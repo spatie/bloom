@@ -204,6 +204,55 @@ struct TranscriptTable: NSViewRepresentable {
 
         // MARK: Entries
 
+        /// How a new list of entries differs from the one the table is showing.
+        ///
+        /// **Only the edges ever move**, which is what makes this worth writing down rather than
+        /// diffing properly. `TranscriptWindow` grows by four hundred rows at the top when the
+        /// reader nears it and by four hundred at the bottom when they near that, rows are appended
+        /// at the live end and never reordered, and the four entries that are not stored rows sit
+        /// in a block at the end. So the old list is either the new list, or a run inside it, or a
+        /// run around it.
+        private enum Shape {
+            /// The same entries in the same order. Only their content can have moved.
+            case same
+            /// The old list sits inside the new one, whole and unbroken, `head` rows down.
+            case grew(head: Int, tail: Int)
+            /// The new list sits inside the old one, whole and unbroken, `head` rows down.
+            case shrank(head: Int, tail: Int)
+            /// Anything else, which in practice is a session being replaced.
+            case rebuilt
+        }
+
+        private static func shape(
+            old: [TranscriptTableEntry], new: [TranscriptTableEntry]
+        ) -> Shape {
+            if old.count == new.count {
+                for index in old.indices where old[index].id != new[index].id { return .rebuilt }
+                return .same
+            }
+            guard !old.isEmpty, !new.isEmpty else { return .rebuilt }
+            if new.count > old.count {
+                guard let head = block(of: old, in: new) else { return .rebuilt }
+                return .grew(head: head, tail: new.count - old.count - head)
+            }
+            guard let head = block(of: new, in: old) else { return .rebuilt }
+            return .shrank(head: head, tail: old.count - new.count - head)
+        }
+
+        /// Where `inner` sits inside `outer`, whole and unbroken, or nothing.
+        private static func block(
+            of inner: [TranscriptTableEntry], in outer: [TranscriptTableEntry]
+        ) -> Int? {
+            guard let first = inner.first,
+                  let head = outer.firstIndex(where: { $0.id == first.id }),
+                  head + inner.count <= outer.count
+            else { return nil }
+            for index in inner.indices where outer[head + index].id != inner[index].id {
+                return nil
+            }
+            return head
+        }
+
         func apply(entries newEntries: [TranscriptTableEntry], scale newScale: CGFloat) {
             guard let tableView else { return }
             // The first width the table ever has. Until it arrives every measurement is one point
@@ -221,36 +270,73 @@ struct TranscriptTable: NSViewRepresentable {
                 widthArrived = true
             }
 
-            let sameShape = newEntries.count == entries.count
-                && zip(newEntries, entries).allSatisfy { $0.id == $1.id }
+            let shape = Self.shape(old: entries, new: newEntries)
+
+            // What has changed about the rows the two lists share, in the NEW list's indices.
             var changed = IndexSet()
-            if sameShape {
-                for (offset, pair) in zip(newEntries, entries).enumerated()
-                where pair.0.contentKey != pair.1.contentKey {
-                    changed.insert(offset)
+            switch shape {
+            case .same:
+                for index in newEntries.indices
+                where newEntries[index].contentKey != entries[index].contentKey {
+                    changed.insert(index)
                 }
+            case .grew(let head, _):
+                for index in entries.indices
+                where entries[index].contentKey != newEntries[head + index].contentKey {
+                    changed.insert(head + index)
+                }
+            case .shrank(let head, _):
+                for index in newEntries.indices
+                where newEntries[index].contentKey != entries[head + index].contentKey {
+                    changed.insert(index)
+                }
+            case .rebuilt:
+                break
+            }
+
+            if case .same = shape, changed.isEmpty, !widthArrived {
+                // Nothing at all has moved. Not even a geometry report is owed.
+                return
             }
 
             let wasAtEnd = isAtEnd
-            let anchor = sameShape ? nil : anchorEntry()
+            // The row at the top of the pane, kept only where something is about to move under it.
+            let anchor: (id: String, delta: CGFloat)?
+            switch shape {
+            case .same: anchor = nil
+            case .grew, .shrank, .rebuilt: anchor = anchorEntry()
+            }
 
+            let oldCount = entries.count
             entries = newEntries
             index = [:]
             for (offset, entry) in newEntries.enumerated() { index[entry.id] = offset }
 
-            if sameShape {
-                if widthArrived { noteHeights(IndexSet(entries.indices)) }
-                if !changed.isEmpty {
-                    noteHeights(changed)
-                    tableView.reloadData(
-                        forRowIndexes: changed, columnIndexes: IndexSet(integer: 0)
-                    )
-                } else if !widthArrived {
-                    // Nothing at all has moved. Not even a geometry report is owed.
-                    return
-                }
-            } else {
-                tableView.reloadData()
+            // **Rows in and out rather than `reloadData()`, and this is the whole of the scroll
+            // stall.**
+            //
+            // A reload throws every cell away and builds the visible ones again, which for a
+            // transcript is a dozen `NSHostingView`s laying out markdown, text views and chips from
+            // nothing. `TranscriptWindow` grows by four hundred rows at a time and does it while
+            // the reader is scrolling, so a sweep down a long conversation paid that several times:
+            // measured at a median frame of 19.8ms with a p99 of a full second, against 8.3ms and
+            // 25ms for the lazy stack. Told which rows arrived, the table leaves every cell it
+            // already has alone, and the only new work is the heights of the rows that turned up.
+            switch shape {
+            case .same:
+                break
+            case .grew(let head, let tail):
+                rowsArrived(head: head, tail: tail, after: oldCount, in: tableView)
+            case .shrank(let head, let tail):
+                rowsLeft(head: head, tail: tail, from: oldCount, in: tableView)
+            case .rebuilt:
+                rebuiltEverything(in: tableView)
+            }
+
+            if widthArrived { noteHeights(IndexSet(entries.indices)) }
+            if !changed.isEmpty {
+                noteHeights(changed)
+                tableView.reloadData(forRowIndexes: changed, columnIndexes: IndexSet(integer: 0))
             }
 
             // A row landing while the reader is at the end keeps them at the end, which is what a
@@ -474,6 +560,45 @@ struct TranscriptTable: NSViewRepresentable {
             let limit = max(0, document - clip.bounds.height)
             clip.setBoundsOrigin(NSPoint(x: clip.bounds.origin.x, y: min(max(0, y), limit)))
             scrollView.reflectScrolledClipView(clip)
+        }
+
+        /// The three ways the table is told, each with a name of its own **so that the next
+        /// `sample` can tell them apart**. Which branch a scroll actually takes is the one thing
+        /// the last profile could not say: `apply` was 47.7 per cent of the main thread with
+        /// `NSHostingView` under it and `measure` at half a per cent, which is a reload rebuilding
+        /// cells rather than heights being taken, but only if the shape really was `.rebuilt`.
+        /// Three symbols answer that without a probe having to carry a counter.
+        private func rowsArrived(head: Int, tail: Int, after oldCount: Int, in tableView: NSTableView) {
+            tableView.beginUpdates()
+            // The head first, so that the indices the tail is named by are the indices the table
+            // has by the time it hears about them.
+            if head > 0 {
+                tableView.insertRows(at: IndexSet(0..<head), withAnimation: [])
+            }
+            if tail > 0 {
+                let start = head + oldCount
+                tableView.insertRows(at: IndexSet(start..<(start + tail)), withAnimation: [])
+            }
+            tableView.endUpdates()
+        }
+
+        private func rowsLeft(head: Int, tail: Int, from oldCount: Int, in tableView: NSTableView) {
+            tableView.beginUpdates()
+            // And the tail first here, for the same reason turned around.
+            if tail > 0 {
+                let start = oldCount - tail
+                tableView.removeRows(at: IndexSet(start..<oldCount), withAnimation: [])
+            }
+            if head > 0 {
+                tableView.removeRows(at: IndexSet(0..<head), withAnimation: [])
+            }
+            tableView.endUpdates()
+        }
+
+        /// Every cell thrown away and the visible ones built again. A session being replaced, and
+        /// nothing else should ever reach here.
+        private func rebuiltEverything(in tableView: NSTableView) {
+            tableView.reloadData()
         }
 
         /// The row at the top of the pane and how far above it the viewport starts, so a growth

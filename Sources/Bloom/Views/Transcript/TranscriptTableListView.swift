@@ -448,12 +448,23 @@ struct TranscriptTableListView: View {
     private func measured(_ table: TranscriptTableGeometry) {
         adoptScrollView()
 
-        bubbleWidth.cap = TranscriptGeometry.cap(
+        // **On a change and never otherwise, and this one is not a saving, it is a bug.**
+        //
+        // `TranscriptBubbleWidth` is `@Observable`, and the setter a macro writes notifies on every
+        // assignment rather than on every change: handing it the number it already holds
+        // invalidates every view that reads it just the same. Written from here it was assigned on
+        // every frame of every scroll, so every user bubble on screen was re-rendered and re-laid
+        // out sixty times a second inside its hosting view, for a cap that had not moved since the
+        // pane was last resized. The lazy stack never had this, because
+        // `onScrollGeometryChange(for: CGFloat.self, of: bubbleCapOf)` only calls its handler when
+        // the projected value changes, and this callback has no such filter in front of it.
+        let cap = TranscriptGeometry.cap(
             width: table.viewportWidth,
             share: Self.bubbleShare,
             gutter: Metrics.gutter,
             floor: Self.bubbleFloor
         )
+        if bubbleWidth.cap != cap { bubbleWidth.cap = cap }
         reachToEnd.value = TranscriptGeometry.reach(
             contentHeight: table.contentHeight,
             viewportHeight: table.viewportHeight,
