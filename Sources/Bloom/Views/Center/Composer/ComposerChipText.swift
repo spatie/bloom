@@ -386,8 +386,12 @@ final class AttachmentChipCell: NSTextAttachmentCell {
 
     override func cellBaselineOffset() -> NSPoint { baselineOffset }
 
+    /// The fallback TextKit does not take: it draws an attachment through the overload below,
+    /// which is the only one that says which character it is drawing. `NSNotFound` rather than
+    /// zero, so a chip reached this way cannot be mistaken for the one the pointer is on when
+    /// that one happens to be the first character of the draft.
     override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {
-        draw(withFrame: cellFrame, in: controlView, characterIndex: 0)
+        draw(withFrame: cellFrame, in: controlView, characterIndex: NSNotFound)
     }
 
     override func draw(
@@ -409,18 +413,15 @@ final class AttachmentChipCell: NSTextAttachmentCell {
             width: side,
             height: side
         )
-        if isRemovable(from: controlView, at: characterIndex) {
-            close?.draw(
-                in: iconRect, from: .zero, operation: .sourceOver, fraction: 1,
-                respectFlipped: true, hints: nil
-            )
-        } else {
-            let icon = FileTypeIcon.icon(for: filename)
-            icon.draw(
-                in: iconRect, from: .zero, operation: .sourceOver, fraction: 1,
-                respectFlipped: true, hints: nil
-            )
-        }
+        // The file's own icon, unless the pointer is on the chip, in which case the slot is the
+        // close control instead. A symbol that would not load falls back to the icon rather than
+        // to an empty slot.
+        let mark = (isRemovable(from: controlView, at: characterIndex) ? close : nil)
+            ?? FileTypeIcon.icon(for: filename)
+        mark.draw(
+            in: iconRect, from: .zero, operation: .sourceOver, fraction: 1,
+            respectFlipped: true, hints: nil
+        )
 
         let name = NSAttributedString(string: filename, attributes: nameAttributes)
         let height = name.size().height
@@ -464,8 +465,8 @@ final class AttachmentChipCell: NSTextAttachmentCell {
 
     /// Where a click takes the file off rather than opening it: the icon's slot and the padding
     /// around it, up to halfway across the gap before the name. Wider than the glyph on purpose,
-    /// because it is thirteen points across, and short of the name because reading the name is
-    /// what tells you which file you are about to remove.
+    /// which is fourteen points in a twenty point pill, and stopping short of the name because
+    /// reading the name is what tells you which file you are about to remove.
     private func closeRect(in frame: NSRect) -> NSRect {
         NSRect(
             x: frame.minX,
