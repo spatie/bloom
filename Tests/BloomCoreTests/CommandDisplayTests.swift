@@ -124,6 +124,22 @@ struct CommandDisplayTests {
         #expect(display.lead == .prefix("cd \(Self.worktree) && cd /var/log &&"))
     }
 
+    @Test("a chain separated by newlines keeps its command, because a row is one line tall")
+    func chainOverNewlines() {
+        let display = Self.of("cd /tmp\ncd /var/log\ntail -n 20 system.log")
+        #expect(display.command == "tail -n 20 system.log")
+        // Collapsed, not raw. Drawn raw, the newline in the middle of it took the command with it.
+        #expect(display.lead == .prefix("cd /tmp cd /var/log"))
+        #expect(!display.line.contains("\n"))
+    }
+
+    @Test("a prefix nobody could read is cut, the way a command is")
+    func absurdPrefix() {
+        let display = Self.of("cd /" + String(repeating: "a", count: 400) + " && ls")
+        #expect(display.lead.text.count <= 301)
+        #expect(display.command == "ls")
+    }
+
     // MARK: 4. No cd at all
 
     @Test("a command with no cd is untouched")
@@ -141,11 +157,20 @@ struct CommandDisplayTests {
         }
     }
 
-    @Test("a bare cd keeps its own text, because a row is never blank")
+    @Test("a bare cd to the worktree keeps its own text, because a row is never blank")
     func nothingAfterTheCD() {
-        for command in ["cd \(Self.worktree)", "cd /tmp"] {
-            #expect(Self.of(command) == CommandDisplay(place: .unstated, command: command), "\(command)")
-        }
+        let command = "cd \(Self.worktree)"
+        #expect(Self.of(command) == CommandDisplay(place: .unstated, command: command))
+    }
+
+    @Test("a bare cd away keeps its own text and is still outside")
+    func bareCDAway() {
+        // Not quiet, and this is why: the Bash tool holds one shell across calls, so this moves
+        // the directory for every row after it.
+        let display = Self.of("cd /tmp")
+        #expect(display.place == .elsewhere(prefix: ""))
+        #expect(display.command == "cd /tmp")
+        #expect(display.lead == .none)
     }
 
     // MARK: 5. Separators and quoting
@@ -259,6 +284,7 @@ struct CommandDisplayTests {
         #expect(row.label == "List admin tests")
         #expect(row.detail == "ls tests/Http/Admin")
         #expect(row.detailLead == .none)
+        #expect(row.tint == .neutral)
         // The copy and the expanded body are the record, so they keep the `cd`.
         #expect(row.literal == "cd \(Self.worktree)\nls tests/Http/Admin")
     }
@@ -271,6 +297,19 @@ struct CommandDisplayTests {
         #expect(row.detailLead == .prefix("cd /tmp/build-cache &&"))
         #expect(row.detail == "rm -rf artefacts")
         #expect(row.detailLine == command)
+        // On the glyph, at the left edge, which is the column a reader scans.
+        #expect(row.tint == .warning)
+    }
+
+    @Test("a Bash row whose destination could not be read is marked too")
+    func bashRowOpaque() {
+        for command in ["cd ~/bloom && ls", "cd $TMPDIR && ls", "cd /tmp"] {
+            let input = JSONValue.object(["command": .string(command)])
+            let row = ToolPresenter.present(name: "Bash", input: input, worktree: Self.worktree)
+            #expect(row.tint == .warning, "\(command)")
+            #expect(row.detail == command, "\(command)")
+            #expect(row.detailLead == .none, "\(command)")
+        }
     }
 
     @Test("a Bash row below the worktree keeps the part below")

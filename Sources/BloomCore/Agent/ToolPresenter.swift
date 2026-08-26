@@ -176,7 +176,11 @@ public enum ToolPresenter {
             glyph: "terminal",
             label: label.isEmpty ? "Bash" : label,
             detail: command,
-            tint: .neutral,
+            // The mark for a command that left the workspace goes on the glyph, at the left edge
+            // where a reader's eye runs down, rather than on a hue in the middle of the line. Every
+            // `.elsewhere` gets it, the ones whose destination could not be read included: "this
+            // went somewhere and I cannot tell where" is as worth seeing as a resolved path.
+            tint: display.leftTheWorkspace ? .warning : .neutral,
             chips: chips,
             detailLead: display.lead
         )

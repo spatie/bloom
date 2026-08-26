@@ -41,8 +41,10 @@ enum TranscriptPresentationCache {
         return cache
     }()
 
-    /// The worktree is not part of the key, and does not need to be: a row id belongs to one
-    /// workspace, and a workspace's worktree does not move under it.
+    /// The worktree is not part of the key, and does not need to be. A row id is a `messages`
+    /// rowid, `AUTOINCREMENT` so it is never reused, so it belongs to one workspace for good. The
+    /// worktree does move, on `Workspace.restore(to:)`, and a row stripped against the worktree it
+    /// actually ran in is the answer we want anyway.
     static func presentation(rowID: Int64, use: AgentToolUse, worktree: String) -> ToolPresentation {
         let key = NSNumber(value: rowID)
         if let cached = values.object(forKey: key) { return cached.value }

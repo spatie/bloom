@@ -95,9 +95,9 @@ struct ToolRowSnapshotGallery: View {
                 ])
             }
 
-            // The four answers `CommandDisplay` gives, in the order a reader meets them. The
-            // first two are the point of the change and the third is what it must not break: a
-            // command that ran outside the workspace keeps its path, in the warning ink.
+            // Every answer `CommandDisplay` gives, in the order a reader meets them. The first two
+            // are the point of the change and the rest are what it must not break: a command that
+            // left the workspace keeps its path, and says so on the glyph.
             group("Where a command ran") {
                 row("c1", "Bash", [
                     "description": .string("List admin tests"),
@@ -114,6 +114,18 @@ struct ToolRowSnapshotGallery: View {
                 row("c4", "Bash", [
                     "description": .string("Show the current diff"),
                     "command": .string("git diff --stat"),
+                ])
+                // The two that were drawn wrongly once. A newline separated chain put a newline
+                // in the middle of a row that is one line tall and swallowed the command after
+                // it; a destination only a shell could work out went unmarked while a resolved
+                // one did not.
+                row("c5", "Bash", [
+                    "description": .string("Read the system log"),
+                    "command": .string("cd /tmp\ncd /var/log\ntail -n 20 system.log"),
+                ])
+                row("c6", "Bash", [
+                    "description": .string("List the home checkout"),
+                    "command": .string("cd ~/bloom && ls"),
                 ])
             }
 

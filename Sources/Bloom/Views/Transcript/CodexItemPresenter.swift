@@ -70,11 +70,18 @@ enum CodexItemPresenter {
         if let code = run.exitCode, code != 0 { chips.append(.code("exit \(code)")) }
         if run.status == .declined { chips.append(.code("declined")) }
 
+        // Failure first: a command that went wrong is more urgent than one that went elsewhere.
+        let tint: ToolTint = switch (run.status, display.leftTheWorkspace) {
+        case (.failed, _): .negative
+        case (_, true): .warning
+        default: .neutral
+        }
+
         return ToolPresentation(
             glyph: "terminal",
             label: "Shell",
             detail: command,
-            tint: run.status == .failed ? .negative : .neutral,
+            tint: tint,
             chips: chips,
             detailLead: display.lead
         )

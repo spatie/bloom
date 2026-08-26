@@ -19,6 +19,11 @@ import Foundation
 ///
 /// Nothing here touches the disk: no symlinks resolved, no `~` expanded, no variable substituted.
 /// A destination it cannot resolve is `elsewhere`, which shows more rather than less.
+///
+/// **Only the drawing is stripped.** `TranscriptSearchText` indexes the stored payload, an open
+/// row prints the command from that payload, and `ToolPresentation.literal` is read off the tool's
+/// input rather than off this. So a worktree path still finds the row, and a copy still gives a
+/// command that runs.
 public struct CommandDisplay: Equatable, Sendable {
     /// Where the command ran, as far as its own text says.
     public enum Place: Equatable, Sendable {
@@ -26,8 +31,9 @@ public struct CommandDisplay: Equatable, Sendable {
         case workspace
         /// A directory below the worktree, named by the path below it.
         case subdirectory(String)
-        /// Outside the worktree, or somewhere this cannot name. Nothing is dropped. The prefix is
-        /// the `cd` that left, and is empty where the text could not be split into one.
+        /// Outside the worktree, or somewhere this cannot name. Nothing is dropped, and the row
+        /// says so on its glyph. The prefix is the `cd` that left, and is empty where the text
+        /// could not be split into one.
         case elsewhere(prefix: String)
         /// No `cd` to read. Nothing is dropped.
         case unstated
@@ -38,7 +44,9 @@ public struct CommandDisplay: Equatable, Sendable {
         case none
         /// A directory below the worktree. The command ran there rather than at the root.
         case location(String)
-        /// The `cd` that left the worktree, kept whole. Its ink is what makes the row stand out.
+        /// The `cd` that left the worktree, kept whole and collapsed to one line by
+        /// `ToolPresenter.oneLine`. A chain separated by newlines put a newline in the middle of
+        /// a row that is one line tall, and everything after it was swallowed.
         case prefix(String)
 
         public var text: String {
@@ -115,8 +123,8 @@ public struct CommandDisplay: Equatable, Sendable {
             case .notMoved:
                 break loop
             case .opaque:
-                // Nothing is hidden and nothing is marked: there is no prefix this could honestly
-                // point at.
+                // No prefix, because there is none this could honestly point at. Still
+                // `.elsewhere`, so the glyph still says the row went somewhere.
                 return CommandDisplay(place: .elsewhere(prefix: ""), command: command)
             case .moved(let destination, let remainder):
                 directory = destination
@@ -126,13 +134,21 @@ public struct CommandDisplay: Equatable, Sendable {
         }
 
         guard moved else { return untouched }
-        // A row is never left blank, so a bare `cd somewhere` keeps its own text.
-        guard !rest.isEmpty else { return untouched }
 
         guard let below = relation(of: directory, to: root) else {
-            let consumed = command[..<rest.startIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+            // A bare `cd elsewhere` keeps its own text, because a row is never left blank, and it
+            // is still `.elsewhere`: Claude Code's Bash tool holds one shell across calls, so a
+            // bare `cd` moves the directory for every row after it. That is the last row to leave
+            // quiet.
+            guard !rest.isEmpty else {
+                return CommandDisplay(place: .elsewhere(prefix: ""), command: command)
+            }
+            let consumed = ToolPresenter.oneLine(String(command[..<rest.startIndex]))
             return CommandDisplay(place: .elsewhere(prefix: consumed), command: String(rest))
         }
+        // A bare `cd` to the worktree keeps its own text, for the same reason and with nothing to
+        // say about it.
+        guard !rest.isEmpty else { return untouched }
         return CommandDisplay(
             place: below.isEmpty ? .workspace : .subdirectory(below),
             command: String(rest)
