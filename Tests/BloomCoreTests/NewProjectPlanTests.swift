@@ -218,7 +218,7 @@ struct NewProjectVerdictTests {
 
     @Test("a location that cannot be written to names the folder that refused")
     func refusesUnwritable() {
-        let verdict = NewProjectVerdict.of(facts(isAncestorWritable: false, ancestor: "/opt"))
+        let verdict = NewProjectVerdict.of(facts(ancestor: "/opt", isAncestorWritable: false))
         #expect(verdict == .refuse(.notWritable("/opt")))
     }
 
