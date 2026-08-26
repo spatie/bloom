@@ -132,7 +132,7 @@ public enum RevealChoice {
     /// so an agent can tell the owner what he is looking at rather than leaving him to notice.
     /// **`.all` is a change now**, where it used to be Home's resting value, and a sentence that
     /// stayed silent about it would be the quiet part of this decision.
-    static let scopeWhenUnnamed = HomeScope.all
+    public static let scopeWhenUnnamed = HomeScope.all
 
     /// Turns names into a target, against the rows as they are right now.
     public static func resolve(
