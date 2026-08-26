@@ -64,12 +64,13 @@ import BloomCore
 /// 1440 points: the name's plate ran 152 to 408 and the field's 416 to 741. The fix was the space
 /// between them, not the plate, and it is `BloomWindowToolbar`'s `ToolbarSpacer`.
 ///
-/// Two things follow from the plate being AppKit's. Adjacent items share ONE plate, so with the
-/// sidebar folded away the `+` and the name are drawn in a single capsule; a fixed
-/// `ToolbarSpacer` between them does not separate them, only a flexible one does, and a flexible
-/// spacer there would push the name into the middle of the bar. The grouping is left as AppKit's.
-/// And `.sharedBackgroundVisibility(.hidden)` is the switch that would turn the plate off, which
-/// is worth knowing about and not worth using here.
+/// One thing follows from the plate being AppKit's, and it is worth knowing before anybody adds a
+/// neighbour. Two adjacent items can be drawn in ONE plate: a plain `Button` next to this text
+/// comes out as a single capsule holding both, and a fixed `ToolbarSpacer` between them does not
+/// separate it, only a flexible one does. The `+` beside this escapes that because it is a split
+/// button rather than a plain one, measured at 152 to 225 with the name's own plate at 233.5. The
+/// switch, if a future neighbour ever needs it, is `.sharedBackgroundVisibility(.hidden)` on the
+/// item, which turns its plate off rather than dividing it.
 ///
 /// ## Renaming in place, measured
 ///
