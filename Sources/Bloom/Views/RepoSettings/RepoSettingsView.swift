@@ -8,8 +8,10 @@ import BloomCore
 ///
 /// Three panes rather than one long scroll, because the three are different kinds of thing and
 /// nobody arrives here wanting all of them: what the project IS, what a new workspace STARTS with,
-/// and what Bloom RUNS in it. The tab bar is the one macOS draws for a `TabView`, and it is the
-/// same control the app's own Settings window is built from, so the two windows read as one app.
+/// and what Bloom RUNS in it. Which one is showing is chosen in the title bar, from the same
+/// toolbar the app's own Settings window is chosen from, so the two windows read as one app. It
+/// is an `NSToolbar` rather than the `TabView` that used to be here, and `RepoSettingsToolbar`
+/// says what the difference between those two turned out to be.
 ///
 /// Two kinds of setting live here and they are stored in two different places, which the screen is
 /// explicit about. The name, mark and colour are Bloom's own record of a folder and live in its
@@ -39,16 +41,9 @@ struct RepoSettingsView: View {
     /// same place. See `RepoMonogram.initials(for:)` for what counts as one, which is a single
     /// leading pictograph and nothing else.
     @State private var name = ""
-    /// Which pane a window opens on. `BLOOM_PANE=workspaces|scripts` for a capture run, because
-    /// `--repo-settings` can open this window but cannot press a tab, and a tab nobody can
-    /// photograph is a tab that changes unverified. Anything else, including nothing, is Project.
-    @State private var pane: Pane = {
-        switch ProcessInfo.processInfo.environment["BLOOM_PANE"] {
-        case "workspaces": return .workspaces
-        case "scripts": return .scripts
-        default: return .project
-        }
-    }()
+    /// Which pane the window is showing. What a capture run can ask for, and why, is on
+    /// `RepoSettingsPane.requested`.
+    @State private var pane: RepoSettingsPane = RepoSettingsPane.requested ?? .project
     @State private var isConfirmingRemove = false
     /// What the last thing the Mark row did came to, when it came to nothing. Cleared as soon as
     /// something else is pressed, because it is about that press and not about the project.
@@ -62,15 +57,6 @@ struct RepoSettingsView: View {
         _model = State(initialValue: RepoSettingsModel(repo: repo))
     }
 
-    /// Which pane is showing. An enum rather than an index, so the value says what it selects.
-    ///
-    /// Named `Pane` because `Tab` is SwiftUI's own type, and the tabs below are declared with it.
-    private enum Pane: Hashable {
-        case project
-        case workspaces
-        case scripts
-    }
-
     /// Long enough that the scripts are readable, and no wider than the longest sentence in the
     /// window wants: the rows themselves no longer care how wide it is, since `SettingsRow` keeps
     /// a field beside its label at any width, but a footer set across a very wide pane does not
@@ -80,31 +66,34 @@ struct RepoSettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TabView(selection: $pane) {
-                Tab("Project", systemImage: "folder", value: Pane.project) {
+            // One pane at a time, switched on rather than laid out by a `TabView`. The row that
+            // chooses is the window's toolbar now, and a `TabView` under it would draw a second
+            // row of its own; see `RepoSettingsToolbar`. What that costs is a pane rebuilt on
+            // every return to it, and it costs nothing that can be typed away: every field here
+            // is bound to `RepoSettingsModel`, which outlives all three.
+            Group {
+                switch pane {
+                case .project:
                     Form {
                         projectSection
                         filesSection
                         removeSection
                     }
                     .settingsForm()
-                }
-
-                Tab("Workspaces", systemImage: "square.stack.3d.up", value: Pane.workspaces) {
+                case .workspaces:
                     Form {
                         RepoFilesToCopySection(model: model)
                         branchSection
                     }
                     .settingsForm()
-                }
-
-                Tab("Scripts", systemImage: "terminal", value: Pane.scripts) {
+                case .scripts:
                     Form {
                         RepoScriptsSection(model: model)
                     }
                     .settingsForm()
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Hairline()
             RepoSettingsSaveBar(model: model)
@@ -113,9 +102,10 @@ struct RepoSettingsView: View {
         .frame(minWidth: Self.minimumSize.width, minHeight: Self.minimumSize.height)
         // There is one of these windows per project, so the window has to say which project it
         // belongs to. It says it the way every other Mac window does, in its own title, above the
-        // tab bar rather than instead of it. See `RepoSettingsTitleBar`.
+        // row that chooses a pane rather than instead of it. See `RepoSettingsTitleBar`.
         .navigationTitle("\(repo.name) Settings")
         .showsProjectInTitleBar(repo)
+        .choosesPaneInTheTitleBar($pane)
         .task {
             // The stored name verbatim. Nothing is written back on load, so a project whose name
             // begins with an emoji keeps it whether or not this window is ever opened.
