@@ -48,4 +48,29 @@ public enum BrowserAddress {
         }
         return self.url(from: url.absoluteString) != nil
     }
+
+    /// The page at this address, as something Bloom may hand to another application on this Mac.
+    ///
+    /// **The string is written by the page, and `NSWorkspace.open` sends a URL to whatever
+    /// application claims its scheme**, so this is a gate rather than a conversion. `file://`
+    /// would hand any path on this Mac to whatever opens it, up to a `.command` or an `.app`, and
+    /// `javascript:` is a line of script for the default browser to run: neither is a page, and
+    /// the answer for both is nil. So is `about:blank`, an address with no host in it, and a pane
+    /// that has been nowhere. Nil means the menu item is absent, not greyed.
+    ///
+    /// http and https only, which is the same door `shows` opens for a browser pane of Bloom's
+    /// own, plus a host to go to.
+    ///
+    /// The scheme has to be written down, which is the one place this asks less of `url(from:)`
+    /// than the field does. That parser completes a bare host, and a completed string is not the
+    /// address a page is on: `mailto:someone@example.com` carries no `://`, so it comes back as
+    /// `https://mailto:someone@example.com`, which is a third site with credentials on it. A page
+    /// always knows its own scheme, so nothing real is lost by insisting on one.
+    public static func external(from address: String) -> URL? {
+        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.contains("://"), let url = url(from: trimmed), shows(url),
+              url.host()?.isEmpty == false
+        else { return nil }
+        return url
+    }
 }
