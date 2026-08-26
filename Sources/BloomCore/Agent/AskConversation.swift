@@ -46,6 +46,12 @@ public enum AskConversation {
     /// Beside the database rather than at a fixed path, for the reason `BridgeOwnerToken.beside`
     /// gives: `Store.databaseDirectoryName` is the one rule that decides which copy of Bloom a
     /// process is, so Bloom and Bloom Dev get their own without a second rule to keep in step.
+    ///
+    /// It stays empty of anything the owner did not put there, rather than empty for ever, and
+    /// that is the honest reading of the paragraph above. Attaching a file to a prompt copies it
+    /// under `.bloom/attachments` here, exactly as it would in a worktree, and the agent can then
+    /// read it without asking. That is not a hole, it is what attaching a file means: the reach
+    /// the mode is protecting is the one nobody made on purpose.
     public static func directory(besideDatabaseAt databasePath: String) -> String {
         let container = (databasePath as NSString).deletingLastPathComponent
         return (container as NSString).appendingPathComponent("Ask")
