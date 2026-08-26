@@ -91,6 +91,51 @@ struct AskConversationTests {
         )
     }
 
+    /// Without this the lock holds exactly once. `ComposerDefaults.resolve` settles a chat's mode
+    /// the first time it is opened and never again, and the picker writes the owner's choice onto
+    /// the row, so a Full access chosen once to get something done would have been what this
+    /// conversation opened on for ever after.
+    @Test("the mode goes back to Ask on the next launch, and not before")
+    func theModeIsReappliedEachLaunch() {
+        // What the owner left it on, a launch later.
+        #expect(
+            AskConversation.modeOnOpening(stored: .bypassPermissions, isFirstOpenSinceLaunch: true)
+                == AskConversation.permissionMode
+        )
+
+        // The same choice, still in the launch it was made in. Overruling it while somebody is
+        // watching would be a picker that does not work.
+        #expect(
+            AskConversation.modeOnOpening(stored: .bypassPermissions, isFirstOpenSinceLaunch: false)
+                == nil
+        )
+
+        // Nothing to do, so nothing is written: this is a column with two writers.
+        #expect(
+            AskConversation.modeOnOpening(
+                stored: AskConversation.permissionMode, isFirstOpenSinceLaunch: true
+            ) == nil
+        )
+    }
+
+    /// The choice expires, so the menu has to say so before it is made rather than after.
+    @Test("the permission menu says what a mode means with no worktree")
+    func theMenuSaysWhatAModeMeansHere() {
+        let inWorktree = ComposerControls(
+            session: Session(workspaceID: WorkspaceID("w1")), isFastMode: false, outputStyle: ""
+        )
+        #expect(inWorktree.hasWorktree)
+        #expect(inWorktree.missingPermissionModeNote == nil)
+
+        let ask = ComposerControls(
+            session: AskConversation.newSession(), isFastMode: false, outputStyle: ""
+        )
+        #expect(!ask.hasWorktree)
+        let note = ask.missingPermissionModeNote ?? ""
+        #expect(note.contains("whole machine"))
+        #expect(note.contains("Bloom next starts"))
+    }
+
     /// The empty state is the first thing the owner sees, and the surprising half is the second
     /// sentence: it looks exactly like every other conversation in Bloom and it cannot change a
     /// file.

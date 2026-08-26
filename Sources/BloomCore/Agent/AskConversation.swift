@@ -68,6 +68,36 @@ public enum AskConversation {
         }
     }
 
+    /// What this conversation opens on, given the mode its row was last left holding.
+    ///
+    /// Nil means leave the row alone.
+    ///
+    /// **The lock has to be reapplied, or it holds exactly once.** `ComposerDefaults.resolve`
+    /// settles a chat's mode the first time it is opened and never again, and the composer's
+    /// picker writes the owner's choice onto the row. So a Full access chosen once to get
+    /// something done would have been what this conversation opened on for ever after, which is
+    /// the state the mode exists to prevent, arrived at quietly.
+    ///
+    /// The answer is not to take the picker away. A mode chosen mid-conversation was chosen by
+    /// somebody sitting in front of the conversation with the facts on the screen, and overruling
+    /// that while they watch would be a control that does not work. What expires is not the choice
+    /// but the presence behind it: a launch later, the agent that choice was made for is gone and
+    /// so is the memory of making it, and the mode would go on governing everything asked
+    /// tomorrow. This is the same reasoning `Store.resetRunningSessions` and
+    /// `abandonPendingPermissionAsks` are built on, which is that a launch boundary ends what a
+    /// person's presence justified.
+    ///
+    /// So: honoured for the rest of the launch, back to Ask on the next one, and the permission
+    /// menu's own footnote says so before the choice is made. See
+    /// `ComposerControls.missingPermissionModeNote`.
+    public static func modeOnOpening(
+        stored: PermissionMode,
+        isFirstOpenSinceLaunch: Bool
+    ) -> PermissionMode? {
+        guard isFirstOpenSinceLaunch, stored != permissionMode else { return nil }
+        return permissionMode
+    }
+
     /// A brand new Ask chat, with no workspace behind it.
     public static func newSession(sortOrder: Int = 0) -> Session {
         Session(

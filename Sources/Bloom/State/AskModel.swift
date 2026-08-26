@@ -29,6 +29,11 @@ final class AskModel {
     /// not both create a chat. The store is an actor, so two callers really can both read "no
     /// session" before either writes one.
     private var isOpening = false
+    /// Whether the permission mode has been settled since Bloom started.
+    ///
+    /// This model is built once and kept for the life of the window, so its first `open()` is the
+    /// launch boundary. See `AskConversation.modeOnOpening` for why there has to be one.
+    private var hasSettledMode = false
 
     init(app: AppModel) {
         self.app = app
@@ -63,13 +68,29 @@ final class AskModel {
         // second by hand in the database; taking the oldest means the chat the owner has been
         // using stays the chat the owner has been using.
         let existing = (try? await store.sessionsWithoutWorkspace()) ?? []
-        let chat: Session?
+        var chat: Session
         if let first = existing.first {
             chat = first
+        } else if let made = try? await store.upsert(AskConversation.newSession()) {
+            chat = made
         } else {
-            chat = try? await store.upsert(AskConversation.newSession())
+            // The database refused the insert. Nothing is drawn rather than a pane pretending to
+            // be a conversation, and the next selection of the row tries again.
+            return
         }
-        guard let chat else { return }
+
+        // Back to Ask on the first open of the launch, whatever the owner left it on. The picker
+        // still works and still lasts the rest of the launch; what expires is the presence that
+        // justified the choice, not the choice. See `AskConversation.modeOnOpening`.
+        if let mode = AskConversation.modeOnOpening(
+            stored: chat.permissionMode, isFirstOpenSinceLaunch: !hasSettledMode
+        ) {
+            // The one column, through the method that names it: the runner owns the state, the
+            // counters and the agent session id on this row and may have written any of them.
+            try? await store.updateSessionPreferences(id: chat.id, permissionMode: mode)
+            chat.permissionMode = mode
+        }
+        hasSettledMode = true
 
         session = chat
         if transcript?.session.id != chat.id {
