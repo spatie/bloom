@@ -466,7 +466,11 @@ struct WorkspaceTabToolTests {
         #expect(!result.isError)
         #expect(result.text.contains("Fix the parser"))
         #expect(result.text.contains("Terminal 1"))
-        #expect(result.text.contains("localhost:3000"))
+        // The last tab in the strip, so the answer is whole rather than truncated. Not an
+        // address: this strip's only browser is inside a split, and a split pane deliberately
+        // reports kind, title and number and no more. What a browser tab of its own says is
+        // `aBrowserCarriesItsNumber` above.
+        #expect(result.text.contains("PaneCensus.swift"))
     }
 
     /// The choice is parsed in the core and handed over whole, so the window is never asked to
