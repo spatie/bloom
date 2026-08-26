@@ -1,4 +1,5 @@
 import AppKit
+import BloomCore
 import SwiftUI
 import QuartzCore
 
@@ -135,12 +136,12 @@ final class DetailSplitViewController: NSSplitViewController {
     static let inspectorMinimum: CGFloat = 280
     private static let inspectorMaximum: CGFloat = 760
 
-    /// The narrowest the detail half of the window can be drawn, divider included.
-    ///
-    /// Public because the window's own minimum has to be built out of it. These are hard AppKit
-    /// constraints: below this the split view stops laying out and starts clipping, and nothing
-    /// above it in SwiftUI negotiates the difference away.
-    static var minimumWidth: CGFloat { detailMinimum + inspectorMinimum + 1 }
+    // The narrowest this half of the window can be drawn is `BloomApp.widths.detailHalf`, and it
+    // is not a constant here any more, because it is not a constant: a collapsed inspector takes no
+    // room and the window should not be held to a width for it. The two numbers above are what that
+    // is built out of, and they are hard AppKit constraints rather than preferences: below the sum
+    // of them the split view stops laying out and starts clipping, and nothing above it in SwiftUI
+    // negotiates the difference away.
 
     private static let autosaveName = "bloom.detail.split"
 
@@ -255,6 +256,7 @@ final class DetailSplitViewController: NSSplitViewController {
 
         let shouldCollapse = !isInspectorPresented
         guard inspectorItem.isCollapsed != shouldCollapse else { return }
+        if !shouldCollapse { makeRoomForInspector(animated: animated) }
         // The animated setter runs a layout pass on every frame of the transition, and layout churn
         // is the condition this window has crashed under, so Reduce Motion turns it off rather than
         // merely shortening it.
@@ -290,6 +292,50 @@ final class DetailSplitViewController: NSSplitViewController {
             publishInspectorWidth(collapsed: shouldCollapse, sliding: true)
         }
     }
+
+    /// Widens the window, if it has to be widened, for a pane that is about to arrive in it.
+    ///
+    /// **This is what makes a conditional minimum honest rather than a trap.** The window's minimum
+    /// drops by 281 points while the inspector is away, which is the whole point of the change, and
+    /// the user is then free to drag the window down to it. Raising the minimum back up does not
+    /// move a window: `NSWindow` applies a new minimum to what the USER does next, not to where the
+    /// window already is. So without this the inspector would open into 281 points that do not
+    /// exist, and the split view would lay out wider than its container and clip, which is exactly
+    /// the defect the flat 1122 was introduced to stop.
+    ///
+    /// Growing the window is the same answer Notes and Freeform give to opening a sidebar in a
+    /// window too small for one. What happens when the screen cannot afford it is
+    /// `WindowWidths.presenting`'s decision rather than this method's: the window takes what the
+    /// screen has and the first column gives up the rest, because a list of rows survives being
+    /// narrow and a transcript and a diff do not.
+    ///
+    /// Inside the caller's animation context rather than before it, so the window grows over the
+    /// same quarter of a second the pane slides in over. `setFrame(_:display:animate:)` would be
+    /// the other way to animate it and it is the wrong one: it spins its own run loop and blocks
+    /// the main thread for the length of the animation, in the middle of a collapse this window
+    /// has crashed under layout churn during.
+    private func makeRoomForInspector(animated: Bool) {
+        guard let window = view.window, let screen = window.screen ?? NSScreen.main else { return }
+        let content = window.contentRect(forFrameRect: window.frame).width
+        let fit = BloomApp.widths.presenting(
+            windowWidth: content, screenWidth: screen.visibleFrame.width
+        )
+        guard let wanted = fit.windowWidth else { return }
+
+        var frame = window.frame
+        frame.size.width += wanted - content
+        // Grow to the right where there is room, and pull the leading edge in where there is not.
+        // A window that grew off the side of the screen would be one whose inspector had arrived
+        // somewhere the user cannot see, which is worse than the width it was opened at.
+        if frame.maxX > screen.visibleFrame.maxX {
+            frame.origin.x = max(screen.visibleFrame.minX, screen.visibleFrame.maxX - frame.width)
+        }
+        if animated {
+            window.animator().setFrame(frame, display: true)
+        } else {
+            window.setFrame(frame, display: true)
+        }
+    }
 }
 
 /// Puts the split controller above back into the SwiftUI tree, at the detail position of the
@@ -318,15 +364,18 @@ struct DetailSplitView: NSViewControllerRepresentable {
     /// leading edge and the inspector's Create Pull Request button off the trailing one, at the
     /// window's own minimum size. Measured on this branch at 1000x700.
     ///
-    /// The honest minimum is the sum of the two panes' minimum thicknesses, which is a constant.
+    /// The honest minimum is the sum of the panes that are ON SCREEN, which is not a constant: a
+    /// collapsed inspector occupies nothing, so reporting its 281 points anyway is what held the
+    /// window 281 points wider than it needed to be while two panes were showing. Same source as
+    /// the window's own minimum, so the two cannot drift. See `WindowWidths`.
     func sizeThatFits(
         _ proposal: ProposedViewSize,
         nsViewController: DetailSplitViewController,
         context: Context
     ) -> CGSize? {
-        CGSize(
-            width: max(proposal.width ?? DetailSplitViewController.minimumWidth,
-                       DetailSplitViewController.minimumWidth),
+        let minimum = BloomApp.widths.detailHalf(withInspector: isInspectorPresented)
+        return CGSize(
+            width: max(proposal.width ?? minimum, minimum),
             height: proposal.height ?? 0
         )
     }

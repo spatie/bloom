@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import BloomCore
 
@@ -58,8 +59,16 @@ struct RootView: View {
                 // is survivable while both columns are the system's own white, and it is not once
                 // they are two steps of a ramp, because then the two panes simply run into each other.
                 .overlay(alignment: .trailing) { Hairline(axis: .vertical) }
+                // The ceiling is not always the reserve. On a display too narrow to hold all
+                // three panes at their minimums, the sidebar is the one that gives, because it is
+                // a list of rows that truncate where the other two hold a transcript and a diff
+                // that do not. `WindowWidths.sidebarMaximum` is that decision, and it answers with
+                // the plain 420 reserve on every display that can afford it, which is every Mac
+                // one. A nil is a screen with no room for a sidebar at all, and the column folds.
                 .navigationSplitViewColumnWidth(
-                    min: 200, ideal: Metrics.sidebarWidth, max: BloomApp.sidebarMaximumWidth
+                    min: BloomApp.sidebarMinimumWidth,
+                    ideal: Metrics.sidebarWidth,
+                    max: sidebarCeiling ?? BloomApp.sidebarMinimumWidth
                 )
             } detail: {
                 // An `NSSplitViewController`, not `.inspector()` and not `HSplitView`.
@@ -166,6 +175,15 @@ struct RootView: View {
             // Marks this scene as the main window, so the menu items that act on a workspace grey out
             // while Settings or a project settings window is key. See `MainWindowFocus`.
             .focusedSceneValue(\.isMainWindowFocused, true)
+
+            // A display with no room for a sidebar folds it rather than clipping it. The other two
+            // panes cannot fold and cannot truncate, so this is the only pane there is a decision
+            // to take about. It stays folded when the room comes back: unfolding a column the user
+            // has not asked for is a window rearranging itself behind them, and the toggle and its
+            // Command key are both a keystroke away. See `WindowWidths.sidebarMaximum`.
+            .onChange(of: sidebarCeiling == nil, initial: true) { _, folds in
+                if folds { columnVisibility = .detailOnly }
+            }
 
             // Bottom trailing, out of the way of the sidebar and of the composer's send button.
             .overlay(alignment: .bottomTrailing) {
@@ -422,10 +440,23 @@ struct RootView: View {
     /// points back to Home's list, which is what keeps a workspace name, its diff counts and its
     /// age on one line without truncating any of them.
     ///
-    /// Keyed on `selectedWorkspace` rather than on `selection`, because `DetailColumn` already
-    /// falls back to Home when a selected id no longer resolves to a workspace.
-    private var isInspectorPresented: Bool {
-        app.isInspectorVisible && app.selectedWorkspace != nil
+    /// It is the model's, because the window's own minimum width depends on the same answer and
+    /// `BloomApp` cannot read a private computed property on a view. See `AppModel`.
+    private var isInspectorPresented: Bool { app.isInspectorPresented }
+
+    /// What the first column may be dragged out to on the display this window is on, or nil when
+    /// there is no room for one at all. See `WindowWidths.sidebarMaximum`.
+    ///
+    /// `NSScreen.main` is the screen holding the key window, which is this one whenever anybody is
+    /// dragging anything. It is read rather than observed, so moving the window to a narrower
+    /// display leaves this a redraw behind; the consequence of being late is a sidebar that could
+    /// have been dragged 98 points wider than it was, on a display Bloom is unlikely to meet, and
+    /// the consequence of not reading it at all is a clipped window on that display.
+    private var sidebarCeiling: CGFloat? {
+        BloomApp.widths.sidebarMaximum(
+            sharing: NSScreen.main?.visibleFrame.width ?? .greatestFiniteMagnitude,
+            withInspector: isInspectorPresented
+        )
     }
 
     // MARK: - Actions

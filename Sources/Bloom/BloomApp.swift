@@ -83,21 +83,41 @@ struct BloomApp: App {
         #endif
     }
 
-    /// The narrowest the window may be dragged.
+    /// The thicknesses the window's minimum width is built out of.
     ///
-    /// Derived rather than a literal. It used to be a flat 1000, which was chosen before the
-    /// centre column and the inspector became an `NSSplitViewController` with real minimum
-    /// thicknesses. Those minimums do not negotiate: at 1000 the split view needed 121 points more
-    /// than it was given and simply overflowed, so a window dragged to its own minimum clipped the
-    /// sidebar's rows off their leading edge and the inspector's Create Pull Request button off
-    /// the trailing one. `NavigationSplitView` does not shrink its sidebar to make room either, so
-    /// the sidebar's MAXIMUM is what the rest has to be added to.
-    private static let minimumWindowWidth =
-        Self.sidebarMaximumWidth + DetailSplitViewController.minimumWidth + 1
+    /// Derived rather than a literal, and conditional rather than derived once. The minimum used to
+    /// be a flat 1000, which was chosen before the centre column and the inspector became an
+    /// `NSSplitViewController` with real minimum thicknesses. Those minimums do not negotiate: at
+    /// 1000 the split view needed 121 points more than it was given and simply overflowed, so a
+    /// window dragged to its own minimum clipped the sidebar's rows off their leading edge and the
+    /// inspector's Create Pull Request button off the trailing one.
+    ///
+    /// It then became 1122, which is those panes added up with the sidebar at its maximum, and 1122
+    /// is what a window showing two panes was still being held to. `WindowWidths` is where that
+    /// stopped being a constant: it carries the numbers below, answers the minimum for the state
+    /// the window is actually in, and owns the companion rule that makes a conditional minimum safe
+    /// rather than a trap. Read its head before changing any of these five numbers.
+    static let widths = WindowWidths(
+        sidebar: Self.sidebarMaximumWidth,
+        sidebarMinimum: Self.sidebarMinimumWidth,
+        detail: DetailSplitViewController.detailMinimum,
+        inspector: DetailSplitViewController.inspectorMinimum,
+        // AppKit's `.thin` divider, which is one point. Both boundaries in this window use it.
+        divider: 1
+    )
 
     /// What the sidebar column may be dragged out to. Shared with `RootView`, which declares it on
     /// the column, so the window minimum above can never fall out of step with it.
+    ///
+    /// This is also what the window RESERVES for that column, rather than the width it is at, and
+    /// the obvious next saving is to reserve the real width instead. Read why that is not taken in
+    /// `WindowWidths` before reaching for it: it is worth up to 220 points and it puts a minimum
+    /// that rises under a window that will not grow behind a control the owner drags constantly.
     static let sidebarMaximumWidth: CGFloat = 420
+
+    /// And what it may be squeezed to, which is the same arrangement: declared on the column in
+    /// `RootView`, and the number `WindowWidths` folds the column away below.
+    static let sidebarMinimumWidth: CGFloat = 200
 
     var body: some Scene {
         // A single `Window` rather than a `WindowGroup`. Bloom's whole model is one window
@@ -106,7 +126,14 @@ struct BloomApp: App {
         Window("Bloom", id: "main") {
             RootView()
                 .environment(model)
-                .frame(minWidth: Self.minimumWindowWidth, minHeight: 620)
+                // Conditional, because the window does not need room for a pane that is not on
+                // screen. It goes back up when the inspector is presented, and `WindowWidths`
+                // explains why raising it is not enough on its own: see
+                // `DetailSplitViewController.makeRoomForInspector`, which is the other half.
+                .frame(
+                    minWidth: Self.widths.minimum(withInspector: model.isInspectorPresented),
+                    minHeight: 620
+                )
                 .handlesBloomURLs(using: model)
                 // What the rest of the OS is told: the App Nap assertion and the dock badge,
                 // the worktree behind the title bar, and the optional menu bar item. All three

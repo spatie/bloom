@@ -943,6 +943,20 @@ final class AppModel {
         return workspaces.first { $0.id == id }
     }
 
+    /// Whether the inspector is actually on screen, rather than merely switched on.
+    ///
+    /// Keyed on `selectedWorkspace` rather than on `selection`, because `DetailColumn` already
+    /// falls back to Home when a selected id no longer resolves to a workspace, and an inspector
+    /// over Home has nothing to say.
+    ///
+    /// Here rather than in `RootView`, which is where it was, because the window's own minimum
+    /// width now depends on it and `BloomApp` cannot see a private computed property on a view.
+    /// Two spellings of one rule is how the window ends up refusing a width for a pane it is not
+    /// drawing. See `WindowWidths`.
+    var isInspectorPresented: Bool {
+        isInspectorVisible && selectedWorkspace != nil
+    }
+
     /// The archived workspace being read, if that is what the window is on.
     ///
     /// Read out of its live model rather than out of a list, because the archived list is loaded
