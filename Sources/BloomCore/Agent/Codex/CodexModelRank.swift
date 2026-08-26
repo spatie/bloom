@@ -34,7 +34,7 @@ public enum CodexModelRank {
             .sorted { left, right in
                 let a = key(left.element)
                 let b = key(right.element)
-                if a.version != b.version { return a.version > b.version }
+                if a.version != b.version { return a.version.isAbove(b.version) }
                 if a.isReduced != b.isReduced { return !a.isReduced }
                 // The arrival index, which is what makes this stable rather than merely sorted.
                 return left.offset < right.offset
@@ -42,21 +42,41 @@ public enum CodexModelRank {
             .map(\.element)
     }
 
-    static func key(_ model: CodexModel) -> (version: Double, isReduced: Bool) {
+    static func key(_ model: CodexModel) -> (version: Version, isReduced: Bool) {
         (version(of: model.id), isReduced(model.id))
     }
 
-    /// The first `major.minor` in the id, as a number. Nought for an id carrying no version at
-    /// all, which puts it below everything that names one rather than above it.
-    static func version(of id: String) -> Double {
+    /// A version as its parts rather than as one number, which is the whole point.
+    ///
+    /// Read as a decimal, `5.10` is 5.1 and sorts *below* `5.9`. That is the bug this type
+    /// exists to make impossible: the components are integers and are compared as integers, so
+    /// the tenth minor release of 5 is above the ninth.
+    struct Version: Equatable {
+        var major = 0
+        var minor = 0
+
+        /// Named rather than `<`, because "above" here means "offered first", and a comparison
+        /// operator on a version invites somebody to reach for the wrong end of it.
+        func isAbove(_ other: Version) -> Bool {
+            major == other.major ? minor > other.minor : major > other.major
+        }
+    }
+
+    /// The first `major.minor` in the id. Zero for an id carrying no version at all, which puts it
+    /// below everything that names one rather than above it.
+    static func version(of id: String) -> Version {
         let digits = id.lowercased().drop { !$0.isNumber }
-        var seen = false
-        let number = digits.prefix {
+        var seenDot = false
+        let text = digits.prefix {
             if $0.isNumber { return true }
-            if $0 == ".", !seen { seen = true; return true }
+            if $0 == ".", !seenDot { seenDot = true; return true }
             return false
         }
-        return Double(number) ?? 0
+        let parts = text.split(separator: ".", omittingEmptySubsequences: false)
+        return Version(
+            major: parts.first.flatMap { Int($0) } ?? 0,
+            minor: parts.count > 1 ? (Int(parts[1]) ?? 0) : 0
+        )
     }
 
     static func isReduced(_ id: String) -> Bool {
