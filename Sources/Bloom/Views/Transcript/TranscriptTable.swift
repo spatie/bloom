@@ -1419,12 +1419,17 @@ private struct HostedRow: View {
 /// The hosting view is exactly the row, so there is no second opinion about its height. What the
 /// content wants instead comes back through `HostedRow`, measured by the same layout that drew it.
 ///
-/// **By frame, and it was by four constraints.** Filling the cell is the same arrangement either
-/// way, and one of them enrols every live row in the Auto Layout engine. A profile of an upward
-/// scroll spent 726 samples of 3,034 inside `-[NSView _layoutSubtreeWithOldSize:]`, recursing some
-/// fifteen deep with 538 still at the bottom, which is the breadth of a table full of cells rather
-/// than the depth of any one of them. A frame set in `layout` is the same geometry with no solver
-/// in it, and the assignment is guarded, so a row whose size has not moved costs nothing at all.
+/// **Pinned on all four edges, and it was briefly a frame set in `layout`.** A profile of an upward
+/// scroll spent 726 samples of 3,034 inside `-[NSView _layoutSubtreeWithOldSize:]`, which is every
+/// live cell sitting in the Auto Layout engine, and a frame is the same geometry with no solver in
+/// it. Then a reader resized a pane and got rows drawn over one another, and the constraints came
+/// back, because the saving was small and unmeasured on its own while text over text is the app
+/// looking broken.
+///
+/// It was never proved to be the cause: nothing in the width path changed that night, so a row can
+/// be drawn at a height measured for another width either way. It was reverted on the shape of the
+/// risk rather than on evidence, and the evidence is a build with this line changed and nothing
+/// else. If that build overlaps too, the fault is older than the mask and this can come back.
 final class TranscriptTableCell: NSView {
     private let host: NSHostingView<AnyView>
     private var appliedKey: TranscriptContentKey?
@@ -1435,20 +1440,14 @@ final class TranscriptTableCell: NSView {
         host = NSHostingView(rootView: AnyView(EmptyView()))
         super.init(frame: .zero)
         self.identifier = identifier
-        // The mask keeps the geometry right through an autoresize AppKit does on its own; the
-        // frame in `layout` below is what makes it exact. Both, because a cell is handed its size
-        // by the table rather than asked for one, and the two agree in every case.
-        host.translatesAutoresizingMaskIntoConstraints = true
-        host.autoresizingMask = [.width, .height]
-        host.frame = bounds
+        host.translatesAutoresizingMaskIntoConstraints = false
         addSubview(host)
-    }
-
-    override func layout() {
-        super.layout()
-        // Guarded, because assigning a frame is what makes a hosting view lay its content out
-        // again, and this runs for every live cell on every pass that moves one.
-        if host.frame != bounds { host.frame = bounds }
+        NSLayoutConstraint.activate([
+            host.leadingAnchor.constraint(equalTo: leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: trailingAnchor),
+            host.topAnchor.constraint(equalTo: topAnchor),
+            host.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
     }
 
     @available(*, unavailable)
