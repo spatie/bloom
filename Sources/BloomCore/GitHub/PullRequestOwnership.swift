@@ -88,7 +88,7 @@ public extension GitHub {
     /// is the difference between finding a pull request the agent opened from a branch it cut
     /// itself and offering a button that opens a second one. See `PullRequestHead`.
     static func headBranch(of workspace: Workspace) async -> String {
-        let checkedOut = (try? await Git.currentBranch(of: workspace.path)) ?? nil
+        let checkedOut = try? await Git.currentBranch(of: workspace.path)
         return PullRequestHead.branch(
             recorded: workspace.branch, checkedOut: checkedOut, base: workspace.baseBranch
         )
