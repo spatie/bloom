@@ -815,6 +815,18 @@ struct TranscriptListView: View {
                 )
                 TranscriptDrawn.note(drawn.window.count)
                 writingTo = memory.map { WriteTarget(memory: $0, session: transcript.session.id) }
+                // **And the positioning is owed again, because the one that has already run was
+                // run too early to mean anything.**
+                //
+                // `position` latches on `didPosition` so a session is placed once rather than on
+                // every row that lands. The row count's `onChange` fires with `initial: true` the
+                // moment this pane appears, which is before the load above has finished and before
+                // the window has been restored, so that first call latched the latch and then
+                // asked a list that was still the conversation being left to scroll to a row it
+                // had never heard of. Every later call was a no-op, and what the reader saw was
+                // the top of the restored window. Measured: left at row 1,478 of 1,582, written
+                // down correctly, and restored to offset nought.
+                didPosition = false
                 // Whatever the session arrived with, taken in without a fade. This runs whether
                 // or not the row count changed, which matters: two sessions can hold the same
                 // number of rows, and then nothing else would have told the tracker it is
