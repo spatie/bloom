@@ -26,6 +26,17 @@ public enum SplitDirection: String, Sendable, Hashable, CaseIterable {
         case .up, .down: .vertical
         }
     }
+
+    /// What the View menu's Focus Pane rows are called. Capitalised here rather than by the view,
+    /// because a menu item's title is a decision and the raw value is a stored spelling.
+    public var title: String {
+        switch self {
+        case .left: "Left"
+        case .right: "Right"
+        case .up: "Up"
+        case .down: "Down"
+        }
+    }
 }
 
 /// One node of the split tree: either a terminal, or a split holding two more nodes.

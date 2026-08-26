@@ -40,7 +40,7 @@ struct BloomCommands: Commands {
         // somewhere else. The update check below stays a group of its own so the separator between
         // the two is still there.
         CommandGroup(replacing: .appInfo) {
-            Button("About Bloom") {
+            MenuCommand(.about) {
                 AboutWindow.show()
             }
         }
@@ -53,7 +53,7 @@ struct BloomCommands: Commands {
         // dead menu item invites the same click every time. See `SoftwareUpdate.availability`.
         CommandGroup(after: .appInfo) {
             if case .configured = updater.availability {
-                Button("Check for Updates…") {
+                MenuCommand(.checkForUpdates) {
                     updater.checkForUpdates()
                 }
                 .disabled(!updater.canCheckForUpdates)
@@ -61,13 +61,12 @@ struct BloomCommands: Commands {
         }
 
         CommandGroup(replacing: .newItem) {
-            Button("New Workspace…") {
+            MenuCommand(.newWorkspace) {
                 // The sheet lives in RootView, and the sidebar and Home already open it this
                 // way. Setting a flag on the model instead would leave it stuck true with no
                 // sheet.
                 NotificationCenter.default.post(name: .bloomNewWorkspace, object: nil)
             }
-            .keyboardShortcut("n", modifiers: .command)
             .disabled(model.repos.isEmpty)
 
             // Directly under New Workspace, because it starts one, and at the top level of File
@@ -78,7 +77,7 @@ struct BloomCommands: Commands {
             //
             // No key equivalent. It is the rarer of the two ways to start a workspace and the item
             // alone is what was missing.
-            Button("New Workspace from Pull Request…") {
+            MenuCommand(.newWorkspaceFromPullRequest) {
                 NotificationCenter.default.post(
                     name: .bloomNewWorkspace, object: nil,
                     userInfo: [Notification.bloomPullRequestKey: true]
@@ -86,11 +85,10 @@ struct BloomCommands: Commands {
             }
             .disabled(model.repos.isEmpty)
 
-            Button("New Session") {
+            MenuCommand(.newSession) {
                 guard let workspace = model.selectedModel else { return }
                 Task { await workspace.createSession() }
             }
-            .keyboardShortcut("t", modifiers: .command)
             .disabled(model.selectedModel == nil)
 
             // The other four things that open a tab in the workspace's centre column, which until
@@ -114,12 +112,10 @@ struct BloomCommands: Commands {
             // it learnable.
             Divider()
 
-            Button("New Terminal Tab") { openPane(.terminal) }
-                .keyboardShortcut("t", modifiers: [.command, .shift])
+            MenuCommand(.newTerminalTab) { openPane(.terminal) }
                 .disabled(model.selectedModel == nil)
 
-            Button("New Browser Tab") { openBrowserPane() }
-                .keyboardShortcut("b", modifiers: [.command, .shift])
+            MenuCommand(.newBrowserTab) { openBrowserPane() }
                 .disabled(model.selectedModel == nil)
 
             // The same key both ways, as the hidden button had it: show me the change, or give me
@@ -127,11 +123,10 @@ struct BloomCommands: Commands {
             // with changes, unlike the `+` menu's own row, because half of what this key does is
             // the way back out of a review and a workspace can have a review open with nothing
             // left in it.
-            Button("Show Changes") {
+            MenuCommand(.showChanges) {
                 guard let workspace = model.selectedModel else { return }
                 FileReview.toggle(in: workspace)
             }
-            .keyboardShortcut("d", modifiers: [.command, .shift])
             .disabled(model.selectedModel == nil)
 
             // Shift+Cmd+N, which nothing in Bloom held. It is the initial of the thing, which is
@@ -139,14 +134,20 @@ struct BloomCommands: Commands {
             // of four is easier to remember than four separate facts. Never disabled beyond
             // needing a workspace, because an empty note is exactly what somebody opening this is
             // about to fix.
-            Button("Show Notes") {
+            MenuCommand(.showNotes) {
                 guard let workspace = model.selectedModel else { return }
                 WorkspaceNotes.open(in: workspace)
             }
-            .keyboardShortcut("n", modifiers: [.command, .shift])
             .disabled(model.selectedModel == nil)
 
             Divider()
+
+            // Renaming a tab existed on the tab's own context menu and on its VoiceOver actions
+            // rotor, and in no menu at the top of the screen. It sits above Close Tab because the
+            // two are the same noun: this row and the one under it are what you can do to the tab
+            // in front. No key, for the reason `WorkspaceMenuItems` gives about Rename.
+            MenuCommand(.renameTab) { renameSelectedTab() }
+                .disabled(isMainWindowFocused != true || renamableTab == nil)
 
             // Cmd+W belongs to the tab, not the window, and this used to be Close Session, which
             // is not the same claim. It closed the workspace's active conversation whatever was in
@@ -163,18 +164,16 @@ struct BloomCommands: Commands {
             // scene below. The menu bar is shared with Settings and with each project's settings
             // window, and unscoped this item both closed the wrong thing from those windows and
             // left them with no working Cmd+W of their own.
-            Button("Close Tab") {
+            MenuCommand(.closeTab) {
                 closeSelectedTab()
             }
-            .keyboardShortcut("w", modifiers: .command)
             // Scoped to the main window as well as to there being a tab, because this item holds
             // Cmd+W for the whole app. See `MainWindowFocus`.
             .disabled(isMainWindowFocused != true || closableTab == nil)
 
             Divider()
 
-            Button("Add Project Folder…", action: addProjectFolder)
-            .keyboardShortcut("o", modifiers: [.command, .shift])
+            MenuCommand(.addProjectFolder, perform: addProjectFolder)
         }
 
         // The item this file used to say did not exist. Two views bind Cmd+S (the project settings
@@ -191,8 +190,7 @@ struct BloomCommands: Commands {
         // published a Save the item is disabled, and a disabled item does not consume its key, so a
         // view that still keeps Cmd+S to itself keeps working. See `FocusedMenuValues`.
         CommandGroup(replacing: .saveItem) {
-            Button("Save") { saveAction?.perform() }
-                .keyboardShortcut("s", modifiers: .command)
+            MenuCommand(.save) { saveAction?.perform() }
                 .disabled(saveAction?.isEnabled != true)
         }
 
@@ -207,8 +205,7 @@ struct BloomCommands: Commands {
             // never been asked for. A submenu called Find, because that is where Mail, Safari,
             // Preview and Xcode all keep these three.
             Menu("Find") {
-                Button("Find…", action: find)
-                    .keyboardShortcut("f", modifiers: .command)
+                MenuCommand(.find, perform: find)
                     // Never disabled. Whatever is in front either finds in place or falls through
                     // to the search, and which of those it is cannot be read from here anyway:
                     // this body is rebuilt when an `@Observable` moves, and first responder is not
@@ -216,11 +213,9 @@ struct BloomCommands: Commands {
                     // responder chain at the moment the key is pressed.
                     .disabled(model.repos.isEmpty && !FindInPlace.isAvailable)
 
-                Button("Find Next") { step(.nextMatch) }
-                    .keyboardShortcut("g", modifiers: .command)
+                MenuCommand(.findNext) { step(.nextMatch) }
 
-                Button("Find Previous") { step(.previousMatch) }
-                    .keyboardShortcut("g", modifiers: [.command, .shift])
+                MenuCommand(.findPrevious) { step(.previousMatch) }
             }
 
             // "Search", not "Find Workspace". It searches names, branches, projects and the full
@@ -236,10 +231,9 @@ struct BloomCommands: Commands {
             // which is what somebody in a terminal needs it to mean. Cmd+F still lands here
             // whenever nothing in front can find, so the key that used to open the Search screen
             // still reaches the search.
-            Button("Search") {
+            MenuCommand(.search) {
                 NotificationCenter.default.post(name: .bloomFocusSearch, object: nil)
             }
-            .keyboardShortcut("f", modifiers: [.command, .shift])
             // Keyed on projects rather than on live workspaces, because search also finds archived
             // ones and a machine whose every workspace is archived still has something to find.
             .disabled(model.repos.isEmpty)
@@ -249,22 +243,29 @@ struct BloomCommands: Commands {
         // owns it for splitting shells, and one keystroke that splits two different things
         // depending on where the pointer last was is worse than two that each mean one thing.
         CommandGroup(after: .sidebar) {
-            // Greyed on a tab that cannot be split rather than on no workspace at all. The
-            // review and the notes have exactly one copy each by design, so `PaneDuplicate` has
-            // always refused them, and these two items said nothing about it: on the Notes tab
-            // Split Right read as available and then did nothing when it was pressed. See
-            // `PaneSplit` in the core, which is the rule both sides read now.
-            Button("Split Right", systemImage: PaneSymbol.splitRight) { splitCentre(.horizontal) }
-                .keyboardShortcut("\\", modifiers: .command)
-                .disabled(!canSplitCentre)
+            splitMenu(.splitRight, axis: .horizontal, symbol: PaneSymbol.splitRight)
+            splitMenu(.splitDown, axis: .vertical, symbol: PaneSymbol.splitDown)
 
-            Button("Split Down", systemImage: PaneSymbol.splitDown) { splitCentre(.vertical) }
-                .keyboardShortcut("\\", modifiers: [.command, .shift])
-                .disabled(!canSplitCentre)
-
-            Button("Close Pane", systemImage: PaneSymbol.closePane) { closeCentrePane() }
-                .keyboardShortcut("w", modifiers: [.command, .control])
+            MenuCommand(.closePane, symbol: PaneSymbol.closePane) { closeCentrePane() }
                 .disabled(model.selectedModel == nil)
+
+            // The two a terminal tab's shell tree can do and nothing else in the column can. They
+            // were on the AppKit menu a shell returns from `menu(for:)` and nowhere a reader can
+            // browse, so the zoom's key was drawn on a menu the app opens on a right click and on
+            // no menu at the top of the screen, and stepping focus between panes had no written
+            // account anywhere at all.
+            //
+            // Greyed rather than absent on every other kind of tab, which is what a menu bar does:
+            // an item that vanishes cannot teach that the feature exists.
+            MenuCommand(.zoomPane, symbol: PaneSymbol.zoomIn) { terminalPane(.toggleZoom) }
+                .disabled(!canCommandTerminalPane)
+
+            MenuCommandGroup(.focusPane) {
+                ForEach(SplitDirection.allCases, id: \.self) { direction in
+                    Button(direction.title) { terminalPane(.focus(direction)) }
+                }
+            }
+            .disabled(!canCommandTerminalPane)
 
             Divider()
 
@@ -274,12 +275,10 @@ struct BloomCommands: Commands {
             // them could be moved between: the full shortcut grep across this app found 74
             // bindings and not one for `[`, `]`, Ctrl+Tab or Cmd+1, and there was no menu item to
             // carry one. Which tab is next is `TabCycle` in the core, wrapping included.
-            Button("Previous Tab") { cycleCentreTab(by: -1) }
-                .keyboardShortcut("[", modifiers: [.command, .shift])
+            MenuCommand(.previousTab) { cycleCentreTab(by: -1) }
                 .disabled(!canCycleCentreTabs)
 
-            Button("Next Tab") { cycleCentreTab(by: 1) }
-                .keyboardShortcut("]", modifiers: [.command, .shift])
+            MenuCommand(.nextTab) { cycleCentreTab(by: 1) }
                 .disabled(!canCycleCentreTabs)
 
             goToTabMenu
@@ -292,61 +291,53 @@ struct BloomCommands: Commands {
             // hidden button and on a menu item is not a tie, the button wins and the item never
             // fires, so it has to be one or the other. Here it is the menu, which greys itself out
             // when there is nothing to step through and says the keys out loud.
-            Button("Next Changed File") { stepChangedFile(1) }
-                .keyboardShortcut("j", modifiers: [.command, .option])
+            MenuCommand(.nextChangedFile) { stepChangedFile(1) }
                 .disabled(!canStepChangedFiles)
 
-            Button("Previous Changed File") { stepChangedFile(-1) }
-                .keyboardShortcut("k", modifiers: [.command, .option])
+            MenuCommand(.previousChangedFile) { stepChangedFile(-1) }
                 .disabled(!canStepChangedFiles)
 
             Divider()
         }
 
         CommandGroup(after: .sidebar) {
-            Button("Toggle Sidebar") {
+            MenuCommand(.toggleSidebar) {
                 // `NavigationSplitView` owns the sidebar's visibility through the binding RootView
                 // holds, not through `toggleSidebar(_:)` on the responder chain, so this goes to
                 // RootView rather than to first responder.
                 NotificationCenter.default.post(name: .bloomToggleSidebar, object: nil)
             }
-            .keyboardShortcut("s", modifiers: [.command, .control])
 
-            Button("Toggle Inspector") {
+            MenuCommand(.toggleInspector) {
                 guard model.selectedModel != nil else { return }
                 model.isInspectorVisible.toggle()
             }
-            .keyboardShortcut("i", modifiers: [.command, .option])
             .disabled(model.selectedModel == nil)
 
             Divider()
 
-            Button("Next Workspace") {
+            MenuCommand(.nextWorkspace) {
                 model.selectNextWorkspace(offset: 1)
             }
-            .keyboardShortcut(.downArrow, modifiers: [.command, .option])
             .disabled(model.workspaces.isEmpty)
 
-            Button("Previous Workspace") {
+            MenuCommand(.previousWorkspace) {
                 model.selectNextWorkspace(offset: -1)
             }
-            .keyboardShortcut(.upArrow, modifiers: [.command, .option])
             .disabled(model.workspaces.isEmpty)
 
-            Button("Next Unread") {
+            MenuCommand(.nextUnread) {
                 model.selectNextUnread()
             }
-            .keyboardShortcut("u", modifiers: [.command, .shift])
             .disabled(!model.workspaces.contains(where: \.unread))
 
             // Cmd+Shift+H, not Cmd+0. Cmd+0 is Actual Size on this platform and now belongs to the
             // Zoom group below; two items in one menu cannot share a key equivalent, and the one
             // AppKit finds first would silently have killed the other. Cmd+Shift+H is what Home is
             // bound to in Finder and in Safari anyway, so this is where it should always have been.
-            Button("Go to Home") {
+            MenuCommand(.goToHome) {
                 model.selection = .home
             }
-            .keyboardShortcut("h", modifiers: [.command, .shift])
             .disabled(model.selection == .home)
         }
 
@@ -358,16 +349,13 @@ struct BloomCommands: Commands {
         CommandGroup(after: .sidebar) {
             Divider()
 
-            Button("Zoom In") { TextZoom.zoomIn() }
-                .keyboardShortcut("+", modifiers: .command)
+            MenuCommand(.zoomIn) { TextZoom.zoomIn() }
                 .disabled(!zoom.canZoomIn)
 
-            Button("Zoom Out") { TextZoom.zoomOut() }
-                .keyboardShortcut("-", modifiers: .command)
+            MenuCommand(.zoomOut) { TextZoom.zoomOut() }
                 .disabled(!zoom.canZoomOut)
 
-            Button("Actual Size") { TextZoom.actualSize() }
-                .keyboardShortcut("0", modifiers: .command)
+            MenuCommand(.actualSize) { TextZoom.actualSize() }
                 .disabled(!zoom.canResetSize)
         }
 
@@ -381,7 +369,7 @@ struct BloomCommands: Commands {
             // Rename had no menu item at all: it existed on the row context menus alone, which a
             // keyboard-only user reaches only through VoiceOver. No key equivalent, because Finder
             // gives Rename none either and both lists already spend Return on opening a row.
-            Button("Rename") {
+            MenuCommand(.renameWorkspace) {
                 guard let workspace = workspace(for: .rename) else { return }
                 NotificationCenter.default.post(
                     name: .bloomRenameWorkspace, object: nil,
@@ -390,13 +378,40 @@ struct BloomCommands: Commands {
             }
             .disabled(workspace(for: .rename) == nil)
 
+            // The three that were on a workspace row's own menu and in no menu at the top of the
+            // screen. They are the row group `WorkspaceMenuItems` describes: none of them touches
+            // the checkout, all three are about how the workspace reads in a list.
+            //
+            // Drawn by the same views the rows draw, rather than by a second copy of each, so one
+            // workspace cannot be offered "Pin" in the sidebar and "Unpin" up here. The model is
+            // passed rather than read from the environment because a `Commands` body is not in one.
+            if let workspace = workspace(for: .pin) {
+                WorkspacePinItem(workspace: workspace, app: model)
+            } else {
+                MenuCommand(.pin) {}.disabled(true)
+            }
+
+            if let workspace = workspace(for: .unreadMark) {
+                WorkspaceUnreadItem(workspace: workspace, app: model)
+            } else {
+                MenuCommand(.unreadMark) {}.disabled(true)
+            }
+
+            if let workspace = workspace(for: .colour) {
+                WorkspaceColourItem(workspace: workspace, app: model)
+            } else {
+                // A plain dead row rather than an empty submenu. A `Menu` with nothing in it draws
+                // a disclosure arrow onto a list that is not there, which reads as broken instead
+                // of as unavailable.
+                MenuCommand(.colour) {}.disabled(true)
+            }
+
             Divider()
 
-            Button("Archive Workspace") {
+            MenuCommand(.archive) {
                 guard let workspace = workspace(for: .archive) else { return }
                 archive(workspace)
             }
-            .keyboardShortcut(.delete, modifiers: .command)
             .disabled(workspace(for: .archive) == nil)
 
             // The way back, which the menu bar had no item for at all. Before this the only path
@@ -404,7 +419,7 @@ struct BloomCommands: Commands {
             // had just happened, so a workspace archived yesterday could not be brought back from
             // anywhere. See `ArchivedWorkspaceView` for why reading it and restoring it are two
             // different things.
-            Button("Restore Workspace") {
+            MenuCommand(.restore) {
                 guard let workspace = restorableWorkspace else { return }
                 Task { await model.restore(workspace) }
             }
@@ -412,28 +427,34 @@ struct BloomCommands: Commands {
 
             Divider()
 
-            Button("Open in Editor") {
+            MenuCommand(.openInEditor) {
                 guard let workspace = workspace(for: .openInEditor) else { return }
                 Reveal.inEditor(workspace.path)
             }
-            .keyboardShortcut("e", modifiers: [.command, .shift])
             .disabled(workspace(for: .openInEditor) == nil)
 
-            Button("Reveal in Finder") {
+            MenuCommand(.revealInFinder) {
                 guard let workspace = workspace(for: .revealInFinder) else { return }
                 Reveal.inFinder(workspace.path)
             }
-            .keyboardShortcut("r", modifiers: [.command, .shift])
             .disabled(workspace(for: .revealInFinder) == nil)
+
+            // The window title's own menu was the only place in the app that put a workspace's
+            // name on the clipboard. Above Copy Branch Name because they are one pair and this is
+            // the one people mean more often. See `WorkspaceMenuItems`.
+            MenuCommand(.copyName) {
+                guard let workspace = workspace(for: .copyName) else { return }
+                Clipboard.copy(workspace.name)
+            }
+            .disabled(workspace(for: .copyName) == nil)
 
             // The one item an archived workspace still answers to. A branch name means something
             // once the worktree has gone, and opening an editor on a path that is not there does
             // not: that pair is the whole of `WorkspaceMenuSubject.allows`.
-            Button("Copy Branch Name") {
+            MenuCommand(.copyBranchName) {
                 guard let workspace = workspace(for: .copyBranchName) else { return }
                 Clipboard.copy(workspace.branch)
             }
-            .keyboardShortcut("c", modifiers: [.command, .shift])
             .disabled(workspace(for: .copyBranchName) == nil)
 
             Divider()
@@ -445,28 +466,26 @@ struct BloomCommands: Commands {
             // The subject's own model rather than the selected one, so a row highlighted on Home
             // stops the agent that row is about. It is `existingModel`, which only reads: a
             // workspace this launch has never opened has no transcript to stop anyway.
-            Button("Stop Agent") {
+            MenuCommand(.stopAgent) {
                 subjectModel?.activeTranscript?.stop()
             }
-            .keyboardShortcut(".", modifiers: .command)
             .disabled(subjectModel?.activeTranscript?.isRunning != true)
         }
 
         CommandGroup(replacing: .help) {
             // The docs, not the repository. This pointed at github.com/spatie/Bloom#readme,
             // which is not where Bloom lives and would have 404'd for everyone who pressed it.
-            Button("Bloom Help") {
+            MenuCommand(.help) {
                 guard let url = URL(string: "https://runbloom.app/docs") else { return }
                 NSWorkspace.shared.open(url)
             }
-            .keyboardShortcut("?", modifiers: .command)
 
             // The first run window, on demand. A real item rather than a debug flag: somebody who
             // waved the welcome away and wants it back has exactly the same need as somebody who
             // has never seen it, and "was anything wrong with my setup" is a Help menu question
             // in every Mac app that can answer it. It re-checks on every visit, so it is also the
             // shortest way to find out whether the CLI you just installed was found.
-            Button("Welcome to Bloom…") {
+            MenuCommand(.welcome) {
                 WelcomeWindow.show()
             }
 
@@ -482,12 +501,11 @@ struct BloomCommands: Commands {
             // The sheets themselves are raised from `RootView`, through `FeedbackPresenter`, for
             // the reason the create sheet is: a menu item cannot present anything, and the draft
             // has to outlive the sheet it was typed into.
-            Button("Send Feedback…") {
+            MenuCommand(.sendFeedback) {
                 FeedbackPresenter.shared.open(.report)
             }
-            .keyboardShortcut("f", modifiers: [.command, .option])
 
-            Button("Submit a Prompt…") {
+            MenuCommand(.submitPrompt) {
                 FeedbackPresenter.shared.open(.prompt)
             }
         }
@@ -542,7 +560,7 @@ struct BloomCommands: Commands {
     @ViewBuilder
     private var runScriptsMenu: some View {
         if let workspace = model.selectedModel, !workspace.settings.runScripts.isEmpty {
-            Menu("Run") {
+            MenuCommandGroup(.runScripts) {
                 ForEach(workspace.settings.runScripts) { script in
                     Button(script.name) { run(script, in: workspace) }
                 }
@@ -565,30 +583,125 @@ struct BloomCommands: Commands {
         WorkspaceTabsStore.shared.select(.tool(tab.id), in: workspace)
     }
 
-    /// Splits the pane the user is in and shows the same thing in the half that opens, which is
-    /// what splitting means in every editor: the same thing twice, and then you change one of them.
+    // MARK: - Splitting the centre column
+
+    /// One direction, and the three things that can be put in the half that opens.
     ///
-    /// A shell or a page cannot actually be shown twice, and asking for it has been possible here
-    /// since panes existed. `PaneDuplicate` is where that is refused and a fresh one of the same
-    /// kind offered instead; it is the same door the strip's own split items use.
-    /// Whether Split Right and Split Down would actually open a pane, read on every rebuild of
-    /// this body. `WorkspaceTabsStore` and `CenterTabStore` are both `@Observable`, so selecting
-    /// another tab greys and ungreys the two items on its own, the way `zoom` does above.
-    private var canSplitCentre: Bool {
-        guard let workspace = model.selectedModel else { return false }
-        let tabs = WorkspaceTabsStore.shared
-        guard let tab = tabs.selectedTab(in: workspace) else { return false }
-        return PaneDuplicate.canOpen(tabs.content(of: tabs.focusedPane(of: tab), in: tab), in: workspace)
+    /// **These two used to be plain items that always duplicated**, so `Cmd+\` on a conversation
+    /// showed the same transcript twice and `Cmd+\` on a shell opened another shell, and the split
+    /// people actually ask for, a page or a terminal beside the conversation, existed only in the
+    /// pane's own right click menu, two levels down, with no key on it and no route from the menu
+    /// bar at all. `CenterPaneMenu` says outright that a second copy of a transcript is almost
+    /// never the point.
+    ///
+    /// So the direction and what goes in it are one gesture here too, drawn from the same
+    /// `PaneKind` the pane's menu and the strip's `+` draw theirs from, and doing the same thing:
+    /// `NewPane` opens a new one of that kind and the half is filled with it.
+    ///
+    /// **What that changes about the keystroke, said out loud.** `Cmd+\` and `Shift+Cmd+\` now
+    /// mean "another one of these, beside this one" rather than "this one again". On a terminal
+    /// that is what they already did. On a browser it opens the address field rather than the page
+    /// you were on, and on a conversation it starts a new one rather than showing the same
+    /// transcript in both halves. That last is the split the View menu was publishing and nobody
+    /// wanted.
+    ///
+    /// Not greyed on the review or the notes any more, and that is the other half of the same
+    /// change. Those two have no second copy of themselves, which is why the duplicate had to
+    /// refuse them, but a shell or a page beside a review is perfectly ordinary and the pane's own
+    /// menu has always offered it. What has nowhere to go on those tabs is the key, and
+    /// `PaneDuplicateOutcome.sameAgainKind` answers nil for exactly them.
+    private func splitMenu(_ action: MenuBarAction, axis: SplitAxis, symbol: String) -> some View {
+        MenuCommandGroup(action, symbol: symbol) {
+            ForEach(PaneKind.allCases) { kind in
+                splitRow(action, axis: axis, kind: kind)
+            }
+        }
+        .disabled(model.selectedModel == nil)
     }
 
-    private func splitCentre(_ axis: SplitAxis) {
+    /// One kind, carrying the key when it is the kind this pane is already showing.
+    ///
+    /// The key is here rather than on the item the submenu hangs off because AppKit never sends
+    /// the action of an item that has a submenu, so a key equivalent written on the parent is
+    /// drawn beside a row that cannot fire. `TerminalPaneMenu` puts `Cmd+D` on its Terminal row
+    /// for the same reason.
+    @ViewBuilder
+    private func splitRow(_ action: MenuBarAction, axis: SplitAxis, kind: PaneKind) -> some View {
+        let row = Button(kind.title, systemImage: kind.symbol) {
+            splitCentre(axis, opening: kind)
+        }
+        if kind == sameAgainKind, let key = MenuBarCatalogue[action].key {
+            row.keyboardShortcut(key.equivalent, modifiers: key.eventModifiers)
+        } else {
+            row
+        }
+    }
+
+    /// Which row of the two submenus carries the key, read on every rebuild of this body.
+    /// `WorkspaceTabsStore` and `CenterTabStore` are both `@Observable`, so selecting another tab
+    /// moves the key on its own, the way `zoom` greys itself above.
+    private var sameAgainKind: PaneKind? {
+        guard let workspace = model.selectedModel else { return nil }
+        let tabs = WorkspaceTabsStore.shared
+        guard let tab = tabs.selectedTab(in: workspace) else { return nil }
+        return PaneDuplicate.sameAgainKind(
+            tabs.content(of: tabs.focusedPane(of: tab), in: tab), in: workspace
+        )
+    }
+
+    /// The same call `CenterPaneView` makes for the same row of its own menu, so the two cannot
+    /// end up splitting differently.
+    private func splitCentre(_ axis: SplitAxis, opening kind: PaneKind) {
         guard let workspace = model.selectedModel else { return }
         let tabs = WorkspaceTabsStore.shared
         guard let tab = tabs.selectedTab(in: workspace) else { return }
         let pane = tabs.focusedPane(of: tab)
 
-        PaneDuplicate.open(tabs.content(of: pane, in: tab), in: workspace) { content in
+        NewPane.open(kind, in: workspace) { content in
             tabs.split(tab: tab, pane: pane, axis: axis, showing: content)
+        }
+    }
+
+    // MARK: - A terminal tab's own panes
+
+    /// The tab the two terminal items act on: the shell tree in front, if what is in front is one.
+    ///
+    /// A shell tree is the only thing in the centre column that has panes of its own to zoom or to
+    /// step focus around, which is why these two items are the terminal's rather than the column's.
+    private var terminalOwnerID: String? {
+        guard let workspace = model.selectedModel else { return nil }
+        let tabs = WorkspaceTabsStore.shared
+        guard let tab = tabs.selectedTab(in: workspace),
+              case .tool(let id) = tabs.content(of: tabs.focusedPane(of: tab), in: tab),
+              CenterTabStore.shared.tabs(for: workspace.workspace.id)
+                  .first(where: { $0.id == id })?.kind == .terminal else { return nil }
+        return id
+    }
+
+    /// Greyed on a shell that has not been split, because there is nothing to zoom and nowhere to
+    /// move focus to. `TerminalSplitStore` is `@Observable`, so splitting a shell ungreys both
+    /// items without anything here asking again.
+    private var canCommandTerminalPane: Bool {
+        guard let ownerID = terminalOwnerID else { return false }
+        return TerminalSplitStore.shared.panes(of: ownerID).count > 1
+    }
+
+    /// Straight to the store rather than through the terminal view, because the arrangement is the
+    /// store's and neither of these two touches a shell. It is the same store `TerminalSplitView`
+    /// calls when the keystroke arrives in a pane instead, so one command has one implementation.
+    private func terminalPane(_ command: TerminalPaneCommand) {
+        guard let ownerID = terminalOwnerID else { return }
+        let splits = TerminalSplitStore.shared
+        switch command {
+        case .toggleZoom:
+            _ = splits.toggleZoom(in: ownerID)
+        case .focus(let direction):
+            _ = splits.moveFocus(direction, in: ownerID)
+        // Splitting and closing a shell pane are the tab's own, and the menu bar reaches neither
+        // from here: Split Right opens in the CENTRE column and Close Pane closes a centre pane,
+        // which are the two items directly above these in the same menu.
+        case .split, .close:
+            return
         }
     }
 
@@ -619,7 +732,7 @@ struct BloomCommands: Commands {
     private var goToTabMenu: some View {
         if let workspace = model.selectedModel {
             let entries = WorkspaceTabsStore.shared.entries(in: workspace)
-            Menu("Go to Tab") {
+            MenuCommandGroup(.goToTab) {
                 ForEach(TabCycle.numbered(entries), id: \.tab) { entry in
                     tabItem(entry.tab, ordinal: entry.ordinal, in: workspace)
                 }
@@ -652,6 +765,26 @@ struct BloomCommands: Commands {
             selectedTab: tab,
             focusedPaneContent: tabs.content(of: tabs.focusedPane(of: tab), in: tab)
         )
+    }
+
+    /// What Rename Tab would open a field on: the tab in front, when it is one that has a name to
+    /// change. The review and the notes are named after what they show, so a name written on
+    /// either would be a label the next reopen throws away. See `TabRenaming` in the core, which is
+    /// also what the tab's own menu asks.
+    private var renamableTab: PaneContent? {
+        guard let workspace = model.selectedModel else { return nil }
+        let tabs = WorkspaceTabsStore.shared
+        guard let selected = tabs.selectedTab(in: workspace) else { return nil }
+        let kind = CenterTabStore.shared.tabs(for: workspace.workspace.id)
+            .first { $0.id == selected.id }?.kind
+        return TabRenaming.canRename(selected, tabKind: kind) ? selected : nil
+    }
+
+    /// The field belongs to the strip, which owns the one that can be open at a time, so this asks
+    /// rather than reaches. The same shape as the workspace rename above and for the same reason.
+    private func renameSelectedTab() {
+        guard renamableTab != nil else { return }
+        NotificationCenter.default.post(name: .bloomRenameTab, object: nil)
     }
 
     /// Closing a conversation still goes through `CloseSessionAlert`, which asks when there is

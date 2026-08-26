@@ -65,6 +65,13 @@ enum PaneDuplicate {
         PaneSplit.duplicating(content, tabKind: tab(for: content, in: model)?.kind).opensAPane
     }
 
+    /// Which row of the View menu's Split submenus means "another one of these", and therefore
+    /// carries `Cmd+\`. Nil on the review and the notes, which have no kind of their own for the
+    /// key to sit on. See `PaneDuplicateOutcome.sameAgainKind`.
+    static func sameAgainKind(_ content: PaneContent, in model: WorkspaceModel) -> PaneKind? {
+        PaneSplit.duplicating(content, tabKind: tab(for: content, in: model)?.kind).sameAgainKind
+    }
+
     private static func tab(for content: PaneContent, in model: WorkspaceModel) -> CenterTab? {
         guard case .tool(let tabID) = content else { return nil }
         return CenterTabStore.shared.tabs(for: model.workspace.id).first { $0.id == tabID }

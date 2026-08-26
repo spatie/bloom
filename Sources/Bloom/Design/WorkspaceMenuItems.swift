@@ -112,18 +112,9 @@ struct WorkspaceMenuItems: View {
         copyBranchItem
         setupItem
         Divider()
-        Button(workspace.pinned ? "Unpin" : "Pin") {
-            Task { await app.togglePinned(workspace) }
-        }
-        // One item that changes its label rather than two, and which of the two it is is decided
-        // in the core so the sidebar and Home cannot disagree about one workspace. See
-        // `WorkspaceUnreadMark`, which is also where the archived case is argued out.
-        if let mark = WorkspaceUnreadMark.action(for: workspace) {
-            Button(mark.title) {
-                Task { await app.setUnread(workspace, mark.unread) }
-            }
-        }
-        colourPicker
+        WorkspacePinItem(workspace: workspace, app: app)
+        WorkspaceUnreadItem(workspace: workspace, app: app)
+        WorkspaceColourItem(workspace: workspace, app: app)
         renameItem
         Divider()
         // Straight through, with no dialog of its own. Whether this needs confirming is not
@@ -204,17 +195,68 @@ struct WorkspaceMenuItems: View {
         }
     }
 
-    /// The colour submenu: None, then the ten colours, with the tick on the current one.
-    ///
-    /// A bare `Picker`, which is what makes its own submenu titled "Colour" with the state column
-    /// filled in for us. A `Button` carrying a checkmark symbol in its label never gets one, which
-    /// is the same thing `ComposerOptionMenu` found.
-    ///
-    /// None is offered as its own row rather than by pressing the current colour again, which is
-    /// how Finder clears a tag. A press that means "set" everywhere except on one row, where it
-    /// means "clear", is a rule you can only find out about by losing a colour you wanted.
-    private var colourPicker: some View {
-        Picker("Colour", selection: colourSelection) {
+}
+
+// MARK: - The three that are about the row, and are now in two menus
+
+/// Pin, as a menu item.
+///
+/// Its own view rather than a property on `WorkspaceMenuItems`, because the Workspace menu at the
+/// top of the screen offers the same item and a `Commands` body is not in the environment this
+/// file reads `AppModel` from. Handing the model in is what lets one implementation serve both, so
+/// a workspace cannot be offered Pin on its row and Unpin in the menu bar.
+///
+/// One item that changes its label rather than two, which is the shape all three of these have.
+struct WorkspacePinItem: View {
+    var workspace: Workspace
+    var app: AppModel
+
+    var body: some View {
+        MenuCommand(.pin, alternate: workspace.pinned) {
+            Task { await app.togglePinned(workspace) }
+        }
+    }
+}
+
+/// The unread mark, as a menu item.
+///
+/// Which of the two labels it wears is decided in the core, so the sidebar, Home and the menu bar
+/// cannot disagree about one workspace. See `WorkspaceUnreadMark`, which is also where the
+/// archived case is argued out: an archived row's `unread` is a flag nothing draws.
+///
+/// Absent rather than greyed on a row that has no answer, which is what a context menu does. The
+/// menu bar's copy greys instead, because a menu bar is a map of what the app can do; that greying
+/// is `WorkspaceMenuSubject.allows` and happens before this view is built at all.
+struct WorkspaceUnreadItem: View {
+    var workspace: Workspace
+    var app: AppModel
+
+    var body: some View {
+        if let mark = WorkspaceUnreadMark.action(for: workspace) {
+            MenuCommand(.unreadMark, alternate: mark == .markRead) {
+                Task { await app.setUnread(workspace, mark.unread) }
+            }
+        }
+    }
+}
+
+/// The colour submenu: None, then the ten colours, with the tick on the current one.
+///
+/// A bare `Picker`, which is what makes its own submenu titled "Colour" with the state column
+/// filled in for us. A `Button` carrying a checkmark symbol in its label never gets one, which
+/// is the same thing `ComposerOptionMenu` found.
+///
+/// None is offered as its own row rather than by pressing the current colour again, which is
+/// how Finder clears a tag. A press that means "set" everywhere except on one row, where it
+/// means "clear", is a rule you can only find out about by losing a colour you wanted.
+struct WorkspaceColourItem: View {
+    var workspace: Workspace
+    var app: AppModel
+
+    var body: some View {
+        // The picker's own label, which is what it draws as the submenu's title. It comes from the
+        // table so the row menu and the menu bar cannot spell it two ways.
+        Picker(MenuBarCatalogue[.colour].title, selection: selection) {
             Text("None").tag("")
             ForEach(WorkspaceColour.all) { colour in
                 Label {
@@ -237,7 +279,7 @@ struct WorkspaceMenuItems: View {
     /// A workspace holding a hex that is not in the list selects nothing, so no row is ticked and
     /// the dot on the row goes on being drawn in the colour it was given. That is the right way
     /// round: the stored value is the truth and this list is only the menu's opinion of it.
-    private var colourSelection: Binding<String> {
+    private var selection: Binding<String> {
         Binding(
             get: { workspace.colour ?? "" },
             set: { hex in
