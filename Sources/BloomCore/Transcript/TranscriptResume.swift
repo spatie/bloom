@@ -149,6 +149,13 @@ public enum TranscriptResume {
         // what a pane wrote down before its session had loaded, and restoring it draws a blank
         // transcript. Measured, and caught only because the probe reports how many rows are in the
         // stack: a run that looked like the fastest resize yet was a pane with nothing in it.
+        // A session small enough to be drawn whole is drawn whole, whatever was written down when
+        // the pane last left it. A remembered window is a saving against growth that no longer
+        // happens, and restoring one would put the reader back in a partial list. See
+        // `TranscriptWindow.whole`.
+        if TranscriptWindow.isWhole(rowCount: rowCount) {
+            return TranscriptWindow.everything(rowCount: rowCount)
+        }
         guard let remembered, remembered.drawn.count > 0 else {
             return TranscriptWindow.opening(rowCount: rowCount, tailStart: tailStart)
         }
