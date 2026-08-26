@@ -199,8 +199,13 @@ struct PullRequestBar: View {
     ///
     /// Nothing here runs git, and there is nothing to report on success either: what comes back is
     /// an ordinary turn in the transcript, and the strip notices the resolved worktree on its next
-    /// refresh like any other change on this disk. The pull request stays conflicted on GitHub
-    /// until the reader presses Commit and push, which is the button the strip offers next.
+    /// refresh like any other change on this disk.
+    ///
+    /// The turn pushes the resolution itself unless it is unsure of it, so the pull request stops
+    /// being conflicted on GitHub without anybody pressing anything else. It used to stop at the
+    /// commit and leave Commit and push to the reader, which read as finished and was not: see the
+    /// argument on `PromptRegistry.fixConflicts`. Commit and push is still the button the strip
+    /// offers when an agent stopped short.
     private func fixConflicts(on pullRequest: PullRequest) {
         isWorking = true
         report = nil
