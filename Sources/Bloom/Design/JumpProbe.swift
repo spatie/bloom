@@ -20,11 +20,11 @@ import BloomCore
 ///     Bloom --jump-probe /tmp/jump.json --jump-workspace <id>
 ///           [--jump-settle 2500] [--window-size 1440x900]
 ///
-/// **The bar is exact and it is not "nearly".** A run passes only when every case ends with the
-/// clip view at the end within `TranscriptAnchor.isAtEnd`'s one point, which is the question
-/// "did the instruction survive" rather than `ScrollEnd.isAtEnd`'s "is the reader still following
-/// along". Ninety points short passes the second and fails the first, and ninety points short is
-/// the newest row half off the bottom of the window.
+/// **The bar is exact and it is not "nearly".** A run passes only where `NSScrollView.isAtEnd`
+/// does, which is `TranscriptAnchor.isAtEnd` asked rather than restated: "did the instruction
+/// survive", not `ScrollEnd.isAtEnd`'s "is the reader still following along". Ninety points short
+/// passes the second and fails this one, and ninety points short is the newest row half off the
+/// bottom of the window.
 ///
 /// Programmatic, and never brought to the front, for the reason at the head of `ProbeHarness`:
 /// the owner is at this Mac while it runs.
@@ -81,7 +81,7 @@ enum JumpProbe {
             harness.fail("no transcript NSScrollView found")
         }
 
-        let travel = ProbeHarness.scrollableHeight(of: scroll)
+        let travel = scroll.endOffset
         guard travel > 1 else {
             harness.fail("the transcript is shorter than its viewport, so there is nowhere to jump from")
         }
@@ -127,7 +127,7 @@ enum JumpProbe {
         // A beat, so the standing instruction is genuinely released by the move above rather than
         // still in force from the last case, which would make this pass without being asked.
         try? await Task.sleep(for: .milliseconds(600))
-        let before = gap(in: scroll)
+        let before = scroll.distanceFromEnd
 
         transcript.jumpToLiveEnd()
         try? await Task.sleep(for: settle)
@@ -146,7 +146,7 @@ enum JumpProbe {
     ) async -> JSONValue {
         put(scroll, at: travel / 2)
         try? await Task.sleep(for: .milliseconds(600))
-        let before = gap(in: scroll)
+        let before = scroll.distanceFromEnd
 
         transcript.jumpToLiveEnd()
         // Deltas across the whole settle, so the tail is still growing when the verdict is taken.
@@ -168,24 +168,18 @@ enum JumpProbe {
     // MARK: - Measuring
 
     private static func verdict(name: String, before: CGFloat, scroll: NSScrollView) -> JSONValue {
-        let after = gap(in: scroll)
+        let after = scroll.distanceFromEnd
         return .object([
             "case": .string(name),
             "pointsFromEndBefore": .number(Double(before)),
             "pointsFromEndAfter": .number(Double(after)),
-            "atEnd": .bool(after <= 1),
+            // The bar itself, asked of the type that owns it rather than written out again here.
+            "atEnd": .bool(scroll.isAtEnd),
             // What the OTHER question would have said, because the two disagreeing is the shape
             // of the bug: a jump that stops ninety points short looks fine to everything that
             // asks whether the reader is following along.
             "wouldPassAsFollowing": .bool(after < ScrollEnd.threshold),
         ])
-    }
-
-    /// How far the bottom of the viewport is from the bottom of the content, in points.
-    private static func gap(in scroll: NSScrollView) -> CGFloat {
-        let content = scroll.documentView?.frame.height ?? 0
-        let viewport = scroll.contentView.bounds.height
-        return max(0, content - scroll.contentView.bounds.origin.y - viewport)
     }
 
     private static func isPass(_ report: JSONValue) -> Bool {

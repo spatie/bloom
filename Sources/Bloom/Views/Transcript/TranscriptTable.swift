@@ -6,27 +6,21 @@ import SwiftUI
 /// The transcript, drawn by an `NSTableView`.
 ///
 /// **Why not a `LazyVStack`, which is what this replaced.** SwiftUI cannot be told how tall an
-/// unrealised row is, so a `ScrollView` over a lazy stack guesses for every row it has not built
-/// and corrects as they come into view. Measured on an 1,855 message session, the content height
-/// fell from 48,995 points to 17,339 during a single scroll pass, a resize over it ran at eight
-/// frames a second, and a reader's place could not be put back because the offset it was written
-/// down against no longer named the same row. A table knows every row's height, caches it, keeps
-/// the scroll position stable when a height changes, recycles the views, and scrolls to a row
-/// exactly. Measured against each other on an idle machine, twice each: 13.6 frames a second on a
-/// resize against 6.6 to 11.4, 110ms of main thread per second of streaming against 275, half the
-/// worst scroll frame, and a reader put back where they were on four returns out of four where the
-/// stack returned them to the top of the conversation every time.
+/// unrealised row is, so it guesses for every row it has not built. Measured on an 1,855 message
+/// session, the content height fell from 48,995 points to 17,339 during a single scroll pass, and
+/// a reader's place could not be put back because the offset it was written down against no longer
+/// named the same row. Table against stack, twice each on an idle machine: 13.6 frames a second on
+/// a resize against 6.6 to 11.4, 110ms of main thread per second of streaming against 275, and a
+/// reader put back where they were on four returns out of four where the stack returned them to
+/// the top of the conversation every time.
 ///
-/// **The bargain, which is the finding rather than a detail:** the table has to be TOLD each
-/// height, and the only thing that knows a SwiftUI row's height is a laid out `NSHostingView`. So
-/// the heights are measured off screen, one measurement per row per width, and cached. That cost
-/// is paid up front whenever the table is reloaded, and again whenever the pane's width changes,
-/// which are exactly the two moments the lazy stack was cheapest. `TranscriptRowHeights` in the
-/// core is the cache and carries the rules; this file is the AppKit around it.
-///
-/// The width case is handled by not handling it during the gesture: a live resize leaves every
-/// cached height alone, and the whole cache is rebuilt once, anchored, a beat after the drag
-/// stops. So a resize is cheap and wrong for a moment, rather than expensive and right.
+/// **The bargain:** the table has to be TOLD each height, and the only thing that knows a SwiftUI
+/// row's height is a laid out `NSHostingView`. So heights are measured off screen, one per row per
+/// width, and cached by `TranscriptRowHeights` in the core. That cost falls whenever the table is
+/// reloaded and whenever the pane's width changes, which are the two moments the lazy stack was
+/// cheapest. A live resize therefore leaves every cached height alone and rebuilds the cache once,
+/// anchored, a beat after the drag stops: cheap and wrong for a moment rather than expensive and
+/// right.
 struct TranscriptTableEntry: Identifiable {
     /// Stable across passes. See `TranscriptEntryID` for why it is a type rather than a string.
     let id: TranscriptEntryID
@@ -37,9 +31,7 @@ struct TranscriptTableEntry: Identifiable {
     /// **The three entries that re-render from their own observation are not excepted, and used to
     /// be.** The streaming tail, the setup log and the delivery at the head of the queue watch
     /// their own state and redraw inside the cell they are in; handing them a new root view on
-    /// every pass threw that state away and rebuilt the tail several times a second. Their heights
-    /// come from the cache like everything else and are corrected by what the cell actually drew,
-    /// which is a mechanism these three need and nothing else has to pay for.
+    /// every pass threw that state away and rebuilt the tail several times a second.
     let contentKey: String
     /// Built on demand: when the row is measured, and when it is drawn. Nothing is built for a row
     /// that is neither, which is what keeps the pass that assembles these cheap.
@@ -71,18 +63,12 @@ final class TranscriptTableController {
 
     /// **Go to the end of the conversation, and keep being at it until somebody says otherwise.**
     ///
-    /// This is the table's answer to `ScrollPosition(edge: .bottom)`, which is what the lazy stack
-    /// used and which was a standing instruction rather than a movement: SwiftUI reapplied it on
-    /// every layout pass that grew the content, so a row landing kept the reader at the end in the
-    /// same pass that made the content taller. An AppKit scroll view has nothing of the sort. A
-    /// single `setBoundsOrigin` is a movement, and a movement is short of the end the moment
+    /// A single `setBoundsOrigin` is a movement, and a movement is short of the end the moment
     /// anything below it changes size, which in a transcript is constantly: heights are corrected
-    /// after a row has been drawn, the streaming tail grows between rows, and a window that has
-    /// just been moved to the tail has not been laid out yet when the scroll is issued.
-    ///
-    /// So the instruction is held. Every place in the coordinator that can change where the end is
-    /// re-asserts it, and it is let go of by `releaseEnd` and by the reader taking hold of the
-    /// view. See `Coordinator.holdsEnd`.
+    /// after a row is drawn, the streaming tail grows between rows, and a window just moved to the
+    /// tail has not been laid out when the scroll is issued. So the instruction is held: every
+    /// place in the coordinator that can change where the end is re-asserts it, and `releaseEnd`
+    /// or the reader taking hold of the view lets it go. See `Coordinator.holdsEnd`.
     func goToEnd() { coordinator?.goToEnd() }
 
     /// Lets go of the standing instruction above, without moving anything.
@@ -91,14 +77,10 @@ final class TranscriptTableController {
     /// **`TranscriptLiveEndFollower` is driving the clip view from here on, so nothing in the
     /// table may touch it.**
     ///
-    /// Two things move the view at the live end while a turn streams: the follower's display link,
-    /// which takes the view back by what arrived and eases forward again so the movement can be
-    /// followed, and this file, which puts the view at the end the instant a height is corrected.
-    /// Both running is the two of them fighting, one at 120Hz and one per correction, and what
-    /// reaches the screen is the instant pin with the travel invisible underneath it. That is the
-    /// same argument `TranscriptLiveEndFollower.onStart` carries about `ScrollPosition`, and it
-    /// arrives here for the same reason: the follower is the only one of the two that can make a
-    /// movement the eye can read, so it wins for as long as it is running.
+    /// Both moving the view at the live end is the two of them fighting, one at 120Hz and one per
+    /// height correction, and what reaches the screen is the instant pin with the travel invisible
+    /// underneath it. The follower is the only one that can make a movement the eye can read, so
+    /// it wins for as long as it is running.
     func followerTookOver() { coordinator?.followerTookOver() }
 
     /// The follower's link has gone down, wherever it left the view. See
@@ -124,23 +106,14 @@ final class TranscriptTableController {
 /// The transcript's scroll view, which differs from `NSScrollView` in exactly one answer.
 ///
 /// **A markdown table stopped the transcript scrolling under the pointer.** A table and a code
-/// fence are each drawn inside a `ScrollView(.horizontal)` so a wide one can be pushed sideways,
-/// and SwiftUI backs that with a real `NSScrollView` of its own, `SwiftUI.HostingScrollView`. Over
-/// the lazy stack there was a SwiftUI scroll view above it, which it knows about and hands a
-/// vertical wheel straight to. Here there is not, so it falls through to `NSScrollView`'s own
-/// `scrollWheel(with:)` and the answer becomes AppKit's: a scroll view that is already at its edge
-/// in an axis keeps the event and scrolls elastically **unless a responder above it has asked for
-/// one**, and `NSResponder.wantsForwardedScrollEvents(for:)` is false by default, which the header
-/// documents and the runtime confirms: asked on macOS 27, a plain `NSScrollView` answers false for
-/// both axes. Nothing asked, so a wheel over a table rubber-banded the table and left the
-/// transcript standing still.
+/// fence each sit in a `ScrollView(.horizontal)` of their own, and an inner scroll view already at
+/// its edge keeps the wheel and rubber-bands unless a responder above it has asked to be forwarded
+/// one. `wantsForwardedScrollEvents(for:)` is false by default, so nothing asked and the
+/// transcript stood still.
 ///
-/// Asking is the whole fix. AppKit forwards only from an inner view already at its edge in that
-/// axis, which for one with nothing to scroll vertically is always, and it decides the event's
-/// predominant axis itself, so a mostly-horizontal wheel stays with the table it is over and a wide
-/// table still scrolls sideways. One answer here covers everything that scrolls horizontally inside
-/// a row, tables and code fences alike, rather than each of them having to fend off a gesture it
-/// never wanted.
+/// Asking is the whole fix, and it covers tables and code fences alike. AppKit forwards only from
+/// an inner view at its edge in that axis and decides the predominant axis itself, so a wide table
+/// still scrolls sideways.
 final class TranscriptScrollView: NSScrollView {
     override func wantsForwardedScrollEvents(for axis: NSEvent.GestureAxis) -> Bool {
         axis == .vertical
@@ -162,14 +135,11 @@ struct TranscriptTable: NSViewRepresentable {
     /// **The reader has taken hold of the view, or let go of it.** True on the first frame of a
     /// gesture and false when it ends.
     ///
-    /// This is `onScrollPhaseChange` in the shape the lazy stack had it, and it is a real answer
-    /// rather than the debounce the spike used. A debounce over "the clip view moved" cannot tell
-    /// a hand from this app's own travel, so the jump pill's glide reported itself as a scroll on
-    /// its very first frame and the pane's handler stopped it: the press moved the transcript by a
-    /// few points and left it there, with the completion that would have landed it at the end
-    /// never run. `NSScrollView` posts `willStartLiveScroll` and `didEndLiveScroll` for
-    /// user-initiated scrolling only, so this app's own movement is silent here and the follower
-    /// pauses for a hand and for nothing else.
+    /// Not a debounce over "the clip view moved", which cannot tell a hand from this app's own
+    /// travel: the jump pill's glide reported itself as a scroll on its first frame and the pane's
+    /// handler stopped it, leaving the transcript a few points down with the completion never run.
+    /// `NSScrollView` posts `willStartLiveScroll` and `didEndLiveScroll` for user-initiated
+    /// scrolling only, so this app's own movement is silent here.
     let onLiveScrollChange: @MainActor (Bool) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -274,10 +244,10 @@ struct TranscriptTable: NSViewRepresentable {
         /// view's.
         ///
         /// **This was half of the wrong heights.** With legacy scrollers the clip view is fifteen
-        /// points wider than the document inside it, so every measurement was taken at a width no
-        /// row is ever laid out at: a paragraph measured at the wider figure wraps to fewer lines
-        /// than it draws at, and the row comes out short with its first line clipped off the top.
-        /// One column and no intercell spacing, so the table's width is the cell's width.
+        /// points wider than the document inside it, so a paragraph measured at the clip's width
+        /// wraps to fewer lines than it draws at and the row comes out short with its first line
+        /// clipped off the top. One column and no intercell spacing, so the table's width is the
+        /// cell's width.
         private var columnWidth: CGFloat {
             if let tableView, tableView.bounds.width > 1 { return tableView.bounds.width }
             return scrollView?.contentView.bounds.width ?? 0
@@ -377,16 +347,8 @@ struct TranscriptTable: NSViewRepresentable {
                 return
             }
 
-            // A reader who is following along is kept at the end, which is what a `ScrollPosition`
-            // standing at `.bottom` did for the lazy stack. `holdsEnd` is the same thing said out
-            // loud by something that asked for it; `wasAtEnd` is the reader who simply has not
-            // scrolled away. Everything else keeps the ROW that was at the top of the pane, which
-            // is the thing a point offset cannot do and the whole reason for the table.
-            let wasAtEnd = ScrollEnd.isAtEnd(
-                contentHeight: currentGeometry.contentHeight,
-                viewportHeight: currentGeometry.viewportHeight,
-                offset: currentGeometry.offset
-            )
+            // Both read before anything moves under the reader. See `keepPlace`.
+            let wasAtEnd = isFollowingAlong
             let anchor = change.movesRows ? anchorEntry() : nil
 
             entries = newEntries
@@ -418,11 +380,7 @@ struct TranscriptTable: NSViewRepresentable {
                 noteHeights(unfolding, over: unfoldSeconds)
             }
 
-            if holdsEnd || (wasAtEnd && !isFollowerDriving) {
-                putEnd()
-            } else if let anchor {
-                restore(anchor)
-            }
+            keepPlace(wasAtEnd: wasAtEnd, anchor: anchor)
             // Off this pass, because this one runs inside `updateNSView` and what it calls writes
             // SwiftUI state. Reporting from here is "Modifying state during view update".
             Task { @MainActor [weak self] in self?.reportGeometry() }
@@ -480,14 +438,12 @@ struct TranscriptTable: NSViewRepresentable {
 
         /// A fresh `NSHostingView` per measurement, at the exact width the cell is laid out at.
         ///
-        /// **The other half of the wrong heights, and it is worth writing down what the shortcut
-        /// cost.** One hosting view reused for every row, with its size invalidated by hand, gave
-        /// a long conversation several hundred points of blank between rows: an `NSHostingView`
-        /// keeps its own fitting size, and `invalidateIntrinsicContentSize` followed by
-        /// `layoutSubtreeIfNeeded` does not reliably make it forget the row before. A fresh one
-        /// has no previous answer to hand back. It builds a whole SwiftUI graph per row, which is
-        /// the expensive thing this arrangement can afford: 2.1ms a layout pass against the lazy
-        /// stack's 11.9ms.
+        /// **The other half of the wrong heights.** One hosting view reused for every row, with
+        /// its size invalidated by hand, gave a long conversation several hundred points of blank
+        /// between rows: an `NSHostingView` keeps its own fitting size and does not reliably
+        /// forget the row before. A fresh one has no previous answer to hand back, and a whole
+        /// SwiftUI graph per row is what this arrangement can afford: 2.1ms a layout pass against
+        /// the lazy stack's 11.9ms.
         ///
         /// The width is a required CONSTRAINT rather than a frame, because that is what makes
         /// `fittingSize` solve the layout at that width instead of handing back the unwrapped
@@ -522,28 +478,18 @@ struct TranscriptTable: NSViewRepresentable {
                 let rows = owedHeights
                 owedHeights = IndexSet()
                 guard !rows.isEmpty else { return }
-                let wasAtEnd = ScrollEnd.isAtEnd(
-                    contentHeight: currentGeometry.contentHeight,
-                    viewportHeight: currentGeometry.viewportHeight,
-                    offset: currentGeometry.offset
-                )
-                // **The row being corrected is usually above the reader**, which is why this needs
-                // the same anchor `apply` takes. Scrolling up through a long conversation brings
-                // rows into view at the top, each of them is drawn and reports a height that
-                // differs from what it was measured at, and every one of those corrections moves
-                // everything below it. Without the anchor the text slides under the eye on the way
-                // up, which is the one thing a reader notices immediately.
+                let wasAtEnd = isFollowingAlong
+                // **The row being corrected is usually above the reader.** Scrolling up brings
+                // rows in at the top, each reports a height that differs from what it was measured
+                // at, and every correction moves everything below it. Without the anchor the text
+                // slides under the eye on the way up.
                 let anchor = anchorEntry()
                 noteHeights(rows)
                 // **The correction is also what leaves a reader short of the end**, and it is the
                 // second half of "the pill does not go all the way down": a scroll that was right
-                // when it was issued is short the moment a row below the fold turns out to be
-                // taller than it was measured at. So the end is said again after every batch.
-                if holdsEnd || (wasAtEnd && !isFollowerDriving) {
-                    putEnd()
-                } else if let anchor {
-                    restore(anchor)
-                }
+                // when it was issued is short the moment a row below the fold turns out taller
+                // than it was measured at.
+                keepPlace(wasAtEnd: wasAtEnd, anchor: anchor)
                 reportGeometry()
             }
         }
@@ -585,12 +531,9 @@ struct TranscriptTable: NSViewRepresentable {
         /// A fold is about to open or close, so the height change it causes is the one this file
         /// may animate.
         ///
-        /// **The height a fold changes is the TABLE's, not the row's**, which is the whole reason
-        /// this has to be said at all. In the lazy stack a `withAnimation` around the state change
-        /// carried into the `if` inside `ToolRowView` and the row grew itself. Here the row is
-        /// remeasured and the table is told a number, and a number arriving is not a transition.
-        /// So the travel is the table's row-height animation, at the length `TranscriptMotion`
-        /// gives every other settle in this app.
+        /// **The height a fold changes is the TABLE's, not the row's.** The row is remeasured
+        /// and the table is told a number, and a number arriving is not a transition, so the
+        /// travel is the table's row-height animation rather than a `withAnimation` inside the row.
         ///
         /// A set rather than a flag, because unfolding one row and folding another in the same
         /// pass is a thing a keyboard can do, and because a fold that is somehow not applied on
@@ -607,6 +550,48 @@ struct TranscriptTable: NSViewRepresentable {
             return TranscriptMotion.disclosure(reduceMotion: rowEnvironment.reduceMotion) ?? 0
         }
 
+        // MARK: Keeping the reader's place
+
+        /// **Where the reader goes after something under them has moved.** One answer, because
+        /// there were three of these and the resize one silently left `wasAtEnd` out: a reader
+        /// sitting at the live end without having asked for it was anchored to their top row by a
+        /// divider drag, while the comment beside it argued that a resize moves the end as much as
+        /// it moves anything. It does, so it gets the same answer as a row landing.
+        ///
+        /// The rule is `TranscriptAnchor.place`, in the core, because it had drifted once already
+        /// and a decision taken in a view is a decision nothing can test. `wasAtEnd` is read
+        /// before the move rather than here. Anything that is not the end keeps the ROW that was
+        /// at the top of the pane, which is the thing a point offset cannot do and the whole
+        /// reason for the table.
+        private func keepPlace(
+            wasAtEnd: Bool, anchor: (id: TranscriptEntryID, delta: CGFloat)?
+        ) {
+            switch TranscriptAnchor.place(
+                holdsEnd: holdsEnd,
+                wasAtEnd: wasAtEnd,
+                followerDriving: isFollowerDriving,
+                hasAnchor: anchor != nil
+            ) {
+            case .end:
+                putEnd()
+            case .anchor:
+                if let anchor { restore(anchor) }
+            case .stay:
+                break
+            }
+        }
+
+        /// Whether the reader is still following along, which is `ScrollEnd`'s question with a
+        /// line or two of slack, and not `TranscriptTableGeometry.isAtEnd`'s exact one.
+        private var isFollowingAlong: Bool {
+            let geometry = currentGeometry
+            return ScrollEnd.isAtEnd(
+                contentHeight: geometry.contentHeight,
+                viewportHeight: geometry.viewportHeight,
+                offset: geometry.offset
+            )
+        }
+
         // MARK: Scrolling
 
         var currentGeometry: TranscriptTableGeometry {
@@ -616,7 +601,9 @@ struct TranscriptTable: NSViewRepresentable {
             let clip = scrollView.contentView
             return TranscriptTableGeometry(
                 offset: clip.bounds.origin.y,
-                contentHeight: document.bounds.height,
+                // `frame` rather than `bounds`, so this agrees with `NSScrollView.endOffset`,
+                // which carries why.
+                contentHeight: document.frame.height,
                 viewportHeight: clip.bounds.height,
                 viewportWidth: clip.bounds.width
             )
@@ -645,14 +632,10 @@ struct TranscriptTable: NSViewRepresentable {
             // standing instruction then.
             guard !isFollowerDriving else { return }
             holdsEnd = true
-            // **And once more on the next turn, which is the table's version of the two-call dance
-            // the lazy stack needed.** There the two calls existed because `ScrollPosition` is a
-            // value and naming the edge it already stood at was not a change SwiftUI could apply.
-            // That argument is obsolete: a call on a table always acts. What is not obsolete is
-            // the reason the second call landed anything, which is that the content this one is
-            // aimed at may not have been laid out yet. A window that has just been moved to the
-            // tail, a bubble drawn on the frame Return was pressed, a row inserted in the same
-            // update: each of them changes where the end is after this line has read it.
+            // **And once more on the next turn**, because the content this one is aimed at may
+            // not have been laid out yet: a window just moved to the tail, a bubble drawn on the
+            // frame Return was pressed, a row inserted in the same update. Each changes where the
+            // end is after the line above has read it.
             endWork?.cancel()
             endWork = Task { @MainActor [weak self] in
                 await Task.yield()
@@ -677,29 +660,20 @@ struct TranscriptTable: NSViewRepresentable {
         }
 
         private func putEnd() {
-            guard let scrollView, let document = scrollView.documentView else { return }
+            guard let scrollView else { return }
             // The only number that means the end. A row being *visible* is not it: the last row of
-            // a transcript is often taller than the pane. See `TranscriptAnchor`.
-            put(
-                TranscriptAnchor.end(
-                    contentHeight: document.bounds.height,
-                    viewportHeight: scrollView.contentView.bounds.height
-                ),
-                in: scrollView
-            )
+            // a transcript is often taller than the pane. See `NSScrollView.endOffset`.
+            put(scrollView.endOffset, in: scrollView)
         }
 
         func scroll(to entryID: TranscriptEntryID, anchor: UnitPoint) {
             // Somewhere that is not the end, so whatever asked to be at the end has been overruled.
             aimingElsewhere()
             put(at: entryID, anchor: anchor)
-            // **And once more on the next turn, for the same reason `goToEnd` says the end twice.**
-            //
-            // A row is scrolled to at the height the table currently believes it is, and that
-            // belief is corrected the moment the row is drawn. The setup log is where this shows:
-            // unfolding 1,381 lines of it and asking to be taken to the end of it lands at the
-            // height the folded row was measured at, thousands of points short of where the log
-            // now ends. The correction arrives one turn later, and so does this.
+            // **And once more on the next turn, for the same reason `goToEnd` says it twice.** A
+            // row is scrolled to at the height the table currently believes it is. Unfolding 1,381
+            // lines of setup log and asking for the end of it lands at the height the folded row
+            // was measured at, thousands of points short; the correction arrives one turn later.
             reaimWork?.cancel()
             reaimWork = Task { @MainActor [weak self] in
                 await Task.yield()
@@ -740,9 +714,13 @@ struct TranscriptTable: NSViewRepresentable {
             let clip = scrollView.contentView
             let target = TranscriptAnchor.clamped(
                 y,
-                contentHeight: Double(scrollView.documentView?.bounds.height ?? 0),
+                contentHeight: Double(scrollView.documentView?.frame.height ?? 0),
                 viewportHeight: clip.bounds.height
             )
+            // Its own tolerance, and a small one on purpose: this asks whether the write would
+            // move anything at all, not whether the view is at the end. A point of slack here,
+            // which is what `TranscriptAnchor.isAtEnd` allows for a clip view's rounding, would
+            // refuse a real correction.
             guard abs(clip.bounds.origin.y - target) > 0.01 else { return }
             // So that the escape in `clipMoved` does not read this file's own arrival at the end
             // as the reader scrolling away from it.
@@ -753,11 +731,9 @@ struct TranscriptTable: NSViewRepresentable {
         }
 
         /// The three ways the table is told rows moved, each with a name of its own **so that the
-        /// next `sample` can tell them apart**. Which branch a scroll actually takes was the one
-        /// thing an earlier profile could not say: `apply` was 47.7 per cent of the main thread
-        /// with `NSHostingView` under it and `measure` at half a per cent, which is a reload
-        /// rebuilding cells rather than heights being taken, but only if the shape really was
-        /// `.rebuilt`. Three symbols answer that without a probe having to carry a counter.
+        /// next `sample` can tell them apart**. An earlier profile put `apply` at 47.7 per cent of
+        /// the main thread with `NSHostingView` under it and `measure` at half a per cent, which
+        /// only means a reload rebuilding cells if the shape really was `.rebuilt`.
         private func rowsArrived(head: Range<Int>, tail: Range<Int>, in tableView: NSTableView) {
             tableView.beginUpdates()
             // The head first, so that the indices the tail is named by are the indices the table
@@ -884,15 +860,12 @@ struct TranscriptTable: NSViewRepresentable {
                 try? await Task.sleep(for: .milliseconds(150))
                 guard !Task.isCancelled, let self else { return }
                 guard heights.reset(width: columnWidth, scale: sizing.scale) else { return }
+                // Read here rather than when the drag began: the rebuild below is what moves the
+                // content, and a width change has not moved anybody off the end before it.
+                let wasAtEnd = isFollowingAlong
                 let anchor = anchorEntry()
                 noteHeights(IndexSet(integersIn: entries.indices))
-                // A resize moves the end as much as it moves anything, so a reader who asked to be
-                // at it is still owed it.
-                if holdsEnd {
-                    putEnd()
-                } else if let anchor {
-                    restore(anchor)
-                }
+                keepPlace(wasAtEnd: wasAtEnd, anchor: anchor)
                 reportGeometry()
             }
             reportGeometry()
@@ -907,44 +880,28 @@ struct TranscriptTable: NSViewRepresentable {
 /// What every cell hosts, and the only place the drawn height is known.
 ///
 /// **`fixedSize` vertically is the whole of it.** A hosting view pinned to the four edges of its
-/// cell proposes the ROW's height to the SwiftUI root inside it, and a root that takes what it is
-/// offered can never report that the row is the wrong size: it is squeezed, or it is padded with
-/// blank, and it says nothing either way. Fixed vertically, the content takes the width it is
-/// given and its own ideal height, the reader sees the row it should have had even before the
-/// correction lands, and the geometry reader behind it has a number worth sending back.
+/// cell proposes the ROW's height to the root inside it, and a root that takes what it is offered
+/// can never report that the row is the wrong size: it is squeezed or padded with blank and says
+/// nothing either way. Fixed vertically, the content takes its own ideal height and the geometry
+/// reader behind it has a number worth sending back.
 ///
-/// The transaction is the SwiftUI half of "the animations get in the way". A cell is recycled: the
-/// same hosting view is handed a different row, and any implicit animation inside turns that swap
-/// into a height or an opacity travelling from what the last row was to what this one is, which
-/// over a scrolling table reads as the whole transcript sliding about. It is cleared here, at the
-/// root of the hosted content, because the row views themselves are shared with everything else
-/// that draws a transcript row and must not be touched.
-///
-/// **The arrival settle survives it**, and that is not an accident of ordering. `ArrivingRow`
-/// animates from its own `onAppear` with an explicit `withAnimation`, which is a transaction it
-/// creates rather than one it inherits, so clearing the inherited one takes nothing away from it.
-/// See `RowArrival`, which measured why the fade has to be started by the cell rather than aimed
-/// at it.
+/// The transaction is the SwiftUI half of "the animations get in the way". A recycled cell is
+/// handed a different row, and any implicit animation turns that swap into a height or an opacity
+/// travelling from the last row's to this one's, which over a scrolling table reads as the whole
+/// transcript sliding about. Cleared here rather than in the row views, which are shared with
+/// everything else that draws a transcript row. `ArrivingRow`'s settle survives it, because an
+/// explicit `withAnimation` creates a transaction rather than inheriting one.
 ///
 /// ## Known unverified: what `.global` means inside here
 ///
-/// **A hover card is positioned by two views agreeing about one coordinate space, and they are no
-/// longer certainly in the same one.** `ToolRowHeader` and `UserTurnRowView` report the chip's
-/// `frame(in: .global)` to `TranscriptHoverHost`, and `TranscriptHoverOverlay` subtracts its own
-/// `frame(in: .global)` to place the popover. Under the lazy stack both were inside one hosting
-/// view, so whatever `.global` resolved to, it resolved to the same thing twice and the
-/// subtraction was right by construction. Here the overlay is still in the pane's hierarchy and
-/// the row is in a hosting view of its own per cell, and if SwiftUI resolves `.global` against the
-/// hosting view rather than the window then the row's answer is its own offset within the cell,
-/// the subtraction is nonsense, and every card appears near the top left of the pane at the chip's
-/// x. If it resolves against the window, nothing has changed and this note can go.
-///
-/// It has not been photographed either way, so it is written down rather than guessed at. The fix,
-/// if it is wrong, is not to fiddle with `.global`: it is for the cell to convert, since the cell
-/// is the only thing that knows where it is. `HostedRow` would name a coordinate space, the
-/// reporters would use it, and an object in the environment carrying the cell's own view would do
-/// the `convert(_:to: nil)`. Reproduction, from the dev database: workspace "#362 Lay the app-side
-/// styling foundation on the", session `369a630d`, file chips in user bubbles at seq 387 and 948.
+/// `ToolRowHeader` and `UserTurnRowView` report a chip's `frame(in: .global)` and
+/// `TranscriptHoverOverlay` subtracts its own to place the popover. Under the lazy stack both were
+/// in one hosting view, so the subtraction was right by construction; here the row is in a hosting
+/// view per cell, and if SwiftUI resolves `.global` against that rather than the window every card
+/// appears near the top left of the pane at the chip's x. Not photographed either way. The fix, if
+/// it is wrong, is for the cell to convert, since it is the only thing that knows where it is.
+/// Reproduction, from the dev database: workspace "#362 Lay the app-side styling foundation on
+/// the", session `369a630d`, file chips in user bubbles at seq 387 and 948.
 private struct HostedRow: View {
     let content: AnyView
     let report: @MainActor (CGFloat) -> Void
@@ -1009,13 +966,10 @@ final class TranscriptTableCell: NSView {
     required init?(coder: NSCoder) { fatalError("not in a nib") }
 
     func apply(entry: TranscriptTableEntry, environment: TranscriptRowEnvironment) {
-        // The recycling. A cell that already holds this content is left exactly as it is, which is
-        // what a table buys over a stack that rebuilds every realised row on every pass.
-        //
-        // The three entries that re-render themselves are NOT excepted, and used to be. The
-        // streaming tail and the setup log watch their own state and re-render inside the cell;
-        // handing them a new root view on every pass threw that state away and rebuilt the tail
-        // several times a second.
+        // The recycling. A cell that already holds this content is left exactly as it is, which
+        // is what a table buys over a stack that rebuilds every realised row on every pass. The
+        // three entries that re-render themselves are NOT excepted, and used to be: handing the
+        // streaming tail a new root view on every pass rebuilt it several times a second.
         guard appliedKey != entry.contentKey else { return }
         appliedKey = entry.contentKey
         let id = entry.id

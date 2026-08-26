@@ -211,25 +211,24 @@ struct ProbeHarness {
             for subview in view.subviews { walk(subview) }
         }
         walk(root)
-        return found.max { scrollableHeight(of: $0) < scrollableHeight(of: $1) }
-    }
-
-    static func scrollableHeight(of scroll: NSScrollView) -> CGFloat {
-        let document = scroll.documentView?.frame.height ?? 0
-        return max(0, document - scroll.contentView.bounds.height)
+        return found.max { $0.endOffset < $1.endOffset }
     }
 
     /// Where a transcript is standing, as a report says it.
     ///
     /// `atEnd` is the one that matters to a reader: "I was at the bottom, I went away, I came
-    /// back". A tolerance rather than an exact equality, because the live end of a list whose
-    /// last row has just been measured is a point or two away from the bottom of the content.
+    /// back".
+    ///
+    /// Four points, which is its own number and not `NSScrollView.isAtEnd`'s one: this records
+    /// where a switch left a reader rather than asserting that an instruction survived, and the
+    /// live end of a list whose last row has just been measured is a point or two from the bottom
+    /// of the content. `JumpProbe` is the one that wants the exact question and asks it.
     static func scrollPlace(_ scroll: NSScrollView?) -> [String: JSONValue] {
         guard let scroll else { return ["found": .bool(false)] }
         let offset = Double(scroll.contentView.bounds.origin.y)
         let content = Double(scroll.documentView?.frame.height ?? 0)
         let viewport = Double(scroll.contentView.bounds.height)
-        let reach = max(0, content - viewport - offset)
+        let reach = Double(scroll.distanceFromEnd)
         return [
             "found": .bool(true),
             "offset": .number(offset),

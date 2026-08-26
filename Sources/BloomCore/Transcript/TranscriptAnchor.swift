@@ -63,6 +63,35 @@ public enum TranscriptAnchor {
         rowTop + rowHeight * anchor - viewportHeight * anchor
     }
 
+    /// What to do with the viewport after something has moved under the reader.
+    public enum Place: Equatable, Sendable {
+        /// Put it at the end of the content.
+        case end
+        /// Put the anchored row back where it was.
+        case anchor
+        /// Leave it where it is.
+        case stay
+    }
+
+    /// Where the reader goes after rows have landed, a height has been corrected, or the pane has
+    /// been resized.
+    ///
+    /// **Three callers wrote this out and the resize one left `wasAtEnd` off**, so a reader
+    /// sitting at the live end without having asked for it was anchored back to their top row by
+    /// a window resize or a divider drag. It is one answer here because the arithmetic in a view
+    /// is a decision nothing can test, and this one had already drifted.
+    ///
+    /// `holdsEnd` is somebody having asked for the end out loud, and it survives everything.
+    /// `wasAtEnd` is the reader who simply had not scrolled away, read BEFORE the move, and it is
+    /// dropped while a follower is driving the view: two things pinning the same clip view is the
+    /// instant pin winning with the travel invisible underneath it.
+    public static func place(
+        holdsEnd: Bool, wasAtEnd: Bool, followerDriving: Bool, hasAnchor: Bool
+    ) -> Place {
+        if holdsEnd || (wasAtEnd && !followerDriving) { return .end }
+        return hasAnchor ? .anchor : .stay
+    }
+
     /// Whether a viewport that was put at the end is still there.
     ///
     /// **Exact, and deliberately not `ScrollEnd.isAtEnd`.** That one answers "is the reader still

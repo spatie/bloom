@@ -7,45 +7,32 @@ import SwiftUI
 /// something the eye can follow instead of a jolt.
 ///
 /// **The rules are `TranscriptFollow`'s and the frames are here.** What this file owns is when the
-/// following is on at all, and one measurement about SwiftUI that the shape of it depends on.
+/// following is on at all.
 ///
 /// ## Why this is not a `withAnimation` on the scroll position
 ///
-/// For the same reason `TranscriptLiveEndScroller` is not, and that file carries the frame timings
-/// that settled it: on a long transcript SwiftUI's own animated scroll delivered a fifth of the
-/// frames the display wanted at six times the main-thread cost of stepping the clip view by hand.
-/// This one has a second reason on top of that. It runs while a turn streams, which is many
-/// content changes a second, and a state write per frame would re-run the list's body and rebuild
-/// every realised row with it. Nothing here writes any SwiftUI state at all: it reads two heights
-/// off AppKit and sets an origin, and the transcript's own geometry callback picks the result up as
-/// if the reader had scrolled there themselves, so the jump pill keeps working off exactly the
-/// numbers it already did.
+/// For the reason `TranscriptLiveEndScroller`'s header measures, and a second one on top of it:
+/// this runs while a turn streams, so a state write per frame would re-run the list's body and
+/// rebuild every realised row with it. Nothing here writes any SwiftUI state. It reads two heights
+/// off AppKit and sets an origin, and the transcript's geometry callback picks the result up as if
+/// the reader had scrolled there themselves.
 ///
 /// ## The take-back, and why it is the shape of the thing
 ///
-/// Something else keeps the view pinned to the end as the content grows, in the same pass that
-/// grows it: under the lazy stack that was a `ScrollPosition` standing at `.bottom`, and under the
-/// table it is `TranscriptTableController.goToEnd`. Either way there is nothing to animate
-/// afterwards, because by the time any frame is drawn the view is already at the end. So the
-/// travel has to be made rather than intercepted, and that is what `TranscriptFollow.start` is: on
-/// the frame that sees the content grow, the view is put back by what arrived, capped, and then
-/// travels forward to the end again. One frame of the pinned position may be shown before the
-/// take-back lands, which at 120Hz is eight milliseconds and has no visible width.
-///
-/// It costs nothing when nothing is pinning. Then the view is simply behind the end by what
-/// arrived, `start` leaves it there, and the same approach carries it forward. Both worlds end up
-/// travelling the same distance at the same rate.
+/// Something else pins the view to the end in the same pass that grows the content
+/// (`TranscriptTableController.goToEnd`), so by the time any frame is drawn there is nothing left
+/// to animate. The travel has to be made rather than intercepted, which is what
+/// `TranscriptFollow.start` is: the view is put back by what arrived, capped, and travels forward
+/// again. One frame of the pinned position may be shown first, which at 120Hz has no visible
+/// width. With nothing pinning, the view is simply behind by what arrived and the same approach
+/// carries it forward.
 ///
 /// ## What turns it off
 ///
-/// Reduce Motion, which drops the travel rather than slowing it, the way every other movement in
-/// this app does, and which is `TranscriptFollow.travels` rather than a reading of the setting
-/// taken here. A window that is not in front, because a display link in a backgrounded app is
-/// the battery bug `ActivityDot` carries the measurement for and there is nobody watching the
-/// travel anyway. A hand on the wheel, because a view that goes on dragging somebody somewhere
-/// after they have taken hold of it is the worst thing this file could do. And a quiet transcript:
-/// the link is only up while a turn is streaming or for a moment after a row lands, so a session
-/// nobody is running costs nothing at all.
+/// Reduce Motion, through `TranscriptFollow.travels`. A window that is not in front, because a
+/// display link in a backgrounded app is the battery bug `ActivityDot` measured. A hand on the
+/// wheel. And a quiet transcript: the link is up only while a turn streams or for a moment after
+/// a row lands.
 @MainActor
 final class TranscriptLiveEndFollower {
     /// Weak, because the scroll view belongs to the view hierarchy and holding it here would keep
@@ -55,13 +42,9 @@ final class TranscriptLiveEndFollower {
         didSet {
             guard scrollView !== oldValue else { return }
             lastHeight = 0
-            // And re-ask, like every other input below. `wants` reads this property, and the
-            // scroll view arrives late: measured back when it was found by walking up from a
-            // planted view, `enclosingScrollView` was nil on the first update, so a turn that
-            // started streaming before the second layout pass set `isStreaming` while `wants` was
-            // still false for want of a view, and nothing asked again. The following stayed off
-            // until the next `nudge()` or state change. The table hands it over rather than being
-            // walked up from now, and it is still not there on the first pass.
+            // And re-ask, like every other input below: the scroll view arrives after the first
+            // pass, so a turn that started streaming before it landed set `isStreaming` while
+            // `wants` was still false for want of a view, and nothing asked again.
             refresh()
         }
     }
@@ -83,19 +66,9 @@ final class TranscriptLiveEndFollower {
     /// Called when the following stops with the view at the end, so the caller can take its
     /// standing instruction back.
     ///
-    /// **This is not tidiness, it is what stops the transcript falling behind when the following
-    /// is off.** Measured against a hosted `ScrollView` whose `ScrollPosition` was standing at
-    /// `.bottom`: content growing kept the view at the end, to the point, until the clip view was
-    /// moved by hand, and from that moment on it never kept it again. SwiftUI takes a position it
-    /// did not make as the reader having scrolled, which is exactly right and is why the pill
-    /// works, but it means the first frame this follower steps also puts SwiftUI's own following
-    /// down. So when the travel is over, whoever owns the position says so again, and the instant
-    /// pin is back for the window that is behind another app, the reader who has asked for less
-    /// movement, and the quiet transcript nobody is running.
-    ///
-    /// The table has no `ScrollPosition` to be taken down, but it has the same argument: while
-    /// this object is driving, nothing else may put the view at the end, and this is the moment
-    /// the instruction goes back. See `TranscriptTableController.goToEnd`.
+    /// **This is what stops the transcript falling behind when the following is off.** While this
+    /// object is driving, nothing else may put the view at the end, so this is the moment that
+    /// instruction goes back. See `TranscriptTableController.goToEnd`.
     ///
     /// Only at the end, and never mid travel: naming the edge from anywhere else is a jump, and
     /// the reader who has just taken hold of the view is precisely who must not be given one.
@@ -104,29 +77,22 @@ final class TranscriptLiveEndFollower {
     /// Called with the current offset when the following starts, so whoever owns the scroll
     /// position can stop naming an edge.
     ///
-    /// **Without this the follower cannot win an argument it is having every frame.** The lazy
-    /// stack held a `ScrollPosition(edge: .bottom)`, and a position standing at an edge is a
-    /// standing instruction: SwiftUI put the view back at the end on the layout pass that grew the
-    /// content, every time. This writes the clip view's origin directly, so the take-back landed
-    /// and was overwritten before a frame was drawn, and what reached the screen was the instant
-    /// pin with the travel invisible underneath it.
+    /// **Without this the follower cannot win an argument it is having every frame.** Whatever
+    /// pins the view to the end does so on the layout pass that grew the content, so the take-back
+    /// landed and was overwritten before a frame was drawn and what reached the screen was the
+    /// instant pin with the travel invisible underneath it.
     ///
-    /// The offset it hands over is the one the view is already at, so naming it moves nothing:
-    /// what changed for SwiftUI is that the position stopped being an edge and started being a
-    /// number, which is what left the clip view alone until `onRest`. The table's caller ignores
-    /// the number and simply lets go of its own instruction, which is the same hand-off with
-    /// nothing to name.
+    /// The offset it hands over is the one the view is already at, so naming it moves nothing. The
+    /// table's caller ignores the number and simply lets go of its own instruction.
     var onStart: (@MainActor (CGFloat) -> Void)?
 
     /// Called whenever the link goes down, at the end or not.
     ///
-    /// **`onRest` is not enough to hand the view back with, and that is what this is for.** It
-    /// only fires when the travel finished AT the end, which is the case where somebody else
-    /// should take over holding it there. Every other ending, a reader who scrolled away mid
-    /// travel, a window going behind another app, a session being left, leaves the view somewhere
-    /// in the middle with nobody told that this object has stopped driving. Whoever suppressed
-    /// their own scrolling for the duration needs to hear about all of them, or they suppress it
-    /// for ever. See `TranscriptTableController.followerTookOver`.
+    /// **`onRest` is not enough to hand the view back with.** It fires only when the travel
+    /// finished AT the end. A reader who scrolled away mid travel, a window going behind another
+    /// app or a session being left all leave the view in the middle, and whoever suppressed their
+    /// own scrolling for the duration would suppress it for ever. See
+    /// `TranscriptTableController.followerTookOver`.
     ///
     /// Said before `onRest`, so a caller that reacts to both gets "I have stopped" and then "and
     /// you are at the end" in that order.
@@ -216,10 +182,10 @@ final class TranscriptLiveEndFollower {
     }
 
     private var isAtEnd: Bool {
-        guard let scrollView, let document = scrollView.documentView else { return false }
-        let clip = scrollView.contentView
-        return document.bounds.height - clip.bounds.height - clip.bounds.origin.y
-            <= TranscriptFollow.arrived
+        guard let scrollView else { return false }
+        // `TranscriptFollow.arrived`, which is about a travel being spent rather than watched, and
+        // deliberately not `NSScrollView.isAtEnd`'s exact point.
+        return scrollView.distanceFromEnd <= TranscriptFollow.arrived
     }
 
     @objc private func step(_ sender: CADisplayLink) {
@@ -235,11 +201,8 @@ final class TranscriptLiveEndFollower {
             let frame = lastFrame > 0 ? now - lastFrame : 0
             lastFrame = now
 
-            // The clip view's own height, not the scroll view's frame: an inset or a ruler makes
-            // those different, and the one that decides how far the document can go is the area
-            // showing it.
-            let height = document.bounds.height
-            let end = height - clip.bounds.height
+            let height = document.frame.height
+            let end = scrollView.endOffset
             var offset = clip.bounds.origin.y
 
             if lastHeight > 0, height > lastHeight {

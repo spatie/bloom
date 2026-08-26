@@ -15,32 +15,14 @@ import SwiftUI
 /// same press with no animation on it costs. WindowServer is not involved either way, which is the
 /// one thing the numbers rule out.
 ///
-/// The travel is not `NSAnimationContext` either, and that is worth a paragraph because it was the
-/// obvious answer and it was tried. `clip.animator().setBoundsOrigin` reads and measures exactly
-/// as well as what is here, and it cannot be stopped: `animator()` writes the model value straight
-/// away and animates the layer towards it, so `bounds.origin` reports the end of the document
-/// from the first frame, the clip view has no presentation layer of its own to ask instead, and a
-/// hand on the wheel therefore froze the view at the bottom rather than where the travel had got
-/// to. That is the teleport this whole branch replaced, performed at the exact moment the reader
+/// **The travel is not `NSAnimationContext` either**, which was the obvious answer and was tried.
+/// `clip.animator().setBoundsOrigin` measures as well as this and cannot be stopped: `animator()`
+/// writes the model value straight away, so `bounds.origin` reports the end of the document from
+/// the first frame and a hand on the wheel froze the view at the bottom rather than where the
+/// travel had got to. That is the teleport this replaced, performed at the moment the reader
 /// grabbed the view. Stepping the origin by hand means the current position is simply known.
 ///
-/// What is given up is that SwiftUI's own `ScrollPosition` does not know where the view ended up,
-/// which is why the caller settles it with an unanimated `scrollTo(edge: .bottom)` on arrival.
-/// That call was already there for the streaming case. It is now what every completed travel ends
-/// with, and a travel that was stopped does not reach it.
-///
-/// It fails safe. The scroll view is handed over by `TranscriptTable`, which owns it, and if there
-/// is none the answer is nil, `glide` returns false, and the caller jumps instead. A press that
-/// arrives instantly is the behaviour this replaced and is not a failure.
-///
-/// **It used to be found rather than handed over**, by planting a zero sized `NSViewRepresentable`
-/// inside the scroll content and walking up through `enclosingScrollView`, because that was the
-/// only way to reach the `NSScrollView` SwiftUI puts behind a `ScrollView`. That view had to be
-/// updated on every layout pass, since the reference went stale whenever SwiftUI rebuilt the
-/// hosting scroll view under a pane that is reused for every workspace the window visits, and it
-/// answered nil on its first update because a representable's view is created before it is put in
-/// the hierarchy. None of that survives the move to a table: the table makes its own scroll view
-/// and says which one it is.
+/// It fails safe: with no scroll view `glide` returns false and the caller jumps instead.
 @MainActor
 @Observable
 final class TranscriptLiveEndScroller {
@@ -65,15 +47,16 @@ final class TranscriptLiveEndScroller {
         guard let scrollView, let document = scrollView.documentView else { return false }
 
         let clip = scrollView.contentView
-        // The clip view's own height, not the scroll view's frame: an inset or a ruler makes those
-        // different, and the one that decides how far the document can go is the area showing it.
-        let reach = document.bounds.height - clip.bounds.height
+        let reach = scrollView.endOffset
         guard reach > 0 else { return false }
 
         // Flipped is what every scroll view in this app is, SwiftUI's included, but it is asked
         // rather than assumed: unflipped, the end of the document is at the origin, and travelling
         // to `reach` would go the wrong way.
         let end = document.isFlipped ? reach : 0
+        // Half a point is under a pixel, so there is nothing to travel. Its own number rather than
+        // `TranscriptFollow.arrived`: the two agree because both are the same claim about a pixel,
+        // not because one owns the other.
         guard abs(clip.bounds.origin.y - end) > 0.5, seconds > 0 else { return false }
 
         stop()
