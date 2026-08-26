@@ -116,7 +116,7 @@ struct SetupCopyTests {
     func allClearCopy() {
         #expect(report().headline == "You are all set")
         #expect(report().sentence.contains("installed and signed in"))
-        #expect(report().primaryButtonTitle == "Start using Bloom")
+        #expect(report().verdict.primaryButtonTitle == "Start using Bloom")
     }
 
     @Test("an optional tool that is not set up is named")
@@ -139,7 +139,7 @@ struct SetupCopyTests {
     @Test("the button is named after what pressing it does, even mid-check")
     func checkingIsNotAButtonTitle() {
         #expect(SetupReport.pending.verdict == .checking)
-        #expect(SetupReport.pending.primaryButtonTitle == "Start using Bloom")
+        #expect(SetupReport.pending.verdict.primaryButtonTitle == "Start using Bloom")
     }
 
     @Test("an optional tool that is not set up says what is still on")
@@ -153,7 +153,7 @@ struct SetupCopyTests {
     func blockedCopy() {
         let blocked = report(claude: .missing, codex: .missing)
         #expect(blocked.headline == "Nearly there")
-        #expect(blocked.primaryButtonTitle == "Check again")
+        #expect(blocked.verdict.primaryButtonTitle == "Check again")
     }
 
     @Test("no git and no agent says both, not one")

@@ -24,6 +24,9 @@ struct WelcomeGreeting: View {
     /// False when somebody has walked back to this screen from the checks. A return is not an
     /// arrival, and replaying the whole opening on one is how a nice moment becomes a wait.
     let isFirstVisit: Bool
+    /// What the one button says, from `OnboardingFlow` rather than from here, so the words that
+    /// name the next screen live with the sequence that decides which screen that is.
+    let continueTitle: String?
     let onContinue: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -153,7 +156,11 @@ struct WelcomeGreeting: View {
                 .padding(.horizontal, Metrics.pane)
                 .modifier(Rise(entered: entered, animation: step(0.28)))
 
-            Button("See what Bloom needs", action: onContinue)
+            // The fallback is unreachable and is a button rather than nothing on purpose. A nil
+            // title means the sequence has nowhere to go from here, which the greeting never does;
+            // if that ever changed, a screen with one control and no way off it is the worse of
+            // the two failures.
+            Button(continueTitle ?? "Continue", action: onContinue)
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
                 // Bloom's own fill rather than whatever the user picked in Appearance, for the

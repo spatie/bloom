@@ -249,6 +249,27 @@ public enum SetupVerdict: Sendable, Hashable {
     case readyWithNotes
     /// Bloom cannot start a workspace on this machine yet.
     case blocked
+
+    /// What the primary button says when this verdict is the reason it is there. It never reads
+    /// as a dead end: a blocked machine is offered another look rather than a closed door.
+    ///
+    /// A machine still being looked at is offered the same way out as one that has answered, and
+    /// the button says so. It read "Checking" while the probes ran, which is a status and not an
+    /// act: it sat on an enabled button that closed the window and let somebody into the app, so
+    /// the one control on the screen was the one thing on it that did not say what it did. The
+    /// window never makes anybody wait for its own animation, which is the whole argument for
+    /// leaving the button live during a run, and a live button has to be named after what
+    /// pressing it does.
+    ///
+    /// On the verdict rather than on the report, because the window has a screen the report has no
+    /// opinion about and the button on it still has to be named. See `OnboardingPrimary`, which is
+    /// what asks, and which is the only thing that reads this.
+    public var primaryButtonTitle: String {
+        switch self {
+        case .checking, .ready, .readyWithNotes: OnboardingPrimary.finishTitle
+        case .blocked: "Check again"
+        }
+    }
 }
 
 /// Every check together, and what they add up to.
@@ -394,23 +415,6 @@ public extension SetupReport {
         case 1: return items[0]
         case 2: return "\(items[0]) and \(items[1])"
         default: return "\(items.dropLast().joined(separator: ", ")) and \(items[items.count - 1])"
-        }
-    }
-
-    /// What the primary button says. It never reads as a dead end: a blocked machine is offered
-    /// another look rather than a closed door.
-    ///
-    /// A machine still being looked at is offered the same way out as one that has answered, and
-    /// the button says so. It read "Checking" while the probes ran, which is a status and not an
-    /// act: it sat on an enabled button that closed the window and let somebody into the app, so
-    /// the one control on the screen was the one thing on it that did not say what it did. The
-    /// window never makes anybody wait for its own animation, which is the whole argument for
-    /// leaving the button live during a run, and a live button has to be named after what
-    /// pressing it does.
-    var primaryButtonTitle: String {
-        switch verdict {
-        case .checking, .ready, .readyWithNotes: "Start using Bloom"
-        case .blocked: "Check again"
         }
     }
 }
