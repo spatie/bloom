@@ -77,12 +77,32 @@ public extension GitHub {
     static func pullRequest(
         for workspace: Workspace, maxAge: Duration = .zero
     ) async throws -> PullRequest? {
+        try await pullRequest(
+            for: workspace, onBranch: await headBranch(of: workspace), maxAge: maxAge
+        )
+    }
+
+    /// The branch to ask gh about, read from the worktree rather than from the row.
+    ///
+    /// One local `git rev-parse`, which is nothing beside the `gh` call it is correcting, and it
+    /// is the difference between finding a pull request the agent opened from a branch it cut
+    /// itself and offering a button that opens a second one. See `PullRequestHead`.
+    static func headBranch(of workspace: Workspace) async -> String {
+        let checkedOut = try? await Git.currentBranch(of: workspace.path)
+        return PullRequestHead.branch(
+            recorded: workspace.branch, checkedOut: checkedOut, base: workspace.baseBranch
+        )
+    }
+
+    private static func pullRequest(
+        for workspace: Workspace, onBranch head: String, maxAge: Duration
+    ) async throws -> PullRequest? {
         guard let found = try await pullRequest(
-            forBranch: workspace.branch, worktree: workspace.path, maxAge: maxAge
+            forBranch: head, worktree: workspace.path, maxAge: maxAge
         ) else { return nil }
 
         let checkedOut = await Git.checkedOutPullRequest(
-            branch: workspace.branch, worktree: workspace.path
+            branch: head, worktree: workspace.path
         )
         guard PullRequestOwnership.belongs(
             found, toWorkspaceStartedAt: workspace.createdAt, checkedOutAs: checkedOut
@@ -96,9 +116,11 @@ public extension GitHub {
     /// request that merged before this workspace existed is a green tick over work nobody has run
     /// anything against.
     static func checks(for workspace: Workspace, maxAge: Duration = .zero) async throws -> [CheckRun] {
-        guard try await pullRequest(for: workspace, maxAge: maxAge) != nil else { return [] }
-        return try await checks(
-            forBranch: workspace.branch, worktree: workspace.path, maxAge: maxAge
-        )
+        // The same branch both times, or the rollup is read for one branch and gated on another.
+        let head = await headBranch(of: workspace)
+        guard try await pullRequest(for: workspace, onBranch: head, maxAge: maxAge) != nil else {
+            return []
+        }
+        return try await checks(forBranch: head, worktree: workspace.path, maxAge: maxAge)
     }
 }
