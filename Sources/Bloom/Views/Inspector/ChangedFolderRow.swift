@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import BloomCore
 
 /// A folder in the changed files tree, said once for a whole chain of directories that only ever
 /// had one child.
@@ -31,13 +32,23 @@ struct ChangedFolderRow: View, Equatable {
     var fullPath: String
     var action: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: InspectorLayout.gap) {
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                // One chevron turned rather than two symbols swapped, and on its own `.animation`
+                // rather than the list's transaction, exactly as `FileTreeRow` does it: the two
+                // trees share a pane and a folder opening must look the same in both.
+                Image(systemName: "chevron.right")
                     .font(Typo.micro)
                     .imageScale(.small)
                     .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .animation(
+                        TreeDisclosureMotion.chevron(reduceMotion: reduceMotion).animation,
+                        value: isExpanded
+                    )
                     .frame(width: InspectorLayout.glyphWidth, alignment: .leading)
                     .accessibilityHidden(true)
                 // The same size as the files under it, one step quieter, and said hierarchically

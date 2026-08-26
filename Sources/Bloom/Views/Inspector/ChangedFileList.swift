@@ -55,6 +55,8 @@ struct ChangedFileList: View {
     @AppStorage(ChangedFilePresentation.storageKey)
     private var isTree = ChangedFilePresentation.defaultsToTree
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         ScrollViewReader { proxy in
             Group {
@@ -260,36 +262,66 @@ struct ChangedFileList: View {
 
     /// Only the shape on screen is derived, because a running agent rewrites the changed file list
     /// every few seconds and the other shape would be thrown away unseen.
+    ///
+    /// Never animated. This is what a running agent's writes come through, and a list that slid
+    /// every six seconds because a file gained a line would be the tree animating for a reason
+    /// nobody gave it. Opening a folder is the one gesture that reflows: see `toggle`.
     private func rebuild() {
         if isTree {
-            treeRows = ChangedFileTree.rows(
+            adopt(ChangedFileTree.rows(
                 from: ChangedFileTree.build(from: model.changedFiles),
                 collapsed: collapsed
-            )
-            groups = []
-            rowPaths = treeRows.map(\.node.path)
-            rowTitles = treeRows.map(\.node.name)
+            ))
         } else {
             groups = ChangedFileGroup.build(from: model.changedFiles)
             treeRows = []
             let files = groups.flatMap(\.files)
             rowPaths = files.map(\.path)
             rowTitles = files.map(\.filename)
+            forgetMissingCursor()
         }
+    }
 
-        // A file the agent reverted, or a directory that closed under the keyboard, leaves the
-        // cursor naming a row that is not drawn any more, and every key after that would be
-        // measured from nothing.
+    private func adopt(_ rows: [ChangedFileTreeRow]) {
+        treeRows = rows
+        groups = []
+        rowPaths = rows.map(\.node.path)
+        rowTitles = rows.map(\.node.name)
+        forgetMissingCursor()
+    }
+
+    /// A file the agent reverted, or a directory that closed under the keyboard, leaves the cursor
+    /// naming a row that is not drawn any more, and every key after that would be measured from
+    /// nothing.
+    private func forgetMissingCursor() {
         if let cursor, !rowPaths.contains(cursor) { self.cursor = nil }
     }
 
+    /// A folder the reader just opened or closed, with the rows below it travelling to make room.
+    /// See `TreeDisclosureMotion` for the threshold above which they stop travelling.
+    ///
+    /// The new rows are built before anything is written, because their count is what decides
+    /// whether the write is animated at all.
     private func toggle(_ path: String) {
-        if collapsed.contains(path) {
-            collapsed.remove(path)
+        var next = collapsed
+        if next.contains(path) {
+            next.remove(path)
         } else {
-            collapsed.insert(path)
+            next.insert(path)
         }
-        rebuild()
+
+        let rows = ChangedFileTree.rows(
+            from: ChangedFileTree.build(from: model.changedFiles),
+            collapsed: next
+        )
+        let motion = TreeDisclosureMotion.rows(
+            changing: abs(rows.count - treeRows.count), reduceMotion: reduceMotion
+        )
+
+        withAnimation(motion.animation) {
+            collapsed = next
+            adopt(rows)
+        }
     }
 
     // MARK: - The keyboard
