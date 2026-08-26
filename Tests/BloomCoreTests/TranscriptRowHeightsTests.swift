@@ -211,7 +211,8 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
         heights.note(120, for: "row.7")
-        #expect(!heights.rewidth(to: 800.25))
+        let rewidened = heights.rewidth(to: 800.25)
+        #expect(!rewidened)
         #expect(!heights.isStale("row.7"))
     }
 
@@ -220,10 +221,12 @@ struct TranscriptRowHeightsTests {
     @Test("a resize before a width has arrived is refused")
     func rewidthNeedsAWidth() {
         var heights = TranscriptRowHeights()
-        #expect(!heights.rewidth(to: 800))
+        let rewidened = heights.rewidth(to: 800)
+        #expect(!rewidened)
         #expect(!heights.isReady)
         heights.reset(width: 800, scale: 1)
-        #expect(!heights.rewidth(to: 1))
+        let rewidened2 = heights.rewidth(to: 1)
+        #expect(!rewidened2)
         #expect(heights.measure?.width == 800)
     }
 
