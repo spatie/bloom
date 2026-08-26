@@ -4,29 +4,76 @@ import Foundation
 
 @Suite("Onboarding flow")
 struct OnboardingFlowTests {
-    @Test("The sequence is a greeting and then the checks, and it ends there")
+    @Test("The sequence is a greeting, the checks, and an offer that is usually not there")
     func order() {
-        #expect(OnboardingStep.order == [.greeting, .checks])
-        #expect(OnboardingStep.greeting.next == .checks)
-        #expect(OnboardingStep.checks.next == nil)
-        #expect(OnboardingStep.checks.isLast)
-        #expect(!OnboardingStep.greeting.isLast)
+        #expect(OnboardingStep.order == [.greeting, .checks, .commandLine])
+        #expect(!OnboardingStep.greeting.isOptional)
+        #expect(!OnboardingStep.checks.isOptional)
+        #expect(OnboardingStep.commandLine.isOptional)
+
+        let plain = OnboardingFlow(step: .greeting)
+        #expect(plain.steps == [.greeting, .checks])
+        #expect(plain.next == .checks)
+
+        let offered = OnboardingFlow(step: .greeting, offersCommandLine: true)
+        #expect(offered.steps == [.greeting, .checks, .commandLine])
     }
 
-    @Test("Back exists from the checks and nowhere else")
+    @Test("Without the offer the checks are the end of it")
+    func endsAtTheChecks() {
+        var flow = OnboardingFlow(step: .checks)
+        #expect(flow.next == nil)
+        #expect(!flow.advance())
+        #expect(flow.step == .checks)
+    }
+
+    @Test("With the offer the checks lead to it, and it is the end")
+    func endsAtTheOffer() {
+        var flow = OnboardingFlow(step: .checks, offersCommandLine: true)
+        #expect(flow.next == .commandLine)
+        #expect(flow.advance())
+        #expect(flow.step == .commandLine)
+        #expect(flow.next == nil)
+        #expect(!flow.advance())
+    }
+
+    @Test("Back exists from the checks and nowhere else, and from the offer once it is there")
     func back() {
-        #expect(OnboardingStep.greeting.back == nil)
-        #expect(!OnboardingStep.greeting.canGoBack)
-        #expect(OnboardingStep.checks.back == .greeting)
-        #expect(OnboardingStep.checks.canGoBack)
+        let greeting = OnboardingFlow(step: .greeting)
+        #expect(greeting.back == nil)
+        #expect(!greeting.canGoBack)
+        #expect(greeting.backButtonTitle == nil)
+
+        let checks = OnboardingFlow(step: .checks)
+        #expect(checks.back == .greeting)
+        #expect(checks.canGoBack)
+        #expect(checks.backButtonTitle != nil)
+
+        let offer = OnboardingFlow(step: .commandLine, offersCommandLine: true)
+        #expect(offer.back == .checks)
     }
 
-    @Test("Only the greeting carries a forward button, and only the checks a back one")
+    @Test("The step somebody is standing on stays in the sequence when the offer is withdrawn")
+    func standingOnAWithdrawnStep() {
+        var flow = OnboardingFlow(step: .checks, offersCommandLine: true)
+        #expect(flow.advance())
+        flow.offerCommandLine(false)
+        #expect(flow.step == .commandLine)
+        #expect(flow.steps.contains(.commandLine))
+        // And back still lands somewhere real rather than on the first step of a list this one
+        // fell out of.
+        #expect(flow.back == .checks)
+    }
+
+    @Test("The forward button names the screen it opens")
     func titles() {
-        #expect(OnboardingStep.greeting.forwardButtonTitle != nil)
-        #expect(OnboardingStep.checks.forwardButtonTitle == nil)
-        #expect(OnboardingStep.greeting.backButtonTitle == nil)
-        #expect(OnboardingStep.checks.backButtonTitle != nil)
+        #expect(OnboardingStep.greeting.arrivalButtonTitle == nil)
+        #expect(OnboardingFlow(step: .greeting).forwardButtonTitle == "See what Bloom needs")
+        #expect(OnboardingFlow(step: .checks).forwardButtonTitle == nil)
+        #expect(
+            OnboardingFlow(step: .checks, offersCommandLine: true).forwardButtonTitle
+                == OnboardingStep.commandLine.arrivalButtonTitle
+        )
     }
 
     @Test("A first run opens on the greeting, and every other reason opens on the checks")
@@ -81,5 +128,50 @@ struct OnboardingFlowTests {
         #expect(!flow.isFirstVisit(to: .greeting))
         _ = flow.advance()
         #expect(!flow.isFirstVisit(to: .checks))
+    }
+}
+
+@Suite("The welcome window's primary button")
+struct OnboardingPrimaryTests {
+    @Test("A blocked machine is offered another look rather than a closed door")
+    func blocked() {
+        let primary = OnboardingPrimary(step: .checks, verdict: .blocked, next: nil)
+        #expect(primary.action == .checkAgain)
+        #expect(primary.title == "Check again")
+    }
+
+    @Test("A step with somewhere to go goes there, and says which screen that is")
+    func advancing() {
+        let toChecks = OnboardingPrimary(step: .greeting, verdict: .checking, next: .checks)
+        #expect(toChecks.action == .advance(.checks))
+        #expect(toChecks.title == "See what Bloom needs")
+
+        let toOffer = OnboardingPrimary(step: .checks, verdict: .ready, next: .commandLine)
+        #expect(toOffer.action == .advance(.commandLine))
+        #expect(toOffer.title == OnboardingStep.commandLine.arrivalButtonTitle)
+    }
+
+    @Test("The last step's button leaves, whatever the verdict is doing behind it")
+    func finishing() {
+        for verdict in [SetupVerdict.checking, .ready, .readyWithNotes, .blocked] {
+            let primary = OnboardingPrimary(step: .commandLine, verdict: verdict, next: nil)
+            #expect(primary.action == .finish)
+            #expect(primary.title == OnboardingPrimary.finishTitle)
+        }
+    }
+
+    @Test("A machine that is fine leaves from the checks when nothing follows them")
+    func finishingFromTheChecks() {
+        let primary = OnboardingPrimary(step: .checks, verdict: .readyWithNotes, next: nil)
+        #expect(primary.action == .finish)
+        #expect(primary.title == "Start using Bloom")
+    }
+
+    @Test("Re-probing to blocked under the offer does not turn the way out into a re-check")
+    func blockedWhileOnTheOffer() {
+        // The column is not on screen there, so Check again would be a button about a list nobody
+        // can see, and it would close nothing.
+        let primary = OnboardingPrimary(step: .commandLine, verdict: .blocked, next: nil)
+        #expect(primary.action == .finish)
     }
 }

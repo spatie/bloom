@@ -4,10 +4,12 @@ import BloomCore
 
 /// What the welcome window draws.
 ///
-/// Two steps, and the sequence is `OnboardingFlow` in the core rather than a boolean here,
-/// because which screen follows which and whether back is offered is the only part of a wizard
-/// that can be wrong and a decision taken inside a view is a decision nothing can test. The
-/// greeting is `WelcomeGreeting`; everything below is the second step.
+/// Two steps and an offer, and the sequence is `OnboardingFlow` in the core rather than a pair of
+/// booleans here, because which screen follows which, whether back is offered and whether the
+/// third screen exists at all is the only part of a wizard that can be wrong, and a decision taken
+/// inside a view is a decision nothing can test. The greeting is `WelcomeGreeting`, the checks are
+/// the second step and are everything below, and the third is `WelcomeCommandLine`, which is drawn
+/// only when `CommandLineRegistration` says there is something to offer.
 ///
 /// Three bands, in the register the About window established: the brand's plinth with the water
 /// moving in it, the reading ground under a hairline, and a chrome strip at the foot with the
@@ -16,6 +18,9 @@ import BloomCore
 /// is carrying information rather than decorating the column. See `soundingLine`.
 struct WelcomeView: View {
     let inspection: SetupInspection
+    /// The optional third step's model: the command, and whether the owner's own Claude Code has
+    /// already been told about this Bloom.
+    let registration: CommandLineRegistration
     let onFinish: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -27,8 +32,14 @@ struct WelcomeView: View {
     /// The login running inside this window, and which row asked for it.
     @State private var login: (tool: SetupTool, session: GitHubLoginSession)?
 
-    init(inspection: SetupInspection, start: OnboardingStep, onFinish: @escaping () -> Void) {
+    init(
+        inspection: SetupInspection,
+        registration: CommandLineRegistration,
+        start: OnboardingStep,
+        onFinish: @escaping () -> Void
+    ) {
         self.inspection = inspection
+        self.registration = registration
         self.onFinish = onFinish
         _flow = State(initialValue: OnboardingFlow(step: start))
     }
@@ -49,14 +60,23 @@ struct WelcomeView: View {
             case .greeting:
                 WelcomeGreeting(
                     isFirstVisit: flow.isFirstVisit(to: .greeting),
+                    continueTitle: flow.forwardButtonTitle,
                     onContinue: { move { flow.advance() } }
                 )
             case .checks:
                 checksStep
+            case .commandLine:
+                commandLineStep
             }
         }
         .frame(width: Self.width)
         .background(Palette.surface)
+        // The answer comes off the disk, so it lands after the window is already up. Applied as it
+        // arrives rather than read at the moment the checks footer draws, because a `body` that
+        // asked would be asking on every redraw of a screen with four probes settling on it.
+        .onChange(of: registration.isOffered, initial: true) { _, isOffered in
+            flow.offerCommandLine(isOffered)
+        }
         .onAppear {
             inspection.revealsInstantly = reduceMotion
             // Started here rather than on the checks step, so four subprocesses are already
@@ -67,6 +87,7 @@ struct WelcomeView: View {
         .onDisappear {
             login?.session.stop()
             inspection.cancel()
+            registration.cancel()
         }
     }
 
@@ -90,6 +111,25 @@ struct WelcomeView: View {
         .transition(reduceMotion ? .identity : .opacity)
         .onAppear { inspection.presentChecks() }
         .onDisappear { inspection.dismissChecks() }
+    }
+
+    /// The offer, in the same three bands the checks step is built from.
+    ///
+    /// `command` is nil only if this copy of Bloom lost its bridge while somebody was standing on
+    /// this screen, which nothing produces: `AppModel.bridge` is cleared during the quit sequence
+    /// and nowhere else. There is no consolation copy for it, because the footer is still drawn
+    /// and its button is still the way out.
+    private var commandLineStep: some View {
+        VStack(spacing: 0) {
+            plinth
+            hairline
+            if let command = registration.command {
+                WelcomeCommandLine(command: command)
+            }
+            hairline
+            footer
+        }
+        .transition(reduceMotion ? .identity : .opacity)
     }
 
     private var hairline: some View {
@@ -509,12 +549,23 @@ struct WelcomeView: View {
 
     /// One primary button that always works, and one quiet way out beside it.
     ///
-    /// The primary is never disabled and never waits for the settling: `inspection.truth` is what
-    /// titles it, so a machine that has already answered can be left the instant its owner wants
-    /// to leave, whatever the rows are still doing. Making somebody watch an animation they did
-    /// not ask for is the trap this whole window is one step away from.
+    /// The primary is never disabled and never waits for the settling, so a machine that has
+    /// already answered can be left the instant its owner wants to leave, whatever the rows are
+    /// still doing. Making somebody watch an animation they did not ask for is the trap this whole
+    /// window is one step away from.
+    ///
+    /// What it says and what it does is `OnboardingPrimary` in the core. It was an `if` on the
+    /// verdict written out here, which was right while there were two screens and one of them had
+    /// no footer; a button whose meaning depends on the step as well as on the machine is a rule,
+    /// and a rule in a `body` is a rule nothing can test.
     private var footer: some View {
-        HStack(spacing: Metrics.inset) {
+        let primary = OnboardingPrimary(
+            step: flow.step,
+            verdict: inspection.truth.verdict,
+            next: flow.next
+        )
+
+        return HStack(spacing: Metrics.inset) {
             if let title = flow.backButtonTitle {
                 // Bottom left, which is where a Mac setup assistant has put Go Back since there
                 // were setup assistants. It is drawn quietly and it never carries the return key:
@@ -537,38 +588,53 @@ struct WelcomeView: View {
             // Check again next to each other read as one pair of links and neither of them said
             // which way it went; back belongs with the way out, and Check again belongs with the
             // button it is the alternative to.
-            if inspection.truth.verdict == .blocked {
-                Button("Skip for now") { finish() }
-                    .buttonStyle(.plain)
-                    .font(Typo.body)
-                    .foregroundStyle(Palette.link)
-            } else {
-                Button("Check again") { inspection.start() }
-                    .buttonStyle(.plain)
-                    .font(Typo.body)
-                    .foregroundStyle(inspection.isRunning ? Palette.textTertiary : Palette.link)
-                    .disabled(inspection.isRunning)
-            }
-
-            Button(inspection.truth.primaryButtonTitle) {
+            //
+            // Both of them are about the column, so neither follows the window onto the offer:
+            // "Check again" there would re-probe a list that is not on screen, and a second way
+            // out beside a button that already leaves is how an optional step starts reading as
+            // one somebody has to get past.
+            if flow.step == .checks {
                 if inspection.truth.verdict == .blocked {
-                    inspection.start()
+                    Button("Skip for now") { finish() }
+                        .buttonStyle(.plain)
+                        .font(Typo.body)
+                        .foregroundStyle(Palette.link)
                 } else {
-                    finish()
+                    Button("Check again") { inspection.start() }
+                        .buttonStyle(.plain)
+                        .font(Typo.body)
+                        .foregroundStyle(inspection.isRunning ? Palette.textTertiary : Palette.link)
+                        .disabled(inspection.isRunning)
                 }
             }
-            .keyboardShortcut(.defaultAction)
-            .buttonStyle(.borderedProminent)
-            // Bloom's own fill rather than whatever the user picked in Appearance, which is what
-            // every other prominent button in the app already does. A system blue button two
-            // inches under a teal wordmark is the one place this window could have looked like
-            // somebody else's.
-            .tint(Palette.accentFill)
-            .controlSize(.large)
+
+            Button(primary.title) { perform(primary.action) }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                // Bloom's own fill rather than whatever the user picked in Appearance, which is
+                // what every other prominent button in the app already does. A system blue button
+                // two inches under a teal wordmark is the one place this window could have looked
+                // like somebody else's.
+                .tint(Palette.accentFill)
+                .controlSize(.large)
         }
         .padding(.horizontal, Metrics.pane)
         .padding(.vertical, Metrics.inset + Metrics.spacingSmall)
         .background(Palette.surfaceSunken)
+    }
+
+    private func perform(_ action: OnboardingPrimary.Action) {
+        switch action {
+        case .checkAgain:
+            inspection.start()
+        case .advance:
+            // The login goes with the step, for the reason the back control kills it: walking off
+            // the checks would otherwise leave a `gh auth login` waiting on a pty nobody can see,
+            // for an answer nobody can give it.
+            move { stopLogin(); flow.advance() }
+        case .finish:
+            finish()
+        }
     }
 
     private func finish() {
