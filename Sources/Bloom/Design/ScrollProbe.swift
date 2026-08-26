@@ -41,6 +41,8 @@ enum ScrollProbe {
 
     private static var workspace: String? { ProbeHarness.value(for: "--scroll-workspace") }
     private static var sweeps: Int { ProbeHarness.count("--scroll-sweeps", or: 4) }
+    /// `--scroll-composer 400`: grow the composer to this many points instead of scrolling.
+    private static var composer: Double? { ProbeHarness.value(for: "--scroll-composer").flatMap(Double.init) }
     private static var step: CGFloat { ProbeHarness.points("--scroll-step", or: 24) }
 
     // MARK: - Entry
@@ -65,7 +67,20 @@ enum ScrollProbe {
         }
 
         guard let scroll = ProbeHarness.transcriptScrollView(in: contentView) else {
+            // What was on screen instead, because "no transcript" is usually a run that attached
+            // to the wrong window: the welcome window on a fresh defaults domain is one.
+            let windows = NSApp.windows.map { "\($0.title) \($0.frame)" }
+            FileHandle.standardError.write(Data("windows: \(windows)\n".utf8))
             harness.fail("no transcript NSScrollView found")
+        }
+
+        if let composer {
+            await growComposer(to: composer, scroll: scroll)
+            harness.write(report(
+                recorder: FrameRecorder(view: contentView) { 0 }, travel: 0, wall: 0,
+                window: window, scroll: scroll, heightBefore: scroll.documentView?.frame.height ?? 0
+            ))
+            exit(0)
         }
 
         // Sampled before the sweep and again in the report, because these two disagreeing is
@@ -103,6 +118,31 @@ enum ScrollProbe {
             heightBefore: heightBefore
         ))
         exit(0)
+    }
+
+    /// **The owner's own reproduction, without his hand on the divider.**
+    ///
+    /// "When I resize the editor to be higher, the chat content will get empty lines as well." The
+    /// composer's height is `@AppStorage("composer.editorHeight")`, so the gesture is a write to
+    /// that key: the box grows, the transcript above it gets shorter, and nothing about its width
+    /// moves. Nothing is scrolled here on purpose, because a sweep would draw every row it passed
+    /// and correct exactly what this is trying to catch.
+    ///
+    /// The nudge is what makes the census speak. It is taken on a movement of the clip view, so a
+    /// point down and back is how a run asks for one.
+    private static func growComposer(to points: Double, scroll: NSScrollView) async {
+        nudge(scroll)
+        try? await Task.sleep(for: .seconds(1))
+        UserDefaults.standard.set(points, forKey: "composer.editorHeight")
+        try? await Task.sleep(for: .seconds(3))
+        nudge(scroll)
+        try? await Task.sleep(for: .seconds(1))
+    }
+
+    private static func nudge(_ scroll: NSScrollView) {
+        let origin = scroll.contentView.bounds.origin
+        scroll.contentView.setBoundsOrigin(CGPoint(x: origin.x, y: max(0, origin.y - 1)))
+        scroll.reflectScrolledClipView(scroll.contentView)
     }
 
     // MARK: - Driving

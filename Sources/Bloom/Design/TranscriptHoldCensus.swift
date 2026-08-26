@@ -33,6 +33,18 @@ enum TranscriptHoldCensus {
     /// it was told. See `TranscriptTable.Coordinator.checkCorrected`, which carries the bug.
     private(set) static var correctedRows = 0
     private(set) static var uncorrectedRows = 0
+    /// **What is on the screen, and how much of it is a guess.** Sampled on every movement of the
+    /// clip view: the most rows the reader could see at once that the table was drawing at a
+    /// height nobody has measured, and the most it was drawing at a height that disagrees with
+    /// what was measured. Either of them above nought is white space the reader can see.
+    private(set) static var screenEstimated = 0
+    private(set) static var screenWrong = 0
+    private(set) static var screensSeen = 0
+    /// The same two on the last screen sampled after the movement stopped, which is what tells a
+    /// guess that is being corrected as the reader flies past from one that is simply standing
+    /// there. See `TranscriptTable.Coordinator.scheduleSettle`.
+    private(set) static var screenEstimatedSettled = 0
+    private(set) static var screenWrongSettled = 0
 
     static func held(_ what: TranscriptPaneHold.PaneHeld, underAHand hand: Bool, liveResize: Bool) {
         switch what {
@@ -54,6 +66,17 @@ enum TranscriptHoldCensus {
 
     static func released(estimated: Int) { estimatedRows = estimated }
 
+    /// One screenful, as it was drawn. The worst of them is what is kept.
+    static func sawScreen(estimated: Int, wrong: Int, settled: Bool = false) {
+        screensSeen += 1
+        screenEstimated = max(screenEstimated, estimated)
+        screenWrong = max(screenWrong, wrong)
+        if settled {
+            screenEstimatedSettled = estimated
+            screenWrongSettled = wrong
+        }
+    }
+
     /// One batch of corrections, and the ones that did not take.
     static func corrected(rows: Int, uncorrected: Int) {
         correctedRows += rows
@@ -71,6 +94,11 @@ enum TranscriptHoldCensus {
         estimatedRows = 0
         correctedRows = 0
         uncorrectedRows = 0
+        screenEstimated = 0
+        screenWrong = 0
+        screensSeen = 0
+        screenEstimatedSettled = 0
+        screenWrongSettled = 0
     }
 
     static func summary() -> [String: Double] {
@@ -85,6 +113,11 @@ enum TranscriptHoldCensus {
             "estimatedRows": Double(estimatedRows),
             "correctedRows": Double(correctedRows),
             "uncorrectedRows": Double(uncorrectedRows),
+            "screenEstimated": Double(screenEstimated),
+            "screenWrong": Double(screenWrong),
+            "screensSeen": Double(screensSeen),
+            "screenEstimatedSettled": Double(screenEstimatedSettled),
+            "screenWrongSettled": Double(screenWrongSettled),
         ]
     }
 }
