@@ -13,20 +13,24 @@ import Foundation
 /// actually sends (see docs/PROTOCOL.md and Tests/fixtures/session-basic.jsonl), and anything unrecognised
 /// still lands on a sensible line rather than nothing, because new tools ship constantly.
 public enum ToolPresenter {
-    public static func present(_ use: AgentToolUse) -> ToolPresentation {
-        present(name: use.name, input: use.input)
+    public static func present(_ use: AgentToolUse, worktree: String = "") -> ToolPresentation {
+        present(name: use.name, input: use.input, worktree: worktree)
     }
 
     /// The row, and then the one thing about it that is decided in the core: what the argument
     /// literally is. `ToolLiteral` is asked once here rather than per case, so the presenter cannot
     /// answer differently from the permission panel below it, which reads the same type.
-    public static func present(name: String, input: JSONValue) -> ToolPresentation {
-        var presentation = shape(name: name, input: input)
+    ///
+    /// `worktree` is the workspace this call ran in, and the only thing it decides is which
+    /// leading `cd` a shell row may hide. Empty hides nothing, which is what every caller with no
+    /// workspace to hand wants.
+    public static func present(name: String, input: JSONValue, worktree: String = "") -> ToolPresentation {
+        var presentation = shape(name: name, input: input, worktree: worktree)
         presentation.literal = ToolLiteral.of(name: name, input: input)
         return presentation
     }
 
-    private static func shape(name: String, input: JSONValue) -> ToolPresentation {
+    private static func shape(name: String, input: JSONValue, worktree: String) -> ToolPresentation {
         if name.hasPrefix("mcp__") { return mcp(name: name, input: input) }
 
         switch name {
@@ -35,7 +39,7 @@ public enum ToolPresenter {
         case "Edit": return edit(input)
         case "MultiEdit": return multiEdit(input)
         case "NotebookEdit": return notebookEdit(input)
-        case "Bash": return bash(input)
+        case "Bash": return bash(input, worktree: worktree)
         case "BashOutput": return bashOutput(input)
         case "KillShell", "KillBash": return killShell(input)
         case "Glob": return glob(input)
@@ -152,8 +156,12 @@ public enum ToolPresenter {
 
     // MARK: Shell
 
-    private static func bash(_ input: JSONValue) -> ToolPresentation {
-        let command = oneLine(input["command"]?.stringValue ?? "")
+    private static func bash(_ input: JSONValue, worktree: String) -> ToolPresentation {
+        // Before the one line collapse, not after: a newline is one of the separators a `cd`
+        // prefix ends with, and collapsing it first leaves a space nothing can tell from an
+        // argument. See `CommandDisplay`.
+        let display = CommandDisplay.of(input["command"]?.stringValue ?? "", worktree: worktree)
+        let command = oneLine(display.command)
         // Claude writes a short description of every command it runs, and that reads far better
         // as the label than the word "Bash" repeated forty times down the transcript.
         let label = input["description"]?.stringValue.map { oneLine($0) } ?? "Bash"
@@ -168,8 +176,13 @@ public enum ToolPresenter {
             glyph: "terminal",
             label: label.isEmpty ? "Bash" : label,
             detail: command,
-            tint: .neutral,
-            chips: chips
+            // The mark for a command that left the workspace goes on the glyph, at the left edge
+            // where a reader's eye runs down, rather than on a hue in the middle of the line. Every
+            // `.elsewhere` gets it, the ones whose destination could not be read included: "this
+            // went somewhere and I cannot tell where" is as worth seeing as a resolved path.
+            tint: display.leftTheWorkspace ? .warning : .neutral,
+            chips: chips,
+            detailLead: display.lead
         )
     }
 

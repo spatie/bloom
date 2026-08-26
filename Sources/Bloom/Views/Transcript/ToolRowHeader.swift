@@ -60,6 +60,22 @@ struct ToolRowHeader: View {
             && !presentation.chips.contains { $0.text == presentation.detail }
     }
 
+    /// The detail, in one or two inks.
+    ///
+    /// A shell row whose command opened with `cd <worktree>` has had that prefix taken off by
+    /// `CommandDisplay`, because the sidebar and the title bar already say which workspace this
+    /// is. What is left in front is a directory below the worktree, or the `cd` that left the
+    /// worktree altogether, and those are the two the reader has to see: one `Text` for it, one
+    /// for the command, concatenated so the pair still truncates as a single line.
+    private var detailText: Text {
+        let lead = presentation.detailLead
+        guard !lead.text.isEmpty else { return Text(presentation.detail) }
+        // Interpolated rather than concatenated: `Text.+` is deprecated in macOS 26 and the app
+        // target builds with -warnings-as-errors.
+        let tinted = Text(lead.text).foregroundStyle(lead.tint.colour)
+        return Text("\(tinted)\(lead.joiner)\(presentation.detail)")
+    }
+
     /// The face the detail is set in.
     ///
     /// A shell command was set in the proportional face while the permission panel four points
@@ -143,14 +159,14 @@ struct ToolRowHeader: View {
                 )
 
             if showsDetail {
-                Text(presentation.detail)
+                detailText
                     .font(detailFont)
                     .foregroundStyle(Palette.textTertiary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .layoutPriority(1)
                     .reportsTruncation(
-                        of: presentation.detail,
+                        of: presentation.detailLine,
                         font: detailFont,
                         isActive: wantsMeasuring,
                         into: $detailIsCut
@@ -244,7 +260,7 @@ struct ToolRowHeader: View {
     private var card: TranscriptHoverCard {
         .row(
             title: presentation.label,
-            detail: showsDetail ? presentation.detail : "",
+            detail: showsDetail ? presentation.detailLine : "",
             isCode: presentation.detailIsCode
         )
     }

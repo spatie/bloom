@@ -19,23 +19,23 @@ enum CodexItemPresenter {
     /// Read off the payload rather than off the session, deliberately: a transcript drawn from the
     /// database alone still knows which vocabulary each row is in, with no join and no column that
     /// did not exist when the row was written.
-    static func present(_ use: AgentToolUse) -> ToolPresentation? {
+    static func present(_ use: AgentToolUse, worktree: String = "") -> ToolPresentation? {
         guard let item = CodexTranslation.item(in: use.input) else { return nil }
-        return present(item)
+        return present(item, worktree: worktree)
     }
 
     /// The row, and then the same core question a Claude row asks: what the argument literally is.
     /// A Codex command must read as a command in exactly the face a Claude one does, or the two
     /// backends stop looking like one transcript.
-    static func present(_ item: CodexItem) -> ToolPresentation {
-        var presentation = shape(item)
+    static func present(_ item: CodexItem, worktree: String = "") -> ToolPresentation {
+        var presentation = shape(item, worktree: worktree)
         presentation.literal = ToolLiteral.of(codex: item)
         return presentation
     }
 
-    private static func shape(_ item: CodexItem) -> ToolPresentation {
+    private static func shape(_ item: CodexItem, worktree: String) -> ToolPresentation {
         switch item {
-        case .commandExecution(let run): command(run)
+        case .commandExecution(let run): command(run, worktree: worktree)
         case .fileChange(let change): fileChange(change)
         case .mcpToolCall(let call): mcp(call)
         case .webSearch(let search): webSearch(search)
@@ -60,19 +60,30 @@ enum CodexItemPresenter {
     /// Codex wraps everything in the login shell, so the command as sent reads
     /// `/bin/zsh -lc 'git status'`. What the user asked for is inside the quotes, and that is what
     /// the row shows: the wrapper is the same on every line and says nothing.
-    private static func command(_ run: CodexCommandExecution) -> ToolPresentation {
-        let command = ToolPresenter.oneLine(ToolLiteral.unwrapShell(run.command))
+    private static func command(_ run: CodexCommandExecution, worktree: String) -> ToolPresentation {
+        // Codex opens its commands with the same `cd` a Claude row does, so it is hidden by the
+        // same rule. Asked before the one line collapse; see `CommandDisplay`.
+        let display = CommandDisplay.of(ToolLiteral.unwrapShell(run.command), worktree: worktree)
+        let command = ToolPresenter.oneLine(display.command)
 
         var chips: [ToolChip] = []
         if let code = run.exitCode, code != 0 { chips.append(.code("exit \(code)")) }
         if run.status == .declined { chips.append(.code("declined")) }
 
+        // Failure first: a command that went wrong is more urgent than one that went elsewhere.
+        let tint: ToolTint = switch (run.status, display.leftTheWorkspace) {
+        case (.failed, _): .negative
+        case (_, true): .warning
+        default: .neutral
+        }
+
         return ToolPresentation(
             glyph: "terminal",
             label: "Shell",
             detail: command,
-            tint: run.status == .failed ? .negative : .neutral,
-            chips: chips
+            tint: tint,
+            chips: chips,
+            detailLead: display.lead
         )
     }
 
@@ -240,14 +251,14 @@ enum CodexItemPresenter {
 /// `DetailCodeBlock` and `ToolResultView` all draw a `ToolPresentation` and do not care where it
 /// came from.
 enum TranscriptPresenter {
-    static func present(_ use: AgentToolUse) -> ToolPresentation {
-        CodexItemPresenter.present(use) ?? ToolPresenter.present(use)
+    static func present(_ use: AgentToolUse, worktree: String = "") -> ToolPresentation {
+        CodexItemPresenter.present(use, worktree: worktree) ?? ToolPresenter.present(use, worktree: worktree)
     }
 
-    static func present(name: String, input: JSONValue) -> ToolPresentation {
+    static func present(name: String, input: JSONValue, worktree: String = "") -> ToolPresentation {
         if let item = CodexTranslation.item(in: input) {
-            return CodexItemPresenter.present(item)
+            return CodexItemPresenter.present(item, worktree: worktree)
         }
-        return ToolPresenter.present(name: name, input: input)
+        return ToolPresenter.present(name: name, input: input, worktree: worktree)
     }
 }

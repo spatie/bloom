@@ -32,10 +32,14 @@ struct ToolRowSnapshotGallery: View {
         Do not change anything. This is a question, not a task.
         """
 
+    /// A real worktree path, at a real length, because the rows below are about what happens to
+    /// one. See `CommandDisplay`.
+    private static let worktree = "/Users/freek/bloom/workspaces/there-there/freekmurze-hibiki-sea"
+
     private var workspace: Workspace {
         Workspace(
             repoID: RepoID("r1"), name: "laravel-webhook-server", branch: "main",
-            path: "/tmp/nowhere", baseBranch: "main"
+            path: Self.worktree, baseBranch: "main"
         )
     }
 
@@ -48,7 +52,7 @@ struct ToolRowSnapshotGallery: View {
         let use = AgentToolUse(id: id, name: name, input: .object(input))
         return ToolRowView(
             use: use,
-            presentation: TranscriptPresenter.present(use),
+            presentation: TranscriptPresenter.present(use, worktree: workspace.path),
             workspace: workspace,
             result: nil,
             isError: false,
@@ -88,6 +92,40 @@ struct ToolRowSnapshotGallery: View {
                 ])])
                 row("p4", "AskUserQuestion", [
                     "question": .string("Should the copy button sit on the row or on the panel?"),
+                ])
+            }
+
+            // Every answer `CommandDisplay` gives, in the order a reader meets them. The first two
+            // are the point of the change and the rest are what it must not break: a command that
+            // left the workspace keeps its path, and says so on the glyph.
+            group("Where a command ran") {
+                row("c1", "Bash", [
+                    "description": .string("List admin tests"),
+                    "command": .string("cd \(Self.worktree)\nls tests/Http/Admin"),
+                ])
+                row("c2", "Bash", [
+                    "description": .string("Run the api package tests"),
+                    "command": .string("cd \(Self.worktree)/packages/api && npm test -- --runInBand"),
+                ])
+                row("c3", "Bash", [
+                    "description": .string("Check the other worktree"),
+                    "command": .string("cd /Users/freek/bloom/workspaces/bloom/main && git log --oneline -5"),
+                ])
+                row("c4", "Bash", [
+                    "description": .string("Show the current diff"),
+                    "command": .string("git diff --stat"),
+                ])
+                // The two that were drawn wrongly once. A newline separated chain put a newline
+                // in the middle of a row that is one line tall and swallowed the command after
+                // it; a destination only a shell could work out went unmarked while a resolved
+                // one did not.
+                row("c5", "Bash", [
+                    "description": .string("Read the system log"),
+                    "command": .string("cd /tmp\ncd /var/log\ntail -n 20 system.log"),
+                ])
+                row("c6", "Bash", [
+                    "description": .string("List the home checkout"),
+                    "command": .string("cd ~/bloom && ls"),
                 ])
             }
 
