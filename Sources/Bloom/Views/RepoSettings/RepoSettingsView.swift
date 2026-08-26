@@ -469,7 +469,7 @@ struct RepoSettingsView: View {
 
                         Spacer(minLength: Metrics.spacingSmall)
 
-                        Button("Open") { Reveal.inEditor(source) }
+                        Button("Open") { Reveal.inEditor(source, repo: repo.id) }
                     }
                 }
             }

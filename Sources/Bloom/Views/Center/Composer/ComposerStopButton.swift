@@ -35,6 +35,8 @@ struct ComposerStopButton: View {
         .buttonStyle(.bordered)
         .buttonBorderShape(.circle)
         .tint(Palette.stop)
-        .help("Stop the agent (Command period)")
+        // The glyphs in brackets, which is how every shortcut in a tooltip is written here.
+        // See `WorkspaceRow`'s archive button for the note.
+        .help("Stop the agent (⌘.)")
     }
 }

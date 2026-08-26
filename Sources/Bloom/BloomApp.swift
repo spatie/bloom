@@ -141,11 +141,12 @@ struct BloomApp: App {
         .windowToolbarStyle(.unified(showsTitle: true))
         .defaultSize(width: 1_440, height: 900)
         .commands {
+            // One `Commands` body, and it is on the MAIN window: SwiftUI only realizes a scene's
+            // commands while one of that scene's own windows is key, so the item that opens the
+            // project settings window cannot live on that window's own scene or it would appear
+            // only once the window was already open. It is a row of `BloomCommands`' File group
+            // now, which is where `MenuBarCatalogue` says it is.
             BloomCommands(model: model)
-            // Attached to the MAIN window rather than to the project settings window group below,
-            // because SwiftUI only realizes a scene's commands while one of that scene's own
-            // windows is key, and an item that opens a window is no use only once it is open.
-            RepoSettingsCommands(model: model)
         }
 
         Settings {

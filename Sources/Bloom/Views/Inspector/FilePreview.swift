@@ -212,12 +212,10 @@ struct FilePreview: View {
         return "Open \(filename) in \(app.app.name)"
     }
 
+    /// One call, because `Reveal.inEditor` now asks `OpenIn.preferred` itself and records the
+    /// choice the same way. This used to ask, open, and hand the miss to a second answer.
     private func openInPreferredApp() {
-        guard let app = OpenIn.preferred(for: .file(absolutePath), repo: model.repo?.id) else {
-            Reveal.inEditor(absolutePath)
-            return
-        }
-        OpenIn.open(absolutePath, with: app, repo: model.repo?.id)
+        Reveal.inEditor(absolutePath, repo: model.repo?.id)
     }
 
     private var directory: String { (path as NSString).deletingLastPathComponent }

@@ -286,10 +286,33 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
             }
         }
 
+        // The three things this menu is for, and it used to stop after the first. Bloom keeps
+        // running with no window open, deliberately, so for anyone working that way this strip is
+        // the whole application: with only "Open Bloom" on it there was no way to reach the
+        // settings and no way to quit without opening a window first. Every status item on this
+        // Mac ends in Quit.
         menu.addItem(.separator())
         let open = NSMenuItem(title: "Open Bloom", action: #selector(openWindow), keyEquivalent: "")
         open.target = self
         menu.addItem(open)
+
+        let settings = NSMenuItem(
+            title: "Settings\u{2026}", action: #selector(openSettings), keyEquivalent: ""
+        )
+        settings.target = self
+        menu.addItem(settings)
+
+        menu.addItem(.separator())
+        // Target left nil so it travels the responder chain to `NSApp`, which is what runs
+        // `applicationShouldTerminate` and therefore what stops on a running turn. A quit wired
+        // straight to this object would be a quit that skips that question.
+        menu.addItem(
+            NSMenuItem(
+                title: "Quit Bloom",
+                action: #selector(NSApplication.terminate(_:)),
+                keyEquivalent: ""
+            )
+        )
     }
 
     /// The limits panel, hosted in a menu item.
@@ -380,5 +403,20 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
 
     @objc private func openWindow() {
         MainWindow.raise()
+    }
+
+    /// Opens the `Settings` scene from a menu that is not a view.
+    ///
+    /// `NSApp.sendAction(Selector(("showSettingsWindow:")))` is the answer usually given and it
+    /// does nothing here: SwiftUI installs that action on the menu item rather than on the
+    /// responder chain. Driving the item itself is what opens the window, which is the same thing
+    /// `Snapshot.openSettingsWindow` records having found out.
+    @objc private func openSettings() {
+        NSApp.activate(ignoringOtherApps: true)
+        // Matched by prefix, because the item carries an ellipsis.
+        guard let appMenu = NSApp.mainMenu?.items.first?.submenu,
+              let index = appMenu.items.firstIndex(where: { $0.title.hasPrefix("Settings") })
+        else { return }
+        appMenu.performActionForItem(at: index)
     }
 }

@@ -148,7 +148,7 @@ struct WorkspaceMenuItems: View {
     }
 
     private var openInEditorItem: some View {
-        Button("Open in Editor") { Reveal.inEditor(workspace.path) }
+        Button("Open in Editor") { Reveal.inEditor(workspace.path, repo: workspace.repoID) }
     }
 
     private var revealInFinderItem: some View {

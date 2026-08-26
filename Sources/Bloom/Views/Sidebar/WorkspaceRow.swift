@@ -380,8 +380,11 @@ struct WorkspaceRow: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(isEmphasized ? Palette.textInverted : Palette.textSecondary)
-        // The shortcut is named the way Conductor names its own, with ours rather than theirs.
-        .help("Archive workspace  ⌘⌫")
+        // One notation for a shortcut in a tooltip, everywhere: the glyphs, in brackets, after
+        // the sentence. The app had three, and this row was the one that wrote two spaces and
+        // no brackets. The other two were `SidebarProjectsHeader`, which already reads this
+        // way, and `ComposerStopButton`, which spelled the keys out in words.
+        .help("Archive workspace (⌘⌫)")
         .accessibilityLabel("Archive \(workspace.name)")
     }
 

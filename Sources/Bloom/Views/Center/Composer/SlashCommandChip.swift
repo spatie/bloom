@@ -183,11 +183,8 @@ struct SlashCommandChip: View {
     /// editor the reader already opens everything else in is the honest answer.
     private func open() {
         guard let path else { return }
-        if let app = OpenIn.preferred(for: .file(path), repo: repoID) {
-            OpenIn.open(path, with: app, repo: repoID)
-        } else {
-            Reveal.inEditor(path)
-        }
+        // One call: `Reveal.inEditor` asks `OpenIn.preferred` itself now, and records the choice.
+        Reveal.inEditor(path, repo: repoID)
     }
 
     private func hover(_ hovering: Bool) {

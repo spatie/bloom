@@ -116,9 +116,10 @@ enum OpenIn {
 /// places it was actually being used: `FilePreview`'s open button fires the preferred application
 /// on its primary action and shows this list on a hold, and `SlashCommandChip` draws its own
 /// button on the chip. A workspace keeps Open in Editor on its row menu and Cmd+Shift+E on the
-/// menu bar, but those two are `Reveal.inEditor`, which tries VS Code, Cursor and Xcode in that
-/// fixed order and knows nothing about the editor this menu remembers per project. They agree on
-/// this machine by coincidence. Closing that gap is worth doing and is not this change.
+/// menu bar, and those two are `Reveal.inEditor`, which asks `OpenIn.preferred` first and falls
+/// back to its fixed VS Code, Cursor and Xcode ladder only when the catalogue answers nothing. It
+/// used to ask the ladder alone, so on a Zed or a Sublime user's Mac this submenu and the menu bar
+/// opened two different applications and agreed on the author's machine by coincidence.
 struct OpenInItems: View {
     let target: OpenInTarget
     /// Overrides the submenu's title, for a place where "file" or "folder" is not what the thing
@@ -134,7 +135,7 @@ struct OpenInItems: View {
         // all to open the thing they asked about. Hand it to whatever the system would. It
         // duplicates nothing, because there is nothing for it to duplicate.
         if OpenIn.preferred(for: target, repo: repoID) == nil {
-            Button("Open in Editor") { Reveal.inEditor(target.path) }
+            Button("Open in Editor") { Reveal.inEditor(target.path, repo: repoID) }
         }
 
         OpenInMenu(target: target, noun: noun)
