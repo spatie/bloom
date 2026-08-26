@@ -4,22 +4,28 @@ import Foundation
 
 @Suite("Remembering how tall a transcript row is")
 struct TranscriptRowHeightsTests {
+    /// A key from one string, which is all these tests need to tell two entries apart. The real
+    /// one combines a dozen fields: see `TranscriptContentKey`.
+    private func key(_ text: String) -> TranscriptContentKey {
+        TranscriptContentKey { $0.combine(text) }
+    }
+
     // MARK: - What the cache is keyed on
 
     @Test("a row measured once is not measured again")
     func remembersAHeight() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(120, for: "row.7|assistant")
-        #expect(heights.height(for: "row.7|assistant") == 120)
+        heights.note(120, for: key("row.7|assistant"))
+        #expect(heights.height(for: key("row.7|assistant")) == 120)
     }
 
     @Test("a row whose content moved is a different row")
     func contentIsPartOfTheKey() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(120, for: "row.7|folded")
-        #expect(heights.height(for: "row.7|unfolded") == nil)
+        heights.note(120, for: key("row.7|folded"))
+        #expect(heights.height(for: key("row.7|unfolded")) == nil)
     }
 
     /// The pane made narrower rewraps every paragraph in it, so nothing measured at the old width
@@ -28,12 +34,12 @@ struct TranscriptRowHeightsTests {
     func widthInvalidates() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(120, for: "row.7")
+        heights.note(120, for: key("row.7"))
         // Called before the expectation rather than inside it: `reset` is mutating, and `#expect`
         // rewrites its argument into a closure that takes the value immutably.
         let invalidated = heights.reset(width: 600, scale: 1)
         #expect(invalidated)
-        #expect(heights.height(for: "row.7") == nil)
+        #expect(heights.height(for: key("row.7")) == nil)
         #expect(heights.count == 0)
     }
 
@@ -41,10 +47,10 @@ struct TranscriptRowHeightsTests {
     func scaleInvalidates() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(120, for: "row.7")
+        heights.note(120, for: key("row.7"))
         let invalidated = heights.reset(width: 800, scale: 1.3)
         #expect(invalidated)
-        #expect(heights.height(for: "row.7") == nil)
+        #expect(heights.height(for: key("row.7")) == nil)
     }
 
     /// The width and the scale are the cache's rather than each key's, so the cache cannot grow one
@@ -54,9 +60,9 @@ struct TranscriptRowHeightsTests {
     func doesNotHoldEveryWidthItHasSeen() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(120, for: "row.7")
+        heights.note(120, for: key("row.7"))
         heights.reset(width: 600, scale: 1)
-        heights.note(180, for: "row.7")
+        heights.note(180, for: key("row.7"))
         heights.reset(width: 800, scale: 1)
         #expect(heights.count == 0)
     }
@@ -68,10 +74,10 @@ struct TranscriptRowHeightsTests {
     func toleratesAFraction() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 831.5, scale: 1)
-        heights.note(120, for: "row.7")
+        heights.note(120, for: key("row.7"))
         let invalidated = heights.reset(width: 831.75, scale: 1)
         #expect(!invalidated)
-        #expect(heights.height(for: "row.7") == 120)
+        #expect(heights.height(for: key("row.7")) == 120)
     }
 
     @Test("a pass that changes nothing says so")
@@ -101,9 +107,9 @@ struct TranscriptRowHeightsTests {
     @Test("nothing is remembered before a width has arrived")
     func refusesHeightsWithoutAWidth() {
         var heights = TranscriptRowHeights()
-        let changed = heights.note(120, for: "row.7")
+        let changed = heights.note(120, for: key("row.7"))
         #expect(!changed)
-        #expect(heights.height(for: "row.7") == nil)
+        #expect(heights.height(for: key("row.7")) == nil)
     }
 
     @Test("the first real width makes the cache ready")
@@ -124,10 +130,10 @@ struct TranscriptRowHeightsTests {
     func aDrawnRowWins() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(120, for: "row.7")
-        let changed = heights.note(340, for: "row.7")
+        heights.note(120, for: key("row.7"))
+        let changed = heights.note(340, for: key("row.7"))
         #expect(changed)
-        #expect(heights.height(for: "row.7") == 340)
+        #expect(heights.height(for: key("row.7")) == 340)
     }
 
     /// A row reports its size on every layout pass. Telling the table to relayout on every one of
@@ -136,12 +142,12 @@ struct TranscriptRowHeightsTests {
     func ignoresAnUnchangedHeight() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        let changed = heights.note(120, for: "row.7")
+        let changed = heights.note(120, for: key("row.7"))
         #expect(changed)
-        let changedAgain = heights.note(120, for: "row.7")
+        let changedAgain = heights.note(120, for: key("row.7"))
         #expect(!changedAgain)
         // Rounds up to the same 120, so a fraction of a point of drift says nothing either.
-        let changedByAFraction = heights.note(119.6, for: "row.7")
+        let changedByAFraction = heights.note(119.6, for: key("row.7"))
         #expect(!changedByAFraction)
     }
 
@@ -151,9 +157,9 @@ struct TranscriptRowHeightsTests {
     func nothingIsAnAnswer() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        let changed = heights.note(0, for: "row.7")
+        let changed = heights.note(0, for: key("row.7"))
         #expect(changed)
-        #expect(heights.height(for: "row.7") == 0)
+        #expect(heights.height(for: key("row.7")) == 0)
     }
 
     @Test("a height is rounded up, and never below nothing")
@@ -172,11 +178,11 @@ struct TranscriptRowHeightsTests {
     func rewidthEstimates() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(120, for: "row.7")
+        heights.note(120, for: key("row.7"))
         let moved = heights.rewidth(to: 600)
         #expect(moved)
-        #expect(heights.height(for: "row.7") == 120)
-        #expect(heights.isStale("row.7"))
+        #expect(heights.height(for: key("row.7")) == 120)
+        #expect(heights.isStale(key("row.7")))
         #expect(heights.measure?.width == 600)
         #expect(heights.staleCount == 1)
     }
@@ -185,10 +191,10 @@ struct TranscriptRowHeightsTests {
     func measuringClearsTheDebt() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(120, for: "row.7")
+        heights.note(120, for: key("row.7"))
         heights.rewidth(to: 600)
-        heights.note(180, for: "row.7")
-        #expect(!heights.isStale("row.7"))
+        heights.note(180, for: key("row.7"))
+        #expect(!heights.isStale(key("row.7")))
         #expect(heights.staleCount == 0)
     }
 
@@ -199,21 +205,21 @@ struct TranscriptRowHeightsTests {
     func anUnchangedHeightStillSettlesTheDebt() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(120, for: "row.7")
+        heights.note(120, for: key("row.7"))
         heights.rewidth(to: 600)
-        let changed = heights.note(120, for: "row.7")
+        let changed = heights.note(120, for: key("row.7"))
         #expect(!changed)
-        #expect(!heights.isStale("row.7"))
+        #expect(!heights.isStale(key("row.7")))
     }
 
     @Test("a resize to the same width changes nothing")
     func rewidthToTheSameWidth() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(120, for: "row.7")
+        heights.note(120, for: key("row.7"))
         let rewidened = heights.rewidth(to: 800.25)
         #expect(!rewidened)
-        #expect(!heights.isStale("row.7"))
+        #expect(!heights.isStale(key("row.7")))
     }
 
     /// A pane that has never been laid out has nothing to estimate from, so this is `reset`'s
@@ -234,22 +240,22 @@ struct TranscriptRowHeightsTests {
     func resetClearsTheDebt() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(120, for: "row.7")
+        heights.note(120, for: key("row.7"))
         heights.rewidth(to: 600)
         heights.reset(width: 600, scale: 1.3)
         #expect(heights.staleCount == 0)
-        #expect(heights.height(for: "row.7") == nil)
+        #expect(heights.height(for: key("row.7")) == nil)
     }
 
     @Test("forgetting settles every debt a resize left")
     func forgettingClearsTheDebt() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(120, for: "row.7")
+        heights.note(120, for: key("row.7"))
         heights.rewidth(to: 600)
         heights.forget()
         #expect(heights.staleCount == 0)
-        #expect(!heights.isStale("row.7"))
+        #expect(!heights.isStale(key("row.7")))
     }
 
     // MARK: - What an unmeasured row is worth
@@ -261,20 +267,20 @@ struct TranscriptRowHeightsTests {
     func assumesAnUnmeasuredRow() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        #expect(heights.height(for: "row.7") == nil)
-        #expect(heights.assumed(for: "row.7") == TranscriptRowHeights.assumedRowHeight)
+        #expect(heights.height(for: key("row.7")) == nil)
+        #expect(heights.assumed(for: key("row.7")) == TranscriptRowHeights.assumedRowHeight)
     }
 
     @Test("what has been measured is what the rest is assumed to be")
     func assumesTheMeanOfWhatIsKnown() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(100, for: "row.1")
-        heights.note(200, for: "row.2")
+        heights.note(100, for: key("row.1"))
+        heights.note(200, for: key("row.2"))
         #expect(heights.estimate == 150)
-        #expect(heights.assumed(for: "row.99") == 150)
+        #expect(heights.assumed(for: key("row.99")) == 150)
         // And the measured ones are still themselves.
-        #expect(heights.assumed(for: "row.1") == 100)
+        #expect(heights.assumed(for: key("row.1")) == 100)
     }
 
     /// The running total has to survive an overwrite, which is what every drawn row does to what
@@ -283,8 +289,8 @@ struct TranscriptRowHeightsTests {
     func meanFollowsAnOverwrite() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(100, for: "row.1")
-        heights.note(300, for: "row.1")
+        heights.note(100, for: key("row.1"))
+        heights.note(300, for: key("row.1"))
         #expect(heights.estimate == 300)
     }
 
@@ -292,7 +298,7 @@ struct TranscriptRowHeightsTests {
     func meanIsEmptiedWithTheCache() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(400, for: "row.1")
+        heights.note(400, for: key("row.1"))
         heights.forget()
         #expect(heights.estimate == TranscriptRowHeights.assumedRowHeight)
     }
@@ -303,8 +309,8 @@ struct TranscriptRowHeightsTests {
     func meanSurvivesAResize() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(100, for: "row.1")
-        heights.note(200, for: "row.2")
+        heights.note(100, for: key("row.1"))
+        heights.note(200, for: key("row.2"))
         heights.rewidth(to: 600)
         #expect(heights.estimate == 150)
     }
@@ -318,12 +324,12 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
         for row in 0..<TranscriptRowHeights.mostRows {
-            heights.note(Double(row % 400) + 1, for: "row.\(row)")
+            heights.note(Double(row % 400) + 1, for: key("row.\(row)"))
         }
         #expect(heights.count == TranscriptRowHeights.mostRows)
-        heights.note(120, for: "one.too.many")
+        heights.note(120, for: key("one.too.many"))
         #expect(heights.count == 1)
-        #expect(heights.height(for: "one.too.many") == 120)
+        #expect(heights.height(for: key("one.too.many")) == 120)
         // The width is kept, because the pane is still the width it was.
         #expect(heights.measure?.width == 800)
     }
@@ -333,11 +339,11 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
         for row in 0..<TranscriptRowHeights.mostRows {
-            heights.note(Double(row % 400) + 1, for: "row.\(row)")
+            heights.note(Double(row % 400) + 1, for: key("row.\(row)"))
         }
-        heights.note(999, for: "row.0")
+        heights.note(999, for: key("row.0"))
         #expect(heights.count == TranscriptRowHeights.mostRows)
-        #expect(heights.height(for: "row.0") == 999)
+        #expect(heights.height(for: key("row.0")) == 999)
     }
 
     @Test("half a point is the same width, and one answer says so")
@@ -352,9 +358,9 @@ struct TranscriptRowHeightsTests {
     func forgets() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1)
-        heights.note(120, for: "row.7")
+        heights.note(120, for: key("row.7"))
         heights.forget()
-        #expect(heights.height(for: "row.7") == nil)
+        #expect(heights.height(for: key("row.7")) == nil)
         #expect(heights.isReady)
         let invalidated = heights.reset(width: 800, scale: 1)
         #expect(!invalidated)

@@ -26,15 +26,26 @@ private final class MarkdownBlockBox: NSObject {
     }
 }
 
-@MainActor
 private enum MarkdownParseCache {
-    static let values: NSCache<NSString, MarkdownBlockBox> = {
+    /// **Bounded by bytes, not by rows**, which is the conclusion `TranscriptEventCache` reached
+    /// and this never revisited. It was 160, and the workspace those measurements were taken
+    /// against holds 1,306 messages, so one scroll from the bottom to the top evicted every
+    /// answer in it and re-parsed all of them on the way back. The eight megabytes below is what
+    /// was already doing the bounding.
+    ///
+    /// `nonisolated(unsafe)` for `SyntaxCache`'s reason and on the same two legs: `NSCache` does
+    /// its own locking, and every value in it is a `final class` holding two `let`s of `Sendable`
+    /// value types, so nothing a reader gets out of it can be written by anybody. The keys are
+    /// bridged `NSString`s, which are immutable too.
+    nonisolated(unsafe) static let values: NSCache<NSString, MarkdownBlockBox> = {
         let cache = NSCache<NSString, MarkdownBlockBox>()
-        cache.countLimit = 160
+        cache.countLimit = 0
         cache.totalCostLimit = 8 * 1_024 * 1_024
         return cache
     }()
 
+    /// A settled answer, parsed once. Nonisolated so a preparation pass can fill this before the
+    /// table asks: see `MarkdownPrime`, and `TranscriptPrime` for why the values are safe to share.
     static func parsed(for text: String) -> MarkdownBlockBox {
         let key = text as NSString
         if let cached = values.object(forKey: key) { return cached }
@@ -46,21 +57,36 @@ private enum MarkdownParseCache {
     /// The live tail gets a cache of exactly one entry rather than a share of the one above.
     ///
     /// Streaming an answer produces one prefix per token, every one of them seen for a few
-    /// milliseconds and never again. Put through `values`, which holds 160 entries, a single
-    /// streamed answer would evict every finished row in it and leave the visible transcript
-    /// re-parsing settled prose on its next redraw. One entry is still worth keeping, because
-    /// SwiftUI is free to evaluate a body more than once for the same value.
+    /// milliseconds and never again. Put through `values` they would be eight megabytes of
+    /// prefixes nobody will ask for again, evicting every finished row and leaving the visible
+    /// transcript re-parsing settled prose on its next redraw. One entry is still worth keeping,
+    /// because SwiftUI is free to evaluate a body more than once for the same value.
+    ///
+    /// **The main actor's, and it stays there.** `values` is an `NSCache` and does its own
+    /// locking; this is a plain `var`, so it is the one thing here a preparation pass may not
+    /// touch. Nothing off the main actor has a live tail to draw anyway.
     ///
     /// The addresses in this one are always empty, and that is not an omission: a run that is
     /// still arriving offers none, so there is nothing for the walk to find and nothing yet worth
     /// finding. See `MarkdownView.body`.
-    private static var streamed: (text: String, box: MarkdownBlockBox)?
+    @MainActor private static var streamed: (text: String, box: MarkdownBlockBox)?
 
-    static func streamingParsed(for text: String) -> MarkdownBlockBox {
+    @MainActor static func streamingParsed(for text: String) -> MarkdownBlockBox {
         if let streamed, streamed.text == text { return streamed.box }
         let box = MarkdownBlockBox(MarkdownParser.parse(text), addresses: [])
         streamed = (text, box)
         return box
+    }
+}
+
+/// Parsing a settled answer before anything asks for it. See `TranscriptPrime`.
+///
+/// A function rather than the cache widened, because `MarkdownBlockBox` is this file's and the
+/// blocks inside it are the core's. The blocks come back so the caller can prime the fences in
+/// them.
+enum MarkdownPrime {
+    static func blocks(of text: String) -> [MarkdownBlock] {
+        MarkdownParseCache.parsed(for: text).blocks
     }
 }
 

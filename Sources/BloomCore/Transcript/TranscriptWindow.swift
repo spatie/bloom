@@ -114,6 +114,19 @@ public struct TranscriptWindow: Equatable, Sendable {
         Self(start: clamp(rowCount - settled, rowCount: rowCount), end: max(0, rowCount))
     }
 
+    /// The window's rows in the order a preparation pass should take them: nearest first to the
+    /// row the reader lands on.
+    ///
+    /// A pass that ran from `start` would prepare the reader's own screen last, which is the one
+    /// screen it exists to have ready before the table asks. The anchor is the row the list opens
+    /// on: the unread mark or the search result when there is one, and the live end otherwise.
+    /// An anchor outside the window is pulled to its nearer edge, so a caller never has to check.
+    public func indices(outwardFrom anchor: Int) -> [Int] {
+        guard count > 0 else { return [] }
+        let pinned = min(max(anchor, start), end - 1)
+        return (start..<end).sorted { abs($0 - pinned) < abs($1 - pinned) }
+    }
+
     /// Whether there is any history left above the window to grow into.
     public var canGrowUp: Bool { start > 0 }
 

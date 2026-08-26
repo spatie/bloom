@@ -175,4 +175,34 @@ struct TranscriptWindowTests {
         #expect(TranscriptWindow.index(ofSeqAtOrAfter: 1_500, in: seqs) == 500)
         #expect(TranscriptWindow.index(ofSeqAtOrAfter: 1_501, in: seqs) == 501)
     }
+
+    // MARK: The order a preparation pass takes the window in
+
+    /// A session opened on its live end is read from the bottom, so the bottom is what has to be
+    /// ready first. See `TranscriptPrime`.
+    @Test("a window anchored at its end is prepared from the end")
+    func preparesTheLiveEndFirst() {
+        let window = TranscriptWindow(start: 0, end: 5)
+        #expect(window.indices(outwardFrom: 4) == [4, 3, 2, 1, 0])
+    }
+
+    @Test("a window anchored on an unread row is prepared outwards from it")
+    func preparesAroundTheUnreadRow() {
+        let window = TranscriptWindow(start: 0, end: 5)
+        let order = window.indices(outwardFrom: 2)
+        #expect(order.first == 2)
+        #expect(Set(order.prefix(3)) == [1, 2, 3])
+        #expect(Set(order) == Set(0..<5))
+    }
+
+    @Test("an anchor outside the window is pulled to its nearer edge")
+    func clampsTheAnchor() {
+        #expect(TranscriptWindow(start: 10, end: 20).indices(outwardFrom: 0).first == 10)
+        #expect(TranscriptWindow(start: 10, end: 20).indices(outwardFrom: 99).first == 19)
+    }
+
+    @Test("an empty window is nothing to prepare")
+    func preparesNothingForAnEmptyWindow() {
+        #expect(TranscriptWindow(start: 0, end: 0).indices(outwardFrom: 0).isEmpty)
+    }
 }

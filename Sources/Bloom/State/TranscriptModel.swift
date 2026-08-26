@@ -276,9 +276,18 @@ final class TranscriptModel {
 
         rows = built.rows
         indexByRefID = built.index
-        // Stays on the main actor, because it reads `TranscriptEventCache` and that cache is the
-        // main actor's. It can afford to: it walks backwards and stops as soon as it has both
-        // numbers, which is within a few rows of the end whatever the session's length.
+
+        // The parsing every row of the window is about to want, done now and off this thread. See
+        // `TranscriptPrime`, which is where the whole argument for it is. Nothing cancels it: it
+        // is one window of a session that has just been asked for, at `.utility`, and a handle
+        // nobody would ever call `cancel` on is bookkeeping.
+        let unread = firstUnreadSeq
+        Task.detached(priority: .utility) { [rows = built.rows, worktree = workspace.path] in
+            await TranscriptPrime.run(rows: rows, worktree: worktree, unreadSeq: unread)
+        }
+
+        // Stays on the main actor, and can afford to: it walks backwards and stops as soon as it
+        // has both numbers, which is within a few rows of the end whatever the session's length.
         //
         // The one place the whole list is walked, because it is also the one place there is a
         // whole list to walk. Everything after this folds in what arrived. Nothing is held from
