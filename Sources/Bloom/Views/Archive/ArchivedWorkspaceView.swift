@@ -117,19 +117,23 @@ struct ArchivedWorkspaceView: View {
         HStack(spacing: Metrics.spacing) {
             Button("Copy Branch Name") { Clipboard.copy(workspace.branch) }
 
-            Button(isRestoring ? "Restoring" : "Restore Workspace") {
+            // The title does not change while it is running. The spinner beside it already says
+            // the work is under way, and swapping the words as well moved the button's width
+            // under the pointer to say a second time what was already being said.
+            Button("Restore Workspace") {
                 Task { await app.restore(workspace) }
             }
             .buttonStyle(.borderedProminent)
             .tint(Palette.accentFill)
             .disabled(isRestoring || isLocating || source?.canRebuild != true)
             .help(restoreHelp)
-        }
-        .overlay(alignment: .trailing) {
+
+            // In the row rather than in an overlay offset out of it. Pushed `Metrics.gutter` past
+            // the controls' trailing edge it landed in a banner whose own trailing padding is
+            // exactly that, so it sat flush against the pane edge or was clipped by it.
             if isRestoring || isLocating {
                 ProgressView()
                     .controlSize(.small)
-                    .offset(x: Metrics.gutter)
             }
         }
     }
