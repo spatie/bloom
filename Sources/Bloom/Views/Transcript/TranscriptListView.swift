@@ -749,6 +749,11 @@ struct TranscriptListView: View {
                 // number of rows, and then nothing else would have told the tracker it is
                 // looking at a different list.
                 arrival.adopt(arrivalIDs)
+                // A turn for the body to run with the window set above, so that the list holds the
+                // rows the positioning is about to name. See `open`, which carries what happens
+                // without it.
+                await Task.yield()
+                guard !Task.isCancelled else { return }
                 // And where the session opens, for the same reason: `position` is otherwise
                 // driven by the row count's onChange, so a switch between two sessions holding
                 // the same number of rows never positioned and never marked the session read,
@@ -1204,6 +1209,26 @@ struct TranscriptListView: View {
         switch opening {
         case .row(let seq, let anchor):
             proxy.scrollTo(seq, anchor: anchor)
+            // And again on the next turn, because the first one can be shouting at a list that
+            // does not hold the row yet.
+            //
+            // **This is the bug the owner reported as "it is always at the bottom now", and it was
+            // neither always nor the bottom.** `ScrollViewProxy.scrollTo` acts on the list as it is
+            // laid out at the moment it is called, and the call sites here run inside the same turn
+            // that sets the window the row lives in: the body has not re-run, the `ForEach` is
+            // still the one from the conversation being left, and the id names nothing. What that
+            // looks like is a pane sitting wherever the arrival put it, which for a restored window
+            // is its first row. Measured with `--switch-probe --switch-scroll 25`: left at 11,993
+            // points and back at 32.
+            //
+            // The edge and the point do not need this. Both are values on `ScrollPosition`, which
+            // SwiftUI applies on the next layout pass whenever that happens to be; only the row is
+            // a call. Saying it twice costs one resolved scroll on a list that already holds the
+            // row, which is what the second call finds in every other case.
+            Task { @MainActor in
+                await Task.yield()
+                proxy.scrollTo(seq, anchor: anchor)
+            }
         case .liveEnd:
             scrollPosition.scrollTo(edge: .bottom)
         case .offset(let y):
