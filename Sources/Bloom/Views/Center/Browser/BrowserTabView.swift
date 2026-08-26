@@ -106,6 +106,7 @@ struct BrowserTabView: View {
                 canGoBack: session.canGoBack,
                 canGoForward: session.canGoForward,
                 isLoading: session.isLoading,
+                loadProgress: session.loadProgress,
                 isCapturing: isCapturing
             ),
             address: $address,

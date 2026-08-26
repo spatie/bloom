@@ -4,9 +4,9 @@ import BloomCore
 /// The browser pane's toolbar in each state its controls can be in, on one page.
 ///
 /// It exists because the bar is a set of controls whose shape is the thing under review: which
-/// arrows can be pressed, whether the third glyph is Reload or Stop, and whether there is anything
-/// to share. One pane shows one of those at a time, and no screen in the app puts a page four
-/// links deep beside a pane that has never been anywhere.
+/// arrows can be pressed, whether the glyph in the field is Reload or Stop, and whether there is
+/// anything to share. One pane shows one of those at a time, and no screen in the app puts a page
+/// four links deep beside a pane that has never been anywhere.
 ///
 /// Drawn from `BrowserToolbarView` rather than from a browser pane, which is why that view was
 /// split out: a pane needs a live `BrowserSession` behind it, and an offscreen render paints
@@ -46,11 +46,24 @@ struct BrowserToolbarGallery: View {
             )
             row(
                 "Loading",
-                "Reload becomes Stop in place, so nothing beside it moves for the second it takes.",
+                "Reload becomes Stop in place, and the fill behind the address is how far it has got.",
                 BrowserToolbar(
                     page: page("https://spatie.be/docs", "Docs"),
                     canGoBack: true,
-                    isLoading: true
+                    isLoading: true,
+                    loadProgress: 0.45
+                )
+            )
+            row(
+                "A URL longer than the pane",
+                "Cut at the tail, so the host is the part that always survives.",
+                BrowserToolbar(
+                    page: page(
+                        "https://github.com/spatie/laravel-medialibrary/pull/3812/files"
+                            + "#diff-a7b3f2c9?utm_source=bloom&expand=1",
+                        "Files changed"
+                    ),
+                    canGoBack: true
                 )
             )
             row(
@@ -123,7 +136,7 @@ extension Gallery {
     static let browserToolbar = Gallery(
         name: "browser-toolbar",
         title: "Browser toolbar",
-        size: CGSize(width: 570, height: 640),
+        size: CGSize(width: 570, height: 740),
         needsFocus: false,
         view: { _ in AnyView(BrowserToolbarGallery()) }
     )

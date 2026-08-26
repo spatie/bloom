@@ -171,4 +171,15 @@ struct BrowserToolbarTests {
         #expect(BrowserToolbar.backMenu([]).isEmpty)
         #expect(BrowserToolbar.forwardMenu([]).isEmpty)
     }
+
+    @Test("The fill behind the address is there only while a load is really under way")
+    func progressIsOnlyDrawnMidLoad() {
+        let page = Self.page("https://example.com/", "Example")
+        #expect(BrowserToolbar(page: page, isLoading: true, loadProgress: 0.4).progress == 0.4)
+        // Nothing before the first report, and nothing once it is done: a field left at full
+        // width reads as still working.
+        #expect(BrowserToolbar(page: page, isLoading: true, loadProgress: 0).progress == nil)
+        #expect(BrowserToolbar(page: page, isLoading: true, loadProgress: 1).progress == nil)
+        #expect(BrowserToolbar(page: page, isLoading: false, loadProgress: 0.4).progress == nil)
+    }
 }

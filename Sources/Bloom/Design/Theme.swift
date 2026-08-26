@@ -719,6 +719,10 @@ enum Metrics {
     /// A strip of small controls along the edge of a pane: the sidebar's status bar, the
     /// inspector's pull request strip and its tab row.
     static let barHeight: CGFloat = 32
+    /// A control drawn with a fill of its own inside one of those strips: Home's search field, the
+    /// browser bar's address pill and the capsule its arrows sit in. Five points of ground above
+    /// and below, which is the clearance a bare glyph in the same strip already has.
+    static let controlHeight: CGFloat = 22
 }
 
 /// How a pane arrives and leaves.

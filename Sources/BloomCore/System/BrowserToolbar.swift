@@ -11,18 +11,17 @@ import Foundation
 /// those two are the browser's other rules and a reader looking for what the browser decides
 /// should find the three of them together.
 ///
-/// ## There is no tab component to reach for
+/// ## There is no stock component for any of this
 ///
 /// The question comes back every time somebody looks at Safari beside this pane, so the answer is
-/// written down where they will be reading. **AppKit's only public tab bar is the window one.**
-/// `NSWindowTabGroup` gathers whole `NSWindow`s into one stack, and `NSWindowTab` describes one
-/// window's entry in it: neither can draw a strip inside a view, and there is no `NSTabBar`.
-/// `NSTabView` is a different control altogether, the one behind a preferences window's segments.
-/// Safari's tab bar is not shipped as a control at all.
+/// written where they will be reading. **Every AppKit component that draws browser chrome belongs
+/// to an `NSWindow`.** `NSToolbar` is a window's, and with it go `NSToolbarItemGroup`, which is
+/// what joins Safari's back and forward arrows, and `NSSearchToolbarItem`, which is its address
+/// field; `NSWindowTabGroup` gathers whole windows, and there is no `NSTabBar`. This bar is a pane
+/// inside a split inside a tab, so none of them can be reached from here. `NSToolbarDisplayMode`
+/// has no `unified` case in the macOS 26 SDK either, whatever memory says.
 ///
-/// It would be the wrong thing here in any case. A browser pane is already one tab of the centre
-/// column's strip, so a Safari strip inside it would be tabs inside tabs, and the tab the reader
-/// would reach for first is the one already at the top of the window.
+/// So the bar is drawn, out of `Palette` and `Capsule`. What that costs is written on the view.
 public struct BrowserToolbar: Equatable, Sendable {
     /// One button in the bar: what it draws, what it is called, and whether it can be pressed.
     public struct Control: Equatable, Sendable {
@@ -50,6 +49,8 @@ public struct BrowserToolbar: Equatable, Sendable {
     public var canGoBack: Bool
     public var canGoForward: Bool
     public var isLoading: Bool
+    /// What WebKit says of the fetch in flight, as `estimatedProgress` reports it.
+    public var loadProgress: Double
     /// A screenshot is already on its way to the composer, so the camera goes quiet rather than
     /// attaching the same page twice. See `BrowserTabView.capture`.
     public var isCapturing: Bool
@@ -59,13 +60,25 @@ public struct BrowserToolbar: Equatable, Sendable {
         canGoBack: Bool = false,
         canGoForward: Bool = false,
         isLoading: Bool = false,
+        loadProgress: Double = 0,
         isCapturing: Bool = false
     ) {
         self.page = page
         self.canGoBack = canGoBack
         self.canGoForward = canGoForward
         self.isLoading = isLoading
+        self.loadProgress = loadProgress
         self.isCapturing = isCapturing
+    }
+
+    /// How much of the field to fill behind the address, or nil for no fill at all.
+    ///
+    /// Nil rather than zero at both ends, so the field is a plain field before a load starts and
+    /// again the moment it finishes: a bar left sitting at 100 percent reads as still working. A
+    /// fetch that has not reported anything yet is nil for the same reason.
+    public var progress: Double? {
+        guard isLoading, loadProgress > 0, loadProgress < 1 else { return nil }
+        return loadProgress
     }
 
     /// Where the page is, as an address the rest of the app agrees is one. Nil for a pane split
