@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 public enum WorkspaceError: Error, CustomStringConvertible {
     case notARepository(String)
@@ -79,6 +80,54 @@ public struct WorkspaceManager: Sendable {
         )
         return try await store.upsert(repo)
     }
+
+    /// Puts a project back in the sidebar, because a workspace has just been added to it.
+    ///
+    /// Called by both places a workspace arrives in a project's list, `start` and `restore`, and
+    /// it decides for itself: the answer is `ProjectVisibility.comesBack`, which is where the
+    /// argument for doing this at all is written down. Callers say what happened rather than
+    /// asking first, so there is one place that reads the row and one place that writes it.
+    ///
+    /// **The row is read again here rather than taken from the `Repo` the caller is holding.**
+    /// That value can be minutes old, because it came off the sidebar, out of a create sheet
+    /// somebody left open, or through the bridge from a `project_list` earlier in the same turn,
+    /// and `project_hide` can have landed on the real row since. A stale copy would answer this
+    /// question about a project as it used to be.
+    ///
+    /// **`update(repoID:)`, and only when the fresh row says hidden.** The first half is the
+    /// store's rule: this runs while a diff stat refresh, an icon walk and a rename may each be
+    /// holding their own copy of the same row, and a whole-value write would carry every one of
+    /// their columns back. The second half is why the read above is not wasted work: `update`
+    /// writes and the store announces every commit, so an unconditional write here would tick the
+    /// change hub on every workspace ever created and wake every observer of `repos` to say
+    /// nothing at all.
+    ///
+    /// Returns whether the project actually came back, so a caller with a window can tell the
+    /// owner that Bloom has just undone something they chose.
+    @discardableResult
+    func bringProjectBack(_ repoID: RepoID) async -> Bool {
+        // The rule answers for a project that is no longer there as well, so the read is handed
+        // to it as it came back; the binding after it is only what the log needs.
+        let stored = try? await store.repo(id: repoID)
+        guard ProjectVisibility.comesBack(stored), let stored else { return false }
+        // Nil is the row having gone between the read and the write, which is a project removed
+        // under this and not a project that came back.
+        guard (try? await store.update(repoID: repoID) { $0.hidden = false }) != nil else {
+            return false
+        }
+        // A line in Console because the owner hid this project on purpose and Bloom has just
+        // reversed that without being asked. Logged `public` for the reason `RefusedTransitions`
+        // gives: a project's name is not anybody's data, and a redacted line is the same silence
+        // in a different font.
+        Self.log.info("showing \(stored.name, privacy: .public) again: a workspace was added to it")
+        return true
+    }
+
+    /// Where a project coming back into the sidebar says so. See `bringProjectBack`.
+    private static let log = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "be.spatie.bloom",
+        category: "workspace"
+    )
 
     // MARK: - Creating workspaces
 

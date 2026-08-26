@@ -70,6 +70,29 @@ public enum ProjectVisibility {
         }
     }
 
+    /// Whether a project comes back into the sidebar because a workspace has just been added to
+    /// it.
+    ///
+    /// This does not argue with the paragraph at the top of this file, it follows from it. Hiding
+    /// says "there is nothing going on in this project and the column is 260 points wide". Cutting
+    /// a worktree in it is that stopping, and the row this new workspace lives in is the one place
+    /// in the window the sidebar would be leaving out. The case it was written for is an agent
+    /// calling `workspace_start` over the bridge: the owner did not ask for the workspace, so
+    /// nobody is watching for it, and the only routes back to a hidden project are a filter menu
+    /// and `project_unhide`, neither of which anybody reaches for to find something they do not
+    /// know exists.
+    ///
+    /// It is narrow on purpose. One boolean on one row, only when that row actually says hidden,
+    /// and nothing else about hiding changes: the project keeps its place in the stored order
+    /// (see above), the workspaces of every other hidden project stay exactly where they were,
+    /// and nothing here ever hides anything.
+    ///
+    /// Nil is a project that is no longer in the database, which a create racing a project removal
+    /// can produce, and a project that is gone is not one to bring back.
+    public static func comesBack(_ project: Repo?) -> Bool {
+        project?.hidden == true
+    }
+
     /// What hiding this project would leave the sidebar showing, for a caller that cannot see it.
     ///
     /// The bridge's two tools say this out loud, because an agent hiding the last visible project

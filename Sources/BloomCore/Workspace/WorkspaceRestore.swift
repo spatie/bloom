@@ -239,6 +239,15 @@ public extension WorkspaceManager {
             $0.restore(to: path, hasSetupScript: settings.setupScript != nil)
         }
         guard let restored = updated else { throw WorkspaceError.workspaceGone(workspace.name) }
+
+        // A restore counts as a workspace being added to the project, even though the row was
+        // already there. The archived list is not the sidebar: this workspace was in no project's
+        // list a moment ago and is in one now, which is the event `bringProjectBack` is about. The
+        // case that settles it is the caller: `AppModel.restore` selects the workspace it just
+        // brought back, and a selected row inside a hidden project is a selection the sidebar
+        // cannot draw.
+        await bringProjectBack(repo.id)
+
         return RestoreOutcome(
             workspace: restored,
             source: source,
