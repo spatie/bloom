@@ -19,12 +19,20 @@ import BloomCore
 /// puts the choice behind one press instead of in front of everybody who only wanted to rename
 /// something.
 ///
-/// **The picker opens into a gap rather than over the form**, which is what the second round of
-/// this panel got wrong. It used to be an overlay positioned off a measured well, with the panel
-/// padded at the foot by whatever the card overhung by; that arithmetic was right and the result
-/// was still a card sitting on top of the Text field and the Save button. A row in the stack costs
-/// the panel exactly the same height and covers nothing, and it takes the measured well frame, the
-/// measured content height and the reserve sum with it.
+/// **The picker is a popover hung off the well**, which is the third and last answer.
+///
+/// It was a hand-built overlay positioned off a measured well, and that covered the Text field and
+/// the Save button. It was then a row in the stack, which covered nothing and cost the panel
+/// exactly the picker's height: the form grew by three hundred points when the well was pressed
+/// and shrank again when it was not, so pressing a small square resized the dialogue around it.
+/// The owner's words on seeing it: that does not feel like macOS at all, and he is right. Nothing
+/// on this platform makes a panel bigger to show a picker.
+///
+/// A popover is not the overlay that failed. It is an `NSPopover`: its own window above the sheet,
+/// with an arrow saying which control opened it, closing on Escape or on a click outside without
+/// this file arranging either, and costing the form no height at all. The measured well frame, the
+/// measured content height and the reserve sum all went with the row, because a popover sizes
+/// itself to what is in it.
 struct QuickPromptForm: View {
     /// The prompt being changed, or nil when this is a new one.
     var editing: QuickPrompt?
@@ -87,9 +95,6 @@ struct QuickPromptForm: View {
                     }
                 }
 
-                if isPickingMark {
-                    picker
-                }
             }
 
             field("Text") {
@@ -115,17 +120,6 @@ struct QuickPromptForm: View {
             buttons
         }
         .padding(Metrics.pane)
-        // Behind the form rather than over it, which is the whole of why this is a `background`.
-        // An overlay took the clicks meant for the fields under it; a background takes only the
-        // ones nothing else wanted, which is exactly the click on the panel's own padding that
-        // ought to put the picker away.
-        .background {
-            if isPickingMark {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { closePicker() }
-            }
-        }
         .onAppear(perform: prepare)
         // Escape leaves the form and goes back to the list, rather than closing the whole panel and
         // losing what was typed with it. While the picker is up it has Escape first, and gives it
@@ -175,6 +169,16 @@ struct QuickPromptForm: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // `.bounds` so the arrow points at the square rather than at the row it sits in, and
+        // `.bottom` so the card hangs under the well the way a menu does, leaving the name field
+        // beside it readable while an icon is chosen.
+        .popover(
+            isPresented: $isPickingMark,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            picker
+        }
         .help("Choose an icon or an emoji")
         .accessibilityLabel("Quick prompt icon")
     }
