@@ -257,11 +257,26 @@ struct HomeListRow: View {
             // status mark to its left slid two centimetres right on every row without a diff.
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
-                // No archived case of its own any more. These two counts used to drain their own
-                // hue, because they were the only thing on the row loud enough to need it; the
-                // row now drains itself, and a second copy of that decision here would be the
-                // one place the treatment could drift from the rest of the line.
-                if workspace.hasDiff {
+                // The size stands IN the diff's slot rather than beside it, and that is the whole
+                // of what Home's rows gained from the Storage pane.
+                //
+                // The same column because it answers the same question one state later: what this
+                // workspace amounts to. An archived workspace's diff counts describe a worktree
+                // that was removed when it was archived, which is the argument the `archivebox`
+                // glyph two columns to the left already makes about its status, so nothing true is
+                // covered up. And one slot rather than a fourth column is what keeps the age from
+                // sliding sideways when the Archived chip is pressed.
+                //
+                // The diff below has no archived case of its own any more. Those two counts used
+                // to drain their own hue, because they were the only thing on the row loud enough
+                // to need it; the row now drains itself, and a second copy of that decision here
+                // would be the one place the treatment could drift from the rest of the line.
+                if let bytes = row.bytes {
+                    Text(ArchiveDeletion.bytes(bytes))
+                        .font(Typo.captionEmphasis)
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.textSecondary)
+                } else if workspace.hasDiff {
                     DiffStatLabel(
                         additions: workspace.additions,
                         deletions: workspace.deletions,
@@ -313,9 +328,17 @@ struct HomeListRow: View {
         row.isArchived ? "Archived" : status.summary(pullRequest: pullRequest)
     }
 
+    /// The tooltip, which is where everything else the Storage pane drew ended up.
+    ///
+    /// The message and chat counts and the branch standing were columns on that screen and are a
+    /// sentence here, because this row is three columns wide and they are worth reading once
+    /// rather than scanning down. This is also the closest thing Home has to the sidebar's hover
+    /// card: it is the row's own facts, unabbreviated, for a reader who has stopped on one row.
+    /// See `ArchivedWorkspaceFootprint.contents`.
     private var help: String {
         var text = statusDescription
         if let repo = row.repo { text += " in \(repo.name)" }
+        if let footprint = row.footprint { text += " \u{00B7} \(footprint.contents)" }
         return text
     }
 
@@ -330,7 +353,11 @@ struct HomeListRow: View {
         parts.append(statusDescription)
         if let colour = workspace.colourDescription { parts.append("colour \(colour)") }
         if workspace.pinned { parts.append("pinned") }
-        if workspace.hasDiff {
+        // Whichever of the two the trailing slot is actually drawing, in the same order, so the
+        // row read by ear and the row read by eye carry the same facts.
+        if let bytes = row.bytes {
+            parts.append("holding \(ArchiveDeletion.bytes(bytes))")
+        } else if workspace.hasDiff {
             parts.append("\(workspace.additions) added, \(workspace.deletions) removed")
         }
         parts.append(

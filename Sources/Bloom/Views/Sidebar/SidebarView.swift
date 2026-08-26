@@ -91,8 +91,9 @@ struct SidebarView: View {
             // One row, and it is the root of the list rather than one of three destinations:
             // Mail's All Inboxes, Photos' Library. Search and Archive were here, and both were
             // the same list of workspaces Home draws. Search is a field in the window's toolbar
-            // now and the archive is a chip on Home; what the Archive screen held that Home did
-            // not is Settings > Storage. See `HomeScope`.
+            // now and the archive is a chip on Home, which carries the one thing the Archive
+            // screen had and Home did not: what each finished workspace still costs. See
+            // `HomeScope`.
             //
             // Their sixty points are not refilled. The Projects heading moves up to sit under the
             // title bar, which is where a source list's content begins in Finder, in Mail and in

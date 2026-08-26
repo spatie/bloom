@@ -10,7 +10,7 @@ import Foundation
 /// were destinations of their own, and both were the same list of workspaces Home already draws:
 /// searching is a state of Home, reached from the window's own search field, and the archive is a
 /// scope on it. What the Archive screen held that Home did not, the bytes each finished workspace
-/// still costs, is Settings > Storage now. See `HomeScope`.
+/// still costs, is on that scope's own rows. See `HomeScope.showsFootprints`.
 public enum SidebarSelection: Hashable, Sendable {
     case home
     /// The conversation that sits above every project. See `AskConversation`.

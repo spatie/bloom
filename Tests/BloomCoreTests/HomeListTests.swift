@@ -59,6 +59,21 @@ struct HomeListTests {
         Repo(id: RepoID(id), name: name ?? id, path: "/tmp/\(id)")
     }
 
+    /// What one archived record holds, as the store would have measured it. Only the bytes and
+    /// the identity matter to the list, so the rest is left at nought rather than invented.
+    private func footprint(_ name: String, bytes: Int) -> ArchivedWorkspaceFootprint {
+        ArchivedWorkspaceFootprint(
+            workspace: workspace(name, state: .archived),
+            repoName: "repo",
+            sessionCount: 0,
+            messageCount: 0,
+            transcriptBytes: bytes,
+            otherBytes: 0,
+            reviewCommentCount: 0,
+            hasNote: false
+        )
+    }
+
     private func bucket(_ activity: Date, now: Date) -> HomeList.Bucket {
         HomeList.bucket(for: activity, now: now, calendar: Self.calendar)
     }
@@ -422,6 +437,159 @@ struct HomeListTests {
 
         #expect(listing.groups.flatMap(\.rows).map(\.id.rawValue) == ["recent", "old"])
         #expect(listing.groups.flatMap(\.rows).map(\.isArchived) == [true, false])
+    }
+
+    // MARK: - What the archive costs
+
+    /// **The Archived chip is where the Settings > Storage pane went, and this is the seam.** The
+    /// rows are the ones Home was already drawing; what arrives with them is the measurement, and
+    /// it arrives on that chip and on no other, because under All the same column would hold a
+    /// size on the archived rows and a diff on the live ones.
+    @Test("sizes reach the rows under the Archived chip and nowhere else")
+    func sizesOnlyUnderArchived() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        let archived = [
+            workspace("gone", at: date(2025, 8, 18, 9, 0, 0), state: .archived),
+            workspace("older", at: date(2025, 8, 10, 9, 0, 0), state: .archived),
+        ]
+        let measured = ArchiveCleanup(footprints: [
+            footprint("gone", bytes: 4_000), footprint("older", bytes: 90),
+        ])
+
+        func rows(_ scope: HomeScope) -> [HomeRow] {
+            HomeList.build(
+                repos: [repo("repo")],
+                workspaces: [workspace("live", at: now)],
+                archived: archived,
+                filter: HomeFilter(scope: scope),
+                footprints: measured,
+                now: now,
+                calendar: Self.calendar
+            ).groups.flatMap(\.rows)
+        }
+
+        #expect(rows(.all).compactMap(\.bytes).isEmpty)
+        #expect(rows(.archived).map(\.bytes) == [4_000, 90])
+        // The whole footprint travels, because the row has two more uses for it and both are
+        // words rather than a column. See `ArchivedWorkspaceFootprint.contents`.
+        #expect(rows(.archived).first?.footprint?.repoName == "repo")
+    }
+
+    /// The status bar's total is over the rows in the list, not over the machine, because it is
+    /// read at the foot of the list rather than beside the chips.
+    @Test("the total is what the rows on screen hold")
+    func totalsTheRowsShown() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        let listing = HomeList.build(
+            repos: [repo("repo")],
+            workspaces: [workspace("live", at: now)],
+            archived: [
+                workspace("gone", at: now, state: .archived),
+                workspace("older", at: now, state: .archived),
+            ],
+            filter: HomeFilter(scope: .archived),
+            footprints: ArchiveCleanup(footprints: [
+                footprint("gone", bytes: 4_000), footprint("older", bytes: 90),
+            ]),
+            now: now,
+            calendar: Self.calendar
+        )
+
+        #expect(listing.shownBytes == 4_090)
+    }
+
+    /// **A size order and the date headings cannot both be true, so the headings go.** Ordering by
+    /// bytes puts a workspace from March above one from yesterday, and every heading over them is
+    /// then a lie; sorting inside each heading instead leaves the largest record on the machine
+    /// halfway down the list, which is the one place nobody looking for it will look. One group
+    /// with one heading, exactly as a search already does to them.
+    @Test("ordered by size, the list is one group and the date headings go")
+    func largestFirstFlattensTheHeadings() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        let listing = HomeList.build(
+            repos: [repo("repo")],
+            workspaces: [],
+            archived: [
+                workspace("yesterday", at: date(2025, 8, 18, 9, 0, 0), state: .archived),
+                workspace("march", at: date(2025, 3, 2, 9, 0, 0), state: .archived),
+            ],
+            filter: HomeFilter(scope: .archived, order: .largest),
+            footprints: ArchiveCleanup(footprints: [
+                footprint("yesterday", bytes: 12), footprint("march", bytes: 900_000),
+            ]),
+            now: now,
+            calendar: Self.calendar
+        )
+
+        #expect(listing.groups.count == 1)
+        #expect(listing.groups[0].title == "Largest first")
+        #expect(listing.groups[0].rows.map(\.id.rawValue) == ["march", "yesterday"])
+
+        // And the same rows in date order, under the headings, when the order is not asked for.
+        let dated = HomeList.build(
+            repos: [repo("repo")],
+            workspaces: [],
+            archived: [
+                workspace("yesterday", at: date(2025, 8, 18, 9, 0, 0), state: .archived),
+                workspace("march", at: date(2025, 3, 2, 9, 0, 0), state: .archived),
+            ],
+            filter: HomeFilter(scope: .archived),
+            footprints: ArchiveCleanup(footprints: [
+                footprint("yesterday", bytes: 12), footprint("march", bytes: 900_000),
+            ]),
+            now: now,
+            calendar: Self.calendar
+        )
+        #expect(dated.groups.map(\.title) == ["Yesterday", "March"])
+    }
+
+    /// Two workspaces archived by the same script in the same second hold the same bytes, and a
+    /// list that reshuffles them between two refreshes is a list somebody clicks the wrong row in.
+    /// A row nobody has measured sorts as nought rather than to the top.
+    @Test("equal sizes keep a stable order, and an unmeasured row does not float")
+    func largestFirstBreaksTiesStably() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        let listing = HomeList.build(
+            repos: [repo("repo")],
+            workspaces: [],
+            archived: [
+                workspace("b", at: now, state: .archived),
+                workspace("a", at: now, state: .archived),
+                workspace("unmeasured", at: now, state: .archived),
+            ],
+            filter: HomeFilter(scope: .archived, order: .largest),
+            footprints: ArchiveCleanup(footprints: [
+                footprint("b", bytes: 100), footprint("a", bytes: 100),
+            ]),
+            now: now,
+            calendar: Self.calendar
+        )
+
+        #expect(listing.groups[0].rows.map(\.id.rawValue) == ["a", "b", "unmeasured"])
+    }
+
+    /// The order is refused rather than settled away in the filter, so a chip that draws no sizes
+    /// cannot be sorted by them and the Archived chip is still on Largest when you come back to
+    /// it. See `HomeOrder.applies`.
+    @Test("a size order asked for outside the Archived chip is ignored, not remembered wrongly")
+    func sizeOrderAppliesOnlyWhereItIsOffered() {
+        let now = date(2025, 8, 19, 12, 0, 0)
+        #expect(!HomeOrder.applies(scope: .all, searching: false))
+        #expect(!HomeOrder.applies(scope: .archived, searching: true))
+        #expect(HomeOrder.applies(scope: .archived, searching: false))
+
+        let listing = HomeList.build(
+            repos: [repo("repo")],
+            workspaces: [workspace("live", at: now)],
+            archived: [workspace("huge", at: date(2025, 3, 2, 9, 0, 0), state: .archived)],
+            filter: HomeFilter(scope: .all, order: .largest),
+            footprints: ArchiveCleanup(footprints: [footprint("huge", bytes: 900_000)]),
+            now: now,
+            calendar: Self.calendar
+        )
+
+        #expect(listing.groups.map(\.title) == ["Today", "March"])
+        #expect(listing.groups.flatMap(\.rows).map(\.id.rawValue) == ["live", "huge"])
     }
 
     @Test("the search reaches the name, the branch and the project, in any case")
