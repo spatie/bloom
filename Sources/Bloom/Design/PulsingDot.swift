@@ -112,6 +112,11 @@ private struct PulsingDotLayer: NSViewRepresentable {
 
 /// One filled circle on a layer, under a repeating scale and a repeating fade.
 final class PulsingDotView: BusyPulseLayerView {
+    /// Capped, and it can afford to be: the dot travels a sixth of its own width, so at twelve
+    /// frames a second its edge moves about a quarter of a point per frame, which is inside the
+    /// softness of a resampled circle. The fade it moves with has no position to stutter at all.
+    private static let frameRate = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)
+
     private let dot = CAShapeLayer()
     private var epoch: CFTimeInterval = 0
     private var diameter: CGFloat = 0
@@ -185,35 +190,20 @@ final class PulsingDotView: BusyPulseLayerView {
         CATransaction.commit()
 
         install(
-            pulse("transform.scale", from: BusyDot.pathScale(at: 0), to: BusyDot.pathScale(at: 1)),
+            pulse(
+                "transform.scale",
+                from: BusyDot.pathScale(at: 0), to: BusyDot.pathScale(at: 1),
+                period: BusyDot.period, frameRate: Self.frameRate
+            ),
             on: dot, key: "swell", beginAt: epoch
         )
         install(
-            pulse("opacity", from: BusyDot.opacity(at: 0), to: BusyDot.opacity(at: 1)),
+            pulse(
+                "opacity",
+                from: BusyDot.opacity(at: 0), to: BusyDot.opacity(at: 1),
+                period: BusyDot.period, frameRate: Self.frameRate
+            ),
             on: dot, key: "fade", beginAt: epoch
         )
-    }
-
-    /// Half a pulse, played forwards and then backwards forever.
-    ///
-    /// `easeInEaseOut` and `autoreverses` rather than a keyframed envelope, because this envelope
-    /// *is* a cubic ease and Core Animation's timing functions are cubic beziers. `BusyBreath` is
-    /// sampled instead only because its two eased stretches are power curves, which a bezier could
-    /// approximate and not express. `easeInEaseOut` is symmetric in time, so the return leg is the
-    /// same curve rather than a different one run backwards, and the dot is momentarily still at
-    /// each end of its travel.
-    ///
-    /// Capped, and it can afford to be: the dot travels a sixth of its own width, so at twelve
-    /// frames a second its edge moves about a quarter of a point per frame, which is inside the
-    /// softness of a resampled circle. The fade it moves with has no position to stutter at all.
-    private func pulse(_ keyPath: String, from: Double, to: Double) -> CABasicAnimation {
-        let animation = CABasicAnimation(keyPath: keyPath)
-        animation.fromValue = from
-        animation.toValue = to
-        animation.duration = BusyDot.period / 2
-        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        animation.autoreverses = true
-        animation.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)
-        return animation
     }
 }

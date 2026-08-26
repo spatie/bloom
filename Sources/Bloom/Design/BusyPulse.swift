@@ -231,4 +231,38 @@ class BusyPulseLayerView: NSView {
         target.removeAnimation(forKey: key)
         target.add(animation, forKey: key)
     }
+
+    /// The pulse every mark here is made of: half a period between the two ends of an envelope the
+    /// core holds, played forwards and then backwards forever.
+    ///
+    /// **It was written twice, as `PulsingDotView.pulse` and `PulsingRuleView.fade`, line for
+    /// line.** They could only ever have been the same: `BusyRule.period` IS `BusyDot.period` by
+    /// construction, so the duration was one number reached down two paths. The frame rate cap is
+    /// the one thing that genuinely differed, so it is a parameter and each caller keeps its own
+    /// argument and the arithmetic behind it.
+    ///
+    /// `easeInEaseOut` and `autoreverses` rather than a keyframed envelope, because both envelopes
+    /// *are* cubic eases and Core Animation's timing functions are cubic beziers. `BusyBreath` is
+    /// sampled instead only because its two eased stretches are power curves, which a bezier could
+    /// approximate and not express. `easeInEaseOut` is symmetric in time, so the return leg is the
+    /// same curve rather than a different one run backwards, and the mark is momentarily still at
+    /// each end.
+    ///
+    /// Half of `period`, because `autoreverses` plays the return leg: one pulse is two of these.
+    final func pulse(
+        _ keyPath: String,
+        from: Double,
+        to: Double,
+        period: TimeInterval,
+        frameRate: CAFrameRateRange
+    ) -> CABasicAnimation {
+        let animation = CABasicAnimation(keyPath: keyPath)
+        animation.fromValue = from
+        animation.toValue = to
+        animation.duration = period / 2
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        animation.autoreverses = true
+        animation.preferredFrameRateRange = frameRate
+        return animation
+    }
 }

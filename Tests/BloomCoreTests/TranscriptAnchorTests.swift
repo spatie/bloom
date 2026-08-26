@@ -159,4 +159,61 @@ struct TranscriptAnchorTests {
     func shortContentIsAtItsEnd() {
         #expect(TranscriptAnchor.isAtEnd(offset: 0, contentHeight: 300, viewportHeight: 800))
     }
+
+    // MARK: - Where the reader goes when something moves under them
+
+    /// The slip this function exists to stop coming back. `TranscriptTable` wrote the rule out
+    /// three times and the resize path left `wasAtEnd` off, so a reader sitting at the live end
+    /// without having asked for it was thrown back to their top row by a divider drag.
+    @Test("a reader at the end who never asked for it is still kept there")
+    func atTheEndWithoutAsking() {
+        #expect(
+            TranscriptAnchor.place(
+                holdsEnd: false, wasAtEnd: true, followerDriving: false, hasAnchor: true
+            ) == .end
+        )
+    }
+
+    @Test("a reader who scrolled away keeps their own row")
+    func scrolledAwayKeepsTheRow() {
+        #expect(
+            TranscriptAnchor.place(
+                holdsEnd: false, wasAtEnd: false, followerDriving: false, hasAnchor: true
+            ) == .anchor
+        )
+    }
+
+    @Test("asking for the end out loud survives everything")
+    func holdingTheEndWins() {
+        for driving in [false, true] {
+            for wasAtEnd in [false, true] {
+                #expect(
+                    TranscriptAnchor.place(
+                        holdsEnd: true, wasAtEnd: wasAtEnd,
+                        followerDriving: driving, hasAnchor: true
+                    ) == .end
+                )
+            }
+        }
+    }
+
+    /// Two things pinning one clip view is the instant pin winning with the travel invisible
+    /// underneath it, so the follower keeps the view for as long as it is driving.
+    @Test("the follower driving takes the end away from a reader who only happened to be at it")
+    func followerOutranksHavingBeenAtTheEnd() {
+        #expect(
+            TranscriptAnchor.place(
+                holdsEnd: false, wasAtEnd: true, followerDriving: true, hasAnchor: true
+            ) == .anchor
+        )
+    }
+
+    @Test("nothing to anchor to is nothing to do")
+    func noAnchorIsNoMove() {
+        #expect(
+            TranscriptAnchor.place(
+                holdsEnd: false, wasAtEnd: false, followerDriving: false, hasAnchor: false
+            ) == .stay
+        )
+    }
 }

@@ -68,7 +68,7 @@ enum ScrollProbe {
         // is one whose rows are still being measured, and every one of those measurements lands
         // on the main thread inside a frame somebody is waiting for.
         let heightBefore = scroll.documentView?.frame.height ?? 0
-        let travel = ProbeHarness.scrollableHeight(of: scroll)
+        let travel = scroll.endOffset
         guard travel > 1 else {
             harness.fail("the transcript is shorter than its viewport, so there is nothing to scroll")
         }
