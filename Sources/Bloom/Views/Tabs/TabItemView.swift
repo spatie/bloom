@@ -16,7 +16,10 @@ struct TabItemView: View {
     /// Every kind carries one, including a chat: a strip with a glyph on two tabs of three reads
     /// as a row that has lost an icon. Still optional, because the bottom panel's setup log and
     /// run scripts are named after the script and have nothing to add.
-    var icon: String?
+    ///
+    /// A `TabItemIcon` rather than a symbol name, because a browser tab wears the page's own
+    /// favicon and that is a picture rather than a glyph. See `TabItemIcon`.
+    var icon: TabItemIcon?
     var isActive: Bool
     var isRunning = false
     /// Whether this tab's leading edge is the leading edge of the pane itself, which is true of
@@ -102,9 +105,9 @@ struct TabItemView: View {
             }
 
             if let icon {
-                Image(systemName: icon)
-                    .imageScale(.small)
-                    .foregroundStyle(isActive ? surface.ink : Palette.textSecondary)
+                TabItemIconView(
+                    icon: icon, ink: isActive ? surface.ink : Palette.textSecondary
+                )
             }
 
             if isRenaming {
