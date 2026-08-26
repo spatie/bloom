@@ -110,6 +110,7 @@ struct ProbeHarness {
     ///
     /// The wait loop is a loop because there is no window for the first moments of a launch, and
     /// a probe that asked once got nil and reported nothing at all.
+
     /// **`--window-hidden`: a run the owner cannot see.**
     ///
     /// `open -g` keeps a probe from taking the keyboard, and it does not keep a 1,440 point window
@@ -131,7 +132,11 @@ struct ProbeHarness {
         async let hiding: Void = hideWindowsAsTheyOpen()
         await settle()
         await hiding
-        for _ in 0..<60 {
+        // A minute rather than fifteen seconds. Several agents build on this Mac at once, the load
+        // average has been over two hundred, and a debug build opening a window on a loaded
+        // machine is not a fifteen second operation. A run that gave up early reported "no window
+        // to probe", which reads as a broken app rather than as a slow one.
+        for _ in 0..<240 {
             let candidate = NSApp.windows.first {
                 $0.isVisible && $0.contentView != nil && $0.parent == nil
                     && $0.styleMask.contains(.titled)
@@ -141,8 +146,22 @@ struct ProbeHarness {
                 await resize(candidate)
                 return (candidate, content)
             }
+            // **A background launch does not always open the scene.** `open -g` is how a probe
+            // stays out of the owner's way, and a `Window` scene launched that way can come up
+            // with no window at all: `NSApp.windows` was empty eighteen seconds in, and a run
+            // that had worked all evening began reporting a broken transcript instead. This is
+            // what a click on the Dock icon does, and it takes no focus.
+            if NSApp.windows.isEmpty, let delegate = NSApp.delegate {
+                _ = delegate.applicationShouldHandleReopen?(NSApp, hasVisibleWindows: false)
+            }
             try? await Task.sleep(for: .milliseconds(250))
         }
+        // Every window, not the filtered set, because "no window to probe" has twice meant "a
+        // window this predicate declined" rather than "no window".
+        let all = NSApp.windows.map {
+            "\($0.title)|\(type(of: $0))|vis=\($0.isVisible)|titled=\($0.styleMask.contains(.titled))|parent=\($0.parent != nil)"
+        }
+        FileHandle.standardError.write(Data("all windows: \(all)\n".utf8))
         fail("no window to probe")
     }
 

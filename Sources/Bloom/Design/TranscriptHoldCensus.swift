@@ -45,6 +45,13 @@ enum TranscriptHoldCensus {
     /// there. See `TranscriptTable.Coordinator.scheduleSettle`.
     private(set) static var screenEstimatedSettled = 0
     private(set) static var screenWrongSettled = 0
+    /// **What a correction costs the table.** Every `noteHeightOfRows` call, the rows in them, and
+    /// every time a correction wrote the scroll offset to keep the reader where they were. A
+    /// scroll upwards draws rows nobody has drawn before, so all three climb with distance, which
+    /// is what "the higher I go the more stuttery it gets" is made of.
+    private(set) static var noteCalls = 0
+    private(set) static var notedRows = 0
+    private(set) static var placeWrites = 0
 
     static func held(_ what: TranscriptPaneHold.PaneHeld, underAHand hand: Bool, liveResize: Bool) {
         switch what {
@@ -77,6 +84,15 @@ enum TranscriptHoldCensus {
         }
     }
 
+    /// One `noteHeightOfRows`, and how many rows it named.
+    static func noted(rows: Int) {
+        noteCalls += 1
+        notedRows += rows
+    }
+
+    /// One write of the scroll offset that actually moved it.
+    static func placed() { placeWrites += 1 }
+
     /// One batch of corrections, and the ones that did not take.
     static func corrected(rows: Int, uncorrected: Int) {
         correctedRows += rows
@@ -99,6 +115,9 @@ enum TranscriptHoldCensus {
         screensSeen = 0
         screenEstimatedSettled = 0
         screenWrongSettled = 0
+        noteCalls = 0
+        notedRows = 0
+        placeWrites = 0
     }
 
     static func summary() -> [String: Double] {
@@ -118,6 +137,9 @@ enum TranscriptHoldCensus {
             "screensSeen": Double(screensSeen),
             "screenEstimatedSettled": Double(screenEstimatedSettled),
             "screenWrongSettled": Double(screenWrongSettled),
+            "noteCalls": Double(noteCalls),
+            "notedRows": Double(notedRows),
+            "placeWrites": Double(placeWrites),
         ]
     }
 }

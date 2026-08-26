@@ -689,6 +689,7 @@ struct TranscriptTable: NSViewRepresentable {
                     (cell as? TranscriptTableCell)?.clips(whileGrowingFor: seconds)
                 }
             }
+            TranscriptHoldCensus.noted(rows: rows.count)
             NSAnimationContext.beginGrouping()
             NSAnimationContext.current.duration = seconds
             if seconds > 0 {
@@ -911,6 +912,7 @@ struct TranscriptTable: NSViewRepresentable {
             // which is what `TranscriptAnchor.isAtEnd` allows for a clip view's rounding, would
             // refuse a real correction.
             guard abs(clip.bounds.origin.y - target) > 0.01 else { return }
+            TranscriptHoldCensus.placed()
             // So that the escape in `clipMoved` does not read this file's own arrival at the end
             // as the reader scrolling away from it.
             isPutting = true
