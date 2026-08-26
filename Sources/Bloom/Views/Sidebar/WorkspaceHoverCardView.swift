@@ -173,12 +173,12 @@ struct WorkspaceHoverCardView: View {
 
     /// The card's own ground.
     ///
-    /// `MenuPanel` is the app's floating card and this is deliberately not it. `MenuPanel` blends
-    /// `.withinWindow` and carries a SwiftUI shadow, both of which are right for something drawn
-    /// inside the composer's window and neither of which is right here: this card IS a window, so
-    /// the material has to blend with what is behind the window rather than with the window, and
-    /// the shadow is AppKit's to draw around the panel's alpha. What is kept is the shape and the
-    /// rim, so the two read as one family.
+    /// `MenuPanel` is the app's floating card and this is deliberately not it. `MenuPanel` samples
+    /// the window it is drawn in (glass since macOS 26, `.withinWindow` vibrancy before that) and
+    /// carries a SwiftUI shadow, both of which are right inside the composer's window and neither
+    /// of which is right here: this card IS a window, so the material has to blend with what is
+    /// behind the window rather than with the window, and the shadow is AppKit's to draw around
+    /// the panel's alpha. What is kept is the shape and the rim, so the two read as one family.
     private var cardBackground: some View {
         VisualEffectBackground(material: .menu, blending: .behindWindow)
             // Clipped rather than filled through a shape, because the material is a view rather
