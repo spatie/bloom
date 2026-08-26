@@ -7,7 +7,7 @@ import BloomCore
 ///
 /// It starts at the end of `bootstrap`, after `isLoaded`, and nothing waits for it: a database
 /// full of months of transcripts must not add a second to a launch, and an index that arrives a
-/// few seconds late costs the user nothing because the search screen says so while it works. One
+/// few seconds late costs the user nothing because Home says so under the results while it works. One
 /// batch at a time with a yield in between, so a turn arriving mid backfill queues behind a batch
 /// rather than behind the whole of history, and the loop stops as soon as the store says it is
 /// finished. Cancelling it (quitting) loses nothing: the cursor is committed with each batch, so
@@ -41,8 +41,9 @@ extension AppModel {
         }
     }
 
-    /// Runs the transcript half of the search screen. The name and branch half stays synchronous
-    /// in `search`, so the two lists never wait for each other.
+    /// Runs the transcript half of a search. The name and branch half is `HomeList.build`, over an
+    /// array already in memory, so the two halves never wait for each other: the names are on
+    /// screen before this has left the main actor.
     func searchTranscripts(_ query: String) {
         transcriptSearchTask?.cancel()
         guard TranscriptSearch.matchExpression(for: query) != nil else {

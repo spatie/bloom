@@ -155,14 +155,16 @@ final class AppModel {
     /// Non-nil while an archive is waiting for the user to confirm that the work it would destroy
     /// really is expendable. RootView presents the confirmation from this.
     var pendingArchive: ArchiveRequest?
-    var searchQuery = ""
-    /// The transcript half of the search screen, one row per workspace. Held here rather than in
-    /// `SearchView` for the same reason `searchQuery` is: the screen is destroyed and rebuilt
-    /// every time the selection leaves it, and a result list that had to be fetched again on the
-    /// way back would flash empty.
+    /// The transcript half of a search, one row per workspace. Held here rather than in `HomeView`
+    /// for the same reason `homeFilter` is: the pane is destroyed and rebuilt every time the
+    /// selection leaves Home, and a result list that had to be fetched again on the way back would
+    /// flash empty.
+    ///
+    /// There is no `searchQuery` beside it any more. The Search screen had one and Home's field
+    /// had another; there is one field in the window now and `homeFilter.query` is it.
     var transcriptResults: [TranscriptWorkspaceMatches] = []
-    /// True while there is transcript history the index has not reached yet, so the search screen
-    /// can say that the answer is still filling in rather than quietly showing half of it.
+    /// True while there is transcript history the index has not reached yet, so a search can say
+    /// that the answer is still filling in rather than quietly showing half of it.
     var isTranscriptIndexIncomplete = false
     /// Set by a transcript result on its way to a workspace, read once by the transcript that
     /// arrives there. See `AppModel+TranscriptSearch`.
@@ -172,19 +174,19 @@ final class AppModel {
     /// keystroke handler is a mid-update mutation this file avoids everywhere else.
     @ObservationIgnored var transcriptSearchTask: Task<Void, Never>?
     @ObservationIgnored var transcriptBackfillTask: Task<Void, Never>?
-    /// What Home's list is narrowed to.
+    /// What Home's list is narrowed to: what was typed into the window's search field, which chip
+    /// is lit, which projects are listed.
     ///
-    /// Here rather than in `HomeView`'s `@State` for the same reason `searchQuery` is: `HomeView`
-    /// is destroyed and rebuilt every time the selection leaves Home and comes back, so a filter
-    /// held in the view is silently cleared by opening any workspace at all. A user who narrows
-    /// the list to one project, opens something from it and comes back to a list of everything
-    /// has been overruled by the app without being told.
+    /// Here rather than in `HomeView`'s `@State`, because `HomeView` is destroyed and rebuilt
+    /// every time the selection leaves Home and comes back, so a filter held in the view is
+    /// silently cleared by opening any workspace at all. A user who narrows the list to one
+    /// project, opens something from it and comes back to a list of everything has been overruled
+    /// by the app without being told. The query has the same problem twice over: the field is in
+    /// the window's toolbar and stays on screen when Home does not.
     ///
-    /// Deliberately not persisted to disk. "Hide archived" is something you turn on to get through
-    /// a long list, not a preference, and an app that starts up with a third of the machine's work
+    /// Deliberately not persisted to disk. A scope is something you click to get through a long
+    /// list, not a preference, and an app that starts up with a third of the machine's work
     /// missing because of something you did last Tuesday has to be worked out rather than read.
-    /// A launch state that hides rows is worse than one that shows them, so this matters more now
-    /// that the switch narrows the list rather than widening it.
     var homeFilter = HomeFilter()
     var isCreatingWorkspace = false
 
@@ -916,8 +918,8 @@ final class AppModel {
     ///
     /// What the title says, so that reading an archived transcript names it rather than falling
     /// back to "Bloom". The Workspace menu no longer asks: what a menu item acts on is
-    /// `WorkspaceMenuSubject`, which also hears about a row highlighted on Home or in the Archive,
-    /// and which decides per item whether an archived workspace can answer it at all.
+    /// `WorkspaceMenuSubject`, which also hears about a row highlighted on Home, and which decides
+    /// per item whether an archived workspace can answer it at all.
     var menuWorkspace: Workspace? {
         selectedWorkspace ?? selectedArchivedWorkspace
     }

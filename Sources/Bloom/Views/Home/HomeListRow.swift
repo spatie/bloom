@@ -98,6 +98,22 @@ struct HomeListRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
 
+                // Why this row is in a search, when the answer is not on the row already.
+                //
+                // The search reaches the name, the branch and the project, so a perfect answer can
+                // have nothing on it that looks like what was typed: searching a branch name gave
+                // a list of workspaces with no visible connection to the query at all. Drawn only
+                // while searching, and only for the two fields the row does not otherwise show.
+                // See `HomeRow.match`.
+                if let match = row.match {
+                    Text(match)
+                        .font(Typo.codeTiny)
+                        .foregroundStyle(Palette.textTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .layoutPriority(-1)
+                }
+
                 // Right after the name, the same place the sidebar puts it, so one workspace is
                 // marked in one way in both lists. No accessibility label of its own: this row is
                 // merged into a single element below, which would swallow it, so the colour is
@@ -290,6 +306,9 @@ struct HomeListRow: View {
     private var accessibilityLabel: String {
         var parts = [workspace.name]
         if let repo = row.repo { parts.append("in \(repo.name)") }
+        // Said out loud, because on a search this is the only thing on the row that explains why
+        // the row is there at all.
+        if let match = row.match { parts.append("matched \(match)") }
         parts.append(statusDescription)
         if let colour = workspace.colourDescription { parts.append("colour \(colour)") }
         if workspace.pinned { parts.append("pinned") }

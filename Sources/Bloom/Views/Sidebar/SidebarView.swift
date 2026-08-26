@@ -88,20 +88,23 @@ struct SidebarView: View {
 
     var body: some View {
         List(selection: $listSelection) {
+            // One row, and it is the root of the list rather than one of three destinations:
+            // Mail's All Inboxes, Photos' Library. Search and Archive were here, and both were
+            // the same list of workspaces Home draws. Search is a field in the window's toolbar
+            // now and the archive is a chip on Home; what the Archive screen held that Home did
+            // not is Settings > Storage. See `HomeScope`.
+            //
+            // Their sixty points are not refilled. The Projects heading moves up to sit under the
+            // title bar, which is where a source list's content begins in Finder, in Mail and in
+            // Xcode.
             Section {
                 navRow(.home, title: "Home", icon: "house")
-                navRow(.search, title: "Search", icon: "magnifyingglass")
-                // Third rather than second, and permanent rather than appearing once something has
-                // been archived. A row that comes and goes is a row nobody learns the position of,
-                // and this one is worth finding when a database has grown rather than only when
-                // somebody happens to remember it exists.
-                navRow(.archive, title: "Archive", icon: "archivebox")
             }
 
             // A plain row rather than a `Section` header, because the things it heads are
             // themselves sections and a list cannot nest one inside another. It carries no tag
-            // and refuses selection, so it stays a label. Home and Search keep their own section
-            // above it, which is what stops them reading as the first two projects.
+            // and refuses selection, so it stays a label. Home keeps its own section above it,
+            // which is what stops it reading as the first project.
             SidebarProjectsHeader(onAddProject: addProject)
                 .selectionDisabled()
                 .listRowSeparator(.hidden)
@@ -524,12 +527,12 @@ struct SidebarView: View {
         .selectedRowInk(isEmphasized: isEmphasized(target))
     }
 
-    /// One of the three places the pane can take you, as a row of the list.
+    /// The root of the pane, as a row of the list. There used to be three of these.
     ///
     /// The mark is inked by `SidebarNavRow` rather than left to the label, and that is the second
     /// half of the "two kinds of blue" this file was changed for. A `Label` in a source list draws
-    /// its symbol in `controlAccentColor`, so Search and Archive were the user's blue sitting a
-    /// row away from a selection that is now Bloom's: the same disagreement, one rung quieter.
+    /// its symbol in `controlAccentColor`, so a nav row was the user's blue sitting a row away
+    /// from a selection that is now Bloom's: the same disagreement, one rung quieter.
     private func navRow(_ target: SidebarSelection, title: String, icon: String) -> some View {
         SidebarNavRow(title: title, icon: icon)
             .tag(target)

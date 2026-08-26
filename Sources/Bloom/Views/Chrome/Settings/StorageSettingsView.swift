@@ -1,18 +1,26 @@
 import SwiftUI
 import BloomCore
 
-/// Everything that has been archived, what each row still costs, and the one way to destroy it.
+/// The Storage pane: what the finished work costs, and the one way to destroy it.
 ///
-/// Archived workspaces have been readable since `ArchivedWorkspaceView`, one at a time, reached
-/// from a greyed row on Home. What there has never been is the other view of them: all of them at
-/// once, in the order that matters when a database has grown, with the number that says which one
-/// is worth doing anything about. A workspace an agent worked in for a week can hold hundreds of
-/// megabytes of transcript, and until now nothing in Bloom could say so or take it back.
+/// **This was a screen in the sidebar and it should not have been.** The Archive row was two
+/// things wearing one name. Half of it was a list of archived workspaces, which Home has always
+/// drawn, in date order, greyed, opening the same reader; that half was a second copy and it is
+/// gone. The other half exists nowhere else in the app: the bytes each workspace still holds, the
+/// share bar that says which two of the thirty are the whole problem, ordering by size,
+/// multi-select, a permanent delete with no undo behind it, the size of the database and the
+/// button that gives the space back. That is storage management, and it must not sit on the
+/// screen the app opens with, next to an ordinary "open this" click.
 ///
-/// Every decision on this screen is `ArchiveCleanup`, `ArchivedWorkspaceFootprint` and
-/// `ArchiveDeletion` in the core: what the bytes are, how the list is ordered, what the
-/// confirmation says. What is left here is where the pixels go.
-struct ArchiveView: View {
+/// So it is a Settings tab, which is where a Mac publishes exactly this: System Settings >
+/// General > Storage, Xcode's Components, Music's Files. It is not a Form like the panes beside
+/// it, because none of those has a table in it and this is nothing but a table; the same argument
+/// System Settings makes by not putting its Storage pane in one.
+///
+/// Every decision here is `ArchiveCleanup`, `ArchivedWorkspaceFootprint` and `ArchiveDeletion` in
+/// the core: what the bytes are, how the list is ordered, what the confirmation says. What is
+/// left is where the pixels go.
+struct StorageSettingsView: View {
     @Environment(AppModel.self) private var app
 
     @State private var cleanup = ArchiveCleanup(footprints: [])
@@ -23,6 +31,11 @@ struct ArchiveView: View {
     @State private var confirming: ArchiveDeletion?
     @State private var isLoaded = false
     @State private var isCompacting = false
+    /// Why nothing was deleted, presented by this pane rather than by `app.alert`.
+    ///
+    /// `AppModel.alert` is raised in the main window, and this pane is in the Settings window, so
+    /// a refused delete would have put its explanation behind whatever the user was looking at.
+    @State private var refusal: String?
 
     /// Where the size column starts, so every figure in the list is right aligned against the same
     /// edge whatever it says. A column that shifts by the width of "1.2 GB" is a column the eye
@@ -43,14 +56,14 @@ struct ArchiveView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.windowBackground)
-        // What the Workspace menu acts on while this screen is up. The sidebar's selection here is
-        // `.archive`, which names no workspace, so a row highlighted in this list used to leave
-        // Restore and Copy Branch Name greyed out with the workspace they name under the pointer.
-        // Only a single selection publishes: a menu item that acts on one workspace has nothing to
-        // say about eight ticked rows, and the Delete below is what those are for.
-        .focusedValue(\.focusedWorkspaceRow, focusedRow)
-        // Delete on the selection, which is this screen's own verb. It goes through the same
-        // confirmation the menu and the row both use, because there is no undo for this one.
+        // Delete on the selection, which is this pane's own verb. It goes through the same
+        // confirmation the row's own menu uses, because there is no undo for this one.
+        //
+        // The Workspace menu is not published to any more. It used to be, because this list was
+        // in the main window and a row highlighted here left Restore and Copy Branch Name greyed
+        // out with the workspace they name under the pointer. In the Settings window those items
+        // are greyed by `MainWindowFocus` whatever this says, which is right: the menu bar acts
+        // on the window being used.
         .onDeleteCommand {
             guard !selected.isEmpty else { return }
             confirming = ArchiveDeletion(cleanup.selected(selected, order: order))
@@ -66,6 +79,14 @@ struct ArchiveView: View {
             )
         } onConfirm: { deletion in
             Task { await delete(deletion) }
+        }
+        .alert(
+            "Nothing was deleted",
+            isPresented: $refusal.isPresent(),
+            presenting: refusal
+        ) { _ in
+        } message: { sentence in
+            Text(sentence)
         }
     }
 
@@ -104,13 +125,6 @@ struct ArchiveView: View {
         .padding(.horizontal, Metrics.gutter)
         .frame(height: Metrics.barHeight)
         .tabStripMaterial()
-    }
-
-    /// The one highlighted row, offered to the menu bar. See `FocusedMenuValues`.
-    private var focusedRow: FocusedWorkspaceRow? {
-        guard selected.count == 1, let id = selected.first,
-              let footprint = cleanup.footprints.first(where: { $0.id == id }) else { return nil }
-        return FocusedWorkspaceRow(workspace: footprint.workspace, isArchived: true)
     }
 
     private var summaryOfEverything: String {
@@ -165,8 +179,12 @@ struct ArchiveView: View {
                         isHovered: hovered == footprint.id
                     ))
                     .contextMenu {
-                        Button("Read the Transcript") { app.openArchived(footprint.workspace) }
-                        Divider()
+                        // No "Read the Transcript" here any more. It would move the main window's
+                        // selection from a Settings window that is in front of it, so the gesture
+                        // would look like it had done nothing at all. Reading an archived
+                        // workspace is Home's job and always was: its Archived chip is the same
+                        // list of rows, and clicking one opens the reader.
+                        //
                         // Through `ArchiveCleanup.target` rather than straight to this row,
                         // and the selection is moved to whatever comes back. That keeps the one
                         // thing this screen cannot afford to get wrong: the strip's count and the
@@ -332,9 +350,7 @@ struct ArchiveView: View {
         // silence: the rows all came back on the reload with nothing ticked and nothing said, so
         // the gesture looked like it had worked on nothing.
         if outcome.didDelete { selected = [] }
-        if let sentence = outcome.sentence {
-            app.alert = BloomAlert(title: "Nothing was deleted", message: sentence)
-        }
+        refusal = outcome.sentence
         await load()
     }
 

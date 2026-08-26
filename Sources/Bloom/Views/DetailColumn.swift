@@ -17,16 +17,12 @@ struct DetailColumn: View {
             switch app.selection {
             case .home:
                 HomeView()
-            case .search:
-                SearchView()
             case .workspace(let id):
                 workspace(id)
             case .subagent(let workspaceID, let subagentID):
                 subagent(subagentID, in: workspaceID)
             case .archived(let id):
                 archived(id)
-            case .archive:
-                ArchiveView()
             }
         }
     }

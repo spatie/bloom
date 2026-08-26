@@ -6,9 +6,13 @@ import Foundation
 /// decision nothing can test. The one that matters is the last: `.workspace(id)` and
 /// `.archived(id)` are different values with different hashes, which is what stops an archived
 /// workspace being reopened as a live one.
+/// It is one case shorter than it looks, and two shorter than it was. `.search` and `.archive`
+/// were destinations of their own, and both were the same list of workspaces Home already draws:
+/// searching is a state of Home, reached from the window's own search field, and the archive is a
+/// scope on it. What the Archive screen held that Home did not, the bytes each finished workspace
+/// still costs, is Settings > Storage now. See `HomeScope`.
 public enum SidebarSelection: Hashable, Sendable {
     case home
-    case search
     case workspace(WorkspaceID)
     /// An archived workspace, open for reading.
     ///
@@ -20,12 +24,6 @@ public enum SidebarSelection: Hashable, Sendable {
     /// hides itself, the menu items grey, the background refresh skips it and nothing tries to
     /// reopen it on the next launch.
     case archived(WorkspaceID)
-    /// The list of everything that has been archived, with what each row still costs.
-    ///
-    /// A screen beside Home and Search rather than a settings pane, because it is a list of
-    /// workspaces and the sidebar is where this app keeps those. Settings holds preferences, and
-    /// which transcripts to destroy is not one.
-    case archive
     /// One subagent of the turn running in a workspace, open for reading.
     ///
     /// **It carries its workspace, and `workspaceID` returns it.** That one line is the whole

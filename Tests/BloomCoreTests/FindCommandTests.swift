@@ -16,7 +16,8 @@ struct FindCommandTests {
     }
 
     /// And what Cmd+F has always done is still on the end of it, so nothing that worked stops
-    /// working.
+    /// working. Only the target moved: it lands in the window's own search field rather than on a
+    /// sidebar screen, which is the same Xcode split it always described.
     @Test("a pane that cannot find falls through to the workspace search")
     func fallsThroughToSearch() {
         #expect(FindCommand.find(canFindInPlace: false, hasProjects: true) == .workspaceSearch)

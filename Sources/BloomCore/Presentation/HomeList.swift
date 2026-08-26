@@ -9,10 +9,21 @@ import Foundation
 public struct HomeRow: Identifiable, Hashable, Sendable {
     public var workspace: Workspace
     public var repo: Repo?
+    /// The text that put this row in a search, when it was not the name.
+    ///
+    /// `WorkspaceSearch.match` searches the name, the branch and the project, so a row can be a
+    /// perfect answer with nothing on it that looks like what was typed: searching a branch name
+    /// used to produce a list of workspaces with no visible connection to the query at all. The
+    /// row says which field answered instead.
+    ///
+    /// Nil outside a search, and nil when the name itself matched, because then the row is already
+    /// showing it.
+    public var match: String?
 
-    public init(workspace: Workspace, repo: Repo? = nil) {
+    public init(workspace: Workspace, repo: Repo? = nil, match: String? = nil) {
         self.workspace = workspace
         self.repo = repo
+        self.match = match
     }
 
     public var id: WorkspaceID { workspace.id }
@@ -38,16 +49,23 @@ public struct HomeGroup: Identifiable, Hashable, Sendable {
 
 /// What Home is showing, and enough about what it is not showing to explain itself.
 ///
-/// The counts are the reason this is one value rather than an array of groups. Four different
+/// The counts are the reason this is one value rather than an array of groups. Several different
 /// empty screens are reachable (nothing exists, nothing matches the search, nothing is in the
-/// chosen projects, everything is archived and archived is hidden), and telling them apart from
-/// an empty array alone is impossible.
+/// chosen projects, nothing is in the chosen scope), and telling them apart from an empty array
+/// alone is impossible. `counts` is the other half of it: every chip on the strip carries its own
+/// number, and they are worked out in this one pass rather than in five more.
 public struct HomeListing: Sendable {
     public var groups: [HomeGroup]
-    /// Rows in the list, after every filter.
+    /// The transcripts that matched, one entry per workspace. Empty outside a search, because the
+    /// index is only asked when there is something to ask it.
+    public var transcripts: [TranscriptWorkspaceMatches]
+    public var counts: HomeScopeCounts
+    /// Whether the field has something in it, which decides both which chips are offered and
+    /// whether the rows are bucketed by date or gathered under one heading.
+    public var isSearching: Bool
+    /// Workspace rows in the list, after every filter.
     public var shown: Int
-    /// Workspaces the filters were applied to, archived ones included unless they are being
-    /// hidden.
+    /// Workspaces the filters were applied to, archived ones included.
     public var considered: Int
     /// Archived workspaces that exist, whether or not they are being shown.
     public var archived: Int
@@ -55,9 +73,19 @@ public struct HomeListing: Sendable {
     public var shownArchived: Int
 
     public init(
-        groups: [HomeGroup], shown: Int, considered: Int, archived: Int, shownArchived: Int
+        groups: [HomeGroup],
+        transcripts: [TranscriptWorkspaceMatches] = [],
+        counts: HomeScopeCounts = HomeScopeCounts(),
+        isSearching: Bool = false,
+        shown: Int,
+        considered: Int,
+        archived: Int,
+        shownArchived: Int
     ) {
         self.groups = groups
+        self.transcripts = transcripts
+        self.counts = counts
+        self.isSearching = isSearching
         self.shown = shown
         self.considered = considered
         self.archived = archived
@@ -68,44 +96,53 @@ public struct HomeListing: Sendable {
         groups: [], shown: 0, considered: 0, archived: 0, shownArchived: 0
     )
 
-    public var isEmpty: Bool { groups.isEmpty }
+    /// Nothing in the pane at all, which is what raises the empty state. A search that found
+    /// transcripts and no names is not empty, so both halves are asked.
+    public var isEmpty: Bool { groups.isEmpty && transcripts.isEmpty }
 }
 
-/// The filter Home's controls add up to.
+/// The filter Home's controls add up to: the window's search field, the chips and the project
+/// menu.
 public struct HomeFilter: Equatable, Sendable {
+    /// What was typed into the window's search field.
+    ///
+    /// One query, not two. Home had a field of its own and the Search screen had another; both
+    /// matched by the same rule, drew the answer two different ways and kept two keyboard models
+    /// alive to walk them.
     public var query = ""
     /// Empty means every project. A set rather than an optional so "all" and "none chosen" are
     /// the same state, which is what stops the menu from reaching a configuration that shows
     /// nothing and offers no way back.
     public var projects: Set<RepoID> = []
-    /// Whether archived workspaces are being kept OUT of the list. Off by default, so Home opens
-    /// on everything on the machine.
+    /// Which chip is lit. `all` includes archived work, so nothing on this Mac is hidden behind a
+    /// control somebody has to remember to check.
     ///
-    /// It was the other way round, `showsArchived`, defaulting to off, and the inversion is not a
-    /// rename. Home is the flat list of every workspace on this Mac and it is the only screen that
-    /// lists an archived one at all, so a default that hid them meant the one place they could be
-    /// found never showed them until you knew to ask. Turning the default around leaves a switch
-    /// that only ever adds rows nobody hid, which is a control with no job, so it became the
-    /// narrowing it now is: a way to put a machine with two hundred finished workspaces back down
-    /// to the ones still being worked in.
-    public var hidesArchived = false
+    /// This replaced a "Hide archived" switch, and `HomeScope.live` is what that switch did. A
+    /// scope rather than a switch of its own, because the switch was a second narrowing mechanism
+    /// beside the field with its own state, its own empty state and its own clause in the summary
+    /// line, all to answer a question the chips answer with a number attached.
+    public var scope: HomeScope = .all
 
-    public init(query: String = "", projects: Set<RepoID> = [], hidesArchived: Bool = false) {
+    public init(query: String = "", projects: Set<RepoID> = [], scope: HomeScope = .all) {
         self.query = query
         self.projects = projects
-        self.hidesArchived = hidesArchived
+        self.scope = scope
     }
+
+    /// What was typed, trimmed and lowercased, which is what every match here is made against.
+    public var needle: String { WorkspaceSearch.needle(query) }
+
+    public var isSearching: Bool { !needle.isEmpty }
 
     /// Whether the list is a subset of what was counted, which is what makes the readout say
     /// "Showing 11 of 312" rather than a bare total.
     ///
-    /// Hiding archived narrows the list too, and is deliberately not part of this. The two things
-    /// `isNarrowed` drives both compare `shown` against `considered`, and a hidden archived
-    /// workspace is never considered in the first place, so it would produce "Showing 11 of 11".
-    /// It is reported by the clause that says how many archived rows are being held back instead,
-    /// which is a number the shown-of-considered pair cannot carry.
+    /// The scope is deliberately not part of this, for the reason hiding archived was not part of
+    /// it before: every chip carries its own count an inch to the left of this readout, so a
+    /// scope that narrows the list is already saying so, with a number the shown-of-considered
+    /// pair cannot carry.
     public var isNarrowed: Bool {
-        !query.trimmingCharacters(in: .whitespaces).isEmpty || !projects.isEmpty
+        isSearching || !projects.isEmpty
     }
 }
 
@@ -121,11 +158,20 @@ public struct HomeFilter: Equatable, Sendable {
 /// target has no test target of its own. Every date input is injected, so the suite can stand a
 /// workspace either side of midnight without waiting for midnight.
 public enum HomeList {
+    /// - Parameters:
+    ///   - transcripts: what the full text index said about the query, which arrives from the
+    ///     store a moment after the names do and is empty until it has. It is passed in rather
+    ///     than fetched, because this runs on every keystroke over an array already in memory and
+    ///     the index query is a hop onto the store actor.
+    ///   - activity: which agents are running and which have stopped to ask, so the "Needs you"
+    ///     and "Running" chips can be counted here rather than by the view.
     public static func build(
         repos: [Repo],
         workspaces: [Workspace],
         archived: [Workspace],
+        transcripts: [TranscriptWorkspaceMatches] = [],
         filter: HomeFilter,
+        activity: HomeActivity = HomeActivity(),
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> HomeListing {
@@ -133,38 +179,118 @@ public enum HomeList {
         byID.reserveCapacity(repos.count)
         for repo in repos { byID[repo.id] = repo }
 
-        let needle = WorkspaceSearch.needle(filter.query)
+        let needle = filter.needle
+        let isSearching = filter.isSearching
         var considered = 0
-        var rows: [HomeRow] = []
-        rows.reserveCapacity(workspaces.count)
+        var counts = HomeScopeCounts()
+        // Everything the project filter and the query let through, before the chip is applied.
+        // The chips have to count what clicking them WOULD show, so a chip's own narrowing is
+        // never in its own number.
+        var matched: [HomeRow] = []
+        matched.reserveCapacity(workspaces.count)
 
         func consider(_ workspace: Workspace) {
             considered += 1
             if !filter.projects.isEmpty, !filter.projects.contains(workspace.repoID) { return }
             let repo = byID[workspace.repoID]
-            guard WorkspaceSearch.matchesOrIsUnfiltered(
-                workspace: workspace, repo: repo, needle: needle
-            ) else { return }
-            rows.append(HomeRow(workspace: workspace, repo: repo))
+            let field = WorkspaceSearch.match(workspace: workspace, repo: repo, needle: needle)
+            guard !isSearching || field != nil else { return }
+            let row = HomeRow(
+                workspace: workspace,
+                repo: repo,
+                // Only when it was not the name, which the row already draws.
+                match: field == workspace.name ? nil : field
+            )
+            matched.append(row)
+            if row.isArchived { counts.archived += 1 } else { counts.live += 1 }
+            if activity.needsYou(workspace) { counts.needsYou += 1 }
+            if activity.isRunning(workspace) { counts.running += 1 }
         }
 
         for workspace in workspaces { consider(workspace) }
-        if !filter.hidesArchived {
-            for workspace in archived { consider(workspace) }
+        for workspace in archived { consider(workspace) }
+        counts.workspaces = matched.count
+
+        let archivedIDs = Set(archived.map(\.id))
+        let hits = transcriptHits(
+            transcripts,
+            isSearching: isSearching,
+            projects: filter.projects,
+            workspaces: workspaces,
+            archived: archived
+        )
+        for hit in hits {
+            counts.transcripts += hit.total
+            counts.transcriptWorkspaces += 1
+            if archivedIDs.contains(hit.workspaceID) { counts.archived += hit.total }
         }
+
+        let rows = matched.filter { filter.scope.includes($0, activity: activity) }
+        let shownTranscripts = isSearching
+            ? hits.filter {
+                filter.scope.includesTranscript(isArchived: archivedIDs.contains($0.workspaceID))
+            }
+            : []
 
         // Recency, most recent first, and nothing else. Pinning is the sidebar's ordering, and a
         // pinned workspace from three weeks ago hoisted to the top would land under a "Today"
         // heading that is then a lie.
-        rows.sort { $0.workspace.lastActivityAt > $1.workspace.lastActivityAt }
+        let ordered = filter.scope.showsWorkspaces
+            ? rows.sorted { $0.workspace.lastActivityAt > $1.workspace.lastActivityAt }
+            : []
+
+        // Searching, the date buckets go. A result list ordered by when the work last happened,
+        // under headings that say "3 weeks ago", answers a question nobody asked: what was typed
+        // is the question, and the heading over the answer says which KIND of thing matched. It
+        // is still one `HomeGroup` in one `List`, which is what keeps the arrow keys and Return
+        // working with one keyboard model rather than two.
+        let groups = isSearching
+            ? (ordered.isEmpty ? [] : [HomeGroup(id: "workspaces", title: "Workspaces", rows: ordered)])
+            : group(ordered, now: now, calendar: calendar)
 
         return HomeListing(
-            groups: group(rows, now: now, calendar: calendar),
-            shown: rows.count,
+            groups: groups,
+            transcripts: shownTranscripts,
+            counts: counts,
+            isSearching: isSearching,
+            shown: ordered.count,
             considered: considered,
             archived: archived.count,
-            shownArchived: rows.count { $0.isArchived }
+            shownArchived: ordered.count { $0.isArchived }
         )
+    }
+
+    /// The transcript results the project menu leaves standing.
+    ///
+    /// The store answers about every workspace on the machine, so the project filter has to be
+    /// applied here or a list narrowed to one project would still show what the agents said in
+    /// the others. A result whose workspace is in neither list is dropped rather than kept
+    /// unfiltered: it has been deleted since the index was written, and there is nothing to open.
+    private static func transcriptHits(
+        _ transcripts: [TranscriptWorkspaceMatches],
+        isSearching: Bool,
+        projects: Set<RepoID>,
+        workspaces: [Workspace],
+        archived: [Workspace]
+    ) -> [TranscriptWorkspaceMatches] {
+        guard isSearching, !transcripts.isEmpty else { return [] }
+        var repoOf: [WorkspaceID: RepoID] = [:]
+        for workspace in workspaces { repoOf[workspace.id] = workspace.repoID }
+        for workspace in archived { repoOf[workspace.id] = workspace.repoID }
+
+        return transcripts.filter { result in
+            guard let repoID = repoOf[result.workspaceID] else { return false }
+            return projects.isEmpty || projects.contains(repoID)
+        }
+    }
+
+    /// The heading over the transcript results, which counts two things because one of them alone
+    /// misleads: "37 matches" over nine workspaces reads as a very long list, and "9 workspaces"
+    /// hides that most of them matched once.
+    public static func transcriptHeading(_ results: [TranscriptWorkspaceMatches]) -> String {
+        let matches = results.reduce(0) { $0 + $1.total }
+        return "In transcripts \u{00B7} \(ArchiveDeletion.count(matches, "match", plural: "matches")) "
+            + "in \(ArchiveDeletion.count(results.count, "workspace"))"
     }
 
     /// Walks the sorted rows once and starts a new group whenever the bucket changes. No sorting
@@ -277,44 +403,45 @@ public enum HomeList {
     ///
     /// Empty when there is nothing to describe. The strip is not drawn then, and on a machine
     /// with no project there is nothing to count.
+    ///
+    /// **It says less than it used to, and that is the point.** It used to carry the archived
+    /// count and the running count as trailing clauses, because nothing else on the strip did.
+    /// Both of those are chips now, with their own numbers, six inches to the left of this
+    /// sentence, so repeating them here was the same fact printed twice on one line.
     public static func summary(
         listing: HomeListing,
-        isNarrowed: Bool,
-        projects: Int,
-        running: Int
+        filter: HomeFilter,
+        projects: Int
     ) -> String {
         guard listing.considered > 0 || listing.archived > 0 else { return "" }
 
-        // Everything on this Mac is archived and archived is being hidden. Said as one fact
-        // rather than as a number and then a correction: `considered` counts only what the
-        // archived switch let through, so the general shape below would report nothing at all
-        // about a machine that is full of work.
-        if !isNarrowed, listing.considered == 0, listing.archived > 0 {
-            return "\(ArchiveDeletion.count(listing.archived, "workspace")), all archived and hidden"
+        // Searching, the only fact worth carrying is how many answers came back, because the
+        // chips beside it have already split them by kind.
+        if listing.isSearching {
+            let found = listing.counts.count(of: filter.scope, searching: true)
+            return "\(ArchiveDeletion.count(found, "result")) for \u{201C}\(filter.query.trimmingCharacters(in: .whitespaces))\u{201D}"
         }
 
-        var text: String
-        if isNarrowed {
-            text = "Showing \(listing.shown) of \(ArchiveDeletion.count(listing.considered, "workspace"))"
-        } else {
-            text = ArchiveDeletion.count(listing.considered, "workspace")
-            if projects > 1 {
-                text += " across \(ArchiveDeletion.count(projects, "project"))"
-            }
+        if filter.isNarrowed {
+            return "Showing \(listing.shown) of \(ArchiveDeletion.count(listing.considered, "workspace"))"
         }
 
-        // Both ways round, for the same reason as the branch above: the count in front of this
-        // clause is a count of what the archived switch let through, so a machine with archived
-        // work it is not being shown has to hear about it here or nowhere. The first half is the
-        // ordinary case now that Home lists archived work by default, and it is worth saying:
-        // "48 workspaces" reads very differently once you know 30 of them are over.
-        if listing.shownArchived > 0 {
-            text += ", \(listing.shownArchived) archived"
-        } else if listing.archived > 0 {
-            text += ", \(listing.archived) archived hidden"
+        // What the machine holds, in the two halves the chips do not repeat: how it is spread
+        // over projects, and how much of it is finished. "48 workspaces" reads very differently
+        // once you know 30 of them are over.
+        var text = projects > 1
+            ? ArchiveDeletion.count(projects, "project")
+            : ArchiveDeletion.count(listing.considered, "workspace")
+
+        if projects > 1 {
+            text += " \u{00B7} \(listing.counts.live) live"
+        } else if listing.counts.archived > 0 {
+            text += ", \(listing.counts.live) live"
         }
 
-        if running > 0 { text += ", \(running) running" }
+        if listing.counts.archived > 0 {
+            text += ", \(listing.counts.archived) archived"
+        }
 
         return text
     }
