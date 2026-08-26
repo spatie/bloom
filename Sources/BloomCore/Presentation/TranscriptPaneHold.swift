@@ -12,12 +12,18 @@ import Foundation
 /// and the transcript keeps the size it had, the way Safari keeps a page while its sidebar moves,
 /// and the reflow happens once when the hand comes off.
 ///
-/// **An arrival.** Pointing a pane at another conversation measures the tail of it, and a beat
-/// later the four hundred rows behind that. Until both have landed the pane is a transcript in
-/// pieces: rows at the top, then a jump to the live end. So it is not drawn at all until it is in
-/// the place it belongs, and then it is faded in.
+/// **An arrival.** Pointing a pane at another conversation used to measure the whole window it
+/// opened: the tail, and a beat later the four hundred rows behind it. None of that is measured up
+/// front any more (see `TranscriptRowHeights.assumed`), so what is left is reading the rows and
+/// measuring the one screen the reader actually lands on. Until that has happened the pane is a
+/// transcript in pieces, so it is not drawn at all until it is in the place it belongs, and then
+/// it is faded in.
 ///
-/// One rule for both: hold, do the expensive thing, fade to it. `TranscriptHoldView` is the
+/// **A split** is the third, and it is an arrival: `CenterPanesView` deliberately changes a pane's
+/// `ForEach` identity when a tab goes from one pane to two, so the chat is rebuilt rather than
+/// resized and has no pixels of its own to keep.
+///
+/// One rule for all three: hold, do the expensive thing, fade to it. `TranscriptHoldView` is the
 /// mechanism, and this is the part that can be tested.
 public enum TranscriptPaneHold {
     /// Whether a width change is worth holding the transcript for.
@@ -45,8 +51,13 @@ public enum TranscriptPaneHold {
     /// unfreezes anyway.
     public static let quietUnderAHand: Duration = .seconds(2)
 
-    public static func letsGo(underAHand: Bool) -> Duration {
-        underAHand ? quietUnderAHand : quiet
+    /// The deadline a hold of this kind is armed with, so that nothing has to arrive for it to
+    /// end. See `TranscriptHoldView.hold(_:)`, which arms one for every hold it takes.
+    public static func letsGo(of held: PaneHeld, underAHand: Bool) -> Duration {
+        switch held {
+        case .whatIsDrawn: underAHand ? quietUnderAHand : quiet
+        case .nothing: arrival
+        }
     }
 
     /// The longest a pane stays blank waiting for the conversation it has been pointed at.
@@ -57,6 +68,19 @@ public enum TranscriptPaneHold {
     /// measuring away. This is what covers a load that never returns, a task cancelled on its way
     /// there, and a session with nothing in it at all.
     public static let arrival: Duration = .seconds(1)
+
+    /// What a hold is holding, which is the whole of the difference between the triggers.
+    ///
+    /// Here rather than in the view, because the deadline and the rule above are decisions and a
+    /// decision taken inside a view is a decision nothing can test.
+    /// `TranscriptHoldView.Held` is this, spelled where the mechanism is.
+    public enum PaneHeld: Equatable, Sendable {
+        /// The pixels a pane already has, at the size it had them. A resize.
+        case whatIsDrawn
+        /// Nothing: the pane draws its own ground until it is ready. An arrival, and a split,
+        /// which is an arrival in a pane that has just been built.
+        case nothing
+    }
 
     /// The most rows measured either side of the ones on screen.
     ///

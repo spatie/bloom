@@ -15,20 +15,31 @@ extension Notification.Name {
 /// What a held transcript is asked to do. `TranscriptTable.Coordinator` is the only one.
 @MainActor
 protocol TranscriptHoldDelegate: AnyObject {
-    /// Stop applying anything: nothing is remeasured, nothing is reloaded, no row lands.
-    func holdBegan()
-    /// Lay out at the new width. True when anything actually moved.
-    func holdEnded() -> Bool
+    /// A hold has begun. What it is holding is the whole of the difference between the two.
+    func holdBegan(_ held: TranscriptHoldView.Held)
+    /// The pane may be drawn again. True when there was anything to show for the wait, which is
+    /// what decides whether the fade is worth playing.
+    func holdEnded(_ held: TranscriptHoldView.Held) -> Bool
     /// Stop being held, and lay out nothing: what was held belongs to a conversation the pane has
-    /// already left. See `holdForArrival`.
+    /// already left. See `hold(_:)`.
     func holdCancelled()
     var reducesMotion: Bool { get }
 }
 
-/// Holds a transcript back while the pane it is in is not ready to show it, and fades to it when
-/// it is. Twice: a pane being resized, and a pane being pointed at another conversation.
+/// **Holds a transcript back while its pane is not ready to show it, and fades to it when it is.**
 ///
-/// ## A resize
+/// One mechanism, one way in and one way out, asked by three triggers that differ in one thing
+/// only: what there is to hold. `hold(_:)` takes that as `Held` and `ready()` ends every one of
+/// them the same way.
+///
+/// - **A drag** halves or widens the pane under the reader's hand: `.whatIsDrawn`.
+/// - **A split** halves it too, but the pane is rebuilt rather than resized (see `CenterPanesView`,
+///   whose `ForEach` identity deliberately changes when a tab goes from one pane to two), so the
+///   arriving pane has no pixels of its own to keep: `.nothing`.
+/// - **An arrival**, which is a workspace switch, a tab switch and the pane's first conversation:
+///   `.nothing`, because what is on screen belongs to the conversation being left.
+///
+/// ## What `.whatIsDrawn` does
 ///
 /// **The trick is Safari's**, in the owner's words: dragging its sidebar does not redraw the page,
 /// the page appears beside the new edge at the size it already had, and the reflowed one is faded
@@ -39,34 +50,50 @@ protocol TranscriptHoldDelegate: AnyObject {
 /// own background, so the content neither stretches nor distorts: it is exactly the pixels that
 /// were there, in the place they were.
 ///
-/// **The fade is a `CATransition` rather than a picture we take.** `Snapshot` records the
-/// measurement: `cacheDisplay` misses anything whose content lives in a layer rather than in
-/// `draw(_:)`, and `layer.render(in:)` misses whole view controller hierarchies, so a bitmap of
-/// this pane is not something to build a crossfade on. A transition on this view's layer makes the
-/// render server crossfade what it already has against the next commit, and the reflow happens in
-/// that same commit, so the new layout is complete before a frame of the fade is drawn.
+/// ## What `.nothing` does
+///
+/// It draws the pane's own background and takes no clicks. A pane is NOT torn down by a workspace
+/// switch: the centre column hands the same view a different model and a different session, so
+/// without this the rows on screen for the moment after the switch are the conversation being
+/// left, then the tail lands at the top of the pane, then the view jumps to the live end. Three of
+/// those four states are a transcript nobody asked to see.
+///
+/// A picture of the pane's own last frame would be better than nothing here and is not available:
+/// `Snapshot` records the measurement that `cacheDisplay` misses anything whose content lives in a
+/// layer, and `layer.render(in:)` misses whole view controller hierarchies. What makes the blank
+/// acceptable is that it is short: nothing is measured up front any more, so a pane arrives in the
+/// time it takes to read its rows and measure one screen of them.
+///
+/// ## The fade, and letting go
+///
+/// The fade is a `CATransition` on this view's layer, for the same measurement: the render server
+/// crossfades what it already has against the next commit, and everything the reveal does happens
+/// in that commit, so the new layout is complete before a frame of the fade is drawn.
 ///
 /// **Every hold is armed to let go by itself.** A drag that is interrupted, a window zoomed or
-/// tiled, a display change, `--window-size`, and a pane taken off screen all end at
-/// `TranscriptPaneHold.quiet` after the last width change, which is 200ms. Nothing here needs an
-/// end event to arrive, which is why it is safe to hold for gestures that do not send one.
-///
-/// ## An arrival
-///
-/// The second thing this pane does that takes longer than a frame: see `holdForArrival`. The two
-/// holds cannot both be running, because a pane that has just been pointed at another conversation
-/// has nothing worth freezing, and `holdForArrival` ends a resize hold that was.
+/// tiled, a display change, `--window-size`, a pane taken off screen, a conversation that never
+/// loads: all of them end at a deadline in `TranscriptPaneHold`, without anything having to
+/// arrive. Nothing here needs an end event, which is why it is safe to hold for gestures and
+/// arrivals that do not send one.
 ///
 /// **Nothing held here can belong to another pane.** The frozen thing is this view's own scroll
-/// view, in place, and an arrival is drawn as nothing at all. There is no store of pictures to
-/// look a pane up in and therefore no way to reach the wrong one: the guarantee is the shape of
+/// view, in place, and everything else is drawn as nothing at all. There is no store of pictures
+/// to look a pane up in and therefore no way to reach the wrong one: the guarantee is the shape of
 /// the mechanism rather than a rule somebody has to keep.
 final class TranscriptHoldView: NSView {
+    /// What a hold is holding, which is the whole of the difference between the three triggers.
+    ///
+    /// The core's, under a shorter name. The deadline each kind is armed with is a decision and
+    /// lives with the other decisions; this is the mechanism, and the two must not be able to
+    /// disagree about what the kinds are.
+    typealias Held = TranscriptPaneHold.PaneHeld
+
     let scroll: NSScrollView
     weak var delegate: TranscriptHoldDelegate?
 
-    /// The frame the scroll view keeps for as long as the transcript is held, and nil when it is
-    /// following this view again.
+    /// What this pane is holding, and nil when it is drawing itself normally.
+    private(set) var held: Held?
+    /// The frame the scroll view keeps while `.whatIsDrawn` is on.
     private var frozen: NSRect?
     /// Whether a divider is known to be under a hand. See `bloomPaneResizeBegan`.
     private var isUnderAHand = false
@@ -74,10 +101,6 @@ final class TranscriptHoldView: NSView {
     /// SwiftUI happen to deliver it.
     private var lastWidth: CGFloat = 0
     private var letGo: Task<Void, Never>?
-    /// Whether this pane is waiting for the conversation it has been pointed at. See
-    /// `holdForArrival`.
-    private var isArriving = false
-    private var reveal: Task<Void, Never>?
 
     private static let fadeKey = "bloom.transcript.reveal"
 
@@ -109,7 +132,7 @@ final class TranscriptHoldView: NSView {
     /// the standing instruction to be at the live end off a transcript nobody can see yet, and the
     /// reader would be somewhere they never scrolled to when it fades in.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        isArriving ? nil : super.hitTest(point)
+        held == .nothing ? nil : super.hitTest(point)
     }
 
     // MARK: - Layout
@@ -129,44 +152,72 @@ final class TranscriptHoldView: NSView {
         scroll.frame = frozen ?? bounds
     }
 
-    // MARK: - Holding
+    // MARK: - The one way in
 
-    private func noteWidth(_ width: CGFloat) {
-        guard width != lastWidth else { return }
-        let before = lastWidth
-        lastWidth = width
-        guard window != nil, !isArriving else { return }
-        guard TranscriptPaneHold.holds(from: Double(before), to: Double(width)) else { return }
-        if frozen == nil {
+    /// **This pane is about to be laid out differently. Hold what is drawn, let the work happen,
+    /// and fade the result in.**
+    ///
+    /// Idempotent per kind: a drag that goes on changing the width re-arms the deadline rather
+    /// than starting a second hold. An arrival outranks a resize, because the pixels a resize was
+    /// keeping belong to a conversation this pane has just left.
+    func hold(_ what: Held) {
+        if held == what {
+            armLetGo()
+            return
+        }
+
+        if what == .nothing, frozen != nil {
+            // Cancelled rather than ENDED, and laid out on the next pass rather than this one,
+            // because an arrival is announced from inside `updateNSView` and a reflow reports
+            // geometry, which writes SwiftUI state.
+            frozen = nil
+            needsLayout = true
+            delegate?.holdCancelled()
+        }
+
+        held = what
+        switch what {
+        case .whatIsDrawn:
             // The frame the scroll view has NOW, which is the one it was laid out at.
             frozen = scroll.frame
-            TranscriptHoldCensus.held(underAHand: isUnderAHand, liveResize: inLiveResize)
-            delegate?.holdBegan()
+        case .nothing:
+            scroll.alphaValue = 0
         }
+        TranscriptHoldCensus.held(what, underAHand: isUnderAHand, liveResize: inLiveResize)
+        delegate?.holdBegan(what)
         armLetGo()
     }
 
-    private func armLetGo() {
-        letGo?.cancel()
-        let deadline = TranscriptPaneHold.letsGo(underAHand: isUnderAHand || inLiveResize)
-        letGo = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: deadline)
-            guard !Task.isCancelled else { return }
-            self?.release()
-        }
-    }
-
-    /// Lets the transcript out at the width the pane is now, and crossfades to it.
-    private func release() {
+    /// **The one way out.** The pane may be drawn again: reflow if the hold owes one, and fade to
+    /// whatever that leaves.
+    func ready() {
         letGo?.cancel()
         letGo = nil
-        guard frozen != nil else { return }
+        guard let what = held else { return }
+        held = nil
         frozen = nil
         fading {
             needsLayout = true
             // The scroll view takes the pane's width here, which is what tells the table it moved.
             layoutSubtreeIfNeeded()
-            return delegate?.holdEnded() ?? false
+            scroll.alphaValue = 1
+            // A reflow that finds nothing to do is a drag that ended where it started, and there
+            // is nothing to crossfade. An arrival always has something: the conversation.
+            let moved = delegate?.holdEnded(what) ?? false
+            return what == .nothing || moved
+        }
+        TranscriptHoldCensus.revealed()
+    }
+
+    private func armLetGo() {
+        letGo?.cancel()
+        let deadline = TranscriptPaneHold.letsGo(
+            of: held ?? .whatIsDrawn, underAHand: isUnderAHand || inLiveResize
+        )
+        letGo = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: deadline)
+            guard !Task.isCancelled else { return }
+            self?.ready()
         }
     }
 
@@ -174,8 +225,7 @@ final class TranscriptHoldView: NSView {
     ///
     /// The transition goes on BEFORE the change it covers and comes off again if the change turns
     /// out to have been nothing: an animation added and removed inside one run loop turn never
-    /// reaches a frame. Everything `change` does happens in that same commit, which is what makes
-    /// "the new layout is complete before the fade starts" true rather than hoped for.
+    /// reaches a frame.
     private func fading(_ change: () -> Bool) {
         let seconds = delegate?.reducesMotion == true ? 0 : Motion.revealSeconds
         if seconds > 0 {
@@ -187,66 +237,30 @@ final class TranscriptHoldView: NSView {
         if !change() { layer?.removeAnimation(forKey: Self.fadeKey) }
     }
 
-    // MARK: - Arriving at another conversation
+    // MARK: - What asks for a hold
 
-    /// **This pane has been pointed at another conversation, so it draws nothing until that one is
-    /// ready.**
-    ///
-    /// The pane is not torn down by a workspace switch: the centre column hands the same view a
-    /// different model and a different session, so without this the rows on screen for the moment
-    /// after the switch are the conversation being left. Then the tail lands at the top of the
-    /// pane, then the view jumps to the live end, then the history goes in behind it. Four states,
-    /// three of which are a transcript nobody asked to see.
-    ///
-    /// So it is hidden until `arrived`, and what it shows meanwhile is its own background. Never
-    /// the outgoing conversation, and never a picture of anything: an empty pane is honest, and it
-    /// is the only thing that cannot be the wrong workspace's.
-    func holdForArrival() {
-        guard !isArriving else { return }
-        // A resize hold has nothing left to protect, because the rows it was holding still belong
-        // to the conversation being left. Cancelled rather than dropped: the table is held by a
-        // flag of its own, and dropping this would leave it held for ever. Cancelled rather than
-        // ENDED, and laid out on the next pass rather than this one, because this is called from
-        // inside `updateNSView` and a reflow reports geometry, which writes SwiftUI state.
-        if frozen != nil {
-            frozen = nil
-            letGo?.cancel()
-            letGo = nil
-            needsLayout = true
-            delegate?.holdCancelled()
-        }
-        isArriving = true
-        scroll.alphaValue = 0
-        reveal = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: TranscriptPaneHold.arrival)
-            guard !Task.isCancelled else { return }
-            self?.arrived()
-        }
+    /// A width change, however it was produced: a divider under a hand, a window edge, a zoom, a
+    /// tiling, a display change, the inspector collapsing, or a probe driving any of them.
+    private func noteWidth(_ width: CGFloat) {
+        guard width != lastWidth else { return }
+        let before = lastWidth
+        lastWidth = width
+        // A pane that is not drawing anything has nothing to freeze, and the reflow a freeze would
+        // owe is the one the arrival is about to do anyway.
+        guard window != nil, held != .nothing else { return }
+        guard TranscriptPaneHold.holds(from: Double(before), to: Double(width)) else { return }
+        hold(.whatIsDrawn)
     }
-
-    /// The conversation is in, and in the place the reader left it. See `TranscriptResume`.
-    func arrived() {
-        reveal?.cancel()
-        reveal = nil
-        guard isArriving else { return }
-        isArriving = false
-        fading {
-            scroll.alphaValue = 1
-            return true
-        }
-        TranscriptHoldCensus.revealed()
-    }
-
-    // MARK: - What says a gesture is running
 
     @objc private func handTookHold() {
         isUnderAHand = true
-        if frozen != nil { armLetGo() }
+        if held != nil { armLetGo() }
     }
 
     @objc private func handLetGo() {
         isUnderAHand = false
-        release()
+        guard held == .whatIsDrawn else { return }
+        ready()
     }
 
     /// The window's own edge, and any divider AppKit resizes panes for. Nothing is held here: the
@@ -254,18 +268,20 @@ final class TranscriptHoldView: NSView {
     override func viewWillStartLiveResize() {
         super.viewWillStartLiveResize()
         TranscriptHoldCensus.liveResizeBegan()
-        if frozen != nil { armLetGo() }
+        if held != nil { armLetGo() }
     }
 
     override func viewDidEndLiveResize() {
         super.viewDidEndLiveResize()
-        release()
+        guard held == .whatIsDrawn else { return }
+        ready()
     }
 
     /// A pane put away mid drag must not come back holding a picture of the width it used to be.
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         needsLayout = true
-        release()
+        guard held == .whatIsDrawn else { return }
+        ready()
     }
 }

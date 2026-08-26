@@ -20,6 +20,19 @@ import Foundation
 /// changing either empties it. That is also the truthful shape, because there is never more than
 /// one width in play.
 ///
+/// ## Nothing is measured up front
+///
+/// A row nobody has measured is not a question the table can be made to wait for: it is told
+/// `estimate`, drawn if the reader ever looks at it, and corrected by `note` the moment it is.
+/// **This is what makes arriving at a conversation cost one screen rather than a window of rows.**
+/// Building the four hundred `NSHostingView`s a window used to open with was the whole of "opening
+/// a workspace or a tab with a chat in it is slow", and none of them was for a row anybody saw.
+///
+/// The estimate is the running mean of what HAS been measured here, which after one screen of a
+/// real conversation is a better number than any constant, and `assumedRowHeight` until then. What
+/// keeps this honest is that no placement is ever resolved against an estimate: the caller
+/// measures the screen it is about to show, exactly, before it shows it.
+///
 /// ## It outlives the conversation it was filled for
 ///
 /// A pane is pointed at one conversation after another, and the heights of the one being left are
@@ -90,6 +103,15 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// cost of hitting this is one conversation measured again.
     public static let mostRows = 20_000
 
+    /// What a row is worth before anything at all has been measured here.
+    ///
+    /// The one number in this file nothing measured, and it is only ever the answer for the first
+    /// screen of the first conversation a pane draws: one measured row replaces it with the mean
+    /// below. A tool row is about thirty points and a paragraph of prose several hundred, so this
+    /// is deliberately nearer the short end. Guessing high would open every conversation with a
+    /// document several times the height of its content and a scroller to match.
+    public static let assumedRowHeight: Double = 64
+
     /// The narrowest width worth measuring a row at.
     ///
     /// A table that has not been laid out yet reports a width of nought or one, and a row measured
@@ -104,6 +126,8 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     private var heights: [String: Double] = [:]
     /// The keys whose height was taken at a width that no longer holds. See `rewidth`.
     private var stale: Set<String> = []
+    /// The sum of `heights`, kept in step on every write so the mean below costs nothing to ask.
+    private var total: Double = 0
 
     public init() {}
 
@@ -129,6 +153,7 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         measure = wanted
         heights.removeAll()
         stale.removeAll()
+        total = 0
         return true
     }
 
@@ -168,6 +193,26 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         heights[contentKey]
     }
 
+    /// What an unmeasured row is worth: the mean of everything measured here, or
+    /// `assumedRowHeight` before there is one.
+    ///
+    /// A mean rather than a median, because it is kept as a running total and a median would mean
+    /// holding the numbers sorted for an answer that is corrected the moment the row is drawn.
+    /// Rows that draw nothing are in it and should be: a conversation with a run of empty rows in
+    /// it really is shorter per row than one without.
+    public var estimate: Double {
+        heights.isEmpty ? Self.assumedRowHeight : total / Double(heights.count)
+    }
+
+    /// **The number to tell a table**: what is known, or what is assumed.
+    ///
+    /// Never nil and never a measurement, so answering it for every row of a session costs a
+    /// dictionary lookup each. See the header for why a table is answered rather than made to
+    /// wait.
+    public func assumed(for contentKey: String) -> Double {
+        heights[contentKey] ?? estimate
+    }
+
     /// Remembers a height, and says whether it is news.
     ///
     /// **A report from a row that has actually been drawn outranks anything measured off screen,
@@ -191,6 +236,7 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         guard abs((heights[contentKey] ?? -1) - rounded) > 0.5 else { return false }
         // See `mostRows`. Asked before the insert, so the cache never holds more than it says.
         if heights.count >= Self.mostRows, heights[contentKey] == nil { forget() }
+        total += rounded - (heights[contentKey] ?? 0)
         heights[contentKey] = rounded
         return true
     }
@@ -209,5 +255,6 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     public mutating func forget() {
         heights.removeAll()
         stale.removeAll()
+        total = 0
     }
 }
