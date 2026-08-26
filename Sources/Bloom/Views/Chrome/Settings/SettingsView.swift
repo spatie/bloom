@@ -490,8 +490,6 @@ private struct ScriptValue: View {
     }
 }
 
-
-
 /// Who made the app, with their mark rather than their name set in the app's own type.
 private struct SpatieCredit: View {
     /// The mark is two-tone and its plate colour is fixed, so it cannot be tinted to suit the
