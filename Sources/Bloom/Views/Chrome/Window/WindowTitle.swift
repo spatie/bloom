@@ -16,6 +16,13 @@ import SwiftUI
 /// wanted again it is one line here.
 ///
 /// On Home there is no workspace, so the title says Bloom rather than staying on the last one.
+///
+/// **AppKit no longer DRAWS the title.** `WindowTitleControl` does, as a toolbar item, so that a
+/// double click can be bounded to the run of text rather than to the whole bar: a double click
+/// anywhere in a title bar is already the system's, wired to Zoom or Minimise in Desktop & Dock.
+/// The window still has a title, which is what the Window menu, Mission Control, the Dock and
+/// saved window state read. What this file keeps is the title itself; `WindowChrome` is what turns
+/// AppKit's drawing of it off.
 struct WindowTitle: ViewModifier {
     let app: AppModel
 
@@ -41,6 +48,33 @@ struct WindowTitle: ViewModifier {
         // that carried a represented URL before this was changed, keeps it otherwise, and the
         // folder icon would come back for exactly the readers who had already seen it.
         window.representedURL = nil
+        // Read BACK rather than passed on, so a build's own mark comes with it. See
+        // `WindowTitleText`. Whether AppKit draws any of this is `WindowChrome`'s to say.
+        WindowTitleText.shared.set(window.title)
+    }
+}
+
+/// What the title bar reads, published so a view can draw it.
+///
+/// It is `window.title` read back rather than the name that went in, and that is the only reason
+/// this exists. `Tools/dev-build.sh` patches the assignment in `WindowTitle.apply` to prefix
+/// "[DEV] ", so once AppKit stops drawing the title a dev window has to keep saying so; reading
+/// the window back picks that mark up without a second anchor to keep in step with the first.
+///
+/// **The name being EDITED never comes from here.** `WindowTitleControl` seeds its field from the
+/// workspace, so no build prefix can reach a stored name.
+@MainActor
+@Observable
+final class WindowTitleText {
+    static let shared = WindowTitleText()
+
+    private(set) var text = "Bloom"
+
+    private init() {}
+
+    func set(_ value: String) {
+        guard text != value else { return }
+        text = value
     }
 }
 

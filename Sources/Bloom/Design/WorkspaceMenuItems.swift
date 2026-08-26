@@ -1,7 +1,8 @@
 import SwiftUI
 import BloomCore
 
-/// Everything you can do to a workspace, as the right click menu on its row.
+/// Everything you can do to a workspace, as the right click menu on its row, and the shorter one
+/// on the window's title.
 ///
 /// One copy, used by the sidebar (`SidebarWorkspaceRow`) and by Home (`HomeRowMenu`). It was two,
 /// deliberately and temporarily, with a note in `HomeRowMenu` saying what to pull out when the two
@@ -63,17 +64,52 @@ import BloomCore
 ///
 /// So the tick is the platform's, drawn in the state column beside the swatch rather than instead
 /// of it, and "None" is a row like any other rather than a second gesture to learn.
+///
+/// ## The title's menu is the same items, cut down, in the same file
+///
+/// `WindowTitleControl` right clicks onto `.title`, which is Rename, Copy Name, Copy Branch Name,
+/// then Open in Editor and Reveal in Finder. Four of those five are the row's own leaves, reached
+/// through the same properties, so an edit to one is an edit to both; only Copy Name is new, and
+/// it is here because the title is the one place in the window where the name is the thing you are
+/// pointing at.
+///
+/// **Those three used to BE the title bar's menu**, in the chip `TitleBarStrip` describes, and
+/// they came off it because a row a few centimetres away already carried them. On the name itself
+/// that argument does not hold: this is the workspace, not a row about it.
+///
+/// What is left out, and why. Pin, Unread and Colour are about the ROW in a list, and there is no
+/// row here. Run Setup needs a live `WorkspaceModel` and is the one item that changes the checkout.
+/// Archive is destructive, and the window's title is the worst place in the app to put a
+/// destructive item: it is the one thing you double click on purpose. All of them keep their
+/// places on the row and in the Workspace menu, with their shortcuts.
 struct WorkspaceMenuItems: View {
+    /// Which of the two menus this is.
+    enum Scope {
+        /// A workspace's row, in the sidebar or on Home: everything.
+        case row
+        /// The window's title: the name, the branch, and the checkout.
+        case title
+    }
+
     var workspace: Workspace
+    var scope: Scope = .row
     /// Raised to the list, which owns the one rename field that can be open at a time.
     var onRename: (WorkspaceID) -> Void
 
     @Environment(AppModel.self) private var app
 
     var body: some View {
-        Button("Open in Editor") { Reveal.inEditor(workspace.path) }
-        Button("Reveal in Finder") { Reveal.inFinder(workspace.path) }
-        Button("Copy Branch Name") { Clipboard.copy(workspace.branch) }
+        switch scope {
+        case .row: rowItems
+        case .title: titleItems
+        }
+    }
+
+    @ViewBuilder
+    private var rowItems: some View {
+        openInEditorItem
+        revealInFinderItem
+        copyBranchItem
         setupItem
         Divider()
         Button(workspace.pinned ? "Unpin" : "Pin") {
@@ -88,7 +124,7 @@ struct WorkspaceMenuItems: View {
             }
         }
         colourPicker
-        Button("Rename") { onRename(workspace.id) }
+        renameItem
         Divider()
         // Straight through, with no dialog of its own. Whether this needs confirming is not
         // something a menu can know: it depends on what is uncommitted, what is running and what
@@ -101,6 +137,40 @@ struct WorkspaceMenuItems: View {
         Button("Archive", role: .destructive) {
             Task { await app.archive(workspace) }
         }
+    }
+
+    /// Rename leads, because renaming is what the menu on a name is for.
+    @ViewBuilder
+    private var titleItems: some View {
+        renameItem
+        copyNameItem
+        copyBranchItem
+        Divider()
+        openInEditorItem
+        revealInFinderItem
+    }
+
+    // MARK: - The leaves both menus share
+
+    private var renameItem: some View {
+        Button("Rename") { onRename(workspace.id) }
+    }
+
+    private var openInEditorItem: some View {
+        Button("Open in Editor") { Reveal.inEditor(workspace.path) }
+    }
+
+    private var revealInFinderItem: some View {
+        Button("Reveal in Finder") { Reveal.inFinder(workspace.path) }
+    }
+
+    private var copyBranchItem: some View {
+        Button("Copy Branch Name") { Clipboard.copy(workspace.branch) }
+    }
+
+    /// The title's alone. A row shows the name it is about; the title IS the name.
+    private var copyNameItem: some View {
+        Button("Copy Name") { Clipboard.copy(workspace.name) }
     }
 
     /// Running this repository's setup script in this worktree, worded and gated by

@@ -18,6 +18,10 @@ import BloomCore
 /// is left is starting work, on the leading edge, and only while the sidebar is folded away. See
 /// `isSidebarCollapsed`.
 ///
+/// And the window's title, which is here because AppKit no longer draws it: a title of our own is
+/// what lets a double click on the NAME start a rename without stealing the double click on the
+/// BAR that Desktop & Dock has already spent. See `WindowTitleControl`.
+///
 /// There is no Refresh Changes either. The changed file list polls every six seconds and redraws
 /// itself, so the command could only ever do what had already happened, and a control that does
 /// nothing teaches the user that the list is not to be trusted.
@@ -67,6 +71,22 @@ struct BloomWindowToolbar: ToolbarContent {
                 // off the `Label`'s words, and the caret answers nothing.
                 .accessibilityLabel("Start a workspace")
             }
+        }
+
+        // The window's title, drawn by us rather than by AppKit.
+        //
+        // A toolbar item and not a title bar accessory, which is what the strip at the other end
+        // is. A leading accessory is placed "adjacent and to the right of the close/minimize/
+        // maximize buttons", per `NSTitlebarAccessoryViewController.h`, so it would sit BEFORE the
+        // `+` above rather than after it, and an accessory is sized from its view's frame rather
+        // than from its content, so the width of a name would have to be measured by hand and
+        // measured again on every keystroke while it is being edited. A toolbar item is laid out
+        // in the order written and sizes itself, which is both of those for free.
+        //
+        // Second in the group, so the `+` keeps the leading edge on the one screen it appears on.
+        // See `WindowTitleControl` for why the title is a view of ours at all.
+        ToolbarItem(placement: .navigation) {
+            WindowTitleControl(app: app)
         }
 
         // The worktree's menu is not here any more. It was a trailing toolbar item, pinned to the
