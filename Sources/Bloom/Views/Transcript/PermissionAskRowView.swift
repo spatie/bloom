@@ -79,12 +79,12 @@ struct PermissionAskRowView: View {
         .padding(TranscriptLayout.cardInset)
         .background(
             RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
-                .fill(Palette.warning.opacity(isOpen ? 0.07 : 0.03))
+                .fill(isOpen ? Palette.cautionWash : Palette.cautionWashSettled)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
                 .strokeBorder(
-                    isOpen ? Palette.warning.opacity(0.46) : Palette.border,
+                    isOpen ? Palette.cautionBorder : Palette.border,
                     lineWidth: Metrics.hairline
                 )
         )

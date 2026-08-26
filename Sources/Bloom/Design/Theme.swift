@@ -355,6 +355,20 @@ enum Palette {
     /// so a finished question reads as part of the record rather than as something still waiting.
     static let questionWashSettled = accent.opacity(0.03)
 
+    /// The amber twin of the set above: the wash and the rule of a card that wants something of
+    /// the reader without being an error. The permission ask while it is holding the turn open,
+    /// and a retry while it is counting down.
+    ///
+    /// Named for the same reason `questionWash` is, and named because the two cards had already
+    /// drifted apart: the ask card was `0.07` over `0.46` and the retry `0.07` over `0.28`, two
+    /// amber plates a reader meets in one scroll with visibly different rules. The border takes
+    /// `questionBorder`'s rung rather than either of the two literals it replaces, since neither
+    /// of them had an argument behind it and the question card is the same card in another colour.
+    static let cautionWash = warning.opacity(0.07)
+    static let cautionBorder = warning.opacity(0.4)
+    /// The ask card once it has been answered, matching `questionWashSettled`.
+    static let cautionWashSettled = warning.opacity(0.03)
+
     /// Something went wrong: a failed check, an error row, a deletion count.
     ///
     /// Not `systemRed`. The system reds are tuned to be the one saturated thing on their screen,
