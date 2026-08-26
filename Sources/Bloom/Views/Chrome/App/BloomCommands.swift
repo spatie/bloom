@@ -627,27 +627,13 @@ struct BloomCommands: Commands {
 
     @ViewBuilder
     private func tabItem(_ tab: PaneContent, ordinal: Int?, in workspace: WorkspaceModel) -> some View {
-        let button = Button(tabTitle(tab, in: workspace)) {
+        let button = Button(CenterTabStore.shared.title(of: tab, in: workspace)) {
             WorkspaceTabsStore.shared.select(tab, in: workspace)
         }
         if let ordinal {
             button.keyboardShortcut(KeyEquivalent(Character("\(ordinal)")), modifiers: .command)
         } else {
             button
-        }
-    }
-
-    /// What a tab is called in the strip, so the menu and the strip cannot say two different names
-    /// for one tab.
-    private func tabTitle(_ tab: PaneContent, in workspace: WorkspaceModel) -> String {
-        switch tab {
-        case .chat(let id):
-            let title = workspace.sessions.first { $0.id == id }?.title ?? ""
-            return title.isEmpty ? "Untitled" : title
-        case .tool(let id):
-            guard let tool = CenterTabStore.shared.tabs(for: workspace.workspace.id)
-                .first(where: { $0.id == id }) else { return "Tab" }
-            return CenterTabStore.shared.displayTitle(of: tool, in: workspace)
         }
     }
 

@@ -148,8 +148,15 @@ public enum WorkspaceTabChoice: Sendable, Equatable {
     ///
     /// All three, because none of them alone tells a strip of four chats apart from a strip of a
     /// chat, a terminal, a review and a browser.
+    ///
+    /// Capped at ten, for the reason `BridgeProjectLookup.listing` caps at ten: a workspace with
+    /// thirty tabs would otherwise spend the whole refusal listing them, and the caller needs only
+    /// enough to pick one.
     private static func list(_ tabs: [WorkspaceTabReport]) -> String {
-        tabs.map { "\($0.number) '\($0.title)' (\($0.kind.rawValue))" }.joined(separator: ", ")
+        let shown = tabs.prefix(10).map { "\($0.number) '\($0.title)' (\($0.kind.rawValue))" }
+        let rest = tabs.count - shown.count
+        let text = shown.joined(separator: ", ")
+        return rest > 0 ? text + ", and \(rest) more" : text
     }
 }
 
@@ -158,7 +165,31 @@ public enum WorkspaceTabChoice: Sendable, Equatable {
 /// Its own two cases rather than `PaneOutcome`, whose success case is called `opened` and would
 /// have this tool telling a model it opened something. Nothing here opens anything, and the word
 /// is the whole point.
+///
+/// **Both successes are built here rather than in the window**, for the reason
+/// `PaneOrder.confirmation` is: what a model is told is behaviour, and the app target is where
+/// `Tests/BloomCoreTests` cannot see it. Every refusal was tested and no success was.
 public enum WorkspaceTabSelection: Sendable, Equatable {
     case selected(String)
     case refused(String)
+
+    /// A tab that was already the one in front.
+    ///
+    /// Answered rather than refused: a tool asked for the state a window is already in has
+    /// succeeded, and a model told "no" here tries something else to get there, which for this
+    /// tool means opening a second tab it did not need.
+    public static func alreadyInFront(_ tab: WorkspaceTabReport) -> WorkspaceTabSelection {
+        .selected("'\(tab.title)' was already the tab in front. Nothing moved.")
+    }
+
+    /// A tab the window has just brought forward.
+    ///
+    /// The extra sentence for a chat carries the second thing the call did, which the caller could
+    /// not have predicted: selecting a chat also moves the workspace's active conversation.
+    public static func brought(_ tab: WorkspaceTabReport) -> WorkspaceTabSelection {
+        let extra = tab.kind == .chat
+            ? " It is the workspace's active conversation now, as it would be if they had clicked it."
+            : ""
+        return .selected("Brought '\(tab.title)' to the front of the strip.\(extra)")
+    }
 }

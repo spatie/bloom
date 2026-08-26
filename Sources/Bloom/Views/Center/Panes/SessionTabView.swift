@@ -33,7 +33,7 @@ struct SessionTabView: View {
 
     var body: some View {
         TabItemView(
-            title: session.title.isEmpty ? "Untitled" : session.title,
+            title: session.title.isEmpty ? PaneNaming.untitledChat : session.title,
             icon: PaneGlyph.chatTab(agentMark: agentGlyph),
             isActive: isActive,
             isRunning: isRunning,

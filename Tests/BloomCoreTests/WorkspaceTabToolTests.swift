@@ -410,6 +410,65 @@ struct WorkspaceTabToolTests {
         #expect(refusal.sentence.contains("pane_open"))
     }
 
+    /// A refusal is text a model has to read before it can try again, and a workspace with thirty
+    /// tabs would otherwise spend the whole of it listing them. Ten and a tail, which is what
+    /// `BridgeProjectLookup.listing` does with projects.
+    @Test("a refusal over a long strip lists ten tabs and counts the rest")
+    func aLongStripIsCappedInTheRefusal() {
+        let many = (1...30).map { chat($0, title: "Chat \($0)") }
+        guard case .failure(let refusal) = WorkspaceTabChoice.choose(.number(99), among: many)
+        else {
+            Issue.record("expected a refusal"); return
+        }
+        #expect(refusal.sentence.contains("10 'Chat 10' (chat)"))
+        #expect(!refusal.sentence.contains("11 'Chat 11' (chat)"))
+        #expect(refusal.sentence.contains("and 20 more"))
+    }
+
+    // MARK: - What a selection that worked says
+
+    /// The success half, which had no test at all: the branch stubbed these sentences in the tool
+    /// tests and asserted every refusal instead.
+    @Test("a tab that was already in front is a success saying nothing moved")
+    func alreadyInFrontIsASuccess() {
+        guard case .selected(let sentence) =
+            WorkspaceTabSelection.alreadyInFront(chat(2, title: "Fix the parser", active: true))
+        else {
+            Issue.record("expected a success"); return
+        }
+        #expect(sentence.contains("'Fix the parser'"))
+        #expect(sentence.contains("already the tab in front"))
+        // Never the word this tool must not be able to say about itself.
+        #expect(!sentence.contains("Opened"))
+    }
+
+    /// Selecting a chat also moves the workspace's active conversation, which the caller could not
+    /// have predicted, so the sentence says so.
+    @Test("a chat brought forward says it is the active conversation now")
+    func aChatSaysItIsActiveNow() {
+        guard case .selected(let sentence) =
+            WorkspaceTabSelection.brought(chat(1, title: "Fix the parser")) else {
+            Issue.record("expected a success"); return
+        }
+        #expect(sentence.contains("Brought 'Fix the parser' to the front of the strip."))
+        #expect(sentence.contains("active conversation"))
+    }
+
+    @Test("every other kind is brought forward and claims nothing more")
+    func otherKindsSayOnlyWhatHappened() {
+        let others: [WorkspaceTabReport] = [
+            terminal(1, title: "Terminal 1"),
+            browser(2, title: "Bloom"),
+            review(3, file: "PaneCensus.swift"),
+        ]
+        for tab in others {
+            guard case .selected(let sentence) = WorkspaceTabSelection.brought(tab) else {
+                Issue.record("expected a success for \(tab.title)"); return
+            }
+            #expect(sentence == "Brought '\(tab.title)' to the front of the strip.")
+        }
+    }
+
     // MARK: - The tools themselves
 
     @Test("both are a parent's tools and nobody else's")

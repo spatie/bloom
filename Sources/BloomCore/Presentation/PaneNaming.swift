@@ -49,6 +49,16 @@ public enum PaneNaming {
     public static let terminal = "Terminal"
     public static let browser = "Browser"
 
+    /// What the strip draws over a conversation whose title is empty, and therefore the name
+    /// `workspace_tabs` reports and `workspace_tab_select` takes back for it. Not `chat` above:
+    /// that is the name a new pane is given, and a chat somebody emptied the title of is not one.
+    public static let untitledChat = "Untitled"
+
+    /// The name for a strip entry pointing at a tool tab that has gone. Only the Go to Tab menu
+    /// prints it, because it draws a row per entry; `workspace_tabs` drops such an entry rather
+    /// than reporting a tab that is not there.
+    public static let missingTab = "Tab"
+
     /// The bare name if it is free, otherwise the base and the lowest free number from 2 up.
     ///
     /// `taken` is every name currently in the strip for that kind, including ones a person typed:

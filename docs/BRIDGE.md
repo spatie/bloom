@@ -347,10 +347,16 @@ that a browser's name is the page's own `<title>` while a tab is the one thing i
 person names out loud. A title that two tabs share is refused with their numbers rather than
 resolved to the first, because guessing there means selecting a tab the caller did not name.
 
+That title is whatever the strip draws, down to the fallback: a chat nobody has titled reads
+`Untitled` in the strip, in the Go to Tab menu and over the bridge, because `workspace_tab_select`
+takes back the name `workspace_tabs` handed out. One function answers it for all three,
+`CenterTabStore.title`, and it was three functions with two different fallbacks.
+
 **`workspace_tab_select` cannot create a tab, and that is the refusal it was written around.** The
 tempting shape is "select it, and open it if it is not there", which reads as helpful and is how an
 agent asked to go back to a terminal ends up forking a second one beside the one it meant. A name
-nothing answers to is a refusal carrying the whole strip, so the next call can pick off it, and
+nothing answers to is a refusal carrying the strip, ten tabs and a count of the rest, so the next
+call can pick off it without a workspace of thirty tabs spending the whole refusal listing them, and
 `pane_open` stays the only door a tab comes through. Selecting a chat also makes it the workspace's
 active conversation, which is not an extra effect: it is what clicking that tab does, through the
 same `WorkspaceTabsStore.select` the click goes through.
