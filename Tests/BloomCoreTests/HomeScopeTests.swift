@@ -186,11 +186,16 @@ struct HomeScopeTests {
         var counts = HomeScopeCounts()
         counts.live = 3
         counts.archived = 17
-        #expect(counts.badge(of: .live, searching: false) == 3)
+        // Only the two chips whose number is a size. Live's three is a state, and the list under
+        // the strip already says it.
         #expect(counts.badge(of: .archived, searching: false) == 17)
         #expect(counts.badge(of: .all, searching: false) == 20)
+        #expect(counts.badge(of: .live, searching: false) == nil)
         #expect(counts.badge(of: .needsYou, searching: false) == nil)
         #expect(counts.badge(of: .running, searching: false) == nil)
+        // And the two that do keep a number still drop it at nought.
+        #expect(HomeScopeCounts().badge(of: .all, searching: false) == nil)
+        #expect(HomeScopeCounts().badge(of: .archived, searching: false) == nil)
         // The chip is still offered, because a strip that reflowed every time an agent started
         // would be movement under the pointer for no gain.
         #expect(HomeScope.offered(searching: false).contains(.running))

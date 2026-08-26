@@ -40,6 +40,10 @@ final class BrowserSession {
     private(set) var loadProgress: Double = 0
     /// Where the page actually is, which is not what the user has typed into the address field.
     private(set) var currentURL: URL?
+    /// Why the last navigation failed, or nil when nothing has. Cleared the moment a document
+    /// commits, because a failed load leaves the previous page in place and the reader is then
+    /// looking at something real again. See `BrowserLoadFailure`.
+    private(set) var failure: BrowserLoadFailure?
     /// Where the page is and what it says it is called, as one value.
     ///
     /// The pair rather than two properties, because the strip has to be told about both in one
@@ -436,6 +440,22 @@ final class BrowserSession {
         dialogs.pageCommitted()
     }
 
+    /// Turns a navigation error into something the pane can say, or into nothing.
+    ///
+    /// The host is taken from the failing URL in the error rather than from `currentURL`, because
+    /// a provisional navigation that never committed has not changed `currentURL` yet: reading it
+    /// here would name the page the reader was on before, which is the one address the message
+    /// must not blame.
+    fileprivate func record(_ error: any Error) {
+        let error = error as NSError
+        let host = (error.userInfo[NSURLErrorFailingURLErrorKey] as? URL)?.host()
+        failure = BrowserLoadFailure.of(domain: error.domain, code: error.code, host: host)
+    }
+
+    fileprivate func clearFailure() {
+        if failure != nil { failure = nil }
+    }
+
     // MARK: - Find in page
 
     /// One of the four things the keyboard asks of Find in Page, from the Edit menu or from the
@@ -656,6 +676,7 @@ private final class NavigationObserver: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        owner?.clearFailure()
         owner?.refresh()
         // A new document, so a page the reader had told to stop asking may ask again. This is the
         // one callback that means it: `didStartProvisionalNavigation` fires for a load that may
@@ -669,6 +690,7 @@ private final class NavigationObserver: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
+        owner?.record(error)
         owner?.refresh()
     }
 
@@ -677,6 +699,9 @@ private final class NavigationObserver: NSObject, WKNavigationDelegate {
         didFailProvisionalNavigation navigation: WKNavigation!,
         withError error: any Error
     ) {
+        // The one that matters for a mistyped address: a provisional navigation is one that never
+        // got as far as a document, which is exactly what a host that does not resolve produces.
+        owner?.record(error)
         owner?.refresh()
     }
 
