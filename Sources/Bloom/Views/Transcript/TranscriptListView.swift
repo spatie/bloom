@@ -411,7 +411,9 @@ struct TranscriptListView: View {
         let sending = transcript.sending
         out.append(TranscriptTableEntry(
             id: .sending,
-            contentKey: "sending.\(sending?.id.rawValue ?? "none")",
+            // The session is in the key for the reason `streaming` below carries: a pane visits
+            // one conversation after another and the heights are remembered across the switch.
+            contentKey: "sending.\(transcript.session.id).\(sending?.id.rawValue ?? "none")",
             content: {
                 guard let sending else { return AnyView(EmptyView()) }
                 let review = ReviewTurn.split(sending.body)
@@ -443,7 +445,13 @@ struct TranscriptListView: View {
         // The one entry that changes height without anything telling this view so, which is why
         // `TranscriptRowHeights` takes a correction from a drawn row as authoritative.
         out.append(TranscriptTableEntry(
-            id: .streaming, contentKey: "streaming",
+            // **The session is part of the key, and it is load bearing.** The height cache
+            // survives a workspace switch, and a bare "streaming" would hand the next
+            // conversation the last one's tail height: a pane opening on its live end with
+            // several hundred points of blank under the newest row, closing again the moment the
+            // cell is drawn. Every stored row is keyed by a row id, which is unique across
+            // sessions; these two are the only entries that are not.
+            id: .streaming, contentKey: "streaming.\(transcript.session.id)",
             content: {
                 AnyView(
                     StreamingTailView(transcript: transcript)
@@ -497,6 +505,7 @@ struct TranscriptListView: View {
 
         TranscriptTable(
             entries: entries,
+            session: transcript.session.id,
             controller: controller,
             scale: fontScale,
             rowEnvironment: rowEnvironment,
@@ -634,6 +643,19 @@ struct TranscriptListView: View {
             guard !Task.isCancelled else { return }
             adoptScrollView()
             position()
+            // **The pane may be drawn again now.** It has been blank since the session changed:
+            // its rows are in, its window is chosen and `position` has applied the placement, so
+            // what fades in is already where the reader left it rather than at the top on its way
+            // there. Before the return below, because a pane coming back to a session it has
+            // drawn before is exactly the switch that has to feel instant.
+            //
+            // One turn later than the positioning, and that is the point: every scroll in
+            // `TranscriptTable` says itself twice, because the first is resolved against heights
+            // the table has not corrected yet. The second lands on this turn, so what is revealed
+            // is the corrected place rather than the place that is about to move.
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            controller.arrived()
 
             // A pane coming back to a session it has drawn before is already in the window the
             // reader was reading in and already where they left off, so none of the reveal below

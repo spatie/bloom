@@ -116,6 +116,7 @@ enum FrameProbe {
 
         PaneLayoutTiming.reset()
         PaneLayoutTiming.isEnabled = true
+        TranscriptHoldCensus.reset()
         recorder.start()
         let cpuBefore = ProbeHarness.mainThreadCPUSeconds()
         let wallBefore = CACurrentMediaTime()
@@ -401,6 +402,9 @@ enum FrameProbe {
             "mainThreadBusyFraction": .number(wallClock > 0 ? mainThreadCPU / wallClock : 0),
             "cpuMsPerStep": .number(mainThreadCPU * 1000 / Double(max(1, steps))),
             "paneLayout": .map(PaneLayoutTiming.summary()),
+            // Whether the transcript held still, and whether this gesture is one AppKit calls a
+            // live resize. See `TranscriptHoldCensus`.
+            "transcriptHold": .map(TranscriptHoldCensus.summary()),
             "histogramMs": .numbers(intervals),
         ]
         // The probe's own keys win, so a report that has an opinion about the window keeps it.

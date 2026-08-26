@@ -114,6 +114,7 @@ enum ResizeProbe {
 
         PaneLayoutTiming.reset()
         PaneLayoutTiming.isEnabled = true
+        TranscriptHoldCensus.reset()
         recorder.start()
         let cpuBefore = ProbeHarness.mainThreadCPUSeconds()
         let wallBefore = CACurrentMediaTime()
@@ -240,6 +241,9 @@ enum ResizeProbe {
             "mainThreadBusyFraction": .number(wall > 0 ? cpu / wall : 0),
             "cpuMsPerStep": .number(cpu * 1000 / Double(max(1, steps))),
             "paneLayout": .map(PaneLayoutTiming.summary()),
+            // Whether the transcript actually held still, and how many rows it did not have to
+            // measure when it let go. See `TranscriptHoldCensus`.
+            "transcriptHold": .map(TranscriptHoldCensus.summary()),
         ]
         // The probe's own keys win over both, so a report that has an opinion keeps it.
         return .object(

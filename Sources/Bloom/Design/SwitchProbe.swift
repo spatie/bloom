@@ -140,6 +140,10 @@ enum SwitchProbe {
         // two columns stood still.
         PaneLayoutTiming.reset()
         PaneLayoutTiming.isEnabled = true
+        // **The number this probe is read for now.** A switch used to rebuild an `NSHostingView`
+        // for every row in the window, because the workspace changing counted as the row
+        // environment changing and that emptied the height cache. See `TranscriptHoldCensus`.
+        TranscriptHoldCensus.reset()
         // A line on stderr with the wall clock on it, so a film of the window taken by another
         // process can be lined up with the switch it is a film of.
         let name = app.workspaces.first { $0.id == id }?.name ?? id.rawValue
@@ -170,6 +174,7 @@ enum SwitchProbe {
             "blocks": .numbers(ticker.blocksMs),
             "paneLayout": .map(PaneLayoutTiming.summary()),
             "panePasses": .map(PaneLayoutTiming.timeline()),
+            "transcriptHold": .map(TranscriptHoldCensus.summary()),
             "worstFrameMs": .number(ticker.intervalsMs.max() ?? 0),
         ]
     }

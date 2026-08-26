@@ -20,13 +20,22 @@ import Foundation
 /// changing either empties it. That is also the truthful shape, because there is never more than
 /// one width in play.
 ///
+/// ## It outlives the conversation it was filled for
+///
+/// A pane is pointed at one conversation after another, and the heights of the one being left are
+/// exactly what makes coming back to it free, so nothing here is emptied by a switch. Two things
+/// follow. Every key has to be unique across sessions, which stored rows get from a row id and
+/// which the transcript's two synthetic entries have to be given (see `TranscriptListView`). And
+/// the cache has to have a bound, which is `mostRows`.
+///
 /// ## A live resize does not remeasure, on purpose
 ///
 /// Every cached height was taken at a width that no longer holds, so all of them are wrong the
 /// moment a divider moves, and taking them again is a whole SwiftUI layout per row per frame of
-/// the drag. So the caller runs the drag on stale heights, which is visibly wrong for any row
-/// whose text rewraps, and rebuilds once when the hand comes off. A resize is cheap and wrong for
-/// a moment rather than expensive and right. `reset(width:scale:)` is where that lands.
+/// the drag. So the caller does not: it holds the transcript at the width it was and lets go once,
+/// when the hand does. `rewidth(to:)` is where that lands, and it keeps the old numbers as
+/// estimates rather than emptying the cache, because emptying it is the four second stall the hold
+/// exists to remove. See `TranscriptPaneHold`.
 ///
 /// ## Nought is a real height
 ///
@@ -53,15 +62,33 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         }
 
         /// Whether two measures are the same one.
-        ///
-        /// Half a point of width, because a scroll view's own arithmetic lands on fractions and a
-        /// row laid out at 831.5 points is the same row as one laid out at 831.75. Anything
-        /// coarser and a real drag would fail to invalidate; anything finer and a rounding error
-        /// would empty the cache for nothing.
         func matches(_ other: Measure) -> Bool {
-            abs(width - other.width) <= 0.5 && scale == other.scale
+            TranscriptRowHeights.isSameWidth(width, other.width) && scale == other.scale
         }
     }
+
+    /// Whether two widths are the same width.
+    ///
+    /// Half a point, because a scroll view's own arithmetic lands on fractions and a row laid out
+    /// at 831.5 points is the same row as one laid out at 831.75. Anything coarser and a real drag
+    /// would fail to invalidate; anything finer and a rounding error would empty the cache for
+    /// nothing. Public because `TranscriptPaneHold` asks the same question of a pane's frame and
+    /// there is one answer to it.
+    public static func isSameWidth(_ one: Double, _ other: Double) -> Bool {
+        abs(one - other) <= 0.5
+    }
+
+    /// The most rows remembered before the cache is emptied and started again.
+    ///
+    /// **A pane keeps the heights of every conversation it has drawn**, which is what makes
+    /// arriving back at one free, and one pane visits a great many in a day. At about 150 bytes a
+    /// row this is a few megabytes, which is the point at which it stops being a cache and starts
+    /// being a leak.
+    ///
+    /// Emptied rather than trimmed. There is no recency here to evict by, and adding some to
+    /// answer a question that arises once a day would be bookkeeping on every note: the honest
+    /// cost of hitting this is one conversation measured again.
+    public static let mostRows = 20_000
 
     /// The narrowest width worth measuring a row at.
     ///
@@ -75,6 +102,8 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// and file the answer under another.
     public private(set) var measure: Measure?
     private var heights: [String: Double] = [:]
+    /// The keys whose height was taken at a width that no longer holds. See `rewidth`.
+    private var stale: Set<String> = []
 
     public init() {}
 
@@ -99,8 +128,40 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         if let measure, measure.matches(wanted) { return false }
         measure = wanted
         heights.removeAll()
+        stale.removeAll()
         return true
     }
+
+    /// Declares a new width and keeps every height as an ESTIMATE of what it will be at it.
+    ///
+    /// **`reset` is right and it costs four seconds.** Emptying the cache means a fresh
+    /// `NSHostingView` for every row in the session before the table can be told anything, which
+    /// on an 1,855 row conversation is the stall a resize was reported for. So a resize does this
+    /// instead: the width moves, the numbers stay, and each one is marked as owed a measurement.
+    /// The caller measures what the reader can see exactly and lets the rest be corrected when
+    /// they are drawn, which `note` already does and outranks anything measured off screen.
+    ///
+    /// It is a better estimate than it sounds. Most rows in a transcript are tool headers, footers
+    /// and notices whose height does not depend on the width at all, so for most of the list the
+    /// old number is not a guess, it is the answer.
+    ///
+    /// Only ever a width: a text size change goes through `reset`, because a paragraph at another
+    /// size is not an estimate of anything.
+    @discardableResult
+    public mutating func rewidth(to width: Double) -> Bool {
+        guard let current = measure, width > Self.narrowest else { return false }
+        guard !Self.isSameWidth(current.width, width) else { return false }
+        measure = Measure(width: width, scale: current.scale)
+        stale = Set(heights.keys)
+        return true
+    }
+
+    /// Whether this height is owed a measurement at the width the cache is now for.
+    public func isStale(_ contentKey: String) -> Bool { stale.contains(contentKey) }
+
+    /// How many heights are still estimates. For a probe: it is the count of rows a resize did
+    /// NOT have to measure, which is the whole of what the hold buys.
+    public var staleCount: Int { stale.count }
 
     /// The remembered height of this content, or nothing if it has never been measured.
     public func height(for contentKey: String) -> Double? {
@@ -123,8 +184,13 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     @discardableResult
     public mutating func note(_ height: Double, for contentKey: String) -> Bool {
         guard measure != nil else { return false }
+        // Before the news test below, so a row that turns out to be exactly as tall as it was at
+        // the old width still stops being owed a measurement.
+        stale.remove(contentKey)
         let rounded = Self.rounded(height)
         guard abs((heights[contentKey] ?? -1) - rounded) > 0.5 else { return false }
+        // See `mostRows`. Asked before the insert, so the cache never holds more than it says.
+        if heights.count >= Self.mostRows, heights[contentKey] == nil { forget() }
         heights[contentKey] = rounded
         return true
     }
@@ -142,5 +208,6 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// finished resize both come down to.
     public mutating func forget() {
         heights.removeAll()
+        stale.removeAll()
     }
 }
