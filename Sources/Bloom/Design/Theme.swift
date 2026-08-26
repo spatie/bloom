@@ -845,26 +845,13 @@ enum Motion {
 
 // MARK: - Materials
 
-/// A real AppKit material, so the sidebar is translucent and vibrant the way every other Mac
-/// sidebar is, and so it dims correctly when the window is not key.
-struct VisualEffectBackground: NSViewRepresentable {
-    var material: NSVisualEffectView.Material = .sidebar
-    var blending: NSVisualEffectView.BlendingMode = .behindWindow
-    var emphasized = false
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.state = .followsWindowActiveState
-        return view
-    }
-
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        view.material = material
-        view.blendingMode = blending
-        view.isEmphasized = emphasized
-    }
-}
-
+/// Every ground in this window is a colour, and there is deliberately no `NSVisualEffectView`
+/// anywhere for one to be reached for from.
+///
+/// There was: a `VisualEffectBackground` representable and a `headerMaterial()`, both of them
+/// under this heading with nothing calling either, directly above the two measurements that say
+/// why nothing should. Machinery kept under an argument against itself is an invitation to put
+/// the argued-against thing back, so it is gone and the measurements are below.
 extension View {
     /// The sidebar's ground.
     ///
@@ -875,20 +862,16 @@ extension View {
     /// would render green over a green wallpaper. A themed ramp cannot survive that. Everything
     /// vibrancy was buying beyond the tint, the rounded window corner and the toolbar unification,
     /// belongs to the window rather than to this view and is unaffected.
+    ///
+    /// The same answer came back for the strips of small controls, which is why they take this
+    /// colour too rather than a material of their own: `NSVisualEffectView(.headerView)` measured
+    /// `#292C33` over a `#0A1A25` pane, a neutral grey with nothing to do with what was behind it,
+    /// so every strip in the window read as a piece of a different app laid over it.
     func sidebarMaterial() -> some View {
         background(Palette.sidebar)
     }
 
-    /// The ground under a strip of small controls: a panel's tab bar, a run script's header.
-    ///
-    /// `NSVisualEffectView(.headerView)` measured `#292C33` over a `#0A1A25` pane, a neutral grey
-    /// with nothing to do with what was behind it, so every strip in the window read as a piece of
-    /// a different app laid on top. The chrome colour is what the material was standing in for.
-    func headerMaterial() -> some View {
-        background(Palette.sidebar)
-    }
-
-    /// The strip a tab bar sits in: the header material with the pane's top edge already on it.
+    /// The strip a tab bar sits in: the chrome colour with the pane's top edge already on it.
     ///
     /// The rule belongs here, behind the tabs, rather than in an overlay over them. Drawn over the
     /// top it crosses the selected tab as well, which boxes that tab in and leaves the strip

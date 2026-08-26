@@ -18,8 +18,6 @@ enum MarkdownMetrics {
     static let headingLead: CGFloat = 10
     /// The column a bullet, an ordinal or a task box sits in. Scaled at the call site.
     static let markerWidth: CGFloat = 24
-    /// Room for a four digit line number. Scaled at the call site.
-    static let lineNumberWidth: CGFloat = 28
     /// A square hit area for the small icon buttons in a code fence, so the glyph swapping from
     /// "copy" to "checkmark" does not resize the bar under the pointer. Larger than the glyph it
     /// holds, because a 16 point target for a control that only appears once per block is a
