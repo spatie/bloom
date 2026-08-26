@@ -252,6 +252,63 @@ struct TranscriptRowHeightsTests {
         #expect(!heights.isStale("row.7"))
     }
 
+    // MARK: - What an unmeasured row is worth
+
+    /// **Nothing is measured up front.** A table asks for every row it holds, so a pane arriving
+    /// at a conversation used to build an `NSHostingView` for each of the four hundred rows in its
+    /// window, none of which anybody saw.
+    @Test("a row nobody has measured is assumed rather than refused")
+    func assumesAnUnmeasuredRow() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        #expect(heights.height(for: "row.7") == nil)
+        #expect(heights.assumed(for: "row.7") == TranscriptRowHeights.assumedRowHeight)
+    }
+
+    @Test("what has been measured is what the rest is assumed to be")
+    func assumesTheMeanOfWhatIsKnown() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(100, for: "row.1")
+        heights.note(200, for: "row.2")
+        #expect(heights.estimate == 150)
+        #expect(heights.assumed(for: "row.99") == 150)
+        // And the measured ones are still themselves.
+        #expect(heights.assumed(for: "row.1") == 100)
+    }
+
+    /// The running total has to survive an overwrite, which is what every drawn row does to what
+    /// was measured for it off screen.
+    @Test("a row measured again does not count twice")
+    func meanFollowsAnOverwrite() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(100, for: "row.1")
+        heights.note(300, for: "row.1")
+        #expect(heights.estimate == 300)
+    }
+
+    @Test("a cache that has been emptied assumes nothing it used to know")
+    func meanIsEmptiedWithTheCache() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(400, for: "row.1")
+        heights.forget()
+        #expect(heights.estimate == TranscriptRowHeights.assumedRowHeight)
+    }
+
+    /// A resize keeps its numbers, so it keeps the estimate they make up: the rows it has not
+    /// measured yet are still better guessed at from this conversation than from a constant.
+    @Test("a resize keeps the estimate as well as the heights")
+    func meanSurvivesAResize() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(100, for: "row.1")
+        heights.note(200, for: "row.2")
+        heights.rewidth(to: 600)
+        #expect(heights.estimate == 150)
+    }
+
     // MARK: - The bound
 
     /// A pane keeps the heights of every conversation it draws, and one pane visits a great many.

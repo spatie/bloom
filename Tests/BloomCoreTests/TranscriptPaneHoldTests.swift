@@ -36,16 +36,31 @@ struct TranscriptPaneHoldTests {
     /// a frozen picture on screen.
     @Test("a hold with no hand on it lets go quickly")
     func letsGoOnItsOwn() {
-        #expect(TranscriptPaneHold.letsGo(underAHand: false) == TranscriptPaneHold.quiet)
+        #expect(
+            TranscriptPaneHold.letsGo(of: .whatIsDrawn, underAHand: false)
+                == TranscriptPaneHold.quiet
+        )
         #expect(TranscriptPaneHold.quiet < .seconds(1))
     }
 
     @Test("a hold under a hand waits longer, and still ends")
     func waitsForAHand() {
-        let held = TranscriptPaneHold.letsGo(underAHand: true)
+        let held = TranscriptPaneHold.letsGo(of: .whatIsDrawn, underAHand: true)
         #expect(held == TranscriptPaneHold.quietUnderAHand)
         #expect(held > TranscriptPaneHold.quiet)
         #expect(held < .seconds(30))
+    }
+
+    /// A pane waiting for a conversation is waiting for a read and one screen of measuring, not
+    /// for a hand, so the hand makes no difference to it.
+    @Test("a pane holding nothing waits for its conversation and no longer")
+    func waitsForAnArrival() {
+        #expect(
+            TranscriptPaneHold.letsGo(of: .nothing, underAHand: true) == TranscriptPaneHold.arrival
+        )
+        #expect(
+            TranscriptPaneHold.letsGo(of: .nothing, underAHand: false) == TranscriptPaneHold.arrival
+        )
     }
 
     // MARK: - Arriving at another conversation

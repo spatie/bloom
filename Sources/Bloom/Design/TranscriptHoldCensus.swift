@@ -1,3 +1,4 @@
+import BloomCore
 import Foundation
 
 /// What a transcript's holds did, for a probe to read. See `TranscriptHoldView`.
@@ -28,15 +29,18 @@ enum TranscriptHoldCensus {
     /// Rows a reflow left holding an estimate rather than measuring. What the hold buys.
     private(set) static var estimatedRows = 0
 
-    static func held(underAHand hand: Bool, liveResize: Bool) {
-        holds += 1
-        if hand { underAHand += 1 }
-        if liveResize { underLiveResize += 1 }
+    static func held(_ what: TranscriptPaneHold.PaneHeld, underAHand hand: Bool, liveResize: Bool) {
+        switch what {
+        case .whatIsDrawn:
+            holds += 1
+            if hand { underAHand += 1 }
+            if liveResize { underLiveResize += 1 }
+        case .nothing:
+            arrivals += 1
+        }
     }
 
     static func liveResizeBegan() { liveResizes += 1 }
-
-    static func arriving() { arrivals += 1 }
 
     static func revealed() { reveals += 1 }
 

@@ -147,6 +147,11 @@ enum TabProbe {
         ticker.beginRun()
         PaneLayoutTiming.reset()
         PaneLayoutTiming.isEnabled = true
+        // **The number this probe is read for.** A tab switch through a tool tab tears the chat
+        // pane down and builds it again, so this is the case a coordinator's own height cache
+        // cannot help with and the one that says whether measuring nothing up front worked. See
+        // `TranscriptHoldCensus`.
+        TranscriptHoldCensus.reset()
         // The same timeline `SwitchProbe` reads, begun by hand: the app itself only begins one
         // when the SIDEBAR selection changes, and nothing about a tab switch moves that.
         SwitchTrace.begin(workspaceID: workspace.workspace.id)
@@ -167,6 +172,7 @@ enum TabProbe {
             "blocks": .numbers(ticker.blocksMs),
             "paneLayout": .map(PaneLayoutTiming.summary()),
             "panePasses": .map(PaneLayoutTiming.timeline()),
+            "transcriptHold": .map(TranscriptHoldCensus.summary()),
             "worstFrameMs": .number(ticker.intervalsMs.max() ?? 0),
         ]
     }

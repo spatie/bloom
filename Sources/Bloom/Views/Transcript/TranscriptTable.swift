@@ -99,7 +99,7 @@ final class TranscriptTableController {
     /// Said by the pane rather than worked out here, because the only thing that knows a
     /// transcript is where it belongs is whatever put it there: the rows have loaded, the window
     /// has been chosen and `TranscriptResume`'s placement has been applied. Until this arrives the
-    /// pane draws nothing. See `TranscriptHoldView.holdForArrival`.
+    /// pane draws nothing. See `TranscriptHoldView.hold(_:)`.
     func arrived() { coordinator?.arrived() }
 
     /// The entry at the top of the pane, which is the place a reader is put back at.
@@ -131,7 +131,7 @@ struct TranscriptTable: NSViewRepresentable {
     let entries: [TranscriptTableEntry]
     /// Which conversation these entries are. A pane is handed a different one by every workspace
     /// switch, and what it draws until that one is ready is nothing at all: see
-    /// `TranscriptHoldView.holdForArrival`.
+    /// `TranscriptHoldView.hold(_:)`.
     let session: SessionID
     let controller: TranscriptTableController
     /// The text scale the rows are drawn at. Part of what the height cache is keyed on, because
@@ -250,6 +250,8 @@ struct TranscriptTable: NSViewRepresentable {
         /// `TranscriptRowHeights`.
         private var heights = TranscriptRowHeights()
         private var settleWork: Task<Void, Never>?
+        /// A reflow saying its placement a second time. See `rewidth`.
+        private var placeWork: Task<Void, Never>?
         private var resizeWork: Task<Void, Never>?
         private var endWork: Task<Void, Never>?
         private var reaimWork: Task<Void, Never>?
@@ -489,20 +491,21 @@ struct TranscriptTable: NSViewRepresentable {
 
         // MARK: Heights
 
-        /// The cache, and a fresh measurement when it misses.
+        /// What the table is told a row is, which is never a measurement.
         ///
-        /// The three entries that re-render themselves read the cache like everything else. They
-        /// used to be measured on every call, which is a whole hosting view per layout pass for
-        /// the streaming tail; what keeps them right instead is `noted` below, which is
-        /// authoritative and which the tail triggers itself as it grows.
+        /// **This used to measure on a miss, and that was the whole of "opening a workspace or a
+        /// tab with a chat in it is slow".** A table asks for every row it holds, so a pane
+        /// arriving at a conversation built an `NSHostingView` for each of the four hundred rows
+        /// in its window, none of which anybody saw. Now an unmeasured row is answered with
+        /// `TranscriptRowHeights.assumed` and put right when it is drawn, or when a placement is
+        /// about to show it: see `measureLanding`.
+        ///
+        /// The three entries that re-render themselves are answered the same way. What keeps them
+        /// right is `noted` below, which is authoritative and which the tail triggers itself as it
+        /// grows.
         private func height(of entry: TranscriptTableEntry) -> CGFloat {
-            guard let sizing = heights.measure else { return Self.hair }
-            if let cached = heights.height(for: entry.contentKey) { return CGFloat(cached) }
-            let measured = CGFloat(
-                TranscriptRowHeights.rounded(measure(entry, at: CGFloat(sizing.width)))
-            )
-            heights.note(measured, for: entry.contentKey)
-            return measured
+            guard heights.isReady else { return Self.hair }
+            return CGFloat(heights.assumed(for: entry.contentKey))
         }
 
         /// A fresh `NSHostingView` per measurement, at the exact width the cell is laid out at.
@@ -737,6 +740,20 @@ struct TranscriptTable: NSViewRepresentable {
 
         private func putEnd() {
             guard let scrollView else { return }
+            // The last screen, measured before the end is claimed to be anywhere. Read again
+            // afterwards, because measuring it is what moves the end: an estimate for a row nobody
+            // has drawn is what the sum said, and the sum is where the scroller stops.
+            //
+            // **This is the reachable end.** Reported as "when I'm at the bottom of a chat and it
+            // gets resized, sometimes I get placed a little higher and can't reach the bottom
+            // anymore": the rows at the end were short by whatever the estimate was out by, so the
+            // document ended above the content and the scroller could not travel to it.
+            //
+            // Twice at most, because measuring the last screen is what moves the end and the
+            // screen at the moved end can hold a row the first pass did not reach. The second
+            // round costs nothing once the rows are measured, which is every return to a
+            // conversation this pane has already drawn.
+            for _ in 0..<2 { measureLanding(at: scrollView.endOffset) }
             // The only number that means the end. A row being *visible* is not it: the last row of
             // a transcript is often taller than the pane. See `NSScrollView.endOffset`.
             put(scrollView.endOffset, in: scrollView)
@@ -761,21 +778,25 @@ struct TranscriptTable: NSViewRepresentable {
 
         private func put(at entryID: TranscriptEntryID, anchor: UnitPoint) {
             guard let tableView, let scrollView, let row = index[entryID] else { return }
-            let rect = tableView.rect(ofRow: row)
-            put(
-                TranscriptAnchor.offset(
+            func target() -> CGFloat {
+                let rect = tableView.rect(ofRow: row)
+                return TranscriptAnchor.offset(
                     rowTop: rect.minY,
                     rowHeight: rect.height,
                     viewportHeight: scrollView.contentView.bounds.height,
                     anchor: anchor.y
-                ),
-                in: scrollView
-            )
+                )
+            }
+            // Aimed at where the estimates say the row is, measured there, and then aimed again at
+            // where it turned out to be: measuring the screen is what moves it.
+            measureLanding(at: target())
+            put(target(), in: scrollView)
         }
 
         func scroll(toY y: CGFloat) {
             aimingElsewhere()
             guard let scrollView else { return }
+            measureLanding(at: y)
             put(y, in: scrollView)
         }
 
@@ -943,8 +964,13 @@ struct TranscriptTable: NSViewRepresentable {
 
         // MARK: - Being held while a pane is resized
 
-        /// Everything stops. See `TranscriptHoldView`, and `TranscriptPaneHold` for the rule.
-        func holdBegan() {
+        /// A hold has begun. What it is holding is the whole of the difference.
+        ///
+        /// **An arrival stops nothing**, because the work it is waiting for is this pane's own
+        /// rows landing: stashing those would be holding out for the thing being held for. What it
+        /// holds is the drawing, which is `TranscriptHoldView`'s alone.
+        func holdBegan(_ held: TranscriptHoldView.Held) {
+            guard held == .whatIsDrawn else { return }
             isHeld = true
             // **Where the reader is, read now rather than when the hold lets go.**
             //
@@ -963,8 +989,12 @@ struct TranscriptTable: NSViewRepresentable {
         }
 
         @discardableResult
-        func holdEnded() -> Bool {
+        func holdEnded(_ held: TranscriptHoldView.Held) -> Bool {
             isHeld = false
+            // A reflow either way. An arrival has usually not changed the width and finds nothing
+            // to do, which is what makes it honest to run the same line for both: the question
+            // "is this pane a different width from the one these heights were taken at" has one
+            // answer wherever it is asked.
             let moved = rewidth()
             // After the width, so this pass finds the cache already declared for the new one and
             // deals with the rows that changed rather than with all of them.
@@ -993,21 +1023,22 @@ struct TranscriptTable: NSViewRepresentable {
         // MARK: - Being pointed at another conversation
 
         /// **The pane has a different conversation in it, so it draws nothing until that one is
-        /// ready.** See `TranscriptHoldView.holdForArrival`, and `arrived` for what ends it.
+        /// ready.** See `TranscriptHoldView.hold(_:)`, and `arrived` for what ends it.
+        ///
+        /// The pane's FIRST conversation is held too, and that is what covers a split: splitting a
+        /// tab rebuilds both panes (see `CenterPanesView`), so the chat arrives in a pane that has
+        /// never drawn anything, exactly as it does in a window that has only just opened. Holding
+        /// it means the split itself is drawn on the frame it was asked for and the conversation
+        /// fades in behind it, rather than the whole column waiting for a transcript to lay out.
         func showing(session: SessionID, in view: TranscriptHoldView) {
             holdView = view
             guard shownSession != session else { return }
-            let isFirst = shownSession == nil
             shownSession = session
-            // Not the pane's first conversation. There is nothing on screen to hide, and hiding it
-            // would blank a window that has only just been opened.
-            guard !isFirst else { return }
-            TranscriptHoldCensus.arriving()
-            view.holdForArrival()
+            view.hold(.nothing)
         }
 
         /// The conversation is in and in the right place. See `TranscriptTableController.arrived`.
-        func arrived() { holdView?.arrived() }
+        func arrived() { holdView?.ready() }
 
         /// **The transcript, laid out at the width the drag left the pane at.**
         ///
@@ -1042,20 +1073,68 @@ struct TranscriptTable: NSViewRepresentable {
             let eager = TranscriptPaneHold.eager(visible: visibleRows, count: entries.count)
             measureExactly(eager)
             noteHeights(IndexSet(integersIn: entries.indices))
+            // **The standing instruction rather than a movement, for a reader who was at the end.**
+            //
+            // A movement is short of the end the moment anything below it changes size, and a
+            // reflow is followed by a burst of exactly that: every cell it redraws reports its own
+            // height a turn or two later. Reported as "sometimes I get placed a little higher and
+            // can't reach the bottom anymore". The instruction is self-releasing, so a reader who
+            // scrolls away in the next moment is not pinned: see `clipMoved`.
+            if wasAtEnd, !isFollowerDriving, !isLiveScrolling { holdsEnd = true }
             keepPlace(wasAtEnd: wasAtEnd, anchor: anchor)
             reportGeometry()
+            // And once more on the next turn, for the reason `goToEnd` says the end twice: a table
+            // lays out a height change on the pass after it is told about it, so a placement made
+            // on this one is resolved against numbers that are still moving.
+            placeWork?.cancel()
+            placeWork = Task { @MainActor [weak self] in
+                await Task.yield()
+                guard !Task.isCancelled, let self, !isLiveScrolling else { return }
+                placeWork = nil
+                keepPlace(wasAtEnd: wasAtEnd, anchor: anchor)
+                reportGeometry()
+            }
             TranscriptHoldCensus.released(estimated: heights.staleCount)
             return true
         }
 
-        /// Measures these rows now, at the width the cache is for, and files the answers.
-        private func measureExactly(_ rows: Range<Int>) {
-            guard let sizing = heights.measure else { return }
+        /// Measures these rows now, at the width the cache is for, and says which of them moved.
+        ///
+        /// A row is measured here if nobody has measured it at all, or if what is held for it was
+        /// taken at another width. Everything else is already the answer.
+        @discardableResult
+        private func measureExactly(_ rows: Range<Int>) -> IndexSet {
+            guard let sizing = heights.measure else { return IndexSet() }
+            var moved = IndexSet()
             for row in rows where entries.indices.contains(row) {
-                let entry = entries[row]
-                guard heights.isStale(entry.contentKey) else { continue }
-                heights.note(measure(entry, at: CGFloat(sizing.width)), for: entry.contentKey)
+                let key = entries[row].contentKey
+                guard heights.height(for: key) == nil || heights.isStale(key) else { continue }
+                if heights.note(measure(entries[row], at: CGFloat(sizing.width)), for: key) {
+                    moved.insert(row)
+                }
             }
+            return moved
+        }
+
+        /// **The screen a placement is about to show, measured exactly before it is shown.**
+        ///
+        /// Nothing is measured up front, so the table's idea of where a row is comes from an
+        /// estimate until somebody looks at it. That is safe for the rows above the reader, which
+        /// are corrected as they are drawn and anchored while they are; it is not safe for the
+        /// screen the reader is being put on, because a placement resolved against an estimate
+        /// lands where the estimate said rather than where the row is. So every placement measures
+        /// its own landing first.
+        ///
+        /// A screen either side of it as well, so that a small scroll after arriving does not land
+        /// on an estimate either.
+        private func measureLanding(at y: CGFloat) {
+            guard let tableView, let scrollView, heights.isReady else { return }
+            let viewport = scrollView.contentView.bounds.height
+            guard viewport > 1 else { return }
+            let rect = CGRect(x: 0, y: max(0, y - viewport), width: 1, height: viewport * 3)
+            let range = tableView.rows(in: rect)
+            guard range.length > 0 else { return }
+            noteHeights(measureExactly(range.location..<(range.location + range.length)))
         }
 
         /// The rows the pane can see, in the entries' own indices.
