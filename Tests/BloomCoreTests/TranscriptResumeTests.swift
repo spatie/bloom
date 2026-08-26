@@ -31,15 +31,25 @@ struct TranscriptResumeTests {
 
     @Test("a pane that has never held this session draws the tail")
     func nothingRememberedDrawsTheTail() {
-        let window = TranscriptResume.window(nil, tailStart: 3_920, rowCount: 4_000)
-        #expect(window == TranscriptWindow(start: 3_920, end: 4_000))
+        let window = TranscriptResume.window(nil, tailStart: 7_920, rowCount: 8_000)
+        #expect(window == TranscriptWindow(start: 7_920, end: 8_000))
     }
 
     @Test("a pane coming back to a session goes back to the window it was reading in")
     func aReturnGoesBackToItsWindow() {
-        let remembered = state(drawn: TranscriptWindow(start: 3_600, end: 4_000))
-        let window = TranscriptResume.window(remembered, tailStart: 3_920, rowCount: 4_000)
-        #expect(window == TranscriptWindow(start: 3_600, end: 4_000))
+        let remembered = state(drawn: TranscriptWindow(start: 7_600, end: 8_000))
+        let window = TranscriptResume.window(remembered, tailStart: 7_920, rowCount: 8_000)
+        #expect(window == TranscriptWindow(start: 7_600, end: 8_000))
+    }
+
+    /// **A remembered window is a saving against a growth that no longer happens.** Under the
+    /// ceiling the session is drawn whole, so coming back to a partial window would put the reader
+    /// in a shorter list than the one they left. See `TranscriptWindow.whole`.
+    @Test("a pane coming back to a session inside the ceiling gets the whole of it")
+    func aReturnToAWholeSessionIsWhole() {
+        let remembered = state(drawn: TranscriptWindow(start: 2_600, end: 3_000))
+        let window = TranscriptResume.window(remembered, tailStart: 2_920, rowCount: 3_000)
+        #expect(window == TranscriptWindow(start: 0, end: 3_000))
     }
 
     @Test("a pane with nothing written down is arriving, and one with a memory is coming back")
@@ -51,15 +61,15 @@ struct TranscriptResumeTests {
     @Test("a window with nothing in it is not restored, because it would draw a blank transcript")
     func anEmptyWindowIsNotAWindow() {
         let remembered = state(drawn: TranscriptWindow(start: 0, end: 0))
-        let window = TranscriptResume.window(remembered, tailStart: 3_920, rowCount: 4_000)
-        #expect(window == TranscriptWindow(start: 3_920, end: 4_000))
+        let window = TranscriptResume.window(remembered, tailStart: 7_920, rowCount: 8_000)
+        #expect(window == TranscriptWindow(start: 7_920, end: 8_000))
     }
 
     @Test("a window from a session that has since been read again is clamped to it")
     func aStaleWindowIsClamped() {
         let remembered = state(drawn: TranscriptWindow(start: 9_000, end: 9_400))
-        let window = TranscriptResume.window(remembered, tailStart: 20, rowCount: 100)
-        #expect(window == TranscriptWindow(start: 100, end: 100))
+        let window = TranscriptResume.window(remembered, tailStart: 20, rowCount: 8_100)
+        #expect(window == TranscriptWindow(start: 8_100, end: 8_100))
     }
 
     // MARK: Where it opens
