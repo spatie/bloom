@@ -595,13 +595,13 @@ public enum RepositoryStarter {
     ) async throws -> (files: Int, excluded: [ExcludedPath], unsigned: Bool) {
         let contents = scan(folder)
 
-        var written: [ExcludedPath] = []
-        for candidate in contents.excluded {
-            // Already covered by a `.gitignore` the user wrote. Adding a duplicate line would be
-            // Bloom editing a file it had no reason to touch.
-            if await Git.isIgnored(candidate.path, in: folder) { continue }
-            written.append(candidate)
-        }
+        // What a `.gitignore` the user wrote already covers, asked for all of them in one
+        // `check-ignore` rather than one process per candidate. Adding a duplicate line would be
+        // Bloom editing a file it had no reason to touch.
+        let alreadyIgnored = await Git.ignoredPaths(
+            among: contents.excluded.map(\.path), in: folder
+        )
+        let written = contents.excluded.filter { !alreadyIgnored.contains($0.path) }
         if !written.isEmpty { try appendGitignore(written, in: folder) }
 
         try await Git.stageAll(in: folder)

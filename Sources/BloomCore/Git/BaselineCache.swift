@@ -93,7 +93,16 @@ actor BaselineCache {
         var usedAt: UInt64
     }
 
+    /// The flights in progress, keyed on the fingerprint as well, because a resolve that started
+    /// before a ref moved is working out the merge base of a graph that no longer exists. Joining
+    /// it would hand back an answer for the old graph, which is the squash-merge bug again.
+    private struct Flight: Hashable {
+        let key: Key
+        let fingerprint: String
+    }
+
     private var entries: [Key: Entry] = [:]
+    private var inFlight: [Flight: Task<String, Error>] = [:]
 
     /// A counter rather than a clock, because `Date()` is not guaranteed to differ between two
     /// entries written in the same loop and an eviction that cannot order its candidates is one
@@ -122,6 +131,44 @@ actor BaselineCache {
         for (key, _) in oldest { entries[key] = nil }
     }
 
+    /// The remembered answer, or the one a caller that got here first is already working out.
+    ///
+    /// `changedFiles` and `branchCommits` both open with `baseline`, and they used to be ordered
+    /// so the second was always a hit. Run together they are two misses on a cold cache, which is
+    /// three extra processes on the workspace switch this coalescing exists to shorten.
+    ///
+    /// The task is detached rather than `Task {}`, which would inherit this actor and put the git
+    /// calls' home executor on the cache.
+    func baseline(
+        worktree: String,
+        base: String,
+        fingerprint: String,
+        resolve: @escaping @Sendable () async throws -> String
+    ) async throws -> String {
+        if let remembered = baseline(worktree: worktree, base: base, fingerprint: fingerprint) {
+            return remembered
+        }
+
+        let flight = Flight(key: Key(worktree: worktree, base: base), fingerprint: fingerprint)
+        // Nothing is awaited between the read and the write, so two callers cannot both find it
+        // empty and both start a resolve.
+        if let running = inFlight[flight] { return try await running.value }
+
+        let task = Task.detached(priority: Task.currentPriority) { try await resolve() }
+        inFlight[flight] = task
+        // Only the caller that started it clears it, and it clears it whether the resolve threw
+        // or not: an entry left behind is a worktree that can never be asked about again.
+        // Awaiting a task's value is not cancelled by the awaiting task, so this always runs.
+        defer { inFlight[flight] = nil }
+
+        let answer = try await task.value
+        remember(worktree: worktree, base: base, fingerprint: fingerprint, baseline: answer)
+        return answer
+    }
+
     /// Read by the suite, which is what pins the bound above.
     var count: Int { entries.count }
+
+    /// Read by the suite. A flight that outlives its resolve is a leak with no symptom.
+    var flights: Int { inFlight.count }
 }

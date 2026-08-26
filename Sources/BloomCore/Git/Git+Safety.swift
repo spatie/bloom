@@ -274,6 +274,7 @@ extension Git {
         // entirely: git could not be asked, and every field below would be a zero standing in for
         // an answer nobody has. `isSafeToDiscard` would read that as "nothing at stake" and let
         // the worktree be deleted, so it throws instead, and the caller shows the reason.
+        var isDetached = false
         if FileManager.default.fileExists(atPath: worktree) {
             guard await isRepository(worktree) else {
                 throw ShellError(
@@ -285,15 +286,22 @@ extension Git {
             let status = try await checkRaw(["status", "--porcelain", "-z"], in: worktree)
             (report.hasUncommittedChanges, report.untrackedFiles) = parseStatus(status.stdout)
             report.modifiedIgnoredFiles = try await divergentIgnoredFiles(worktree: worktree, repo: repo)
-            report.detachedCommits = try await detachedCommitCount(worktree: worktree, repo: repo)
+            isDetached = try await isDetachedHead(worktree: worktree)
         }
 
-        guard await branchExists(branch, in: repo) else { return report }
+        let branchIsThere = await branchExists(branch, in: repo)
+        guard isDetached || branchIsThere else { return report }
 
-        let refs = try await check(
-            ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes", "refs/tags"],
-            in: repo
-        ).lines
+        // One ref walk for both counts. A detached worktree used to walk every head, remote and
+        // tag here and again inside `detachedCommitCount`, which on a repository with thousands
+        // of tags is the expensive call in this whole report.
+        let refs = try await allRefs(in: repo)
+
+        if isDetached {
+            report.detachedCommits = try await detachedCommitCount(worktree: worktree, excluding: refs)
+        }
+        guard branchIsThere else { return report }
+
         // Feeding the other refs in on stdin rather than as arguments, because a repository with
         // thousands of tags would otherwise blow past the argument limit.
         let negated = refs
@@ -439,19 +447,27 @@ extension Git {
         return false
     }
 
-    /// Commits reachable from the worktree's own HEAD and from no ref anywhere.
-    ///
-    /// Zero unless HEAD is detached, which is what happens when an agent runs `git checkout` in
-    /// its worktree. Those commits are held only by the per-worktree reflog, which
-    /// `git worktree remove` deletes.
-    static func detachedCommitCount(worktree: String, repo: String) async throws -> Int {
+    /// Whether HEAD here is a commit rather than a branch, which is what an agent running
+    /// `git checkout` in its worktree leaves behind.
+    static func isDetachedHead(worktree: String) async throws -> Bool {
         let head = try await run(["symbolic-ref", "--quiet", "HEAD"], in: worktree)
-        guard !head.ok else { return 0 }
+        return !head.ok
+    }
 
-        let refs = try await check(
+    /// Every ref in the repository, which is the walk `safetyReport` pays for once and hands to
+    /// both counts below.
+    static func allRefs(in repo: String) async throws -> [String] {
+        try await check(
             ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes", "refs/tags"],
             in: repo
         ).lines
+    }
+
+    /// Commits reachable from the worktree's own detached HEAD and from no ref anywhere. Those
+    /// commits are held only by the per-worktree reflog, which `git worktree remove` deletes.
+    ///
+    /// Only ever asked of a detached HEAD: on a branch the answer is zero by construction.
+    static func detachedCommitCount(worktree: String, excluding refs: [String]) async throws -> Int {
         let negated = refs.map { "^\($0)" }.joined(separator: "\n")
         let unique = try await run(
             ["rev-list", "--count", "--stdin", "HEAD"],

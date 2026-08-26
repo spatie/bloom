@@ -30,14 +30,22 @@ public extension Git {
     /// The name and address git would put on a commit made here. Either can be missing, and a
     /// commit with neither fails with a page of advice, so this is asked before anything is done.
     static func commitIdentity(in path: String) async -> (name: String?, email: String?) {
-        func value(_ key: String) async -> String? {
-            guard let result = try? await run(["config", "--get", key], in: path), result.ok else {
-                return nil
-            }
-            let trimmed = result.trimmed
-            return trimmed.isEmpty ? nil : trimmed
+        // One process rather than a `--get` each. `--get-regexp` prints `user.name <value>` per
+        // match and exits 1 when nothing matches, which is the same nothing two failed `--get`s
+        // said.
+        guard let result = try? await run(
+            ["config", "--get-regexp", "^user\\.(name|email)$"], in: path
+        ), result.ok else { return (nil, nil) }
+
+        var values: [String: String] = [:]
+        for line in result.lines {
+            guard let space = line.firstIndex(of: " ") else { continue }
+            let value = line[line.index(after: space)...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { continue }
+            values[String(line[..<space])] = value
         }
-        return await (value("user.name"), value("user.email"))
+        return (values["user.name"], values["user.email"])
     }
 
     /// The repository this folder sits inside, if any, found by walking up rather than by asking
@@ -67,6 +75,27 @@ public extension Git {
     static func isIgnored(_ relativePath: String, in repo: String) async -> Bool {
         let result = try? await run(["check-ignore", "--quiet", "--", relativePath], in: repo)
         return result?.ok ?? false
+    }
+
+    /// Which of these paths the repository's own ignore rules already cover.
+    ///
+    /// `check-ignore -z --stdin` takes the whole list at once and prints back the ones that match,
+    /// so a folder with thirty candidates costs one process instead of thirty. On stdin rather
+    /// than as arguments for the reason `safetyReport` feeds refs the same way: a long list would
+    /// pass the argument limit, and a name beginning with a dash cannot be read as an option.
+    ///
+    /// Exit 1 is "none matched" rather than a failure. Anything else is git failing to answer,
+    /// and that reads as not ignored, which is the same way round `isIgnored` had it: Bloom writes
+    /// the rule rather than assuming a file it cannot check is already covered.
+    static func ignoredPaths(among paths: [String], in repo: String) async -> Set<String> {
+        guard !paths.isEmpty else { return [] }
+        guard let result = try? await run(
+            ["check-ignore", "-z", "--stdin"],
+            in: repo,
+            stdin: paths.joined(separator: "\0") + "\0"
+        ), result.status == 0 || result.status == 1 else { return [] }
+
+        return Set(result.stdout.split(separator: "\0").map(String.init))
     }
 
     static func stageAll(in repo: String) async throws {

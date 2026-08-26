@@ -42,6 +42,19 @@ public enum DiffRefreshSchedule {
     /// How often the loop wakes.
     public static let tick: TimeInterval = 6
 
+    /// How many worktrees a pass asks git about at once.
+    ///
+    /// The pass used to be strictly one at a time, over worktrees that share no state until the
+    /// `Store` write and that `GIT_OPTIONAL_LOCKS=0` keeps out of each other's `index.lock`. What
+    /// this moves is the wall time of a pass, not the 651ms of process time above: the same trade
+    /// `changedFiles` makes with its three reads inside one worktree.
+    ///
+    /// Capped rather than unbounded because `Shell.run` puts two reader threads with 512KB stacks
+    /// behind every process, so fanning out over a 27 project sidebar would be around 200 blocked
+    /// threads. It is here rather than in the loop so `IdleProbe` measures the width the loop
+    /// actually uses.
+    public static let width = 4
+
     /// How stale a workspace nothing is writing to is allowed to get.
     ///
     /// **Five minutes rather than one, because this is no longer how a change is noticed.**

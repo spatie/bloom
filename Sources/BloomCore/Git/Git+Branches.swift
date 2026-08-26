@@ -164,16 +164,19 @@ extension Git {
             "rebase-merge", "rebase-apply", "MERGE_HEAD",
             "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG",
         ]
-        for marker in markers {
-            guard let result = try? await run(["rev-parse", "--git-path", marker], in: directory),
-                  result.ok else { continue }
-            let path = result.trimmed
-            guard !path.isEmpty else { continue }
+        // `rev-parse` takes `--git-path` as many times as it is given and prints one line per
+        // marker, in order, so six processes are one. It fails only for a directory that is not a
+        // repository, where all six failed anyway.
+        let arguments = ["rev-parse"] + markers.flatMap { ["--git-path", $0] }
+        guard let result = try? await run(arguments, in: directory), result.ok else { return false }
+
+        return result.lines.contains { line in
+            let path = line.trimmingCharacters(in: .whitespaces)
+            guard !path.isEmpty else { return false }
             let absolute = path.hasPrefix("/")
                 ? path
                 : (directory as NSString).appendingPathComponent(path)
-            if FileManager.default.fileExists(atPath: absolute) { return true }
+            return FileManager.default.fileExists(atPath: absolute)
         }
-        return false
     }
 }

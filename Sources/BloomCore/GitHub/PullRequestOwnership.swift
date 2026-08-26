@@ -97,17 +97,10 @@ public extension GitHub {
     private static func pullRequest(
         for workspace: Workspace, onBranch head: String, maxAge: Duration
     ) async throws -> PullRequest? {
-        guard let found = try await pullRequest(
+        guard let found = try await snapshot(
             forBranch: head, worktree: workspace.path, maxAge: maxAge
-        ) else { return nil }
-
-        let checkedOut = await Git.checkedOutPullRequest(
-            branch: head, worktree: workspace.path
-        )
-        guard PullRequestOwnership.belongs(
-            found, toWorkspaceStartedAt: workspace.createdAt, checkedOutAs: checkedOut
-        ) else { return nil }
-        return found
+        ), await owns(found.pullRequest, workspace: workspace, onBranch: head) else { return nil }
+        return found.pullRequest
     }
 
     /// This workspace's checks, which are the checks of this workspace's pull request.
@@ -115,12 +108,27 @@ public extension GitHub {
     /// The same gate, because they come out of the same `gh pr view`: a rollup drawn for a pull
     /// request that merged before this workspace existed is a green tick over work nobody has run
     /// anything against.
+    ///
+    /// One snapshot, not two. Asking for the pull request and then for the checks landed on the
+    /// same cache key, and `maxAge` is zero for the only caller, which never hits, so the Checks
+    /// tab made two identical `gh pr view` round trips every twenty seconds and threw one payload
+    /// away.
     static func checks(for workspace: Workspace, maxAge: Duration = .zero) async throws -> [CheckRun] {
         // The same branch both times, or the rollup is read for one branch and gated on another.
         let head = await headBranch(of: workspace)
-        guard try await pullRequest(for: workspace, onBranch: head, maxAge: maxAge) != nil else {
-            return []
-        }
-        return try await checks(forBranch: head, worktree: workspace.path, maxAge: maxAge)
+        guard let found = try await snapshot(
+            forBranch: head, worktree: workspace.path, maxAge: maxAge
+        ), await owns(found.pullRequest, workspace: workspace, onBranch: head) else { return [] }
+        return found.runs
+    }
+
+    /// Whether the pull request gh found under this branch name is this workspace's.
+    private static func owns(
+        _ pullRequest: PullRequest, workspace: Workspace, onBranch head: String
+    ) async -> Bool {
+        let checkedOut = await Git.checkedOutPullRequest(branch: head, worktree: workspace.path)
+        return PullRequestOwnership.belongs(
+            pullRequest, toWorkspaceStartedAt: workspace.createdAt, checkedOutAs: checkedOut
+        )
     }
 }

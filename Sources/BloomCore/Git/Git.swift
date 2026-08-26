@@ -303,21 +303,17 @@ public enum Git {
     public static func baseline(_ base: String, in worktree: String) async throws -> String {
         try validate(ref: base, label: "base branch")
 
-        let refs = await refPositions(base, in: worktree)
-        if let refs,
-           let remembered = await BaselineCache.shared.baseline(
-               worktree: worktree, base: base, fingerprint: refs
-           ) {
-            return remembered
+        // No fingerprint means git could not be asked, so there is nothing to remember it under
+        // and nothing to join: every such call resolves on its own.
+        guard let refs = await refPositions(base, in: worktree) else {
+            return try await resolveBaseline(base, in: worktree)
         }
 
-        let answer = try await resolveBaseline(base, in: worktree)
-        if let refs {
-            await BaselineCache.shared.remember(
-                worktree: worktree, base: base, fingerprint: refs, baseline: answer
-            )
+        return try await BaselineCache.shared.baseline(
+            worktree: worktree, base: base, fingerprint: refs
+        ) {
+            try await resolveBaseline(base, in: worktree)
         }
-        return answer
     }
 
     /// Where the three refs are now, as one string. Nil when git could not be asked at all, which
