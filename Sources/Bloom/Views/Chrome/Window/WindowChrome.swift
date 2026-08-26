@@ -12,8 +12,8 @@ import SwiftUI
 /// `titlebarAppearsTransparent` hands the strip to the window's own background colour, which is
 /// the same `Palette.sidebar` the column below it is painted in. That is also what a unified
 /// toolbar is meant to look like: one continuous piece of chrome from the traffic lights down the
-/// sidebar. The traffic lights, the toolbar items, the proxy icon and the title all stay exactly
-/// where AppKit puts them; only the paint behind them changes.
+/// sidebar. The traffic lights and the toolbar items stay exactly where AppKit puts them; only the
+/// paint behind them changes. The title is the one exception now, and `apply` says why.
 ///
 /// The colour is an `NSColor` with an appearance provider rather than a resolved value, so the
 /// title bar follows a switch between light and dark without this modifier being told about it.
@@ -40,6 +40,18 @@ struct WindowChrome: ViewModifier {
         guard let window else { return }
         window.titlebarAppearsTransparent = true
         window.backgroundColor = Palette.sidebarNSColor
+        // AppKit's own title text, off. `WindowTitleControl` draws it as a toolbar item instead,
+        // so that a double click on the NAME can start a rename without taking the double click on
+        // the BAR that Desktop & Dock has already spent on Zoom or Minimise.
+        //
+        // Here rather than in `WindowTitle`, which owns the title's words, because `addStrip`
+        // below measures the title bar and the measurement has to be taken with this already
+        // applied. Two sibling modifiers attach to the window in no defined order, so the
+        // measurement and the setting belong in one place. `NSWindowTitleHidden` "moves the
+        // toolbar up into the area previously occupied by the title", which is a no-op for a
+        // `.unified` toolbar whose title was already inline with it, but this is not a thing to
+        // depend on the ordering of.
+        window.titleVisibility = .hidden
         addStrip(to: window)
     }
 
