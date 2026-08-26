@@ -352,10 +352,16 @@ struct PullRequestSummary: View {
         }
     }
 
+    /// Untinted, deliberately.
+    ///
+    /// It carried `tint`, which on a merged pull request is `Palette.merged`, and it stands beside
+    /// an Archive filled with `mergedFill`. That drew two purple buttons rather than a primary and
+    /// a secondary, which is the one thing the strip's whole button hierarchy is about: exactly
+    /// one filled control per state, and everything beside it plainly not it. A bordered button in
+    /// the system's own grey is what a secondary looks like on this platform.
     private var continueControl: some View {
         Button("Continue", systemImage: "chevron.forward.2", action: onContinue)
             .buttonStyle(.bordered)
-            .tint(tint ?? Palette.accent)
             .controlSize(.regular)
             .help(
                 branchActions.reason

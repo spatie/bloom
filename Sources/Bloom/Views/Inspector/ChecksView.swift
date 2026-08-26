@@ -125,23 +125,23 @@ struct ChecksView: View {
             // Honest rather than alarming: an empty list here means Bloom could not ask, not that
             // GitHub reported nothing. The two reasons are different problems with different
             // fixes, so they get different sentences.
-            VStack(spacing: Metrics.gutter) {
-                EmptyStateView(
-                    glyph: "questionmark.circle",
-                    title: github == .notInstalled ? "The GitHub CLI is not installed" : "GitHub is not connected",
-                    message: github == .notInstalled
-                        ? "Checks come from GitHub through the gh command, and it is not on this Mac."
-                        : "Checks come from GitHub through the gh command, and it is signed out."
-                )
-                // A deliberate press, which is the only thing that may raise the sheet.
-                Button(github == .notInstalled ? "Install the GitHub CLI" : "Connect GitHub") {
-                    // Through the gate rather than straight to the sheet, so a signed in machine
-                    // simply reloads and a signed out one signs in and then reloads.
-                    GitHubSignIn.shared.run(directory: model.workspace.path) { reload += 1 }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Palette.accentFill)
-            }
+            // Passed in rather than stacked under with a gap picked by hand, the way
+            // `ChangedFileList` and `DiffView` already do it: `EmptyStateView` is
+            // `ContentUnavailableView`, which places and tints its own actions, so a button parked
+            // below it sat at a spacing nothing else in the app uses.
+            //
+            // The press is still a deliberate one, and it is still the only thing that may raise
+            // the sheet. It goes through the gate rather than straight to it, so a signed in
+            // machine simply reloads and a signed out one signs in and then reloads.
+            EmptyStateView(
+                glyph: "questionmark.circle",
+                title: github == .notInstalled ? "The GitHub CLI is not installed" : "GitHub is not connected",
+                message: github == .notInstalled
+                    ? "Checks come from GitHub through the gh command, and it is not on this Mac."
+                    : "Checks come from GitHub through the gh command, and it is signed out.",
+                actionTitle: github == .notInstalled ? "Install the GitHub CLI" : "Connect GitHub",
+                action: { GitHubSignIn.shared.run(directory: model.workspace.path) { reload += 1 } }
+            )
         } else if hasLoaded {
             EmptyStateView(
                 glyph: "checkmark.seal",
