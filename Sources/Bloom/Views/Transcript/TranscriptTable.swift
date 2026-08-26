@@ -470,8 +470,10 @@ struct TranscriptTable: NSViewRepresentable {
         /// authoritative and which the tail triggers itself as it grows.
         private func height(of entry: TranscriptTableEntry) -> CGFloat {
             guard let sizing = heights.measure else { return Self.hair }
-            if let cached = heights.height(for: entry.contentKey) { return cached }
-            let measured = TranscriptRowHeights.rounded(measure(entry, at: sizing.width))
+            if let cached = heights.height(for: entry.contentKey) { return CGFloat(cached) }
+            let measured = CGFloat(
+                TranscriptRowHeights.rounded(measure(entry, at: CGFloat(sizing.width)))
+            )
             heights.note(measured, for: entry.contentKey)
             return measured
         }
@@ -791,9 +793,9 @@ struct TranscriptTable: NSViewRepresentable {
             let visible = scrollView.contentView.documentVisibleRect
             return (
                 id,
-                TranscriptAnchor.delta(
+                CGFloat(TranscriptAnchor.delta(
                     rowTop: tableView.rect(ofRow: row).minY, viewportTop: visible.minY
-                )
+                ))
             )
         }
 
@@ -873,7 +875,7 @@ struct TranscriptTable: NSViewRepresentable {
         /// text rewraps, and the whole cache is rebuilt once when the hand comes off, anchored on
         /// the row at the top so the correction does not move the reader.
         @objc private func paneResized() {
-            guard let sizing = heights.measure, abs(columnWidth - sizing.width) > 0.5 else {
+            guard let sizing = heights.measure, abs(columnWidth - CGFloat(sizing.width)) > 0.5 else {
                 reportGeometry()
                 return
             }
