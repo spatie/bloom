@@ -92,14 +92,12 @@ struct SettingsView: View {
                     CommandLineSettingsView()
                 }
 
-                // Last of the panes that are about the machine rather than about the agents,
-                // which is where a Mac puts this one: System Settings > General > Storage sits
-                // at the foot of General, and Xcode's Components is the last of its tools. It is
-                // also the only pane in this window that can destroy something, so it is nowhere
-                // near the panes somebody opens to change a preference.
-                Tab(SettingsTab.storage.title, systemImage: "internaldrive", value: SettingsTab.storage) {
-                    StorageSettingsView()
-                }
+                // **There was a Storage pane here and it has gone into Home.** It listed every
+                // archived workspace with its project, its branch, its age and its size, which is
+                // the list Home's Archived chip was already drawing with everything but the size
+                // on it: the same objects on two screens with different columns. Home carries the
+                // size, the order and both totals now, and this window has no pane that can
+                // destroy anything.
             }
 
             Tab(SettingsTab.about.title, systemImage: "info.circle", value: SettingsTab.about) {

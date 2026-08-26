@@ -104,6 +104,20 @@ public enum HomeScope: String, Hashable, Sendable, CaseIterable, Codable {
     /// Whether workspace rows are drawn at all under this scope.
     public var showsWorkspaces: Bool { self != .transcripts }
 
+    /// Whether the rows say what each record still costs, and can be ordered by it.
+    ///
+    /// **The Archived chip alone, and that is what folded a Settings pane into this list rather
+    /// than beside it.** Settings had a Storage screen listing every archived workspace with its
+    /// size, its project, its branch and its age: the same objects as this list, ordered
+    /// differently, with one extra column. Under this chip every row is a database record and
+    /// nothing else, so a column of bytes has a value on every one of them and means one thing.
+    ///
+    /// Under `all` it would not. The same slot would hold a size on the archived rows and a diff
+    /// on the live ones, on alternating rows down one column, which is a column that means two
+    /// things. It is also what keeps the measurement off the screen the app opens with: see
+    /// `HomeView.loadFootprints` for what asking costs.
+    public var showsFootprints: Bool { self == .archived }
+
     /// Whether transcript results are drawn under this scope. Only ever asked while searching.
     public var showsTranscripts: Bool {
         switch self {

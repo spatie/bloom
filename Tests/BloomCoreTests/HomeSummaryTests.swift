@@ -23,7 +23,8 @@ struct HomeSummaryTests {
         running: Int = 0,
         workspaces: Int = 0,
         transcripts: Int = 0,
-        isSearching: Bool = false
+        isSearching: Bool = false,
+        shownBytes: Int = 0
     ) -> HomeListing {
         var counts = HomeScopeCounts()
         counts.live = live
@@ -39,7 +40,8 @@ struct HomeSummaryTests {
             shown: shown,
             considered: considered,
             archived: archived,
-            shownArchived: archived
+            shownArchived: archived,
+            shownBytes: shownBytes
         )
     }
 
@@ -171,6 +173,118 @@ struct HomeSummaryTests {
         #expect(
             HomeList.summary(listing: allArchived, filter: HomeFilter(scope: .live), projects: 4)
                 == "Nothing live \u{00B7} 17 archived"
+        )
+    }
+
+    // MARK: - What the archive costs
+
+    /// **This line is where a Settings pane's header and footer ended up.** Storage said "17
+    /// archived workspaces, holding 7.6 MB" across its top and "Bloom's database is 44.3 MB"
+    /// across its foot, and both are facts about the whole of something, which is what this bar
+    /// is for. They belong in one sentence rather than in two windows: 7.6 MB of archived work
+    /// inside a 44.3 MB file is a different afternoon from 7.6 MB inside a 500 MB one.
+    @Test("the archived line carries what the archive holds and how big the file is")
+    func theArchivedLineCarriesBothTotals() {
+        let machine = listing(
+            shown: 17, considered: 20, live: 3, archived: 17, shownBytes: 7_600_000
+        )
+        let tidy = DatabaseSize(pageSize: 4_096, pageCount: 10_000, freePageCount: 10)
+
+        #expect(
+            HomeList.summary(
+                listing: machine, filter: HomeFilter(scope: .archived), projects: 4,
+                database: tidy
+            ) == "17 archived in 4 projects, holding \(ArchiveDeletion.bytes(7_600_000)) "
+                + "\u{00B7} Bloom\u{2019}s database is \(ArchiveDeletion.bytes(40_960_000))"
+        )
+    }
+
+    /// The unused half is printed only when a compaction is on offer, because that button is the
+    /// only thing that can act on it and it needs a number to be about. A person who cannot do
+    /// anything about 40 kB of free list does not need to be told it is there.
+    @Test("the free space is named only when there is a compaction to explain")
+    func namesFreeSpaceOnlyWhenItIsWorthReclaiming() {
+        let machine = listing(shown: 17, considered: 20, archived: 17, shownBytes: 7_600_000)
+        let loose = DatabaseSize(pageSize: 4_096, pageCount: 10_000, freePageCount: 4_000)
+
+        let text = HomeList.summary(
+            listing: machine, filter: HomeFilter(scope: .archived), projects: 1, database: loose
+        )
+        #expect(loose.isWorthCompacting)
+        #expect(text.hasSuffix("\(ArchiveDeletion.bytes(16_384_000)) of it unused"))
+        // No project clause on a machine with one project, which the size clauses must not have
+        // quietly reintroduced.
+        #expect(text.hasPrefix("17 archived, holding"))
+    }
+
+    /// Every other chip is about the list rather than about the disk, and a database size under a
+    /// list of live work is an answer to a question that screen is not asking.
+    @Test("the database is named under the Archived chip alone")
+    func theDatabaseIsNamedOnlyUnderArchived() {
+        let machine = listing(
+            shown: 20, considered: 20, live: 3, archived: 17, shownBytes: 7_600_000
+        )
+        let size = DatabaseSize(pageSize: 4_096, pageCount: 10_000, freePageCount: 10)
+        for scope in [HomeScope.all, .live, .needsYou, .running] {
+            #expect(
+                !HomeList.summary(
+                    listing: machine, filter: HomeFilter(scope: scope), projects: 4, database: size
+                ).contains("database")
+            )
+        }
+    }
+
+    /// Nothing archived and a database that is nonetheless large is worth saying in one breath:
+    /// it is the answer to "why is this file so big" being "not because of the archive".
+    @Test("an empty archive still says how big the file is")
+    func anEmptyArchiveStillNamesTheFile() {
+        let quiet = listing(shown: 0, considered: 20, live: 20, archived: 0)
+        let size = DatabaseSize(pageSize: 4_096, pageCount: 10_000, freePageCount: 10)
+        #expect(
+            HomeList.summary(
+                listing: quiet, filter: HomeFilter(scope: .archived), projects: 4, database: size
+            ) == "Nothing archived \u{00B7} Bloom\u{2019}s database is "
+                + "\(ArchiveDeletion.bytes(40_960_000))"
+        )
+    }
+
+    /// The project menu answers before the chip does: narrowed to one project the line is
+    /// "Showing 11 of 312 workspaces" and never reaches the archived branch at all, while the
+    /// rows above it are each still drawing a size. A total that appeared and vanished with the
+    /// project filter would be the one number on the screen that could not be trusted.
+    @Test("a project filter narrows the line and keeps the storage on it")
+    func aProjectFilterKeepsTheStorageClauses() {
+        let machine = listing(shown: 11, considered: 312, archived: 11, shownBytes: 2_100_000)
+        let size = DatabaseSize(pageSize: 4_096, pageCount: 10_000, freePageCount: 10)
+
+        #expect(
+            HomeList.summary(
+                listing: machine,
+                filter: HomeFilter(projects: [RepoID("a")], scope: .archived),
+                projects: 4,
+                database: size
+            ) == "Showing 11 of 312 workspaces, holding \(ArchiveDeletion.bytes(2_100_000)) "
+                + "\u{00B7} Bloom\u{2019}s database is \(ArchiveDeletion.bytes(40_960_000))"
+        )
+        // And nothing about bytes on any other chip, narrowed or not.
+        #expect(
+            HomeList.summary(
+                listing: machine,
+                filter: HomeFilter(projects: [RepoID("a")], scope: .all),
+                projects: 4,
+                database: size
+            ) == "Showing 11 of 312 workspaces"
+        )
+    }
+
+    /// Nobody has measured yet, which is every moment before the load lands and every chip that
+    /// never asks. The line is the one it has always been rather than one with a hole in it.
+    @Test("an unmeasured archive says nothing about bytes at all")
+    func saysNothingBeforeAnythingIsMeasured() {
+        let machine = listing(shown: 17, considered: 20, live: 3, archived: 17)
+        #expect(
+            HomeList.summary(listing: machine, filter: HomeFilter(scope: .archived), projects: 4)
+                == "17 archived in 4 projects"
         )
     }
 

@@ -43,9 +43,9 @@ struct HomeRowMenu: View {
             Divider()
             // The one irreversible thing this menu can do, so it is last, alone under a rule, and
             // it takes an ellipsis because it opens the confirmation rather than doing it. That
-            // confirmation is Storage settings' own `ArchiveDeletion`, which counts the chats, the
-            // transcript rows and the review comments that would go: the same words wherever the
-            // deletion is started from, because it is the same deletion.
+            // confirmation is `ArchiveDeletion`, which counts the chats, the transcript rows and
+            // the review comments that would go: the same words whether the deletion is started
+            // here or with the Delete key, because it is the same deletion.
             //
             // Home only. The sidebar never lists an archived workspace, and a live one has a
             // worktree that Archive is the way through. See this file's head.

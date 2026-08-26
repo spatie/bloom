@@ -301,9 +301,10 @@ in its own doc comment.
 
 ### Settings and the project settings window
 
-Storage, agents, appearance, prompts and the per project settings are all reachable from `⌘,` and
-`⇧⌘,`. Removing a project from Settings, and removing a run script, are buttons inside those
-windows and belong there.
+Agents, appearance, prompts and the per project settings are all reachable from `⌘,` and `⇧⌘,`.
+Removing a project from Settings, and removing a run script, are buttons inside those windows and
+belong there. Storage was a pane here and is not any more: what the archived work costs, and the
+only way to give the space back, are on Home's Archived chip, beside the rows they are about.
 
 ## Keys, and who wins
 

@@ -11,6 +11,10 @@ import BloomCore
 /// `HomeStatusBar` at the foot of the pane: a count belongs beside the thing it counts, and this
 /// bar was carrying five chips, a picker and a sentence at one weight, so nothing on it led.
 ///
+/// **What went on it.** One control, and only under the Archived chip: whether that list is in
+/// date order or in size order. It is the last piece of the Settings > Storage pane, whose
+/// Largest/Oldest switch was the only part of it Home had no answer for. See `orderControl`.
+///
 /// **It was glass and it is not any more.** It was a `GlassEffectContainer` with `.regular` on the
 /// strip and a tinted chip for the selected one, floating over the list on its own rounded plate.
 /// The owner's words were "Bloom doesn't need that glassy stuff behind it", and he is right about
@@ -45,7 +49,10 @@ struct HomeBar: View {
 
                 Spacer(minLength: Metrics.gutter)
 
-                projectMenu
+                HStack(spacing: Metrics.spacing) {
+                    orderControl
+                    projectMenu
+                }
             }
             .padding(.horizontal, HomeMetrics.gutter)
             .frame(height: Metrics.barHeight)
@@ -117,6 +124,35 @@ struct HomeBar: View {
         case .archived: "Archived: readable, restorable, with nothing left on disk"
         case .workspaces: "Matched by name, branch or project"
         case .transcripts: "Matched in what the agents said"
+        }
+    }
+
+    // MARK: - Order
+
+    /// Date order or size order, offered on the Archived chip and on no other.
+    ///
+    /// **It appears with that chip and goes with it**, which is a control moving on a strip and is
+    /// normally the thing not to do. The alternative is a picker present and disabled everywhere
+    /// else, which makes the strip permanently wider in order to say "not here" on four screens
+    /// out of five. It moves in answer to a click on the chip beside it, which is the one case
+    /// where a reader can see why the strip changed.
+    ///
+    /// A segmented pair rather than a menu, because there are only two and both are worth reading
+    /// at rest: a menu would say "Recent" and hide the fact that a size order exists at all, on
+    /// the one chip that exists to answer what the archive costs.
+    @ViewBuilder
+    private var orderControl: some View {
+        if HomeOrder.applies(scope: filter.scope, searching: isSearching) {
+            Picker("Order", selection: $filter.order) {
+                ForEach(HomeOrder.allCases, id: \.self) { order in
+                    Text(order.label).tag(order)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .fixedSize()
+            .help("Order the archived work by when it finished, or by what it still holds")
         }
     }
 
