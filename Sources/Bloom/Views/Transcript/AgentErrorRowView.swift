@@ -37,7 +37,7 @@ struct AgentErrorRowView: View {
                 .foregroundStyle(Palette.negative)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .transcriptLabelColumn()
+                .transcriptLabelColumn(exit.title, font: Typo.label)
 
             Text(exit.summary)
                 .font(Typo.label)

@@ -45,7 +45,7 @@ struct ThinkingRowView: View {
                 .foregroundStyle(Palette.textSecondary)
                 .italic()
                 .lineLimit(1)
-                .transcriptLabelColumn()
+                .transcriptLabelColumn("Thinking", font: Typo.label)
 
             if !isExpanded {
                 Text(ToolPresenter.oneLine(text))

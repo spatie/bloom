@@ -24,7 +24,7 @@ struct SessionStartRowView: View {
             Text("Session started")
                 .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
-                .transcriptLabelColumn()
+                .transcriptLabelColumn("Session started", font: Typo.label)
 
             if !info.model.isEmpty {
                 Chip(text: modelLabel)
