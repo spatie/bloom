@@ -516,10 +516,13 @@ struct BloomCommands: Commands {
     /// having gone away. That, and the absent case beside it, are `SetupRunOffer` now: the same
     /// item is on a workspace row's own menu, and the two must not word it differently or disagree
     /// about when it can be pressed.
+    ///
+    /// It asks before it runs, and every control that offers the run asks the same question. See
+    /// `SetupRunAlert`.
     @ViewBuilder
     private var setupItem: some View {
         if let workspace = model.selectedModel, let offer = workspace.setupRunOffer {
-            Button(offer.title) { workspace.runSetupAgain() }
+            Button(offer.title) { SetupRunAlert.shared.ask(workspace) }
                 .disabled(!offer.isEnabled)
         }
     }

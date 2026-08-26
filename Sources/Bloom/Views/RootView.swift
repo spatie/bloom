@@ -20,6 +20,7 @@ struct RootView: View {
 
     @Bindable private var projectSetup = ProjectSetup.shared
     @Bindable private var closeSession = CloseSessionAlert.shared
+    @Bindable private var setupRun = SetupRunAlert.shared
     /// The two Help menu sheets, and the drafts typed into them. See `FeedbackPresenter`.
     @Bindable private var feedback = FeedbackPresenter.shared
 
@@ -215,6 +216,19 @@ struct RootView: View {
             Button(request.cost.cancelTitle, role: .cancel) { closeSession.cancel() }
         } message: { request in
             Text(request.message)
+        }
+        // The question asked before a setup script runs. On the window because the three controls
+        // that raise it are two menus and a transcript row, and a `Commands` body is not a view
+        // and can present nothing. See `SetupRunAlert`.
+        .confirmation($setupRun.request) { request in
+            Confirmation(
+                title: request.question.title,
+                message: request.question.message,
+                confirmLabel: request.question.confirmLabel,
+                cancelLabel: request.question.cancelLabel
+            )
+        } onConfirm: { request in
+            request.model.runSetupAgain()
         }
         // A single OK that does nothing but dismiss is the system default, so the actions builder
         // is deliberately empty rather than spelling one out.

@@ -813,7 +813,8 @@ final class WorkspaceModel {
         workspace.setupState != .pending || !setupOutput.isEmpty
     }
 
-    /// Runs the setup script in this worktree again.
+    /// Runs the setup script in this worktree again. Called only once the reader has said yes:
+    /// see `SetupRunAlert`.
     ///
     /// A recovery rather than a first run, which is why it sends no prompt and reloads no
     /// sessions: the script failed, or it was edited, and it is being run once more. A workspace
