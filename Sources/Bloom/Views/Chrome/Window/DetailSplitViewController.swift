@@ -229,16 +229,24 @@ final class DetailSplitViewController: NSSplitViewController {
         inspectorHost.view.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(publishInspectorWidth),
+            selector: #selector(paneFrameChanged),
             name: NSView.frameDidChangeNotification,
             object: inspectorHost.view
         )
     }
 
-    @objc private func publishInspectorWidth() {
-        let pane = inspectorHost.view
-        let width = inspectorItem.isCollapsed ? 0 : pane.frame.width
-        InspectorGeometry.shared.setInspectorWidth(width)
+    /// A drag or a resize. Never a slide: the pane is where it is, and the title bar should follow
+    /// it this frame rather than a quarter of a second from now.
+    @objc private func paneFrameChanged() {
+        publishInspectorWidth(collapsed: inspectorItem.isCollapsed, sliding: false)
+    }
+
+    /// `collapsed` is passed in rather than read back off the item, because the animated setter
+    /// below is told where the pane is going and "where is it now" is a question with two
+    /// defensible answers while it is on its way there.
+    private func publishInspectorWidth(collapsed: Bool, sliding: Bool) {
+        let width = collapsed ? 0 : inspectorHost.view.frame.width
+        InspectorGeometry.shared.setInspectorWidth(width, sliding: sliding)
     }
 
     func update(detail: AnyView, inspector: AnyView, isInspectorPresented: Bool, animated: Bool) {
@@ -250,12 +258,32 @@ final class DetailSplitViewController: NSSplitViewController {
         // The animated setter runs a layout pass on every frame of the transition, and layout churn
         // is the condition this window has crashed under, so Reduce Motion turns it off rather than
         // merely shortening it.
-        if animated {
-            inspectorItem.animator().isCollapsed = shouldCollapse
-        } else {
+        guard animated else {
             inspectorItem.isCollapsed = shouldCollapse
+            publishInspectorWidth(collapsed: shouldCollapse, sliding: false)
+            return
         }
-        publishInspectorWidth()
+
+        // The two halves of the inspector, started together.
+        //
+        // What the user reads as one thing arriving is drawn by two frameworks: this pane, and the
+        // pull request band, which is a title bar accessory because it sits in the title bar rather
+        // than in the pane. The band used to be drawn or not drawn with nothing in between, so it
+        // appeared whole on the frame the toolbar button was pressed while the pane slid in
+        // underneath it a quarter of a second later. Reported as "bit jarring now", and it was two
+        // events rather than one.
+        //
+        // So both are started inside one animation context, off one duration. The context is given
+        // its numbers rather than left at its defaults for the same reason the band is told about
+        // the slide at all: a length nobody wrote down is a length the two halves are free to
+        // disagree about later. `Motion.inspectorSeconds` is what the default already was, so the
+        // pane keeps exactly the speed it has always collapsed at.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Motion.inspectorSeconds
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            inspectorItem.animator().isCollapsed = shouldCollapse
+            publishInspectorWidth(collapsed: shouldCollapse, sliding: true)
+        }
     }
 }
 
