@@ -25,8 +25,7 @@ struct InstallPingSettingsSection: View {
             }
         } footer: {
             Text(InstallPing.settingFooter)
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textSecondary)
+                .settingsFootnote()
         }
     }
 }

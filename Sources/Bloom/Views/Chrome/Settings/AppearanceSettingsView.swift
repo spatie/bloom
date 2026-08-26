@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import BloomCore
 
 /// The Appearance pane.
 ///
@@ -43,8 +44,7 @@ struct AppearanceSettingsView: View {
                 .pickerStyle(.segmented)
 
                 Text(chatFont.summary)
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textSecondary)
+                    .settingsFootnote()
 
                 Picker("Text size", selection: $chatTextSize) {
                     ForEach(ChatTextSize.allCases) { size in
@@ -59,9 +59,8 @@ struct AppearanceSettingsView: View {
             } header: {
                 Text("Conversation")
             } footer: {
-                Text("Applies to what an agent says and to what you type. Code, paths and diffs stay monospaced whichever face is chosen. The sidebar, the inspector and the toolbar follow System Settings.")
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textSecondary)
+                Text("Applies to what an agent says and to what you type. The rest of the window follows System Settings.")
+                    .settingsFootnote()
             }
 
             Section {
@@ -81,23 +80,26 @@ struct AppearanceSettingsView: View {
                 }
 
                 TerminalTextPreview(size: effectiveTerminalSize, usesGhosttyTheme: usesGhosttyTheme)
+            } header: {
+                Text("Terminal")
+            } footer: {
+                Text(terminalSizeSource)
+                    .settingsFootnote()
+            }
 
+            // Its own section, because it is its own subject. Surviving a quit has nothing to do
+            // with how large a terminal is set, and the two sat in one card with a loose sentence
+            // between them doing the work a footer is for.
+            Section {
                 Toggle("Keep terminals running after quitting", isOn: $persistsTerminals)
                     .disabled(!TerminalPersistence.isTmuxInstalled)
                     .help(
                         "Terminals run in tmux instead of inside Bloom, so they survive a quit "
                         + "and come back on the next launch."
                     )
-
-                Text(persistenceFooter)
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textSecondary)
-            } header: {
-                Text("Terminal")
             } footer: {
-                Text(terminalFooter)
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textSecondary)
+                Text(TerminalSettingsCopy.persistence(isTmuxInstalled: TerminalPersistence.isTmuxInstalled))
+                    .settingsFootnote()
             }
         }
         .settingsForm()
@@ -121,35 +123,14 @@ struct AppearanceSettingsView: View {
         TerminalTextSize.override ?? TerminalTextSize.fallback(for: NSApp.effectiveAppearance)
     }
 
-    /// Says which of the three states the size is in, because "14 pt" alone cannot tell somebody
-    /// whether Bloom is following their terminal or has quietly stopped.
-    /// Said next to the switch rather than in the section footer, which already explains the text
-    /// size. The archive sentence is not a detail: a shell left running in a worktree that has
-    /// just been deleted is the failure this feature could otherwise cause, and the guarantee that
-    /// it cannot is worth stating where the switch is thrown.
-    private var persistenceFooter: String {
-        guard TerminalPersistence.isTmuxInstalled else {
-            return "Requires tmux, which is not installed. Install it with `brew install tmux`. "
-                + "Until then terminals stop when you quit Bloom."
-        }
-        return "Terminals keep running when you quit Bloom and are restored on the next launch, "
-            + "with their scrollback and anything still running in them. Archiving a workspace "
-            + "always stops its terminals, whatever this is set to."
-    }
-
-    /// Says where the size is coming from, and nothing else.
-    ///
-    /// The keys used to be spelled out here too. They are in the View menu now, which is where a
-    /// person looks for them and where they are always visible, so repeating them under a stepper
-    /// was telling someone something they can already see.
-    private var terminalFooter: String {
-        if TerminalTextSize.override != nil {
-            return "Set here, so it no longer follows Ghostty."
-        }
-        if let ghostty = TerminalTextSize.ghosttyDefault(for: NSApp.effectiveAppearance) {
-            return "Following your Ghostty configuration's font-size of \(Int(ghostty)) pt."
-        }
-        return "No Ghostty configuration was found, so terminals use the system monospaced size."
+    /// Which of the three states the size is in. The sentences and the choice between them are
+    /// `TerminalSettingsCopy`, in the core, where a test can read them; this reads the two numbers
+    /// off AppKit and hands them over.
+    private var terminalSizeSource: String {
+        TerminalSettingsCopy.textSizeSource(
+            override: TerminalTextSize.override.map { Double($0) },
+            ghostty: TerminalTextSize.ghosttyDefault(for: NSApp.effectiveAppearance).map { Double($0) }
+        )
     }
 }
 

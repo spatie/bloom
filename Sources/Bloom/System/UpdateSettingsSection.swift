@@ -22,9 +22,7 @@ struct UpdateSettingsSection: View {
             if let explanation = SoftwareUpdate.unavailableExplanation(updater.availability) {
                 SettingsRow(SoftwareUpdate.settingTitle) {
                     Text(explanation)
-                        .font(Typo.caption)
-                        .foregroundStyle(Palette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .settingsFootnote()
                 }
             } else {
                 // A switch with its explanation underneath, matching every other boolean in this

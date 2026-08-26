@@ -31,8 +31,10 @@ struct ModelSettingsView: View {
                         effort: $defaults.effort
                     )
                 } label: {
+                    // No second line under either of these. "Model for new sessions" under a label
+                    // reading "Default model" is the label again in different words, and a caption
+                    // that says nothing teaches the reader to skip the ones that do.
                     Text("Default model")
-                    Text("Model for new sessions")
                 }
 
                 LabeledContent {
@@ -42,7 +44,6 @@ struct ModelSettingsView: View {
                     )
                 } label: {
                     Text("Review model")
-                    Text("Model for code reviews")
                 }
             }
 
@@ -68,15 +69,9 @@ struct ModelSettingsView: View {
                     Text("How much a new session may do without asking")
                 }
 
-                Toggle(isOn: $defaults.planMode) {
-                    Text("Default to plan mode")
-                    Text("Start new sessions in plan mode")
-                }
+                Toggle("Start new sessions in plan mode", isOn: $defaults.planMode)
 
-                Toggle(isOn: $defaults.fastMode) {
-                    Text("Default to fast mode")
-                    Text("Start new sessions in fast mode")
-                }
+                Toggle("Start new sessions in fast mode", isOn: $defaults.fastMode)
             } footer: {
                 // A footer rather than a section of its own. A group holding nothing but a
                 // sentence draws a card around the sentence, which makes an aside look like a
@@ -85,9 +80,7 @@ struct ModelSettingsView: View {
                     "A repository that pins a model in its own settings file wins over these. "
                     + "Sessions that already exist keep whatever they were opened with."
                 )
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+                .settingsFootnote()
             }
         }
         .settingsForm()

@@ -17,6 +17,12 @@ import BloomCore
 ///
 /// The rule text is the CLI's own `ruleContent`, never a rewording. Showing anything else would
 /// mean somebody revoking a rule they never read.
+///
+/// **Matching is exact.** Bloom answers a question by itself only when the agent proposes one of
+/// these rules character for character; anything else is put to the user. That sentence used to be
+/// in a footer on the pane, and it is mechanism rather than anything a person revoking a rule can
+/// act on. What they can act on stayed: a revoke takes effect on the next question, not the next
+/// launch.
 struct ApprovalSettingsView: View {
     @Environment(AppModel.self) private var app
 
@@ -34,14 +40,14 @@ struct ApprovalSettingsView: View {
                     Text("Nothing yet.")
                         .foregroundStyle(Palette.textSecondary)
                 } footer: {
+                    // The empty state is the one place on this pane that has to say what the
+                    // pane is for, because there is nothing else on it to work that out from.
                     Text(
                         "When an agent asks to do something, one of the answers is to allow it for "
-                        + "the whole project. Those rules are listed here, and this is where you take "
-                        + "them back."
+                        + "the whole project. Those rules are listed here, and this is where you "
+                        + "take them back."
                     )
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .settingsFootnote()
                 }
             }
 
@@ -57,14 +63,8 @@ struct ApprovalSettingsView: View {
                 Section {
                     EmptyView()
                 } footer: {
-                    Text(
-                        "Bloom answers a question itself only when the agent proposes exactly one of "
-                        + "these rules, character for character. Anything else is asked. Revoking "
-                        + "takes effect on the next question, not the next launch."
-                    )
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    Text("Revoking takes effect on the next question, not the next launch.")
+                        .settingsFootnote()
                 }
             }
         }

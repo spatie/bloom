@@ -25,8 +25,7 @@ struct SleepSettingsSection: View {
             }
         } footer: {
             Text(SleepPrevention.caveat)
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textSecondary)
+                .settingsFootnote()
         }
     }
 }

@@ -20,6 +20,11 @@ struct PromptEditor: View {
 
     private let overrides = PromptOverrides()
 
+    /// Closed. The tokens are a reference somebody reaches for while editing, not an explanation
+    /// of the setting, and seven prompts each showing five of them was most of the pane's height
+    /// spent on a table nobody had asked to see.
+    @State private var showsVariables = false
+
     @State private var text = ""
     /// Until the stored value has been read, `text` is an empty string that nobody typed. Writing
     /// that back would turn every visit to this tab into an override.
@@ -36,9 +41,7 @@ struct PromptEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
             Text(definition.summary)
-                .font(Typo.label)
-                .foregroundStyle(Palette.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+                .settingsFootnote()
 
             editor
 
@@ -59,6 +62,9 @@ struct PromptEditor: View {
                 .font(Typo.caption)
                 .foregroundStyle(Palette.warning)
                 .fixedSize(horizontal: false, vertical: true)
+                // Opened for them, because a token that will not be substituted is the one moment
+                // the list of the ones that will is worth interrupting for.
+                .onAppear { showsVariables = true }
             }
 
             variableReference
@@ -94,21 +100,20 @@ struct PromptEditor: View {
     private var status: some View {
         if isEmptyOverride {
             Text("Empty, so the built-in prompt is sent.")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textSecondary)
+                .settingsFootnote()
         } else if isCustomised {
             Text("Customised")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textSecondary)
+                .settingsFootnote()
         }
     }
 
+    /// The tokens, behind a disclosure.
+    ///
+    /// Not deleted, because it is the one thing on the row a person editing a template genuinely
+    /// reaches for, and not open, because it is reference rather than explanation: five rows times
+    /// seven prompts was the tallest thing on the pane and none of it had been asked for.
     private var variableReference: some View {
-        VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-            Text("Variables")
-                .font(Typo.captionEmphasis)
-                .foregroundStyle(Palette.textSecondary)
-
+        DisclosureGroup(isExpanded: $showsVariables) {
             // A grid rather than a list of `LabeledContent`, so the tokens line up as a reference
             // table instead of hugging opposite edges of a wide settings window.
             Grid(alignment: .leading, horizontalSpacing: Metrics.gutter, verticalSpacing: Metrics.spacingSmall) {
@@ -120,12 +125,16 @@ struct PromptEditor: View {
                             .textSelection(.enabled)
 
                         Text(variable.summary)
-                            .font(Typo.caption)
-                            .foregroundStyle(Palette.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .settingsFootnote()
                     }
                 }
             }
+            .padding(.top, Metrics.spacingSmall)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Text("Variables")
+                .font(Typo.captionEmphasis)
+                .foregroundStyle(Palette.textSecondary)
         }
     }
 
