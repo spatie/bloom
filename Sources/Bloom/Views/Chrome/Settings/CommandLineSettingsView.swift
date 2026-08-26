@@ -1,7 +1,14 @@
 import BloomCore
 import SwiftUI
 
-/// The Terminal pane: coupling a client the owner runs themselves to the Bloom that is running.
+/// The Command Line pane: coupling a client the owner runs themselves to the Bloom that is
+/// running.
+///
+/// **Not called Terminal, and that is a correction rather than a preference.** It was, and the two
+/// settings anybody goes looking for under that word, the terminal's text size and whether a shell
+/// survives a quit, are in Appearance and always have been. A reader after a font size clicked
+/// Terminal and got an `mcp add` command. Nothing in here is about the terminal Bloom draws; it is
+/// about the one the owner already had open.
 ///
 /// This pane is the whole of the feature's onboarding, which is why it is a pane rather than a row
 /// somewhere. Everything else about the standalone bridge already exists by the time anybody gets
@@ -17,7 +24,7 @@ import SwiftUI
 /// register projects and cut worktrees on this machine, in a commit, is the one genuinely bad
 /// outcome available here, so the warning is on the page next to the button rather than in a
 /// document nobody opens.
-struct TerminalSettingsView: View {
+struct CommandLineSettingsView: View {
     @Environment(AppModel.self) private var app
 
     /// Resolved once when the pane opens rather than in `body`. Reading the token touches the file

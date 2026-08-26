@@ -22,7 +22,15 @@ struct SettingsView: View {
     /// Enough for the widest form row without the window feeling like a second main window. Its
     /// own numbers, rather than the sidebar and inspector widths that happened to add up to
     /// something plausible.
+    ///
+    /// The width is a floor under `SettingsTabRow.width` rather than the answer. 640 held the
+    /// forms and was never asked about the twelve tabs above them, and a preference-style toolbar
+    /// that does not fit folds its tail behind a `»`, so the window opened with Storage and About
+    /// in an overflow menu. See `SettingsTabRow`, which is where the row is measured and where the
+    /// part of it that is an estimate is named.
     private static let minSize = CGSize(width: 640, height: 420)
+
+    @MainActor private static var minWidth: CGFloat { max(minSize.width, SettingsTabRow.width) }
 
     /// Which tab is showing. An enum rather than an index, so the value says what it selects.
     ///
@@ -34,54 +42,54 @@ struct SettingsView: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            Tab("General", systemImage: "gear", value: SettingsTab.general) {
+            Tab(SettingsTab.general.title, systemImage: "gear", value: SettingsTab.general) {
                 GeneralSettingsView()
             }
 
-            Tab("Appearance", systemImage: "paintbrush", value: SettingsTab.appearance) {
+            Tab(SettingsTab.appearance.title, systemImage: "paintbrush", value: SettingsTab.appearance) {
                 AppearanceSettingsView()
             }
 
-            Tab("Notifications", systemImage: "bell", value: SettingsTab.notifications) {
+            Tab(SettingsTab.notifications.title, systemImage: "bell", value: SettingsTab.notifications) {
                 NotificationSettingsView()
             }
 
-            Tab("Projects", systemImage: "folder", value: SettingsTab.projects) {
+            Tab(SettingsTab.projects.title, systemImage: "folder", value: SettingsTab.projects) {
                 ProjectSettingsView()
             }
 
-            Tab("Models", systemImage: "sparkle", value: SettingsTab.models) {
+            Tab(SettingsTab.models.title, systemImage: "sparkle", value: SettingsTab.models) {
                 ModelSettingsView()
             }
 
-            Tab("Agents", systemImage: "person.2", value: SettingsTab.agents) {
+            Tab(SettingsTab.agents.title, systemImage: "person.2", value: SettingsTab.agents) {
                 AgentsSettingsView()
             }
 
-            Tab("Prompts", systemImage: "text.bubble", value: SettingsTab.prompts) {
+            Tab(SettingsTab.prompts.title, systemImage: "text.bubble", value: SettingsTab.prompts) {
                 PromptSettingsView()
             }
 
             // Beside Tools rather than inside General: it holds state the user created, one row
             // per decision, and it is the thing that makes granting a rule forever safe to offer.
-            Tab("Approvals", systemImage: "hand.raised", value: SettingsTab.approvals) {
+            Tab(SettingsTab.approvals.title, systemImage: "hand.raised", value: SettingsTab.approvals) {
                 ApprovalSettingsView()
             }
 
             // Grouped only to get under `TabView`'s builder limit, which is ten children and was
-            // exactly reached before the Terminal pane arrived. `Group` conforms to `TabContent`,
+            // exactly reached before the Command Line pane arrived. `Group` conforms to `TabContent`,
             // so this changes the tab bar not at all, and it is where a new pane goes now that
             // the limit is spent.
             Group {
-                Tab("Tools", systemImage: "wrench.and.screwdriver", value: SettingsTab.tools) {
+                Tab(SettingsTab.tools.title, systemImage: "wrench.and.screwdriver", value: SettingsTab.tools) {
                     ToolSettingsView()
                 }
 
                 // After Tools rather than beside Agents: the Agents pane is about the CLIs Bloom
                 // launches, and this is the one arrangement where a CLI Bloom did not launch
                 // reaches in the other way round.
-                Tab("Terminal", systemImage: "terminal", value: SettingsTab.terminal) {
-                    TerminalSettingsView()
+                Tab(SettingsTab.commandLine.title, systemImage: "terminal", value: SettingsTab.commandLine) {
+                    CommandLineSettingsView()
                 }
 
                 // Last of the panes that are about the machine rather than about the agents,
@@ -89,16 +97,16 @@ struct SettingsView: View {
                 // at the foot of General, and Xcode's Components is the last of its tools. It is
                 // also the only pane in this window that can destroy something, so it is nowhere
                 // near the panes somebody opens to change a preference.
-                Tab("Storage", systemImage: "internaldrive", value: SettingsTab.storage) {
+                Tab(SettingsTab.storage.title, systemImage: "internaldrive", value: SettingsTab.storage) {
                     StorageSettingsView()
                 }
             }
 
-            Tab("About", systemImage: "info.circle", value: SettingsTab.about) {
+            Tab(SettingsTab.about.title, systemImage: "info.circle", value: SettingsTab.about) {
                 AboutSettingsView()
             }
         }
-        .frame(minWidth: Self.minSize.width, minHeight: Self.minSize.height)
+        .frame(minWidth: Self.minWidth, minHeight: Self.minSize.height)
         // No tint. The selected tab is the last system-accent control in this window, and
         // `.tint(Palette.accent)` on this TabView was tried and measured: the label came out
         // `#397CE1` with it and `#397CE1` without it, identical pixels in the same capture. The
