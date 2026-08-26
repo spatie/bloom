@@ -1,56 +1,36 @@
 import SwiftUI
 import BloomCore
 
-/// The boundary between two panes of the centre column: the line, the resize drag, and the grips
-/// by which either of the two panes is picked up and moved somewhere else in the tab.
+/// The boundary between two panes of the centre column: the line, a resize drag over the strip in
+/// the middle of it, and a band either side of that strip that picks a pane up and moves it
+/// elsewhere in the tab. Nothing is drawn for the move, so the pointer's shape is what says it is
+/// there: an open hand outside the strip against the resize cursor inside it.
 ///
-/// # Why the pane move starts here, and not on the pane
+/// The gesture is on the divider rather than on the pane because a terminal pane is a SwiftTerm
+/// `NSView` and a browser pane a `WKWebView`, and both want every mouse event for themselves.
 ///
-/// A pane is not something the pointer can grab. A terminal pane is a SwiftTerm `NSView` that wants
-/// every mouse event for selecting text and a browser pane is a `WKWebView` that wants them for the
-/// page, so "press anywhere in the pane and drag" takes a gesture away from the two kinds of
-/// content this app is mostly made of. A modifier held down while dragging dodges that and is what
-/// the first design reached for, but nothing on screen says it exists.
+/// It is a `DragGesture` rather than a `dropDestination`, and that was measured rather than argued.
+/// `.dropDestination` installs an `NSView` drawn BEHIND the content it is applied to, a `WKWebView`
+/// registers seventeen dragged types of its own and sits on top of it, and AppKit offers the drag
+/// to the deepest registered destination, so over a browser pane the drop was never ours. Drawn
+/// content wins where a drop destination cannot, because `NSHostingView` claims its own points
+/// whatever a pane has registered.
 ///
-/// A divider is the one surface inside a split tab that belongs to Bloom rather than to what a pane
-/// is showing, and it is exactly as available as the gesture is useful: **a divider only exists
-/// once a tab has been split, which is the only time there is anywhere to move a pane to.** Every
-/// pane of a split tree is a leaf and so the direct child of some split, so every pane has a
-/// divider against it and can be reached. Nothing is added to a pane at rest.
-///
-/// # Why this is a `DragGesture` and not `dropDestination`
-///
-/// It was `dropDestination` first, and it could not work, which was measured rather than argued.
-/// `.dropDestination` installs a real `NSView` as a sibling drawn BEHIND the content it is applied
-/// to, and a `WKWebView` registers seventeen dragged types of its own and sits on top of it:
-/// `hitTest` in the middle of a browser pane returns the web view, and AppKit offers the drag to
-/// the deepest registered destination, which is therefore never ours. The same measurement says the
-/// opposite about drawn content: a SwiftUI view declared over a web view DOES win the hit test on
-/// its own area, because `NSHostingView` claims those points itself.
-///
-/// So a gesture on drawn content reaches the pointer where a drop destination cannot, and nothing
-/// a pane happens to register can take it away. Nothing is lost by leaving the pasteboard out of
-/// it either: a pane move never leaves the window, so there was never anything to carry.
-///
-/// # Why it is not `SplitPaneDivider`
-///
-/// That one is the bottom panel's, where a split holds terminals and there is no tree to move a
-/// pane in. It stays exactly as it is rather than growing a second job and a pile of optional
-/// arguments for a caller that has no use for them.
+/// `SplitPaneDivider` is the bottom panel's, where a split holds terminals and there is no tree to
+/// move a pane in.
 struct CenterPaneDivider: View {
     var axis: SplitAxis
     var ratio: Double
-    /// How long the split is along its own axis, which is what turns a drag in points into a
-    /// change in ratio.
+    /// How long the split is along its own axis, which turns a drag in points into a ratio.
     var span: Double
     /// How long the divider is, across that axis.
     var length: Double
-    /// Where the line itself is, in the column's coordinate space, so a point from the drag can be
-    /// read as an offset from the line without the view having to measure itself.
+    /// Where the line is, in the column's coordinate space, so a point from the drag can be read as
+    /// an offset from it without the view having to measure itself.
     var line: CGRect
     /// The single pane on the leading or top side, and nil when that side is a group of panes
-    /// rather than one. A group has no grip: `SplitLayout.move` moves one pane, and every pane is
-    /// reachable from the divider of its own parent split anyway. See `SplitLayout.sides(at:)`.
+    /// rather than one: `SplitLayout.move` moves one pane, and a pane inside a group is reachable
+    /// from the divider of its own parent split. See `SplitLayout.sides(at:)`.
     var first: String?
     /// The single pane on the trailing or bottom side, on the same terms.
     var second: String?
@@ -59,127 +39,55 @@ struct CenterPaneDivider: View {
     var onMoveChanged: (String, CGPoint) -> Void
     var onMoveEnded: (String, CGPoint) -> Void
 
-    /// Where the ratio was when a resize started. Without it the divider would chase the pointer by
-    /// the whole translation on every event rather than by the delta.
+    /// Where the ratio was when a resize started, so the drag follows the delta rather than
+    /// reapplying the whole translation on every event.
     @State private var dragOrigin: Double?
-    /// The pane this drag is carrying, decided from where the press landed and then held for the
-    /// rest of the gesture. Read on every change, so a pointer that wanders across the line
-    /// mid drag does not change its mind about what it picked up.
+    /// The pane this drag is carrying, decided from where the press landed and then held, so a
+    /// pointer that crosses the line mid drag does not change what it picked up.
     @State private var carrying: String?
-    /// Where the pointer is inside the band, or nil when it is not in it. Drives the grips, and
-    /// the pointer's own shape.
+    /// Where the pointer is inside the band, or nil when it is not in it.
     @State private var pointer: CGPoint?
 
-    /// Half the band the view occupies, across the divider. Wide enough to hold a grip outside the
-    /// resize strip.
+    /// Half the band, across the divider: the resize strip plus the seven points either side of it
+    /// that pick a pane up. It cannot fall to `resizeReach`, because then the two gestures would
+    /// want the same points and one of them would have to become a mode.
     private static let reach: CGFloat = 12
     /// Half the strip that resizes, which is the ten point grab `SplitPaneDivider` has always had.
-    /// A press inside this is a resize and a press outside it is a move, so neither is a mode and
-    /// both are aimed at rather than remembered.
     private static let resizeReach: CGFloat = 5
-    /// One grip, along the divider and across it. It sits outside the resize strip, so the two
-    /// never overlap and a press means one thing.
-    private static let gripLength: CGFloat = 22
-    private static let gripBreadth: CGFloat = 7
     /// One notch of the VoiceOver adjustable action, a twentieth of the split.
     private static let step: Double = 0.05
 
     var body: some View {
-        ZStack {
-            Rectangle()
-                .fill(Palette.border)
-                .frame(
-                    width: axis == .horizontal ? Metrics.hairline : nil,
-                    height: axis == .vertical ? Metrics.hairline : nil
-                )
-
-            if isShowingGrips {
-                grip(first, side: -1)
-                grip(second, side: 1)
+        Rectangle()
+            .fill(Palette.border)
+            .frame(
+                width: axis == .horizontal ? Metrics.hairline : nil,
+                height: axis == .vertical ? Metrics.hairline : nil
+            )
+            .frame(
+                width: axis == .horizontal ? Self.reach * 2 : length,
+                height: axis == .vertical ? Self.reach * 2 : length
+            )
+            // At rest the hit area is the ten point strip alone, so clicking a link or placing a
+            // caret near a divider still reaches the page or the terminal. It grows to the full
+            // band only while the pointer is in it, so stepping out to pick a pane up never leaves
+            // the shape and the hover cannot switch off under the hand using it.
+            .contentShape(band)
+            .pointerStyle(pointerStyle)
+            .onContinuousHover(coordinateSpace: .local) { phase in
+                switch phase {
+                case .active(let point): pointer = point
+                case .ended: pointer = nil
+                }
             }
-        }
-        .frame(
-            width: axis == .horizontal ? Self.reach * 2 : length,
-            height: axis == .vertical ? Self.reach * 2 : length
-        )
-        // The hit area, and the whole reason the grips can be bigger than the strip without taking
-        // a band of every pane away from the content in it.
-        //
-        // At rest this is the ten point strip and nothing else, so clicking a link or placing a
-        // caret near a divider reaches the page or the terminal exactly as it did before. While the
-        // pointer is in it the shape GROWS to include the two grips, so moving from the strip onto
-        // a grip never leaves the shape and the grips cannot flicker. That flicker is why the first
-        // attempt drew a permanent mark instead: it had the grips owning their own hover, drawn on
-        // top of a divider that reported it had been left the moment the pointer reached them. One
-        // shape has no such problem.
-        //
-        // Ghostty solves it the same way, which is visible in the recording rather than guessed at:
-        // its mark is drawn while the pointer is twelve points below the divider and a hundred and
-        // forty points away along it, and gone with the pointer sixty points below. The region it
-        // watches is bigger than the mark it draws.
-        .contentShape(band)
-        .pointerStyle(pointerStyle)
-        .onContinuousHover(coordinateSpace: .local) { phase in
-            switch phase {
-            case .active(let point): pointer = point
-            case .ended: pointer = nil
+            .gesture(drag)
+            .onTapGesture(count: 2) { onResize(0.5) }
+            .accessibilityElement()
+            .accessibilityLabel(axis == .horizontal ? "Pane divider" : "Pane divider, stacked")
+            .accessibilityValue(Text(ratio, format: .percent.precision(.fractionLength(0))))
+            .accessibilityAdjustableAction { direction in
+                onResize(ratio + (direction == .increment ? Self.step : -Self.step))
             }
-        }
-        .gesture(drag)
-        .onTapGesture(count: 2) { onResize(0.5) }
-        .accessibilityElement()
-        .accessibilityLabel(axis == .horizontal ? "Pane divider" : "Pane divider, stacked")
-        .accessibilityValue(Text(ratio, format: .percent.precision(.fractionLength(0))))
-        .accessibilityAdjustableAction { direction in
-            onResize(ratio + (direction == .increment ? Self.step : -Self.step))
-        }
-    }
-
-    // MARK: - The grips
-
-    /// Shown while the pointer is in the band and nothing is being carried yet.
-    ///
-    /// They go the moment a drag begins, because from then on the plate under the pointer and the
-    /// wash on the pane are what say what is happening, and a grip left behind at the divider is a
-    /// mark for a gesture that has already started. It would also have nowhere to be: the pointer
-    /// leaves the band immediately, and the grip would spring back to the middle of the divider.
-    private var isShowingGrips: Bool {
-        pointer != nil && carrying == nil && (first != nil || second != nil)
-    }
-
-    /// Beside the pointer rather than at the middle of the divider, which is the one place this
-    /// goes past the reference. Ghostty keeps its mark at the midpoint, which is fine for the short
-    /// horizontal divider in the recording and a long way from the hand on a full height vertical
-    /// one, which is the split the owner actually has.
-    private var alongPointer: CGFloat {
-        guard let pointer else { return length / 2 }
-        let raw = axis == .horizontal ? pointer.y : pointer.x
-        // Kept whole inside the divider, so a grip never hangs off either end.
-        return min(max(raw, Self.gripLength / 2), max(Self.gripLength / 2, length - Self.gripLength / 2))
-    }
-
-    /// `side` is -1 for the leading or top pane and 1 for the trailing or bottom one.
-    @ViewBuilder
-    private func grip(_ pane: String?, side: CGFloat) -> some View {
-        if pane != nil {
-            let across = side * (Self.resizeReach + Self.gripBreadth / 2)
-            RoundedRectangle(cornerRadius: Metrics.cornerSmall / 2, style: .continuous)
-                .fill(Palette.textSecondary.opacity(isOver(side: side) ? 0.7 : 0.3))
-                .frame(
-                    width: axis == .horizontal ? Self.gripBreadth : Self.gripLength,
-                    height: axis == .horizontal ? Self.gripLength : Self.gripBreadth
-                )
-                .offset(
-                    x: axis == .horizontal ? across : alongPointer - length / 2,
-                    y: axis == .horizontal ? alongPointer - length / 2 : across
-                )
-                .allowsHitTesting(false)
-        }
-    }
-
-    private func isOver(side: CGFloat) -> Bool {
-        guard let across = across(of: pointer) else { return false }
-        return abs(across) > Self.resizeReach && (across < 0 ? side < 0 : side > 0)
     }
 
     // MARK: - Where a point is
@@ -190,37 +98,21 @@ struct CenterPaneDivider: View {
         return (axis == .horizontal ? point.x : point.y) - Self.reach
     }
 
-    /// The hit area: the resize strip at rest, and the strip plus the two grips while the pointer
-    /// is in it.
-    private var band: some Shape {
-        var path = Path()
-        let strip = axis == .horizontal
-            ? CGRect(x: Self.reach - Self.resizeReach, y: 0, width: Self.resizeReach * 2, height: length)
-            : CGRect(x: 0, y: Self.reach - Self.resizeReach, width: length, height: Self.resizeReach * 2)
-        path.addRect(strip)
-
-        if isShowingGrips {
-            for (pane, side) in [(first, CGFloat(-1)), (second, CGFloat(1))] where pane != nil {
-                path.addRect(gripRect(side: side))
-            }
-        }
-        return path
+    /// Whether the outer band is part of the hit shape: the pointer is in the divider already, and
+    /// a side holds a single pane for a press out there to pick up. Not while one is being carried,
+    /// when the pointer has left and the plate and the wash say what is happening.
+    private var isOfferingMove: Bool {
+        pointer != nil && carrying == nil && (first != nil || second != nil)
     }
 
-    private func gripRect(side: CGFloat) -> CGRect {
-        let inner = Self.reach + side * Self.resizeReach
-        let outer = inner + side * Self.gripBreadth
-        let along = alongPointer
-        if axis == .horizontal {
-            return CGRect(
-                x: min(inner, outer), y: along - Self.gripLength / 2,
-                width: Self.gripBreadth, height: Self.gripLength
-            )
-        }
-        return CGRect(
-            x: along - Self.gripLength / 2, y: min(inner, outer),
-            width: Self.gripLength, height: Self.gripBreadth
-        )
+    /// The resize strip at rest, and the whole band while the pointer is in it.
+    private var band: some Shape {
+        let half = isOfferingMove ? Self.reach : Self.resizeReach
+        var path = Path()
+        path.addRect(axis == .horizontal
+            ? CGRect(x: Self.reach - half, y: 0, width: half * 2, height: length)
+            : CGRect(x: 0, y: Self.reach - half, width: length, height: half * 2))
+        return path
     }
 
     /// Which pane a press at this point would pick up, and nil for a press that resizes instead.
@@ -229,10 +121,8 @@ struct CenterPaneDivider: View {
         return across < 0 ? first : second
     }
 
-    /// The resize cursor over the strip and the open hand over a grip, so the affordance is legible
-    /// before anything is pressed. One style for the whole view, chosen from where the pointer is,
-    /// rather than three views each with their own: three views would mean three hover regions
-    /// trading one flag between them, which is the flicker `contentShape` exists here to avoid.
+    /// The open hand over the band and the resize cursor over the strip. With nothing drawn on the
+    /// divider, this is the whole of what says the two are different grabs.
     private var pointerStyle: PointerStyle? {
         guard let pointer else { return nil }
         if pane(at: pointer) != nil { return .grabIdle }
@@ -241,14 +131,11 @@ struct CenterPaneDivider: View {
 
     // MARK: - The drag
 
-    /// One gesture for both jobs, because they are one press in one view. What it turns out to be
-    /// is decided from where the press landed and then held for the rest of it, so a pointer that
-    /// crosses the line halfway through a move does not change what it is carrying.
+    /// One gesture for both jobs, because they are one press in one view.
     ///
-    /// `.named` rather than `.local`, and that is load bearing for the same reason
-    /// `SplitPaneDivider` uses `.global`: this view MOVES the moment the ratio changes, so measuring
-    /// a translation from an origin the translation itself just moved is a feedback loop, and the
-    /// divider oscillates instead of following. The column's own space does not move.
+    /// `.named` rather than `.local`, and load bearing for the reason `SplitPaneDivider` uses
+    /// `.global`: this view moves the moment the ratio changes, so a translation measured from an
+    /// origin the translation itself moved oscillates instead of following.
     private var drag: some Gesture {
         DragGesture(minimumDistance: 1, coordinateSpace: .named(CenterPanesView.space))
             .onChanged { value in
