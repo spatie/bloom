@@ -764,23 +764,45 @@ final class AppModel {
         let present = Set(workspaces.map(\.id))
         lastDiffRefresh = lastDiffRefresh.filter { present.contains($0.key) }
 
-        var refreshed: Set<WorkspaceID> = []
-        for workspace in workspaces where due.contains(workspace.id) {
-            guard !Task.isCancelled else { return refreshed }
+        let pending = workspaces.filter {
             // A worktree that has been removed outside Bloom would make git walk up to the parent
             // repository and answer about the wrong tree.
-            guard FileManager.default.fileExists(atPath: workspace.path) else { continue }
-            await Self.withTimeLimit(.seconds(5)) {
-                await manager.refreshDiffStat(workspace: workspace)
+            due.contains($0.id) && FileManager.default.fileExists(atPath: $0.path)
+        }
+
+        var refreshed: Set<WorkspaceID> = []
+        await withTaskGroup(of: WorkspaceID.self) { group in
+            var next = pending.startIndex
+            var running = 0
+            while next < pending.endIndex || running > 0 {
+                while running < DiffRefreshSchedule.width, next < pending.endIndex {
+                    let workspace = pending[next]
+                    next = pending.index(after: next)
+                    running += 1
+                    // The deadline stays around each worktree rather than around the group, so one
+                    // git blocked on an `index.lock` costs its own slot and nobody else's.
+                    group.addTask {
+                        await Self.withTimeLimit(.seconds(5)) {
+                            await manager.refreshDiffStat(workspace: workspace)
+                        }
+                        return workspace.id
+                    }
+                }
+                guard let id = await group.next() else { break }
+                running -= 1
+                // After the pass rather than before it, so a workspace whose git call took four
+                // seconds is not immediately due again on the next tick.
+                lastDiffRefresh[id] = Date()
+                // And it has now been asked about, so the watcher's report is spent. Anything that
+                // happened WHILE the pass ran is a fresh event and lands back in here behind us,
+                // which is the right answer: the numbers this pass read are already a moment old.
+                changedWorkspaceIDs.remove(id)
+                refreshed.insert(id)
+                if Task.isCancelled {
+                    group.cancelAll()
+                    break
+                }
             }
-            // After the pass rather than before it, so a workspace whose git call took four
-            // seconds is not immediately due again on the next tick.
-            lastDiffRefresh[workspace.id] = Date()
-            // And it has now been asked about, so the watcher's report is spent. Anything that
-            // happened WHILE the pass ran is a fresh event and lands back in here behind us, which
-            // is the right answer: the numbers this pass read are already a moment old.
-            changedWorkspaceIDs.remove(workspace.id)
-            refreshed.insert(workspace.id)
         }
         // Nothing is read back here. `Store.updateDiffStat` only writes when one of the three
         // numbers has actually moved, and a write that happens publishes itself, so the sidebar is
@@ -794,7 +816,10 @@ final class AppModel {
     /// agent commits, would otherwise stall the refresh loop for every workspace forever.
     /// Cancellation reaches the subprocess itself: `Shell.run` terminates it when its task is
     /// cancelled.
-    private static func withTimeLimit(
+    ///
+    /// `nonisolated` because the pass calls it from a task group child now. Left on the main
+    /// actor it would hop back for the group's own bookkeeping, once per worktree, for nothing.
+    private nonisolated static func withTimeLimit(
         _ limit: Duration,
         _ work: @escaping @Sendable () async -> Void
     ) async {

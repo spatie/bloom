@@ -173,15 +173,24 @@ final class CenterTabStore {
     /// Nothing that is alive is dropped, and where that cannot be established the tab is kept. See
     /// `TerminalPersistence.sessions`.
     ///
-    /// It costs nothing on any launch after the first: with no rows left there is nothing to ask
-    /// tmux about, and the whole thing is one query that comes back empty.
+    /// It costs nothing on any launch after the first, and it is the first query that says so.
+    /// One `SELECT` over the whole table, grouped here: it used to ask once per workspace, which
+    /// on a table with no index on `workspace_id` was a full scan each, and the early-out that
+    /// was supposed to make this free came after the loop rather than before it.
     func adoptTerminalTabs(from store: Store?) async {
-        guard let store, let workspaces = try? await store.workspaces() else { return }
+        guard let store,
+              let rows = try? await store.terminalTabs(),
+              !rows.isEmpty,
+              let workspaces = try? await store.workspaces()
+        else { return }
 
+        // Rows for a workspace this app no longer has are dropped rather than adopted. The
+        // foreign key cascades, so there should be none; a tab nothing can open is not worth
+        // trusting that with.
+        let present = Set(workspaces.map(\.id))
         var rowsByWorkspace: [WorkspaceID: [TerminalTab]] = [:]
-        for workspace in workspaces {
-            let rows = (try? await store.terminalTabs(workspaceID: workspace.id)) ?? []
-            if !rows.isEmpty { rowsByWorkspace[workspace.id] = rows }
+        for row in rows where present.contains(row.workspaceID) {
+            rowsByWorkspace[row.workspaceID, default: []].append(row)
         }
         guard !rowsByWorkspace.isEmpty else { return }
 

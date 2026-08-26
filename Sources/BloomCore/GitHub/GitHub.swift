@@ -101,7 +101,9 @@ private struct CheckPayload: Decodable {
     }
 }
 
-private struct PullRequestSnapshot: Sendable {
+/// Internal rather than private: the pull request and its check runs come out of one
+/// `gh pr view`, and `GitHub.checks(for:)` next door needs both halves of the same payload.
+struct PullRequestSnapshot: Sendable {
     let pullRequest: PullRequest
     let runs: [CheckRun]
 }
@@ -182,14 +184,6 @@ public enum GitHub {
         maxAge: Duration = .zero
     ) async throws -> PullRequest? {
         try await snapshot(forBranch: branch, worktree: worktree, maxAge: maxAge)?.pullRequest
-    }
-
-    public static func checks(
-        forBranch branch: String,
-        worktree: String,
-        maxAge: Duration = .zero
-    ) async throws -> [CheckRun] {
-        try await snapshot(forBranch: branch, worktree: worktree, maxAge: maxAge)?.runs ?? []
     }
 
     /// This seam makes gh version differences testable without a repository or network access.
@@ -347,7 +341,7 @@ public enum GitHub {
         stderr.localizedCaseInsensitiveContains("no pull requests found")
     }
 
-    private static func snapshot(
+    static func snapshot(
         forBranch branch: String,
         worktree: String,
         maxAge: Duration

@@ -903,22 +903,30 @@ final class WorkspaceModel {
 
         let task = Task.detached(priority: .userInitiated) { () -> Result<ChangesAnswer, GitFailure> in
             do {
-                let files = try await Git.changedFiles(worktree: path, base: base, scope: scope)
+                // All three together rather than one after another. They ask three different
+                // questions of the same worktree and none of them reads another's answer, so
+                // running them in sequence only ever made the switch longer. `Git.baseline`, which
+                // the first and the third both open with, coalesces so that starting them at once
+                // does not resolve the merge base twice. See `BaselineCache`.
+                //
                 // In the same task as the file list rather than on a cadence of its own. The one
                 // extra command is `status --porcelain -z --branch`, which answers uncommitted,
-                // untracked and unpushed at once, so the poll that already runs three git calls
-                // every six seconds runs four. Nothing stats the worktree on a redraw: the strip
-                // reads a value, and the value is only ever written here.
+                // untracked and unpushed at once. Nothing stats the worktree on a redraw: the
+                // strip reads a value, and the value is only ever written here.
                 //
                 // Failing to answer it is not a failure of the refresh. The file list is what the
                 // reader asked for; a missing local count means the strip says nothing extra,
-                // which is the right answer when we do not know.
-                let local = try? await Git.localWork(worktree: path)
-                // Same forgiveness as the local counts: failing to list the commits costs the
-                // menu its rows, not the reader their file list.
-                let commits = wantsCommits
-                    ? try? await Git.branchCommits(worktree: path, base: base)
+                // which is the right answer when we do not know. Same forgiveness for the commit
+                // list: failing to read it costs the menu its rows, not the reader their files.
+                async let filesRead = Git.changedFiles(worktree: path, base: base, scope: scope)
+                async let localRead = try? Git.localWork(worktree: path)
+                async let commitsRead: BranchCommitList? = wantsCommits
+                    ? try? Git.branchCommits(worktree: path, base: base)
                     : nil
+
+                let files = try await filesRead
+                let local = await localRead
+                let commits = await commitsRead
                 return .success(ChangesAnswer(files: files, local: local, commits: commits))
             } catch {
                 // Diagnosed rather than reported, in the register `WorkspaceStartFailure` set. A

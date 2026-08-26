@@ -2511,10 +2511,13 @@ public actor Store {
 
     // MARK: - Terminal tabs
 
-    public func terminalTabs(workspaceID: WorkspaceID) throws -> [TerminalTab] {
+    /// Every row, because the one caller left is the migration that drains the table and it wants
+    /// all of them. Per workspace, it was a query each and `terminal_tabs` has no index on
+    /// `workspace_id`, so each was a full scan. Nothing is indexed instead: after the migration
+    /// the table is empty, and the only other statement here is keyed on the primary key.
+    public func terminalTabs() throws -> [TerminalTab] {
         try db.query(
-            "SELECT * FROM terminal_tabs WHERE workspace_id = ? ORDER BY sort_order",
-            [.text(workspaceID)]
+            "SELECT * FROM terminal_tabs ORDER BY workspace_id, sort_order"
         ).map {
             TerminalTab(
                 id: TerminalTabID($0.string("id") ?? newID()),

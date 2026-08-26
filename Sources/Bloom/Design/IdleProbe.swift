@@ -150,15 +150,28 @@ enum IdleProbe {
     }
 
     /// One sweep of `Git.diffStat` over every worktree, exactly as `AppModel.refreshDiffStats`
-    /// runs it: one at a time, because that is what the loop does and a concurrent sweep would
-    /// measure how many cores this Mac has rather than what the loop costs.
+    /// runs it: `DiffRefreshSchedule.width` at a time, read from the same constant the loop reads
+    /// so the two cannot drift. It was one at a time here because the loop was one at a time; a
+    /// probe that keeps a width the loop no longer has measures a loop nobody runs.
     private static func pass(_ trees: [String]) async -> Pass {
         let spawnsBefore = Shell.spawnCount
         let cpuBefore = ProcessCPU.read()
         let wallBefore = CACurrentMediaTime()
 
-        for tree in trees {
-            _ = try? await Git.diffStat(worktree: tree, base: base)
+        let baseBranch = base
+        await withTaskGroup(of: Void.self) { group in
+            var next = trees.startIndex
+            var running = 0
+            while next < trees.endIndex || running > 0 {
+                while running < DiffRefreshSchedule.width, next < trees.endIndex {
+                    let tree = trees[next]
+                    next = trees.index(after: next)
+                    running += 1
+                    group.addTask { _ = try? await Git.diffStat(worktree: tree, base: baseBranch) }
+                }
+                guard await group.next() != nil else { break }
+                running -= 1
+            }
         }
 
         return Pass(
