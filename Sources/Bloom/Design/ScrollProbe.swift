@@ -114,6 +114,8 @@ enum ScrollProbe {
             try? await Task.sleep(for: .seconds(1))
         }
 
+        await documentToStopChanging(scroll)
+
         // **Read here rather than on arrival.** The history lands a beat after the tail, so an end
         // sampled before that names a document a fraction of its final height: a run that took
         // 7,722 points swept the last eighth of a 32,600 point conversation and never went near
@@ -154,6 +156,35 @@ enum ScrollProbe {
         try? await Task.sleep(for: .seconds(3))
         nudge(scroll)
         try? await Task.sleep(for: .seconds(1))
+    }
+
+    /// **The arrival is not the gesture, and `documentMoves` was counting it.**
+    ///
+    /// A session's history lands a beat after its tail, as one insert of some two thousand rows,
+    /// and the document grows by the whole height of them on that frame. Whether that fell inside
+    /// the measured window or just before it was a matter of timing, and it moved the reported
+    /// worst move between 8,035 and 32,218 points across three runs of builds that differed in
+    /// ways that could not account for it. Worse, it cannot be improved: the rows really are that
+    /// tall, so a perfect estimate produces the same jump, and on the run that prompted this the
+    /// arithmetic came to 28,779 against a reported worst of 24,795. A number with a floor above
+    /// the value being reported is not measuring the thing it is named for.
+    ///
+    /// So a run waits for the document to stop changing before it starts counting. What is left is
+    /// what SCROLLING does to it, which is the question.
+    private static func documentToStopChanging(_ scroll: NSScrollView) async {
+        var last = scroll.documentView?.frame.height ?? 0
+        var still = 0
+        // Ten seconds at the outside. A conversation still growing after that is a running turn,
+        // and a run measures what it finds rather than waiting for a turn to end.
+        for _ in 0..<100 {
+            try? await Task.sleep(for: .milliseconds(100))
+            let now = scroll.documentView?.frame.height ?? 0
+            still = abs(now - last) <= 0.5 ? still + 1 : 0
+            last = now
+            // Half a second of not moving. Long enough to be past the insert, short enough that a
+            // run does not spend its time here.
+            if still >= 5 { return }
+        }
     }
 
     /// **"The higher I go up, the more stuttery it gets", as a number.**

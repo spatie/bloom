@@ -31,6 +31,20 @@ import BloomCore
 /// The runtime guard the two probes carried is gone because there is nothing left for it to
 /// catch, which is the only kind of check worth deleting.
 ///
+/// **A probe whose cost scales with the change it is measuring reports the probe.** The newest
+/// lesson, and the one that is hardest to see afterwards, because the numbers it produces are
+/// plausible. `TranscriptHoldCensus` is read by four probes and written by the transcript, and its
+/// census of the screen walked the visible rows on every movement of the clip view: about thirty
+/// rows, which is nothing. Then a change under measurement made most rows a hundredth of a point
+/// tall, a viewport came to span hundreds of them rather than thirty, and the walk grew with the
+/// thing it was watching. Every band of that run came back slower, on a machine at a third of the
+/// load, and the run was read as a regression in the app.
+///
+/// So a hook that a probe reads belongs where the view has STOPPED: a settle, an end of gesture, a
+/// placement. Per frame is for what the frame did, which is `FrameRecorder` reading a clock and
+/// nothing else. Anything that walks rows, cells or views on the way past is measuring itself as
+/// well as the app, and there is no way to tell the two apart in the report.
+///
 /// # What is NOT here
 ///
 /// Every probe's driver and subject: a divider drag, a workspace selection, a tab pick, a scroll,

@@ -11,6 +11,11 @@ import Foundation
 /// divider does is a thing to measure on this system rather than to remember from a document.
 ///
 /// Counters, written where the holds are and read by nothing but a report.
+///
+/// **A counter added here is code on the app's own path, so where it is written matters as much as
+/// what it counts.** An increment is free; a walk over the visible rows is not, and this file has
+/// already reported a regression that was its own. See the head of `ProbeHarness`. Increment where
+/// the thing happens, and take anything that has to LOOK at the screen on the settle.
 @MainActor
 enum TranscriptHoldCensus {
     private(set) static var holds = 0

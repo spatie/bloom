@@ -136,7 +136,27 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// point is to stop moving rather than to be perfect: a frozen number that is wrong by a fifth
     /// leaves every unmeasured row wrong by a fifth and the document still, and each of those rows
     /// is put right the moment it is drawn, which is the whole design.
+    ///
+    /// Held, but not for ever: see `resettleDrift` for the one screenful this settles from being
+    /// the least representative one in the session.
     public static let settleAfter = 24
+
+    /// How far out the settled estimate has to be before it is worth taking again.
+    ///
+    /// **Freezing was right and the number it froze on was formed too early.** A pane arrives at
+    /// the live end and measures that screen, so the sample the estimate settles from is the tail
+    /// of the conversation: the newest answer, which is the longest prose in the session, next to
+    /// a footer. Measured on a 2,981 row conversation, the document it produced swung to 54,353
+    /// points against a true 35,290, half again too tall, and stayed there because nothing could
+    /// take the number again.
+    ///
+    /// So it can be taken again, and both halves of that are load bearing. A quarter out, because
+    /// a settled number that is nearly right must not move: the whole point of freezing is that a
+    /// wholesale re-ask cashes in the drift since the last one. And not until the sample has
+    /// DOUBLED, so that a mean hovering near the threshold cannot re-settle twice for the same
+    /// rows, and so the number of times this can fire over a session is a handful rather than a
+    /// count of the rows in it.
+    public static let resettleDrift = 0.25
 
     /// Whether a row is the height it drew at.
     ///
@@ -169,6 +189,9 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// The estimate once it has stopped moving, or nothing while it is still being formed. See
     /// `settleAfter`, which carries what a drifting one costs.
     private var settled: Double?
+    /// How many drawn rows the settled number was formed from, so it is only taken again once
+    /// there are twice as many. See `resettleDrift`.
+    private var settledFrom = 0
 
     public init() {}
 
@@ -197,6 +220,7 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         total = 0
         inked = 0
         settled = nil
+        settledFrom = 0
         return true
     }
 
@@ -297,9 +321,30 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         if previous > 0 { inked -= 1 }
         if rounded > 0 { inked += 1 }
         heights[contentKey] = rounded
-        // Once, and then never again for the life of this cache. See `settleAfter`.
-        if settled == nil, inked >= Self.settleAfter { settled = total / Double(inked) }
+        settleIfItIsTime()
         return true
+    }
+
+    /// Takes the estimate, if there is enough to take it from and it is worth taking again.
+    ///
+    /// Once at `settleAfter`, and after that only when the sample has doubled AND the running mean
+    /// disagrees with what is held by more than `resettleDrift`. Both of those, so that a good
+    /// first screenful settles the number for the whole session and a bad one is not permanent.
+    private mutating func settleIfItIsTime() {
+        guard inked >= Self.settleAfter else { return }
+        let running = total / Double(inked)
+        guard let settled else {
+            take(running)
+            return
+        }
+        guard inked >= settledFrom * 2 else { return }
+        guard abs(running - settled) > settled * Self.resettleDrift else { return }
+        take(running)
+    }
+
+    private mutating func take(_ estimate: Double) {
+        settled = estimate
+        settledFrom = inked
     }
 
     /// Rounded up to a whole point, and never below nothing.
@@ -319,5 +364,6 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         total = 0
         inked = 0
         settled = nil
+        settledFrom = 0
     }
 }

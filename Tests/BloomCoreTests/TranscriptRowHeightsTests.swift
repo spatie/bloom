@@ -347,10 +347,50 @@ struct TranscriptRowHeightsTests {
         }
         #expect(heights.estimate == 100)
         // Everything after this is measured on its own account and changes nothing for the rows
-        // nobody has drawn.
-        for row in 0..<200 { heights.note(900, for: key("late.\(row)")) }
+        // nobody has drawn, until the sample it was formed from has doubled. Twenty three of these
+        // is forty seven drawn rows against the twenty four it settled from, so it holds even
+        // though every one of them disagrees.
+        for row in 0..<23 { heights.note(900, for: key("late.\(row)")) }
         #expect(heights.estimate == 100)
         #expect(heights.assumed(for: key("never.drawn")) == 100)
+    }
+
+    /// **The screenful it settles from is the least representative one in the session**: a pane
+    /// arrives at the live end, so the sample is the newest answer, which is the longest prose
+    /// there is. Measured, that left a document half again taller than the truth with nothing able
+    /// to take the number again.
+    @Test("a settled estimate formed off a bad screenful is taken again")
+    func resettlesWhenItIsBadlyOut() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        // The tail: a screenful of tall rows, which settles it at 400.
+        for row in 0..<TranscriptRowHeights.settleAfter {
+            heights.note(400, for: key("tail.\(row)"))
+        }
+        #expect(heights.estimate == 400)
+        // The conversation behind it, which is what the session is really made of. Nothing moves
+        // until the sample has doubled, however wrong the held number is: twenty three of these
+        // leaves forty seven drawn rows against the twenty four it settled from.
+        for row in 0..<23 { heights.note(20, for: key("row.\(row)")) }
+        #expect(heights.estimate == 400)
+        // The forty eighth doubles it, and 210 is the mean of the two halves.
+        heights.note(20, for: key("row.23"))
+        #expect(heights.estimate == 210)
+    }
+
+    /// A number that is nearly right must not move, because the whole point of settling is that a
+    /// wholesale re-ask cashes in whatever drift there has been since the last one.
+    @Test("a settled estimate that is nearly right is left alone")
+    func doesNotResettleForSmallDrift() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        for row in 0..<TranscriptRowHeights.settleAfter {
+            heights.note(100, for: key("row.\(row)"))
+        }
+        #expect(heights.estimate == 100)
+        // A tenth out over hundreds of rows, which is inside the drift this tolerates.
+        for row in 0..<400 { heights.note(110, for: key("more.\(row)")) }
+        #expect(heights.estimate == 100)
     }
 
     /// Before it settles it still tracks, because the first screenful is all there is to go on and
