@@ -1312,6 +1312,15 @@ struct TranscriptListView: View {
     private func open(_ opening: Opening?, with proxy: ScrollViewProxy) {
         switch opening {
         case .row(let seq, let anchor):
+            // **The standing instruction has to be let go of first, or this moves nothing.**
+            //
+            // `.scrollPosition($scrollPosition)` is a VALUE the list reapplies on every layout
+            // pass, and a pane that has just opened is standing at an edge. A proxy scroll is a
+            // call: it moves the view, and the next pass puts it straight back where the standing
+            // value says. `TranscriptLiveEndFollower.onStart` already had to learn this, and its
+            // remedy is the one used here: naming the offset the view is already at moves nothing
+            // and takes the position off its edge, which lets the call below stand.
+            scrollPosition.scrollTo(y: contentOffset.value)
             proxy.scrollTo(seq, anchor: anchor)
             // The second attempt is `position`'s now, so that the live end gets one too.
         case .liveEnd:
