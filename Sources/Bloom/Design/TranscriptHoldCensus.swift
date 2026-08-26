@@ -94,6 +94,19 @@ enum TranscriptHoldCensus {
     /// `cellsAsked` is every call of `viewFor`; `cellsBuilt` is the ones that actually replaced the
     /// root view, because a recycled cell holding the content it already holds returns early. The
     /// seconds are around that replacement.
+    ///
+    /// **And the seconds do not mean what they were added to mean. Measured: 0.0123 seconds over a
+    /// sweep that dropped 29 per cent of its frames, 0.007ms a cell.** Predicted 5 to 12 seconds,
+    /// from 2.1ms a cell, which is a figure this file records for `measure(_:at:)`: a hosting view
+    /// built, given a width constraint, laid out and asked for its `fittingSize`. Assigning
+    /// `rootView` is none of that. It hands SwiftUI a new tree and returns, and the layout it
+    /// causes happens later, in the hosting view's own pass, outside this bracket.
+    ///
+    /// So a small number here does not acquit building a row. It says the cost is not in the
+    /// statement this brackets, and a bracket around a statement whose work is deferred cannot say
+    /// where it went. The 2.1ms was borrowed from an operation that does the work synchronously
+    /// and carried into an argument about one that does not: a number is evidence for the thing it
+    /// measured and for nothing else.
     private(set) static var cellsAsked = 0
     private(set) static var cellsBuilt = 0
     private(set) static var cellSeconds = 0.0
