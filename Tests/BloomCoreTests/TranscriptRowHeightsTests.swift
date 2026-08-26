@@ -334,6 +334,66 @@ struct TranscriptRowHeightsTests {
         #expect(heights.estimate == 100)
     }
 
+    /// **The estimate stops moving, because the document's total depends on it.** A table caches
+    /// every height it is told, so a drifting estimate turns each wholesale re-ask into one jump of
+    /// `unmeasured x drift`: measured at 32,218 points on a 2,981 row conversation, which is the
+    /// height of the whole document.
+    @Test("the estimate settles and then holds still")
+    func settlesAndHolds() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        for row in 0..<TranscriptRowHeights.settleAfter {
+            heights.note(100, for: key("row.\(row)"))
+        }
+        #expect(heights.estimate == 100)
+        // Everything after this is measured on its own account and changes nothing for the rows
+        // nobody has drawn.
+        for row in 0..<200 { heights.note(900, for: key("late.\(row)")) }
+        #expect(heights.estimate == 100)
+        #expect(heights.assumed(for: key("never.drawn")) == 100)
+    }
+
+    /// Before it settles it still tracks, because the first screenful is all there is to go on and
+    /// a constant is worse than a mean of two real rows.
+    @Test("the estimate tracks until it settles")
+    func tracksUntilItSettles() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        heights.note(100, for: key("row.1"))
+        #expect(heights.estimate == 100)
+        heights.note(300, for: key("row.2"))
+        #expect(heights.estimate == 200)
+    }
+
+    /// A width or a text size change empties the cache, and the number formed at the old one goes
+    /// with it. A paragraph at another size is not an estimate of anything.
+    @Test("emptying the cache unsettles the estimate")
+    func settlingIsEmptiedWithTheCache() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        for row in 0..<TranscriptRowHeights.settleAfter {
+            heights.note(100, for: key("row.\(row)"))
+        }
+        heights.forget()
+        #expect(heights.estimate == TranscriptRowHeights.assumedRowHeight)
+        heights.note(40, for: key("fresh"))
+        #expect(heights.estimate == 40)
+    }
+
+    /// The rows that drew nothing are not what settles it either. A session where most rows draw
+    /// nothing would otherwise settle on a number formed from almost no real rows.
+    @Test("noughts do not settle the estimate")
+    func noughtsDoNotSettleIt() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1)
+        for row in 0..<200 { heights.note(0, for: key("blank.\(row)")) }
+        heights.note(100, for: key("row.1"))
+        #expect(heights.estimate == 100)
+        heights.note(300, for: key("row.2"))
+        // Two drawn rows is not a screenful, so it is still tracking.
+        #expect(heights.estimate == 200)
+    }
+
     /// The running total has to survive an overwrite, which is what every drawn row does to what
     /// was measured for it off screen.
     @Test("a row measured again does not count twice")

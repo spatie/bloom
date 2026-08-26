@@ -122,6 +122,22 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// document several times the height of its content and a scroller to match.
     public static let assumedRowHeight: Double = 64
 
+    /// How many drawn rows it takes before the estimate stops moving.
+    ///
+    /// **A row's height and the document's total are two questions, and the second one needs the
+    /// answer to hold still.** A table caches every height it is told and re-asks only when it is
+    /// told to, so the total is the sum of what each row was told when it was last asked. A
+    /// running mean that drifts turns every wholesale re-ask, which is the history landing and any
+    /// remeasure, into one jump of `unmeasured x drift`: on a 2,981 row conversation that was a
+    /// single move of 32,218 points, the height of the whole document.
+    ///
+    /// So the mean is taken from the first rows drawn here and then held. About a screenful,
+    /// because that is what a pane measures on arrival before it shows anything, and because the
+    /// point is to stop moving rather than to be perfect: a frozen number that is wrong by a fifth
+    /// leaves every unmeasured row wrong by a fifth and the document still, and each of those rows
+    /// is put right the moment it is drawn, which is the whole design.
+    public static let settleAfter = 24
+
     /// Whether a row is the height it drew at.
     ///
     /// The same half point `note` files a measurement under, so the check that a drawn row is the
@@ -150,6 +166,9 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// How many of `heights` are more than nothing, which is what `estimate` divides by. See it
     /// for why a mean over the rows that drew nothing was the wrong number.
     private var inked = 0
+    /// The estimate once it has stopped moving, or nothing while it is still being formed. See
+    /// `settleAfter`, which carries what a drifting one costs.
+    private var settled: Double?
 
     public init() {}
 
@@ -177,6 +196,7 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         stale.removeAll()
         total = 0
         inked = 0
+        settled = nil
         return true
     }
 
@@ -228,8 +248,13 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// actually asked about. Those rows are answered by `assumed(for:drawsNothing:)` without
     /// consulting this at all, so including them made the one number this still answers worse for
     /// no one's benefit.
+    ///
+    /// **And it stops moving once a screenful has been drawn.** See `settleAfter`: a running mean
+    /// is the right answer to "how tall is a row I know nothing about" and the wrong answer to
+    /// "how tall is this document", and the second question is the one a reader feels.
     public var estimate: Double {
-        inked == 0 ? Self.assumedRowHeight : total / Double(inked)
+        if let settled { return settled }
+        return inked == 0 ? Self.assumedRowHeight : total / Double(inked)
     }
 
     /// **The number to tell a table**: what is known, what is known to be nothing, or what is
@@ -272,6 +297,8 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         if previous > 0 { inked -= 1 }
         if rounded > 0 { inked += 1 }
         heights[contentKey] = rounded
+        // Once, and then never again for the life of this cache. See `settleAfter`.
+        if settled == nil, inked >= Self.settleAfter { settled = total / Double(inked) }
         return true
     }
 
@@ -291,5 +318,6 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         stale.removeAll()
         total = 0
         inked = 0
+        settled = nil
     }
 }

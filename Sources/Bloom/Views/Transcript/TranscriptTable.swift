@@ -502,6 +502,13 @@ struct TranscriptTable: NSViewRepresentable {
             let identifier = NSUserInterfaceItemIdentifier("bloom.transcript.cell")
             let cell = tableView.makeView(withIdentifier: identifier, owner: self)
                 as? TranscriptTableCell ?? TranscriptTableCell(identifier: identifier)
+            // **Every row in the visible rect gets one of these, and a screenful is not a fixed
+            // number of rows.** Most of a session draws nothing and is a hundredth of a point
+            // tall, so a viewport can span hundreds of them, each costing a SwiftUI graph. Counted
+            // rather than assumed: `measurements` only ever covered the hosting views built OFF
+            // screen, so nothing in the report has ever said what a frame of scrolling really
+            // builds. See `TranscriptHoldCensus`.
+            TranscriptHoldCensus.builtCell()
             cell.onHeightChange = { [weak self] id, height in
                 self?.noted(height: height, for: id)
             }
@@ -651,8 +658,13 @@ struct TranscriptTable: NSViewRepresentable {
         /// `checkCorrected` can only speak for rows that reported. A row that never reports at all
         /// is answered from the mean for ever and nothing above would say so, which is the shape
         /// of blank this file has now been wrong about twice. This counts the visible rows the
-        /// table is drawing at a height nobody has measured, on every movement of the clip view:
-        /// two dictionary lookups per visible row, which at a screenful is nothing.
+        /// table is drawing at a height nobody has measured.
+        ///
+        /// **On the settle, and it used to be on every movement of the clip view.** A screenful is
+        /// not a fixed number of rows: most of a session draws nothing and is a hundredth of a
+        /// point tall, so a viewport can span hundreds of rows rather than the thirty this walked
+        /// when it was written. Instrumentation that grows with what it is watching distorts what
+        /// it measures, and the three numbers anybody reads from it are settled ones anyway.
         private func censusOfTheScreen(settled: Bool = false) {
             guard let tableView, heights.isReady else { return }
             var estimated = 0
@@ -1023,7 +1035,6 @@ struct TranscriptTable: NSViewRepresentable {
             // nobody is holding it any more.
             if holdsEnd, !isPutting, !currentGeometry.isAtEnd { releaseEnd() }
             reportGeometry()
-            censusOfTheScreen()
             scheduleSettle()
         }
 

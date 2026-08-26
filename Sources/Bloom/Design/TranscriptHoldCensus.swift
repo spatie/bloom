@@ -33,10 +33,13 @@ enum TranscriptHoldCensus {
     /// it was told. See `TranscriptTable.Coordinator.checkCorrected`, which carries the bug.
     private(set) static var correctedRows = 0
     private(set) static var uncorrectedRows = 0
-    /// **What is on the screen, and how much of it is a guess.** Sampled on every movement of the
-    /// clip view: the most rows the reader could see at once that the table was drawing at a
-    /// height nobody has measured, and the most it was drawing at a height that disagrees with
-    /// what was measured. Either of them above nought is white space the reader can see.
+    /// **What is on the screen, and how much of it is a guess.** Sampled when the view has stopped
+    /// moving: the most rows the reader could see at once that the table was drawing at a height
+    /// nobody has measured, and the most it was drawing at a height that disagrees with what was
+    /// measured. Either of them above nought is white space the reader can see.
+    ///
+    /// Sampled on the settle rather than on every frame, because the walk is over the visible rows
+    /// and a screenful is not a fixed number of them: see `censusOfTheScreen`.
     private(set) static var screenEstimated = 0
     private(set) static var screenWrong = 0
     private(set) static var screensSeen = 0
@@ -52,6 +55,10 @@ enum TranscriptHoldCensus {
     private(set) static var noteCalls = 0
     private(set) static var notedRows = 0
     private(set) static var placeWrites = 0
+    /// Cells the table asked for, which is one SwiftUI graph each. A row that draws nothing is a
+    /// hundredth of a point tall, so a screenful of them is hundreds of rows rather than thirty,
+    /// and this is the only number that would say so.
+    private(set) static var cellsBuilt = 0
 
     static func held(_ what: TranscriptPaneHold.PaneHeld, underAHand hand: Bool, liveResize: Bool) {
         switch what {
@@ -93,6 +100,9 @@ enum TranscriptHoldCensus {
     /// One write of the scroll offset that actually moved it.
     static func placed() { placeWrites += 1 }
 
+    /// One cell handed to the table. See `cellsBuilt`.
+    static func builtCell() { cellsBuilt += 1 }
+
     /// One batch of corrections, and the ones that did not take.
     static func corrected(rows: Int, uncorrected: Int) {
         correctedRows += rows
@@ -118,6 +128,7 @@ enum TranscriptHoldCensus {
         noteCalls = 0
         notedRows = 0
         placeWrites = 0
+        cellsBuilt = 0
     }
 
     static func summary() -> [String: Double] {
@@ -140,6 +151,7 @@ enum TranscriptHoldCensus {
             "noteCalls": Double(noteCalls),
             "notedRows": Double(notedRows),
             "placeWrites": Double(placeWrites),
+            "cellsBuilt": Double(cellsBuilt),
         ]
     }
 }
