@@ -61,6 +61,16 @@ struct ComposerFooterView: View {
     /// contain that control and `ViewThatFits` throws away the state of the ones it does not
     /// pick. See the binding on that view.
     @State private var isShowingContextDetail = false
+    /// Where the context gauge is, in this footer's own space, so the popover can point at it.
+    ///
+    /// The popover is presented on the whole row rather than on the gauge, because narrowing the
+    /// pane drops the gauge out of the `ViewThatFits` and would take the presenter with it while
+    /// the card was up. Presented on the row, its default anchor is the row's own bounds, so the
+    /// arrow came out under the middle of the footer pointing at nothing. This is the gauge's
+    /// frame, handed to `attachmentAnchor` so the card hangs off the control it describes.
+    @State private var gaugeFrame: CGRect?
+
+
 
     /// Whether the quick prompt panel is up. Held here for the same reason the flag above it is:
     /// the button is in all three candidates `ViewThatFits` builds, and state inside a candidate
@@ -93,7 +103,12 @@ struct ComposerFooterView: View {
         }
         // Outside the `ViewThatFits`, so narrowing the pane cannot take the presenter out of the
         // tree while the popover is up.
-        .popover(isPresented: $isShowingContextDetail, arrowEdge: .top) {
+        .coordinateSpace(.named(composerFooterSpace))
+        .popover(
+            isPresented: $isShowingContextDetail,
+            attachmentAnchor: gaugeFrame.map { .rect(.rect($0)) } ?? .rect(.bounds),
+            arrowEdge: .top
+        ) {
             if let context { ContextWindowDetail(usage: context) }
         }
         .onChange(of: controls.model, initial: true) { _, id in
@@ -231,6 +246,12 @@ struct ComposerFooterView: View {
                 ComposerContextGauge(
                     usage: context, reading: reading, isShowingDetail: $isShowingContextDetail
                 )
+                // In the footer's space rather than the window's, which is what
+                // `attachmentAnchor` wants. Only the gauge is measured, and only while it is
+                // drawn, so a compact row that has dropped it reads nothing.
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(composerFooterSpace)) } action: {
+                    gaugeFrame = $0
+                }
             }
 
             // Beside the paperclip, because those two are the only controls in this row that
@@ -371,3 +392,10 @@ struct ComposerFooterView: View {
         }
     }
 }
+
+/// The footer's own coordinate space, so the gauge can report where it is inside it.
+///
+/// A file-level constant rather than a static on the view: the geometry closure is `Sendable` and
+/// cannot reach a main-actor-isolated static, which is a warning and this project builds with
+/// warnings as errors.
+private let composerFooterSpace = "composer.footer"

@@ -181,10 +181,16 @@ struct WorkspaceRow: View {
         // list, or it does not travel with the row when a project folds.
         .labelStyle(SidebarRowLabelStyle())
         // The glyph is the row's whole state in one mark, so VoiceOver has to be told what it
-        // means rather than being handed an unlabelled image, and a pointer resting on it gets the
-        // same sentence. Both sit on the row: the icon of a `Label` is not a hit target of its own.
+        // means rather than being handed an unlabelled image. It sits on the row: the icon of a
+        // `Label` is not a hit target of its own.
+        //
+        // **No `.help` here, and that is a removal rather than an omission.** It carried the same
+        // sentence as `accessibilityValue`, and the hover card says all of it and more: the
+        // branch, the diff, the pull request, the checks and the age. So resting on a row raised
+        // a system tooltip and our own card at once, a few points apart, one repeating a line of
+        // the other. The card is the better of the two and it is the one that stays; a reader who
+        // cannot see it still has the accessibility value, which is what that line was really for.
         .accessibilityValue(statusDescription)
-        .help(statusDescription)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         // Only rows that exist ask GitHub anything, and the id carries the branch and whether

@@ -1,8 +1,8 @@
 import SwiftUI
 import BloomCore
 
-/// The strip pinned to the bottom of the sidebar: what is running, and the three controls that
-/// narrow or explain the list.
+/// The strip pinned to the bottom of the sidebar: the two controls that narrow or explain the
+/// list, and a line the pane borrows when it has something to say about itself.
 ///
 /// The filter lives down here rather than in a header, which is where Xcode and Finder put the
 /// controls that narrow a source list.
@@ -70,12 +70,11 @@ struct SidebarStatusBar: View {
                     SidebarLegend()
                 }
 
-                SettingsLink {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.accessoryBar)
-                .help("Settings")
+                // **No Settings cogwheel.** There was one here, and it was the one control in this
+                // strip that duplicated something every Mac user already knows: Command-comma, and
+                // the Bloom menu. The other two earn their place because neither is reachable any
+                // other way, and a third glyph beside them spent the strip's width saying what the
+                // menu bar says for free.
             }
             .padding(.horizontal, Metrics.spacingSmall)
             .frame(height: Metrics.barHeight)
@@ -102,31 +101,29 @@ struct SidebarStatusBar: View {
     /// A readout, so it is set as text rather than as the filled `Chip` it used to be. A pill in a
     /// status bar reads as a control that does nothing when clicked, and this one sits beside three
     /// controls that really are clickable.
+    /// **The running count went, and the line stayed.**
+    ///
+    /// It read "Idle" most of the time and "2 running" the rest, and the list above it says both
+    /// already: a running workspace carries a glyph and its project carries one too, so the strip
+    /// was a second, quieter copy of a fact the reader was already looking at. A permanent readout
+    /// of the resting state is a thing the eye learns to skip, and it took the leading end of the
+    /// strip to do it.
+    ///
+    /// What is left is the note, and it is why this is not simply deleted. A drag that could not
+    /// land where it was let go borrows this line rather than raising anything of its own: it is
+    /// the one place in the pane that talks about the pane, and an alert for a drop that went one
+    /// row too far would be an answer several sizes too big for the question. With nothing to say
+    /// the strip is now the controls alone.
+    @ViewBuilder
     private var status: some View {
-        let running = app.runningCount
-        // A drag that could not land where it was let go borrows this line rather than raising
-        // anything of its own. It is the one place in the pane that already talks about the pane,
-        // a workspace being kept in its project is exactly that kind of fact, and an alert or a
-        // toast for a drop that went one row further than it could would be an answer several
-        // sizes too big for the question.
-        return Label(
-            note ?? (running == 0 ? "Idle" : "\(running) running"),
-            systemImage: note != nil
-                ? "arrow.uturn.backward"
-                : (running == 0 ? "moon.zzz" : "bolt.fill")
-        )
-        .font(Typo.caption)
-        .foregroundStyle(noteInk ?? (running == 0 ? Palette.textTertiary : Palette.running))
-        .padding(.leading, Metrics.spacing)
-        .lineLimit(1)
-        .accessibilityLabel(
-            note ?? (running == 0 ? "No agents running" : "\(running) agents running")
-        )
+        if let note {
+            Label(note, systemImage: "arrow.uturn.backward")
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textSecondary)
+                .padding(.leading, Metrics.spacing)
+                .lineLimit(1)
+                .accessibilityLabel(note)
+        }
     }
 
-    /// Secondary ink, one step up from the idle readout it stands in for and well short of a
-    /// warning colour. Nothing went wrong: a row was put where it was allowed to go.
-    private var noteInk: Color? {
-        note == nil ? nil : Palette.textSecondary
-    }
 }
