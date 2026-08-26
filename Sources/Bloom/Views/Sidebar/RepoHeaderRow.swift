@@ -319,6 +319,16 @@ struct RepoHeaderRow: View {
     /// Nothing is lost with the pointer away, and that matters more here than it did at the
     /// trailing edge: Project settings… is on this header's own context menu, and File carries
     /// Project Settings at Command Shift comma.
+    ///
+    /// THE INK IS THE CALLER'S AND MUST NOT BE SET HERE. This carried its own
+    /// `.foregroundStyle(Palette.textPrimary)`, which sits nearer the label than the
+    /// `Color.clear` in `mark` above and therefore won every time: the gear was drawn in full
+    /// ink on top of every project's tile, at rest, on every row. It reads as a badly rendered
+    /// mark rather than as a stray control, which is how it survived: a project whose mark is
+    /// artwork came out muddy with a cog stamped through it, and a pale one came out as an
+    /// unreadable grey square. The same artwork in the project's settings window, where there is
+    /// no gear over it, was crisp, so the fault looked like the sidebar rasterising the picture
+    /// badly and was nothing of the kind.
     private var settingsButton: some View {
         Button {
             openWindow(id: RepoSettingsWindow.id, value: repo.id)
@@ -333,7 +343,6 @@ struct RepoHeaderRow: View {
                 .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
         }
         .buttonStyle(.plain)
-        .foregroundStyle(Palette.textPrimary)
         .help("Settings for \(repo.name)")
     }
 
