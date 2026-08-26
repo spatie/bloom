@@ -204,6 +204,9 @@ enum SwitchProbe {
             }
             try? await Task.sleep(for: .seconds(2))
             report["topLeft"] = .object(ProbeHarness.scrollPlace(scroll))
+            // And what the pane wrote down about it, which is the only way to tell a place that
+            // was recorded wrongly from a place that was recorded and then restored wrongly.
+            report["topRemembered"] = .object(remembered(for: top, in: app))
         }
 
         // The other stays where a conversation opens, which is its live end.
@@ -229,6 +232,27 @@ enum SwitchProbe {
         }
         report["visits"] = .array(visits)
         return report
+    }
+
+    /// What a pane has written down about the conversation it is showing.
+    ///
+    /// Reached through the workspace's own model, which is where `TranscriptPaneMemory` puts it.
+    /// The pane name is the unsplit one, because that is what every one of these runs is looking
+    /// at; a split tab would answer for one of its halves and this probe never splits.
+    private static func remembered(for id: WorkspaceID, in app: AppModel) -> [String: JSONValue] {
+        guard let model = app.existingModel(for: id),
+              let session = model.activeSession,
+              let state = model.panePosition(pane: CenterPanesView.soloPane, session: session.id)
+        else { return ["found": .bool(false)] }
+        return [
+            "found": .bool(true),
+            "anchorSeq": state.anchorSeq.map { .integer($0) } ?? .null,
+            "offset": .number(state.offset),
+            "isAtLiveEnd": .bool(state.isAtLiveEnd),
+            "rowCount": .integer(state.rowCount),
+            "drawnStart": .integer(state.drawn.start),
+            "drawnEnd": .integer(state.drawn.end),
+        ]
     }
 
     /// Switches back and forth without waiting, then reports what is on screen at the end.
