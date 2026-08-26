@@ -139,8 +139,42 @@ struct TranscriptScrollBridge: NSViewRepresentable {
         // representable's view is created before it is put in the hierarchy: the scroll view is
         // there from the second update on. Anything that took the reference once, on attach, would
         // hold nil for ever and every travel below would silently fall back to a jump.
-        let found = nsView.enclosingScrollView
+        //
+        // **SPIKE: downward first, upward second.** With a `List` there is nowhere inside the
+        // content to plant this: a row is recycled the moment it leaves the viewport, so anything
+        // hung on a row is destroyed as soon as a long session is scrolled. So the transcript
+        // hangs it on the list's background instead, where `enclosingScrollView` answers nil or,
+        // worse, finds whatever scroll view the pane itself is inside. The table's own scroll view
+        // is a SIBLING of the background, so it is found by walking up a few levels and searching
+        // down. The `ScrollView` variant is unaffected: this still walks up first for it, and the
+        // downward search only runs when that answers nothing.
+        let found = nsView.enclosingScrollView ?? Self.scrollView(near: nsView)
         if scroller.scrollView !== found { scroller.scrollView = found }
         if follower.scrollView !== found { follower.scrollView = found }
+    }
+
+    /// The scroll view a sibling of this view is the document of, if there is one.
+    ///
+    /// Bounded rather than unbounded, in both directions: a search that climbs to the window and
+    /// walks the whole view tree would find the terminal's scroll view, or the inspector's, on a
+    /// pane where the transcript's has not been built yet.
+    private static func scrollView(near view: NSView) -> NSScrollView? {
+        var node = view.superview
+        var climbed = 0
+        while let current = node, climbed < 6 {
+            if let found = descendantScrollView(of: current, depth: 0) { return found }
+            node = current.superview
+            climbed += 1
+        }
+        return nil
+    }
+
+    private static func descendantScrollView(of view: NSView, depth: Int) -> NSScrollView? {
+        guard depth < 8 else { return nil }
+        for sub in view.subviews {
+            if let scroll = sub as? NSScrollView, scroll.documentView != nil { return scroll }
+            if let found = descendantScrollView(of: sub, depth: depth + 1) { return found }
+        }
+        return nil
     }
 }

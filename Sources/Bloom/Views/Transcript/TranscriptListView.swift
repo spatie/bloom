@@ -3,9 +3,21 @@ import BloomCore
 
 /// Every row of a session, and the rules for where the view sits among them.
 ///
-/// It is a `ScrollView` over a `LazyVStack` rather than a `List` for one reason, which is that a
-/// session can hold tens of thousands of rows and a `List` insists on knowing about all of them.
-/// Here nothing is decoded, measured or styled until it is about to be on screen.
+/// **This is the `spike-list` variant, and it is not finished work.** It draws the same rows
+/// through a `List` rather than through a `ScrollView` over a `LazyVStack`, to settle a claim the
+/// comment that used to stand here made without a measurement behind it: that a session can hold
+/// tens of thousands of rows and a `List` insists on knowing about all of them. What a `List` buys
+/// on macOS, if the claim is wrong, is an `NSTableView` that caches a row's height once it has
+/// measured it, which is the one thing a `LazyVStack` cannot be told: measured against this file
+/// as it stands, a 1,855 message session's content height collapses from 48,995 points to 17,339
+/// during a single scroll pass, a window resize over it runs at eight frames a second, and a
+/// reader's place cannot be put back reliably because the document it was written down against is
+/// not the document it is restored into.
+///
+/// The rows, the window mechanism and every decision in this file are left exactly as they were.
+/// What changed is the container, `List`'s chrome being stripped so the pixels compare, and the
+/// scroll bridge, which had nowhere inside a `List`'s content to stand. Each of those is commented
+/// `SPIKE` where it sits.
 struct TranscriptListView: View {
     let transcript: TranscriptModel
     /// Only to explain an empty transcript: a workspace whose setup script is still running has a
@@ -394,8 +406,17 @@ struct TranscriptListView: View {
         @Bindable var transcript = transcript
 
         ScrollViewReader { proxy in
-            ScrollView(.vertical) {
-                LazyVStack(alignment: .leading, spacing: 0) {
+            // **SPIKE.** A `List` in place of the `ScrollView` over a `LazyVStack`, to answer one
+            // question and nothing else: whether a `List` really does insist on knowing about
+            // every row of a long session, which is what the comment at the head of this file
+            // claims. On macOS a `List` is an `NSTableView`, which caches a row's height once it
+            // has measured it, so the content height stops collapsing under the reader and a
+            // resize stops re-measuring the world. Everything else in this file is left standing
+            // and the ones that could not survive the move are commented, not deleted.
+            //
+            // The rows themselves are untouched, on purpose: the comparison is only fair if both
+            // variants are drawing exactly the same views at exactly the same measure.
+            List {
                     // Before every row, because setting the workspace up is what happens before
                     // anything can be said in it. These are drawn from the workspace's own state
                     // rather than stored as rows, so a setup re-run replaces its line in place
@@ -425,8 +446,14 @@ struct TranscriptListView: View {
                     // body rebuilds the setup timeline from a log that may be two hundred thousand
                     // characters long. See `WorkspaceEventsView.==`.
                     .equatable()
+                    .transcriptListRow()
 
-                    ForEach(visibleRows) { row in
+                    // SPIKE: `id: \.seq` rather than `TranscriptRow`'s own `Identifiable`, whose
+                    // id is the message row id. Both are unique and both are monotonic, and this
+                    // way the identity `List` diffs on is the identity `proxy.scrollTo` names, so
+                    // every scroll-to-a-row in this file goes on meaning what it meant.
+                    ForEach(visibleRows, id: \.seq) { row in
+                        Group {
                         if TranscriptNoise.isHidden(row) {
                             EmptyView()
                         } else if row.kind == .result {
@@ -497,6 +524,8 @@ struct TranscriptListView: View {
                             // 1,582, returned at the first row of the window.
                             .onDisappear { visibleRowSeqs.note(row.seq, isVisible: false) }
                         }
+                        }
+                        .transcriptListRow()
                     }
 
                     // Where the stored row for it will be, which is above the answer to it. The
@@ -523,6 +552,7 @@ struct TranscriptListView: View {
                             .arrivingRow(true)
                             .padding(.horizontal, TranscriptLayout.inset)
                             .id(Self.sendingID)
+                            .transcriptListRow()
                         } else {
                             let turn = AttachmentTrailer.split(sending.body)
                             UserTurnRowView(
@@ -533,12 +563,14 @@ struct TranscriptListView: View {
                             .arrivingRow(true)
                             .padding(.horizontal, TranscriptLayout.inset)
                             .id(Self.sendingID)
+                            .transcriptListRow()
                         }
                     }
 
                     StreamingTailView(transcript: transcript)
                         .padding(.horizontal, TranscriptLayout.inset)
                         .id(Self.streamingID)
+                        .transcriptListRow()
 
                     // After everything that has been said, because that is where the next thing to
                     // be said belongs. Drawn from the workspace's queue rather than from a row, so
@@ -556,17 +588,34 @@ struct TranscriptListView: View {
                         )
                         .padding(.horizontal, TranscriptLayout.inset)
                         .id(Self.pendingID(delivery.id))
+                        .transcriptListRow()
                     }
-                }
-                .padding(.vertical, TranscriptLayout.block)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                // Inside the content, so the scroll view behind the transcript can be found by
-                // walking up from it. See `TranscriptScrollBridge`.
-                .background(
-                    TranscriptScrollBridge(scroller: scroller, follower: follower)
-                        .frame(width: 0, height: 0)
-                )
             }
+            // SPIKE: `List`'s own chrome off, so the pixels are comparable with the stack's.
+            // The row's insets, separator and background are per row and are in
+            // `transcriptListRow` above; these four are the list's.
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            // A `List` gives every row a floor of about twenty-two points on macOS, which would
+            // put a visible gap under every hidden row and change the content height this spike
+            // exists to measure. Nought is the stack's own answer.
+            .environment(\.defaultMinListRowHeight, 0)
+            // What `.padding(.vertical, TranscriptLayout.block)` on the stack was. A `List` has no
+            // single content view to pad, so it is the scroll content's margin instead.
+            .contentMargins(.vertical, TranscriptLayout.block, for: .scrollContent)
+            // **The bridge moved, and this is the first thing that did not survive the move.**
+            //
+            // It used to sit INSIDE the stack, because `enclosingScrollView` walks up and a
+            // background on the scroll view is a sibling of it. A `List` has no content view to
+            // hang it on: a row is recycled the moment it leaves the viewport, so a bridge planted
+            // in the first row is destroyed the moment a long session is scrolled, and one planted
+            // in the last row goes when the reader scrolls up. So it is a background on the list
+            // and `TranscriptScrollBridge` searches DOWNWARD for the table's scroll view as well
+            // as upward. See the note there.
+            .background(
+                TranscriptScrollBridge(scroller: scroller, follower: follower)
+                    .frame(width: 0, height: 0)
+            )
             // A conversation shorter than the pane starts at the top of it, and only once there is
             // more of it than fits does the view sit at the live end.
             //
@@ -581,7 +630,16 @@ struct TranscriptListView: View {
             // `.sizeChanges` anchor below, and opening a session on its live end is
             // `scrollPosition.scrollTo(edge: .bottom)` in `position`. Both are about content that
             // is longer than the pane, which is the case this one never sees.
+            //
+            // SPIKE: kept, and it is one of the two things to watch. `defaultScrollAnchor` is
+            // documented against a `ScrollView`; a `List` compiles it and may ignore it. If a new
+            // workspace's "Session started" hangs at the BOTTOM of the pane, this is the modifier
+            // that stopped being obeyed, and it is cosmetic.
             .defaultScrollAnchor(.top, for: .alignment)
+            // SPIKE: kept. `ScrollPosition(edge:)` is what every programmatic move to the live end
+            // in this file goes through, so if a `List` does not honour it the jump pill, the
+            // reveal and the follower's handback all stop working at once. That is the single
+            // biggest thing this spike is asking about after the row heights.
             .scrollPosition($scrollPosition)
             // Held for the reader who has scrolled away, and not for the following.
             //
@@ -602,6 +660,12 @@ struct TranscriptListView: View {
             // scrolled away, which is the rule the per-row scroll used to enforce by hand. Yanking
             // someone back down as they read something further up is the single most irritating
             // thing a live log can do.
+            //
+            // SPIKE: kept, for the same reason as the alignment anchor above and with the same
+            // caveat. If a `List` ignores it, nothing that matters is lost: the comment already
+            // says the `ScrollPosition` standing at `.bottom` is what actually holds the view at
+            // the live end, and `growWindow`'s `isGrowing` is the half that would be missed, which
+            // would show up as the reader being thrown backwards when history lands above them.
             .defaultScrollAnchor(geometry.isNearBottom || isGrowing ? .bottom : nil, for: .sizeChanges)
             // More history, when the reader gets near the top of what is drawn.
             //
@@ -610,6 +674,12 @@ struct TranscriptListView: View {
             // through the middle of a conversation writes no state at all and only crossing into
             // the top of it does. `TranscriptGeometry` makes the same bargain by quantising, one
             // step coarser.
+            // SPIKE: all four `onScrollGeometryChange` subscriptions and both `onScrollPhaseChange`
+            // ones are kept unchanged. They are `View` modifiers that act on the nearest enclosing
+            // scrollable container rather than on `ScrollView` the type, so a `List` should feed
+            // them; whether the geometry it reports is the whole table or only the realised part
+            // of it is exactly what the measurement is for. If `growWindow` never fires, this is
+            // where to look first.
             .onScrollGeometryChange(for: Bool.self, of: Self.isNearTop) { _, isNearTop in
                 guard isNearTop else { return }
                 growWindow()
@@ -1478,5 +1548,22 @@ struct TranscriptListView: View {
         // unfolding a tool result and switching tab to look at what it did is one gesture, and
         // re-folding it behind the reader's back was the bug. See `TranscriptResume`.
         remember()
+    }
+}
+
+/// **SPIKE.** `List`'s own chrome, off, applied to every row of the transcript.
+///
+/// A `LazyVStack` gives a child nothing it did not ask for; a `List` gives every row insets, a
+/// separator, a background and a leading alignment of its own. All four are taken off here so that
+/// the two variants put the same pixels in the same places and the comparison is about heights
+/// rather than about padding.
+private extension View {
+    func transcriptListRow() -> some View {
+        self
+            // What `LazyVStack(alignment: .leading)` did for a row narrower than the pane.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
     }
 }
