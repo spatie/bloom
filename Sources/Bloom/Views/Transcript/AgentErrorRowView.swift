@@ -98,21 +98,26 @@ struct AgentErrorRowView: View {
     /// unfold twenty five thousand characters at a person who only wanted to know what broke.
     @ViewBuilder
     private var detail: some View {
-        let capped = TextCap.cap(
-            exit.detail,
-            lines: showsAll ? .max : Self.detailLines,
-            characters: showsAll ? TextCap.characterCap : Self.detailCharacters
+        // Measured at the FOLDED cap whichever way round the dump is, because the question the
+        // control answers is whether there is more here than the fold shows, and the opened-out
+        // text answers no to that. Asked of whatever was on screen, the way back left the screen
+        // the moment somebody took it.
+        let folded = TextCap.cap(
+            exit.detail, lines: Self.detailLines, characters: Self.detailCharacters
         )
+        let shown = showsAll
+            ? TextCap.cap(exit.detail, lines: .max, characters: TextCap.characterCap).text
+            : folded.text
 
         VStack(alignment: .leading, spacing: TranscriptLayout.tight * 2) {
-            Text(capped.text)
+            Text(shown)
                 .font(Typo.code)
                 .foregroundStyle(Palette.negative)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            if capped.truncated, !showsAll {
-                Button("Show everything the agent printed") { showsAll = true }
+            if folded.truncated {
+                Button(TextFold.title(isExpanded: showsAll)) { showsAll.toggle() }
                     .linkButton()
                     .font(Typo.caption)
             }

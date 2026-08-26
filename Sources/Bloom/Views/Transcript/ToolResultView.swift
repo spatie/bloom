@@ -1,4 +1,5 @@
 import SwiftUI
+import BloomCore
 
 /// What the tool gave back. A rule down the left rather than a filled block, so the answer reads as
 /// quoted output rather than as another thing the agent wrote.
@@ -14,10 +15,15 @@ struct ToolResultView: View {
     @State private var showsAll = false
 
     var body: some View {
-        let capped = TextCap.cap(text, lines: showsAll ? .max : TextCap.lineCap)
+        // Measured at the FOLDED cap either way round, because what decides whether there is a
+        // control here is whether there is more output than the fold shows, and the opened-out
+        // text answers no to that. It used to be asked of whichever version was on screen, which
+        // is how the way back left the screen the moment somebody took it.
+        let folded = TextCap.cap(text, lines: TextCap.lineCap)
+        let shown = showsAll ? TextCap.cap(text, lines: .max).text : folded.text
 
         VStack(alignment: .leading, spacing: TranscriptLayout.tight * 2) {
-            Text(capped.text)
+            Text(shown)
                 .font(Typo.code)
                 .foregroundStyle(isError ? Palette.negative : Palette.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -29,8 +35,8 @@ struct ToolResultView: View {
                         .frame(width: TranscriptLayout.rule)
                 }
 
-            if capped.truncated, !showsAll {
-                Button("Show all output") { showsAll = true }
+            if folded.truncated {
+                Button(TextFold.title(isExpanded: showsAll)) { showsAll.toggle() }
                     .linkButton()
                     .font(Typo.caption)
                     .padding(.leading, TranscriptLayout.block)

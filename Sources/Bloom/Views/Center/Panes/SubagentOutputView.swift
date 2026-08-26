@@ -136,7 +136,7 @@ struct SubagentOutputView: View {
                     .font(SubagentPane.briefIsCode(subagent.kind) ? Typo.codeSmall : Typo.body)
                     .textSelection(.enabled)
                 if SubagentPane.briefCollapses(text) {
-                    Button(isBriefExpanded ? "Show less" : "Show all") {
+                    Button(TextFold.title(isExpanded: isBriefExpanded)) {
                         isBriefExpanded.toggle()
                     }
                     .buttonStyle(.link)
