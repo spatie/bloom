@@ -218,7 +218,12 @@ copy of what was there before. Three things hold that in: both are owner only, s
 client the owner is typing into rather than an agent running for ten minutes unattended; neither is
 self-approved, so the call stops and asks a person who is sitting there; and the delete's answer
 carries the whole prompt back, name, mark and text, so `quick_prompt_create` writes it again
-verbatim, which is an undo that costs one call. That last one is what a worktree does not have and
+verbatim, which is an undo that costs one call. The two delivery switches are the exception, and
+deliberately: `sends_immediately` and `opens_new_chat` are reported by every one of these tools and
+set by none of them, because they say what happens when the OWNER presses a row and a tool that
+could arm them would be an agent arranging a turn he never read. A prompt restored by
+`quick_prompt_create` comes back as an ordinary one, and the delete's answer says what he has to
+turn back on. That last one is what a worktree does not have and
 is why archiving is still not here.
 
 A quick prompt deleted over the bridge is deleted exactly as one deleted in the panel is, because

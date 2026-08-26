@@ -4,9 +4,12 @@ import BloomCore
 /// The panel behind the composer's quick prompt button: a search field, the prompts under it, and
 /// one row at the foot to write a new one.
 ///
-/// **Choosing a row puts its words in the box and stops.** Nothing is sent: every one of these
-/// starts a turn against a real worktree, and a list somebody arrows through by accident is the
-/// wrong place to be one keystroke away from that. See `QuickPromptInsertion`.
+/// **Choosing a row puts its words in the box and stops**, unless that one prompt was written to
+/// do more. Every one of these starts a turn against a real worktree, and a list somebody arrows
+/// through by accident is the wrong place to be one keystroke away from that, so the two switches
+/// on the form are off on every prompt until somebody turns them on. A prompt that has them on
+/// says so on its own row, which is what makes arrowing past it safe: see `QuickPromptRow` for the
+/// marks and `QuickPromptDelivery` for the four things a press can do.
 ///
 /// A `.popover` rather than a `Menu`, for the reason `WorkspaceSourcePicker` writes down: an
 /// `NSMenu` cannot contain a text field, so a menu with a search box in it is not a thing macOS
@@ -290,7 +293,7 @@ struct QuickPromptMenu: View {
             editing: editing,
             suggestedName: suggested,
             onCancel: { self.editor = nil },
-            onSave: { name, symbol, text in save(editing, name: name, symbol: symbol, text: text) },
+            onSave: { fields in save(editing, fields) },
             onDelete: {
                 guard let editing else { return }
                 deleting = editing
@@ -305,15 +308,15 @@ struct QuickPromptMenu: View {
         onPick(prompt)
     }
 
-    private func save(_ editing: QuickPrompt?, name: String, symbol: String, text: String) {
+    private func save(_ editing: QuickPrompt?, _ fields: QuickPrompt.Fields) {
         let catalog = catalog
         let store = app.store
         editor = nil
         Task {
             if let editing {
-                await catalog.save(id: editing.id, name: name, symbol: symbol, text: text, in: store)
+                await catalog.save(id: editing.id, fields, in: store)
             } else {
-                let written = await catalog.add(name: name, symbol: symbol, text: text, in: store)
+                let written = await catalog.add(fields, in: store)
                 // The prompt somebody has just written is the one they were looking for, so the
                 // list comes back with it highlighted and Return away from being used.
                 if let written { selected = written }

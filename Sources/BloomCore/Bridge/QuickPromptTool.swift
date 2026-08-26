@@ -163,6 +163,14 @@ enum QuickPromptCall {
 
     /// One prompt, whole. The text is not truncated: a model asked to change a prompt has to be
     /// able to read the one it is changing, and the preview the panel draws is not the prompt.
+    ///
+    /// The two switches are reported and cannot be written by any of these four tools, which is a
+    /// decision rather than an omission. They say what happens when the OWNER presses a row: one
+    /// of the four turns his next press into a turn he did not read first, and a tool that could
+    /// set them would be an agent arranging that. `quick_prompt_update` rewrites the words of a
+    /// prompt somebody already trusts; it does not get to change what pressing it does. Read as
+    /// `sends_immediately` and `opens_new_chat`, so a model changing the text of a prompt can at
+    /// least see which kind of prompt it is editing.
     static func json(_ prompt: QuickPrompt) -> JSONValue {
         .object([
             "id": .string(prompt.id.rawValue),
@@ -170,6 +178,8 @@ enum QuickPromptCall {
             "shown_as": .string(prompt.resolvedName),
             "symbol": .string(prompt.symbol),
             "text": .string(prompt.text),
+            "sends_immediately": .bool(prompt.sendsImmediately),
+            "opens_new_chat": .bool(prompt.opensNewChat),
             "sort_order": .integer(prompt.sortOrder),
             "created_at": .string(prompt.createdAt.formatted(.iso8601)),
         ])
@@ -513,7 +523,10 @@ public struct QuickPromptUpdateTool: BridgeToolHandling {
 ///    That is the same argument the project tools are held to.
 /// 2. **The answer carries the prompt back.** A worktree cannot be handed to a model in a tool
 ///    result; a quick prompt is a name, a mark and a few lines, and all three are in the answer.
-///    `quick_prompt_create` writes it back verbatim, which is an undo that costs one call.
+///    `quick_prompt_create` writes it back verbatim, which is an undo that costs one call. The two
+///    delivery switches are the one thing that does not come back, because no tool here can set
+///    them: see `QuickPromptCall.json`. The answer still reports them, so the owner is told what
+///    the prompt he has to turn back on was doing.
 ///
 /// **Deleting a built-in behaves exactly as deleting one in the window does**, because it is the
 /// same call: `Store.deleteQuickPrompt`. Nothing here writes `QuickPromptSeed.versionKey`, and
@@ -533,7 +546,9 @@ public struct QuickPromptDeleteTool: BridgeToolHandling {
 
             There is no undo and Bloom keeps no copy. The answer repeats the whole prompt, its \
             name, its mark and its text, so quick_prompt_create can write it back if this turns \
-            out to have been the wrong one. That is the only way back.
+            out to have been the wrong one. That is the only way back, and it comes back as an \
+            ordinary prompt: if sends_immediately or opens_new_chat was set, say so to the owner, \
+            because no tool can set those and only he can turn them on again.
 
             Deleting one of Bloom's own built-in prompts is a deletion like any other: it stays \
             deleted, and no later launch and no later version of Bloom puts it back.

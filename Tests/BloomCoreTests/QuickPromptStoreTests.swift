@@ -49,6 +49,8 @@ struct QuickPromptStoreTests {
         #expect(loaded.count == 1)
         #expect(loaded[0].name == "Run tests")
         #expect(loaded[0].symbol == "hammer")
+        #expect(!loaded[0].sendsImmediately)
+        #expect(!loaded[0].opensNewChat)
         #expect(loaded[0].text == "Run make test.")
         #expect(loaded[0].sortOrder == written.sortOrder)
         // Not exact equality: a `Date` goes to SQLite as seconds since 1970 and comes back
@@ -74,6 +76,63 @@ struct QuickPromptStoreTests {
         #expect(try await store.quickPrompts().map(\.name) == ["second"])
     }
 
+    /// Both switches, through the two writes a form can make. A prompt is written with them off,
+    /// turned on, and read back off the disk as on.
+    @Test("the two switches round-trip, on the insert and on the update")
+    func roundTripsDelivery() async throws {
+        let store = try makeTestStore("quick-prompts")
+        let written = try await store.insert(
+            QuickPrompt(name: "Ship it", text: "Push the branch.")
+        )
+        #expect(!written.sendsImmediately)
+        #expect(!written.opensNewChat)
+        #expect(try await store.quickPrompts().first?.sendsImmediately == false)
+
+        let changed = try await store.update(quickPromptID: written.id) {
+            $0.sendsImmediately = true
+            $0.opensNewChat = true
+        }
+        #expect(changed?.sendsImmediately == true)
+
+        let loaded = try #require(try await store.quickPrompt(id: written.id))
+        #expect(loaded.sendsImmediately)
+        #expect(loaded.opensNewChat)
+        #expect(loaded.text == "Push the branch.")
+
+        // And back off again, because a switch that cannot be turned off is worse than one that
+        // was never there.
+        _ = try await store.update(quickPromptID: written.id) { $0.sendsImmediately = false }
+        let after = try #require(try await store.quickPrompt(id: written.id))
+        #expect(!after.sendsImmediately)
+        #expect(after.opensNewChat)
+    }
+
+    /// Every prompt in the table was written when insert-and-stop was the only thing a quick
+    /// prompt could do, and off is exactly that behaviour. Replaying the step must neither throw
+    /// nor move what is stored. Same shape as `ProjectVisibilityTests.migration`, same reason.
+    @Test("a prompt written before the columns existed reads with both switches off")
+    func migration() async throws {
+        let path = TestScratch.unique("quick-prompt-delivery-migration") + ".sqlite"
+        let store = try Store(path: path)
+        let old = try await store.insert(QuickPrompt(name: "Explain", text: "Explain the changes."))
+        let opted = try await store.insert(QuickPrompt(name: "Ship it", text: "Push."))
+        _ = try await store.update(quickPromptID: opted.id) { $0.sendsImmediately = true }
+
+        let raw = try SQLiteDatabase(path: path)
+        raw.userVersion = 0
+
+        let reopened = try Store(path: path)
+        let plain = try #require(try await reopened.quickPrompt(id: old.id))
+        #expect(!plain.sendsImmediately)
+        #expect(!plain.opensNewChat)
+        // The replay is not allowed to clear what somebody had already turned on either.
+        #expect(try await reopened.quickPrompt(id: opted.id)?.sendsImmediately == true)
+
+        let fresh = try await reopened.insert(QuickPrompt(name: "New", text: "Anything."))
+        #expect(!fresh.sendsImmediately)
+        #expect(!fresh.opensNewChat)
+    }
+
     @Test("a fresh database is seeded with the built-ins")
     func seeds() async throws {
         let store = try makeTestStore("quick-prompts")
@@ -81,6 +140,9 @@ struct QuickPromptStoreTests {
 
         #expect(seeded.count == QuickPromptSeed.all.count)
         #expect(seeded.map(\.name) == QuickPromptSeed.all.map(\.name))
+        // A built-in is an ordinary prompt from the moment it is inserted, and no ordinary prompt
+        // sends itself.
+        #expect(seeded.allSatisfy { !$0.sendsImmediately && !$0.opensNewChat })
         #expect(try await store.setting(QuickPromptSeed.versionKey) == String(QuickPromptSeed.version))
     }
 

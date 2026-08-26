@@ -3,9 +3,12 @@ import Foundation
 /// What choosing a quick prompt does to the draft: its text goes in at the caret, and nothing is
 /// sent.
 ///
-/// **Insert, never send.** Every one of these starts a turn against a real worktree, and a list
-/// somebody arrows through is the wrong place to be one keystroke away from that. So the prompt is
-/// a starting point: it can be edited, appended to, and a second one can be stacked after it.
+/// **Insert, never send, unless this one prompt was written to send.** Every one of these starts a
+/// turn against a real worktree, and a list somebody arrows through is the wrong place to be one
+/// keystroke away from that. So the prompt is a starting point by default: it can be edited,
+/// appended to, and a second one can be stacked after it. `QuickPromptDelivery` is the switch out
+/// of that, per prompt and off until somebody turns it on, and the row in the panel says which
+/// prompts have it. This type is what every one of those four routes writes with.
 ///
 /// It goes in as plain text and not as a chip. Bloom draws chips for files and for a `/command`
 /// because each of those stands for something the CLI resolves later, and a chip is a thing you can

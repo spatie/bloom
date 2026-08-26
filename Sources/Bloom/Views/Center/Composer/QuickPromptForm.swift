@@ -1,9 +1,10 @@
 import SwiftUI
 import BloomCore
 
-/// Writing a quick prompt, or changing one: a name, a mark and the words. Nothing else.
+/// Writing a quick prompt, or changing one: a name, a mark, the words, and the two switches that
+/// say what pressing it does.
 ///
-/// One form for both jobs, because they are the same three fields. Editing adds Delete, on the left
+/// One form for both jobs, because they are the same five fields. Editing adds Delete, on the left
 /// of the row Save is on, which is where a destructive button goes in a Mac form and the only place
 /// this one lives. It asks before it deletes: see `QuickPromptDeletion`.
 ///
@@ -38,13 +39,15 @@ struct QuickPromptForm: View {
     /// without a click.
     var startsPickingMark = false
     var onCancel: @MainActor () -> Void
-    var onSave: @MainActor (_ name: String, _ symbol: String, _ text: String) -> Void
+    var onSave: @MainActor (QuickPrompt.Fields) -> Void
     /// Asks for the prompt to go. The panel owns the question, because the list can ask it too.
     var onDelete: @MainActor () -> Void
 
     @State private var name = ""
     @State private var symbol = QuickPrompt.defaultSymbol
     @State private var text = ""
+    @State private var sendsImmediately = false
+    @State private var opensNewChat = false
     /// Whether the fields have been filled from `editing` yet. A `task` rather than `onAppear`
     /// would run again when the panel is rebuilt under an open form and would throw away what has
     /// been typed since.
@@ -106,6 +109,8 @@ struct QuickPromptForm: View {
                     }
                     .accessibilityLabel("Quick prompt text")
             }
+
+            behaviour
 
             buttons
         }
@@ -187,6 +192,66 @@ struct QuickPromptForm: View {
         )
     }
 
+    /// The two switches, and one line saying what the pair of them will do.
+    ///
+    /// **Neither switch greys the other out**, and the sentence is why that is affordable. All
+    /// four combinations mean something, including the quiet one: a new chat with the words
+    /// waiting in its composer and nothing sent. Disabling the second switch while the first is
+    /// off would forbid that, and a disabled control in a panel this small has nowhere to carry
+    /// the reason it is disabled. So both stand alone and the line underneath reads the
+    /// combination back, which is the thing somebody wants to know before pressing Save.
+    ///
+    /// The sentence is `QuickPromptDelivery`'s rather than this view's, because what a prompt does
+    /// when it is chosen is a decision, and a decision taken in a view is one nothing can test.
+    private var behaviour: some View {
+        field("When you choose it") {
+            VStack(alignment: .leading, spacing: Metrics.spacing) {
+                toggle("Send it straight away", isOn: $sendsImmediately)
+                toggle("Open it in a new chat tab", isOn: $opensNewChat)
+
+                Text(delivery.sentence)
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    /// What the two switches add up to, which is what the line under them says.
+    private var delivery: QuickPromptDelivery {
+        QuickPromptDelivery(sendsImmediately: sendsImmediately, opensNewChat: opensNewChat)
+    }
+
+    /// One switch, drawn as a settings row rather than as SwiftUI lays a bare `Toggle` out.
+    ///
+    /// The label is on the left and the switch is at the trailing edge, which is where every
+    /// switch on this Mac is, and the label is a target of its own, because a switch is a small
+    /// thing to hit in a panel with the room for a whole row of words.
+    ///
+    /// The gesture is on the words and not on the row around them. A row-wide one sits behind the
+    /// switch as well, and the two would both fire on the same click: the switch moves and the
+    /// gesture moves it back, which reads as a control that does not work.
+    private func toggle(_ title: String, isOn: Binding<Bool>) -> some View {
+        HStack(spacing: Metrics.spacing) {
+            Text(title)
+                .font(Typo.body)
+                .foregroundStyle(Palette.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+                .contentShape(Rectangle())
+                .onTapGesture { isOn.wrappedValue.toggle() }
+
+            Spacer(minLength: Metrics.spacing)
+
+            // Labelled and then hidden, rather than built with an empty label: the words above are
+            // drawn by this row, and VoiceOver still has to be told what the switch is called.
+            Toggle(title, isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+        }
+    }
+
     private var buttons: some View {
         HStack(spacing: Metrics.spacingWide) {
             if editing != nil {
@@ -208,9 +273,13 @@ struct QuickPromptForm: View {
 
             Button("Save") {
                 onSave(
-                    name.trimmingCharacters(in: .whitespacesAndNewlines),
-                    symbol,
-                    text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    QuickPrompt.Fields(
+                        name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                        symbol: symbol,
+                        text: text.trimmingCharacters(in: .whitespacesAndNewlines),
+                        sendsImmediately: sendsImmediately,
+                        opensNewChat: opensNewChat
+                    )
                 )
             }
             .keyboardShortcut(.defaultAction)
@@ -244,6 +313,10 @@ struct QuickPromptForm: View {
         name = editing?.name ?? suggestedName
         symbol = editing.map { QuickPrompt.resolvedSymbol($0.symbol) } ?? QuickPrompt.defaultSymbol
         text = editing?.text ?? ""
+        // Off for a new prompt, and whatever the row says for one being edited. Cancelling writes
+        // nothing, so opening the form and leaving it cannot move either switch.
+        sendsImmediately = editing?.sendsImmediately ?? false
+        opensNewChat = editing?.opensNewChat ?? false
         isNameFocused = true
     }
 }

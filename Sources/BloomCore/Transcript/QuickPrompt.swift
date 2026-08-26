@@ -23,8 +23,18 @@ public struct QuickPrompt: Identifiable, Sendable, Hashable {
     /// held nothing but symbol names still reads back correctly. `QuickPromptMark` is what tells
     /// the two apart.
     public var symbol: String
-    /// The words that go into the draft. Never sent on their own: see `QuickPromptInsertion`.
+    /// The words that go into the draft. Where they land, and whether they go on their own, is
+    /// `QuickPromptDelivery` reading the two switches below.
     public var text: String
+    /// Whether choosing it sends the words rather than leaving them in the composer to be edited.
+    ///
+    /// Off for every prompt written before this existed, which is what the migration on
+    /// `quick_prompt` defaults it to. The whole library behaved that way for its whole life, and a
+    /// stored row must not change what it does because Bloom learned a new column.
+    public var sendsImmediately: Bool
+    /// Whether choosing it opens a new chat for the words rather than using the one on screen.
+    /// Off by default, for the reason above.
+    public var opensNewChat: Bool
     /// Where it sits in the list. There is no reordering, so this only ever says which order they
     /// were written in; search is the ordering anybody actually uses.
     public var sortOrder: Int
@@ -35,6 +45,8 @@ public struct QuickPrompt: Identifiable, Sendable, Hashable {
         name: String,
         symbol: String = QuickPrompt.defaultSymbol,
         text: String,
+        sendsImmediately: Bool = false,
+        opensNewChat: Bool = false,
         sortOrder: Int = 0,
         createdAt: Date = Date()
     ) {
@@ -42,8 +54,58 @@ public struct QuickPrompt: Identifiable, Sendable, Hashable {
         self.name = name
         self.symbol = symbol
         self.text = text
+        self.sendsImmediately = sendsImmediately
+        self.opensNewChat = opensNewChat
         self.sortOrder = sortOrder
         self.createdAt = createdAt
+    }
+
+    /// Everything about a prompt the owner chooses, which is everything the form writes.
+    ///
+    /// A value rather than five arguments, because the form hands this down through a closure and
+    /// a catalogue method, and `onSave(name, symbol, text, true, false)` is a call nobody can read
+    /// at either end. The id, the order and the date are not here: none of the three is a thing a
+    /// person types, and all three belong to the row rather than to what is written into it.
+    public struct Fields: Sendable, Equatable {
+        public var name: String
+        public var symbol: String
+        public var text: String
+        public var sendsImmediately: Bool
+        public var opensNewChat: Bool
+
+        public init(
+            name: String,
+            symbol: String = QuickPrompt.defaultSymbol,
+            text: String,
+            sendsImmediately: Bool = false,
+            opensNewChat: Bool = false
+        ) {
+            self.name = name
+            self.symbol = symbol
+            self.text = text
+            self.sendsImmediately = sendsImmediately
+            self.opensNewChat = opensNewChat
+        }
+    }
+
+    /// What the form opens with, and what it writes back.
+    public var fields: Fields {
+        get {
+            Fields(
+                name: name,
+                symbol: symbol,
+                text: text,
+                sendsImmediately: sendsImmediately,
+                opensNewChat: opensNewChat
+            )
+        }
+        set {
+            name = newValue.name
+            symbol = newValue.symbol
+            text = newValue.text
+            sendsImmediately = newValue.sendsImmediately
+            opensNewChat = newValue.opensNewChat
+        }
     }
 
     /// What a row without an icon gets, and what an unknown symbol name falls back to.
@@ -103,6 +165,19 @@ public struct QuickPrompt: Identifiable, Sendable, Hashable {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty else { return trimmed }
         return preview
+    }
+
+    /// What a chat opened for this prompt is called, or nil for the strip's own numbered `Chat`.
+    ///
+    /// The name the owner typed, and only that. `PaneNaming` is emphatic that a chat is furniture
+    /// rather than a description of what is in it, with the exception it names being a chat opened
+    /// FOR something, which is what the pull request and merge buttons pass a title for. A quick
+    /// prompt somebody called "Ship it" is exactly that case. A quick prompt with no name is not:
+    /// `resolvedName` would hand the strip the first stretch of the words, which is the fragment of
+    /// somebody's sentence that rule exists to keep out of the tab bar.
+    public var chatTitle: String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// Whether the row has anything to say on a second line.

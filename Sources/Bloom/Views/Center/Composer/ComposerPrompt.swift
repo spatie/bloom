@@ -500,8 +500,8 @@ struct ComposerPrompt<Footer: View>: View {
         return true
     }
 
-    /// A quick prompt chosen from the panel in the footer: its words go into the draft where the
-    /// caret is, and nothing is sent.
+    /// A quick prompt written into the draft where the caret is. Nothing here sends it: see
+    /// `ComposerPromptActions.insert` for who decides that and `QuickPromptDelivery` for the rule.
     ///
     /// Written into the body rather than into the whole draft, exactly as a picked file is: the
     /// caret the composer holds counts from the start of the prompt written after any `/command`,
