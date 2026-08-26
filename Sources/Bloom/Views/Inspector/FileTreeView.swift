@@ -35,6 +35,8 @@ struct FileTreeView: View {
     /// selection fill and the quiet one. See `RowBackground`.
     @State private var hasKeyboard = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private struct LoadID: Hashable {
         var workspaceID: WorkspaceID
         var workspacePath: String
@@ -142,14 +144,20 @@ struct FileTreeView: View {
         toggle(node)
     }
 
+    /// Never animated. The listing lands once when the workspace opens, and eight thousand rows
+    /// arriving is the pane being pointed somewhere else rather than anything the reader did.
     private func rebuildRows() {
-        rows = FileTreeRowItem.flatten(children: model.fileTree, expanded: expanded)
-        rowTitles = rows.map(\.node.name)
+        adopt(FileTreeRowItem.flatten(children: model.fileTree, expanded: expanded))
+    }
+
+    private func adopt(_ items: [FileTreeRowItem]) {
+        rows = items
+        rowTitles = items.map(\.node.name)
 
         // A folder that closed under the keyboard takes its children off the screen, and a cursor
         // naming a row that is not drawn any more would leave every key after it measured from
         // nothing.
-        if let selection, !rows.contains(where: { $0.node.path == selection }) {
+        if let selection, !items.contains(where: { $0.node.path == selection }) {
             self.selection = nil
         }
     }
@@ -209,14 +217,33 @@ struct FileTreeView: View {
         }
     }
 
+    /// The one place in this view that animates: a folder the reader just opened or closed, with
+    /// the rows below it travelling to make room. See `TreeDisclosureMotion` for the threshold
+    /// above which they stop travelling and simply arrive.
+    ///
+    /// The new rows are flattened before anything is written, because their count is what decides
+    /// whether the write is animated at all.
     private func toggle(_ node: FileTreeNode) {
-        selection = node.path
-        if expanded.contains(node.path) {
-            expanded.remove(node.path)
+        var opened = expanded
+        if opened.contains(node.path) {
+            opened.remove(node.path)
         } else {
-            expanded.insert(node.path)
+            opened.insert(node.path)
         }
-        rebuildRows()
+
+        let items = FileTreeRowItem.flatten(children: model.fileTree, expanded: opened)
+        let motion = TreeDisclosureMotion.rows(
+            changing: abs(items.count - rows.count), reduceMotion: reduceMotion
+        )
+
+        // Outside the transaction, so the highlight lands with the click rather than fading in
+        // behind the rows.
+        selection = node.path
+
+        withAnimation(motion.animation) {
+            expanded = opened
+            adopt(items)
+        }
     }
 
     private func fullPath(_ relative: String) -> String {

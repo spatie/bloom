@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import BloomCore
 
 /// One row of the worktree tree: a disclosure chevron or a document icon, the name, and a dot if
 /// the agent touched it.
@@ -25,6 +26,7 @@ struct FileTreeRow: View, Equatable {
     var action: () -> Void
 
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The dot marking a file the agent touched. Punctuation, not a badge.
     private static let changedDotSize: CGFloat = 5
@@ -36,6 +38,15 @@ struct FileTreeRow: View, Equatable {
                     .font(Typo.micro)
                     .imageScale(.small)
                     .foregroundStyle(.tertiary)
+                    // One chevron turned rather than two symbols swapped, which is what a
+                    // disclosure triangle on this platform does. Its own `.animation` and not the
+                    // tree's transaction, so it still turns on an expansion too big for the rows
+                    // below to travel. See `TreeDisclosureMotion`.
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .animation(
+                        TreeDisclosureMotion.chevron(reduceMotion: reduceMotion).animation,
+                        value: isExpanded
+                    )
                     .frame(width: InspectorLayout.glyphWidth, alignment: .leading)
                     .accessibilityHidden(true)
                 // A directory is one step quieter than a file, said with the hierarchical style so
@@ -79,9 +90,9 @@ struct FileTreeRow: View, Equatable {
         return isExpanded ? "Expanded" : "Collapsed"
     }
 
+    /// Always the closed chevron for a directory. Open is the same glyph, turned.
     private var symbol: String {
-        guard item.node.isDirectory else { return "doc" }
-        return isExpanded ? "chevron.down" : "chevron.right"
+        item.node.isDirectory ? "chevron.right" : "doc"
     }
 
     private func copyPath() {
