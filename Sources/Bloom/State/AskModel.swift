@@ -36,9 +36,10 @@ final class AskModel {
 
     /// The empty directory the agent runs in, made once.
     ///
-    /// Read the argument on `AskConversation.directory`: this is a permission decision. Bloom
-    /// defaults to `acceptEdits`, and a chat started in the owner's home directory under that mode
-    /// would accept an edit anywhere in it without asking.
+    /// Read the argument on `AskConversation.directory`: this is a permission decision, and it is
+    /// the second of two. A chat started in the owner's home directory would treat every file in
+    /// it as inside the working directory, which is the one place any permission mode stops asking
+    /// about.
     private var directory: String? {
         guard let store = app.store else { return nil }
         return AskConversation.prepareDirectory(besideDatabaseAt: store.path)

@@ -16,21 +16,32 @@ public enum AskConversation {
     /// worktree looks exactly like a chat with one until you ask it something it cannot do.
     public static let placeholder = "Ask about your projects and workspaces, or ask for one"
 
-    /// The mode it opens on, and it is not the app's default.
+    /// The mode it opens on, and it is deliberately not the app's default.
     ///
-    /// `acceptEdits` grants this chat nothing it wants: there is no worktree here for an accepted
-    /// edit to be in, and the one directory it does have is deliberately empty. So the default is
-    /// the one that asks, and the composer still offers the other three for the day somebody wants
-    /// one.
+    /// **The default is Full access.** `AppDefaults.fallbackPermissionMode` is
+    /// `bypassPermissions`, and the Models tab can pin anything over it, so this chat inheriting
+    /// the owner's default would have meant an agent above every project running whatever it liked
+    /// without asking. That default is a reasonable one for a worktree, which is a copy: the
+    /// argument for it is that a session which stops before its first command is a session somebody
+    /// has to sit and watch. Neither half of that argument holds here, because there is no worktree
+    /// and because the owner is by definition sitting in front of this conversation.
+    ///
+    /// `acceptEdits` would be no better and is not the middle ground it sounds like: there is no
+    /// worktree for an accepted edit to be in, so what it accepts is edits anywhere the agent can
+    /// reach. So the mode is the one that asks, and the composer still offers the other three for
+    /// the day somebody wants one. `ComposerDefaults.resolve` is what stops the owner's default
+    /// landing on this chat the first time it is opened.
     public static let permissionMode = PermissionMode.auto
 
     /// The chat's working directory: its own, empty, and made once.
     ///
-    /// **This is a permission decision rather than a tidiness one.** Bloom's default mode is
-    /// `acceptEdits`, and a chat started in the owner's home directory under that mode would accept
-    /// an edit anywhere in it without asking. An empty directory of its own makes every filesystem
-    /// reach a reach *outside* the working directory, which is a reach that asks, and it pushes the
-    /// agent towards the bridge tools instead, which are the audited surface.
+    /// **This is a permission decision rather than a tidiness one**, and it is the second lock
+    /// rather than the first. `permissionMode` above is what stops this chat opening on the mode
+    /// the owner's other chats open on; this is what makes the mode it does open on mean something.
+    /// A chat started in the owner's home directory would treat every file in it as inside the
+    /// working directory, which is the one place a mode stops asking about. An empty directory of
+    /// its own makes every filesystem reach a reach *outside* it, which is a reach that asks, and
+    /// it pushes the agent towards the bridge tools instead, which are the audited surface.
     ///
     /// Beside the database rather than at a fixed path, for the reason `BridgeOwnerToken.beside`
     /// gives: `Store.databaseDirectoryName` is the one rule that decides which copy of Bloom a

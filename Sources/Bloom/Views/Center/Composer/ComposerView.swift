@@ -527,7 +527,12 @@ struct ComposerView: View {
         }
         guard !Task.isCancelled else { return }
 
-        let resolved = ComposerDefaults.resolve(repo: repoSettings, app: appDefaults)
+        // A chat with no worktree does not inherit the owner's permission mode, and that is the
+        // whole of decision two: the default is Full access, and this is the one conversation in
+        // Bloom that sits above every project. See `ComposerDefaults.resolve`.
+        let resolved = ComposerDefaults.resolve(
+            repo: repoSettings, app: appDefaults, hasWorktree: transcript.workspace != nil
+        )
 
         if appDefaults.fastMode != isFastMode {
             isFastMode = appDefaults.fastMode
