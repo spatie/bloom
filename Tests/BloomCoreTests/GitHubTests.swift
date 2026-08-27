@@ -59,11 +59,25 @@ struct GitHubTests {
             summary: "1 optional check failed"
         ),
         (
-            name: "queued and running checks are pending",
+            name: "a commit status pending is executing, like a run in progress",
             nodes: #"{"__typename":"CheckRun","name":"Tests","status":"IN_PROGRESS","conclusion":null},"#
                 + #"{"__typename":"StatusContext","context":"deploy","state":"PENDING"}"#,
             checks: .pending,
-            summary: "2 checks pending"
+            summary: "2 checks running"
+        ),
+        (
+            name: "nothing has been picked up yet",
+            nodes: #"{"__typename":"CheckRun","name":"Tests","status":"QUEUED","conclusion":null},"#
+                + #"{"__typename":"CheckRun","name":"Lint","status":"QUEUED","conclusion":null}"#,
+            checks: .pending,
+            summary: "2 checks queued"
+        ),
+        (
+            name: "one runner started, so the line reports what is moving",
+            nodes: #"{"__typename":"CheckRun","name":"Tests","status":"IN_PROGRESS","conclusion":null},"#
+                + #"{"__typename":"CheckRun","name":"Lint","status":"QUEUED","conclusion":null}"#,
+            checks: .pending,
+            summary: "1 check running"
         ),
         (
             name: "an empty rollup has no checks",

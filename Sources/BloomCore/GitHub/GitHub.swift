@@ -209,7 +209,18 @@ public enum GitHub {
             return (.failing, countSummary(requiredFailures.count, singular: "required check failed"))
         }
         if !pending.isEmpty {
-            return (.pending, countSummary(pending.count, singular: "check pending"))
+            // **Running and queued are different facts and the line used to say neither.** Both
+            // are `isPending`, so a branch whose checks were visibly executing on GitHub read
+            // "2 checks pending", which sounds like nothing has started. `CheckState` has told
+            // the two apart all along; only this sentence did not.
+            // A mixed set counts the running ones only, because the question the line answers is
+            // whether anything is moving, and "3 checks running" over one runner and two waiting
+            // would be the same lie in the other direction.
+            let running = pending.filter { CheckState($0) == .running }
+            if !running.isEmpty {
+                return (.pending, countSummary(running.count, singular: "check running"))
+            }
+            return (.pending, countSummary(pending.count, singular: "check queued"))
         }
         if !optionalFailures.isEmpty {
             return (.passing, countSummary(optionalFailures.count, singular: "optional check failed"))
