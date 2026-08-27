@@ -51,6 +51,18 @@ public struct WorkspaceManager: Sendable {
         return home.appendingPathComponent("bloom/workspaces", isDirectory: true)
     }
 
+    /// `workspacesRoot`, with Spotlight told to leave it alone before anything is cut into it.
+    ///
+    /// Asked here rather than at launch because this is the only moment the answer is needed and
+    /// the only moment the directory is certain to be wanted: a copy of Bloom that never creates
+    /// a workspace should not create a directory either. `SpotlightExclusion` carries why the
+    /// marker is worth writing at all.
+    static func preparedWorkspacesRoot() -> URL {
+        let root = workspacesRoot
+        SpotlightExclusion.mark(root)
+        return root
+    }
+
     // MARK: - Repositories
 
     @discardableResult
@@ -195,7 +207,7 @@ public struct WorkspaceManager: Sendable {
         let finalBranch = Git.uniqueBranch(stem, taken: existingBranches)
 
         let directoryName = finalBranch.replacingOccurrences(of: "/", with: "-")
-        let root = Self.workspacesRoot.appendingPathComponent(repo.name, isDirectory: true)
+        let root = Self.preparedWorkspacesRoot().appendingPathComponent(repo.name, isDirectory: true)
         // The suffix rule lives in `WorktreePath` because restoring an archived workspace needs
         // the same one: two places that each invent a free directory name are two places that can
         // disagree about which names are free.
@@ -284,7 +296,7 @@ public struct WorkspaceManager: Sendable {
         }
 
         let directoryName = branch.replacingOccurrences(of: "/", with: "-")
-        let root = Self.workspacesRoot.appendingPathComponent(repo.name, isDirectory: true)
+        let root = Self.preparedWorkspacesRoot().appendingPathComponent(repo.name, isDirectory: true)
         let worktreePath = WorktreePath.free(
             preferred: root.appendingPathComponent(directoryName).path
         ) { FileManager.default.fileExists(atPath: $0) }
