@@ -201,8 +201,8 @@ patch_source "$WORK/Sources/Bloom/BloomApp.swift" \
   '        Window("[DEV] Bloom", id: Self.mainWindowID) {'
 
 patch_source "$WORK/Sources/Bloom/Views/RootView.swift" \
-  '        .navigationTitle(app.menuWorkspace?.name ?? "Bloom")' \
-  '        .navigationTitle("[DEV] " + (app.menuWorkspace?.name ?? "Bloom"))'
+  '            .navigationTitle(app.menuWorkspace?.name ?? "Bloom")' \
+  '            .navigationTitle("[DEV] " + (app.menuWorkspace?.name ?? "Bloom"))'
 
 # ------------------------------------------------------------------- the build
 
