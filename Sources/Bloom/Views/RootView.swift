@@ -35,6 +35,9 @@ struct RootView: View {
         return windowWiring(
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView()
+                // The system toggle offers an irrelevant label-style context menu on macOS 26.
+                // BloomWindowToolbar replaces it with the same image-only action.
+                .toolbar(removing: .sidebarToggle)
                 // The sidebar's ground is set here rather than inside `SidebarView`, because what has
                 // to be replaced is the `List`'s own scroll background, and that is a property of the
                 // column rather than of anything the sidebar draws. See `sidebarMaterial` for why a
@@ -70,7 +73,11 @@ struct RootView: View {
                     isInspectorPresented: isInspectorPresented,
                     animated: !reduceMotion
                 )
-                    .toolbar { BloomWindowToolbar(app: app) }
+                    .toolbar {
+                        BloomWindowToolbar(app: app) {
+                            columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
+                        }
+                    }
                     // Said here as well as under `navigationTitle` below, and deliberately.
                     //
                     // The title is declared on the split view and the toolbar is declared on this

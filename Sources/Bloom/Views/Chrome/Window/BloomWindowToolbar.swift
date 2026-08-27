@@ -32,8 +32,21 @@ import BloomCore
 /// nothing teaches the user that the list is not to be trusted.
 struct BloomWindowToolbar: ToolbarContent {
     let app: AppModel
+    let toggleSidebar: () -> Void
 
     var body: some ToolbarContent {
+        // NavigationSplitView's default sidebar item offers a label-style context menu on macOS
+        // 26. Bloom always shows this control as an icon, so a choice between "Icon and Text" and
+        // "Icon Only" has no useful effect. RootView removes that default item and this image-only
+        // button keeps the native placement and action without advertising a setting Bloom ignores.
+        ToolbarItem(placement: .navigation) {
+            Button(action: toggleSidebar) {
+                Image(systemName: "sidebar.left")
+            }
+            .help("Toggle sidebar")
+            .accessibilityLabel("Toggle sidebar")
+        }
+
         // The window's title, drawn by us rather than by AppKit.
         //
         // A toolbar item and not a title bar accessory, which is what the strip at the other end
