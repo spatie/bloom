@@ -197,8 +197,8 @@ patch_source "$WORK/Sources/Bloom/Views/Chrome/Window/WindowTitle.swift" \
   '        window.title = "[DEV] " + value'
 
 patch_source "$WORK/Sources/Bloom/BloomApp.swift" \
-  '        Window("Bloom", id: "main") {' \
-  '        Window("[DEV] Bloom", id: "main") {'
+  '        Window("Bloom", id: Self.mainWindowID) {' \
+  '        Window("[DEV] Bloom", id: Self.mainWindowID) {'
 
 patch_source "$WORK/Sources/Bloom/Views/RootView.swift" \
   '        .navigationTitle(app.menuWorkspace?.name ?? "Bloom")' \
