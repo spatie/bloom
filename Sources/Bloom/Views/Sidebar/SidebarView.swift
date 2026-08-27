@@ -173,14 +173,11 @@ struct SidebarView: View {
                         .selectionDisabled()
                         .moveDisabled(true)
 
-                case .notice(let repoID):
+                case .notice:
                     // A sentence about a project, so it is neither selectable nor something to
                     // pick up. `SidebarReorder` refuses it a second time, in case the outline
-                    // offers it anyway. The button inside it is still pressable: refusing the row
-                    // is about the row, not about what is drawn in it.
-                    SidebarEmptyNoticeRow(isFiltered: filter != .all) {
-                        presentCreate(in: app.repos.first { $0.id == repoID })
-                    }
+                    // offers it anyway.
+                    SidebarEmptyNoticeRow(isFiltered: filter != .all)
                         .selectionDisabled()
                         .moveDisabled(true)
                 }

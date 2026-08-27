@@ -148,42 +148,16 @@ struct SidebarEmptyNoticeRow: View {
     /// Only used to say WHY there is nothing here, which is a different sentence when a filter is
     /// hiding rows than when the project has none.
     var isFiltered: Bool
-    /// Starts one. Absent when a filter is what is hiding the rows, because the way out of that is
-    /// to change the filter and a project with workspaces does not need a button offering more.
-    var onCreate: (@MainActor () -> Void)?
-
     var body: some View {
         Label {
-            // The sentence, and then the way out of it. Every other empty state in the app carries
-            // one: the sidebar's "No projects yet", Home's, the create sheet's. This one said "No
-            // workspaces yet" and stopped, and the `+` that fixes it is on the header above and
-            // only appears once the pointer is on that header.
-            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                Text(isFiltered ? "Nothing matches the filter" : "No workspaces yet")
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
-
-                // **A control, not a link.** It was `linkButton`, which is the style for a
-                // sentence with an address in it, and in a sidebar it came out as a line of blue
-                // web text under a grey one: the owner's word for it was fugly, and he is right.
-                // Nothing else in this column is underlined-blue-adjacent, and what this does is
-                // open a sheet rather than go somewhere.
-                //
-                // It stays rather than being deleted, because the `+` that does the same thing is
-                // on the header above and only appears once the pointer is on that header. An
-                // empty project with no visible way out of being empty is the reason this was
-                // added.
-                if !isFiltered, let onCreate {
-                    Button(action: onCreate) {
-                        Label("New workspace", systemImage: "plus")
-                            .labelStyle(.titleAndIcon)
-                            .font(Typo.caption)
-                    }
-                    .buttonStyle(.accessoryBar)
-                    .tint(Palette.accent)
-                    .controlSize(.small)
-                }
-            }
+            // **The sentence and nothing else.** There was a button under it, first as a blue
+            // link and then as a proper control, on the argument that the `+` which does the same
+            // thing sits on the header above and only appears on hover. The owner has overruled
+            // that: the `+` is enough, and a second control for one action inside one project is
+            // the thing this window has spent a night removing.
+            Text(isFiltered ? "Nothing matches the filter" : "No workspaces yet")
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textTertiary)
         } icon: {
             Color.clear
         }

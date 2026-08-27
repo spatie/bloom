@@ -400,6 +400,11 @@ struct PullRequestSummary: View {
     private var archiveControl: some View {
         Button("Archive", systemImage: "archivebox", action: onArchive)
             .buttonStyle(.borderedProminent)
+            // The same capsule `MergeSplitButton` paints by hand, said here rather than
+            // left to the default. The merge button has to draw its own fill, because a
+            // `Menu` takes no tint, so it settled on a capsule; these took whatever
+            // `.borderedProminent` gives, and the two silhouettes disagreed in one strip.
+            .buttonBorderShape(.capsule)
             .tint(status.tone.fill)
             .controlSize(.regular)
             .help(
@@ -431,6 +436,11 @@ struct PullRequestSummary: View {
     private var pushControl: some View {
         Button(pushLabel, systemImage: "arrow.up.circle", action: onPush)
             .buttonStyle(.borderedProminent)
+            // The same capsule `MergeSplitButton` paints by hand, said here rather than
+            // left to the default. The merge button has to draw its own fill, because a
+            // `Menu` takes no tint, so it settled on a capsule; these took whatever
+            // `.borderedProminent` gives, and the two silhouettes disagreed in one strip.
+            .buttonBorderShape(.capsule)
             .tint(status.tone.fill)
             .controlSize(.regular)
             // Disabled with the rest of the cluster while a turn runs: pushing a worktree that
@@ -488,6 +498,11 @@ struct PullRequestSummary: View {
     private var fixConflictsControl: some View {
         Button("Fix merge conflicts", systemImage: "wrench.and.screwdriver", action: onFixConflicts)
             .buttonStyle(.borderedProminent)
+            // The same capsule `MergeSplitButton` paints by hand, said here rather than
+            // left to the default. The merge button has to draw its own fill, because a
+            // `Menu` takes no tint, so it settled on a capsule; these took whatever
+            // `.borderedProminent` gives, and the two silhouettes disagreed in one strip.
+            .buttonBorderShape(.capsule)
             .tint(status.tone.fill)
             .controlSize(.regular)
             // Disabled with the rest of the cluster while a turn runs: merging the base into a

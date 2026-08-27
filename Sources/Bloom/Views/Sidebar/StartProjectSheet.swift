@@ -66,7 +66,12 @@ struct StartProjectSheet: View {
     /// it do not move as the target changes under the keyboard. It grows for a long refusal: the
     /// nine that are left run to 232 characters and every one of them is worth reading in full,
     /// which is the whole argument for a sheet rather than an editable row in the sidebar.
-    private static let blockMinHeight: CGFloat = 74
+    ///
+    /// **74 was two lines of body plus the headline, and the common answer is one.** Reserving the
+    /// long case left the ordinary one sitting in a box a third empty, which is what the owner saw
+    /// first. The floor is the short answer now; a long refusal still pushes the sheet taller,
+    /// which is the movement this constant exists to avoid and the only one worth paying for.
+    private static let blockMinHeight: CGFloat = 52
     /// Enough to see what is being kept out of the first commit without the list becoming the
     /// sheet. The same cap `ProjectSetupSheet` uses.
     private static let excludedShown = 8
@@ -384,15 +389,9 @@ struct StartProjectSheet: View {
 
     private var footer: some View {
         HStack(spacing: Metrics.spacingWide) {
-            // The one branch the unification introduces, said before it is taken: creating a
-            // project ends in the New Workspace sheet and adding one ends in the sidebar. Four
-            // words, drawn only where they are true.
-            if phase == .naming, verdict.opensAWorkspace {
-                Text("then a new workspace")
-                    .font(Typo.micro)
-                    .foregroundStyle(Palette.textTertiary)
-            }
-
+            // **No "then a new workspace".** It said the one branch the unification introduces,
+            // before it is taken, and the owner had it out on sight: what happens next is a thing
+            // he will see happen, one second later, and a footnote promising it earns nothing.
             Spacer(minLength: 0)
 
             switch phase {
