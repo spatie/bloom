@@ -46,10 +46,17 @@ public struct WorkspaceManager: Sendable {
     /// three and running `git worktree repair`, and getting any part of it wrong strands work
     /// that only exists in that checkout. So `~/baton/workspaces` keeps every worktree already in
     /// it, forever, and only new ones land here.
-    public static var workspacesRoot: URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return home.appendingPathComponent("bloom/workspaces", isDirectory: true)
-    }
+    ///
+    /// Which folder that is depends on what is already on disk, and `WorkspacesRoot` is the rule
+    /// and the argument for it: a new installation gets a name ending `.noindex`, which is the
+    /// only thing measured to keep Spotlight out of the `vendor` and `.build` folders inside
+    /// every worktree, and an installation that already has a root keeps it.
+    ///
+    /// Resolved once per launch rather than on every read. The two `stat` calls cost nothing; an
+    /// answer that could change while the app is running does, because a folder appearing at
+    /// midday would put the afternoon's worktrees somewhere the morning's are not, and the
+    /// Settings row would stop naming the directory the last workspace went into.
+    public static let workspacesRoot: URL = WorkspacesRoot.resolve()
 
     // MARK: - Repositories
 

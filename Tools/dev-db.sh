@@ -156,10 +156,12 @@ done
 # and pointing Bloom Dev at the real Bloom checkout is the entire reason this
 # exists. A workspace the dev copy creates for itself is cut fresh, under its own
 # name, and only the dev database knows about it, so only the dev copy can
-# archive it. It does land under the same ~/bloom/workspaces as the real copy's,
-# because `WorkspaceManager.workspacesRoot` is a constant with no override; that
-# is a shared parent directory, not a shared worktree, and it is the reason
-# `--keep-paths` is not the default.
+# archive it. It does land under the same workspaces root as the real copy's,
+# because `WorkspaceManager.workspacesRoot` has no override: it reads the same
+# home directory as the real copy and answers with the same folder, whichever of
+# the two names `WorkspacesRoot` picks on this machine. That is a shared parent
+# directory, not a shared worktree, and it is the reason `--keep-paths` is not
+# the default.
 if (( KEEP_PATHS )); then
   cat <<EOF
 ==> --keep-paths: the copied rows point at the REAL worktrees.

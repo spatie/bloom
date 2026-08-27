@@ -173,16 +173,25 @@ private struct GeneralSettingsView: View {
             InstallPingSettingsSection()
 
             SettingsRow("New workspaces") {
-                HStack(spacing: Metrics.gutter) {
-                    Text(WorkspaceManager.workspacesRoot.path)
-                        .font(Typo.codeSmall)
-                        .foregroundStyle(Palette.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                    HStack(spacing: Metrics.gutter) {
+                        Text(WorkspaceManager.workspacesRoot.path)
+                            .font(Typo.codeSmall)
+                            .foregroundStyle(Palette.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
 
-                    Button("Reveal in Finder") {
-                        Reveal.inFinder(WorkspaceManager.workspacesRoot.path)
+                        Button("Reveal in Finder") {
+                            Reveal.inFinder(WorkspaceManager.workspacesRoot.path)
+                        }
                     }
+
+                    // One sentence, and no notice anywhere else. An install that already has a
+                    // root gets none of the indexing benefit and can only find that out from the
+                    // row that names its folder; an install that has the new one is being told
+                    // why its path looks like that. Neither is worth a banner or a migration.
+                    Text(WorkspacesRoot.note(for: WorkspaceManager.workspacesRoot))
+                        .settingsFootnote()
                 }
             }
 

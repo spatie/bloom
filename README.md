@@ -10,8 +10,14 @@ frameworks.
 ## What it does
 
 - Add a git repository as a project.
-- Describe a task. Bloom creates a branch, a worktree under `~/bloom/workspaces`, copies your
-  `.env` files, runs your setup script, and starts an agent in it.
+- Describe a task. Bloom creates a branch, a worktree under `~/bloom/workspaces.noindex`, copies
+  your `.env` files, runs your setup script, and starts an agent in it. The name ends `.noindex`
+  because a dozen worktrees of the same project are a dozen copies of its `vendor` and `.build`
+  folders, and that suffix is the only thing measured to keep Spotlight out of them. An
+  installation that already has a `~/bloom/workspaces` keeps it: nothing is ever renamed on disk,
+  because a worktree's path is recorded in the database, in the worktree, and in git's own admin
+  files, and moving it strands work that exists nowhere else. Making the `.noindex` folder by hand
+  is how an existing installation opts in for its next worktree.
 - Watch the agent work in a dense transcript: one line per tool call, expandable.
 - See what changed, as a syntax-highlighted diff against the merge base.
 - Open a terminal in the worktree, run your dev server, check the pull request, merge it.

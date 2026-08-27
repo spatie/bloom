@@ -47,6 +47,13 @@ BLOOM_DEV_BUNDLE_ID="be.spatie.bloom.dev"
 
 # Where a detached dev copy's worktrees are said to be. See Tools/dev-db.sh for
 # why the copied rows are pointed here rather than left on the real ones.
+#
+# Deliberately NOT named to end `.noindex`, which is what a new installation's
+# real root is called and why. This path is a fiction: the whole point is that it
+# does not exist, so that every destructive action in the dev copy fails on a
+# missing directory. Nothing is ever written here, so there is nothing for
+# Spotlight to walk and nothing the suffix would buy, and a name that matched the
+# real root would read as somewhere worktrees actually go.
 BLOOM_DEV_WORKSPACES_ROOT="$HOME/bloom-dev/workspaces"
 
 # The private tmux socket an instance holding this database uses.
