@@ -375,11 +375,11 @@ struct CenterPaneView: View {
                     }
                     // Terminal is the prominent one because this pane exists for a workspace that
                     // opened with a terminal and whose shell has ended, so it is what the reader
-                    // most likely wants back. Bloom's fill rather than the system accent, as every
-                    // prominent button in this app carries.
+                    // most likely wants back. It carries the system control accent, like every
+                    // primary action in the app.
                     .buttonStyle(.borderedProminent)
-                    .tint(kind == .terminal ? Palette.accentFill : Palette.surfaceRaised)
-                    .foregroundStyle(kind == .terminal ? Color.white : Palette.textPrimary)
+                    .tint(kind == .terminal ? Palette.controlAccent : Palette.surfaceRaised)
+                    .foregroundStyle(kind == .terminal ? Palette.selectedEmphasizedText : Palette.textPrimary)
                 }
             }
         }

@@ -222,7 +222,7 @@ struct ProjectSetupSheet: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Metrics.corner)
-                    .strokeBorder(choice == value ? Palette.accent : Palette.border)
+                    .strokeBorder(choice == value ? Palette.accent : Palette.border, lineWidth: Metrics.outline)
             )
         }
         .buttonStyle(.plain)
@@ -346,7 +346,8 @@ struct ProjectSetupSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
         .overlay(
-            RoundedRectangle(cornerRadius: Metrics.corner).strokeBorder(Palette.border)
+            RoundedRectangle(cornerRadius: Metrics.corner)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         )
     }
 
@@ -560,7 +561,7 @@ struct ProjectSetupSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button(primaryTitle) { start() }
                     .buttonStyle(.borderedProminent)
-                    .tint(Palette.accentFill)
+                    .tint(Palette.controlAccent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!canStart)
 
@@ -579,7 +580,7 @@ struct ProjectSetupSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Try again") { phase = .choosing }
                     .buttonStyle(.borderedProminent)
-                    .tint(Palette.accentFill)
+                    .tint(Palette.controlAccent)
                     .keyboardShortcut(.defaultAction)
 
             case .failed(let failure):
@@ -599,7 +600,7 @@ struct ProjectSetupSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Try again") { start(resuming: failure.completed) }
                     .buttonStyle(.borderedProminent)
-                    .tint(Palette.accentFill)
+                    .tint(Palette.controlAccent)
                     .keyboardShortcut(.defaultAction)
 
             case .finished(let outcome):
@@ -608,7 +609,7 @@ struct ProjectSetupSheet: View {
                 }
                 Button("Add project") { onFinish(request.path) }
                     .buttonStyle(.borderedProminent)
-                    .tint(Palette.accentFill)
+                    .tint(Palette.controlAccent)
                     .keyboardShortcut(.defaultAction)
             }
         }

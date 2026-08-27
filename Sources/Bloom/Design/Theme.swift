@@ -105,11 +105,12 @@ enum Palette {
     /// as a smudge. These are the same two steps, taken along Bloom's ramp instead.
     static let selected = dynamic(PaletteInk.selected)
     /// Selection in a focused list inside the key window, where macOS uses the accent colour.
+    /// Selection and control emphasis supplied by macOS.
     ///
-    /// Bloom's accent rather than the system's, for the reason spelled out on `accent`. This is the
-    /// most visible of the surfaces that now ignore System Settings: the selected sidebar row and
-    /// the selected changed file are brand blue on a Mac set to Graphite.
-    static let selectedEmphasized = accentFill
+    /// Interactive colour follows the user's system accent. Brand colour remains available through
+    /// `accent` and `accentFill` for identity and status marks that are not controls.
+    static let controlAccent = Color(nsColor: .controlAccentColor)
+    static let selectedEmphasized = controlAccent
     /// The ink that survives an emphasized fill. `alternateSelectedControlTextColor` is AppKit's
     /// name for it, and it is the one semantic colour in this file that is right without argument.
     static let selectedEmphasizedText = Color(nsColor: .alternateSelectedControlTextColor)
@@ -202,14 +203,10 @@ enum Palette {
     // follows the text colour on high contrast, and the selection is the paler fill a text run
     // gets rather than the solid one a list row gets.
     //
-    // All three are still semantic and none of them is a hex here, which is right for the same
-    // three reasons. What changed is what they are derived FROM. They are computed off
-    // `controlAccentColor`, and until `NSAccentColorName` went into the bundle that was the user's
-    // accent while every fill Bloom drew was Bloom's, so a focus ring round a field was the system
-    // blue an inch under a selected row that was Spatie Blue. Now the accent AppKit derives them
-    // from is `accentFill`, and the three follow it: measured `#006282` and `#37A3C7` for the ring
-    // at half alpha, and `PaletteInk.accentTextSelection` for the selection, which
-    // `PaletteContrastTests` holds a floor over because it is a fill with a paragraph on it.
+    // All three remain semantic and derive from `controlAccentColor`, the same source exposed as
+    // `Palette.controlAccent`. Bloom's AccentColor asset supplies the default under Multicolour,
+    // while an explicit user-selected accent wins. Native and custom interactive surfaces
+    // therefore stay aligned.
 
     /// The focus ring around the control that has keyboard focus.
     static let focusRing = Color(nsColor: .keyboardFocusIndicatorColor)
@@ -220,13 +217,10 @@ enum Palette {
 
     // MARK: Meaning
 
-    /// Bloom's accent, and deliberately not the user's.
+    /// Bloom's brand accent for identity, links and status ink.
     ///
-    /// This is the one place the app overrides a system preference on purpose. `controlAccentColor`
-    /// follows System Settings, so on a machine set to Graphite every tinted glyph, chip and
-    /// selected segment in Bloom came out grey, and on one set to Pink they came out pink. Bloom
-    /// has a mark and a site built on one ramp, and an app whose accent is whatever the user last
-    /// picked cannot be part of it. See `PALETTE.md` in the brand folder.
+    /// It deliberately does not paint controls or selections. Those use `controlAccent`, which
+    /// follows the user's system preference. See `PALETTE.md` in the brand folder.
     ///
     /// A pair, not a colour, because the ramp is explicit that its bottom half is for dark grounds
     /// and its top half for light. Bloom `#4FD8C4` measures 10.6 to 1 on the dark surface and 1.7
@@ -234,51 +228,22 @@ enum Palette {
     /// Ink `#0C7A6E`, which measures 5.1. Both are the same hue, so a glyph that is teal in dark is
     /// recognisably the same glyph in light.
     ///
-    /// This is for ink and for strokes. A filled control that has to carry white text uses
-    /// `accentFill`, which is a different member of the ramp for exactly that reason.
-    ///
-    /// **The override used to reach only what Bloom draws itself, and that was the whole bug.**
-    /// Thirty-seven toggles, three steppers, every focus ring and every text selection are drawn by
-    /// AppKit off `controlAccentColor`, which no `.tint` can reach, so one Settings pane held a
-    /// switch in the user's blue, a focus ring in the user's blue and a selected sidebar row in
-    /// Bloom's. Two accents in one window, structurally rather than by slip. `NSAccentColorName` in
-    /// `Resources/Info.plist` names the `AccentColor` set in Assets.car, which carries `accentFill`,
-    /// and `controlAccentColor` then answers that for the whole process: measured `#197593` in both
-    /// appearances, with the ring, the text selection and the list selection all derived from it.
-    ///
-    /// **What it does not reach, and this was measured rather than repeated from the docs.** The
-    /// key wins only where the user has left the accent on Multicolour, which is the default and so
-    /// most machines. A probe bundle carrying this exact key and catalogue, handed a chosen accent,
-    /// answered `#F74F9E` for `controlAccentColor` and derived its ring and its selection from that:
-    /// the user's choice beats the app's every time. So a Mac set to Pink or to Graphite has the
-    /// two accents it had before, and this fixes the default case and nothing else. The other
-    /// coherent answer, giving the sidebar selection back to `controlAccentColor`, is the one to
-    /// reach for if the brand argument ever gives.
-    ///
-    /// Increase Contrast is the system's business either way now, because the colour it is lifting
-    /// is `controlAccentColor` and that is this. A colour set can carry a High Contrast variant of
-    /// its own the day `PaletteInk` grows a high-contrast tier; it has none, so it declares one
-    /// colour and the system does what it does to it.
+    /// This is for ink and strokes that convey Bloom identity or status, not interactive emphasis.
     static let accent = dynamic(PaletteInk.accent)
 
     /// The same pair as an `NSColor`, for the layers that hold a `CGColor` and therefore have to be
     /// handed a colour already resolved against the window's appearance.
     static let accentNSColor = dynamicNSColor(light: 0x0C7A6E, dark: 0x4FD8C4)
 
-    /// The accent as a fill with light text on it: a selected row, a prominent button.
+    /// A brand fill capable of carrying light text, for identity surfaces such as the user's
+    /// message bubble. Controls and selections use `controlAccent` instead.
     ///
     /// Spatie Blue, the ramp's anchor and the only colour in it that works on both grounds. White
-    /// on it measures 5.2 to 1, which is where macOS's own selection fill sits (4.9 to 1), so a
-    /// selected row reads exactly as firmly as it did. Bloom itself cannot do this job: white on
+    /// on it measures 5.2 to 1. Bloom itself cannot do this job: white on
     /// `#4FD8C4` is 1.6 to 1, an unreadable row.
     ///
-    /// **This is also the colour AppKit is handed**, through `NSAccentColorName` and the
-    /// `AccentColor` set in Assets.car, and it is this member of the ramp rather than `accent` for
-    /// the reason above: `controlAccentColor` is a FILL everywhere the system reaches for it, the
-    /// track of a switch, the box of a ticked checkbox, the dot of a radio button, all of them with
-    /// white on top. `accent` in dark is `#4FD8C4` and would leave every tick in the app at 1.6 to
-    /// 1. One value in both appearances is what a colour set wants anyway, and this pair already is
-    /// one, which is why `Tools/build.sh` refuses a build where the two halves have come apart.
+    /// This also supplies the app's default AccentColor when the system preference is Multicolour.
+    /// An explicit user-selected accent still wins for native and custom interactive controls.
     static let accentFill = dynamic(PaletteInk.accentFill)
 
     /// An address in running text: underlined, and this colour.
@@ -657,6 +622,12 @@ extension Color {
 /// step the app actually wanted, was never used at all. `.subheadline` is that step, and it is
 /// where everything that sat at 10 for want of anywhere else has moved to.
 enum Typo {
+    /// Large brand copy, expressed as a system text style so the welcome and about windows cannot
+    /// drift into unrelated point sizes.
+    static let display = ScaledFont(.largeTitle, weight: .light, design: .serif)
+    /// A page heading inside the welcome sequence.
+    static let displayHeading = ScaledFont(.title2, weight: .medium, design: .serif)
+    static let displayTracking: CGFloat = -0.6
     /// 15. The only rung above reading size, for the two places something has to read as a heading
     /// rather than as a bold sentence: a heading inside agent prose, and the state of the pull
     /// request at the top of the inspector.
@@ -745,6 +716,9 @@ enum Metrics {
     /// step, the rules in this window were not so much subtle as absent, and every pane floated.
     /// The name stays because a one point rule is still what everyone calls a hairline.
     static let hairline: CGFloat = 1
+    /// A device-pixel-style outline for controls and cards. Structural pane dividers remain a full
+    /// point through `hairline`.
+    static let outline: CGFloat = 0.5
 
     // MARK: Spacing
     //

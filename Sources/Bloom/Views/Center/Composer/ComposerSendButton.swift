@@ -61,9 +61,8 @@ struct ComposerSendButton: View {
         // Prominent, because sending is the action on offer and it is the only one here now.
         .buttonStyle(.borderedProminent)
         .buttonBorderShape(isNamed ? .capsule : .circle)
-        // `accentFill`, not `accent`. A prominent button paints a white label on its tint, and
-        // white on Bloom teal is 1.6 to 1. Spatie Blue is the ramp member that carries a label.
-        .tint(Palette.accentFill)
+        // The system control accent keeps this primary action consistent with every native control.
+        .tint(Palette.controlAccent)
         .disabled(!canSend)
         .help(isRunning ? "Queue this message. It goes when the turn ends (Return)" : intent.help)
     }

@@ -38,7 +38,7 @@ struct ComposerBox: ViewModifier {
                 RoundedRectangle(cornerRadius: Metrics.corner)
                     .strokeBorder(
                         isDropTarget ? Palette.accent : Palette.border,
-                        lineWidth: isDropTarget ? Metrics.hairline * 2 : Metrics.hairline
+                        lineWidth: isDropTarget ? Metrics.outline * 2 : Metrics.outline
                     )
             }
             .overlay {

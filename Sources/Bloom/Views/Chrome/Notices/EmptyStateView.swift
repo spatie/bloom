@@ -37,9 +37,8 @@ struct EmptyStateView: View {
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .buttonStyle(.borderedProminent)
-                    // Tinted explicitly, like every other prominent button in the app: untinted
-                    // it follows the system accent and renders as grey glass on macOS 26.
-                    .tint(Palette.accentFill)
+                    // Explicit so every primary action reads from the shared semantic token.
+                    .tint(Palette.controlAccent)
             }
         }
     }

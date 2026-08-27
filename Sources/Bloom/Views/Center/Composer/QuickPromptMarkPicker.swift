@@ -175,7 +175,7 @@ struct QuickPromptMarkPicker: View {
         )
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         }
     }
 

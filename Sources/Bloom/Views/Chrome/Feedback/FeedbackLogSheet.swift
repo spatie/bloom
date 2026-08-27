@@ -50,7 +50,8 @@ struct FeedbackLogSheet: View {
             .frame(height: Self.height)
             .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
             .overlay(
-                RoundedRectangle(cornerRadius: Metrics.corner).strokeBorder(Palette.border)
+                RoundedRectangle(cornerRadius: Metrics.corner)
+                    .strokeBorder(Palette.border, lineWidth: Metrics.outline)
             )
 
             HStack(spacing: Metrics.gutter) {

@@ -70,6 +70,10 @@ final class AppModel {
     var selection: SidebarSelection {
         get { storedSelection }
         set {
+            // Observation treats an identical assignment as a mutation. A click on the selected
+            // sidebar row can arrive here again, and without this guard it writes defaults,
+            // rebuilds the subagent rows and starts another settings read for no state change.
+            guard newValue != storedSelection else { return }
             if let id = newValue.workspaceID, id != storedSelection.workspaceID {
                 SwitchTrace.begin(workspaceID: id)
             }

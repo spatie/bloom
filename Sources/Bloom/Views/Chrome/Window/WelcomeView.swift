@@ -177,8 +177,8 @@ struct WelcomeView: View {
                 .accessibilityHidden(true)
 
             Text(verbatim: "Welcome to Bloom")
-                .font(.system(size: 26, weight: .light, design: .serif))
-                .tracking(-0.6)
+                .font(Typo.display)
+                .tracking(Typo.displayTracking)
                 .foregroundStyle(Brand.foam)
                 .padding(.top, Metrics.spacingWide + Metrics.spacingSmall)
         }
@@ -220,7 +220,7 @@ struct WelcomeView: View {
     private func verdict(_ report: SetupReport) -> some View {
         VStack(alignment: .leading, spacing: Metrics.spacing) {
             Text(report.headline)
-                .font(.system(size: 19, weight: .medium, design: .serif))
+                .font(Typo.displayHeading)
                 .foregroundStyle(Palette.textPrimary)
 
             Text(report.sentence)
@@ -496,7 +496,8 @@ struct WelcomeView: View {
         .padding(.vertical, Metrics.spacingWide)
         .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
         .overlay(
-            RoundedRectangle(cornerRadius: Metrics.corner).strokeBorder(Palette.border)
+            RoundedRectangle(cornerRadius: Metrics.corner)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         )
         .transition(reduceMotion ? .identity : .opacity)
     }
@@ -541,7 +542,10 @@ struct WelcomeView: View {
                 .frame(height: 220)
         }
         .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
-        .overlay(RoundedRectangle(cornerRadius: Metrics.corner).strokeBorder(Palette.border))
+        .overlay(
+            RoundedRectangle(cornerRadius: Metrics.corner)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
+        )
     }
 
     private func startLogin(_ check: SetupCheck, fix: SetupFix) {
@@ -643,11 +647,8 @@ struct WelcomeView: View {
             Button(primary.title) { perform(primary.action) }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
-                // Bloom's own fill rather than whatever the user picked in Appearance, which is
-                // what every other prominent button in the app already does. A system blue button
-                // two inches under a teal wordmark is the one place this window could have looked
-                // like somebody else's.
-                .tint(Palette.accentFill)
+                // The user's control accent, matching every other primary action in the app.
+                .tint(Palette.controlAccent)
                 .controlSize(.large)
         }
         .padding(.horizontal, Metrics.pane)

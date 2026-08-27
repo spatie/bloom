@@ -25,9 +25,8 @@ struct RepoSettingsSaveBar: View {
             }
             .keyboardShortcut("s", modifiers: .command)
             .buttonStyle(.borderedProminent)
-            // Bloom's fill rather than the system accent, as every other prominent button
-            // in the app carries. See `EmptyStateView`.
-            .tint(Palette.accentFill)
+            // The same system control accent as every other primary action in the app.
+            .tint(Palette.controlAccent)
             .disabled(!model.isDirty)
         }
         .padding(.horizontal, Metrics.pane)

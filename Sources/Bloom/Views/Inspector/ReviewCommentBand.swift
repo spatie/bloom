@@ -243,11 +243,11 @@ struct ReviewCommentEditorButtons: View {
                         .imageScale(.small)
                 }
                 .font(Typo.captionEmphasis)
-                .foregroundStyle(Palette.textInverted)
+                .foregroundStyle(Palette.selectedEmphasizedText)
                 .padding(.horizontal, Metrics.spacingWide)
                 .padding(.vertical, Metrics.spacingSmall)
                 .background(
-                    Palette.accentFill.opacity(canConfirm ? 1 : 0.4),
+                    Palette.controlAccent.opacity(canConfirm ? 1 : 0.4),
                     in: RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                 )
             }

@@ -151,9 +151,8 @@ struct FeedbackSheet: View {
         HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingWide) {
             Toggle(Feedback.Copy.logsToggle, isOn: $presenter.includesLogs)
                 .toggleStyle(.checkbox)
-                // Untinted it follows the system accent, which is another app's colour on a Mac
-                // set to anything but Blue.
-                .tint(Palette.accentFill)
+                // Explicit so every interactive control reads from the shared semantic token.
+                .tint(Palette.controlAccent)
                 .font(Typo.caption)
 
             Button(Feedback.Copy.logsView) { showLogs() }
@@ -432,7 +431,8 @@ private struct FeedbackImageChip: View {
         .padding(.vertical, Metrics.spacingSmall)
         .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
         .overlay(
-            RoundedRectangle(cornerRadius: Metrics.cornerSmall).strokeBorder(Palette.border)
+            RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         )
         .frame(maxWidth: 260, alignment: .leading)
     }

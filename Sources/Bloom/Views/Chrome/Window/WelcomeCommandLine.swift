@@ -27,7 +27,7 @@ struct WelcomeCommandLine: View {
             // window rather than as a different window that happens to share a plinth.
             VStack(alignment: .leading, spacing: Metrics.spacing) {
                 Text("Use Bloom from your own terminal")
-                    .font(.system(size: 19, weight: .medium, design: .serif))
+                    .font(Typo.displayHeading)
                     .foregroundStyle(Palette.textPrimary)
 
                 CommandLineInstruction(isLead: true)

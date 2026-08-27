@@ -186,9 +186,8 @@ struct PullRequestCreator: View {
         return "No pull request yet. Target \(baseBranch)."
     }
 
-    /// Tinted explicitly. An untinted `.borderedProminent` follows the system accent on this
-    /// platform, and this is the button the strip exists for. See `PullRequestSummary.mergeButton`
-    /// for the measurement, and for the one case no tint survives.
+    /// Explicit so the button reads from the shared semantic token. See
+    /// `PullRequestSummary.mergeButton` for the one case where a state colour replaces it.
     private var createButton: some View {
         Button("Create pull request", systemImage: "arrow.triangle.pull", action: action)
             .buttonStyle(.borderedProminent)
@@ -197,7 +196,7 @@ struct PullRequestCreator: View {
             // `Menu` takes no tint, so it settled on a capsule; these took whatever
             // `.borderedProminent` gives, and the two silhouettes disagreed in one strip.
             .buttonBorderShape(.capsule)
-            .tint(Palette.accentFill)
+            .tint(Palette.controlAccent)
             .controlSize(.regular)
             // Held back while a turn runs, like every other button in this band: opening the
             // pull request pushes the branch, and a worktree being written to as it is read

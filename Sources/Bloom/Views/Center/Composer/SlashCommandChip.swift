@@ -67,7 +67,7 @@ struct SlashCommandChip: View {
         }
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         }
         .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
         .onHover(perform: hover(_:))

@@ -44,7 +44,7 @@ struct CommandLineOffer: View {
                         .fill(fill)
                         .overlay(
                             RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
-                                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
                         )
                 )
 

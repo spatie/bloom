@@ -433,7 +433,7 @@ struct StartProjectView: View {
                 // reads as Bloom not having understood the target rather than as it refusing one.
                 Button(verdict.buttonTitle, action: start)
                     .buttonStyle(.borderedProminent)
-                    .tint(Palette.accentFill)
+                    .tint(Palette.controlAccent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!canStart)
 
@@ -449,7 +449,7 @@ struct StartProjectView: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Try again") { phase = .naming }
                     .buttonStyle(.borderedProminent)
-                    .tint(Palette.accentFill)
+                    .tint(Palette.controlAccent)
                     .keyboardShortcut(.defaultAction)
             }
         }

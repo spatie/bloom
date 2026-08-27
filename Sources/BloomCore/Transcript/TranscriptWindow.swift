@@ -98,6 +98,17 @@ public struct TranscriptWindow: Equatable, Sendable {
         Self(start: max(0, start - max(0, chunk)), end: end)
     }
 
+    /// One more piece of history to hand to a table while the reader is idle.
+    ///
+    /// The visible window still opens narrowly, so arriving at a long conversation keeps its
+    /// first frame. Once that arrival is complete, however, an `NSTableView` is cheaper when its
+    /// lightweight row entries arrive before the reader asks for them. Returning nil makes the
+    /// caller's settle chain stop naturally when there is no history left.
+    public func preparedHistory(afterArrival arrived: Bool, by chunk: Int = chunk) -> Self? {
+        guard arrived, canGrowUp else { return nil }
+        return grownUp(by: chunk)
+    }
+
     /// The window grown downward, which is what the reader approaching the bottom of an opened-on-
     /// an-old-row window asks for.
     public func grownDown(rowCount: Int, by chunk: Int = chunk) -> Self {

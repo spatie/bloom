@@ -67,7 +67,11 @@ struct StatusColumnGallery: View {
 
             HStack(alignment: .top, spacing: Metrics.gutter) {
                 column("On the sidebar's own ground", onSelection: false, background: Palette.sidebar)
-                column("On a selected row", onSelection: true, background: Palette.accentFill)
+                column(
+                    "On a selected row",
+                    onSelection: true,
+                    background: Palette.selectedEmphasized
+                )
             }
 
             boxes
@@ -98,7 +102,9 @@ struct StatusColumnGallery: View {
     private func row(_ status: WorkspaceStatus, onSelection: Bool) -> some View {
         Label {
             Text(status.label)
-                .foregroundStyle(onSelection ? Palette.textInverted : Palette.textPrimary)
+                .foregroundStyle(
+                    onSelection ? Palette.selectedEmphasizedText : Palette.textPrimary
+                )
         } icon: {
             mark(status, onSelection: onSelection)
         }

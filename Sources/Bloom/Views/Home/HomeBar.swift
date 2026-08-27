@@ -85,10 +85,10 @@ struct HomeBar: View {
                     Text(badge, format: .number)
                         .font(Typo.micro)
                         .monospacedDigit()
-                        .foregroundStyle(isOn ? Palette.textInverted.opacity(0.8) : countTint(scope))
+                        .foregroundStyle(isOn ? Palette.selectedEmphasizedText.opacity(0.8) : countTint(scope))
                 }
             }
-            .foregroundStyle(isOn ? Palette.textInverted : Palette.textSecondary)
+            .foregroundStyle(isOn ? Palette.selectedEmphasizedText : Palette.textSecondary)
             .padding(.horizontal, Metrics.spacing)
             .frame(height: Metrics.controlHeight)
             .background(fill(isOn: isOn, isHovered: hovered == scope), in: Capsule())
@@ -101,10 +101,9 @@ struct HomeBar: View {
         .help(help(for: scope))
     }
 
-    /// The selected chip is filled with Bloom's own accent rather than tinted glass, which is the
-    /// same fill an emphasized selection uses everywhere else in the window.
+    /// The selected chip uses the same emphasized selection colour as every other control.
     private func fill(isOn: Bool, isHovered: Bool) -> Color {
-        if isOn { return Palette.accentFill }
+        if isOn { return Palette.selectedEmphasized }
         return isHovered ? Palette.hover : .clear
     }
 

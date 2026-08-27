@@ -446,14 +446,12 @@ struct HomeView: View {
             // file panel, and pointing at a folder is what the sheet's own Choose does now.
             Button(state.actionTitle, systemImage: "plus", action: startProject)
                 .buttonStyle(.borderedProminent)
-                // Tinted explicitly, like every other prominent button in the app: untinted it
-                // follows the system accent, which on a Mac set to Graphite is grey glass. See
-                // `EmptyStateView`, which says the same over the same button.
-                .tint(Palette.accentFill)
+                // Explicit so every primary action reads from the shared semantic token.
+                .tint(Palette.controlAccent)
         case .noWorkspaces:
             Button(state.actionTitle, systemImage: "plus") { requestWorkspace(in: nil) }
                 .buttonStyle(.borderedProminent)
-                .tint(Palette.accentFill)
+                .tint(Palette.controlAccent)
         case .noMatch:
             Button(state.actionTitle) { app.homeFilter.query = "" }
         case .noneInChosenProjects:

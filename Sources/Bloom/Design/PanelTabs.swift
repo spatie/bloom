@@ -96,7 +96,7 @@ struct PanelTabs<Tab: Hashable>: View {
         }
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.corner)
-                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         }
         // Dropped under Reduce Motion rather than slowed, which is what every other call site in
         // this app does with `Motion`: the setting is about movement, not about speed.

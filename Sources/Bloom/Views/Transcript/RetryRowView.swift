@@ -78,7 +78,7 @@ struct RetryRowView: View {
                     .fill(Palette.cautionWash)
                     .overlay {
                         RoundedRectangle(cornerRadius: Metrics.corner)
-                            .strokeBorder(Palette.cautionBorder, lineWidth: Metrics.hairline)
+                            .strokeBorder(Palette.cautionBorder, lineWidth: Metrics.outline)
                     }
             }
         }

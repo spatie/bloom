@@ -56,7 +56,7 @@ struct ScriptEditor: View {
         .overlay(alignment: .bottom) { grip }
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         }
         // The editor is a scroll view of its own inside the form's scroll view, and it is the one
         // that should answer here. Without this the row is one tall control as far as the form is

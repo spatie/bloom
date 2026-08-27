@@ -354,7 +354,7 @@ private struct MarkdownBlockView: View {
             .clipShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
             .overlay {
                 RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                    .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                    .strokeBorder(Palette.border, lineWidth: Metrics.outline)
             }
         }
     }

@@ -628,7 +628,7 @@ struct AccentSwatches: View {
                 .fill(Color(hexString: hex))
                 .frame(width: Self.size, height: Self.size)
                 .overlay {
-                    Circle().strokeBorder(Palette.textPrimary.opacity(0.12), lineWidth: Metrics.hairline)
+                    Circle().strokeBorder(Palette.textPrimary.opacity(0.12), lineWidth: Metrics.outline)
                 }
                 // A ring cut out of the swatch, which is what macOS itself marks a chosen colour
                 // with, and which needs no room between the swatches to be drawn in.

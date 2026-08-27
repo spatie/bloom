@@ -129,8 +129,8 @@ struct WelcomeGreeting: View {
                 .animation(step(0), value: entered)
 
             Text(verbatim: "Welcome to Bloom")
-                .font(.system(size: 38, weight: .light, design: .serif))
-                .tracking(-0.9)
+                .font(Typo.display)
+                .tracking(Typo.displayTracking)
                 .foregroundStyle(Brand.foam)
                 .padding(.top, Metrics.pane + Metrics.spacingWide)
                 .modifier(Rise(entered: entered, animation: step(0.16)))
@@ -145,7 +145,7 @@ struct WelcomeGreeting: View {
             // never the whole fault. Mono is this app's voice for what a machine said: a version,
             // a path, a command, an account. This sentence is English, and English set in mono
             // reads as data, which is the same mistake the checks column's state words used to
-            // make. Between a thirty eight point serif line and a large button, at the floor of
+            // make. Between a display serif line and a large button, at the floor of
             // the scale in a face that is wider and greyer per word than the text around it, the
             // one line explaining the product was the hardest thing in the window to read.
             Text("A worktree, an agent and a branch for every task you describe")
@@ -163,10 +163,8 @@ struct WelcomeGreeting: View {
             Button(continueTitle ?? "Continue", action: onContinue)
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
-                // Bloom's own fill rather than whatever the user picked in Appearance, for the
-                // reason the checks screen's primary button carries: a system blue button under a
-                // teal wordmark is the one place this window could look like somebody else's.
-                .tint(Palette.accentFill)
+                // The user's control accent, matching primary actions throughout macOS.
+                .tint(Palette.controlAccent)
                 .controlSize(.large)
                 .padding(.top, Metrics.pane + Metrics.inset)
                 .modifier(Rise(entered: entered, animation: step(0.40)))

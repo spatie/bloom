@@ -98,7 +98,7 @@ struct PermissionAskRowView: View {
             RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
                 .strokeBorder(
                     isOpen ? Palette.cautionBorder : Palette.border,
-                    lineWidth: Metrics.hairline
+                    lineWidth: Metrics.outline
                 )
         )
         .padding(.vertical, TranscriptLayout.tight)
@@ -190,7 +190,7 @@ struct PermissionAskRowView: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Metrics.cornerSmall, style: .continuous)
-                    .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                    .strokeBorder(Palette.border, lineWidth: Metrics.outline)
             )
             // SwiftUI's selectable Text is a private NSTextField subclass whose own context
             // menu comes back empty, so a copy item has to be put here by hand. Kept alongside
@@ -244,9 +244,8 @@ struct PermissionAskRowView: View {
                     // "Always allow" and would have granted one call.
                     Button(offer.prominent.buttonLabel) { onAnswer(.allow(scope: offer.prominent)) }
                         .buttonStyle(.borderedProminent)
-                        // Bloom's fill rather than the system accent, as every other prominent button in
-                        // the app carries. See `EmptyStateView`.
-                        .tint(Palette.accentFill)
+                        // The shared system control accent for a primary action.
+                        .tint(Palette.controlAccent)
                         // Command and Return while there is more than one allow to choose between,
                         // and a bare Return when this is the only one. Exactly what the two
                         // branches this replaced did, kept because the modifier is what stops a
@@ -328,9 +327,8 @@ struct PermissionAskRowView: View {
                 HStack(spacing: Metrics.spacing) {
                     Button("Deny") { onAnswer(.deny(message: reason, endsTurn: false)) }
                         .buttonStyle(.borderedProminent)
-                        // Bloom's fill rather than the system accent, as every other prominent button in
-                        // the app carries. See `EmptyStateView`.
-                        .tint(Palette.accentFill)
+                        // The shared system control accent for a primary action.
+                        .tint(Palette.controlAccent)
                         .keyboardShortcut(.return, modifiers: .command)
 
                     Button("Deny and stop the turn") {

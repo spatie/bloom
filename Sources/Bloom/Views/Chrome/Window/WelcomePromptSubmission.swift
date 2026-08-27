@@ -34,7 +34,7 @@ struct WelcomePromptSubmission: View {
             // rung this window sets prose at.
             VStack(alignment: .leading, spacing: Metrics.spacing) {
                 Text("Say what Bloom does next")
-                    .font(.system(size: 19, weight: .medium, design: .serif))
+                    .font(Typo.displayHeading)
                     .foregroundStyle(Palette.textPrimary)
 
                 Text(

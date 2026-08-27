@@ -140,7 +140,7 @@ struct AttachmentChip: View {
         }
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                .strokeBorder(stroke, lineWidth: Metrics.hairline)
+                .strokeBorder(stroke, lineWidth: Metrics.outline)
         }
         .background { probe }
         .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))

@@ -134,8 +134,8 @@ private struct AboutView: View {
             // on macOS and is the closest face this machine has to Newsreader, so the wordmark
             // reads as the same wordmark rather than as the system font in a larger size.
             Text(verbatim: "Bloom")
-                .font(.system(size: 34, weight: .light, design: .serif))
-                .tracking(-0.75)
+                .font(Typo.display)
+                .tracking(Typo.displayTracking)
                 .foregroundStyle(Brand.foam)
                 .padding(.top, Metrics.spacingWide)
 

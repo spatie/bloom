@@ -30,7 +30,7 @@ struct RunningGlyphGallery: View {
             )
             row(
                 "In a row, selected",
-                background: Palette.accentFill,
+                background: Palette.selectedEmphasized,
                 onSelection: true
             )
 
@@ -95,7 +95,7 @@ struct RunningGlyphGallery: View {
                     }
                 }
                 .padding(8)
-                .background(Palette.accentFill)
+                .background(Palette.selectedEmphasized)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
 
@@ -127,7 +127,9 @@ struct RunningGlyphGallery: View {
                 .frame(width: Metrics.glyph, height: Metrics.glyph)
             Text(name)
                 .font(Typo.body)
-                .foregroundStyle(onSelection ? Palette.textInverted : Palette.textPrimary)
+                .foregroundStyle(
+                    onSelection ? Palette.selectedEmphasizedText : Palette.textPrimary
+                )
             Spacer()
         }
         .padding(.horizontal, 8)
@@ -163,7 +165,7 @@ struct RunningGlyphGallery: View {
                 .frame(width: Metrics.glyph, height: Metrics.glyph)
                 .scaleEffect(8, anchor: .center)
                 .frame(width: Metrics.glyph * 8, height: Metrics.glyph * 8)
-                .background(onSelection ? Palette.accentFill : Palette.surface)
+                .background(onSelection ? Palette.selectedEmphasized : Palette.surface)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
     }

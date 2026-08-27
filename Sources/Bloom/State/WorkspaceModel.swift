@@ -319,6 +319,10 @@ final class WorkspaceModel {
 
     private var changesTask: Task<Result<ChangesAnswer, GitFailure>, Never>?
     private var pullRequestTask: Task<PullRequest?, Never>?
+    /// One repository settings read at a time. A request that arrives during a read is remembered,
+    /// so the burst ends with one fresh read rather than silently keeping the older answer.
+    @ObservationIgnored private var settingsRefresh = RefreshDemand()
+    @ObservationIgnored private var settingsTask: Task<Void, Never>?
     /// A setup script can run for minutes (`composer install`, `npm ci`). Without a handle,
     /// archiving mid-setup cannot stop it and it outlives the app.
     private var setupTask: Task<Void, Never>?
@@ -343,7 +347,8 @@ final class WorkspaceModel {
     /// Nothing waits for it: the menu shows the previous answer until this one lands, and on the
     /// first launch of a workspace that is an empty one for a few milliseconds.
     func refreshSettings() {
-        Task { [weak self] in await self?.reloadSettings() }
+        guard settingsRefresh.request() else { return }
+        settingsTask = Task { [weak self] in await self?.drainSettingsRefreshes() }
     }
 
     /// The same read, awaited, for the one caller that cannot carry on without the answer.
@@ -353,12 +358,20 @@ final class WorkspaceModel {
     /// call above, which returns immediately and lets the menu show the previous answer until this
     /// one lands.
     func reloadSettings() async {
-        guard let path = repo?.path else { return }
-        let loaded = await Task.detached(priority: .utility) {
-            SettingsLoader.load(repo: path)
-        }.value
-        guard settings != loaded else { return }
-        settings = loaded
+        refreshSettings()
+        await settingsTask?.value
+    }
+
+    private func drainSettingsRefreshes() async {
+        repeat {
+            if let path = repo?.path {
+                let loaded = await Task.detached(priority: .utility) {
+                    SettingsLoader.load(repo: path)
+                }.value
+                if settings != loaded { settings = loaded }
+            }
+        } while settingsRefresh.complete()
+        settingsTask = nil
     }
 
     var store: Store? { app.store }

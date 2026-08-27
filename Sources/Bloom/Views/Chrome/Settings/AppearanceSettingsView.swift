@@ -182,7 +182,7 @@ private struct ChatTextPreview: View {
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metrics.corner))
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.corner)
-                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         }
         .accessibilityLabel("Preview of the conversation in this font, text size and line height")
     }

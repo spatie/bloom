@@ -67,7 +67,7 @@ struct RepoFilesToCopySection: View {
                 RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                     .strokeBorder(
                         isRingVisible ? Palette.focusRing : Palette.border,
-                        lineWidth: isRingVisible ? Self.focusRingWidth : Metrics.hairline
+                        lineWidth: isRingVisible ? Self.focusRingWidth : Metrics.outline
                     )
             }
             .accessibilityLabel("Patterns of files to copy into a new workspace")
@@ -182,7 +182,7 @@ struct RepoFilesToCopySection: View {
         .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         }
     }
 

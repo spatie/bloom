@@ -77,7 +77,7 @@ struct NoticeBanner: View {
         .clipShape(RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
-                .strokeBorder(Palette.border)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         )
         // Two shadows rather than one. The near one draws the edge, which is the whole of what
         // separates a white card from the white page under it in light; the far one is the depth,

@@ -127,7 +127,7 @@ struct ArchivedWorkspaceView: View {
                 Task { await app.restore(workspace) }
             }
             .buttonStyle(.borderedProminent)
-            .tint(Palette.accentFill)
+            .tint(Palette.controlAccent)
             .disabled(isRestoring || isLocating || source?.canRebuild != true)
             .help(restoreHelp)
 

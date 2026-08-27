@@ -13,6 +13,8 @@ struct DetailColumn: View {
     var body: some View {
         if !app.isLoaded {
             LoadingView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Palette.windowBackground)
         } else {
             switch app.selection {
             case .home:

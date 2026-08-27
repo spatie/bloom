@@ -220,7 +220,7 @@ struct WorkspaceHoverCardView: View {
             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Metrics.corner))
             .overlay {
                 RoundedRectangle(cornerRadius: Metrics.corner)
-                    .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                    .strokeBorder(Palette.border, lineWidth: Metrics.outline)
             }
     }
 }

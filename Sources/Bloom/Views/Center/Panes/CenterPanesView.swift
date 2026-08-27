@@ -216,7 +216,7 @@ struct CenterPanesView: View {
             .fill(Palette.surface)
             .overlay {
                 RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
-                    .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                    .strokeBorder(Palette.border, lineWidth: Metrics.outline)
             }
             .overlay { Image(systemName: symbol).foregroundStyle(Palette.textSecondary) }
             .frame(width: Self.ghostSize.width, height: Self.ghostSize.height)

@@ -110,7 +110,7 @@ struct QuickPromptForm: View {
                     // `PromptEditor` draws for the same reason.
                     .overlay {
                         RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                            .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                            .strokeBorder(Palette.border, lineWidth: Metrics.outline)
                     }
                     .accessibilityLabel("Quick prompt text")
             }
@@ -166,7 +166,7 @@ struct QuickPromptForm: View {
                 RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                     .strokeBorder(
                         isPickingMark ? Palette.accent : Palette.border,
-                        lineWidth: Metrics.hairline
+                        lineWidth: Metrics.outline
                     )
             }
             .contentShape(Rectangle())

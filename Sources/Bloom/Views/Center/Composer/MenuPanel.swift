@@ -28,7 +28,7 @@ struct MenuPanel<Content: View>: View {
         // the card ends once Reduce Transparency has turned the material opaque.
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.corner)
-                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         }
         // A panel open over the window is `lifted`, and the recipe is `Elevation`'s rather than
         // this file's: the three shadows in the app were three unrelated numbers, including the

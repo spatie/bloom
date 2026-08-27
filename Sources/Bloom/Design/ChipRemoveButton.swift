@@ -38,7 +38,7 @@ struct ChipRemoveButton: View {
                 .frame(width: diameter, height: diameter)
                 .background(plate, in: Circle())
                 .overlay {
-                    Circle().strokeBorder(ring, lineWidth: Metrics.hairline)
+                    Circle().strokeBorder(ring, lineWidth: Metrics.outline)
                 }
                 .contentShape(Circle())
         }
@@ -105,7 +105,7 @@ enum ChipRemoveImage {
         guard let glyph = NSImage(systemSymbolName: "xmark", accessibilityDescription: label)?
             .withSymbolConfiguration(size.applying(colour)) else { return nil }
 
-        let hairline = Metrics.hairline
+        let outline = Metrics.outline
         // Sized in POINTS, with the drawing deferred: an `NSCustomImageRep` is asked to draw
         // again at whatever scale the display it lands on has, so the disc is a circle on a
         // Retina screen rather than a fourteen pixel bitmap stretched over twenty-eight.
@@ -113,11 +113,11 @@ enum ChipRemoveImage {
             // Inset by half the line, because a stroked path straddles it: without this the ring
             // is drawn half outside the disc and the control is a point wider than the slot the
             // line was laid out around.
-            let disc = NSBezierPath(ovalIn: rect.insetBy(dx: hairline / 2, dy: hairline / 2))
+            let disc = NSBezierPath(ovalIn: rect.insetBy(dx: outline / 2, dy: outline / 2))
             plate.setFill()
             disc.fill()
             border.setStroke()
-            disc.lineWidth = hairline
+            disc.lineWidth = outline
             disc.stroke()
 
             let glyphSize = glyph.size

@@ -171,10 +171,10 @@ struct DiffLineView: View, Equatable {
                 Image(systemName: "plus")
                     .font(Typo.micro)
                     .fontWeight(.bold)
-                    .foregroundStyle(shown ? Palette.textInverted : .clear)
+                    .foregroundStyle(shown ? Palette.selectedEmphasizedText : .clear)
                     .frame(width: 16, height: 16)
                     .background(
-                        shown ? Palette.accentFill : .clear,
+                        shown ? Palette.controlAccent : .clear,
                         in: RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                     )
                     .contentShape(Rectangle())

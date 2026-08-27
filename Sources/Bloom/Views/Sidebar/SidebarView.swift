@@ -153,8 +153,7 @@ struct SidebarView: View {
                         .moveDisabled(true)
                         .tag(SidebarSelection.subagent(workspaceID, subagent.id))
                         // A subagent that CAN be selected selects like everything else in the
-                        // pane. One of these left on the system accent would have put the second
-                        // blue straight back, one rung further in.
+                        // pane. It shares the same semantic selection as every other selected row.
                         .listRowBackground(
                             selectionFill(for: .subagent(workspaceID, subagent.id))
                         )
@@ -189,26 +188,10 @@ struct SidebarView: View {
         }
         // The list draws its own row height, and that is left to it. Its selection is not.
         //
-        // Selection: the fill is Bloom's, painted through `listRowBackground` on the one row that
-        // is selected. This paragraph used to argue the other way, that a source list selection is
-        // a system affordance and the brand is everywhere else. It was right that repainting the
-        // row costs something and wrong about how much. Keyboard navigation is untouched, because
-        // a background is not a behaviour. The inversion of the row's ink is not lost either, it
-        // is simply ours now: `selectedRowInk` sets `backgroundProminence` itself, and everything
-        // that reads it goes on reading it. What is genuinely coarser is the dimming, and
-        // `selectionFill(for:)` says exactly how.
-        //
-        // What it did cost was the pane disagreeing with the window it is in. Every other list
-        // here goes through `RowBackground`, whose emphasized fill is `Palette.accentFill`, and
-        // the very same workspaces are drawn on Home by one of them. So one workspace was Spatie
-        // Blue in the middle of the window and the user's own accent on the left, and a Mac set
-        // to Graphite had a grey sidebar selection in an app with a teal one four hundred points
-        // to the right. Photographed both ways: `--snapshot-gallery --gallery sidebar-selection`.
-        //
-        // This is the same opinion `Palette.accent` already holds and documents, held in one more
-        // place rather than decided afresh. The rest of the accent's work in this window, the
-        // focus ring, the caret, the text selection and a selected tab, is not ours and is
-        // untouched.
+        // Selection is painted through `listRowBackground` on the selected row, using the same
+        // semantic system accent as other emphasized selections. Keyboard navigation remains the
+        // list's responsibility. `selectedRowInk` restores the matching semantic label colour and
+        // `backgroundProminence` that the custom background would otherwise suppress.
         //
         // Row height: 32 points, where `Metrics.rowHeight` is 28 and the reference render is 28
         // as well. It is not ours to set. `listRowInsets`, an explicit `frame(height:)` on the
@@ -538,10 +521,8 @@ struct SidebarView: View {
 
     /// The root of the pane, as a row of the list. There used to be three of these.
     ///
-    /// The mark is inked by `SidebarNavRow` rather than left to the label, and that is the second
-    /// half of the "two kinds of blue" this file was changed for. A `Label` in a source list draws
-    /// its symbol in `controlAccentColor`, so a nav row was the user's blue sitting a row away
-    /// from a selection that is now Bloom's: the same disagreement, one rung quieter.
+    /// The mark is inked by `SidebarNavRow` so it follows the row's emphasized semantic label
+    /// colour rather than retaining the unselected source-list tint.
     private func navRow(_ target: SidebarSelection, title: String, icon: String) -> some View {
         SidebarNavRow(title: title, icon: icon)
             .tag(target)
@@ -623,10 +604,8 @@ struct SidebarView: View {
         } actions: {
             Button("Start a project", systemImage: "plus", action: startProject)
                 .buttonStyle(.borderedProminent)
-                // Tinted explicitly, like every other prominent button in the app: untinted it
-                // follows the system accent, which on a Mac set to Graphite is grey glass. See
-                // `EmptyStateView`, which says the same over the same button.
-                .tint(Palette.accentFill)
+                // Explicit so every primary action reads from the shared semantic token.
+                .tint(Palette.controlAccent)
         }
     }
 
@@ -673,7 +652,7 @@ struct SidebarNavRow: View {
         } icon: {
             Image(systemName: icon)
                 .foregroundStyle(
-                    prominence == .increased ? Palette.textInverted : Palette.textSecondary
+                    prominence == .increased ? Palette.selectedEmphasizedText : Palette.textSecondary
                 )
         }
     }
@@ -705,11 +684,11 @@ extension View {
     /// Two things at once, on purpose. `foregroundStyle` is what the label and the symbol read, and
     /// `backgroundProminence` is what everything further in reads: the status mark, the running
     /// figure's breathing rings, the project tile and the diff stat all key off it, and every one
-    /// of them already knows to switch to `Palette.textInverted` on a fill. The table used to set
+    /// of them already knows to switch to `Palette.selectedEmphasizedText` on a fill. The table used to set
     /// that environment value for us because the table drew the fill. Bloom draws it now, so Bloom
     /// sets it, and the two can never say different things about the same row.
     func selectedRowInk(isEmphasized: Bool) -> some View {
         environment(\.backgroundProminence, isEmphasized ? .increased : .standard)
-            .foregroundStyle(isEmphasized ? Palette.textInverted : Palette.textPrimary)
+            .foregroundStyle(isEmphasized ? Palette.selectedEmphasizedText : Palette.textPrimary)
     }
 }

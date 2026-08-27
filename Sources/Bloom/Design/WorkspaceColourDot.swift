@@ -72,7 +72,7 @@ struct WorkspaceColourDot: View {
                 // against their own ground: yellow on a light pane, grey on a dark one. The
                 // project swatches in settings are ringed for the same reason.
                 .overlay {
-                    Circle().strokeBorder(Palette.textPrimary.opacity(0.12), lineWidth: Metrics.hairline)
+                    Circle().strokeBorder(Palette.textPrimary.opacity(0.12), lineWidth: Metrics.outline)
                 }
                 .frame(width: Self.size, height: Self.size)
                 // Carried by the dot alone, which is the whole reason this is a guide here rather

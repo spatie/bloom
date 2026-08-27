@@ -120,7 +120,7 @@ struct BrowserToolbarView: View {
         .glassEffect(.regular.interactive(), in: Capsule())
         // The rim is drawn rather than left to the material's, because it is what still says where
         // the capsule ends once Reduce Transparency has turned the glass opaque.
-        .overlay { Capsule().strokeBorder(Palette.border, lineWidth: Metrics.hairline) }
+        .overlay { Capsule().strokeBorder(Palette.border, lineWidth: Metrics.outline) }
     }
 
     private var addressField: some View {
@@ -149,7 +149,7 @@ struct BrowserToolbarView: View {
         .overlay {
             Capsule().strokeBorder(
                 isRingVisible ? Palette.focusRing : Palette.border,
-                lineWidth: isRingVisible ? Self.focusRingWidth : Metrics.hairline
+                lineWidth: isRingVisible ? Self.focusRingWidth : Metrics.outline
             )
         }
     }

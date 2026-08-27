@@ -58,7 +58,7 @@ struct PendingTurnRowView: View {
     /// Short dashes with a gap wider than they are, which reads as dotted at a hairline and stays
     /// dotted when the conversation is set larger: the pattern is in points, not in ems, because
     /// the border is a border rather than a piece of text.
-    private static let dots = StrokeStyle(lineWidth: Metrics.hairline, dash: [2, 3])
+    private static let dots = StrokeStyle(lineWidth: Metrics.outline, dash: [2, 3])
 
     var body: some View {
         HStack(spacing: 0) {

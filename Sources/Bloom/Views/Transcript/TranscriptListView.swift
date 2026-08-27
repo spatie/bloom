@@ -123,6 +123,12 @@ struct TranscriptListView: View {
     /// owner's 2,981 row session an upward scroll grows about eight times, so that was eight
     /// rebuilds of up to 2,981 entries each, for nothing. See `GeometryBox`.
     @State private var isGrowing = GeometryBox(false)
+    /// Whether a reader currently has the transcript's scroll view. Idle history preparation is
+    /// allowed to spend main-thread time only after that gesture has ended.
+    @State private var isLiveScrolling = GeometryBox(false)
+    /// Whether this transcript still owns a visible pane. Detached preparation tasks can outlive
+    /// a tab switch unless they have an explicit cancellation condition.
+    @State private var isVisible = GeometryBox(false)
     @State private var resumed: SessionID?
     @State private var opening: Opening?
     @State private var writingTo: WriteTarget?
@@ -808,14 +814,19 @@ struct TranscriptListView: View {
             scale: fontScale,
             rowEnvironment: rowEnvironment,
             onGeometryChange: { measured($0) },
-            onSettled: { remember() },
+            onSettled: {
+                remember()
+                scheduleHistoryPreparation()
+            },
             onLiveScrollChange: { hasHold in
                 // **A hand on the wheel outranks anything this view asked for.** The follower is
                 // paused rather than stopped, and for the momentum too: a flick that lands near
                 // the live end is still the reader's own movement, and something pulling the last
                 // few points out from under it is the same interruption a drag would be.
                 follower.isPaused = hasHold
+                isLiveScrolling.value = hasHold
                 guard hasHold else { return }
+                isGrowing.value = false
                 // A card that stayed up while the content moved under it would be pointing at a
                 // chip that is no longer there.
                 hoverHost.request = nil
@@ -833,7 +844,12 @@ struct TranscriptListView: View {
         // The case the whole of `TranscriptResume` is about: a tab switch destroys this view, and
         // a reader who arrived, read what was on screen and moved on has scrolled nothing for the
         // settle to fire on.
-        .onDisappear { remember() }
+        .onAppear { isVisible.value = true }
+        .onDisappear {
+            remember()
+            isVisible.value = false
+            isGrowing.value = false
+        }
         .onChange(of: transcript.rows.count, initial: true) { _, _ in
             position()
             // A row arriving is another chance to notice that the window stops short of it.
@@ -887,6 +903,7 @@ struct TranscriptListView: View {
             follower.stop()
             controller.releaseEnd()
             didPosition = false
+            isLiveScrolling.value = false
             opening = nil
             // The folds of the session being arrived at, which are its own and are usually none.
             let remembered = memory?.remembered(session: transcript.session.id)
@@ -983,6 +1000,7 @@ struct TranscriptListView: View {
             // 163ms to 169ms main thread block on every return.
             guard resumed != transcript.session.id else {
                 arrivalSession = transcript.session.id
+                scheduleHistoryPreparation()
                 SwitchTrace.mark("transcript.window", workspace: transcript.workspace?.id)
                 SwitchTrace.markOnScreen("transcript.window", workspace: transcript.workspace?.id)
                 return
@@ -1018,6 +1036,7 @@ struct TranscriptListView: View {
             // The session has finished arriving, so from here on a row that turns up is a row the
             // reader is watching turn up. The history that just landed is not one of them.
             arrivalSession = transcript.session.id
+            scheduleHistoryPreparation()
             SwitchTrace.mark("transcript.history", workspace: transcript.workspace?.id)
             SwitchTrace.markOnScreen("transcript.history", workspace: transcript.workspace?.id)
         }
@@ -1322,6 +1341,22 @@ struct TranscriptListView: View {
               )
         else { return }
         let place = topPlace.value
+        let rowCount = transcript.rows.count
+        let rememberedWindow: TranscriptWindow
+        if atLiveEnd.value {
+            rememberedWindow = .liveEnd(rowCount: rowCount)
+        } else if let seq = place?.seq,
+                  let index = TranscriptWindow.index(
+                      ofSeqAtOrAfter: seq, in: transcript.rows.lazy.map(\.seq)
+                  ) {
+            rememberedWindow = .opening(
+                rowCount: rowCount,
+                tailStart: max(0, rowCount - TranscriptWindow.settled),
+                mustReach: index
+            )
+        } else {
+            rememberedWindow = drawn.window
+        }
         target.memory.remember(
             TranscriptPaneState(
                 expanded: expanded,
@@ -1332,8 +1367,11 @@ struct TranscriptListView: View {
                 anchorSeq: place?.seq,
                 anchorDelta: Double(place?.delta ?? 0),
                 isAtLiveEnd: atLiveEnd.value,
-                rowCount: transcript.rows.count,
-                drawn: drawn.window
+                rowCount: rowCount,
+                // Idle preparation may have filled the whole table. Remember only the reader's
+                // neighbourhood so returning from another tab does not rebuild thousands of
+                // entries before the pane can appear.
+                drawn: rememberedWindow
             ),
             session: target.session
         )
@@ -1384,6 +1422,51 @@ struct TranscriptListView: View {
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(120))
             isGrowing.value = false
+        }
+    }
+
+    /// Hands the table another chunk before the reader reaches it.
+    ///
+    /// `onSettled` only arrives after the clip view has been quiet for 150ms and after a live
+    /// gesture has ended. Growing here therefore pays the entry diff, row insertion and initial
+    /// height estimates while nobody is waiting on a scroll frame. Long conversations fill one
+    /// bounded chunk at a time until the table knows all of their rows.
+    ///
+    /// `growWindow` above stays as the fallback for a reader who starts moving before this idle
+    /// preparation has reached the beginning. It should become rare rather than becoming a hard
+    /// stop at the top of the prepared history.
+    private func prepareHistoryWhileIdle() {
+        guard drawn.session == transcript.session.id,
+              isVisible.value,
+              !isGrowing.value,
+              !isLiveScrolling.value,
+              arrivalSession == transcript.session.id,
+              drawn.window.canGrowUp
+        else { return }
+        isGrowing.value = true
+        Task { @MainActor in
+            // `onSettled` comes from an NSTableView delegate callback. Leave that callback before
+            // changing the table's rows, or AppKit correctly diagnoses a reentrant delegate pass.
+            await Task.yield()
+            while isGrowing.value,
+                  isVisible.value,
+                  arrivalSession == transcript.session.id,
+                  drawn.session == transcript.session.id,
+                  let prepared = drawn.window.preparedHistory(afterArrival: true) {
+                drawn.window = prepared
+                TranscriptDrawn.note(prepared.count)
+                try? await Task.sleep(for: .milliseconds(180))
+            }
+            isGrowing.value = false
+        }
+    }
+
+    /// Gives the arrival's own positioning and geometry callbacks time to finish first. One of
+    /// those callbacks may perform the ordinary near-top growth and hold `isGrowing` briefly.
+    private func scheduleHistoryPreparation() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            prepareHistoryWhileIdle()
         }
     }
 

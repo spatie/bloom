@@ -70,7 +70,7 @@ struct JumpToNewestPill: View {
                 // The hover response, on the ground rather than on the label, so the words do not
                 // change weight under the pointer.
                 .overlay(Capsule().fill(isHovering ? Palette.hover : .clear))
-                .overlay(Capsule().strokeBorder(Palette.border, lineWidth: Metrics.hairline))
+                .overlay(Capsule().strokeBorder(Palette.border, lineWidth: Metrics.outline))
         }
         .clipShape(Capsule())
         // It grows on hover because that is what says the thing is floating: a control that only

@@ -249,7 +249,7 @@ struct TabItemView: View {
                 .fill(surface.fill)
                 .overlay {
                     TabItemOutline(radius: Self.cornerRadius, skipsLeadingEdge: isAtPaneEdge)
-                        .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                        .strokeBorder(Palette.border, lineWidth: Metrics.outline)
                 }
                 .matchedGeometryEffect(id: Self.selectionID, in: namespace)
         } else if isHovered {

@@ -312,7 +312,9 @@ final class WorkspaceTabsStore {
     /// which one that is. A tab whose focused pane is a shell or a page says nothing about it and
     /// leaves the last answer standing, which is what clicking a terminal tab has always done.
     func select(_ tab: PaneContent, in model: WorkspaceModel) {
-        selected[model.workspace.id] = tab
+        // A selected tab remains clickable. Do not turn that click into an observed dictionary
+        // mutation and a redraw of the strip and panes when the selection did not move.
+        if selected[model.workspace.id] != tab { selected[model.workspace.id] = tab }
         adoptActiveSession(of: tab, in: model)
     }
 

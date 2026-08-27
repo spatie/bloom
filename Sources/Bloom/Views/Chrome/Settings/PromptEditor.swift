@@ -90,7 +90,7 @@ struct PromptEditor: View {
                 RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                     .strokeBorder(
                         isRingVisible ? Palette.focusRing : Palette.border,
-                        lineWidth: isRingVisible ? Self.focusRingWidth : Metrics.hairline
+                        lineWidth: isRingVisible ? Self.focusRingWidth : Metrics.outline
                     )
             }
             .accessibilityLabel("\(definition.title) prompt")

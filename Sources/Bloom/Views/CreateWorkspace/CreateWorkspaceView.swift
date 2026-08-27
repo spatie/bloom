@@ -518,11 +518,8 @@ struct CreateWorkspaceView: View {
         }
         .pickerStyle(.segmented)
         .fixedSize()
-        // Tinted explicitly, like every other coloured control in this window: untinted a
-        // segmented control paints its selected cell in the SYSTEM accent, which on a Mac set to
-        // anything but Blue is another app's colour sitting in Bloom's own window. Measured on a
-        // capture: bright system blue beside its teal Create button.
-        .tint(Palette.accentFill)
+        // Explicit so every interactive control reads from the shared semantic token.
+        .tint(Palette.controlAccent)
         .help("Start a chat with an agent, or cut a worktree and open a shell or a browser in it")
     }
 
@@ -807,10 +804,8 @@ struct CreateWorkspaceView: View {
         } actions: {
             Button("Choose a folder", systemImage: "folder", action: addProject)
                 .buttonStyle(.borderedProminent)
-                // Tinted explicitly, like every other prominent button in the app: untinted it
-                // follows the system accent, which on a Mac set to Graphite is grey glass. See
-                // `EmptyStateView`, which says the same over the same button.
-                .tint(Palette.accentFill)
+                // Explicit so every primary action reads from the shared semantic token.
+                .tint(Palette.controlAccent)
         }
     }
 
