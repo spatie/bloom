@@ -143,9 +143,12 @@ public struct ClaudeCodeQuotaSource: AgentQuotaSource {
     private let environment: [String: String]
     private let makeProcess: @Sendable (AgentLaunch) -> any AgentProcessing
 
+    /// `cwd` is an empty folder Bloom owns and never the home directory. Nothing here reads a
+    /// file, and a CLI rooted at `~` is one that has been handed everything the user owns. See
+    /// `AgentScratchDirectory`.
     public init(
         executable: String = AgentRunner.executable,
-        cwd: String = NSHomeDirectory(),
+        cwd: String = AgentScratchDirectory.current(),
         environment: [String: String] = Shell.environment(),
         makeProcess: @escaping @Sendable (AgentLaunch) -> any AgentProcessing = AgentRunner.spawn
     ) {
@@ -215,8 +218,10 @@ public struct CodexQuotaSource: AgentQuotaSource {
     private let configuration: CodexClient.Configuration
     private let makeProcess: @Sendable (AgentLaunch) -> any AgentProcessing
 
+    /// `cwd` is the same empty folder the Claude Code source stands in, and for the same reason.
+    /// See `AgentScratchDirectory`.
     public init(
-        cwd: String = NSHomeDirectory(),
+        cwd: String = AgentScratchDirectory.current(),
         environment: [String: String] = Shell.environment(),
         makeProcess: @escaping @Sendable (AgentLaunch) -> any AgentProcessing = CodexClient.spawn
     ) {

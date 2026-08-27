@@ -56,7 +56,7 @@ struct WorkspaceNamerTests {
     @Test("it runs somewhere with no repository in it")
     func runsOutsideTheWorktree() {
         let launch = WorkspaceNamer.launch(prompt: "anything")
-        #expect(launch.cwd.hasSuffix("bloom-naming"))
+        #expect(launch.cwd == AgentScratchDirectory.current())
         #expect(launch.cwd != NSHomeDirectory())
     }
 

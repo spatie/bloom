@@ -3,7 +3,7 @@
 #
 #   ./Tools/house-rules.sh
 #
-# Nine rules, and every one of them is here because it has already been broken:
+# Ten rules, and every one of them is here because it has already been broken:
 #
 #   1. No em dashes and no en dashes. Anywhere. They arrive by the hundred from
 #      anything that writes prose for you, and once one is in a file the next
@@ -30,6 +30,9 @@
 #      makes it the exception, and it is here because SwiftLint cannot hold it:
 #      its `custom_rules` need SourceKit, there is none on Linux, and the lint
 #      job skips them and stays green. See the rule itself.
+#  10. No subprocess is rooted at the home directory. Four were, three of them as
+#      a default argument nobody read, and macOS blames Bloom for whatever the
+#      child then touches; see the rule itself.
 #
 # Exit status is 1 if anything was found, and every finding is printed with the
 # file and line so it can be opened. The word lists are deliberately narrow:
@@ -416,6 +419,31 @@ while IFS= read -r file; do
 done <<EOF
 $(git grep --untracked -l -I -E 'catch[^{]*\{' -- 'Sources/*' 'Tests/*' || true)
 EOF
+
+echo "==> no subprocess is rooted at the home directory"
+# A child process inherits a working directory, and both agent CLIs treat theirs
+# as the project they have been pointed at. macOS attributes what a child reads
+# to the responsible application, which is Bloom, so a CLI started in `~` asks
+# for the user's own folders in Bloom's name and the user is asked about it by a
+# system prompt naming Bloom.
+#
+# Four sites did it, and every one of them was reachable before a project had
+# been added: both quota readers and the Codex model catalogue took
+# `cwd: String = NSHomeDirectory()` as a default argument nobody reads, and the
+# welcome window's sign-in terminal passed the home directory outright. None of
+# them opens a file in the folder it stands in, so none of them needed a
+# directory at all. `WorkspaceNamer` had already worked this out for the one call
+# site its author was looking at, and said so in a comment, which is exactly the
+# shape of decision that needs a rule rather than a paragraph.
+#
+# Narrow on purpose: this looks for a home directory handed to a parameter named
+# `cwd` or `directory`, which is what every spawn site in the tree calls it. A
+# path built out of `NSHomeDirectory()` to read a dotfile is not this mistake and
+# is left alone.
+if hits="$(git grep --untracked -n -I -E '(cwd|directory):[^)]*(NSHomeDirectory\(\)|homeDirectoryForCurrentUser)' -- 'Sources/*' || true)" && [ -n "$hits" ]; then
+  echo "$hits" | show
+  report "A subprocess rooted at the home directory. Nothing Bloom starts stands in the user's home: use AgentScratchDirectory for an ask with no workspace, or the workspace's own path."
+fi
 
 echo "==> British spelling"
 # Words with an American spelling that has no other job in this codebase.

@@ -151,7 +151,12 @@ public actor CodexModelCatalog {
     ///
     /// A connection rather than a long-lived one, because this is asked for a few times an hour
     /// and holding a subprocess open between those is a process the user did not ask for.
-    public static func live(cwd: String = NSHomeDirectory(), codexHome: String? = nil) -> CodexModelCatalog {
+    /// `cwd` is an empty folder Bloom owns rather than the home directory: listing models opens no
+    /// file, and a CLI rooted at `~` is one that has been pointed at everything the user owns. See
+    /// `AgentScratchDirectory`.
+    public static func live(
+        cwd: String = AgentScratchDirectory.current(), codexHome: String? = nil
+    ) -> CodexModelCatalog {
         CodexModelCatalog(fetch: {
             let client = CodexClient(configuration: CodexClient.Configuration(
                 cwd: cwd,

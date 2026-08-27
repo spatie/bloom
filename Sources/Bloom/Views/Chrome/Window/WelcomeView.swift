@@ -536,7 +536,11 @@ struct WelcomeView: View {
         guard let session = GitHubLoginSession(
             executable: executable,
             arguments: Array(parts.dropFirst()),
-            directory: FileManager.default.homeDirectoryForCurrentUser.path,
+            // Not the home directory. This is the first launch, before Bloom has been shown a
+            // project, and the command is a sign-in that reads nothing off the disk it is standing
+            // on. Rooting it at `~` pointed Claude Code at everything the user owns and made macOS
+            // ask about it in Bloom's name. See `AgentScratchDirectory`.
+            directory: AgentScratchDirectory.current(),
             onExit: { _ in
                 // Whatever it exited with, ask the machine rather than the exit status. A CLI that
                 // returns zero because the user pressed Escape at its first question has not

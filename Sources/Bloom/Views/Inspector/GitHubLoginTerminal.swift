@@ -47,9 +47,13 @@ final class GitHubLoginSession {
             execName: executable,
             arguments: arguments,
             environment: variables.map { "\($0.key)=\($0.value)" }.sorted(),
+            // The fallback is an empty folder Bloom owns rather than the home directory. A login
+            // is `gh auth login` or `claude /login`, and neither reads the folder it is standing
+            // in; a CLI started in `~` is one macOS then asks about in Bloom's name. See
+            // `AgentScratchDirectory`.
             directory: FileManager.default.fileExists(atPath: directory)
                 ? directory
-                : FileManager.default.homeDirectoryForCurrentUser.path
+                : AgentScratchDirectory.current()
         )
 
         terminal = BloomTerminalView(frame: .zero)
