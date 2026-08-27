@@ -1,71 +1,45 @@
 #!/bin/zsh
-# Builds a Bloom that is not the owner's and installs it beside his, under its
-# own name, its own icon and its own database.
+# Builds the second Bloom, the one Bloom is developed in, and installs it to
+# ~/Applications/Bloom Dev.app.
 #
-#   ./Tools/dev-build.sh                  build HEAD as Bloom Dev, install, relaunch it
-#   ./Tools/dev-build.sh --identity ssh   build it as Bloom SSH instead
-#   ./Tools/dev-build.sh <ref>            build that commit or branch instead
-#   ./Tools/dev-build.sh --no-launch      install without restarting the copy
+#   ./Tools/dev-build.sh              build HEAD, install, relaunch the dev copy
+#   ./Tools/dev-build.sh <ref>        build that commit or branch instead
+#   ./Tools/dev-build.sh --no-launch  install without restarting the dev copy
 #
-# `make dev` and `make ssh` are the first two of those.
+# `make dev` is the first of those.
 #
-# ONE SCRIPT, EVERY IDENTITY BUT THE OWNER'S, AND WHY NOT ONE SCRIPT EACH. Bloom
-# SSH wanted every line of this: the same plist edits, the same anchored source
-# patches, the same detached worktree, the same refusal to install over anything
-# running, and the same read-the-environment-back check at the foot. A copy with
-# the strings changed would have been a second script agreeing with this one by
-# coincidence, and the coincidence would have ended at the first anchor that
-# moved, leaving one build failing loudly and the other installing a copy wearing
-# the real name. So the strings are a table in Tools/guard.sh, this takes a key,
-# and the next identity is four entries in that table and a Makefile line.
-#
-# The file is still called dev-build.sh, which now names only the first thing it
-# builds. It is kept because everything points here: `make dev`, `make ssh`,
-# CLAUDE.md, and the refusal message in Tools/guard.sh that tells somebody which
-# target to run instead. A rename would be worth exactly one word of accuracy.
-#
-# WHY A SEPARATE IDENTITY AND NOT A SEPARATE BUILD. Two copies of the same bundle
-# id are the same app twice: same Application Support container, same preferences
+# WHY A SECOND IDENTITY AND NOT A SECOND BUILD. Two copies of the same bundle id
+# are the same app twice: same Application Support container, same preferences
 # domain, same saved window state, same tmux sockets, same database. An agent
 # clicking around in one of them archives the other one's workspaces. So this
 # does not build a different Bloom, it builds Bloom AS SOMEBODY ELSE, and every
 # separation macOS gives us follows from the bundle id:
 #
-#   the bundle id   its own `defaults` domain and its own saved window state
-#   BLOOM_DB_PATH   its own database, through LSEnvironment in Info.plist, which
-#                   `Store.defaultPath` already honours, and, if that never
-#                   arrives because the executable was run rather than opened,
-#                   through the bundle id again: the fallback directory is
-#                   derived from it. The tmux socket is derived from the database
-#                   path, so that separates too, and so does the notification
-#                   identifier
-#   the URL scheme  its own, so this copy cannot steal a `bloom://` deep link
-#                   meant for the copy in daily use
+#   be.spatie.bloom.dev   its own `defaults` domain and its own saved window state
+#   BLOOM_DB_PATH         its own database, through LSEnvironment in Info.plist,
+#                         which `Store.defaultPath` already honours, and, if that
+#                         never arrives because the executable was run rather than
+#                         opened, through the bundle id again: the fallback
+#                         directory is derived from it. The tmux socket is derived
+#                         from the database path, so that separates too, and so
+#                         does the notification identifier
+#   bloomdev:             its own URL scheme, so the dev copy cannot steal a
+#                         `bloom://` deep link meant for the copy in daily use
 #
-# WHAT THE SSH IDENTITY IS FOR, since it is the one that needs saying. The work on
-# driving agents over SSH points a build at real servers, and the copy the owner
-# works in must never be that build: a run that reaches somebody's host is a run
-# whose blast radius is not this Mac. It holds its own database for the same
-# reason and one more, which is that the rows are not the same rows. That database
-# will hold servers, not just workspaces, so it is not a copy of his that has
-# drifted, it is a different set of facts that has no business in the copy he
-# works in and would be carried back into it by any sharing at all.
-#
-# HOW A COPY IS TOLD APART, which matters more than any of the above because the
+# HOW IT IS TOLD APART, which matters more than any of the above because the
 # failure is the owner typing into the wrong window:
 #
-#   the icon      rotated round the colour wheel, so the same drawing arrives in
-#                 rust and orange, or in violet, instead of teal and navy. The
-#                 turn is per identity: Tools/icon/tint.py argues the three
-#   the name      "Bloom Dev" or "Bloom SSH" in the Dock, in the Cmd-Tab switcher
-#                 and as the first item of the menu bar
-#   the title     every window title is prefixed "[DEV] " or "[SSH] "
+#   the icon      half a turn round the colour wheel, so the same drawing arrives
+#                 in rust and orange instead of teal and navy. Tools/icon/dev-tint.py
+#   the name      "Bloom Dev" in the Dock, in the Cmd-Tab switcher and as the
+#                 first item of the menu bar
+#   the title     every window title is prefixed "[DEV] "
 #
 # HOW THE THREE MARKS ARE APPLIED. Not by committing a second Info.plist, a
 # second icon and a branch in a view. They are applied to the detached worktree
-# this builds from, so the repository has one identity and this script owns every
-# other one entirely. Each edit checks its own anchor and stops the build if it
-# has moved, because a side build wearing the real icon and the real name is the
+# this builds from, so the repository has one identity and this script owns the
+# second one entirely. Each edit checks its own anchor and stops the build if it
+# has moved, because a dev build wearing the real icon and the real name is the
 # one outcome worth failing over.
 #
 # The rest is Tools/master.sh's shape and for its reasons: a detached worktree at
@@ -79,47 +53,27 @@ source "$PWD/Tools/guard.sh"
 
 REF=HEAD
 LAUNCH=1
-IDENTITY=dev
-while (( $# > 0 )); do
-  case "$1" in
+for arg in "$@"; do
+  case "$arg" in
     --no-launch) LAUNCH=0 ;;
-    # A key rather than a name, and validated by `bloom_use_identity` against the
-    # list of identities a build may install. "real" is not on that list, which is
-    # what stops `--identity real` from being the shortest route to replacing the
-    # owner's copy.
-    --identity)
-      shift
-      (( $# > 0 )) || { echo "--identity needs one of: ${BLOOM_INSTALLABLE_IDENTITIES[*]}" >&2; exit 1 }
-      IDENTITY="$1"
-      ;;
-    -*) echo "unknown option: $1" >&2; exit 1 ;;
-    *) REF="$1" ;;
+    -*) echo "unknown option: $arg" >&2; exit 1 ;;
+    *) REF="$arg" ;;
   esac
-  shift
 done
-
-bloom_use_identity "$IDENTITY"
 
 RESOLVED="$(git rev-parse --short "$REF")"
 SUBJECT="$(git log -1 --format=%s "$REF")"
-# Per identity, both of them. The worktree because two identities are two
-# different sets of source patches and one directory cannot hold both, and the
-# build scratch because sharing it would mean each build invalidating the other's
-# incremental state on every run, which is the whole benefit of keeping it.
-WORK="/tmp/bloom-$BLOOM_ID-src"
-DEST="$BLOOM_APP"
+WORK=/tmp/bloom-dev-src
+DEST="$BLOOM_DEV_APP"
 
 # This script has the same shape as Tools/master.sh and therefore the same
-# hazard: an agent running inside the copy being replaced would have this kill
-# its own host. The two lines under it are belt and braces against a typo or a
-# stale environment ever pointing DEST somewhere it was never meant to go: the
-# first names the one destination that is never acceptable, and the second says
-# what the destination must instead BE, which is one of two paths.
-bloom_refuse_if_own_host "$DEST" "$BLOOM_DB"
+# hazard: an agent running inside the DEV copy would have this replace and kill
+# its own host. The second line is belt and braces against a typo or a stale
+# environment ever pointing DEST at the copy the owner is using.
+bloom_refuse_if_own_host "$DEST" "$BLOOM_DEV_DB"
 bloom_refuse_real_app "$DEST"
-bloom_require_installable_app "$DEST"
 
-echo "==> $BLOOM_NAME  $RESOLVED  $SUBJECT"
+echo "==> $RESOLVED  $SUBJECT"
 
 git worktree remove --force "$WORK" 2>/dev/null || true
 rm -rf "$WORK"
@@ -134,13 +88,13 @@ PLIST="$WORK/Resources/Info.plist"
 # silent identity edit is how a dev build ends up wearing the real name.
 plist() { /usr/libexec/PlistBuddy -c "$1" "$PLIST" >/dev/null; }
 
-plist "Set :CFBundleName $BLOOM_NAME"
-plist "Set :CFBundleDisplayName $BLOOM_NAME"
-plist "Set :CFBundleIdentifier $BLOOM_BUNDLE_ID"
-plist "Set :CFBundleURLTypes:0:CFBundleURLName $BLOOM_BUNDLE_ID.deeplink"
-plist "Set :CFBundleURLTypes:0:CFBundleURLSchemes:0 $BLOOM_SCHEME"
-plist "Set :NSServices:0:NSPortName $BLOOM_NAME"
-plist "Set :NSServices:0:NSMenuItem:default New $BLOOM_NAME Workspace"
+plist "Set :CFBundleName Bloom Dev"
+plist "Set :CFBundleDisplayName Bloom Dev"
+plist "Set :CFBundleIdentifier $BLOOM_DEV_BUNDLE_ID"
+plist "Set :CFBundleURLTypes:0:CFBundleURLName $BLOOM_DEV_BUNDLE_ID.deeplink"
+plist "Set :CFBundleURLTypes:0:CFBundleURLSchemes:0 bloomdev"
+plist "Set :NSServices:0:NSPortName Bloom Dev"
+plist "Set :NSServices:0:NSMenuItem:default New Bloom Dev Workspace"
 
 # The database, and the only reason the dev copy is safe to click around in.
 #
@@ -151,31 +105,26 @@ plist "Set :NSServices:0:NSMenuItem:default New $BLOOM_NAME Workspace"
 # here and baked in.
 #
 # It is applied by LaunchServices, which means it applies when the app is opened
-# and not when its executable is run directly. Open the copy with `open` or from
-# the Dock. A build launched as ~/Applications/Bloom Dev.app/Contents/MacOS/Bloom
+# and not when its executable is run directly. Open the dev copy with `open` or
+# from the Dock. A build launched as ~/Applications/Bloom Dev.app/Contents/MacOS/Bloom
 # has no BLOOM_DB_PATH at all. That used to be the one way to defeat all of this,
 # and it is not any more: `Store.databaseDirectoryName` derives the fallback
-# directory from the bundle id, and every identity's id resolves to the same
-# directory this key names rather than to the real one. So this key is belt now,
-# not the only strap, and the two have to agree on the path, which is why both
-# come from the one table in Tools/guard.sh and why
-# Tests/BloomCoreTests/DatabaseDirectoryTests.swift holds the Swift half of the
-# agreement. The check at the foot of this script reads the value back out of the
-# launched process rather than assuming it arrived.
+# directory from the bundle id, and be.spatie.bloom.dev resolves to this same
+# "Bloom Dev" directory rather than to the real one. So this key is belt now, not
+# the only strap, and the two have to agree on the path. The check at the foot of
+# this script reads the value back out of the launched process rather than
+# assuming it arrived.
 #
 # The delete is the one call here allowed to fail, because Resources/Info.plist
 # does not carry an LSEnvironment and PlistBuddy treats deleting an absent key as
 # an error. The two Adds under it are not allowed to fail, and do not.
 plist "Delete :LSEnvironment" 2>/dev/null || true
 plist "Add :LSEnvironment dict"
-plist "Add :LSEnvironment:BLOOM_DB_PATH string $BLOOM_DB"
+plist "Add :LSEnvironment:BLOOM_DB_PATH string $BLOOM_DEV_DB"
 
 # The icon, recoloured in place in the worktree. Same document, same layer names,
-# same CFBundleIconName, so Tools/build.sh compiles it with actool unchanged. The
-# turn comes from the identity table; the script refuses a turn of nothing, so an
-# identity that lost its entry fails here rather than installing a copy wearing
-# the real icon.
-python3 Tools/icon/tint.py "$BLOOM_ICON_TURN" "$WORK/Resources/Bloom.icon/icon.json"
+# same CFBundleIconName, so Tools/build.sh compiles it with actool unchanged.
+python3 Tools/icon/dev-tint.py "$WORK/Resources/Bloom.icon/icon.json"
 
 # The window title, in all three of the places that set one.
 #
@@ -245,15 +194,15 @@ with open(path, "w") as handle:
 
 patch_source "$WORK/Sources/Bloom/Views/Chrome/Window/WindowTitle.swift" \
   '        window.title = value' \
-  "        window.title = \"$BLOOM_TITLE_MARK\" + value"
+  '        window.title = "[DEV] " + value'
 
 patch_source "$WORK/Sources/Bloom/BloomApp.swift" \
   '        Window("Bloom", id: Self.mainWindowID) {' \
-  "        Window(\"${BLOOM_TITLE_MARK}Bloom\", id: Self.mainWindowID) {"
+  '        Window("[DEV] Bloom", id: Self.mainWindowID) {'
 
 patch_source "$WORK/Sources/Bloom/Views/RootView.swift" \
   '            .navigationTitle(app.menuWorkspace?.name ?? "Bloom")' \
-  "            .navigationTitle(\"$BLOOM_TITLE_MARK\" + (app.menuWorkspace?.name ?? \"Bloom\"))"
+  '            .navigationTitle("[DEV] " + (app.menuWorkspace?.name ?? "Bloom"))'
 
 # ------------------------------------------------------------------- the build
 
@@ -265,8 +214,8 @@ patch_source "$WORK/Sources/Bloom/Views/RootView.swift" \
 # it saw last time and rebuilds what changed. And the scratch is still this
 # script's alone, so a concurrent agent build cannot swap objects underneath it,
 # which is the reason Tools/master.sh takes a scratch path of its own.
-mkdir -p "/tmp/bloom-$BLOOM_ID-build"
-ln -sfn "/tmp/bloom-$BLOOM_ID-build" "$WORK/.build"
+mkdir -p /tmp/bloom-dev-build
+ln -sfn /tmp/bloom-dev-build "$WORK/.build"
 
 # The bundle the last run left in that scratch, removed before this one starts.
 #
@@ -294,11 +243,11 @@ rm -rf "$WORK/.build/release/Bloom.app"
 # a tail is the same mistake in smaller print: Swift reports the first error at
 # the top and then keeps compiling, so the line that explains the failure is not
 # reliably in the last forty.
-BUILD_LOG="/tmp/bloom-$BLOOM_ID-build.log"
+BUILD_LOG=/tmp/bloom-dev-build.log
 if ! ( cd "$WORK" && ./Tools/build.sh -r ) >"$BUILD_LOG" 2>&1; then
   cat "$BUILD_LOG" >&2
   print -ru2 -- ""
-  print -ru2 -- "==> the $BLOOM_NAME build failed. The whole log is above, and in $BUILD_LOG."
+  print -ru2 -- "==> the dev build failed. The whole log is above, and in $BUILD_LOG."
   print -ru2 -- "    Nothing was installed, so $DEST is whatever it was before."
   exit 1
 fi
@@ -319,22 +268,14 @@ rm -rf "$DEST"
 cp -R "$BUILT" "$DEST"
 
 # What this is, so a stale install can be identified without guessing. The same
-# key Tools/master.sh writes, plus one that says this is not the owner's copy and
-# one that says which of the side identities it is.
+# key Tools/master.sh writes, plus one that says which of the two this is.
 #
-# Three keys rather than two because `BloomDevBuild` answers "is this a side
-# build" and stopped answering "which one" the moment there were two of them, and
-# it is read by nothing in the app, so narrowing it would have been a silent
-# change to the only fact a confused reader has. The identity key is the key,
-# which is also the `make` target that rebuilds it.
-#
-# These used to end in `|| true`, which is the wrong trade for the one set of
+# These used to end in `|| true`, which is the wrong trade for the one pair of
 # keys anybody reads when they are already confused about which build they are
 # looking at. If the stamp cannot be written the bundle is unidentifiable, and
 # that is worth stopping for.
 /usr/bin/defaults write "$DEST/Contents/Info.plist" BloomMasterCommit -string "$RESOLVED"
 /usr/bin/defaults write "$DEST/Contents/Info.plist" BloomDevBuild -bool true
-/usr/bin/defaults write "$DEST/Contents/Info.plist" BloomBuildIdentity -string "$BLOOM_ID"
 
 # Re-signed, because the two writes above invalidated the signature Tools/build.sh
 # applied. Same identity resolution as that script, so a machine with a real one
@@ -366,12 +307,12 @@ fi
 git worktree remove --force "$WORK" 2>/dev/null || true
 
 echo "==> installed $DEST"
-echo "==> database $BLOOM_DB"
+echo "==> database $BLOOM_DEV_DB"
 
 if [ "$LAUNCH" -eq 1 ]; then
-  # By pid, and only pids of the bundle this run installed. Every other copy is a
-  # different executable path, so none of them is ever a candidate. No pattern
-  # kill anywhere near this: `pkill -f Bloom` would take the owner's app with it.
+  # By pid, and only pids of the dev bundle. The real copy is a different
+  # executable path, so it is never a candidate. No pattern kill anywhere near
+  # this: `pkill -f Bloom` would take the owner's app with it.
   for pid in $(bloom_app_pids "$DEST"); do
     kill "$pid" 2>/dev/null || true
   done
@@ -379,21 +320,21 @@ if [ "$LAUNCH" -eq 1 ]; then
   open "$DEST"
   sleep 3
 
-  # Nothing above proves this copy is on its own database. `ps -E` prints the
+  # Nothing above proves the dev copy is on its own database. `ps -E` prints the
   # environment of a process this user owns, which is the only honest answer:
   # LaunchServices could have served a cached Info.plist, or somebody could have
-  # started the executable directly. A side copy silently running against the real
+  # started the executable directly. A dev copy silently running against the real
   # database is the failure this whole file exists to prevent, so it is checked.
   running="$(bloom_app_pids "$DEST" | head -1)"
   if [[ -z "$running" ]]; then
     echo "==> launched, but no process is running from $DEST" >&2
     exit 1
   fi
-  if ps -E -p "$running" 2>/dev/null | grep -q "BLOOM_DB_PATH=$BLOOM_DB"; then
+  if ps -E -p "$running" 2>/dev/null | grep -q "BLOOM_DB_PATH=$BLOOM_DEV_DB"; then
     echo "==> launched pid $running, on its own database"
   else
     # Not "on the REAL database" any more: with no BLOOM_DB_PATH, Store derives the directory
-    # from this bundle id and lands on this identity's own anyway. But a missing key means
+    # from the dev bundle id and lands on Bloom Dev anyway. But a missing key means
     # LaunchServices served a stale plist or the executable was run by hand, and this build is
     # down to one mechanism where two agreeing ones are the point, so it still stops.
     echo "==> pid $running has no BLOOM_DB_PATH. The bundle id fallback is holding the" >&2

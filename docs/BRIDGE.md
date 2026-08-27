@@ -18,9 +18,8 @@ Bloom serves MCP over a unix domain socket. Neither CLI can speak to one: Claude
 MCP server as a stdio command or an HTTP URL, Codex as a stdio `command` or a streamable HTTP
 `--url`, and that is the whole list on both. HTTP on localhost was refused for a different reason,
 which is that it would be one port for the whole machine, reachable by every local process, and
-impossible to share between Bloom and the copies installed beside it, which are a documented
-permanent arrangement rather than a test setup: Bloom Dev, Bloom SSH, and whatever the identity
-table at the head of `Tools/guard.sh` holds next.
+impossible to share between Bloom and Bloom Dev, a pair that is a documented permanent arrangement
+rather than a test setup.
 
 So the registered transport is stdio and the socket sits behind it. `bloom-bridge` is the stdio
 process the CLI launches, shipped inside Bloom's own bundle, and it is a line relay and

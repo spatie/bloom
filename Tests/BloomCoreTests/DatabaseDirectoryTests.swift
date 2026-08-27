@@ -32,15 +32,6 @@ struct DatabaseDirectoryTests {
         #expect(Store.devBundleIdentifier == "be.spatie.bloom.dev")
     }
 
-    /// The identity that exists so a build talking to real servers is never the copy the owner
-    /// works in. Its database is its own for that reason and because it holds servers as well as
-    /// workspaces, so there is nothing about it a shared directory would be right about.
-    @Test("the SSH copy lands where dev-build.sh already points it")
-    func theSSHCopy() {
-        #expect(name(Store.sshBundleIdentifier) == "Bloom SSH")
-        #expect(Store.sshBundleIdentifier == "be.spatie.bloom.ssh")
-    }
-
     /// The case nothing warned about. `swift run Bloom` and `.build/debug/Bloom` are not inside a
     /// bundle, so there is no identifier at all, and until this they resolved to the real database.
     @Test("a binary in no bundle gets a directory that says so")
@@ -59,7 +50,7 @@ struct DatabaseDirectoryTests {
     @Test("no two identities share a directory")
     func noneCollide() {
         let identifiers: [String?] = [
-            Store.primaryBundleIdentifier, Store.devBundleIdentifier, Store.sshBundleIdentifier,
+            Store.primaryBundleIdentifier, Store.devBundleIdentifier,
             "be.spatie.bloom.snapshot", "be.spatie.bloomer", nil,
         ]
         let names = identifiers.map(name)
@@ -72,7 +63,6 @@ struct DatabaseDirectoryTests {
     func aNearMissIsNotAMatch() {
         #expect(name("be.spatie.bloom.dev.extra") != "Bloom")
         #expect(name("be.spatie.bloom.dev.extra") != "Bloom Dev")
-        #expect(name("be.spatie.bloom.sshd") != "Bloom SSH")
         #expect(name("be.spatie.bloomer") != "Bloom")
         #expect(name("BE.SPATIE.BLOOM") != "Bloom")
     }

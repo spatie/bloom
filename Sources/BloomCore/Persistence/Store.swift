@@ -33,20 +33,13 @@ public actor Store {
     private let db: SQLiteDatabase
     public nonisolated let path: String
 
-    /// The bundle identifier of the copy the owner actually uses, and the ones the side builds get.
+    /// The bundle identifier of the copy the owner actually uses, and the one the dev build gets.
     ///
-    /// Written down here because these three strings are the difference between a process that may
-    /// open the real database and one that may not. `Tools/dev-build.sh` sets the second and the
-    /// third from the identity table at the head of `Tools/guard.sh`, which names the directory
-    /// that goes with each.
+    /// Written down here because these two strings are the difference between a process that may
+    /// open the real database and one that may not. `Tools/dev-build.sh` sets the second, and
+    /// `Tools/guard.sh` names the directory that goes with it.
     public static let primaryBundleIdentifier = "be.spatie.bloom"
     public static let devBundleIdentifier = "be.spatie.bloom.dev"
-
-    /// The copy the work on driving agents over SSH runs in, so that a build pointed at real
-    /// servers is never the one the owner works in. Its database is separate for the usual reason
-    /// and one of its own: it holds servers as well as workspaces, so it is a different set of
-    /// facts rather than a stale copy of his.
-    public static let sshBundleIdentifier = "be.spatie.bloom.ssh"
 
     /// Which Application Support directory a binary with this bundle identifier may use.
     ///
@@ -64,18 +57,11 @@ public actor Store {
     /// So it is derived from the binary instead. `LSEnvironment` is belt now rather than the only
     /// strap, and the dev copy is separated whether it is opened or run.
     ///
-    /// The dev identifier maps to "Bloom Dev" and the SSH one to "Bloom SSH", which are the same
-    /// directories `Tools/dev-build.sh` points `BLOOM_DB_PATH` at, so a hand started side binary
-    /// lands where it was always meant to rather than somewhere new. Anything else is a build that
-    /// is not one of the three: it gets a directory named after what it is, because a nameless
-    /// empty database is a mystery and "Bloom (unbundled)" sitting in Application Support answers
-    /// itself.
-    ///
-    /// The strings are duplicated in `Tools/guard.sh` rather than read from it, because a shell
-    /// script is not a dependency a Swift target can have. That table and this one are checked
-    /// against each other by `Tests/BloomCoreTests/DatabaseDirectoryTests.swift` naming the same
-    /// literals, which is the most a test on this side can do; the failure it catches is a copy
-    /// opened by LaunchServices and the same copy started by hand landing in two databases.
+    /// The dev identifier maps to "Bloom Dev", which is the same directory `Tools/dev-build.sh`
+    /// points `BLOOM_DB_PATH` at, so a hand started dev binary lands where it was always meant to
+    /// rather than somewhere new. Anything else is a build that is not one of the two: it gets a
+    /// directory named after what it is, because a nameless empty database is a mystery and
+    /// "Bloom (unbundled)" sitting in Application Support answers itself.
     ///
     /// A pure function of the identifier, rather than of `Bundle.main`, because `Bundle.main`
     /// cannot be varied inside one process and this table is the whole of the rule.
@@ -83,7 +69,6 @@ public actor Store {
         switch identifier {
         case primaryBundleIdentifier: "Bloom"
         case devBundleIdentifier: "Bloom Dev"
-        case sshBundleIdentifier: "Bloom SSH"
         case .some(let other) where !other.isEmpty: "Bloom (\(other))"
         // An executable that is not inside a bundle at all: `swift run`, `.build/debug/Bloom`, or
         // a test host. Nil and empty are the same claim and are treated the same way.
