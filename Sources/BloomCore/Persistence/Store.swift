@@ -881,6 +881,41 @@ public actor Store {
                     throw StoreTrouble.rebuildLostRows(table: "messages", before: before, after: after)
                 }
             },
+
+            // The servers a user has added, one row each.
+            //
+            // Called `hosts` because that is what SSH calls the thing, and because `Server` in SQL
+            // reads like a column somebody would put a URL in. The Swift type is `Server`, which
+            // is the word on the pane.
+            //
+            // `destination` is UNIQUE, and that is the one constraint here that is not decoration.
+            // Two rows for `deploy@vps` would each keep their own idea of that machine's state
+            // and each write it over the other's, and there is no question a second row could
+            // answer that the first one could not.
+            //
+            // **No credential column, and there is nothing to add later.** Bloom shells out to the
+            // user's own `ssh`, which reads their config, their agent and their keys. What is
+            // here is a destination, a name for it, and what the last look found. A schema with
+            // nowhere to put a key is a schema nobody can be tempted to put one in.
+            //
+            // `state` and `probed_at` have one writer between them, `recordProbe`, and `label`
+            // and `destination` have another, `update(serverID:)`. Two narrow writers rather than
+            // one `upsert`, for the reason at the head of this file: a probe takes twenty seconds
+            // and a rename takes as long as somebody types, so whole-value writes from either
+            // would put the other back to what it was when the form opened.
+            sql("""
+            CREATE TABLE IF NOT EXISTS hosts (
+                id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                destination TEXT NOT NULL UNIQUE,
+                state TEXT NOT NULL DEFAULT 'unknown',
+                detail TEXT NOT NULL DEFAULT '',
+                bloomd_version TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                probed_at REAL
+            );
+            """),
         ]
 
         let current = Int(db.userVersion)
@@ -2511,6 +2546,126 @@ public actor Store {
         )
     }
 
+    // MARK: - Servers
+
+    /// Every server, in the order the pane draws them.
+    public func servers() throws -> [Server] {
+        try db.query("SELECT * FROM hosts ORDER BY sort_order, created_at, id")
+            .map(Self.server(from:))
+    }
+
+    public func server(id: ServerID) throws -> Server? {
+        try db.query("SELECT * FROM hosts WHERE id = ?", [.text(id)])
+            .first.map(Self.server(from:))
+    }
+
+    /// Writes a new server. `insert` rather than `upsert`, for the reason at the head of this
+    /// file: every column here belongs to somebody, and a row that already exists is changed
+    /// through `update(serverID:)` or `recordProbe`. A destination the table already holds fails
+    /// on the UNIQUE constraint rather than quietly replacing the row that has the history.
+    ///
+    /// The order it lands in is worked out here, inside the actor, so two servers added in the
+    /// same moment cannot both read the same maximum and share a place in the list.
+    @discardableResult
+    public func insert(_ server: Server) throws -> Server {
+        var row = server
+        row.sortOrder = try nextServerOrder()
+        try db.run(
+            """
+            INSERT INTO hosts (id, label, destination, state, detail, bloomd_version, sort_order, created_at, probed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                .text(row.id), .text(row.label), .text(row.destination.display),
+                .text(row.state.rawValue), .text(row.detail),
+                row.bloomdVersion.map { SQLValue.text($0) } ?? .null,
+                .int(Int64(row.sortOrder)),
+                .double(row.createdAt.timeIntervalSince1970),
+                row.probedAt.map { SQLValue.double($0.timeIntervalSince1970) } ?? .null,
+            ]
+        )
+        return row
+    }
+
+    /// Changes the two columns a person owns: what the server is called, and where it is.
+    ///
+    /// The row is read here, inside the actor, immediately before it is written back, with no
+    /// suspension in between, so a rename typed while a twenty second probe is in flight cannot
+    /// carry that probe's state back to what it was when the field was focused. See
+    /// `ServerWriteIsolationTests`, which is that pair of writers written down.
+    ///
+    /// It names its columns rather than writing the value it was handed, so a state assigned
+    /// inside the closure would not be written even if `Server.state` were assignable, which it
+    /// is not.
+    @discardableResult
+    public func update(
+        serverID: ServerID,
+        _ change: @Sendable (inout Server) -> Void
+    ) throws -> Server? {
+        guard var row = try server(id: serverID) else { return nil }
+        change(&row)
+        try db.run(
+            "UPDATE hosts SET label = ?, destination = ? WHERE id = ?",
+            [.text(row.label), .text(row.destination.display), .text(serverID)]
+        )
+        return try server(id: serverID)
+    }
+
+    /// Files what a look at a server found: the state, the sentence under it, the daemon version
+    /// and when it happened. Nothing else.
+    ///
+    /// The one writer of `state`, which is why `Server.state` is `internal(set)`. A state is what
+    /// a probe found, and a state written by anything that has not just probed is a claim about a
+    /// machine nobody looked at.
+    @discardableResult
+    public func recordProbe(
+        serverID: ServerID,
+        verdict: ServerVerdict,
+        bloomdVersion: String?,
+        at moment: Date = Date()
+    ) throws -> Server? {
+        guard try server(id: serverID) != nil else { return nil }
+        try db.run(
+            """
+            UPDATE hosts
+            SET state = ?, detail = ?, bloomd_version = ?, probed_at = ?
+            WHERE id = ?
+            """,
+            [
+                .text(verdict.state.rawValue), .text(verdict.detail),
+                bloomdVersion.map { SQLValue.text($0) } ?? .null,
+                .double(moment.timeIntervalSince1970),
+                .text(serverID),
+            ]
+        )
+        return try server(id: serverID)
+    }
+
+    /// Says a look has started, without touching what the last one found.
+    ///
+    /// `probed_at` deliberately stays where it was: it means "when this row last learned
+    /// something", and moving it at the start of a probe would make a server that has been
+    /// unreachable for a week read as having been checked successfully a second ago.
+    @discardableResult
+    public func markServerProbing(serverID: ServerID) throws -> Server? {
+        guard try server(id: serverID) != nil else { return nil }
+        try db.run(
+            "UPDATE hosts SET state = ?, detail = '' WHERE id = ?",
+            [.text(ServerState.probing.rawValue), .text(serverID)]
+        )
+        return try server(id: serverID)
+    }
+
+    public func deleteServer(id: ServerID) throws {
+        try db.run("DELETE FROM hosts WHERE id = ?", [.text(id)])
+    }
+
+    private func nextServerOrder() throws -> Int {
+        let highest = try db.query("SELECT COALESCE(MAX(sort_order), -1) AS m FROM hosts")
+            .first?.int("m") ?? -1
+        return Int(highest) + 1
+    }
+
     // MARK: - Permission grants
 
     /// Every rule granted in one project, newest first. This is the revocation list.
@@ -2876,6 +3031,26 @@ public actor Store {
             opensNewChat: row.int("opens_new_chat") == 1,
             sortOrder: Int(row.int("sort_order") ?? 0),
             createdAt: row.date("created_at") ?? Date()
+        )
+    }
+
+    private static func server(from row: Row) -> Server {
+        let text = row.string("destination") ?? ""
+        // A destination that will not parse cannot happen through the Add field, which parses
+        // before it inserts. It can happen to a row somebody edited in `sqlite3`, and the honest
+        // answer there is to keep the text as the host so the row is still visible and still
+        // deletable, rather than to drop a server out of the list with no explanation.
+        let destination = (try? SSHDestination.parse(text)) ?? SSHDestination(user: nil, host: text)
+        return Server(
+            id: ServerID(row.string("id") ?? newID()),
+            label: row.string("label") ?? destination.suggestedLabel,
+            destination: destination,
+            state: ServerState(rawValue: row.string("state") ?? "") ?? .unknown,
+            detail: row.string("detail") ?? "",
+            bloomdVersion: row.string("bloomd_version"),
+            sortOrder: Int(row.int("sort_order") ?? 0),
+            createdAt: row.date("created_at") ?? Date(),
+            probedAt: row.date("probed_at")
         )
     }
 

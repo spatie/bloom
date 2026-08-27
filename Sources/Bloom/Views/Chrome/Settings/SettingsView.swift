@@ -107,6 +107,14 @@ struct SettingsView: View {
             // rare one, and a tool that is missing is already said where it matters rather than
             // filed behind a tab beside Models and Prompts.
 
+                // Beside Command Line rather than beside Agents, because both of these are about
+                // something outside this Mac reaching in or being reached: a CLI the owner runs
+                // themselves, and a machine Bloom drives over SSH. The Agents pane is about the
+                // binaries on THIS machine.
+                Tab(SettingsTab.servers.title, systemImage: "server.rack", value: SettingsTab.servers) {
+                    ServerSettingsView()
+                }
+
                 // After Tools rather than beside Agents: the Agents pane is about the CLIs Bloom
                 // launches, and this is the one arrangement where a CLI Bloom did not launch
                 // reaches in the other way round.
