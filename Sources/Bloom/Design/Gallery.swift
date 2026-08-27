@@ -83,6 +83,7 @@ extension Snapshot {
         .sidebarIndent,
         .runningColour,
         .proseLeading,
+        .welcomeOffers,
     ]
 
     /// The page `--gallery` names, falling back to the first rather than failing: a capture run

@@ -71,7 +71,7 @@ because every tool a parent has is implicitly scoped to the worktree it is sitti
 caller is sitting in none.
 
 **Two clients come in on it, and neither is a special case of the other.** One is the owner's own
-terminal, holding the token the welcome window's last step or Settings > Command Line handed them. The other is Ask Bloom, the
+terminal, holding the token the welcome window's command line step or Settings > Command Line handed them. The other is Ask Bloom, the
 conversation inside the app that belongs to no workspace: `BridgeServer.register(askSession:)`
 attaches it to the same standalone token rather than minting one, because the definition above is
 exactly what that chat is, and a fourth role or an invented workspace would have been the only

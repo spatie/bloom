@@ -4,12 +4,13 @@ import BloomCore
 
 /// What the welcome window draws.
 ///
-/// Two steps and an offer, and the sequence is `OnboardingFlow` in the core rather than a pair of
+/// Two steps and two offers, and the sequence is `OnboardingFlow` in the core rather than a set of
 /// booleans here, because which screen follows which, whether back is offered and whether the
 /// third screen exists at all is the only part of a wizard that can be wrong, and a decision taken
 /// inside a view is a decision nothing can test. The greeting is `WelcomeGreeting`, the checks are
-/// the second step and are everything below, and the third is `WelcomeCommandLine`, which is drawn
-/// only when `CommandLineRegistration` says there is something to offer.
+/// the second step and are everything below, the third is `WelcomeCommandLine`, which is drawn
+/// only when `CommandLineRegistration` says there is something to offer, and the last is
+/// `WelcomePromptSubmission`, which is always there because nothing can make it empty.
 ///
 /// Three bands, in the register the About window established: the brand's plinth with the water
 /// moving in it, the reading ground under a hairline, and a chrome strip at the foot with the
@@ -71,6 +72,8 @@ struct WelcomeView: View {
                 checksStep
             case .commandLine:
                 commandLineStep
+            case .promptSubmission:
+                promptStep
             }
         }
         .frame(width: Self.width)
@@ -122,7 +125,7 @@ struct WelcomeView: View {
     /// `command` is nil only if this copy of Bloom lost its bridge while somebody was standing on
     /// this screen, which nothing produces: `AppModel.bridge` is cleared during the quit sequence
     /// and nowhere else. There is no consolation copy for it, because the footer is still drawn
-    /// and its button is still the way out.
+    /// and its button still moves the window on.
     private var commandLineStep: some View {
         VStack(spacing: 0) {
             plinth
@@ -130,6 +133,22 @@ struct WelcomeView: View {
             if let command = registration.command {
                 WelcomeCommandLine(command: command)
             }
+            hairline
+            footer
+        }
+        .transition(reduceMotion ? .identity : .opacity)
+    }
+
+    /// The last screen, in the same three bands as the two before it.
+    ///
+    /// Its one control is the offer, so it is in the reading band rather than in the footer: the
+    /// footer's button still says "Start using Bloom" and still only leaves, which is what keeps
+    /// a screen somebody may walk straight past from reading as one they have to get through.
+    private var promptStep: some View {
+        VStack(spacing: 0) {
+            plinth
+            hairline
+            WelcomePromptSubmission(onSubmit: submitAPrompt)
             hairline
             footer
         }
@@ -602,10 +621,10 @@ struct WelcomeView: View {
             // which way it went; back belongs with the way out, and Check again belongs with the
             // button it is the alternative to.
             //
-            // Both of them are about the column, so neither follows the window onto the offer:
-            // "Check again" there would re-probe a list that is not on screen, and a second way
-            // out beside a button that already leaves is how an optional step starts reading as
-            // one somebody has to get past.
+            // Both of them are about the column, so neither follows the window onto the screens
+            // after it: "Check again" there would re-probe a list that is not on screen, and a
+            // second way out beside a button that already leaves is how an offer starts reading
+            // as a step somebody has to get past.
             if flow.step == .checks {
                 if inspection.truth.verdict == .blocked {
                     Button("Skip for now") { finish() }
@@ -654,5 +673,24 @@ struct WelcomeView: View {
         stopLogin()
         WelcomeLaunch.recordCompletion()
         onFinish()
+    }
+
+    /// Opens the same sheet Help's Submit a Prompt opens, and closes this window on the way to it.
+    ///
+    /// **The closing is the route rather than a courtesy.** That sheet is presented by `RootView`,
+    /// on the main window, through `FeedbackPresenter`, because a draft has to outlive the sheet
+    /// it was typed into and a `Commands` body cannot present anything. This window is a separate
+    /// `NSWindow` built by hand and is not in the app's environment, so presenting the same sheet
+    /// here would mean either a second view bound to `FeedbackPresenter.sheet`, with two windows
+    /// raising a form each off one assignment, or a copy of `PromptSubmissionSheet` wired to
+    /// something else, which is two forms to keep in step over one endpoint. Left as it is, the
+    /// form would open on the window behind this one and the press would look like nothing
+    /// happening. So the window goes first, and the screen's own caption says it will.
+    ///
+    /// It finishes the sequence, and should: this is the last screen, and somebody who pressed the
+    /// one control on it has done more than the button beside it asks for.
+    private func submitAPrompt() {
+        finish()
+        FeedbackPresenter.shared.open(.prompt)
     }
 }

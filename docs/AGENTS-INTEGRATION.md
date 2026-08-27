@@ -120,7 +120,7 @@ A session already running does not pick the server up. Start a new one.
 
 The command is offered in two places and generated in one. `BridgeRegistration.ownerAddCommand`
 builds it; `CommandLineOffer` draws it, the warning about `.mcp.json` included, for both the
-welcome window's last step and Settings > Command Line. The welcome step is where somebody meets
+welcome window's command line step and Settings > Command Line. The welcome step is where somebody meets
 it, because nobody browses a settings tab they do not know exists, and the pane is where they go
 back for it and where Regenerate lives. The step is offered only when there is something to offer:
 `BridgeUserRegistration` reads the `mcpServers` table at the top level of `~/.claude.json` and

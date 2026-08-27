@@ -2,7 +2,7 @@ import Foundation
 
 /// The steps the welcome window walks through, and the rules for moving between them.
 ///
-/// There are three, and the third one is not always there. The window used to be one screen that
+/// There are four, and the third one is not always there. The window used to be one screen that
 /// opened straight onto four probes, which meant the first thing a new Bloom ever said to anybody
 /// was a list of what their Mac might be missing. That reads as a form. A greeting first, then the
 /// checks, is what turns the same two facts into a welcome, and it costs one press.
@@ -14,10 +14,6 @@ import Foundation
 /// bridge, and the owner's user scope has not already been pointed at it. Somebody who ran the
 /// command last week is not asked to run it again, and somebody who never wants it presses the
 /// same button that ended the sequence before it existed.
-///
-/// A fourth step would be a tour, and a tour is a tax on somebody who has already installed the
-/// app. The test for whether a step belongs here is whether skipping it leaves the window feeling
-/// unfinished; if it does, it is a stage, and this window has no business growing one.
 public enum OnboardingStep: String, Sendable, Hashable, CaseIterable, Identifiable, Codable {
     /// The mark, the name and one line saying what Bloom is. No information to act on.
     case greeting
@@ -26,12 +22,20 @@ public enum OnboardingStep: String, Sendable, Hashable, CaseIterable, Identifiab
     /// The one command that couples the owner's own Claude Code to this Bloom. Optional, and
     /// omitted entirely when there is nothing to offer. See `OnboardingFlow.steps`.
     case commandLine
+    /// The prompt anybody can send back to the people who build Bloom, which is the same sheet
+    /// Help's Submit a Prompt raises and the same endpoint it posts to.
+    ///
+    /// Never left out, unlike the offer above it, because nothing about this Mac can make it
+    /// empty: every build may send, the address is a constant, and there is no configuration to
+    /// have already been done. So `isOptional` is false here and stays a statement about the
+    /// list rather than about whether a reader has to do anything.
+    case promptSubmission
 
     public var id: String { rawValue }
 
     /// Reading order. Which of these a given window actually walks is `OnboardingFlow.steps`,
     /// which is the same list with the optional step taken out when it has nothing to say.
-    public static let order: [OnboardingStep] = [.greeting, .checks, .commandLine]
+    public static let order: [OnboardingStep] = [.greeting, .checks, .commandLine, .promptSubmission]
 
     /// True of a step the sequence may leave out. Nothing is lost by leaving it out: the offer is
     /// in Settings for the rest of the app's life, which is where somebody goes back for it.
@@ -49,17 +53,23 @@ public enum OnboardingStep: String, Sendable, Hashable, CaseIterable, Identifiab
     /// it actually does is look down the PATH for four tools and ask two of them whether they are
     /// signed in, so the button names the screen it opens instead.
     ///
-    /// The command line entry is the one place the rule bends, and on purpose. Naming that screen
-    /// would produce "Connect your terminal", which reads as a job somebody has been given, and
-    /// the one thing this step must not do is read as a job: Bloom works perfectly without it.
-    /// "One more thing" names the position in the sequence instead, which is the fact that keeps
-    /// it from reading as a chore, and the screen it opens says what it is about in the first line
-    /// on it.
+    /// The command line entry said "One more thing", and the words were about the position in the
+    /// sequence rather than about the screen. The position moved: a screen after it makes a button
+    /// promising to be the last one into a button that is not. It names the capability now, which
+    /// is what the position wording was standing in for. Not "Connect your terminal", which is the
+    /// same screen described as a job somebody has been given, and the one thing that step must
+    /// not do is read as a job: Bloom works perfectly without it.
+    ///
+    /// The prompt entry is the sentence the screen leads with rather than the name of the sheet it
+    /// ends at. "Submit a prompt" is what the button ON that screen says, because by then somebody
+    /// has read what a prompt does here; arriving at a form nobody has been told the purpose of is
+    /// how a menu item three menus deep goes unread in the first place.
     public var arrivalButtonTitle: String? {
         switch self {
         case .greeting: nil
         case .checks: "See what Bloom needs"
-        case .commandLine: "One more thing"
+        case .commandLine: "Use Bloom from your terminal"
+        case .promptSubmission: "Say what Bloom does next"
         }
     }
 }
@@ -211,8 +221,8 @@ public struct OnboardingPrimary: Sendable, Hashable {
 
     /// The words on the button that ends the sequence.
     ///
-    /// Named here rather than only in the verdict's table because two screens now end with it, and
-    /// the second of them is one no verdict has an opinion about.
+    /// Named here rather than only in the verdict's table because the screen that ends the
+    /// sequence is one no verdict has an opinion about.
     public static let finishTitle = "Start using Bloom"
 
     public init(step: OnboardingStep, verdict: SetupVerdict, next: OnboardingStep?) {
