@@ -52,8 +52,8 @@ struct ProjectTargetTests {
     func aPathIsStandardised() {
         for line in ["~/dev/code/sparkline/", "~/dev/code/./sparkline"] {
             let target = ProjectTarget.resolve(line, defaultLocation: location, home: home)
-            #expect(target.name == "sparkline", line)
-            #expect(target.location == "/Users/tester/dev/code", line)
+            #expect(target.name == "sparkline", "for \(line)")
+            #expect(target.location == "/Users/tester/dev/code", "for \(line)")
         }
     }
 
