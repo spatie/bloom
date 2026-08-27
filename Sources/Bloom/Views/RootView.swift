@@ -75,7 +75,7 @@ struct RootView: View {
                 )
                     .toolbar {
                         BloomWindowToolbar(app: app) {
-                            columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
+                            toggleSidebar()
                         }
                     }
                     // Said here as well as under `navigationTitle` below, and deliberately.
@@ -330,7 +330,7 @@ struct RootView: View {
             if now { app.selection = .home }
         }
         .onReceive(NotificationCenter.default.publisher(for: .bloomToggleSidebar)) { _ in
-            columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
+            toggleSidebar()
         }
         .onReceive(NotificationCenter.default.publisher(for: .bloomOfferProjectSetup)) { note in
             guard let path = note.object as? String else { return }
@@ -378,6 +378,12 @@ struct RootView: View {
             let repo = app.repos.first { $0.name == named } ?? app.repos.first
             guard let repo else { return }
             Task { await app.createWorkspace(in: repo, prompt: "", opensWith: .terminal) }
+        }
+    }
+
+    private func toggleSidebar() {
+        withAnimation(reduceMotion ? nil : Motion.pane) {
+            columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
         }
     }
 

@@ -977,7 +977,7 @@ struct TranscriptListView: View {
             // The controller rather than this view, for the reason the lazy stack captured a
             // `State` box rather than `self`: the view holds the follower, the follower would hold
             // the closure, and a pane torn down mid turn would leave both of them behind.
-            follower.onStart = { [controller] _ in controller.followerTookOver() }
+            follower.onStart = { [controller] in controller.followerTookOver() }
             follower.onStop = { [controller] in controller.followerHandedBack() }
             follower.onRest = { [controller] in controller.goToEnd() }
             await transcript.load()
@@ -1520,7 +1520,11 @@ struct TranscriptListView: View {
     /// A group opening adds rows and closing removes them. Tell the table this is a reader-driven
     /// change so it can cross-fade those rows without applying that effect to live arrivals.
     private func toggleFold(_ firstSeq: Int) {
-        controller.willChangeFoldRows()
+        // A disclosure click is the reader taking the view. Stop any live-end travel first, then
+        // hold the clicked fold line in place while its children enter or leave below it.
+        scroller.stop()
+        follower.stop()
+        controller.willChangeFoldRows(.fold(firstSeq))
         if unfolded.contains(firstSeq) {
             unfolded.remove(firstSeq)
         } else {

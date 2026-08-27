@@ -94,7 +94,7 @@ final class TranscriptTableController {
     /// height correction, and what reaches the screen is the instant pin with the travel invisible
     /// underneath it. The follower is the only one that can make a movement the eye can read, so
     /// it wins for as long as it is running.
-    func followerTookOver() { coordinator?.followerTookOver() }
+    func followerTookOver() -> Bool { coordinator?.followerTookOver() ?? false }
 
     /// The follower's link has gone down, wherever it left the view. See
     /// `TranscriptLiveEndFollower.onStop`, which carries why this cannot be `onRest`.
@@ -116,7 +116,9 @@ final class TranscriptTableController {
     func willUnfold(_ entryID: TranscriptEntryID) { coordinator?.willUnfold(entryID) }
 
     /// A transcript activity group is about to add or remove its disclosed rows.
-    func willChangeFoldRows() { coordinator?.willChangeFoldRows() }
+    func willChangeFoldRows(_ entryID: TranscriptEntryID) {
+        coordinator?.willChangeFoldRows(entryID)
+    }
 
     /// **The conversation this pane was pointed at is in, and in the place the reader left it.**
     ///
@@ -322,6 +324,9 @@ struct TranscriptTable: NSViewRepresentable {
         /// The next row-list change came from a disclosure click rather than from live activity.
         /// Only that change gets the brief cross-fade requested for opening and closing a group.
         private var pendingFoldRows = false
+        /// The disclosure row where the reader clicked, held at the same point in the viewport
+        /// while its children enter or leave below it.
+        private var pendingFoldAnchor: (id: TranscriptEntryID, delta: CGFloat)?
 
         /// **Whether the transcript is being held still while a pane is resized.** Nothing in here
         /// measures, reloads or moves while it is on. See `TranscriptHoldView`.
@@ -457,9 +462,14 @@ struct TranscriptTable: NSViewRepresentable {
 
             let newIDs = newEntries.map(\.id)
             let change = TranscriptEntryChange.between(ids, newIDs)
-            let fadesFoldRows = pendingFoldRows && change.movesRows
+            let changesFoldRows = pendingFoldRows && change.movesRows
+            let foldAnchor = changesFoldRows ? pendingFoldAnchor : nil
+            let fadesFoldRows = changesFoldRows
                 && rowEnvironment?.reduceMotion != true
-            if change.movesRows { pendingFoldRows = false }
+            if change.movesRows {
+                pendingFoldRows = false
+                pendingFoldAnchor = nil
+            }
 
             // What has changed about the entries the two lists share, in the NEW list's indices,
             // and which of those are a fold the reader just clicked.
@@ -497,8 +507,11 @@ struct TranscriptTable: NSViewRepresentable {
             }
 
             // Both read before anything moves under the reader. See `keepPlace`.
-            let wasAtEnd = isFollowingAlong
-            let anchor = change.movesRows ? anchorEntry() : nil
+            // A disclosure click is navigation, even when the clicked row happens to be on the
+            // last screen. Keep that row where it was instead of treating the new children as
+            // live transcript activity and following them to the end.
+            let wasAtEnd = changesFoldRows ? false : isFollowingAlong
+            let anchor = foldAnchor ?? (change.movesRows ? anchorEntry() : nil)
 
             entries = newEntries
             ids = newIDs
@@ -954,8 +967,10 @@ struct TranscriptTable: NSViewRepresentable {
             pendingUnfolds.insert(entryID)
         }
 
-        func willChangeFoldRows() {
+        func willChangeFoldRows(_ entryID: TranscriptEntryID) {
             pendingFoldRows = true
+            pendingFoldAnchor = anchorEntry(entryID)
+            aimingElsewhere()
         }
 
         /// How long a fold takes, or nothing at all under Reduce Motion. Read from the row
@@ -1102,9 +1117,14 @@ struct TranscriptTable: NSViewRepresentable {
             endWork = nil
         }
 
-        func followerTookOver() {
+        func followerTookOver() -> Bool {
+            // Read before releasing the standing instruction. A response can add more than the
+            // near-end threshold in one pass, but a view the table was holding at the end still
+            // belongs to the follower rather than to a reader who moved away.
+            let ownedEnd = holdsEnd || isFollowingAlong
             isFollowerDriving = true
             releaseEnd()
+            return ownedEnd
         }
 
         func followerHandedBack() {
@@ -1279,6 +1299,21 @@ struct TranscriptTable: NSViewRepresentable {
                 id,
                 CGFloat(TranscriptAnchor.delta(
                     rowTop: tableView.rect(ofRow: row).minY, viewportTop: visible.minY
+                ))
+            )
+        }
+
+        /// The clicked disclosure row at its current visual position. Unlike `anchorEntry()`,
+        /// this keeps the control itself under the pointer while rows open or close beneath it.
+        private func anchorEntry(
+            _ entryID: TranscriptEntryID
+        ) -> (id: TranscriptEntryID, delta: CGFloat)? {
+            guard let tableView, let scrollView, let row = index[entryID] else { return nil }
+            return (
+                entryID,
+                CGFloat(TranscriptAnchor.delta(
+                    rowTop: tableView.rect(ofRow: row).minY,
+                    viewportTop: scrollView.contentView.bounds.origin.y
                 ))
             )
         }

@@ -75,17 +75,20 @@ final class TranscriptLiveEndFollower {
     /// the reader who has just taken hold of the view is precisely who must not be given one.
     var onRest: (@MainActor () -> Void)?
 
-    /// Called with the current offset when the following starts, so whoever owns the scroll
-    /// position can stop naming an edge.
+    /// Called when the following starts, so whoever owns the scroll position can stop naming an
+    /// edge and say whether that edge belonged to the follower.
     ///
     /// **Without this the follower cannot win an argument it is having every frame.** Whatever
     /// pins the view to the end does so on the layout pass that grew the content, so the take-back
     /// landed and was overwritten before a frame was drawn and what reached the screen was the
     /// instant pin with the travel invisible underneath it.
     ///
-    /// The offset it hands over is the one the view is already at, so naming it moves nothing. The
-    /// table's caller ignores the number and simply lets go of its own instruction.
-    var onStart: (@MainActor (CGFloat) -> Void)?
+    /// The answer is ownership rather than a distance. A row can land before the display link's
+    /// first frame and open a gap wider than any threshold, but if the table was holding the end
+    /// that gap still belongs to this follower. Without carrying that fact across the handoff, the
+    /// follower mistakes an arriving response for a reader who scrolled up and leaves it below the
+    /// viewport.
+    var onStart: (@MainActor () -> Bool)?
 
     /// Called whenever the link goes down, at the end or not.
     ///
@@ -188,12 +191,11 @@ final class TranscriptLiveEndFollower {
     private func startLink() {
         guard link == nil, let scrollView else { return }
         lastFrame = 0
-        // Nothing is owed to us on the frame the link comes up: the view is wherever the reader
-        // left it, and it becomes ours when this object first places it.
         forgetTheView()
         // Before the first frame runs, so the very first take-back is not overwritten by the pin
         // it is trying to take back from. See `onStart`.
-        onStart?(scrollView.contentView.bounds.origin.y)
+        ownsGap = onStart?() ?? false
+        if ownsGap { lastPut = scrollView.contentView.bounds.origin.y }
         let created = scrollView.contentView.displayLink(target: self, selector: #selector(step))
         created.add(to: .main, forMode: .common)
         link = created
