@@ -15,11 +15,16 @@ private func makeCodexSession(
     let workspace = try await store.upsert(Workspace(
         repoID: repo.id, name: "w", branch: "b", path: "/tmp/w", baseBranch: "main"
     ))
+    // Said out loud, and it was not. The fixture is named for Codex, ran through `CodexRunner`
+    // and was left on the default backend, which was invisible until `Session` started holding
+    // the mode and the backend legal against each other: Approve for me is a Codex row, so a
+    // session claiming Claude Code cannot be in it, and this one silently became Auto.
     let session = try await store.upsert(Session(
         workspaceID: workspace.id,
         agentSessionID: agentSessionID,
         model: "gpt-5.6-sol",
         effort: "low",
+        agentKind: .codex,
         permissionMode: permissionMode
     ))
     return (session, repo.id)
@@ -505,7 +510,13 @@ private func eventually(
     /// to say so rather than leaving a value nothing can read.
     @Test func aChatDefaultsToClaudeCode() async throws {
         let store = try makeTestStore("agent-kind-default")
-        let (session, _) = try await makeCodexSession(store)
+        // A chat made here rather than through `makeCodexSession`, which now says which backend
+        // it is for. A test about the default cannot borrow a fixture that names one.
+        let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r-\(UUID().uuidString)"))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id, name: "w", branch: "b", path: "/tmp/w", baseBranch: "main"
+        ))
+        let session = try await store.upsert(Session(workspaceID: workspace.id))
         #expect(session.agentKind == .claudeCode)
 
         let stored = try await store.session(id: session.id)

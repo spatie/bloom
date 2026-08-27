@@ -170,7 +170,6 @@ struct ComposerFooterView: View {
         var models: [ComposerModelSection] = []
         var efforts: [ComposerOption] = []
         var outputStyles: [ComposerOption] = []
-        var outputStyleDetail: String?
         var permissionModes: [ComposerOption] = []
         var context: ContextWindowUsage.Reading?
     }
@@ -189,14 +188,11 @@ struct ComposerFooterView: View {
             outputStyles: controls.offersOutputStyle
                 ? outputStyles.options(includingCurrent: controls.outputStyle)
                 : [],
-            outputStyleDetail: controls.offersOutputStyle
-                ? outputStyles.detail(of: controls.outputStyle)
-                : nil,
-            // Labelled in the backend's own vocabulary, not Bloom's. A Codex chat's menu reads
-            // the way the Codex app reads and a Claude Code chat's reads the way that CLI does,
-            // which is the whole of `PermissionVocabulary`.
-            permissionModes: controls.availablePermissionModes.map {
-                ComposerOption(id: $0.rawValue, label: $0.label(on: controls.agentKind))
+            // Labelled and described in the backend's own vocabulary, not Bloom's. A Codex chat's
+            // picker reads the way the Codex app reads and a Claude Code chat's reads the way that
+            // CLI does, which is the whole of `PermissionVocabulary`.
+            permissionModes: controls.permissionModeChoices.map {
+                ComposerOption(id: $0.mode.rawValue, label: $0.label, detail: $0.summary)
             },
             context: context?.reading
         )
@@ -236,11 +232,12 @@ struct ComposerFooterView: View {
                 // permission mode answers "what may it touch". Absent entirely for Codex, which
                 // has no output styles: see `ComposerControls.offersOutputStyle`.
                 if controls.offersOutputStyle {
-                    ComposerOptionMenu(
+                    // A panel rather than a menu, because each style says what it is in its own
+                    // words: the CLI's own sentence for the four it compiles in, and the file's
+                    // `description` for a custom one. Those sentences were printed under the menu,
+                    // for the selected style only. See `ComposerOptionPicker`.
+                    ComposerOptionPicker(
                         options: choices.outputStyles,
-                        // The selected style, in its own words. The CLI's own sentence for the
-                        // four it compiles in, and the file's `description` for a custom one.
-                        footnote: choices.outputStyleDetail,
                         selection: controls.outputStyle,
                         heading: "Output style",
                         systemImage: "textformat",
@@ -250,8 +247,14 @@ struct ComposerFooterView: View {
                     )
                 }
 
-                ComposerOptionMenu(
+                // The picker this change was reported against. The four rows are how much a coding
+                // agent may do without asking, and Bypass permissions is a decision to read before
+                // making rather than after, which is what a one line `NSMenu` row could not offer.
+                ComposerOptionPicker(
                     options: choices.permissionModes,
+                    // What is left of the footnote once every row carries its own sentence: the
+                    // one fact that is about the conversation rather than about any mode in it.
+                    // Nil in a worktree, which is every chat but Ask Bloom.
                     footnote: controls.permissionModeNote,
                     selection: controls.permissionMode.rawValue,
                     heading: "Permission mode",
@@ -406,11 +409,10 @@ struct ComposerFooterView: View {
             $0.model = id
             $0.agentKind = backend
             $0.effort = catalog.resolvedEffort($0.effort, for: backend, model: id)
-            // A mode the new backend does not have cannot survive the move: Codex has no Plan
-            // and Claude Code has no Approve for me, and a chat left holding either would be in a
-            // mode nothing implements. Where it lands is `PermissionMode.nearest(on:)`, in the
-            // core, because it is a decision and this is a view.
-            $0.permissionMode = $0.permissionMode.nearest(on: backend)
+            // The permission mode moves itself. A mode the new backend does not have cannot
+            // survive the move (Codex has no Plan, Claude Code has no Approve for me), and that
+            // used to be arranged here, in a view, by one of the four places a backend changes.
+            // It is an invariant of `ComposerControls` now: see the property's own note.
         }
     }
 

@@ -23,8 +23,24 @@ public struct ComposerControls: Equatable, Sendable {
     /// Which CLI runs the chat. Not a picker of its own: choosing a model out of the Codex section
     /// is choosing Codex, because a model already names its backend and a second menu saying the
     /// same thing would be a second thing to keep in step.
-    public var agentKind: AgentKind
-    public var permissionMode: PermissionMode
+    ///
+    /// **Moving it moves the permission mode with it, and that is the invariant this type now
+    /// holds.** Codex has no Plan row and Claude Code has no Approve for me, and a chat left
+    /// holding the other one's mode is in a mode nothing implements: the picker draws no tick,
+    /// the row says one thing and the wire carries another. It used to be arranged by hand at the
+    /// places a backend or a mode is set, and two of those were not doing it: the bridge's own
+    /// workspace start, and the app-wide "start in plan mode" default, which is chosen in Settings
+    /// long before any backend is. See `PermissionMode.nearest(on:)` for where each one lands.
+    public var agentKind: AgentKind {
+        didSet { permissionMode = permissionMode.nearest(on: agentKind) }
+    }
+    /// The mode, which can never be one this backend does not have. Assigning one this backend
+    /// has no row for lands it on the nearest mode that backend does have, by the same rule the
+    /// line above uses. Writing inside a `didSet` does not run the observer again, so the two
+    /// cannot chase each other.
+    public var permissionMode: PermissionMode {
+        didSet { permissionMode = permissionMode.nearest(on: agentKind) }
+    }
     public var isFastMode: Bool
     /// How the agent is asked to write, by name. `OutputStyle.defaultName` for "leave it alone",
     /// which is what a session is until somebody picks something else.
@@ -46,7 +62,10 @@ public struct ComposerControls: Equatable, Sendable {
         self.model = model
         self.effort = effort
         self.agentKind = agentKind
-        self.permissionMode = permissionMode
+        // Through the rule rather than straight in. A property observer does not run during
+        // initialisation, so the one place the invariant above could still be broken is the
+        // initialiser, and every value of this type is made here.
+        self.permissionMode = permissionMode.nearest(on: agentKind)
         self.isFastMode = isFastMode
         self.outputStyle = outputStyle
         self.hasWorktree = hasWorktree
@@ -82,39 +101,33 @@ public struct ComposerControls: Equatable, Sendable {
         }
     }
 
-    /// What the permission menu says under its rows: what the chosen mode does, which mode is
-    /// missing and why, and what a mode means here when it does not mean what it usually means.
+    /// The rows the permission picker draws, each with the sentence that says what picking it
+    /// would do. See `PermissionModeChoice`.
+    public var permissionModeChoices: [PermissionModeChoice] {
+        availablePermissionModes.map { PermissionModeChoice(mode: $0, on: agentKind) }
+    }
+
+    /// The one thing the permission picker has to say that no row of it can say, or nil where
+    /// there is nothing.
     ///
-    /// Three facts, and all three can be true at once, so they are joined rather than one winning.
+    /// **It carried three facts and it is down to one**, which is the whole shape of this change.
+    /// The first was the selected mode's own sentence, printed under the menu because an `NSMenu`
+    /// row is one line with no space beneath it; every row carries its own sentence now, so the
+    /// reader sees what a mode does before choosing it rather than after. The second named Plan
+    /// as a mode Codex does not have, and the owner's answer to that was that the picker should
+    /// do the right thing instead of explaining itself: Codex is not offered a Plan row and is
+    /// not told about one either.
     ///
-    /// The first is here because a row is a label and a label is not enough. "Only ask for actions
-    /// detected as potentially unsafe" is the sentence that made Approve for me legible to the
-    /// person who asked for it, and there is nowhere else to put it: an `NSMenu` row is one line.
-    /// The output style picker already prints the selected style's own sentence in this same spot
-    /// and for this same reason.
-    ///
-    /// The last is the one worth reading twice. Every other chat in Bloom is in a worktree, which
-    /// is a copy of a project cut for the purpose, so the widest mode there is full access to a
-    /// copy. This conversation has no worktree, and the same words would mean the whole machine.
-    ///
-    /// Never nil, unlike the `missingPermissionModeNote` it replaced: there is always a chosen
-    /// mode and it always has a sentence, so the footnote is a fixture of the menu rather than
-    /// something that appears and disappears as the selection moves.
-    public var permissionModeNote: String {
-        let mode = permissionMode
-        var notes = ["\(mode.label(on: agentKind)): \(mode.summary(on: agentKind))"]
-        if agentKind == .codex {
-            notes.append("Plan is a Claude Code mode. Codex has no equivalent.")
-        }
-        if !hasWorktree {
-            notes.append(
-                "This conversation has no worktree, so anything wider than "
-                    + "\(PermissionMode.auto.label(on: agentKind)) reaches the whole machine "
-                    + "rather than a copy of a project. Whatever you choose lasts until Bloom "
-                    + "next starts, and then it is back to that."
-            )
-        }
-        return notes.joined(separator: " ")
+    /// What is left is the fact that is about this conversation rather than about any row in it.
+    /// Every other chat in Bloom is in a worktree, which is a copy of a project cut for the
+    /// purpose, so the widest mode there is full access to a copy. This one has no worktree, and
+    /// the same words would mean the whole machine.
+    public var permissionModeNote: String? {
+        guard !hasWorktree else { return nil }
+        return "This conversation has no worktree, so anything wider than "
+            + "\(PermissionMode.auto.label(on: agentKind)) reaches the whole machine "
+            + "rather than a copy of a project. Whatever you choose lasts until Bloom "
+            + "next starts, and then it is back to that."
     }
 
     /// Whether this backend has output styles at all.
@@ -124,8 +137,9 @@ public struct ComposerControls: Equatable, Sendable {
     /// picker is not drawn for a Codex chat rather than drawn and ignored, which is the difference
     /// between a control that is absent and one that lies.
     ///
-    /// Unlike Plan mode this gets no footnote, because there is no menu left to put one in: Plan
-    /// is one row missing from a picker that still does its job, and this is the whole picker.
+    /// Absent without explanation, which is the same answer the missing Plan row gets: a picker
+    /// that quietly offers only what the running backend has is a picker that cannot lie, and a
+    /// sentence about a control that is not there is a sentence nobody is looking for.
     public var offersOutputStyle: Bool {
         agentKind == .claudeCode
     }

@@ -97,7 +97,7 @@ struct MergeSplitButton: View {
     private var control: some View {
         Menu {
             // An inline `Picker` rather than a `Button` per method, for the reason
-            // `ComposerOptionItems` states: the tick lives in an `NSMenu` item's state column,
+            // `ComposerOptionMenu` states: the tick lives in an `NSMenu` item's state column,
             // which is the menu's to draw and not a label's, and an inline picker is what asks
             // the platform to draw it. It also cannot perform anything, which is exactly the
             // promise this menu makes.

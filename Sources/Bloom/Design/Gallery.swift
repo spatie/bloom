@@ -75,6 +75,7 @@ extension Snapshot {
         .paneTabs,
         .sidebarSelection,
         .quickPrompts,
+        .composerPickers,
         .hoverCard,
         .panelTabs,
         .browserToolbar,

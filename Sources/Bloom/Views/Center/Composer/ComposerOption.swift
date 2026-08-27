@@ -5,6 +5,14 @@ import BloomCore
 struct ComposerOption: Identifiable, Hashable {
     var id: String
     var label: String
+    /// One line saying what picking this row would do, drawn under the name in the pickers that
+    /// open a list rather than a menu. See `ComposerOptionRow`.
+    ///
+    /// Nil for the two pickers whose rows have nothing to add: a model is a name and an effort is
+    /// a word on a scale, and a sentence under either would be Bloom inventing copy about
+    /// somebody else's product. The two that have one are the two that were printing it as a
+    /// footnote under the whole menu, which is what the owner could not read before choosing.
+    var detail: String?
 
     static let models = [
         ComposerOption(id: "opus", label: "Opus 5"),

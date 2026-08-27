@@ -542,7 +542,11 @@ struct ComposerView: View {
         // whole of decision two: the default is Full access, and this is the one conversation in
         // Bloom that sits above every project. See `ComposerDefaults.resolve`.
         let resolved = ComposerDefaults.resolve(
-            repo: repoSettings, app: appDefaults, hasWorktree: transcript.workspace != nil
+            repo: repoSettings,
+            app: appDefaults,
+            hasWorktree: transcript.workspace != nil,
+            // The chat's own backend, so "start in plan mode" cannot write Plan onto a Codex row.
+            backend: transcript.session.agentKind
         )
 
         if appDefaults.fastMode != isFastMode {

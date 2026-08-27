@@ -355,7 +355,7 @@ all**, and the other four `PermissionMode` cases are exactly Codex's own four pr
 | `acceptEdits`, "Ask for approval" | `workspace` | `on-request` | `workspace-write` | `user` |
 | `autoReview`, "Approve for me" | `auto` | `on-request` | `workspace-write` | `auto_review` |
 | `bypassPermissions`, "Full access" | `full-access` | `never` | `danger-full-access` | `user` |
-| `plan` | **not offered** | | | |
+| `plan` | **not offered**, falls to `auto` | | | |
 
 **Shipped, and measured.** Read only means "do not write without telling me", and read-only is the
 sandbox that means it: reads and commands run untouched, writes arrive as questions. The measured
@@ -393,9 +393,16 @@ ignores both, so an action the reviewer denies is denied without a row saying so
 `[UNSTABLE]` in the app-server schema, "This shape is expected to change soon", which is why the
 mode ships without them rather than waiting for them.
 
-`plan` is **absent from the picker for a Codex chat and the picker says why**: "Plan is a Claude
-Code mode. Codex has no equivalent." Absent and silent would leave somebody who knows Bloom has a
-Plan mode hunting for it.
+`plan` is **absent from the picker for a Codex chat, and silently so**. It used to be named in the
+picker's footnote as a mode Codex does not have, on the argument that somebody who knows Bloom has
+a Plan mode would otherwise hunt for it. The owner's verdict was the other way: do the right thing
+rather than explain what you are not offering. A chat carrying Plan that moves onto Codex falls to
+`auto`, Codex's Read only, which is the preset that keeps Plan's promise that nothing changes
+until you say so; it used to fall to `acceptEdits`, which can write the worktree without asking,
+and that was a silent widening of what the agent may do. The falling is an invariant of
+`ComposerControls` rather than an arrangement made at each of the four places a backend changes,
+and moving back to Claude Code offers Plan again without choosing it. See
+`PermissionMode.nearest(on:)`.
 
 ### The words over the rows
 
@@ -403,8 +410,10 @@ Plan mode hunting for it.
 in the core. The same user's report is the reason: Bloom was printing "Ask, Accept edits, Full
 access" over a Codex chat, and somebody who has read one product's documentation could not find the
 row he wanted. The labels and the one-line sentences above them are the vendors' own, from the
-`codex` binary at 0.149.1 and from `claude` at 2.1.246; the sentence for the selected row is the
-permission menu's footnote, because an `NSMenu` row is one line with no room under it.
+`codex` binary at 0.149.1 and from `claude` at 2.1.246. Every row prints its own sentence under its
+own name: they were one footnote describing the selected row, because an `NSMenu` row is one line
+with no room under it, which meant the one thing a permission picker has to answer was only
+answered after the choice. The picker is a popover of two line rows now. See `ComposerOptionList`.
 
 Claude Code's side of that was wrong too, and in the same direction. Its `--permission-mode auto`
 is documented in the CLI as "Use a model classifier to approve/deny permission prompts", which is

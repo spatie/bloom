@@ -370,19 +370,12 @@ public struct WorkspaceSourceMatches: Sendable, Hashable {
     /// Where the highlight lands after a step, given what is highlighted now.
     ///
     /// Here rather than in the panel because it is the whole of the keyboard's behaviour and a
-    /// decision taken in a view is a decision nothing can test. It wraps at both ends, which is
-    /// what every menu on the Mac does, and it answers with the first row when nothing is
-    /// highlighted yet, so the first press of Down after typing does not swallow itself.
+    /// decision taken in a view is a decision nothing can test. Scoped to the tab, which is this
+    /// panel's own half of the rule; the wrapping itself is `MenuRows`.
     public func stepped(
         from current: WorkspaceSource?, by step: Int, in tab: WorkspaceSourceTab
     ) -> WorkspaceSource? {
-        let rows = rows(in: tab)
-        guard !rows.isEmpty else { return nil }
-        guard let current, let index = rows.firstIndex(of: current) else {
-            return step < 0 ? rows.last : rows.first
-        }
-        let next = (index + step + rows.count) % rows.count
-        return rows[next]
+        MenuRows.stepped(from: current, by: step, in: rows(in: tab))
     }
 
     /// What stays highlighted when the list changes under the field: the same row if it survived

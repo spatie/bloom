@@ -368,8 +368,25 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     ///
     /// Every row that existed before this column defaults to Claude Code, because that is what
     /// every one of them was.
-    public var agentKind: AgentKind
-    public var permissionMode: PermissionMode
+    public var agentKind: AgentKind {
+        didSet { permissionMode = permissionMode.nearest(on: agentKind) }
+    }
+    /// How much this chat may do without asking.
+    ///
+    /// **It can only ever be a mode `agentKind` has a row for**, and the initialiser below is what
+    /// makes that true of every value of this type, including the one `Store` builds from a row
+    /// it has just read. A synthesised `init(from:)` is the one door that would go round this, and
+    /// nothing in the app or the suite decodes a `Session`. Codex
+    /// has no Plan and Claude Code has no Approve for me; a row written before this rule existed,
+    /// or by a version that had a different one, would otherwise be drawn with no tick on any row
+    /// of the picker while the wire carried something else again. See `PermissionMode.nearest(on:)`.
+    ///
+    /// The two observers hold the pair legal whichever of them is written, and in whichever order,
+    /// so `sessionEditor.apply` setting a backend and a mode in one block cannot land a
+    /// combination that does not exist. Writing inside a `didSet` does not run the observer again.
+    public var permissionMode: PermissionMode {
+        didSet { permissionMode = permissionMode.nearest(on: agentKind) }
+    }
     /// What this chat is doing. **Read anywhere, written only through `apply(_: SessionEvent)`,**
     /// which stamps `updatedAt` in the same statement because a state change nothing downstream
     /// notices is not a state change. See `SessionLifecycle`.
@@ -415,7 +432,9 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         self.model = model
         self.effort = effort
         self.agentKind = agentKind
-        self.permissionMode = permissionMode
+        // Through the rule rather than straight in. See the property's own note: this is the one
+        // door every `Session` comes through, the ones `Store` builds from a row included.
+        self.permissionMode = permissionMode.nearest(on: agentKind)
         self.state = state
         self.sortOrder = sortOrder
         self.createdAt = createdAt

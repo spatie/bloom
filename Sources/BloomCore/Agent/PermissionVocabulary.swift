@@ -33,8 +33,13 @@ public extension PermissionMode {
     ///
     /// It exists because "Only ask for actions detected as potentially unsafe" is the sentence
     /// that made the mode legible to the person who reported this, and a label on its own is not.
-    /// An `NSMenu` row is one line with no space under it, so the composer prints the selected
-    /// row's sentence as the menu's footnote, the way the output style picker already does.
+    ///
+    /// **It is printed under the row it belongs to, on every row, not under the menu.** It was a
+    /// single footnote describing the selected mode, because an `NSMenu` row is one line with no
+    /// space beneath it, and the owner read that menu and said "I cannot see what the option does
+    /// before picking it": the one thing a picker of permissions has to answer was the one thing
+    /// only answered after the choice. The picker is a popover of two line rows now, so the
+    /// limitation went rather than the workaround. See `ComposerOptionList`.
     func summary(on kind: AgentKind) -> String {
         switch kind {
         case .codex: codexSummary
@@ -47,12 +52,19 @@ public extension PermissionMode {
     /// Only two of the five modes ever move. `autoReview` off Codex is exact rather than
     /// approximate: Claude Code's Auto is the mode Codex calls Approve for me, so nothing is lost
     /// in the translation. `plan` on Codex is the lossy one, and it is lossy because Codex has
-    /// nothing that means "work it out and touch nothing"; `acceptEdits` is where the composer
-    /// has always put it.
+    /// nothing that means "work it out and touch nothing".
+    ///
+    /// **Plan falls to Read only, and it used to fall to Ask for approval.** That was the widest
+    /// of the two and it was the wrong way to be wrong: Plan is the strictest row in the picker,
+    /// Codex's Ask for approval can write the worktree and run commands without being asked, and
+    /// a chat moved from one backend to the other would have been quietly granted that. Read only
+    /// is the Codex preset that keeps Plan's promise, which is that nothing changes until you say
+    /// so. `CodexRunner.sandboxMode` had already reached the same answer from the other end and
+    /// says it in one line: "Read only and Plan both mean do not write without telling me."
     func nearest(on kind: AgentKind) -> PermissionMode {
         switch self {
         case .autoReview: kind == .codex ? self : .auto
-        case .plan: kind == .codex ? .acceptEdits : self
+        case .plan: kind == .codex ? .auto : self
         case .auto, .acceptEdits, .bypassPermissions: self
         }
     }
@@ -90,7 +102,9 @@ public extension PermissionMode {
         case .acceptEdits: "Ask for approval"
         case .autoReview: "Approve for me"
         case .bypassPermissions: "Full access"
-        // Not offered on this side either, and this is the one the menu's footnote is about.
+        // Not offered on this side either. It used to be named in the menu's footnote as a mode
+        // Codex does not have, and the owner's verdict on that was that a picker should do the
+        // right thing rather than explain itself: the row is absent, and so is the sentence.
         case .plan: "Plan"
         }
     }
@@ -108,5 +122,25 @@ public extension PermissionMode {
             "Codex can edit files outside the workspace and reach the internet without asking."
         case .plan: "Research and propose changes without making them."
         }
+    }
+}
+
+/// One row of the permission picker: the mode, its name in the running backend's words, and the
+/// sentence that says what picking it would do.
+///
+/// Assembled here rather than in the footer, because it is the pair of vendor strings above with
+/// nothing added, and a view that reached for both separately is a view that can print one
+/// backend's label over the other's sentence.
+public struct PermissionModeChoice: Identifiable, Hashable, Sendable {
+    public var mode: PermissionMode
+    public var label: String
+    public var summary: String
+
+    public var id: PermissionMode { mode }
+
+    public init(mode: PermissionMode, on kind: AgentKind) {
+        self.mode = mode
+        self.label = mode.label(on: kind)
+        self.summary = mode.summary(on: kind)
     }
 }

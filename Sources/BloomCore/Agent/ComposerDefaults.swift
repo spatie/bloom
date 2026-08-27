@@ -35,10 +35,16 @@ public struct ComposerDefaults: Equatable {
     ///
     ///   The model and the effort are still the owner's, because those are about what a
     ///   conversation costs and that is the same question here as anywhere.
+    /// - Parameter backend: which CLI the chat runs on, so a default this backend has no row for
+    ///   never reaches its session row. "Start in plan mode" is an app-wide switch, chosen long
+    ///   before any backend is, and a Codex chat opened under it was being written a mode Codex
+    ///   cannot be sent. `WorkspaceStart` already ran its answer through the same rule; this is
+    ///   the other route a session's opening values arrive by.
     public static func resolve(
         repo: RepoSettings,
         app: AppDefaults,
-        hasWorktree: Bool = true
+        hasWorktree: Bool = true,
+        backend: AgentKind = .claudeCode
     ) -> ComposerDefaults {
         // Repo file, then what the user chose in Settings, then a machine-wide settings file, then
         // the built-in. The home file sits below the Settings screen deliberately: a global
@@ -59,9 +65,9 @@ public struct ComposerDefaults: Equatable {
             ),
             // "Start in plan mode" is the more specific instruction of the two, so it beats the
             // permission mode picker when both are set rather than the two fighting over one column.
-            permissionMode: hasWorktree
+            permissionMode: (hasWorktree
                 ? (app.planMode ? .plan : app.permissionMode)
-                : AskConversation.permissionMode
+                : AskConversation.permissionMode).nearest(on: backend)
         )
     }
 

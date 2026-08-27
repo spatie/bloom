@@ -120,19 +120,20 @@ struct AskConversationTests {
 
     /// The choice expires, so the menu has to say so before it is made rather than after.
     @Test("the permission menu says what a mode means with no worktree")
-    func theMenuSaysWhatAModeMeansHere() {
+    func theMenuSaysWhatAModeMeansHere() throws {
         let inWorktree = ComposerControls(
             session: Session(workspaceID: WorkspaceID("w1")), isFastMode: false, outputStyle: ""
         )
         #expect(inWorktree.hasWorktree)
-        // The chosen mode's own sentence, and nothing about the machine.
-        #expect(!inWorktree.permissionModeNote.contains("whole machine"))
+        // Nothing at all. Every row says what it does on its own line now, so the footnote is
+        // left with the one fact that is about this conversation rather than about any row.
+        #expect(inWorktree.permissionModeNote == nil)
 
         let ask = ComposerControls(
             session: AskConversation.newSession(), isFastMode: false, outputStyle: ""
         )
         #expect(!ask.hasWorktree)
-        let note = ask.permissionModeNote
+        let note = try #require(ask.permissionModeNote)
         #expect(note.contains("whole machine"))
         #expect(note.contains("Bloom next starts"))
     }
