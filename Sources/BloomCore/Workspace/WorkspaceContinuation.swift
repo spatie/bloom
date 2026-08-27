@@ -14,13 +14,28 @@ import Foundation
 /// cut beside it. Nothing is renamed, nothing is deleted, and the merged branch stays on this
 /// machine until the workspace is archived like any other.
 public struct ContinuationFacts: Sendable, Hashable {
-    /// The branch the workspace row says it is on.
-    public var recordedBranch: String
+    /// The branch the merged pull request is for, and therefore the branch this workspace has
+    /// finished with.
+    ///
+    /// GitHub's answer rather than the workspace row's, because the row goes stale and this does
+    /// not. A workspace was refused with `switchedByHand` over a merged pull request it had every
+    /// right to continue from: `Workspace.branch` said `freekmurze/investigate-problem`, the
+    /// worktree was on `freekmurze/fix-stuck-channel-deletions`, and the reflog shows the agent
+    /// itself cutting the second from the first fourteen minutes after the workspace was made.
+    /// Nothing had gone wrong and nobody had switched anything by hand. The row simply records
+    /// where Bloom put the worktree, and an agent that cuts a branch of its own never touches it.
+    ///
+    /// The strip was already right about this: `PullRequestHead` asks gh about the branch the
+    /// worktree is on **now**, which is how it found pull request #381 and drew the Continue
+    /// button in the first place. So the refusal named, as the branch the pull request was not
+    /// for, the exact branch the pull request was for. The two halves of the same band now read
+    /// the same fact.
+    public var mergedBranch: String
     /// The branch actually checked out in the worktree, or nil for a detached HEAD.
     public var checkedOutBranch: String?
     /// The branch the finished pull request targeted, and the one the new branch is cut from.
     public var baseBranch: String
-    /// GitHub says the pull request for `recordedBranch` was merged. Only ever true when GitHub
+    /// GitHub says the pull request for `mergedBranch` was merged. Only ever true when GitHub
     /// actually said so: this is the whole justification for moving off the branch, so it is
     /// never inferred from silence.
     public var isPullRequestMerged: Bool
@@ -32,7 +47,7 @@ public struct ContinuationFacts: Sendable, Hashable {
     public var takenBranches: Set<String>
 
     public init(
-        recordedBranch: String,
+        mergedBranch: String,
         checkedOutBranch: String?,
         baseBranch: String,
         isPullRequestMerged: Bool = false,
@@ -40,7 +55,7 @@ public struct ContinuationFacts: Sendable, Hashable {
         hasOperationInProgress: Bool = false,
         takenBranches: Set<String> = []
     ) {
-        self.recordedBranch = recordedBranch
+        self.mergedBranch = mergedBranch
         self.checkedOutBranch = checkedOutBranch
         self.baseBranch = baseBranch
         self.isPullRequestMerged = isPullRequestMerged
@@ -56,7 +71,9 @@ public enum ContinuationRefusal: Sendable, Hashable {
     case notMerged
     case agentRunning
     case detachedHead
-    case switchedByHand(String)
+    /// The worktree is on a branch, and it is not the one the merged pull request was for. Both
+    /// names, because the whole content of the refusal is that they differ.
+    case switchedByHand(onBranch: String, pullRequestBranch: String)
     case operationInProgress
     case onBaseBranch(String)
     case noValidName
@@ -74,9 +91,10 @@ public enum ContinuationRefusal: Sendable, Hashable {
         case .detachedHead:
             "This worktree is not on a branch at all. Commits made on a detached HEAD are held by "
                 + "nothing but this checkout, so Bloom will not move it."
-        case .switchedByHand(let branch):
-            "This worktree is on \(branch) now, which is not the branch the pull request was for. "
-                + "Bloom only continues a workspace that is still where it left it."
+        case .switchedByHand(let branch, let pullRequestBranch):
+            "This worktree is on \(branch) now, and the pull request that merged was for "
+                + "\(pullRequestBranch). Bloom will not move a checkout off a branch it was not "
+                + "the one to put it on."
         case .operationInProgress:
             "A rebase or merge is half finished in this worktree. Finish or abort it first."
         case .onBaseBranch(let branch):
@@ -103,6 +121,27 @@ public enum ContinuationDecision: Sendable, Hashable {
     }
 }
 
+/// Which branch a merged pull request is actually for.
+///
+/// gh reports the head branch and `PullRequest.branch` carries it, so that is the answer whenever
+/// there is one. It is empty from a gh old enough not to report it, and the fallback then is the
+/// branch the pull request was looked up under, which is `PullRequestHead`'s decision and is
+/// already the live checkout in every case that gets this far. Asking `PullRequestHead` again
+/// rather than keeping a second copy of that rule is the point: the branch Continue compares
+/// against has to be the branch the pull request was found by, or the strip and the button are
+/// answering two different questions again.
+public enum ContinuationHead {
+    /// - Parameter recorded: `Workspace.branch`.
+    /// - Parameter checkedOut: what the worktree says now, or nil for a detached HEAD.
+    public static func branch(
+        of pullRequest: PullRequest, recorded: String, checkedOut: String?, base: String
+    ) -> String {
+        let reported = pullRequest.branch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard reported.isEmpty else { return reported }
+        return PullRequestHead.branch(recorded: recorded, checkedOut: checkedOut, base: base)
+    }
+}
+
 public enum ContinuationGate {
     /// Whether this workspace may carry on in place, and on what branch.
     ///
@@ -121,22 +160,34 @@ public enum ContinuationGate {
         guard !facts.isAgentRunning else { return .refuse(.agentRunning) }
 
         // Then the user's own hands, exactly as the rename gate weighs them. A detached HEAD may
-        // be holding commits that no ref points at, and a branch switched by hand means the
-        // workspace is not where Bloom left it.
+        // be holding commits that no ref points at, and a worktree standing somewhere other than
+        // the branch that merged is a worktree somebody has moved for a reason of their own.
+        //
+        // Against the pull request's branch rather than against the workspace row, which is the
+        // whole of the report on `ContinuationFacts.mergedBranch`: an agent that cuts its own
+        // branch leaves the row behind, and comparing with the row refused the one case this
+        // feature exists for while letting nothing else through.
         guard let checkedOut = facts.checkedOutBranch else { return .refuse(.detachedHead) }
-        guard checkedOut == facts.recordedBranch else {
-            return .refuse(.switchedByHand(checkedOut))
-        }
+        // The base first, because it is the more specific description of the same fact. A
+        // worktree parked on main is not on the merged branch either, and being told it has been
+        // switched away from a branch it never left is a worse sentence than being told there is
+        // nothing on main to continue from.
         guard checkedOut != facts.baseBranch else {
             return .refuse(.onBaseBranch(checkedOut))
+        }
+        guard checkedOut == facts.mergedBranch else {
+            return .refuse(
+                .switchedByHand(onBranch: checkedOut, pullRequestBranch: facts.mergedBranch)
+            )
         }
 
         // Then the repository's own state. `git checkout -b` mid rebase abandons the rebase.
         guard !facts.hasOperationInProgress else { return .refuse(.operationInProgress) }
 
-        let branch = ContinuationBranch.next(
-            after: facts.recordedBranch, taken: facts.takenBranches
-        )
+        // Named after the branch that merged, which is the branch the worktree is standing on
+        // and, since the check above, the same string. Naming from the row would have called the
+        // next branch after a name the work stopped using two hours ago.
+        let branch = ContinuationBranch.next(after: checkedOut, taken: facts.takenBranches)
         guard Git.isValidBranchName(branch), !facts.takenBranches.contains(branch) else {
             return .refuse(.noValidName)
         }
@@ -280,27 +331,95 @@ public struct WorkspaceContinuation: Sendable, Hashable {
     }
 }
 
+/// The state a workspace is in for the minutes after it continues, and the sentence for it.
+///
+/// It is a real state and it had no words of its own. There is no pull request, because the one
+/// there was has merged and belonged to a branch this worktree has left; there is nothing on the
+/// branch, because it was cut from the base a moment ago; and the strip therefore fell back to
+/// the line it shows a workspace nobody has done anything in yet, "Nothing has changed on this
+/// branch yet.", which is true and reads as though the last two hours never happened.
+///
+/// Held for a branch name rather than for a workspace, and compared against the branch the strip
+/// is drawing. The moment the worktree moves again, by an agent cutting its own branch or by
+/// anybody else, this stops describing it and the ordinary line comes back. It lives in memory
+/// and does not survive a relaunch, which is right: a day later this is an ordinary empty branch
+/// and the merge that made it is history rather than news.
+public struct ContinuedBranch: Sendable, Hashable {
+    /// The branch that was cut. What the line is checked against.
+    public var branch: String
+    /// The branch that merged, still on this machine.
+    public var previousBranch: String
+    public var baseBranch: String
+    /// The pull request that merged, or 0 when its number is not known.
+    public var pullRequest: Int
+
+    public init(branch: String, previousBranch: String, baseBranch: String, pullRequest: Int) {
+        self.branch = branch
+        self.previousBranch = previousBranch
+        self.baseBranch = baseBranch
+        self.pullRequest = pullRequest
+    }
+
+    public init(_ continuation: WorkspaceContinuation, pullRequest: Int) {
+        self.init(
+            branch: continuation.branch,
+            previousBranch: continuation.previousBranch,
+            baseBranch: continuation.workspace.baseBranch,
+            pullRequest: pullRequest
+        )
+    }
+
+    /// The line under the branch name in the pull request strip, on a branch with nothing on it.
+    ///
+    /// One row, tail truncated at the inspector's default width, so it says the three things a
+    /// reader standing in front of an empty branch needs and stops: where it came from, why it is
+    /// empty, and that this is not a workspace that has done nothing.
+    ///
+    /// The pull request number when there is one, because it is shorter than a branch name and it
+    /// is what the reader was looking at ten seconds ago.
+    public static func line(on branch: String, continued: ContinuedBranch?) -> String {
+        guard let continued, continued.branch == branch else {
+            return "Nothing has changed on this branch yet."
+        }
+        let merged = continued.pullRequest > 0
+            ? "#\(continued.pullRequest)"
+            : continued.previousBranch
+        return "Cut from \(continued.baseBranch) after \(merged) merged. Nothing on it yet."
+    }
+}
+
 public extension WorkspaceManager {
     /// Everything `ContinuationGate` needs, read out of the repository as it stands right now.
     ///
-    /// - Parameter isPullRequestMerged: GitHub's own answer. Nothing here can ask: `gh` lives
-    ///   above this layer, the same way it does for `archive`.
+    /// - Parameter pullRequest: the one the strip is showing, which is GitHub's own answer and
+    ///   the reason the button is on screen. Nothing here can ask for it: `gh` lives above this
+    ///   layer, the same way it does for `archive`. Nil is a workspace with no pull request at
+    ///   all, and the gate refuses it on the merge.
     /// - Parameter isAgentRunning: whether this app is holding a running agent process for this
     ///   workspace. Git cannot see that either.
     func continuationFacts(
         workspace: Workspace,
-        isPullRequestMerged: Bool,
+        pullRequest: PullRequest?,
         isAgentRunning: Bool
     ) async throws -> ContinuationFacts {
         async let checkedOut = try? Git.currentBranch(of: workspace.path)
         async let inProgress = Git.hasOperationInProgress(in: workspace.path)
         async let branches = try? Git.branches(of: workspace.path)
 
+        let live = await checkedOut
+        // The row only when there is nothing better. It is what the old comparison used and it is
+        // what goes stale, so it is the fallback rather than the source: see `mergedBranch`.
+        let merged = pullRequest.map {
+            ContinuationHead.branch(
+                of: $0, recorded: workspace.branch, checkedOut: live, base: workspace.baseBranch
+            )
+        }
+
         return ContinuationFacts(
-            recordedBranch: workspace.branch,
-            checkedOutBranch: await checkedOut,
+            mergedBranch: merged ?? workspace.branch,
+            checkedOutBranch: live,
             baseBranch: workspace.baseBranch,
-            isPullRequestMerged: isPullRequestMerged,
+            isPullRequestMerged: pullRequest?.isMerged ?? false,
             isAgentRunning: isAgentRunning,
             hasOperationInProgress: await inProgress,
             takenBranches: Set(await branches ?? [])
@@ -331,6 +450,12 @@ public extension WorkspaceManager {
         branch: String
     ) async throws -> WorkspaceContinuation {
         let local = try? await Git.localWork(worktree: workspace.path)
+        // The branch actually being left, read off the worktree rather than taken from the row,
+        // for the reason `ContinuationFacts.mergedBranch` gives at length: the row is where Bloom
+        // put this worktree and an agent that cuts a branch of its own does not update it. The
+        // prompt the agent is handed names this branch, and naming one the work left hours ago
+        // would be worse than saying nothing.
+        let leaving = (try? await Git.currentBranch(of: workspace.path)) ?? workspace.branch
         let resolved = try await Git.baseRevision(
             branch: workspace.baseBranch, in: workspace.path
         )
@@ -342,7 +467,7 @@ public extension WorkspaceManager {
         guard let saved = updated else { throw WorkspaceError.workspaceGone(workspace.name) }
         return WorkspaceContinuation(
             workspace: saved,
-            previousBranch: workspace.branch,
+            previousBranch: leaving,
             branch: branch,
             revision: resolved.revision,
             base: resolved.base,

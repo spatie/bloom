@@ -404,10 +404,11 @@ extension AppModel {
         do {
             facts = try await manager.continuationFacts(
                 workspace: workspace,
-                // GitHub's own answer, from the strip the button lives in rather than from a
-                // fresh lookup. The strip is the reason the button is on screen at all, so
-                // asking again would only introduce a way for the two to disagree.
-                isPullRequestMerged: pullRequest.isMerged,
+                // The pull request the strip is showing rather than a fresh lookup. The strip is
+                // the reason the button is on screen at all, so asking again would only introduce
+                // a way for the two to disagree, and this one carries the branch it is for, which
+                // is what the gate weighs the checkout against.
+                pullRequest: pullRequest,
                 isAgentRunning: isRunning(workspace)
             )
         } catch {
@@ -457,6 +458,11 @@ extension AppModel {
         // age beside the shared one's 110, and forgetting one and not the other was a bug waiting
         // for the next caller who only knew about one of them.
         WorkspacePullRequests.shared.forget(continuation.workspace.id)
+
+        // What the strip says instead, until something is committed here or the worktree moves
+        // again. Without it the band falls back to the line it shows a workspace nobody has
+        // touched: see `ContinuedBranch`.
+        model.continued = ContinuedBranch(continuation, pullRequest: pullRequest.number)
 
         // The diff is measured against the base, and the base just moved under it.
         await model.refreshChanges()

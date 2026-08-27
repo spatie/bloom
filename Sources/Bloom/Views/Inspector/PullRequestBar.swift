@@ -111,6 +111,7 @@ struct PullRequestBar: View {
                 branchActions: branchActions,
                 worktree: model.workspace.path,
                 hasChanges: hasChanges,
+                continued: model.continued,
                 action: createPullRequest
             )
         }

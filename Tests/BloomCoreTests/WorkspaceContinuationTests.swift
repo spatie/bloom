@@ -7,7 +7,7 @@ struct ContinuationGateTests {
     /// A workspace as it stands the moment its pull request goes in: still on the branch Bloom
     /// cut, nothing else happening to it.
     private func facts(
-        recorded: String = "dark-mode-toggle",
+        mergedBranch: String = "dark-mode-toggle",
         checkedOut: String? = "dark-mode-toggle",
         base: String = "main",
         merged: Bool = true,
@@ -16,7 +16,7 @@ struct ContinuationGateTests {
         taken: Set<String> = ["main", "dark-mode-toggle"]
     ) -> ContinuationFacts {
         ContinuationFacts(
-            recordedBranch: recorded,
+            mergedBranch: mergedBranch,
             checkedOutBranch: checkedOut,
             baseBranch: base,
             isPullRequestMerged: merged,
@@ -51,16 +51,56 @@ struct ContinuationGateTests {
         #expect(ContinuationGate.decide(facts(checkedOut: nil)).refusal == .detachedHead)
     }
 
-    @Test("a branch switched by hand stops it, and is named in the refusal")
+    @Test("a branch switched by hand stops it, and both branches are named in the refusal")
     func switchedByHand() {
         let decision = ContinuationGate.decide(facts(checkedOut: "something-else"))
-        #expect(decision.refusal == .switchedByHand("something-else"))
+        #expect(
+            decision.refusal
+                == .switchedByHand(
+                    onBranch: "something-else", pullRequestBranch: "dark-mode-toggle"
+                )
+        )
+        let sentence = decision.refusal?.sentence ?? ""
+        #expect(sentence.contains("something-else"))
+        #expect(sentence.contains("dark-mode-toggle"))
+    }
+
+    @Test("the branch an agent cut for itself is continued from, not refused")
+    func agentCutItsOwnBranch() {
+        // The report this whole comparison was rewritten for. The row said one thing, the reflog
+        // showed the agent cutting its own branch off it fourteen minutes in, and pull request
+        // #381 merged the branch the worktree was actually on. The strip found that pull request,
+        // because it asks about the live branch, and Continue then refused with a sentence naming
+        // the very branch the pull request was for.
+        let decision = ContinuationGate.decide(
+            facts(
+                mergedBranch: "freekmurze/fix-stuck-channel-deletions",
+                checkedOut: "freekmurze/fix-stuck-channel-deletions",
+                taken: [
+                    "main",
+                    "freekmurze/seto-inland-sea",
+                    "freekmurze/investigate-problem",
+                    "freekmurze/fix-stuck-channel-deletions",
+                ]
+            )
+        )
+        // And the new branch counts on from the branch that merged rather than from the name the
+        // work stopped using two hours earlier.
+        #expect(decision == .cut(branch: "freekmurze/fix-stuck-channel-deletions-2"))
     }
 
     @Test("a worktree parked on the base branch has nothing to continue from")
     func onBase() {
-        let decision = ContinuationGate.decide(facts(recorded: "main", checkedOut: "main"))
+        let decision = ContinuationGate.decide(facts(mergedBranch: "main", checkedOut: "main"))
         #expect(decision.refusal == .onBaseBranch("main"))
+
+        // And it stays that sentence when the pull request was for a branch of its own, which is
+        // the ordinary shape of it: parked on main is not the same complaint as moved elsewhere,
+        // and it is checked first so the more specific one wins.
+        let parked = ContinuationGate.decide(
+            facts(mergedBranch: "dark-mode-toggle", checkedOut: "main")
+        )
+        #expect(parked.refusal == .onBaseBranch("main"))
     }
 
     @Test("a half finished rebase stops it")
@@ -74,7 +114,8 @@ struct ContinuationGateTests {
     @Test("every refusal says something")
     func everyRefusalHasASentence() {
         let refusals: [ContinuationRefusal] = [
-            .notMerged, .agentRunning, .detachedHead, .switchedByHand("other"),
+            .notMerged, .agentRunning, .detachedHead,
+            .switchedByHand(onBranch: "other", pullRequestBranch: "dark-mode-toggle"),
             .operationInProgress, .onBaseBranch("main"), .noValidName,
         ]
         for refusal in refusals {
@@ -175,13 +216,29 @@ struct WorkspaceContinuationTests {
         return (origin, repo, registered, manager, workspace)
     }
 
+    /// The pull request the strip would be showing, for whichever branch is named. gh reports the
+    /// head branch and `PullRequest.branch` is where it lands, which is what the gate weighs the
+    /// checkout against.
+    private func merged(_ branch: String, number: Int = 370) -> PullRequest {
+        PullRequest(
+            number: number,
+            title: "Add the toggle",
+            url: "https://github.com/example/repo/pull/\(number)",
+            state: "MERGED",
+            branch: branch,
+            closedAt: Date()
+        )
+    }
+
     @Test("the worktree stays put, moves to a new branch, and the merged one is left alone")
     func continuesInPlace() async throws {
         let (origin, repo, _, manager, workspace) = try await makeMergedWorkspace()
         defer { repo.cleanUp(); origin.cleanUp() }
 
         let facts = try await manager.continuationFacts(
-            workspace: workspace, isPullRequestMerged: true, isAgentRunning: false
+            workspace: workspace,
+            pullRequest: merged(workspace.branch),
+            isAgentRunning: false
         )
         let branch = try #require(ContinuationGate.decide(facts).branch)
 
@@ -293,15 +350,64 @@ struct WorkspaceContinuationTests {
         let workspace = try await manager.createWorkspace(repo: registered, prompt: "Do a thing")
 
         let facts = try await manager.continuationFacts(
-            workspace: workspace, isPullRequestMerged: true, isAgentRunning: false
+            workspace: workspace,
+            pullRequest: merged(workspace.branch),
+            isAgentRunning: false
         )
 
-        #expect(facts.recordedBranch == workspace.branch)
+        #expect(facts.mergedBranch == workspace.branch)
+        #expect(facts.isPullRequestMerged)
         #expect(facts.checkedOutBranch == workspace.branch)
         #expect(facts.baseBranch == workspace.baseBranch)
         #expect(facts.hasOperationInProgress == false)
         #expect(facts.takenBranches.contains(workspace.branch))
         #expect(facts.takenBranches.contains("main"))
+    }
+
+    @Test("the branch an agent cut for itself is the one continued from, row or no row")
+    func continuesFromTheAgentsOwnBranch() async throws {
+        let (origin, repo, _, manager, workspace) = try await makeMergedWorkspace()
+        defer { repo.cleanUp(); origin.cleanUp() }
+
+        // What the reported workspace's reflog shows: fourteen minutes in, the agent cut a better
+        // named branch off the one Bloom made and did the work there. Nothing writes that back to
+        // the row, and nothing is supposed to.
+        try await Shell.check(
+            "git", ["checkout", "-q", "-b", "fix-stuck-channel-deletions"], cwd: workspace.path
+        )
+        let worktree = TempRepo(existing: workspace.path)
+        try worktree.write("fix.swift", "let fixed = true\n")
+        try await worktree.commit("Fix the thing")
+        try await Shell.check(
+            "git", ["push", "-q", "origin", "HEAD:refs/heads/main"], cwd: workspace.path
+        )
+
+        let facts = try await manager.continuationFacts(
+            workspace: workspace,
+            pullRequest: merged("fix-stuck-channel-deletions", number: 381),
+            isAgentRunning: false
+        )
+        #expect(facts.mergedBranch == "fix-stuck-channel-deletions")
+        #expect(facts.checkedOutBranch == "fix-stuck-channel-deletions")
+        // The row is still where it was, which is the exact state that used to be refused.
+        #expect(workspace.branch != "fix-stuck-channel-deletions")
+
+        let branch = try #require(ContinuationGate.decide(facts).branch)
+        #expect(branch == "fix-stuck-channel-deletions-2")
+
+        let continuation = try await manager.continueOnNewBranch(
+            workspace: workspace, branch: branch
+        )
+
+        // The branch left behind is the one the work was on, not the one the row remembered, and
+        // it is the name the agent's own prompt is about to be rendered with.
+        #expect(continuation.previousBranch == "fix-stuck-channel-deletions")
+        #expect(continuation.workspace.branch == branch)
+        #expect(try await Git.currentBranch(of: workspace.path) == branch)
+
+        // And the row has caught up, so the next reader of it is not two branches behind.
+        let stored = try await manager.store.workspace(id: workspace.id)
+        #expect(stored?.branch == branch)
     }
 }
 
@@ -363,5 +469,134 @@ struct ContinuationPromptTests {
         #expect(ContinuationBase.fetched.warning == nil)
         #expect(ContinuationBase.cachedRemote.warning != nil)
         #expect(ContinuationBase.localBranch.warning != nil)
+    }
+}
+
+@Suite("Which branch the merged pull request is for")
+struct ContinuationHeadTests {
+    private func pullRequest(branch: String) -> PullRequest {
+        PullRequest(
+            number: 381,
+            title: "Finish channel deletions that time out",
+            url: "https://github.com/example/repo/pull/381",
+            state: "MERGED",
+            branch: branch
+        )
+    }
+
+    @Test("gh's own head branch is the answer whenever there is one")
+    func reported() {
+        #expect(
+            ContinuationHead.branch(
+                of: pullRequest(branch: "fix-stuck-channel-deletions"),
+                recorded: "investigate-problem",
+                checkedOut: "fix-stuck-channel-deletions",
+                base: "main"
+            ) == "fix-stuck-channel-deletions"
+        )
+    }
+
+    @Test("without one it falls back to the branch the pull request was looked up under")
+    func fallsBackToTheLiveBranch() {
+        // A gh too old to report a head branch still found this pull request, and it found it by
+        // asking about the branch the worktree is on now. That rule is `PullRequestHead`, and
+        // this asks it rather than keeping a second copy that can disagree with the strip.
+        #expect(
+            ContinuationHead.branch(
+                of: pullRequest(branch: ""),
+                recorded: "investigate-problem",
+                checkedOut: "fix-stuck-channel-deletions",
+                base: "main"
+            ) == "fix-stuck-channel-deletions"
+        )
+    }
+
+    @Test("a worktree standing on the base falls back to the row, which the gate then refuses")
+    func onTheBase() {
+        #expect(
+            ContinuationHead.branch(
+                of: pullRequest(branch: ""),
+                recorded: "dark-mode",
+                checkedOut: "main",
+                base: "main"
+            ) == "dark-mode"
+        )
+    }
+
+    @Test("whitespace out of gh is not a head branch")
+    func blank() {
+        #expect(
+            ContinuationHead.branch(
+                of: pullRequest(branch: "   "),
+                recorded: "dark-mode",
+                checkedOut: "dark-mode",
+                base: "main"
+            ) == "dark-mode"
+        )
+    }
+}
+
+@Suite("What the strip says once a workspace has continued")
+struct ContinuedBranchTests {
+    private let continued = ContinuedBranch(
+        branch: "dark-mode-toggle-2",
+        previousBranch: "dark-mode-toggle",
+        baseBranch: "main",
+        pullRequest: 381
+    )
+
+    @Test("a workspace that has never continued keeps the ordinary line")
+    func ordinary() {
+        #expect(
+            ContinuedBranch.line(on: "dark-mode-toggle", continued: nil)
+                == "Nothing has changed on this branch yet."
+        )
+    }
+
+    @Test("a branch cut from a merge says where it came from and why it is empty")
+    func afterContinuing() {
+        let line = ContinuedBranch.line(on: "dark-mode-toggle-2", continued: continued)
+        #expect(line.contains("main"))
+        #expect(line.contains("#381"))
+        #expect(line.contains("Nothing on it yet"))
+        #expect(line != "Nothing has changed on this branch yet.")
+    }
+
+    @Test("it stops describing the workspace the moment the worktree is somewhere else")
+    func onlyForTheBranchItNames() {
+        // Held in memory and never cleared, which is only safe because of this: an agent that
+        // cuts its own branch two minutes later must not be described as the branch Continue made.
+        #expect(
+            ContinuedBranch.line(on: "something-the-agent-cut", continued: continued)
+                == "Nothing has changed on this branch yet."
+        )
+    }
+
+    @Test("with no pull request number it names the branch that merged instead")
+    func withoutANumber() {
+        var unnumbered = continued
+        unnumbered.pullRequest = 0
+        let line = ContinuedBranch.line(on: "dark-mode-toggle-2", continued: unnumbered)
+        #expect(line.contains("dark-mode-toggle"))
+        #expect(line.contains("#") == false)
+    }
+
+    @Test("it is built from the continuation the app is already holding")
+    func fromTheContinuation() {
+        let continuation = WorkspaceContinuation(
+            workspace: Workspace(
+                repoID: RepoID("repo"),
+                name: "Dark mode toggle",
+                branch: "dark-mode-toggle-2",
+                path: "/tmp/worktree",
+                baseBranch: "main"
+            ),
+            previousBranch: "dark-mode-toggle",
+            branch: "dark-mode-toggle-2",
+            revision: "abc123",
+            base: .fetched,
+            carriedUncommittedWork: false
+        )
+        #expect(ContinuedBranch(continuation, pullRequest: 381) == continued)
     }
 }

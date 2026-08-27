@@ -42,6 +42,11 @@ struct PullRequestCreator: View {
     /// It settles both halves of the strip: the line under the branch name, and whether there is a
     /// button at all.
     var hasChanges: Bool
+    /// Set for the branch this workspace was carried on to when its pull request merged, and only
+    /// while nothing has been committed to it. It is the difference between an empty branch that
+    /// has just been cut from a landed pull request and an empty branch nobody has done anything
+    /// on, which read identically until `ContinuedBranch` gave the first of them a sentence.
+    var continued: ContinuedBranch?
     var action: () -> Void
 
     /// Whether the pointer is on the branch name, which is the only time anything asks whether it
@@ -177,9 +182,8 @@ struct PullRequestCreator: View {
         // `PullRequestSummary.detailLine` gives: a disabled button that explains itself only on
         // hover is a button most people never get an explanation from.
         if let note = branchActions.note { return note }
-        return hasChanges
-            ? "No pull request yet. Target \(baseBranch)."
-            : "Nothing has changed on this branch yet."
+        guard hasChanges else { return ContinuedBranch.line(on: branch, continued: continued) }
+        return "No pull request yet. Target \(baseBranch)."
     }
 
     /// Tinted explicitly. An untinted `.borderedProminent` follows the system accent on this

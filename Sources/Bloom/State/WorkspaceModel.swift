@@ -162,6 +162,14 @@ final class WorkspaceModel {
     /// tall, so a notice added under the strip was drawn into a band with no room for it and cut
     /// off mid sentence. See `TitleBarStrip` and `InspectorView`.
     var pullRequestNotice: PullRequestNotice?
+    /// The branch this workspace was carried on to when its pull request merged, while the strip
+    /// is still drawing that branch and nothing has been committed to it.
+    ///
+    /// Set by `AppModel.continueAfterMerge` and never cleared, because it does not need to be:
+    /// `ContinuedBranch.line` checks the branch it names against the branch being drawn, so it
+    /// stops applying by itself the moment the worktree moves on. The reasoning for holding it in
+    /// memory rather than on the row is on the type.
+    var continued: ContinuedBranch?
     /// How many times a turn started by Create pull request has ended with no pull request.
     ///
     /// The button cannot itself fail. It succeeds the moment the turn is handed to the agent, and
