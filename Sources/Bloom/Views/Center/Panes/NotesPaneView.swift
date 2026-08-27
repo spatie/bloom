@@ -54,6 +54,9 @@ struct NotesPaneView: View {
         // one; the pane going away covers switching tab, switching workspace and closing the tab,
         // all of which tear this view down while a scheduled save is still sleeping.
         .onChange(of: isEditing) { _, editing in if !editing { saveNow() } }
+        // Command-Backspace is delete-to-start-of-line in every text box on macOS, and the
+        // menu bar had it for Archive Workspace. See `FocusedValues.isTypingProse`.
+        .focusedValue(\.isTypingProse, isEditing)
         .onDisappear(perform: saveNow)
     }
 

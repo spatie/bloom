@@ -188,6 +188,11 @@ struct PullRequestCreator: View {
     private var createButton: some View {
         Button("Create pull request", systemImage: "arrow.triangle.pull", action: action)
             .buttonStyle(.borderedProminent)
+            // The same capsule `MergeSplitButton` paints by hand, said here rather than
+            // left to the default. The merge button has to draw its own fill, because a
+            // `Menu` takes no tint, so it settled on a capsule; these took whatever
+            // `.borderedProminent` gives, and the two silhouettes disagreed in one strip.
+            .buttonBorderShape(.capsule)
             .tint(Palette.accentFill)
             .controlSize(.regular)
             // Held back while a turn runs, like every other button in this band: opening the
