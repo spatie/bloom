@@ -302,6 +302,10 @@ struct TranscriptTable: NSViewRepresentable {
         private var isPutting = false
         /// Whether the reader has hold of the view. `NSScrollView`'s own answer, not a guess.
         private var isLiveScrolling = false
+        /// When the last step of a live scroll arrived, so a gesture nothing announced the start
+        /// or the end of can be noticed to have stopped. See `liveScrolled`.
+        private var lastLiveScroll: CFTimeInterval = 0
+        private var quietWork: Task<Void, Never>?
         /// Whether the follower is driving. See `TranscriptTableController.followerTookOver`.
         private var isFollowerDriving = false
         /// Rows whose next height change is a fold the reader just clicked, and may therefore be
@@ -1224,11 +1228,47 @@ struct TranscriptTable: NSViewRepresentable {
         /// Belt to the braces above. AppKit posts this for every step of a user-initiated scroll,
         /// and a gesture that somehow began without a `willStartLiveScroll` still has to take the
         /// hold down on the frame it reaches here.
+        ///
+        /// **And a gesture that begins here can end without anything saying so, which used to
+        /// latch the hold on for good.** `isLiveScrolling` refuses `goToEnd` and pauses the
+        /// follower, so a step arriving after its own gesture's `didEndLiveScroll` turned both
+        /// mechanisms off and nothing turned them back on until the next cleanly completed
+        /// gesture. That is the "sometimes it just stops following" shape, and it survives a whole
+        /// session because nothing else clears the flag: the settle that would notice is itself
+        /// gated on it.
+        ///
+        /// So the belt watches for quiet, and only when it is the belt that started the gesture. A
+        /// step inside an ordinary one does no more than stamp the clock.
         @objc private func liveScrolled() {
+            lastLiveScroll = CACurrentMediaTime()
+            guard !isLiveScrolling else { return }
             liveScrollBegan()
+            watchForQuiet()
+        }
+
+        /// How long without a step of a gesture nothing announced counts as that gesture being
+        /// over. Comfortably longer than a frame at any rate this app runs at, and shorter than
+        /// the settle, so a hold that was never taken down is gone before the place is written.
+        private static let quietSeconds: Double = 0.2
+
+        private func watchForQuiet() {
+            quietWork?.cancel()
+            quietWork = Task { @MainActor [weak self] in
+                while true {
+                    try? await Task.sleep(for: .seconds(Self.quietSeconds))
+                    guard !Task.isCancelled, let self, isLiveScrolling else { return }
+                    guard CACurrentMediaTime() - lastLiveScroll >= Self.quietSeconds else { continue }
+                    // Cleared before the call rather than after, so the cancellation inside it is
+                    // not this task cancelling itself.
+                    quietWork = nil
+                    return liveScrollEnded()
+                }
+            }
         }
 
         @objc private func liveScrollEnded() {
+            quietWork?.cancel()
+            quietWork = nil
             guard isLiveScrolling else { return }
             isLiveScrolling = false
             onLiveScrollChange?(false)
