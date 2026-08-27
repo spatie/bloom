@@ -353,6 +353,10 @@ final class AppModel {
             }.value
             self.store = store
             self.manager = WorkspaceManager(store: store)
+            // Every installation that predates this has a workspaces root with no marker in it,
+            // and nothing else ever revisits that directory. Two `stat` calls once a launch, and
+            // it says nothing when it fails. See `SpotlightExclusion`.
+            SpotlightExclusion.markWorkspacesRoot()
             try await store.resetRunningSessions()
             // The questions those sessions were blocked on. A pending ask whose agent is gone is
             // not a question, it is a row with four live buttons that answer nothing, so they are

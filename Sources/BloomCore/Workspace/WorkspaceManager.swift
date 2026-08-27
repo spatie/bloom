@@ -195,6 +195,9 @@ public struct WorkspaceManager: Sendable {
         let finalBranch = Git.uniqueBranch(stem, taken: existingBranches)
 
         let directoryName = finalBranch.replacingOccurrences(of: "/", with: "-")
+        // Here rather than after the checkout, because a marker written once a worktree is already
+        // on disk arrives too late for everything in it. See `SpotlightExclusion`.
+        SpotlightExclusion.markWorkspacesRoot(creatingIt: true)
         let root = Self.workspacesRoot.appendingPathComponent(repo.name, isDirectory: true)
         // The suffix rule lives in `WorktreePath` because restoring an archived workspace needs
         // the same one: two places that each invent a free directory name are two places that can
@@ -284,6 +287,7 @@ public struct WorkspaceManager: Sendable {
         }
 
         let directoryName = branch.replacingOccurrences(of: "/", with: "-")
+        SpotlightExclusion.markWorkspacesRoot(creatingIt: true)
         let root = Self.workspacesRoot.appendingPathComponent(repo.name, isDirectory: true)
         let worktreePath = WorktreePath.free(
             preferred: root.appendingPathComponent(directoryName).path
