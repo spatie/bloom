@@ -105,14 +105,3 @@ public struct SubagentID: Identifier {
     public let rawValue: String
     public init(_ rawValue: String) { self.rawValue = rawValue }
 }
-
-/// One server the user has added, which is a row in the `hosts` table.
-///
-/// Its own type rather than the destination string, because the destination is the one part of a
-/// server the user is allowed to change: a VPS that moves from an IP address to a name is the same
-/// server with the same history, and keying anything off the text would lose that the moment it
-/// was edited.
-public struct ServerID: Identifier {
-    public let rawValue: String
-    public init(_ rawValue: String) { self.rawValue = rawValue }
-}

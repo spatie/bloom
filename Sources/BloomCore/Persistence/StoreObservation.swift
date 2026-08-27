@@ -27,9 +27,6 @@ public enum StoreDomain: String, Sendable, Hashable, CaseIterable {
     case permissionAsks = "permission_asks"
     case agentQuotas = "agent_quotas"
     case quickPrompts = "quick_prompt"
-    /// The servers pane's list. Named for the table, like every case here, and the table is
-    /// `hosts` because that is what SSH calls the thing. See `Server`.
-    case hosts
 }
 
 /// Who hears about a committed write, and how they are stopped from drowning in them.

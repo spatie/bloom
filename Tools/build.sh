@@ -276,19 +276,6 @@ for art in Resources/Spatie*.pdf(N) Resources/BloomMenuBar.pdf(N) Resources/Make
   cp "$art" "$APP/Contents/Resources/"
 done
 
-# bloomd, the Python file Bloom copies onto a server. It rides in the bundle rather than being
-# fetched at install time, so the version the app ships with and the version it installs cannot
-# disagree, and so a machine with no route to the internet still gets a working server. See
-# `Bloomd` in the core, which finds it here by walking up from the executable, and
-# `Resources/bloomd.py` itself, whose header says what it is for.
-#
-# The exec bit is carried across on purpose even though Bloom runs it as `python3 <path>`: a user
-# who wants to run it by hand on the server should not have to think about it.
-if [[ -f Resources/bloomd.py ]]; then
-  cp Resources/bloomd.py "$APP/Contents/Resources/bloomd.py"
-  chmod 755 "$APP/Contents/Resources/bloomd.py"
-fi
-
 # SwiftTerm and friends ship as dylibs in a debug build; carry them along.
 for lib in "$BIN_DIR"/*.dylib(N); do
   cp "$lib" "$APP/Contents/MacOS/"

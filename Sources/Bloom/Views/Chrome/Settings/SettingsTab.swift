@@ -14,11 +14,6 @@ enum SettingsTab: String, Hashable, CaseIterable {
     case prompts
     case approvals
     case tools
-    /// The machines Bloom can reach over SSH. See `ServerSettingsView`.
-    ///
-    /// Called Servers rather than Hosts, which is what SSH and the `hosts` table behind it call
-    /// the thing, because a person adding their VPS calls it a server.
-    case servers
     /// Coupling a client the owner runs themselves. See `CommandLineSettingsView`.
     ///
     /// It was called Terminal, and that was the wrong word twice over: nothing in the pane is
@@ -48,7 +43,6 @@ enum SettingsTab: String, Hashable, CaseIterable {
         case .prompts: "Prompts"
         case .approvals: "Approvals"
         case .tools: "Tools"
-        case .servers: "Servers"
         case .commandLine: "Command Line"
         case .about: "About"
         }
