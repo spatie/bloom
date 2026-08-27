@@ -51,6 +51,14 @@ struct DiffView: View {
     private var draft: ReviewDraft? { model.reviewDrafts[file.path] }
     private var draftSpot: ReviewSpot? { draft?.spot }
 
+    /// The cancel waiting on an answer, or nil when nothing has been asked.
+    ///
+    /// Held by this view rather than by the band, because the confirmation is a sheet and the
+    /// bands are rows in a lazy stack: a row scrolled away takes its sheet with it. That is the
+    /// same reason `TranscriptListView` hangs the queued message question on the list instead of
+    /// on the row it is about.
+    @State private var discarding: PendingDiscard?
+
     /// The patch as git wrote it, kept so the whitespace toggle can refold it without going back
     /// to git for a diff it has already been given.
     @State private var source: FileDiff?
@@ -89,6 +97,21 @@ struct DiffView: View {
     private struct LoadID: Hashable {
         var workspaceID: WorkspaceID
         var file: ChangedFile
+    }
+
+    /// One cancel that has been asked about: what would be lost, and which editor to close once
+    /// the answer comes back. The editor stays open and holding its text while the question is up,
+    /// so an answer of "keep" needs no restoring.
+    private struct PendingDiscard: Equatable {
+        var target: Target
+        var question: ReviewCommentDiscard
+
+        enum Target: Equatable {
+            /// The editor the gutter `+` opened.
+            case draft
+            /// The editor the pencil opened, on the comment it is rewriting.
+            case edit(ReviewCommentID)
+        }
     }
 
     private var absolutePath: String {
@@ -142,6 +165,18 @@ struct DiffView: View {
         ) { _ in
         } message: { problem in
             Text(problem)
+        }
+        // Cancel and Escape ask before they throw typed text away. On this view rather than on the
+        // band, for the reason `discarding` gives.
+        .confirmation($discarding) { pending in
+            pending.question.confirmation
+        } onConfirm: { pending in
+            switch pending.target {
+            case .draft:
+                discardDraft()
+            case let .edit(id):
+                closeEdit(of: id)
+            }
         }
     }
 
@@ -484,7 +519,7 @@ struct DiffView: View {
                 editing: editBinding(for: placement.comment.id),
                 onBeginEdit: { beginEdit(of: placement.comment) },
                 onCommitEdit: { commitEdit(of: placement.comment) },
-                onCancelEdit: { cancelEdit(of: placement.comment.id) },
+                onCancelEdit: { cancelEdit(of: placement.comment) },
                 onRemove: {
                     let model = model
                     Task { await model.removeReviewComment(id: placement.comment.id) }
@@ -581,7 +616,28 @@ struct DiffView: View {
         model.reviewDrafts[file.path] = ReviewDraft(spot: spot, anchor: anchor)
     }
 
+    /// Cancel and Escape, from the editor the gutter `+` opened.
+    ///
+    /// **Reported by the owner: either of them threw the sentence away on the press.** There is no
+    /// undo anywhere in the app that could bring it back, and Escape is the easier of the two to
+    /// hit by accident, because it is also how a menu, a popover and Quick Look are dismissed. So
+    /// both ask, and they ask the same thing: `ReviewCommentDiscard` decides whether there is
+    /// anything to lose and what the reader is told, so a button and a key cannot come to two
+    /// answers about one editor. An empty box, or one holding only whitespace, still closes on the
+    /// press: a question with nothing behind it teaches people to click through questions.
     private func cancelDraft() {
+        guard let question = ReviewCommentDiscard.needed(
+            closing: model.reviewText.drafts[file.path] ?? "", replacing: nil
+        ) else {
+            discardDraft()
+            return
+        }
+        discarding = PendingDiscard(target: .draft, question: question)
+    }
+
+    /// Closing the editor for good: the anchor and the text both go. Reached by an answered
+    /// question, by a cancel with nothing to lose, and by a commit that has the body it needs.
+    private func discardDraft() {
         model.reviewDrafts[file.path] = nil
         model.reviewText.drafts[file.path] = nil
     }
@@ -592,10 +648,10 @@ struct DiffView: View {
         let body = (model.reviewText.drafts[file.path] ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else {
-            cancelDraft()
+            discardDraft()
             return
         }
-        cancelDraft()
+        discardDraft()
         let model = model
         let path = file.path
         Task {
@@ -631,9 +687,28 @@ struct DiffView: View {
         model.reviewEdits.insert(comment.id)
     }
 
-    /// Escape and Cancel. The typed text goes; the comment keeps the body it had. Discarding is
-    /// safe here in a way it is not on a click elsewhere, because this is somebody saying so.
-    private func cancelEdit(of id: ReviewCommentID) {
+    /// Escape and Cancel, from the editor the pencil opened. It asks first, exactly as the draft's
+    /// does.
+    ///
+    /// **Cancel does not mean the same thing in the two editors, and the question says so.**
+    /// Cancelling a comment being written loses the whole note; cancelling a rewrite loses only
+    /// the rewrite, because the comment keeps the body it already had and is still going out with
+    /// the next message. That is the smaller loss and it is still the one worth asking about: it
+    /// is a second look at a note somebody had already decided to leave. `ReviewCommentDiscard`
+    /// carries both wordings so the two cannot drift, and it stays quiet when the field says what
+    /// the comment already says, or has been emptied, since neither leaves anything to lose.
+    private func cancelEdit(of comment: ReviewComment) {
+        guard let question = ReviewCommentDiscard.needed(
+            closing: model.reviewText.edits[comment.id] ?? "", replacing: comment.body
+        ) else {
+            closeEdit(of: comment.id)
+            return
+        }
+        discarding = PendingDiscard(target: .edit(comment.id), question: question)
+    }
+
+    /// Closing the editor for good, which is also what a save does once the write is on its way.
+    private func closeEdit(of id: ReviewCommentID) {
         model.reviewEdits.remove(id)
         model.reviewText.edits[id] = nil
     }
@@ -648,9 +723,9 @@ struct DiffView: View {
         case .refused:
             return
         case .unchanged:
-            cancelEdit(of: comment.id)
+            closeEdit(of: comment.id)
         case let .save(body):
-            cancelEdit(of: comment.id)
+            closeEdit(of: comment.id)
             let model = model
             Task { await model.editReviewComment(id: comment.id, body: body) }
         }
