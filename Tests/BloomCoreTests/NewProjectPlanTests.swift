@@ -101,7 +101,8 @@ struct NewProjectVerdictTests {
         targetIsRepository: Bool = false,
         enclosing: String? = nil,
         ancestor: String = "/Users/tester/Developer",
-        isAncestorWritable: Bool = true
+        isAncestorWritable: Bool = true,
+        isTargetWritable: Bool = true
     ) -> NewProjectFacts {
         NewProjectFacts(
             name: name,
@@ -115,6 +116,7 @@ struct NewProjectVerdictTests {
             enclosingRepository: enclosing,
             nearestExistingAncestor: ancestor,
             isAncestorWritable: isAncestorWritable,
+            isTargetWritable: isTargetWritable,
             homeDirectory: home,
             workspacesRoot: "/Users/tester/bloom/workspaces"
         )
@@ -147,27 +149,35 @@ struct NewProjectVerdictTests {
             .contains("already there and empty"))
     }
 
-    /// The refusal the owner asked for by name: a folder with somebody's work in it does not get
-    /// a silent `git init` over the top of it.
-    @Test("a folder with things in it is refused, and points at the other door")
-    func refusesAFolderWithFilesInIt() {
+    /// A folder that is there and cannot be written to is refused on its own permissions rather
+    /// than its parent's, because nothing is being made above it.
+    @Test("an existing folder Bloom cannot write to is refused, and names itself")
+    func refusesAnUnwritableFolder() {
         let verdict = NewProjectVerdict.of(
-            facts(targetExists: true, targetIsDirectory: true, targetIsEmpty: false)
+            facts(
+                targetExists: true, targetIsDirectory: true, targetIsEmpty: true,
+                isTargetWritable: false
+            )
         )
-        #expect(verdict == .refuse(.folderNotEmpty("~/Developer/sparkline")))
-        #expect(!verdict.allowsCreation)
-        guard case .refuse(let refusal) = verdict else { return }
-        #expect(refusal.sentence.contains("~/Developer/sparkline"))
-        #expect(refusal.sentence.contains("add that folder as a project"))
+        #expect(verdict == .refuse(.notWritable("~/Developer/sparkline")))
     }
 
-    /// "It has things in it" is true of a repository too, and it is the useless half of the truth.
-    @Test("an existing repository is named as one, not as a full folder")
-    func refusesARepository() {
-        let verdict = NewProjectVerdict.of(
-            facts(targetExists: true, targetIsDirectory: true, targetIsRepository: true)
+    /// The two refusals that retired when the two doors became one. Neither was about the disk:
+    /// both ended by telling the person to close the window and come in through the other door,
+    /// and there is one door now. A repository is `ProjectTargetVerdict.add` and a folder with
+    /// files in it is `.track`, which is `ProjectTargetTests`' business rather than this rule's.
+    @Test("an existing repository and a folder with files in it are no longer this rule's to judge")
+    func theTwoRedirectionsAreGone() {
+        // Asked outside its contract, this rule answers about the folder being there and says
+        // nothing about what is in it. `ProjectTargetVerdict` is what stops it being asked.
+        #expect(
+            NewProjectVerdict.of(
+                facts(targetExists: true, targetIsDirectory: true, targetIsRepository: true)
+            ) == .adopt
         )
-        #expect(verdict == .refuse(.alreadyRepository("~/Developer/sparkline")))
+        for refusal in [NewProjectRefusal.somethingThere("~/x"), .insideRepository("~/y")] {
+            #expect(!refusal.sentence.contains("add that folder as a project"), "\(refusal)")
+        }
     }
 
     @Test("a file in the way is refused")
@@ -182,6 +192,10 @@ struct NewProjectVerdictTests {
         #expect(verdict == .refuse(.insideRepository("~/dev/outer")))
         guard case .refuse(let refusal) = verdict else { return }
         #expect(refusal.sentence.contains("~/dev/outer"))
+        // The one refusal with somewhere to go, offered as a button that writes the repository
+        // into the field. The same accessor `FolderRefusal` has, for the same case.
+        #expect(refusal.alternative == "~/dev/outer")
+        #expect(NewProjectRefusal.noName.alternative == nil)
     }
 
     @Test("Bloom's own worktree folder is refused")
@@ -246,8 +260,8 @@ struct NewProjectVerdictTests {
     func everyRefusalSpeaks() {
         let all: [NewProjectRefusal] = [
             .noName, .nameHasSeparator("a/b"), .nameIsHidden(".x"), .noLocation,
-            .locationNotAbsolute("dev"), .somethingThere("~/x"), .folderNotEmpty("~/x"),
-            .alreadyRepository("~/x"), .insideRepository("~/y"), .insideBloomsWorkspaces("~/z"),
+            .locationNotAbsolute("dev"), .somethingThere("~/x"),
+            .insideRepository("~/y"), .insideBloomsWorkspaces("~/z"),
             .reservedLocation("~/Desktop"), .notWritable("/opt"),
         ]
         for refusal in all {

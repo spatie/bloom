@@ -492,9 +492,11 @@ enum Snapshot {
                 try? await Task.sleep(for: .seconds(2))
             }
 
-            // `--new-project` opens the New Project sheet, for the same reason `--create-sheet`
-            // opens the other one: it is a sheet, and a sheet has no way in that a capture run can
-            // press. Pass it LAST, as above.
+            // `--new-project` opens the sheet that starts a project, for the same reason
+            // `--create-sheet` opens the other one: it is a sheet, and a sheet has no way in that
+            // a capture run can press. Pass it LAST, as above. The flag keeps the old name because
+            // that is what the notification is still called: `StartProjectSheet` absorbed the
+            // second door rather than replacing the first.
             let wantsNewProject = arguments.contains("--new-project")
             if wantsNewProject {
                 NotificationCenter.default.post(name: .bloomNewProject, object: nil)

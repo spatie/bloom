@@ -113,7 +113,7 @@ struct SidebarView: View {
             // themselves sections and a list cannot nest one inside another. It carries no tag
             // and refuses selection, so it stays a label. Home keeps its own section above it,
             // which is what stops it reading as the first project.
-            SidebarProjectsHeader(onNewProject: newProject, onAddProject: addProject)
+            SidebarProjectsHeader(onStartProject: startProject)
                 .selectionDisabled()
                 .listRowSeparator(.hidden)
 
@@ -611,23 +611,21 @@ struct SidebarView: View {
     /// It used to say "Point Bloom at a git repository to start running agents in it", which for
     /// the person with an idea and no folder is the sentence that ends the evaluation. It had also
     /// stopped being true: Bloom will make the repository, and now it will make the folder too.
-    /// The prominent half is the one that needs no folder, because that is the reader this panel
-    /// was failing.
+    ///
+    /// One button, where there were two. The second said Choose a folder and went to a file panel,
+    /// which is the same fork the `+` above used to offer and is now the Choose inside the sheet.
     private var noProjects: some View {
         ContentUnavailableView {
             Label("No projects yet", systemImage: "folder.badge.plus")
         } description: {
             Text("Start a new project, or point Bloom at a repository you already have.")
         } actions: {
-            VStack(spacing: Metrics.spacingSmall) {
-                Button("New project", systemImage: "plus", action: newProject)
-                    .buttonStyle(.borderedProminent)
-                    // Tinted explicitly, like every other prominent button in the app: untinted it
-                    // follows the system accent, which on a Mac set to Graphite is grey glass. See
-                    // `EmptyStateView`, which says the same over the same button.
-                    .tint(Palette.accentFill)
-                Button("Choose a folder", systemImage: "folder", action: addProject)
-            }
+            Button("Start a project", systemImage: "plus", action: startProject)
+                .buttonStyle(.borderedProminent)
+                // Tinted explicitly, like every other prominent button in the app: untinted it
+                // follows the system accent, which on a Mac set to Graphite is grey glass. See
+                // `EmptyStateView`, which says the same over the same button.
+                .tint(Palette.accentFill)
         }
     }
 
@@ -640,13 +638,9 @@ struct SidebarView: View {
         NotificationCenter.default.post(name: .bloomNewWorkspace, object: repo)
     }
 
-    private func addProject() {
-        Task { await app.addProjectByAsking() }
-    }
-
     /// The sheet lives in `RootView` for the same reason the create sheet does, so every entry
     /// point posts and behaves identically.
-    private func newProject() {
+    private func startProject() {
         NotificationCenter.default.post(name: .bloomNewProject, object: nil)
     }
 }

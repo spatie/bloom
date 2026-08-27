@@ -70,8 +70,6 @@ struct ComposerFooterView: View {
     /// frame, handed to `attachmentAnchor` so the card hangs off the control it describes.
     @State private var gaugeFrame: CGRect?
 
-
-
     /// Whether the quick prompt panel is up. Held here for the same reason the flag above it is:
     /// the button is in all three candidates `ViewThatFits` builds, and state inside a candidate
     /// belongs to the candidate.

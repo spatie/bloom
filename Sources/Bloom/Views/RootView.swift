@@ -191,24 +191,26 @@ struct RootView: View {
                     initialRepo: createTargetRepo, startsOnPullRequest: createStartsOnPullRequest
                 )
             }
-            // Starting a project that is not a repository yet, and then going straight on to its
-            // first workspace.
+            // The one door into the project list, and then going straight on to a first workspace
+            // where there is one to start.
             //
-            // **The hand-off is the one behavioural change.** Adding a folder ends with a project in
-            // the sidebar because the person already had one and may well have work in it. Creating a
-            // project ends in the create sheet, because a repository with one empty commit in it is
-            // not something anybody wanted for its own sake: they had an idea, and the next thing is
-            // an agent working on it.
+            // **The hand-off is the branch the sheet's footer names.** A project Bloom made ends in
+            // the create sheet, because a repository with one empty commit in it is not something
+            // anybody wanted for its own sake: they had an idea, and the next thing is an agent
+            // working on it. A project that already had work in it ends in the sidebar, because
+            // they may well have come to read what is already there. The sheet decides which, and
+            // says so before the button is pressed. See `ProjectTargetVerdict.opensAWorkspace`.
             .sheet(isPresented: $isNewProjectPresented, onDismiss: startWorkInNewProject) {
-                NewProjectSheet { path in
-                    guard let path else {
+                StartProjectSheet { started in
+                    guard let started else {
                         isNewProjectPresented = false
                         return
                     }
                     // Registered before the sheet comes down rather than after, so the project is in
                     // hand by the time `onDismiss` looks for it. It is one store write.
                     Task {
-                        projectToStartWorkIn = await app.addCreatedProject(at: path)
+                        let repo = await app.addStartedProject(at: started.path)
+                        projectToStartWorkIn = started.opensWorkspace ? repo : nil
                         isNewProjectPresented = false
                     }
                 }
@@ -454,9 +456,11 @@ extension Notification.Name {
     /// body.
     static let bloomFocusSearch = Notification.Name("bloom.focusSearch")
     static let bloomNewWorkspace = Notification.Name("bloom.newWorkspace")
-    /// Raises the New Project sheet. A notification for the same reason the create sheet is one:
-    /// the sheet lives here, and the sidebar's menu, Home's empty state, the toolbar and a
-    /// `Commands` body can none of them present anything themselves.
+    /// Raises the sheet that starts a project. A notification for the same reason the create sheet
+    /// is one: the sheet lives here, and the sidebar's `+`, Home's empty state, the toolbar and a
+    /// `Commands` body can none of them present anything themselves. The name is the old one,
+    /// because what it raises is still the same sheet: `StartProjectSheet` absorbed the second
+    /// door rather than replacing the first.
     static let bloomNewProject = Notification.Name("bloom.newProject")
     /// Posted only by `Snapshot`, and only in a debug build. See the handler above.
     static let bloomStartTerminalWorkspace = Notification.Name("bloom.startTerminalWorkspace")

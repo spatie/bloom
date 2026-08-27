@@ -51,8 +51,7 @@ contribute for free.
 | Show Notes | `⇧⌘N` | a workspace is selected |
 | Rename Tab | | the tab in front has a name to change |
 | Close Tab | `⌘W` | main window is key and a tab is closable |
-| New Project… | `⌥⌘N` | always |
-| Add Project Folder… | `⇧⌘O` | always |
+| Start a Project… | `⌥⌘N` | always |
 | Save | `⌘S` | a window has published a `SaveAction` |
 
 ### Edit
@@ -288,8 +287,7 @@ in its own doc comment.
 
 | Action | Where it lives | In the menu bar | Key |
 | --- | --- | --- | --- |
-| New project (sidebar heading menu, both empty states) | `+` menu, buttons | yes | `⌥⌘N` |
-| Add a project folder (sidebar heading menu, both empty states) | `+` menu, buttons | yes | `⇧⌘O` |
+| Start a project (sidebar heading, both empty states) | `+` button, buttons | yes | `⌥⌘N` |
 | Home scopes: All, Needs you, Running, Live, Archived | chip strip | **no** | none |
 | Home project filter | menu | **no** | none |
 | Sidebar filter: which workspaces, hidden projects (`SidebarFilterMenuItems`) | status bar menu | **no** | none |

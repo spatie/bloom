@@ -71,12 +71,12 @@ public enum MenuBarCatalogue {
         // spends a double click on it.
         MenuBarItem(.renameTab, in: .file, "Rename Tab", availability: .needsTab),
         MenuBarItem(.closeTab, in: .file, "Close Tab", key: .command("w"), availability: .needsTab),
-        // Two verbs for two different people, and they are not the same command with two names.
-        // New makes the folder and the repository for somebody who has an idea; Add takes a
-        // repository that already exists. Every door into this used to say Add, which is a word
-        // that only makes sense to the second of the two.
-        MenuBarItem(.newProject, in: .file, "New Project…", key: .init("n", .command, .option)),
-        MenuBarItem(.addProjectFolder, in: .file, "Add Project Folder…", key: .init("o", .command, .shift)),
+        // One item, where there were two: New Project at option-command-N and Add Project Folder
+        // at shift-command-O. They were two verbs for two different people, and both of them ended
+        // in a project in the sidebar, so the menu was asking which kind of person you were before
+        // you had said anything. Which verb a target needs is worked out from the target now. See
+        // `ProjectTargetVerdict`, and `StartProjectSheet` for the window it draws.
+        MenuBarItem(.startProject, in: .file, "Start a Project…", key: .init("n", .command, .option)),
         MenuBarItem(.save, in: .file, "Save", key: .command("s"), availability: .sometimes),
 
         // MARK: Edit
@@ -198,8 +198,7 @@ public enum MenuBarAction: String, CaseIterable, Sendable {
     case showNotes
     case renameTab
     case closeTab
-    case newProject
-    case addProjectFolder
+    case startProject
     case save
 
     case find

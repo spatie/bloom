@@ -103,19 +103,19 @@ struct HomeEmptyStateTests {
         for state in states { #expect(state.message.hasSuffix(".")) }
     }
 
-    /// The first state is the only one with two ways out, and the prominent one is the one that
-    /// needs no folder. Bloom used to offer this reader nothing but a file panel, which is the
-    /// wrong door for somebody whose project does not exist yet.
-    @Test("only the state with no projects offers a second button")
-    func onlyTheFirstStateHasTwoWaysOut() {
-        #expect(HomeEmptyState.noProjects.actionTitle == "New project")
-        #expect(HomeEmptyState.noProjects.secondaryActionTitle == "Add a project folder")
-        let others: [HomeEmptyState] = [
-            .noWorkspaces, .noMatch(query: "blue", scope: .all),
+    /// One way out of each state, including the first, which used to have two: New project and Add
+    /// a project folder, the same pair the sidebar's `+` offered. Both ended in a project in the
+    /// sidebar, so the reader with nothing on disk yet is asked for one thing rather than which
+    /// kind of person they are.
+    @Test("every state offers exactly one way out, and names it as a verb")
+    func everyStateHasOneWayOut() {
+        #expect(HomeEmptyState.noProjects.actionTitle == "Start a project")
+        let all: [HomeEmptyState] = [
+            .noProjects, .noWorkspaces, .noMatch(query: "blue", scope: .all),
             .noneInChosenProjects(phrase: "Bloom"), .emptyScope(.archived),
         ]
-        for state in others {
-            #expect(state.secondaryActionTitle == nil, "\(state)")
+        for state in all {
+            #expect(!state.actionTitle.isEmpty, "\(state)")
         }
     }
 

@@ -43,8 +43,8 @@ struct BloomWindowToolbar: ToolbarContent {
     /// column has none. So the control appears when it is the only one left and stands down when
     /// it is not.
     ///
-    /// Nothing is only here. New Workspace is Command N in the File menu and Add Project Folder is
-    /// Command Shift O beside it, so both keys work in either state, on Home and in a workspace,
+    /// Nothing is only here. New Workspace is Command N in the File menu and Start a Project is
+    /// Option Command N beside it, so both keys work in either state, on Home and in a workspace,
     /// whether or not this item is on screen. This is the pointer's way in, not the only way in.
     let isSidebarCollapsed: Bool
 
@@ -58,15 +58,14 @@ struct BloomWindowToolbar: ToolbarContent {
                 Menu {
                     Button(MenuBarCatalogue[.newWorkspace].title, action: presentCreate)
                         .disabled(app.repos.isEmpty)
-                    Button(MenuBarCatalogue[.newProject].title, action: newProject)
-                    Button(MenuBarCatalogue[.addProjectFolder].title, action: addProject)
+                    Button(MenuBarCatalogue[.startProject].title, action: startProject)
                 } label: {
                     Label("New workspace", systemImage: "plus")
                 } primaryAction: {
                     // With no projects there is no workspace to start, so the click does the
                     // thing that needs nothing on disk. It used to open the file panel, which is
                     // the right answer only for somebody who already has a repository.
-                    if app.repos.isEmpty { newProject() } else { presentCreate() }
+                    if app.repos.isEmpty { startProject() } else { presentCreate() }
                 }
                 .help("Start a workspace")
                 // The control had no accessibility label at all, which matters more now that it
@@ -135,11 +134,7 @@ struct BloomWindowToolbar: ToolbarContent {
         NotificationCenter.default.post(name: .bloomNewWorkspace, object: nil)
     }
 
-    private func addProject() {
-        Task { await app.addProjectByAsking() }
-    }
-
-    private func newProject() {
+    private func startProject() {
         NotificationCenter.default.post(name: .bloomNewProject, object: nil)
     }
 }
