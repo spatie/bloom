@@ -1,8 +1,11 @@
 import SwiftUI
 import BloomCore
 
-/// The one line that stands for a run of consecutive tool calls: a triangle and the words for what
-/// is behind it.
+/// The one line that stands for the hidden part of a run of consecutive tool calls: a triangle and
+/// the words for what is behind it.
+///
+/// It stands above the calls that are still drawn, which are the newest of the run and the one
+/// running right now. The count is what is hidden, so it climbs as a turn works.
 ///
 /// **Words rather than a number in a grey oval**, which is what was asked for and which macOS has
 /// already spent on notification badges. `TranscriptFold.label` carries that argument and the

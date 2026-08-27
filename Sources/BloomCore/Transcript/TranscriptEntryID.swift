@@ -22,12 +22,13 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
     /// The line above a run of consecutive tool calls, by the sequence number of the FIRST call in
     /// it. See `TranscriptFold`.
     ///
-    /// **It is in the list from the moment the run is long enough, whether it is folded or not,
-    /// and drawing nothing when it is not.** That is the same argument the four singletons below
-    /// carry and it is the whole reason folding is cheap: an entry that came and went in the
-    /// middle of the list would make the pass that folds a run both an insertion and a removal,
-    /// which `TranscriptEntryChange` can only answer `.rebuilt` to. Always present, folding is a
-    /// removal on its own and unfolding is an insertion on its own.
+    /// **It is in the list from the run's second call onwards, whether it is folded or not, and
+    /// drawing nothing when it is not.** That is the same argument the four singletons below carry
+    /// and it is the whole reason folding is cheap: an entry that came and went in the middle of
+    /// the list would make the pass that folds a run both an insertion and a removal, which
+    /// `TranscriptEntryChange` can only answer `.rebuilt` to. In place before the run is long
+    /// enough to fold, folding is a removal on its own and unfolding is an insertion on its own.
+    /// See `TranscriptFold.leastGroup`, which is that gap.
     case fold(Int)
     /// The bubble drawn from the moment Return is pressed until its stored row arrives. Its own
     /// case rather than a row, so that the stored row taking its place is an entry the table has

@@ -160,61 +160,79 @@ struct TranscriptEntryChangeTests {
 
     // MARK: - Folding a run of tool calls
 
-    /// **The whole reason `TranscriptFold` is shaped the way it is, written down as the four
-    /// shapes it has to produce.** Every one of these must be a single contiguous edit: `.rebuilt`
-    /// is a `reloadData()`, which throws away every cell and the reader's text selection, and a
-    /// fold that cost one of those on every run in a turn would be slower than no fold at all.
+    /// **The whole reason `TranscriptFold` is shaped the way it is, written down as the shapes it
+    /// has to produce.** Every one of these must be a single contiguous edit: `.rebuilt` is a
+    /// `reloadData()`, which throws away every cell and the reader's text selection, and a fold
+    /// that cost one of those per tool call would be far slower than no fold at all. The runs are
+    /// therefore held in the list's own state and refreshed one pass BEHIND the rows, so a call
+    /// landing and the fold that swallows it are never the same pass.
     ///
-    /// The run here is rows 10 to 13, closed by prose at 14, and `fold.10` is the line above it.
+    /// The run here begins at row 10, and `fold.10` is the line above it.
     private func withFold(_ seqs: [Int]) -> [TranscriptEntryID] {
         [.setup, .fold(10)] + rows(seqs) + [.sending, .streaming]
     }
 
-    /// A run reaching four calls puts its line into the list while the run is still growing, which
-    /// is an insertion in the middle of the rows and nothing else.
-    @Test("a run's line goes in while the run is still open")
+    /// A group's line joins the list at its second call, long before it can fold. That gap is what
+    /// makes every shape below a single edit: an entry appearing on the same pass that rows leave
+    /// is an insertion and a removal at once, and there is no answer to that but `.rebuilt`.
+    @Test("a run's line goes in while the run is far too short to fold")
     func theFoldLineArrives() {
-        let old = drawn([10, 11, 12])
-        let new = withFold([10, 11, 12, 13])
-        #expect(TranscriptEntryChange.between(old, new) == .grew(head: 1..<2, tail: 5..<6))
+        let old = drawn([10])
+        let new = withFold([10, 11])
+        #expect(TranscriptEntryChange.between(old, new) == .grew(head: 1..<2, tail: 3..<4))
     }
 
-    /// **The pass that folds a closed run is a removal and nothing else**, because the line was
-    /// already there and the row the fold keeps is the last one, which does not move. This is the
-    /// shape that fails if the fold's line is emitted only when it is folded.
-    @Test("folding a closed run takes rows out and puts none in")
+    /// **The pass a run first folds is a removal and nothing else**, because the line was already
+    /// there and the newest call, which is the row the fold keeps, does not move.
+    @Test("a run reaching four calls folds by taking three rows out")
     func foldingIsOneRemoval() {
-        let open = withFold([10, 11, 12, 13, 14])
-        let folded = withFold([13, 14])
+        let open = withFold([10, 11, 12, 13])
+        let folded = withFold([13])
         #expect(TranscriptEntryChange.between(open, folded) == .shrank(head: 2..<5, tail: 0..<0))
     }
 
-    /// And opening one is the mirror. The line stays put, the rows go back in behind it.
+    /// **And the shape that repeats for every call after that, which is the one folding on arrival
+    /// added.** The call lands on its own pass and the fold swallows the one before it on the
+    /// next, so the transcript stops growing during a run: one row in, one row out, and the line
+    /// above them counting up.
+    @Test("a call landing in a folded run, then the fold swallowing the one before it")
+    func aCallLandsIntoAFoldedRun() {
+        let folded = withFold([13])
+        let landed = withFold([13, 14])
+        #expect(TranscriptEntryChange.between(folded, landed) == .grew(head: 3..<4, tail: 0..<0))
+        let swallowed = withFold([14])
+        #expect(TranscriptEntryChange.between(landed, swallowed) == .shrank(head: 2..<3, tail: 0..<0))
+    }
+
+    /// Opening a fold is the mirror of closing it. The line stays put and the rows go back in
+    /// behind it, which is what naming the fold by the run's FIRST call buys.
     @Test("opening a fold puts its rows back in one run")
     func unfoldingIsOneInsertion() {
-        let folded = withFold([13, 14])
-        let open = withFold([10, 11, 12, 13, 14])
+        let folded = withFold([13])
+        let open = withFold([10, 11, 12, 13])
         #expect(TranscriptEntryChange.between(folded, open) == .grew(head: 2..<5, tail: 0..<0))
+        #expect(TranscriptEntryChange.between(open, folded) == .shrank(head: 2..<5, tail: 0..<0))
     }
 
-    /// The row that closes a run lands one pass BEFORE the fold, which is why the runs are held in
-    /// state and refreshed from an `onChange` rather than computed in the body. Both edits on one
-    /// pass would be a removal and an insertion at once, which has no answer but `.rebuilt`.
-    @Test("the row that closes a run lands on a pass of its own")
-    func theClosingRowIsItsOwnPass() {
-        let running = withFold([10, 11, 12, 13])
-        let closed = withFold([10, 11, 12, 13, 14])
-        #expect(TranscriptEntryChange.between(running, closed) == .grew(head: 6..<7, tail: 0..<0))
+    /// A burst of parallel calls arrives with no results back, so nothing may be hidden yet: the
+    /// pass that discovers the run only puts its line in.
+    @Test("a burst of calls with no results back is an insertion and no fold")
+    func aParallelBurstDoesNotFold() {
+        let old = drawn([])
+        let landed = drawn([10, 11, 12, 13])
+        #expect(TranscriptEntryChange.between(old, landed) == .grew(head: 1..<5, tail: 0..<0))
+        let listed = withFold([10, 11, 12, 13])
+        #expect(TranscriptEntryChange.between(landed, listed) == .grew(head: 1..<2, tail: 0..<0))
     }
 
-    /// And the shape that would happen if it did not: both at once, which is a full reload. Here
-    /// so that anybody who moves the fold back into the body finds out from a test rather than
-    /// from a scroll.
-    @Test("a row landing and a run folding on one pass is a rebuild")
+    /// **And the shape that would happen if the runs were computed in the body rather than held
+    /// one pass behind it.** Here so that anybody who moves them back finds out from a test rather
+    /// than from a scroll.
+    @Test("a call landing and a run folding on one pass is a rebuild")
     func bothAtOnceIsARebuild() {
         let running = withFold([10, 11, 12, 13])
-        let closedAndFolded = withFold([13, 14])
-        #expect(TranscriptEntryChange.between(running, closedAndFolded) == .rebuilt)
+        let landedAndFolded = withFold([14])
+        #expect(TranscriptEntryChange.between(running, landedAndFolded) == .rebuilt)
     }
 
     // MARK: - The five kinds of entry

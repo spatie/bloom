@@ -367,7 +367,11 @@ struct TranscriptListView: View {
                     // that did not do what it was asked is a call the reader is looking for.
                     failed: $0.isError || $0.refusal != nil,
                     nested: $0.parentToolUseID != nil,
-                    drawsNothing: TranscriptRowInk.drawsNothing(kind: $0.kind, payload: $0.payload)
+                    drawsNothing: TranscriptRowInk.drawsNothing(kind: $0.kind, payload: $0.payload),
+                    // The result has come back, so nothing this call says can change again. It is
+                    // what lets a fold hide a call while the turn is still running without ever
+                    // having to reveal it later. See rule 1 in `TranscriptFold`.
+                    settled: $0.resultPayload != nil
                 )
             },
             extending: previous
@@ -456,9 +460,10 @@ struct TranscriptListView: View {
         let drawnRows = visibleRows
         let drawnRange = drawnRows.startIndex..<drawnRows.endIndex
         // The run the loop below is inside, so a fold's own line is emitted once, at the first row
-        // of it the window actually holds.
+        // of it the window actually holds, and the first row of that run which is NOT hidden.
+        // Every row of the run before that one is skipped.
         var runSeq: Int?
-        var runIsFolded = false
+        var runShownFrom = 0
 
         var out: [TranscriptTableEntry] = []
         // A workspace's setup script, its worktree events and its opening prompt. All three are
@@ -497,29 +502,36 @@ struct TranscriptListView: View {
 
         for index in drawnRows.indices {
             let row = drawnRows[index]
-            // A run of consecutive tool calls, drawn as its last call with a line above it saying
-            // how many came before. See `TranscriptFold`, which holds every decision about what
-            // forms a run and when one refuses to fold; what happens here is only the emitting.
-            if let run = folds.run(containing: index) {
-                if run.firstSeq != runSeq {
+            // A run of consecutive tool calls, drawn as the newest of them with a line above
+            // saying how many came before. See `TranscriptFold`, which holds every decision about
+            // what forms a run and what may be hidden; what happens here is only the emitting.
+            if let at = folds.runIndex(containing: index) {
+                // By index above and by value here, so the run's own array of calls is taken up
+                // once per run rather than once per row. See `TranscriptFold.Runs.runIndex`.
+                if folds.runs[at].firstSeq != runSeq {
+                    let run = folds.runs[at]
                     runSeq = run.firstSeq
-                    runIsFolded = TranscriptFold.isFolded(
-                        run, unfolded: unfolded, revealed: revealed, drawn: drawnRange
-                    )
+                    // What the fold would hide if the reader had not opened it, which is what the
+                    // line has to say either way, and whether it has anything to say at all.
+                    let would = TranscriptFold.hides(run, revealed: revealed, drawn: drawnRange)
+                    let hidden = unfolded.contains(run.firstSeq) ? 0 : would
+                    runShownFrom = hidden > 0 ? run.calls[hidden].index : run.rows.lowerBound
                     out.append(foldEntry(
-                        run: run,
-                        isFolded: runIsFolded,
-                        // A run that cannot fold, and one held open by anything other than the
-                        // reader's own click, has no line: a control that answers nothing when it
-                        // is pressed is worse than no control. Its entry stays in the list all the
-                        // same, drawing nothing, because an entry that came and went in the middle
-                        // of the list is the `.rebuilt` this is all arranged to avoid.
-                        shows: run.canFold && (runIsFolded || unfolded.contains(run.firstSeq)),
+                        firstSeq: run.firstSeq,
+                        hiding: would,
+                        isFolded: hidden > 0,
+                        // A run that has nothing to hide gets no line: a control that answers
+                        // nothing when it is pressed is worse than no control. Its entry stays in
+                        // the list all the same, drawing nothing, because an entry that came and
+                        // went in the middle of the list is the `.rebuilt` this is all arranged to
+                        // avoid.
+                        shows: would > 0,
                         session: sessionID
                     ))
                 }
-                // Folded, only the last call in the run is still drawn.
-                if runIsFolded, index != run.lastDrawnIndex { continue }
+                // Everything before the first call that stays is the fold, and the rows that draw
+                // nothing between them go with it.
+                if index < runShownFrom { continue }
             }
             guard !TranscriptNoise.isHidden(row) else { continue }
             let isExpanded = expanded.contains(row.seq)
@@ -714,16 +726,20 @@ struct TranscriptListView: View {
     /// is.** The height cache survives a workspace switch and every other entry is keyed by a row
     /// id, which is unique across sessions; a run's first sequence number is not, so without this
     /// the next conversation's fold would be handed the last one's height.
+    ///
+    /// Handed the run's first sequence number rather than the run, because the closure below
+    /// outlives this pass and a `Run` carries the array of its calls with it: one entry per run in
+    /// the session, each holding a session's worth of nothing anybody reads.
     private func foldEntry(
-        run: TranscriptFold.Run, isFolded: Bool, shows: Bool, session: SessionID
+        firstSeq: Int, hiding: Int, isFolded: Bool, shows: Bool, session: SessionID
     ) -> TranscriptTableEntry {
         TranscriptTableEntry(
-            id: .fold(run.firstSeq),
+            id: .fold(firstSeq),
             contentKey: TranscriptContentKey {
                 $0.combine("fold")
                 $0.combine(session)
-                $0.combine(run.firstSeq)
-                $0.combine(run.hiddenCount)
+                $0.combine(firstSeq)
+                $0.combine(hiding)
                 $0.combine(isFolded)
                 $0.combine(shows)
             },
@@ -735,9 +751,9 @@ struct TranscriptListView: View {
                 guard shows else { return AnyView(EmptyView()) }
                 return AnyView(
                     TranscriptFoldRowView(
-                        hiddenCount: run.hiddenCount,
+                        hiddenCount: hiding,
                         isExpanded: !isFolded,
-                        onToggle: { toggleFold(run.firstSeq) }
+                        onToggle: { toggleFold(firstSeq) }
                     )
                     // The same two insets every row in this list carries: one here, and one inside
                     // `transcriptRowFrame`. A fold's line drawn with only the inner one would sit
