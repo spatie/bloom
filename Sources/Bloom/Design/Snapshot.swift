@@ -497,11 +497,13 @@ enum Snapshot {
                 try? await Task.sleep(for: .seconds(2))
             }
 
-            // `--new-project` opens the sheet that starts a project, for the same reason
+            // `--new-project` opens the window that starts a project, for the same reason
             // `--create-sheet` opens the window beside it: neither has a way in that a capture run
-            // can press. Pass it LAST, as above. The flag keeps the old name because
-            // that is what the notification is still called: `StartProjectSheet` absorbed the
-            // second door rather than replacing the first.
+            // can press. Pass it LAST, as above. The flag keeps the old name because that is what
+            // the notification is still called: `StartProjectView` absorbed the second door rather
+            // than replacing the first. What moved when it stopped being a sheet is where the
+            // picture comes from, which is the second-window branch below rather than the
+            // attached-sheet one.
             let wantsNewProject = arguments.contains("--new-project")
             if wantsNewProject {
                 NotificationCenter.default.post(name: .bloomNewProject, object: nil)
@@ -568,7 +570,8 @@ enum Snapshot {
             // showing, and it titles the MAIN window after the selected workspace, so a title
             // comparison against "Bloom" matched neither and every settings capture silently
             // returned a picture of the main window instead.
-            if wantsSettings || wantsRepoSettings || wantsAbout || wantsWelcome || wantsCreateWindow {
+            if wantsSettings || wantsRepoSettings || wantsAbout || wantsWelcome || wantsCreateWindow
+                || wantsNewProject {
                 let main = candidate
                 candidate = nil
                 for _ in 0..<40 {
@@ -584,6 +587,8 @@ enum Snapshot {
                         openAppMenuItem(titled: "About")
                     } else if wantsWelcome {
                         WelcomeWindow.show()
+                    } else if wantsNewProject {
+                        NotificationCenter.default.post(name: .bloomNewProject, object: nil)
                     } else {
                         openSettingsWindow()
                     }
@@ -602,7 +607,7 @@ enum Snapshot {
             // A sheet is its own window, hanging off the one it was presented from, and it is
             // never in `capturableWindows()`: it carries no title bar. Asked for by name here
             // rather than searched for, so nothing else on screen can be picked by mistake.
-            if wantsNewProject || wantsProjectSetup || wantsFeedbackSheet {
+            if wantsProjectSetup || wantsFeedbackSheet {
                 for _ in 0..<20 where candidate?.attachedSheet == nil {
                     try? await Task.sleep(for: .milliseconds(250))
                 }

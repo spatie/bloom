@@ -52,7 +52,7 @@ extension AppModel {
         }
     }
 
-    /// Registers what `StartProjectSheet` ended with, and hands the row back so a first workspace
+    /// Registers what `StartProjectView` ended with, and hands the row back so a first workspace
     /// can follow where there is one to start.
     ///
     /// The same call as adding a folder somebody chose, deliberately: by the time this runs the

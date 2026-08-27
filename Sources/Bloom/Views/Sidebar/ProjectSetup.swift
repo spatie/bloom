@@ -20,10 +20,10 @@ enum ProjectSetupSurface: Sendable, Equatable {
 /// hand it over, so the offer below is reached identically from all of them.
 ///
 /// The main window's own routes no longer come this way. The sidebar's `+`, Home's empty state,
-/// the toolbar and the File menu all raise `StartProjectSheet`, which asks the same questions of
+/// the toolbar and the File menu all raise `StartProjectView`, which asks the same questions of
 /// the same folder and answers them in one field rather than behind a file panel. This offer
-/// stays because Settings is a separate scene and cannot present the main window's sheet, and
-/// because the GitHub half of it lives nowhere else.
+/// stays because the Settings window's project list adds a folder through a file panel rather
+/// than through one field, and because the GitHub half of it lives nowhere else.
 @MainActor
 @Observable
 final class ProjectSetup {

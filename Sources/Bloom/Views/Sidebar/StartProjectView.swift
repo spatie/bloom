@@ -2,7 +2,7 @@ import SwiftUI
 import BloomCore
 
 /// One door into the project list: a field, a block that says what will happen, and a button named
-/// after it.
+/// after it. The window it is in, and why it is one, is `StartProjectWindow`.
 ///
 /// It replaces a two item menu. The `+` beside Projects used to ask New Project or Add Project
 /// Folder before the person had typed anything, and the owner's objection was that both answers
@@ -12,11 +12,11 @@ import BloomCore
 ///
 /// **Every decision it draws is `ProjectTargetVerdict` in the core.** How one typed line is read,
 /// which of the two rule sets judges it, what the block says, whether the button can be pressed
-/// and what it is called: all of them are pure functions with tests, because the sheet is the one
+/// and what it is called: all of them are pure functions with tests, because this is the one
 /// place in the app where a wrong answer writes to somebody's disk.
 ///
 /// **No GitHub half.** `ProjectSetupSheet` offers to publish a folder it has just turned into a
-/// repository, and this sheet does not, in either of the two cases where it makes one. For a brand
+/// repository, and this does not, in either of the two cases where it makes one. For a brand
 /// new project the argument is the one the sheet this replaced was built on: publishing an empty
 /// repository claims a name in somebody's account for a thing that may not exist next week, and
 /// `RepositoryStarter.abandon` will not delete one once it does. **For Start Tracking that
@@ -25,11 +25,17 @@ import BloomCore
 /// own piece of work, with an owner picker, an availability check and a sign in sheet, and it does
 /// not belong in the change that removed a menu. Publishing an existing project is still
 /// `ProjectSetupSheet`'s, reached from the file panel.
-struct StartProjectSheet: View {
-    /// Called with the project once there is one, and with nil when the person backed out.
-    let onFinish: (StartedProject?) -> Void
-
+///
+/// A plain `View` with a `dismiss` in it, which is what let it move out of a sheet for almost
+/// nothing: `DismissAction` closes the window it is in exactly as it dismissed the sheet it was
+/// in, so every route that ended the sheet ends the window. What it no longer needs is the
+/// closure it used to hand its answer back through. The sheet's host had to register the project
+/// and then wait for the sheet to leave the screen before it could raise the next surface,
+/// because two sheets cannot be up at once. Two windows can, so what happens next is said here.
+struct StartProjectView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openWindow) private var openWindow
 
     private enum Phase: Equatable {
         case naming
@@ -45,7 +51,7 @@ struct StartProjectSheet: View {
     @State private var contents: FolderContents?
     @State private var phase: Phase = .naming
     /// Where a bare name goes: the folder the owner's projects already live in. Settled once, when
-    /// the sheet appears, so it cannot move while somebody is typing.
+    /// the window appears, so it cannot move while somebody is typing.
     @State private var defaultLocation = ""
     @State private var projectsThere = 0
     /// What the first commit's branch will be. Read from git rather than asserted, because a
@@ -56,6 +62,12 @@ struct StartProjectSheet: View {
     @State private var identityProblem: String?
     @State private var createTask: Task<Void, Never>?
     @State private var isStepSlow = false
+    /// Set by every path that ends this window on purpose, so the close that follows is not read
+    /// as somebody walking out on a run. The one path that does not set it is the close button,
+    /// which is the whole of what the discard in `onDisappear` is for, and the one that most needs
+    /// it is a run that has just SUCCEEDED: the phase is still `.working` at that moment, and
+    /// without this the folder that was just made would be taken straight back off the disk.
+    @State private var isFinishing = false
     @FocusState private var isFieldFocused: Bool
 
     private static let width: CGFloat = 560
@@ -65,15 +77,15 @@ struct StartProjectSheet: View {
     /// The block is always there and never collapses, so the field above it and the button below
     /// it do not move as the target changes under the keyboard. It grows for a long refusal: the
     /// nine that are left run to 232 characters and every one of them is worth reading in full,
-    /// which is the whole argument for a sheet rather than an editable row in the sidebar.
+    /// which is the whole argument for a dialog rather than an editable row in the sidebar.
     ///
     /// **74 was two lines of body plus the headline, and the common answer is one.** Reserving the
     /// long case left the ordinary one sitting in a box a third empty, which is what the owner saw
-    /// first. The floor is the short answer now; a long refusal still pushes the sheet taller,
+    /// first. The floor is the short answer now; a long refusal still pushes the window taller,
     /// which is the movement this constant exists to avoid and the only one worth paying for.
     private static let blockMinHeight: CGFloat = 52
     /// Enough to see what is being kept out of the first commit without the list becoming the
-    /// sheet. The same cap `ProjectSetupSheet` uses.
+    /// window. The same cap `ProjectSetupSheet` uses.
     private static let excludedShown = 8
 
     private var home: String { FileManager.default.homeDirectoryForCurrentUser.path }
@@ -98,7 +110,7 @@ struct StartProjectSheet: View {
             Hairline()
 
             // Not a ScrollView, for the reason `ProjectSetupSheet` gives: one takes every point it
-            // is offered, and this sheet is as tall as the three things in it.
+            // is offered, and this window is as tall as the three things in it.
             VStack(alignment: .leading, spacing: Metrics.gutter) {
                 switch phase {
                 case .naming: form
@@ -114,6 +126,12 @@ struct StartProjectSheet: View {
         }
         .frame(width: Self.width)
         .background(Palette.surface)
+        // The title bar says which of the three phases this is, because the header underneath no
+        // longer says it: a window whose bar reads "Start a project" over a heading reading the
+        // same words is the stutter the create window's own title was taken out for. It is still
+        // worth saying once, which is why it moves rather than goes: "Setting up bloom" is what
+        // the window is doing, and a failure's title is what went wrong.
+        .navigationTitle(title)
         .onAppear {
             if defaultLocation.isEmpty {
                 let paths = app.repos.map(\.path)
@@ -151,9 +169,20 @@ struct StartProjectSheet: View {
             contents = found
         }
         .onDisappear {
-            // Not a stop: the sheet only leaves the screen by a path that has finished with the
-            // run. What this covers is the window closing under it.
+            // It used to be true that this only left the screen by a path that had finished with
+            // the run, because a sheet has no close button and no Cmd+W. A window has both, so
+            // closing it in the middle of a run is now a thing a person can do, and what is left
+            // behind if nothing answers for it is a half made repository on their disk. This is
+            // `stop` without the part that ends a sheet that is already gone.
             createTask?.cancel()
+            createTask = nil
+            guard !isFinishing, case .working = phase else { return }
+            // Read before the folder exists, from the inspection `start` took, which is the whole
+            // point: `NewProjectStarter.discard` takes back what Bloom made and leaves what it
+            // did not. See the rule there for the folder somebody else's files are in.
+            let target = facts.path
+            let made = !facts.targetExists
+            Task { await NewProjectStarter.discard(at: target, folderWasCreated: made) }
         }
     }
 
@@ -180,14 +209,12 @@ struct StartProjectSheet: View {
                 .foregroundStyle(Palette.accent)
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: Metrics.spacingTight) {
-                Text(title)
-                    .font(Typo.title)
-                    .foregroundStyle(Palette.textPrimary)
-                Text("a folder on this Mac, and a project in the sidebar")
-                    .font(Typo.codeTiny)
-                    .foregroundStyle(Palette.textTertiary)
-            }
+            // The line that was under the title, now the only thing in the band. The title itself
+            // is the window's, which is where a window's title goes, and the same words in bold
+            // fifteen points four points below it were the second drawing of it.
+            Text("a folder on this Mac, and a project in the sidebar")
+                .font(Typo.codeTiny)
+                .foregroundStyle(Palette.textTertiary)
 
             Spacer(minLength: 0)
         }
@@ -195,6 +222,9 @@ struct StartProjectSheet: View {
         .padding(.vertical, Metrics.inset)
     }
 
+    /// What the title bar says, which is the phase rather than a fixed name: the window is a
+    /// question, then a run, then a refusal, and only the first of the three is called starting a
+    /// project.
     private var title: String {
         switch phase {
         case .naming: "Start a project"
@@ -237,7 +267,7 @@ struct StartProjectSheet: View {
     /// What will happen, said in the same place whatever the answer is.
     ///
     /// One block rather than a hint line, a first commit box and a refusal that each appear and
-    /// disappear: the target changes under the keyboard, and a sheet whose middle grows and
+    /// disappear: the target changes under the keyboard, and a dialog whose middle grows and
     /// shrinks by a paragraph per keystroke is one nobody reads.
     private var block: some View {
         let said = consequence
@@ -289,7 +319,7 @@ struct StartProjectSheet: View {
     }
 
     /// Drawn open rather than behind a chevron, which is where `ProjectSetupSheet` keeps it. It is
-    /// the one thing on this sheet worth reading before pressing: a folder with a `.env` in it is
+    /// the one thing here worth reading before pressing: a folder with a `.env` in it is
     /// exactly the case that goes wrong quietly.
     private func excluded(_ paths: [ExcludedPath]) -> some View {
         VStack(alignment: .leading, spacing: Metrics.spacingTight) {
@@ -396,7 +426,7 @@ struct StartProjectSheet: View {
 
             switch phase {
             case .naming:
-                Button("Cancel", role: .cancel) { onFinish(nil) }
+                Button("Cancel", role: .cancel) { finish(nil) }
                     .keyboardShortcut(.cancelAction)
                 // Named after the verdict, so a verb that is not what will happen can never be
                 // pressed. It keeps its title while disabled, because a button that goes blank
@@ -409,7 +439,7 @@ struct StartProjectSheet: View {
 
             case .working:
                 // Enabled, and carrying Escape. A disabled Cancel over a step that has hung is a
-                // sheet with no way out, which is the bug the neighbouring sheet was left with
+                // dialog with no way out, which is the bug the neighbouring sheet was left with
                 // when `git commit` sat waiting on a signing helper.
                 Button("Stop", role: .cancel, action: stop)
                     .keyboardShortcut(.cancelAction)
@@ -435,6 +465,12 @@ struct StartProjectSheet: View {
     // MARK: - Work
 
     private func chooseFolder() {
+        // The panel lands on THIS window, and nothing here had to change for that: `present()`
+        // hangs it off `NSApp.keyWindow`, which was the sheet while this was one and is this
+        // window now that it is one. Which matters, because a folder picker that opened as a sheet
+        // on the main window would be answering a question asked somewhere else, and the window
+        // that asked it would be sitting beside it with its field still empty.
+        //
         // The deepest part of what is typed that really exists, so the panel opens beside the
         // folder being named rather than at whatever it was last shown.
         let opening = facts.targetExists
@@ -464,7 +500,7 @@ struct StartProjectSheet: View {
         // Nothing is written for a repository that is already one, so there is no run to watch and
         // no failure to report: the project simply appears in the sidebar.
         if case .add(let root) = decided {
-            onFinish(StartedProject(path: root, opensWorkspace: false))
+            finish(StartedProject(path: root, opensWorkspace: false))
             return
         }
 
@@ -484,7 +520,7 @@ struct StartProjectSheet: View {
                     phase = .working(step)
                 }
                 guard !Task.isCancelled else { return }
-                onFinish(StartedProject(path: creation.path, opensWorkspace: opensWorkspace))
+                finish(StartedProject(path: creation.path, opensWorkspace: opensWorkspace))
             } catch let failure as NewProjectFailure {
                 guard !Task.isCancelled else { return }
                 phase = .failed(failure)
@@ -509,13 +545,48 @@ struct StartProjectSheet: View {
         let target = facts.path
         Task {
             await NewProjectStarter.discard(at: target, folderWasCreated: !facts.targetExists)
-            onFinish(nil)
+            finish(nil)
+        }
+    }
+
+    /// What happens after the button: the project into the sidebar, this window closed, and, where
+    /// there is a first workspace to write, the create window opened on it.
+    ///
+    /// It is said here rather than by whatever raised this window, and that is the change of
+    /// container paying for itself. A sheet had to hand its answer back through a closure, park it,
+    /// and let its host raise the next surface from inside the dismissal, because AppKit draws one
+    /// sheet at a time and the second one could not go up until the first had come down. Two
+    /// windows have no such quarrel.
+    ///
+    /// **The hand-off is the branch the footer names.** A project Bloom made ends in the create
+    /// window, because a repository with one empty commit in it is not something anybody wanted
+    /// for its own sake: they had an idea, and the next thing is an agent working on it. A project
+    /// that already had work in it ends in the sidebar, because they may well have come to read
+    /// what is already there. See `ProjectTargetVerdict.opensAWorkspace`.
+    private func finish(_ started: StartedProject?) {
+        isFinishing = true
+        guard let started else { return dismiss() }
+        Task {
+            // Registered before this window goes rather than after, so the project is in hand by
+            // the time anything is raised in front of it. It is one store write.
+            let repo = await app.addStartedProject(at: started.path)
+            dismiss()
+            // The window this one is not attached to. What the button just did shows up in the
+            // main window's sidebar, and this window can be in front of it, beside it, or open
+            // with the main window closed altogether, in which case nothing at all would show it.
+            // `openWindow` on the main scene brings it forward when it is open and opens it when
+            // it is not. It was free while this was a sheet, because a sheet cannot exist without
+            // the window it is attached to. `CreateWorkspaceView.create` makes the same call for
+            // the same reason.
+            openWindow(id: BloomApp.mainWindowID)
+            guard started.opensWorkspace, let repo else { return }
+            openWindow(id: CreateWorkspaceWindow.id, value: repo.id)
         }
     }
 
     private func discardAndClose() {
         guard case .failed(let failure) = phase else {
-            onFinish(nil)
+            finish(nil)
             return
         }
         let target = facts.path
@@ -523,17 +594,17 @@ struct StartProjectSheet: View {
             await NewProjectStarter.discard(
                 at: target, folderWasCreated: failure.folderWasCreated
             )
-            onFinish(nil)
+            finish(nil)
         }
     }
 }
 
-/// What the sheet ended with.
+/// What the run ended with.
 ///
-/// Two facts rather than one, because the window does two different things with them: every
-/// project it hands back goes into the sidebar, and only one that Bloom made goes straight on to
-/// its first workspace. See `ProjectTargetVerdict.opensAWorkspace` for why that difference is
-/// right, and the footer for where it is said out loud.
+/// Two facts rather than one, because `finish` does two different things with them: every project
+/// it hands back goes into the sidebar, and only one that Bloom made goes straight on to its first
+/// workspace. See `ProjectTargetVerdict.opensAWorkspace` for why that difference is right, and the
+/// footer for where it is said out loud.
 struct StartedProject: Equatable {
     var path: String
     var opensWorkspace: Bool

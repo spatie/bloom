@@ -647,7 +647,7 @@ struct HomeView: View {
         NotificationCenter.default.post(name: .bloomNewWorkspace, object: repo)
     }
 
-    /// Handed to `RootView`, which owns the only sheet that starts a project.
+    /// Handed to `RootView`, which opens the one window that starts a project.
     private func startProject() {
         NotificationCenter.default.post(name: .bloomNewProject, object: nil)
     }

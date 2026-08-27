@@ -641,8 +641,8 @@ struct SidebarView: View {
         NotificationCenter.default.post(name: .bloomNewWorkspace, object: repo)
     }
 
-    /// The sheet lives in `RootView` for the same reason the create window is opened from there,
-    /// so every entry point posts and behaves identically.
+    /// The window is opened from `RootView` for the same reason the create window is, so every
+    /// entry point posts and behaves identically.
     private func startProject() {
         NotificationCenter.default.post(name: .bloomNewProject, object: nil)
     }

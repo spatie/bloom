@@ -169,6 +169,10 @@ struct BloomApp: App {
         // code being described can be read while the task is written. See the scene.
         CreateWorkspaceWindow(model: model)
 
+        // Where a project is started, a window for the same reason and at the owner's asking. One
+        // of these rather than one per project: it is not about a project yet. See the scene.
+        StartProjectWindow(model: model)
+
         // The map of the seas workspaces have been named after, opened from the Window menu.
         // See the scene.
         OceansWindow(model: model)

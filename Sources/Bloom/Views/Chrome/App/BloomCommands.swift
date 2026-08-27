@@ -202,7 +202,7 @@ struct BloomCommands: Commands {
 
             // One door. It was two, and both of them ended in a project in the sidebar, which is
             // why the second one is gone rather than reworded: whether a folder is added, made or
-            // tracked is worked out from the folder. See `StartProjectSheet`.
+            // tracked is worked out from the folder. See `StartProjectView`.
             MenuCommand(.startProject) {
                 NotificationCenter.default.post(name: .bloomNewProject, object: nil)
             }

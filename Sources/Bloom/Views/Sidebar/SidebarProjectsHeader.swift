@@ -36,7 +36,7 @@ struct SidebarProjectsHeader: View {
             // owner's objection to that menu was that it made him choose before he had said
             // anything, and he was right: both items ended in a project in the sidebar, and which
             // of the two a folder needs is Bloom's to work out from the folder. See
-            // `StartProjectSheet`, and `ProjectTargetVerdict` for the rule that decides.
+            // `StartProjectView`, and `ProjectTargetVerdict` for the rule that decides.
             //
             // Lit on hover rather than revealed by it, and drawn exactly as the per-project `+`
             // is, so the sidebar has one convention for a header's button rather than two.

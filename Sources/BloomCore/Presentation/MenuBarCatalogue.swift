@@ -75,7 +75,7 @@ public enum MenuBarCatalogue {
         // at shift-command-O. They were two verbs for two different people, and both of them ended
         // in a project in the sidebar, so the menu was asking which kind of person you were before
         // you had said anything. Which verb a target needs is worked out from the target now. See
-        // `ProjectTargetVerdict`, and `StartProjectSheet` for the window it draws.
+        // `ProjectTargetVerdict`, and `StartProjectView` for the window it draws.
         MenuBarItem(.startProject, in: .file, "Start a Project…", key: .init("n", .command, .option)),
         MenuBarItem(.save, in: .file, "Save", key: .command("s"), availability: .sometimes),
 

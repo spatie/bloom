@@ -28,12 +28,6 @@ struct RootView: View {
     /// Whether the window's search field has the keyboard. Shift+Cmd+F, and Cmd+F where nothing in
     /// front can find, put it here. See `FindCommand`.
     @FocusState private var isSearchFocused: Bool
-    @State private var isNewProjectPresented = false
-    /// The project the new-project sheet has just made, waiting for that sheet to leave the
-    /// screen. Two sheets cannot be up at once, and raising the second one from inside the first
-    /// one's dismissal is the only ordering AppKit reliably draws, so the hand-off is a value
-    /// parked here and read in `onDismiss`.
-    @State private var projectToStartWorkIn: Repo?
 
     var body: some View {
         @Bindable var app = app
@@ -169,30 +163,6 @@ struct RootView: View {
             // Debug builds only, and only when asked for on the command line: raises one of the two
             // Help menu sheets so a capture run can look at it. See `FeedbackPresenter`.
             .task { FeedbackPresenter.shared.presentIfRequested() }
-            // The one door into the project list, and then going straight on to a first workspace
-            // where there is one to start.
-            //
-            // **The hand-off is the branch the sheet's footer names.** A project Bloom made ends in
-            // the create window, because a repository with one empty commit in it is not something
-            // anybody wanted for its own sake: they had an idea, and the next thing is an agent
-            // working on it. A project that already had work in it ends in the sidebar, because
-            // they may well have come to read what is already there. The sheet decides which, and
-            // says so before the button is pressed. See `ProjectTargetVerdict.opensAWorkspace`.
-            .sheet(isPresented: $isNewProjectPresented, onDismiss: startWorkInNewProject) {
-                StartProjectSheet { started in
-                    guard let started else {
-                        isNewProjectPresented = false
-                        return
-                    }
-                    // Registered before the sheet comes down rather than after, so the project is in
-                    // hand by the time `onDismiss` looks for it. It is one store write.
-                    Task {
-                        let repo = await app.addStartedProject(at: started.path)
-                        projectToStartWorkIn = started.opensWorkspace ? repo : nil
-                        isNewProjectPresented = false
-                    }
-                }
-            }
             // Send Feedback and Submit a Prompt, raised from the Help menu. Here rather than at the
             // menu item, because a `Commands` body is not a view and cannot present anything, and
             // because what was typed into either of them belongs to the app rather than to the sheet:
@@ -325,11 +295,11 @@ struct RootView: View {
 
     /// The window's notification wiring, in a method rather than in `body`.
     ///
-    /// Not tidiness. `body` was one chain of forty-odd modifiers, and the new-project sheet took
-    /// it past the type checker's budget: the build fails with "unable to type-check this
-    /// expression in reasonable time", which names no cause and points at whichever line the
-    /// solver happened to give up on. A method has a signature of its own to solve against, so
-    /// the two halves are solved separately.
+    /// Not tidiness. `body` was one chain of forty-odd modifiers, and the new-project sheet that
+    /// used to be among them took it past the type checker's budget: the build fails with "unable
+    /// to type-check this expression in reasonable time", which names no cause and points at
+    /// whichever line the solver happened to give up on. A method has a signature of its own to
+    /// solve against, so the two halves are solved separately.
     ///
     /// A method and not a `ViewModifier`, because half of these handlers write this view's own
     /// `@State` and `@FocusState`, and a modifier is a separate type that can see neither.
@@ -372,8 +342,13 @@ struct RootView: View {
         // window into the state the two busy signals are for. See `Snapshot`.
         .acceptsCaptureRunningState(app)
         .acceptsCaptureNotice(app)
+        // A window now rather than a sheet on this one, so this is the same translation the create
+        // window's post gets in the handler below. The four controls that ask still post, because
+        // a `Commands` body cannot reach `openWindow` and the other three have always gone through
+        // one door. What that window does once its button is pressed is its own, which is why
+        // nothing is parked here waiting for it to come down: see `StartProjectView.finish`.
         .onReceive(NotificationCenter.default.publisher(for: .bloomNewProject)) { _ in
-            isNewProjectPresented = true
+            openWindow(id: StartProjectWindow.id)
         }
         // The post is still the one door every control goes through, and what it opens is a
         // window now rather than a sheet on this one. The translation is here because this is
@@ -414,15 +389,6 @@ struct RootView: View {
 
     // MARK: - Actions
 
-    /// The first workspace of a project that has just been created, raised as the new-project
-    /// sheet leaves the screen. Nothing happens when the sheet was cancelled, which is what an
-    /// empty `projectToStartWorkIn` means.
-    private func startWorkInNewProject() {
-        guard let repo = projectToStartWorkIn else { return }
-        projectToStartWorkIn = nil
-        openCreateWindow(in: repo)
-    }
-
     /// Opens the create window, on the project that was asked for or on the one the window is
     /// already looking at.
     ///
@@ -456,11 +422,12 @@ extension Notification.Name {
     /// has selected, and because the four have always behaved identically by going through one
     /// door. See `openCreateWindow`.
     static let bloomNewWorkspace = Notification.Name("bloom.newWorkspace")
-    /// Raises the sheet that starts a project. A notification for the same reason the create
-    /// window is opened by one: the sheet lives here, and the sidebar's `+`, Home's empty state,
-    /// the toolbar and a `Commands` body can none of them present anything themselves. The name is the old one,
-    /// because what it raises is still the same sheet: `StartProjectSheet` absorbed the second
-    /// door rather than replacing the first.
+    /// Opens the window that starts a project. A notification for the same reason the create
+    /// window is opened by one: the sidebar's `+`, Home's empty state, the toolbar and a
+    /// `Commands` body can none of them reach `openWindow`, and this is where the receiver that
+    /// can has always been. The name is the old one twice over, because what it raises is still
+    /// the same surface: `StartProjectView` absorbed the second door rather than replacing the
+    /// first, and it stopped being a sheet without changing what it asks.
     static let bloomNewProject = Notification.Name("bloom.newProject")
     /// Posted only by `Snapshot`, and only in a debug build. See the handler above.
     static let bloomStartTerminalWorkspace = Notification.Name("bloom.startTerminalWorkspace")
