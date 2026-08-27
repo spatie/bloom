@@ -123,16 +123,15 @@ struct TranscriptFoldTests {
         #expect(hides(work) == 5)
     }
 
-    /// **A turn that ends on a tool call has no answer**, so the whole of it is working and its
-    /// newest row stays on screen. That is also what every streaming turn looks like before its
-    /// answer arrives, which is why it is the same rule rather than a case.
-    @Test("a turn that ends on a tool call has no answer and keeps its newest row")
+    /// A turn that ends on a settled tool call has no answer, so all of it is working. The view
+    /// uses the newest hidden row as the fold's visible label.
+    @Test("a turn that ends on settled work includes its newest row in the fold")
     func noAnswer() throws {
         let facts = [user(0)] + (1..<8).map { tool($0) } + [footer(8)]
         let work = try only(facts)
         #expect(!work.hasAnswer)
-        #expect(hides(work) == 6)
-        #expect(work.rows[hides(work)].seq == 7)
+        #expect(hides(work) == 7)
+        #expect(work.rows[hides(work) - 1].seq == 7)
     }
 
     /// And prose followed by more work is narration rather than an answer, so it folds too. Taking
@@ -241,10 +240,9 @@ struct TranscriptFoldTests {
     func anUndecidedAskIsNeverHidden() throws {
         let waiting = [user(0), tool(1), tool(2), tool(3), tool(4), ask(5, decided: false), tool(6)]
         #expect(hides(try only(waiting)) == 4)
-        // Answered, it is history and folds away with everything else: the fold reaches past it
-        // and stops only at the newest row, which is where an unanswered turn always stops.
+        // Answered, it is history and folds away with everything else through the newest row.
         let decided = [user(0), tool(1), tool(2), tool(3), tool(4), ask(5), tool(6)]
-        #expect(hides(try only(decided)) == 5)
+        #expect(hides(try only(decided)) == 6)
     }
 
     /// **Rule 4.** A tool result the reader opened is a row they are reading. Refusing to fold at
@@ -252,7 +250,7 @@ struct TranscriptFoldTests {
     @Test("an opened row cuts the fold short rather than unfolding it")
     func anOpenedRowCapsThePrefix() throws {
         let work = try only([user(0)] + (1..<11).map { tool($0) })
-        #expect(hides(work) == 9)
+        #expect(hides(work) == 10)
         #expect(hides(work, revealed: [5]) == 4)
         // A row further along cuts it no further than it already was.
         #expect(hides(work, revealed: [7, 5]) == 4)
@@ -267,7 +265,7 @@ struct TranscriptFoldTests {
         for seq in 1..<10 {
             #expect(hides(work, revealed: [seq]) <= seq - 1, "row \(seq) must still be drawn")
         }
-        #expect(hides(work, revealed: [99]) == 9)
+        #expect(hides(work, revealed: [99]) == 10)
     }
 
     /// A failure that has not settled by the caller's reckoning is still settled here. A result
@@ -288,7 +286,7 @@ struct TranscriptFoldTests {
     @Test("a working that runs past the drawn window does not fold")
     func aWorkingOutsideTheWindowDoesNotFold() throws {
         let work = try only([user(0)] + (1..<7).map { tool($0) })
-        #expect(TranscriptFold.hides(work, revealed: [], drawn: 0..<7) == 5)
+        #expect(TranscriptFold.hides(work, revealed: [], drawn: 0..<7) == 6)
         #expect(TranscriptFold.hides(work, revealed: [], drawn: 0..<6) == 0)
     }
 
@@ -298,8 +296,8 @@ struct TranscriptFoldTests {
     @Test("the window's start does not move what is hidden")
     func growingUpwardsTakesNothingOut() throws {
         let work = try only([user(0)] + (1..<7).map { tool($0) })
-        #expect(TranscriptFold.hides(work, revealed: [], drawn: 4..<20) == 5)
-        #expect(TranscriptFold.hides(work, revealed: [], drawn: 0..<20) == 5)
+        #expect(TranscriptFold.hides(work, revealed: [], drawn: 4..<20) == 6)
+        #expect(TranscriptFold.hides(work, revealed: [], drawn: 0..<20) == 6)
     }
 
     // MARK: Nothing unfolds
@@ -343,9 +341,8 @@ struct TranscriptFoldTests {
 
     // MARK: The words
 
-    /// The count goes into the label rather than into a grey oval, because macOS has already spent
-    /// that shape on notification badges. See `TranscriptFold.label`.
-    @Test("the line names what is hidden and how many")
+    /// Expanded folds spell out the count. Collapsed folds show it in their leading circle.
+    @Test("the expanded line names what is hidden and how many")
     func theLabel() {
         #expect(TranscriptFold.label(hiding: 14, showsMore: false) == "14 steps")
         #expect(TranscriptFold.label(hiding: 11, showsMore: true) == "11 earlier steps")

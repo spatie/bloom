@@ -38,8 +38,8 @@ import Foundation
 /// Two cases fall out of that and both were asked about:
 ///
 /// - **A turn that ends on a tool call has no answer.** Nothing follows the last work row, so the
-///   walk back finds no prose and the whole turn is work. Its newest row stays on screen, which is
-///   also what every streaming turn looks like before its answer arrives.
+///   walk back finds no prose and the whole turn is work. Its newest settled row remains visible
+///   as the fold label, which is also what a streaming turn shows before its answer arrives.
 /// - **A turn with two prose blocks and work between them** has one answer, the second, and the
 ///   first folds with everything around it.
 ///
@@ -89,27 +89,8 @@ public enum TranscriptFold {
     /// say, the pass that folds a turn is a removal and nothing else.
     public static let leastWork = 2
 
-    /// What the fold's line says, which has to name what is hidden and how many.
-    ///
-    /// **Not a count in a grey oval.** That is what was asked for, and macOS has already spent
-    /// that shape: Apple's guidance defines a filled oval carrying a number as a notification
-    /// badge, reserves it for unread counts and says not to imitate one, and Bloom's own sidebar
-    /// draws unread marks a few hundred points to the left. The rule for a disclosure control is
-    /// the opposite one, a descriptive label saying what is disclosed or hidden, which a bare
-    /// number fails. Every product shipping this exact control puts the count into words: Claude
-    /// Code's CLI says "Ran 4 commands", Codex says "Ran 4 commands", Cursor says "Explored N
-    /// tools".
-    ///
-    /// **It said "tool calls" and cannot any more**, because what is hidden is now a turn's whole
-    /// working: calls, the narration between them, thinking, a notice. "Step" is what covers all
-    /// of those and it is the word every agent surface uses for exactly this. It is not the
-    /// todo list's "step": that one is a thing the agent PLANS to do, this one is a thing it has
-    /// already done, and they never appear in the same place.
-    ///
-    /// Two wordings, for two different claims rather than for variety. While a turn is working
-    /// there is a row of it still on screen, so the hidden ones are the ones above it and the line
-    /// says so. Once the answer has landed the whole of the working is behind the line, and there
-    /// is no "earlier" left for the word to mean.
+    /// What an expanded fold says. A collapsed fold uses its newest hidden row as its label and
+    /// puts this count in the leading circle instead.
     public static func label(hiding count: Int, showsMore: Bool) -> String {
         let unit = count == 1 ? "step" : "steps"
         return showsMore ? "\(count) earlier \(unit)" : "\(count) \(unit)"
@@ -139,10 +120,9 @@ public enum TranscriptFold {
     /// reader has opened, and the row this session was opened on. `drawn` is the window of rows the
     /// list is handing to the table, because a fold has to be able to draw what it leaves.
     public static func hides(_ work: Work, revealed: Set<Int>, drawn: Range<Int>) -> Int {
-        // The last row stays while the turn has not said its answer yet: it is the thing happening
-        // now, and hiding it is the one way this feature can take away what it was asked for. Once
-        // the answer is on screen there is nothing left to keep, so the whole working goes.
-        var count = min(work.ready, work.hasAnswer ? work.rows.count : work.rows.count - 1)
+        // Settled work can all move into the fold. Its newest row remains visible as the fold's
+        // label, so this compacts the transcript without taking the current activity away.
+        var count = min(work.ready, work.rows.count)
         // Cut short at the first row somebody is reading or being taken to, rather than refusing to
         // fold at all: refusing would unfold a turn that had already folded.
         if !revealed.isEmpty,

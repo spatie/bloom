@@ -545,6 +545,9 @@ struct TranscriptListView: View {
                         hiding: would,
                         showsMore: would < work.rows.count,
                         isFolded: hidden > 0,
+                        latest: would > 0 ? rows[work.rows[would - 1].index] : nil,
+                        home: home,
+                        projectName: projectName,
                         // A turn with nothing to hide gets no line: a control that answers nothing
                         // when it is pressed is worse than no control. Its entry stays in the list
                         // all the same, drawing nothing, because an entry that came and went in
@@ -759,6 +762,9 @@ struct TranscriptListView: View {
         hiding: Int,
         showsMore: Bool,
         isFolded: Bool,
+        latest: TranscriptRow?,
+        home: TranscriptHome,
+        projectName: String?,
         shows: Bool,
         session: SessionID
     ) -> TranscriptTableEntry {
@@ -772,6 +778,8 @@ struct TranscriptListView: View {
                 $0.combine(showsMore)
                 $0.combine(isFolded)
                 $0.combine(shows)
+                $0.combine(latest?.id)
+                $0.combine(latest?.resultPayload?.count)
             },
             // Not a guess. This entry draws nothing because it has been told to draw nothing, so
             // the table can give it no view at all rather than build one to find out. See
@@ -784,6 +792,17 @@ struct TranscriptListView: View {
                         hiddenCount: hiding,
                         showsMore: showsMore,
                         isExpanded: !isFolded,
+                        latest: latest.map { row in
+                            AnyView(
+                                TranscriptRowView(
+                                    row: row,
+                                    home: home,
+                                    isExpanded: false,
+                                    isNested: row.parentToolUseID != nil,
+                                    projectName: projectName
+                                )
+                            )
+                        },
                         onToggle: { toggleFold(firstSeq) }
                     )
                     // The same two insets every row in this list carries: one here, and one inside

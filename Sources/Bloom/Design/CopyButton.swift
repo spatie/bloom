@@ -35,20 +35,31 @@ struct CopyButton: View {
 
     @State private var copied = false
     @State private var reset: Task<Void, Never>?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: copy) {
-            Label(copied ? "Copied" : title, systemImage: copied ? "checkmark" : "doc.on.doc")
-                .labelStyle(.iconOnly)
+            ZStack {
+                Image(systemName: "doc.on.doc")
+                    .opacity(copied ? 0 : 1)
+
+                Image(systemName: "checkmark")
+                    .foregroundStyle(Palette.positive)
+                    .opacity(copied ? 1 : 0)
+            }
                 .font(Typo.caption)
                 .imageScale(.medium)
+                // Both symbols occupy this exact box. Their different intrinsic bounds cannot
+                // move the footer or the button beside it when the copied state changes.
+                .frame(width: 16, height: 16)
                 // Clear rather than `.opacity(0)`, for the reason `DiffLineView.commentButton`
                 // measured: fading a button or its label to nothing took the element out of the
                 // accessibility hierarchy, so the control existed only for a pointer. Nothing
                 // gates hit testing here, so this one is reachable by Tab as well.
-                .foregroundStyle(isVisible || copied ? (copied ? Palette.positive : Palette.textTertiary) : Color.clear)
+                .foregroundStyle(isVisible || copied ? Palette.textTertiary : Color.clear)
                 .frame(width: size, height: size)
                 .contentShape(Rectangle())
+                .animation(reduceMotion ? nil : Motion.hover, value: copied)
         }
         .buttonStyle(.plain)
         // Still says "Copied" while it is showing the tick, because the tick alone is not an
