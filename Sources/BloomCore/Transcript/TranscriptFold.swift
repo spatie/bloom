@@ -115,6 +115,18 @@ public enum TranscriptFold {
         return showsMore ? "\(count) earlier \(unit)" : "\(count) \(unit)"
     }
 
+    /// An opened live turn becomes a growing log again when another item arrives. At the live end,
+    /// fold it back so the newest item remains visible and the completed items return to their
+    /// count. Away from the end the reader is inspecting that log, so their disclosure stays open.
+    public static func refoldedAtLiveEnd(_ unfolded: Set<Int>, in folds: Folds) -> Set<Int> {
+        guard let live = folds.all.last, !live.hasAnswer, unfolded.contains(live.firstSeq) else {
+            return unfolded
+        }
+        var result = unfolded
+        result.remove(live.firstSeq)
+        return result
+    }
+
     /// How many rows at the front of this turn's work are hidden right now, or nought for a fold
     /// that is not folded.
     ///

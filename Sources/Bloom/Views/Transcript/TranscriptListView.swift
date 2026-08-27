@@ -866,6 +866,13 @@ struct TranscriptListView: View {
             // arrivals leave the runs exactly as they were.
             let rescanned = Self.rescan(transcript.rows, extending: folds)
             if rescanned != folds { folds = rescanned }
+            // An open live turn is useful while the reader is inspecting it. Once they are back at
+            // the live end and more work arrives, it is a growing log again: keep the newest item
+            // visible and return everything completed above it to the compact count.
+            if atLiveEnd.value {
+                let refolded = TranscriptFold.refoldedAtLiveEnd(unfolded, in: rescanned)
+                if refolded != unfolded { unfolded = refolded }
+            }
             // A row has landed, so the end of the content has moved. Between rows the tail grows
             // without any of this being told, which is what `isStreaming` below is for.
             follower.nudge()

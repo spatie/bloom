@@ -360,6 +360,30 @@ struct TranscriptFoldTests {
         #expect(TranscriptFold.label(hiding: 1, showsMore: false) == "1 step")
     }
 
+    @Test("an open live turn folds back when new work reaches the live end")
+    func refoldingLiveWork() throws {
+        let live = try only([user(0)] + (1..<7).map { tool($0) })
+        let historical = TranscriptFold.Work(
+            span: 10..<14,
+            rows: (10..<14).map { TranscriptFold.Row(index: $0, seq: $0) },
+            ready: 4,
+            hasAnswer: true
+        )
+        let folds = TranscriptFold.Folds(
+            all: [historical, live], scannedRows: 7, resumeIndex: 1
+        )
+
+        #expect(
+            TranscriptFold.refoldedAtLiveEnd(
+                [historical.firstSeq, live.firstSeq], in: folds
+            ) == [historical.firstSeq]
+        )
+        #expect(
+            TranscriptFold.refoldedAtLiveEnd([historical.firstSeq], in: folds)
+                == [historical.firstSeq]
+        )
+    }
+
     // MARK: Finding a fold by row
 
     @Test("a row index finds the working it is in, and only that one")

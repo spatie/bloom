@@ -297,6 +297,11 @@ struct TranscriptTable: NSViewRepresentable {
         /// was at the live end and an instruction to be there is where somebody is. Written here
         /// and nowhere else: `goToEnd` and `releaseEnd` are the only two things that move it.
         fileprivate private(set) var holdsEnd = false
+        /// A pane reflow that began at the end is not a user scroll. AppKit can deliver the
+        /// bounds changes caused by its row-height corrections after `noteHeightOfRows` returns,
+        /// so `isPutting` alone cannot distinguish them from a wheel event. Keep that distinction
+        /// until the resized table has been quiet and has reached its new end once.
+        private var isSettlingResizeAtEnd = false
         /// Whether this file is the thing moving the clip view right now, so that the escape below
         /// does not read the transcript's own arrival at the end as the reader scrolling away.
         private var isPutting = false
@@ -1079,6 +1084,7 @@ struct TranscriptTable: NSViewRepresentable {
 
         func releaseEnd() {
             holdsEnd = false
+            isSettlingResizeAtEnd = false
             endWork?.cancel()
             endWork = nil
         }
@@ -1273,7 +1279,9 @@ struct TranscriptTable: NSViewRepresentable {
             // must still be able to scroll up and stay there. So the position itself is the last
             // word: if the view is no longer at the end and this file did not put it there, then
             // nobody is holding it any more.
-            if holdsEnd, !isPutting, !currentGeometry.isAtEnd { releaseEnd() }
+            if holdsEnd, !isPutting, !isSettlingResizeAtEnd, !currentGeometry.isAtEnd {
+                releaseEnd()
+            }
             // The reader is moving, so whatever was being prepared for them is now on their frame.
             // Started again by the settle when they stop. See `warmAhead`.
             warmWork?.cancel()
@@ -1356,6 +1364,11 @@ struct TranscriptTable: NSViewRepresentable {
                 try? await Task.sleep(for: .milliseconds(150))
                 guard !Task.isCancelled, let self, !isLiveScrolling else { return }
                 settleWork = nil
+                if isSettlingResizeAtEnd {
+                    putEnd()
+                    reportGeometry()
+                    isSettlingResizeAtEnd = false
+                }
                 censusOfTheScreen(settled: true)
                 onSettled?()
                 warmAhead()
@@ -1612,7 +1625,11 @@ struct TranscriptTable: NSViewRepresentable {
             // height a turn or two later. Reported as "sometimes I get placed a little higher and
             // can't reach the bottom anymore". The instruction is self-releasing, so a reader who
             // scrolls away in the next moment is not pinned: see `clipMoved`.
-            if wasAtEnd, !isFollowerDriving, !isLiveScrolling { holdsEnd = true }
+            if wasAtEnd, !isFollowerDriving, !isLiveScrolling {
+                holdsEnd = true
+                isSettlingResizeAtEnd = true
+                scheduleSettle()
+            }
             keepPlace(wasAtEnd: wasAtEnd, anchor: anchor)
             reportGeometry()
             // And once more on the next turn, for the reason `goToEnd` says the end twice: a table

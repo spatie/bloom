@@ -30,6 +30,7 @@ import BloomCore
 ///
 ///     Bloom --resize-probe /tmp/resize.json --resize-workspace <id>
 ///           [--resize-sweeps 4] [--resize-travel 240] [--resize-step 4]
+///           [--resize-leave-narrow]
 ///           [--resize-url file:///…] [--window-size 1440x900]
 ///
 /// A sweep narrows the window by `travel` points and widens it back, `step` points per vsync. Four
@@ -57,6 +58,9 @@ enum ResizeProbe {
     private static var sweeps: Int { ProbeHarness.count("--resize-sweeps", or: 4) }
     private static var travel: CGFloat { ProbeHarness.points("--resize-travel", or: 240) }
     private static var step: CGFloat { ProbeHarness.points("--resize-step", or: 4) }
+    private static var leavesWindowNarrow: Bool {
+        CommandLine.arguments.contains("--resize-leave-narrow")
+    }
 
     /// Where the browser pane goes. A file URL by preference, and empty by default: a run that has
     /// to reach the network is a run that measures the network.
@@ -100,6 +104,16 @@ enum ResizeProbe {
         // probes wait, because this is the only one that asks for three things at once.
         try? await Task.sleep(for: .seconds(8))
 
+        let transcriptScroll = ProbeHarness.transcriptScrollView(in: contentView)
+        if let transcriptScroll {
+            transcriptScroll.contentView.setBoundsOrigin(
+                NSPoint(x: transcriptScroll.contentView.bounds.origin.x, y: transcriptScroll.endOffset)
+            )
+            transcriptScroll.reflectScrolledClipView(transcriptScroll.contentView)
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+        let scrollBefore = ProbeHarness.scrollPlace(transcriptScroll)
+
         let recorder = FrameRecorder(view: contentView) { [weak window] in
             window?.frame.width ?? 0
         }
@@ -107,7 +121,7 @@ enum ResizeProbe {
         // A warm pass that is thrown away. The first resize of a launch pays for every layout
         // cache the window has not built yet, and reporting that as the steady state would
         // overstate every number. `ScrollProbe` and `FrameProbe` both do this and for this reason.
-        await drag(window, sweeps: 1)
+        await drag(window, sweeps: 1, returnsToStart: true)
         try? await Task.sleep(for: .seconds(1))
 
         harness.markStarted()
@@ -118,14 +132,20 @@ enum ResizeProbe {
         recorder.start()
         let cpuBefore = ProbeHarness.mainThreadCPUSeconds()
         let wallBefore = CACurrentMediaTime()
-        await drag(window, sweeps: sweeps)
+        await drag(window, sweeps: sweeps, returnsToStart: !leavesWindowNarrow)
         let cpu = ProbeHarness.mainThreadCPUSeconds() - cpuBefore
         let wall = CACurrentMediaTime() - wallBefore
         recorder.stop()
         PaneLayoutTiming.isEnabled = false
 
         harness.write(report(
-            recorder: recorder, window: window, workspace: workspace, cpu: cpu, wall: wall
+            recorder: recorder,
+            window: window,
+            workspace: workspace,
+            cpu: cpu,
+            wall: wall,
+            scrollBefore: scrollBefore,
+            scrollAfter: ProbeHarness.scrollPlace(transcriptScroll)
         ))
         exit(0)
     }
@@ -176,7 +196,7 @@ enum ResizeProbe {
     /// `display: true` is what makes a step cost what a frame of a drag costs. Without it AppKit
     /// is free to defer the layout and a hundred steps collapse into one. `FrameProbe` records
     /// the same finding.
-    private static func drag(_ window: NSWindow, sweeps: Int) async {
+    private static func drag(_ window: NSWindow, sweeps: Int, returnsToStart: Bool) async {
         let start = window.frame
         for offset in offsets(sweeps: sweeps) {
             var frame = start
@@ -184,7 +204,9 @@ enum ResizeProbe {
             window.setFrame(frame, display: true)
             try? await Task.sleep(for: .microseconds(8_333))
         }
-        window.setFrame(start, display: true)
+        var finish = start
+        if !returnsToStart { finish.size.width -= travel }
+        window.setFrame(finish, display: true)
         try? await Task.sleep(for: .milliseconds(300))
     }
 
@@ -207,7 +229,8 @@ enum ResizeProbe {
 
     private static func report(
         recorder: FrameRecorder, window: NSWindow, workspace: WorkspaceModel,
-        cpu: Double, wall: Double
+        cpu: Double, wall: Double,
+        scrollBefore: [String: JSONValue], scrollAfter: [String: JSONValue]
     ) -> JSONValue {
         let widths = recorder.widths
         let tabs = WorkspaceTabsStore.shared
@@ -225,6 +248,8 @@ enum ResizeProbe {
             "panes": .integer(panes),
             "inspector": .bool(AppModel.probeInstance?.isInspectorVisible ?? false),
             "changedFiles": .integer(workspace.changedFiles.count),
+            "scrollBefore": .object(scrollBefore),
+            "scrollAfter": .object(scrollAfter),
             // Proof the drag landed. A run whose min and max agree resized nothing.
             "widthMin": .number(Double(widths.min() ?? 0)),
             "widthMax": .number(Double(widths.max() ?? 0)),
@@ -234,6 +259,7 @@ enum ResizeProbe {
             "travel": .number(Double(travel)),
             "step": .number(Double(step)),
             "sweeps": .integer(sweeps),
+            "leavesWindowNarrow": .bool(leavesWindowNarrow),
             // What two builds are compared with, for `FrameProbe`'s reason: a wall clock frame
             // interval measures this machine as well as this app, and CPU per step does not.
             "mainThreadCpuMs": .number(cpu * 1000),
