@@ -12,7 +12,7 @@ import BloomCore
 ///
 /// The columns themselves are `SidebarView` and `DetailColumn`, and the toolbar is
 /// `BloomWindowToolbar`. What is left here is only what belongs to the window as a whole: the
-/// split view, the inspector, the create sheet, the archive confirmation and the alert.
+/// split view, the inspector, the archive confirmation and the alert.
 struct RootView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -28,10 +28,6 @@ struct RootView: View {
     /// Whether the window's search field has the keyboard. Shift+Cmd+F, and Cmd+F where nothing in
     /// front can find, put it here. See `FindCommand`.
     @FocusState private var isSearchFocused: Bool
-    @State private var isCreateSheetPresented = false
-    @State private var createTargetRepo: Repo?
-    /// Set by the File menu's pull request item and by nothing else. See `CreateWorkspaceSheet`.
-    @State private var createStartsOnPullRequest = false
     @State private var isNewProjectPresented = false
     /// The project the new-project sheet has just made, waiting for that sheet to leave the
     /// screen. Two sheets cannot be up at once, and raising the second one from inside the first
@@ -186,16 +182,11 @@ struct RootView: View {
             // Debug builds only, and only when asked for on the command line: raises one of the two
             // Help menu sheets so a capture run can look at it. See `FeedbackPresenter`.
             .task { FeedbackPresenter.shared.presentIfRequested() }
-            .sheet(isPresented: $isCreateSheetPresented) {
-                CreateWorkspaceSheet(
-                    initialRepo: createTargetRepo, startsOnPullRequest: createStartsOnPullRequest
-                )
-            }
             // The one door into the project list, and then going straight on to a first workspace
             // where there is one to start.
             //
             // **The hand-off is the branch the sheet's footer names.** A project Bloom made ends in
-            // the create sheet, because a repository with one empty commit in it is not something
+            // the create window, because a repository with one empty commit in it is not something
             // anybody wanted for its own sake: they had an idea, and the next thing is an agent
             // working on it. A project that already had work in it ends in the sidebar, because
             // they may well have come to read what is already there. The sheet decides which, and
@@ -397,16 +388,22 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .bloomNewProject)) { _ in
             isNewProjectPresented = true
         }
+        // The post is still the one door every control goes through, and what it opens is a
+        // window now rather than a sheet on this one. The translation is here because this is
+        // where the post was already being received and because `openWindow` needs a view: the
+        // window itself is `CreateWorkspaceWindow`, and it is keyed by project, so asking twice
+        // for the same project brings the first one forward with its draft still in it.
         .onReceive(NotificationCenter.default.publisher(for: .bloomNewWorkspace)) { note in
-            createTargetRepo = note.object as? Repo ?? app.selectedWorkspace.flatMap(app.repo(for:))
-            createStartsOnPullRequest = note.userInfo?[Notification.bloomPullRequestKey] as? Bool == true
-            isCreateSheetPresented = true
+            if note.userInfo?[Notification.bloomPullRequestKey] as? Bool == true {
+                CreateWorkspaceOpening.shared.askForPullRequest()
+            }
+            openCreateWindow(in: note.object as? Repo)
         }
-        // Makes the workspace the create sheet's terminal mode makes, for a capture run, which
-        // cannot choose a mode or press a button. It goes through `createWorkspace` exactly as the
-        // sheet does, sea and all, so
-        // what is photographed is the real workspace rather than a hand-built row that looks like
-        // one. Debug builds only, through the same flag family as `--create-sheet`.
+        // Makes the workspace the create window's terminal mode makes, for a capture run, which
+        // cannot choose a mode or press a button. It goes through `createWorkspace` exactly as that
+        // window does, sea and all, so what is photographed is the real workspace rather than a
+        // hand-built row that looks like one. Debug builds only, through the same flag family as
+        // `--create-sheet`.
         .onReceive(NotificationCenter.default.publisher(for: .bloomStartTerminalWorkspace)) { note in
             let named = note.object as? String
             let repo = app.repos.first { $0.name == named } ?? app.repos.first
@@ -436,9 +433,21 @@ struct RootView: View {
     private func startWorkInNewProject() {
         guard let repo = projectToStartWorkIn else { return }
         projectToStartWorkIn = nil
-        createTargetRepo = repo
-        createStartsOnPullRequest = false
-        isCreateSheetPresented = true
+        openCreateWindow(in: repo)
+    }
+
+    /// Opens the create window, on the project that was asked for or on the one the window is
+    /// already looking at.
+    ///
+    /// The project is resolved here rather than inside the window, because it is the selection in
+    /// THIS window that answers "which project did they mean", and a window keyed by project has
+    /// to be given one before it exists. A machine with no projects at all opens it with none,
+    /// which is the empty state that offers to add one; every control that could ask is disabled
+    /// or diverted in that state anyway.
+    private func openCreateWindow(in repo: Repo?) {
+        let target = repo ?? app.selectedWorkspace.flatMap(app.repo(for:)) ?? app.repos.first
+        guard let target else { return openWindow(id: CreateWorkspaceWindow.id) }
+        openWindow(id: CreateWorkspaceWindow.id, value: target.id)
     }
 
     private func confirmArchive(_ request: ArchiveRequest) {
@@ -455,10 +464,14 @@ extension Notification.Name {
     /// by Cmd+F falling through, neither of which can reach a `@FocusState` from a `Commands`
     /// body.
     static let bloomFocusSearch = Notification.Name("bloom.focusSearch")
+    /// Asks for the create window. Still a notification rather than an `openWindow` at each of
+    /// the four controls that can ask, because which project is meant depends on what this window
+    /// has selected, and because the four have always behaved identically by going through one
+    /// door. See `openCreateWindow`.
     static let bloomNewWorkspace = Notification.Name("bloom.newWorkspace")
-    /// Raises the sheet that starts a project. A notification for the same reason the create sheet
-    /// is one: the sheet lives here, and the sidebar's `+`, Home's empty state, the toolbar and a
-    /// `Commands` body can none of them present anything themselves. The name is the old one,
+    /// Raises the sheet that starts a project. A notification for the same reason the create
+    /// window is opened by one: the sheet lives here, and the sidebar's `+`, Home's empty state,
+    /// the toolbar and a `Commands` body can none of them present anything themselves. The name is the old one,
     /// because what it raises is still the same sheet: `StartProjectSheet` absorbed the second
     /// door rather than replacing the first.
     static let bloomNewProject = Notification.Name("bloom.newProject")
@@ -466,7 +479,7 @@ extension Notification.Name {
     static let bloomStartTerminalWorkspace = Notification.Name("bloom.startTerminalWorkspace")
     /// The Workspace menu's Rename, aimed at whichever list is drawing that row.
     ///
-    /// A notification rather than a flag on `AppModel`, for the same reason the create sheet is
+    /// A notification rather than a flag on `AppModel`, for the same reason the create window is
     /// one: the field belongs to a row inside a list, the list owns the one field that can be open
     /// at a time, and a menu item cannot reach into either. Both lists listen, and each ignores a
     /// workspace it is not drawing, so the post can be made without knowing which is on screen.
@@ -481,7 +494,7 @@ extension Notification.Name {
 }
 
 extension Notification {
-    /// Whether a `bloomNewWorkspace` post wants the sheet opened on the pull request route. Absent
+    /// Whether a `bloomNewWorkspace` post wants the window opened on the pull request route. Absent
     /// on every other post, which is the ordinary new branch opening.
     static let bloomPullRequestKey = "bloom.newWorkspace.pullRequest"
     /// Which workspace a `bloomRenameWorkspace` post is about, as its raw id.

@@ -6,7 +6,7 @@ import Foundation
 ///
 /// These rules spent their first months inside the app target, where this suite could not see
 /// them and `SlashCommandTests` kept a hand copied duplicate of `slashQuery` honest by eye. They
-/// were moved into the core when the create sheet joined the transcript as a second caller: two
+/// were moved into the core when the create window joined the transcript as a second caller: two
 /// composers resolving menus through an untested function is how the two drift.
 @Suite("Composer menu resolution")
 struct ComposerMenuTests {
@@ -209,7 +209,7 @@ struct MenuPlacementTests {
         #expect(placement.menuHeight == MenuLayout.maxHeight)
     }
 
-    @Test("the create sheet's shape flips the menu below the line being typed")
+    @Test("the create window's shape flips the menu below the line being typed")
     func belowWhenTheSheetIsCramped() {
         // Near enough the sheet's real numbers: seventy points of header above the box, a five
         // line editor and a status row below.

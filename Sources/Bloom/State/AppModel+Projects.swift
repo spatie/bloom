@@ -40,7 +40,7 @@ extension AppModel {
     /// The original path, for a folder git already recognises.
     ///
     /// It hands the row back, because one caller needs it: a project that was just created goes
-    /// straight on to its first workspace, and the create sheet has to be told which project.
+    /// straight on to its first workspace, and the create window has to be told which project.
     @discardableResult
     private func addKnownRepository(at path: String) async -> Repo? {
         guard let manager else { return nil }

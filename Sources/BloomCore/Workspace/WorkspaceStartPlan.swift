@@ -2,7 +2,7 @@ import Foundation
 
 /// Whether a workspace may be started yet, given what has been written.
 ///
-/// This was a computed property inside `CreateWorkspaceSheet`, where nothing could test it, and it
+/// This was a computed property inside `CreateWorkspaceView`, where nothing could test it, and it
 /// is the reason "just give me a worktree" could not be asked for: the sheet disabled Create on an
 /// empty box for every route at once. Words are the right requirement for a chat and the wrong one
 /// for a shell, and one condition covering both is how the wrong one gets applied.
@@ -72,7 +72,7 @@ public enum WorkspaceStartPlan {
 
     // MARK: - Crossing between the modes
 
-    /// What the name field carries over when the sheet leaves chat mode.
+    /// What the name field carries over when the create window leaves chat mode.
     ///
     /// This is the whole question the two-button sheet answered silently. Pressing "Just a
     /// terminal" with a sentence in the box did use that sentence: `Git.title(from:)` cut its
@@ -97,9 +97,9 @@ public enum WorkspaceStartPlan {
         return Git.title(from: spoken)
     }
 
-    /// And what the prompt carries back when the sheet returns to chat mode.
+    /// And what the prompt carries back when it returns to chat mode.
     ///
-    /// The mirror of the rule above, and it exists because the sheet now OPENS in terminal mode
+    /// The mirror of the rule above, and it exists because the window now OPENS in terminal mode
     /// for anybody who was last there. Somebody who types a sentence into the name field and then
     /// realises they wanted an agent after all must not have to type it twice: that is the same
     /// silent discard, pointing the other way.
@@ -119,7 +119,7 @@ public enum WorkspaceStartPlan {
     /// **It does not mention seas, and that is the point of it living here.** The sheet used to
     /// say "Leave it empty and the workspace is named after a sea", which spends a discovery to
     /// explain a mechanism nobody asked about: the sea catalogue is a thing to find out about from
-    /// the chart and from the notice that fires the first time one is claimed, and a create sheet
+    /// the chart and from the notice that fires the first time one is claimed, and a create window
     /// that names it beforehand has told the joke before the punchline. What somebody standing in
     /// front of an empty field needs is that the field is optional and that something will fill
     /// it, which is what this says.

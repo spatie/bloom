@@ -3,7 +3,7 @@ import Foundation
 /// Everything the composer's footer pickers choose about the next turn, as a value.
 ///
 /// It exists because the footer now has two callers and only one of them has a `Session` to write
-/// to. In a conversation these four live on the session row; in the create sheet the session has
+/// to. In a conversation these four live on the session row; in the create window the session has
 /// not been made yet, and the same four have to be carried from the sheet into the row that gets
 /// made. Naming them once means the footer is written against the choices rather than against
 /// where they happen to be stored, and neither caller has to invent its own arrangement of
@@ -158,7 +158,7 @@ public struct ComposerControls: Equatable, Sendable {
 
     /// Records that a session has had its opening values settled, so `ComposerView.prepare` never
     /// re-applies the app-wide defaults over choices somebody has already made. It was written
-    /// only by the composer's own first open; the create sheet writes it too, because a model
+    /// only by the composer's own first open; the create window writes it too, because a model
     /// picked in the sheet is exactly as deliberate as one picked in the footer and must survive
     /// the workspace being opened.
     public static func defaultsAppliedKey(sessionID: SessionID) -> String {

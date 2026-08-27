@@ -5,7 +5,7 @@ import Foundation
 /// What a session nobody has configured is allowed to do.
 ///
 /// The default moved from Accept edits to Full access, and the reason it needs a suite of its own
-/// is that "the default" is not one value in one place: the create sheet, the composer's first
+/// is that "the default" is not one value in one place: the create window, the composer's first
 /// open, a `bloom://` link and a session row written with no mode stated each used to reach their
 /// own literal. They all reach `AppDefaults.fallbackPermissionMode` now, and these tests are what
 /// stops a second literal growing back.

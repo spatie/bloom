@@ -167,7 +167,7 @@ struct FileHeaderBar: View {
     ///
     /// `Image` rather than `Label` in the segments: a segmented control on macOS is an
     /// `NSSegmentedControl`, whose cells carry a title or an image and not both, which
-    /// `CreateWorkspaceSheet.modePicker` records having found out the hard way.
+    /// `CreateWorkspaceView.modePicker` records having found out the hard way.
     private var layoutPicker: some View {
         Picker("Diff layout", selection: $isSideBySide) {
             Image(systemName: "list.bullet.rectangle")

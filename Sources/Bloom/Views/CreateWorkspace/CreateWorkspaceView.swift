@@ -2,42 +2,36 @@ import SwiftUI
 import AppKit
 import BloomCore
 
-/// The sheet that starts a workspace.
+/// What is inside the window that starts a workspace. The window itself, and why it is one, is
+/// `CreateWorkspaceWindow`.
 ///
 /// It is the composer, not a form that happens to contain a text box.
 ///
 /// Creating a workspace is writing the first message of a conversation. The thing you actually do
-/// is describe a task, and everything else on the sheet is a qualifier on that sentence: which
-/// project, which base, which model, how hard to think, what it may do without asking. So the
-/// surface is the same surface as every other message in the app, with the same controls in the
-/// same places: `ComposerPrompt` with `ComposerFooterView` under it, exactly as at the bottom of
-/// the centre column. The form this replaced put the task in the fourth row of five, gave the
-/// model and the effort no representation at all, and could not take an attachment.
+/// is describe a task, and everything else here is a qualifier on that sentence: which project,
+/// which base, which model, how hard to think, what it may do without asking. So the surface is
+/// the same surface as every other message in the app, with the same controls in the same places:
+/// `ComposerPrompt` with `ComposerFooterView` under it, exactly as at the bottom of the centre
+/// column. The form this replaced put the task in the fourth row of five, gave the model and the
+/// effort no representation at all, and could not take an attachment.
 ///
 /// What it gains by being the composer, rather than by anything written here: a screenshot can be
 /// dropped, pasted or picked into the first message, `@` offers the repository's files, `/` offers
 /// its commands, and the model, effort, permission mode and fast mode are chosen with the controls
 /// you already know, then carried onto the session that gets made so the first turn runs with them.
-struct CreateWorkspaceSheet: View {
+///
+/// Still a plain `View` with a `dismiss` in it, which is the whole reason moving it out of a sheet
+/// cost this file so little: `DismissAction` closes the window it is in exactly as it dismissed
+/// the sheet it was in, so every route that ended the sheet ends the window.
+struct CreateWorkspaceView: View {
     /// Which project to start in. The sidebar passes the repo whose `+` was clicked, otherwise
     /// the repo of whatever is selected. Either way the project arrives decided, so the control
     /// for it never asks a question: it reports, and opens only if you want to change your mind.
     var initialRepo: Repo?
 
-    /// Whether the sheet opens with the pull request box already up. The File menu's "New
-    /// Workspace from Pull Request…" is the only caller that sets it, and it exists because the
-    /// pull request route was two levels inside the "Start from" menu and so invisible to anybody
-    /// who had not already been told it was there.
-    ///
-    /// It raises the box for a number or a URL rather than the list of open ones, because that is
-    /// the half a menu item can actually put in front of somebody: the list is a network call that
-    /// has not landed when the sheet opens, and it cannot offer a closed pull request, somebody
-    /// else's, or the hundred and first of a busy repository. The list is still one click away in
-    /// the "Start from" control the sheet opens with.
-    var startsOnPullRequest = false
-
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openWindow) private var openWindow
 
     @State private var repoID: RepoID?
     @State private var prompt = ""
@@ -46,7 +40,7 @@ struct CreateWorkspaceSheet: View {
     @State private var contentHeight = ComposerTextEditor.lineHeight
 
     /// The model, effort, permission mode and fast mode this workspace's first turn will run with.
-    /// Resolved from the same precedence chain a new session would use, so the sheet opens showing
+    /// Resolved from the same precedence chain a new session would use, so the window opens showing
     /// what would have happened anyway rather than a second set of defaults.
     @State private var controls = ComposerControls()
 
@@ -59,7 +53,7 @@ struct CreateWorkspaceSheet: View {
     @State private var checkout: WorkspaceCheckout?
     @State private var checkoutOptions = WorkspaceCheckoutOptions()
     @State private var isLoadingCheckouts = false
-    /// A pull request number or URL typed into the sheet, for the ones the list does not offer:
+    /// A pull request number or URL typed into the window, for the ones the list does not offer:
     /// somebody else's, a closed one, or one of the two hundred a busy repository has open.
     @State private var reference = ""
     @State private var isEnteringReference = false
@@ -75,21 +69,21 @@ struct CreateWorkspaceSheet: View {
     @State private var isResolvingReference = false
     @State private var branchPrefix: String?
     /// Whether this project runs anything after the worktree is cut, so the footer can say so.
-    /// Read with the branches, from the same settings the rest of this sheet is built from.
+    /// Read with the branches, from the same settings the rest of this window is built from.
     @State private var hasSetupScript = false
     @State private var isLoading = false
 
-    /// Whether a model will be asked to name this workspace, which decides what the sheet may
+    /// Whether a model will be asked to name this workspace, which decides what the window may
     /// honestly promise about the branch. Both halves are settled off the main actor in `load`,
     /// because one of them looks for a binary on the PATH.
     @State private var isNamingAvailable = false
 
     /// Which bucket of `PromptAttachmentStore` this draft is filling, and the name of the staging
-    /// directory its files are copied into. A fresh one per draft, so a sheet opened again cannot
+    /// directory its files are copied into. A fresh one per draft, so a window opened again cannot
     /// pick up the previous draft's screenshots.
     @State private var draftID = PromptAttachments.newShortID()
 
-    /// Which of the three things this sheet is being used for, and the last answer, kept.
+    /// Which of the three things this window is being used for, and the last answer, kept.
     ///
     /// Read through `WorkspaceStartMode.remembered` rather than by giving `@AppStorage` a default,
     /// so the fresh-install answer and the reason for it live in the core beside the tests instead
@@ -117,8 +111,8 @@ struct CreateWorkspaceSheet: View {
     ///
     /// **And then a fifth control arrived and took the words again.** The row carries fast mode
     /// now as well as the model, the effort, the output style and the permission mode, and 620
-    /// put every one of them back on the glyph-only rung: a sheet asking what you want to work on
-    /// while showing five unlabelled symbols is a sheet that tells you nothing about what it is
+    /// put every one of them back on the glyph-only rung: a window asking what you want to work on
+    /// while showing five unlabelled symbols is a window that tells you nothing about what it is
     /// about to do. The number below is what the same row needs with its words on.
     private static let width: CGFloat = 700
     /// What the writing area opens at. Five lines, because the question is "what do you want to
@@ -144,7 +138,7 @@ struct CreateWorkspaceSheet: View {
         PromptAttachmentStore.shared.attachments(for: draftID).map(\.path)
     }
 
-    /// Which mode the sheet is in, and the one place the stored string is turned back into it.
+    /// Which mode the window is in, and the one place the stored string is turned back into it.
     private var mode: WorkspaceStartMode {
         WorkspaceStartMode.remembered(raw: rememberedMode)
     }
@@ -184,7 +178,7 @@ struct CreateWorkspaceSheet: View {
     /// A checkout arrives with a name, a branch and a base already chosen by whoever opened the
     /// pull request, and `WorkspaceStartRequest` takes that name over anything derived here. So a
     /// name field beside a chosen pull request would be a box that changes nothing, which is worse
-    /// than no box: it is a box that lies. The checkout's own chip under the sheet says what the
+    /// than no box: it is a box that lies. The checkout's own chip under the box says what the
     /// workspace will be called instead.
     /// One line saying what pressing Create actually does.
     ///
@@ -224,21 +218,32 @@ struct CreateWorkspaceSheet: View {
         // One task keyed on the project, not a task plus an onChange: the pair ran `load` twice on
         // every open (the first pass writes `repoID`, which fired the onChange), and a load left
         // in flight when the project changed could land another project's branches on this one's
-        // sheet. `.task(id:)` cancels the stale load; `load` checks before writing.
+        // window. `.task(id:)` cancels the stale load; `load` checks before writing.
         .task(id: repoID) { await load() }
-        // The keyboard goes to the pull request box rather than to the task, when the sheet was
+        // The keyboard goes to the pull request box rather than to the task, when the window was
         // opened to open a pull request. `load` puts it in the task unconditionally, so this has
         // to come after it rather than beside it.
+        //
+        // One flag, read at the only two moments there are: here, for a window that has just been
+        // built, and below, for one that was already open when the menu item was pressed. It is
+        // consumed by whichever gets there, so the box is raised once. See
+        // `CreateWorkspaceOpening`.
         .task {
-            guard startsOnPullRequest else { return }
-            isEnteringReference = true
-            isReferenceFocused = true
+            guard CreateWorkspaceOpening.shared.consumePullRequestAsk() else { return }
+            raisePullRequestBox()
+        }
+        // The already-open case. No `initial`, deliberately: a window built with the flag already
+        // set sees no change and is served by the task above, which runs after `load` and so keeps
+        // the keyboard the task would otherwise have taken back.
+        .onChange(of: CreateWorkspaceOpening.shared.wantsPullRequest) { _, _ in
+            guard CreateWorkspaceOpening.shared.consumePullRequestAsk() else { return }
+            raisePullRequestBox()
         }
         // A second task, and a second trip, because listing pull requests is a network call and
-        // the composer has to be typeable before it lands. The sheet opens on the branch route
+        // the composer has to be typeable before it lands. The window opens on the branch route
         // either way; the picker fills in behind it.
         .task(id: repoID) { await loadCheckouts() }
-        // The draft's chips and the files behind them belong to a sheet that is going away.
+        // The draft's chips and the files behind them belong to a window that is going away.
         .onDisappear(perform: discardDraft)
     }
 
@@ -249,30 +254,15 @@ struct CreateWorkspaceSheet: View {
     /// about the workspace, and the footer is about the turn.
     private var header: some View {
         HStack(spacing: Metrics.spacingSmall) {
-            // The sheet's title, and the reason it is in this band rather than above it.
+            // **"New workspace" used to be the first thing in this row, and the title bar says it
+            // now.** It was put here because a sheet that opened on a segmented control read as a
+            // fragment of a window rather than as a window, and every other sheet in the app opens
+            // with a `Typo.heading` title at the top left. This is a window, with the title in the
+            // bar where a window's title goes, so the same words in bold thirty points underneath
+            // are the stutter the argument was made against.
             //
-            // The sheet used to open on a segmented control, so the first strong thing on it was
-            // a control rather than a heading and it read as a fragment of a window rather than
-            // as a window. Every other sheet in the app opens with a `Typo.heading` title at the
-            // top left; this one is the odd one out and it was felt before it was named.
-            //
-            // A row of its own would have made three stacked strips before any content, so the
-            // title goes into the strip that was already there and the two controls after it
-            // become its qualifiers: "New workspace, in bloom, from main" reads as one sentence
-            // across the band.
-            //
-            // Trailing padding only now, and those six points are still the ones the controls
-            // beside it carry inside their own plates, so the title does not run into the
-            // project's tile. The leading twelve moved to the strip itself, at the foot of this
-            // view: the title's first letter lands on the same 12 points as the project's name
-            // and as everything below the hairline either way, and this way the strip has one
-            // margin rather than a sum of two, so the trailing control keeps the same 12.
-            Text("New workspace")
-                .font(Typo.heading)
-                .foregroundStyle(Palette.textPrimary)
-                .padding(.trailing, Metrics.spacing)
-                .accessibilityAddTraits(.isHeader)
-
+            // What the band is now is the sentence that was already after the title: "in bloom,
+            // from main", the two choices that are about the workspace rather than about the turn.
             projectControl
 
             if repo != nil {
@@ -287,7 +277,7 @@ struct CreateWorkspaceSheet: View {
                     .accessibilityLabel("Loading branches")
             }
         }
-        // The same padding as `ProjectSetupSheet`'s header, which is the app's other sheet header
+        // The same padding as `ProjectSetupSheet`'s header, which is the app's other header
         // sitting above a hairline: `gutter` across, `inset` down.
         //
         // It was `spacing` across and `spacingSmall` down, six points and four, and both were the
@@ -321,7 +311,7 @@ struct CreateWorkspaceSheet: View {
             RepoIcon(repo: repo, size: Metrics.repoIconSmall)
         }
 
-        // One project is not a choice. It still says which project, because a sheet that cut a
+        // One project is not a choice. It still says which project, because a window that cut a
         // worktree without naming the repository would be asking for trust it has not earned.
         if app.repos.count > 1 {
             Menu {
@@ -384,7 +374,7 @@ struct CreateWorkspaceSheet: View {
     /// the setting here whose wrong value is expensive.
     ///
     /// Everything it draws is `WorkspaceSourcePicker`, including the search field a `Menu` could
-    /// not have held. What is left here is what the sheet owns: which project's lists these are,
+    /// not have held. What is left here is what the window owns: which project's lists these are,
     /// and what happens to the one that gets picked.
     private var sourceControl: some View {
         WorkspaceSourcePicker(
@@ -466,7 +456,7 @@ struct CreateWorkspaceSheet: View {
             // competing to be read first, which is most of what "janky" was: "New workspace" and
             // "What do you want to work on?" at fifteen bold, forty points apart. This is the
             // system's own heading style at reading size, which is what a section inside a titled
-            // sheet is.
+            // window is.
             Text(heading)
                 .font(Typo.title)
                 .foregroundStyle(Palette.textPrimary)
@@ -475,7 +465,7 @@ struct CreateWorkspaceSheet: View {
             case .chat: chatBox
             // One box for both, because they ask the same question. What differs between a
             // terminal and a browser start is which tab the workspace lands on, and that is
-            // settled after the sheet is gone. See `WorkspaceStartMode.pane`.
+            // settled after the window is gone. See `WorkspaceStartMode.pane`.
             case .terminal, .browser: nameBox
             }
 
@@ -484,7 +474,7 @@ struct CreateWorkspaceSheet: View {
         .padding(Metrics.gutter)
     }
 
-    /// Which of the three things this sheet is for.
+    /// Which of the three things this window is for.
     ///
     /// Above the question rather than beside Create, which is the whole of the change. A second
     /// button next to Create was two ways to finish where one of them silently repurposed the
@@ -507,22 +497,22 @@ struct CreateWorkspaceSheet: View {
         // is what left the control floating with no introduction.
         Picker("Start with", selection: modeBinding) {
             ForEach(WorkspaceStartMode.allCases) { candidate in
-                Text(candidate.sheetLabel).tag(candidate)
+                Text(candidate.pickerLabel).tag(candidate)
             }
         }
         .pickerStyle(.segmented)
         .fixedSize()
         // Tinted explicitly, like every other coloured control in this window: untinted a
         // segmented control paints its selected cell in the SYSTEM accent, which on a Mac set to
-        // anything but Blue is another app's colour sitting in Bloom's sheet. Measured on a
-        // capture: bright system blue beside the sheet's teal Create button.
+        // anything but Blue is another app's colour sitting in Bloom's own window. Measured on a
+        // capture: bright system blue beside its teal Create button.
         .tint(Palette.accentFill)
         .help("Start a chat with an agent, or cut a worktree and open a shell or a browser in it")
     }
 
     /// Writing the choice down, and carrying the draft across with it.
     ///
-    /// Both directions, because the sheet now opens on whichever was used last: somebody who was
+    /// Both directions, because the window now opens on whichever was used last: somebody who was
     /// last in a terminal opens in one, and a sentence typed there has to survive the trip to chat
     /// exactly as a sentence typed in chat has to survive the trip the other way. Both rules are
     /// `WorkspaceStartPlan`'s. See `carriedName`. Terminal to browser crosses nothing, because
@@ -551,7 +541,7 @@ struct CreateWorkspaceSheet: View {
         )
     }
 
-    /// Chat mode, which is the sheet as it was before a second button was put in its footer.
+    /// Chat mode, which is what this was before a second button was put in its footer.
     private var chatBox: some View {
         ComposerPrompt(
             text: $prompt,
@@ -571,12 +561,12 @@ struct CreateWorkspaceSheet: View {
                 onChange: { controls = $0 },
                 canSend: canCreate,
                 intent: .create,
-                // The repository, because the worktree this sheet is about to cut does not
+                // The repository, because the worktree this window is about to cut does not
                 // exist yet and a style the project defines is already in the repository.
                 project: repo?.path,
                 onAttach: actions.attach,
                 // Written into the box, whatever the prompt's own two switches say. There is no
-                // conversation here to send into and no strip to open a chat on, and the sheet is
+                // conversation here to send into and no strip to open a chat on, and the window is
                 // not going to cut a worktree because a row was arrowed onto. `QuickPromptDelivery`
                 // is the same fallback said once, for a surface that can do neither.
                 onQuickPrompt: actions.insert,
@@ -590,7 +580,7 @@ struct CreateWorkspaceSheet: View {
     /// Not the composer with its controls disabled. A model, a reasoning effort, an output style,
     /// a permission mode and a paperclip are all qualifiers on a turn, and there is no turn here,
     /// so the honest drawing of them is none of them. What is left is the one field that decides
-    /// anything and the one button that finishes the sheet.
+    /// anything and the one button that finishes the window.
     ///
     /// **It is as tall as what is in it**, which it was not until somebody looked at the gap. See
     /// the note over `.composerBox` at the foot of this view.
@@ -628,12 +618,12 @@ struct CreateWorkspaceSheet: View {
             HStack(spacing: Metrics.spacing) {
                 Spacer(minLength: 0)
                 // Beside Create rather than in the row below it. The two things that end this
-                // sheet were stacked vertically, which is not a shape a Mac sheet has: the pair is
+                // window were stacked vertically, which is not a shape a Mac dialogue has: the pair is
                 // one decision and reads as one row, with the default action rightmost.
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 // The same button the composer's footer ends with, in the same corner of the same
-                // box, doing the same job. One way to finish the sheet in every mode, and Return
+                // box, doing the same job. One way to finish the window in every mode, and Return
                 // presses it in every one.
                 ComposerSendButton(intent: .create, canSend: canCreate, onSend: create)
             }
@@ -713,8 +703,8 @@ struct CreateWorkspaceSheet: View {
         max(contentHeight, ComposerTextEditor.lineHeight * Self.minEditorLines)
     }
 
-    /// What the sheet is willing to promise, under the box. Cancel used to stand at its trailing
-    /// end, which put the sheet's two terminal actions one above the other; it is beside Create
+    /// What the window is willing to promise, under the box. Cancel used to stand at its trailing
+    /// end, which put the window's two terminal actions one above the other; it is beside Create
     /// now.
     private var statusRow: some View {
         HStack(spacing: Metrics.spacingWide) {
@@ -724,7 +714,7 @@ struct CreateWorkspaceSheet: View {
         }
     }
 
-    /// What the sheet is allowed to promise about the name and the branch.
+    /// What the window is allowed to promise about the name and the branch.
     ///
     /// It used to say "named from your prompt", which stopped being true when workspaces started
     /// naming themselves: a chat workspace opens under a plant codename and a model rewrites both
@@ -762,7 +752,7 @@ struct CreateWorkspaceSheet: View {
             // Only chat mode has anything to say here, and only when no model is going to write
             // the name. The other modes have said it already: the line under the name field says
             // Bloom will name it, and the branch follows the name. A second sentence eight points
-            // lower saying the same thing again was the third place this sheet explained a
+            // lower saying the same thing again was the third place this window explained a
             // mechanism nobody had asked about, and the mechanism is the part that was wrong.
             if mode.runsAnAgent {
                 Text("The branch is named from what you write")
@@ -818,7 +808,7 @@ struct CreateWorkspaceSheet: View {
 
     /// The three lists the picker ranks, as one value.
     ///
-    /// The base branches are this sheet's own listing rather than `checkoutOptions.branches`. The
+    /// The base branches are this window's own listing rather than `checkoutOptions.branches`. The
     /// two are different questions: what may be cut from includes the default branch and every
     /// head a pull request speaks for, and what may be opened does not. See
     /// `WorkspaceCheckoutPlan.offeredBranches`.
@@ -887,10 +877,10 @@ struct CreateWorkspaceSheet: View {
 
         // A refusal is about a branch of the project that was on screen when the row was picked,
         // so it goes with the project. Left standing, it would name a folder in a repository the
-        // sheet is no longer looking at.
+        // window is no longer looking at.
         heldProblem = nil
 
-        // Whichever box the remembered mode has put on screen. The sheet no longer always opens
+        // Whichever box the remembered mode has put on screen. The window no longer always opens
         // on the writing box, so focusing it unconditionally would put the caret in a view that
         // is not there.
         focusTheBox()
@@ -903,12 +893,12 @@ struct CreateWorkspaceSheet: View {
         }
 
         // The gathering and both branch decisions live in the core, where the suite can reach
-        // them, and where the subprocess rule wants them: this sheet was the last view on the
+        // them, and where the subprocess rule wants them: this view was the last one on the
         // allow-list in `Tools/house-rules.sh` for calling `Git` itself.
         let context = await WorkspaceStartContext.load(repoPath: path)
 
         // Cancelled means the project changed under this load, and these are the other
-        // project's branches. The task running for the new project owns the sheet now,
+        // project's branches. The task running for the new project owns the window now,
         // spinner included.
         guard !Task.isCancelled else { return }
         isLoading = false
@@ -934,7 +924,7 @@ struct CreateWorkspaceSheet: View {
     /// What a row in the source picker means here.
     ///
     /// The two that mean opening something both go through `offer`, which is where the one row
-    /// that is not a choice about this sheet at all is dealt with: a branch something already
+    /// that is not a choice about this window at all is dealt with: a branch something already
     /// holds. Git refuses one branch in two worktrees, so "open it" cannot mean a second
     /// workspace. Such a row used to be missing from the list entirely, which answered the
     /// question by pretending the branch was not there.
@@ -969,7 +959,7 @@ struct CreateWorkspaceSheet: View {
     /// picker had always greyed such a row and the pull request half never had, which is why the
     /// question is asked here, over the checkout, rather than per case.
     ///
-    /// A branch one of Bloom's own workspaces holds is not a refusal at all: the sheet has nothing
+    /// A branch one of Bloom's own workspaces holds is not a refusal at all: the window has nothing
     /// left to ask and goes there, which is what it has always done. Anything else is named with
     /// its path, because that is the folder to go and close, and the sentence says what can be had
     /// instead. See `BranchHolder.refusal`.
@@ -1008,6 +998,12 @@ struct CreateWorkspaceSheet: View {
         heldProblem = nil
         reference = ""
         focusTheBox()
+    }
+
+    /// Raises the box for a pull request number or URL, and puts the keyboard in it.
+    private func raisePullRequestBox() {
+        isEnteringReference = true
+        isReferenceFocused = true
     }
 
     /// Puts the keyboard in whichever box this mode is showing.
@@ -1073,15 +1069,15 @@ struct CreateWorkspaceSheet: View {
         Task { await app.addProjectByAsking() }
     }
 
-    /// A chip in the sheet has no review tab to open into, so it opens where a file opens when
+    /// A chip in this window has no review tab to open into, so it opens where a file opens when
     /// nothing in the app owns it.
     private func open(attachment: PromptAttachment) {
         NSWorkspace.shared.open(attachment.url(in: stagingDirectory))
     }
 
-    /// Cuts the worktree, on whichever mode the sheet is in.
+    /// Cuts the worktree, on whichever mode the window is in.
     ///
-    /// One function, one button, one guard, because there is now one way to finish this sheet.
+    /// One function, one button, one guard, because there is now one way to finish this window.
     /// Everything below the first two lines is the same work whichever mode asked for it: the same
     /// attachments, the same staging, the same funnel. See `AppModel.createWorkspace`, which is
     /// the one way a workspace is started whoever is asking.
@@ -1110,11 +1106,19 @@ struct CreateWorkspaceSheet: View {
         // The chips go now; the files stay until the worktree has taken them.
         PromptAttachmentStore.shared.clear(sessionID: handedOver)
         // Still rotated, even though creating now always dismisses. `dismiss` runs `onDisappear`,
-        // which discards whatever draft the sheet is holding, and without this that would be the
+        // which discards whatever draft the window is holding, and without this that would be the
         // draft whose files are at this moment on their way into a worktree.
         draftID = PromptAttachments.newShortID()
 
         dismiss()
+
+        // The window this one is not attached to. Creating selects the new workspace in the main
+        // window, and this window can be sitting in front of it, beside it, or open with the main
+        // window closed altogether, in which case nothing at all would show what pressing Create
+        // just did. `openWindow` on the main scene brings it forward when it is open and opens it
+        // when it is not. It was free while this was a sheet, because a sheet cannot exist without
+        // the window it is attached to.
+        openWindow(id: BloomApp.mainWindowID)
 
         Task {
             await app.createWorkspace(

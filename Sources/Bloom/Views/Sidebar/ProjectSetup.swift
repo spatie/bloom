@@ -15,7 +15,7 @@ enum ProjectSetupSurface: Sendable, Equatable {
 /// The one way Bloom offers to make a folder into a project.
 ///
 /// Everything that adds a project through the file panel goes through `AppModel.addRepository`,
-/// and what is left of that is the Settings window's project list, the create sheet's empty state
+/// and what is left of that is the Settings window's project list, the create window's empty state
 /// and `project_add` over the bridge. None of them decides anything. They ask for a folder and
 /// hand it over, so the offer below is reached identically from all of them.
 ///

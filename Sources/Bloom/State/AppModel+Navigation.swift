@@ -31,7 +31,7 @@ extension AppModel {
 
     /// Asks for a folder and adds it, which is the whole of what an "Add project" control that
     /// cannot raise the main window's sheet does: the Settings window's project list, and the
-    /// create sheet's empty state. Four views spelled the pair out themselves.
+    /// create window's empty state. Four views spelled the pair out themselves.
     func addProjectByAsking() async {
         guard let path = await ProjectFolderPicker.choose() else { return }
         await addRepository(at: path)

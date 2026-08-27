@@ -95,6 +95,10 @@ struct BloomApp: App {
     private static let minimumWindowWidth =
         Self.sidebarMaximumWidth + DetailSplitViewController.minimumWidth + 1
 
+    /// The main window's scene id. Named rather than repeated, because the create window brings
+    /// it forward after a workspace is made and a second literal is how those two stop matching.
+    static let mainWindowID = "main"
+
     /// What the sidebar column may be dragged out to. Shared with `RootView`, which declares it on
     /// the column, so the window minimum above can never fall out of step with it.
     static let sidebarMaximumWidth: CGFloat = 420
@@ -103,7 +107,7 @@ struct BloomApp: App {
         // A single `Window` rather than a `WindowGroup`. Bloom's whole model is one window
         // listing every workspace, and a WindowGroup opens an extra window every time a
         // `bloom://` link arrives, which is the opposite of what a deep link should do.
-        Window("Bloom", id: "main") {
+        Window("Bloom", id: Self.mainWindowID) {
             RootView()
                 .environment(model)
                 .frame(minWidth: Self.minimumWindowWidth, minHeight: 620)
@@ -160,6 +164,10 @@ struct BloomApp: App {
 
         // One window per project, opened from the gear on its sidebar header. See the scene.
         RepoSettingsWindow(model: model)
+
+        // Where a workspace is started. A window rather than a sheet on the main window, so the
+        // code being described can be read while the task is written. See the scene.
+        CreateWorkspaceWindow(model: model)
 
         // The map of the seas workspaces have been named after, opened from the Window menu.
         // See the scene.

@@ -233,7 +233,7 @@ public struct AttachmentDraft: Equatable, Sendable {
     /// behind them.
     ///
     /// What send does with a file that has gone missing between being attached and the turn going,
-    /// and what the create sheet does with one that could not be moved into the worktree: naming a
+    /// and what the create window does with one that could not be moved into the worktree: naming a
     /// path the agent cannot read only teaches it that Bloom lies about paths.
     public func keeping(_ isKept: (String) -> Bool) -> String {
         var result = ""

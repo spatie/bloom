@@ -37,7 +37,7 @@ final class ComposerOutputStyleCatalog {
     /// re-read a list that was fresh; what it could not do was find one, because the object
     /// holding it had been destroyed with the view.
     ///
-    /// Keyed on the project, which can be nil in the create sheet, where there is no checkout yet
+    /// Keyed on the project, which can be nil in the create window, where there is no checkout yet
     /// and the built in styles are the whole answer.
     private static var byProject: [String: ComposerOutputStyleCatalog] = [:]
 

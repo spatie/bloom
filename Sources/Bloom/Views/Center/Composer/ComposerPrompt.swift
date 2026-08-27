@@ -6,7 +6,7 @@ import BloomCore
 /// it, and whatever footer the caller puts under it.
 ///
 /// This is the whole of "the composer" as a thing you can put somewhere. It was pulled out of
-/// `ComposerView` when the create sheet became a composer rather than a form, because creating a
+/// `ComposerView` when the create window became a composer rather than a form, because creating a
 /// workspace is writing the first message of a conversation and it should be the same surface as
 /// writing the second: the same chrome, the same drop target, the same `@mention` and `/command`
 /// menus, the same paperclip, the same hover cards. Copying that into a sheet would have been two
@@ -31,11 +31,11 @@ struct ComposerPrompt<Footer: View>: View {
     /// Where an attached file is copied to, and what its stored path is relative to.
     var attachmentRoot: String
     /// Which bucket of `PromptAttachmentStore` this prompt is filling: a session id in a
-    /// conversation, a draft id in the create sheet.
+    /// conversation, a draft id in the create window.
     var attachmentKey: String
 
     /// The review comments riding with the next message, drawn as chips above the text the way
-    /// the `/command` chip is. Only a conversation has any: the create sheet has no diff to have
+    /// the `/command` chip is. Only a conversation has any: the create window has no diff to have
     /// commented on, so its default stays empty and nothing about the sheet changes.
     var reviewComments: [ReviewComment] = []
     var onRemoveReviewComment: @MainActor (ReviewCommentID) -> Void = { _ in }
@@ -414,7 +414,7 @@ struct ComposerPrompt<Footer: View>: View {
     /// Which side of the box the floating panels open on, and how much room that side has.
     ///
     /// In a conversation the composer sits at the foot of the window and the room above it is the
-    /// whole transcript, so this resolves to `above` and nothing moves. In the create sheet the
+    /// whole transcript, so this resolves to `above` and nothing moves. In the create window the
     /// box sits under one heading in a window sized exactly to its content, and a menu that
     /// opened upwards there was clipped at the sheet's top edge: two arbitrary rows survived, the
     /// ranked ones, the selected one among them, were cut off, and the header controls were

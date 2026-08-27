@@ -1,11 +1,11 @@
 import Foundation
 
-/// What the create sheet learns about a repository before Create can be pressed: the branches a
+/// What the create window learns about a repository before Create can be pressed: the branches a
 /// worktree could be cut from, the repository's settings, and whether a model is around to name
 /// the workspace.
 ///
 /// This used to be the last allow-listed exception to the rule that a `View` does not run a
-/// subprocess: `CreateWorkspaceSheet` asked `Git.branches` from its own `.task`, and with the
+/// subprocess: `CreateWorkspaceView` asked `Git.branches` from its own `.task`, and with the
 /// call went the two branch decisions below, where no test could reach them. The gathering is
 /// one function so the sheet still makes a single hop off the main actor for all three reads (a
 /// branch listing, a settings file chain and a PATH lookup, none of which belongs on the actor
@@ -43,7 +43,7 @@ public struct WorkspaceStartContext: Sendable {
     }
 }
 
-/// What the create sheet can offer to open, as opposed to what it can cut a branch from.
+/// What the create window can offer to open, as opposed to what it can cut a branch from.
 ///
 /// Loaded separately from `WorkspaceStartContext` and after it, because listing pull requests is a
 /// network call: the sheet has to be typeable the moment it opens, and a project whose GitHub is
@@ -81,7 +81,7 @@ public struct WorkspaceCheckoutOptions: Sendable {
 
     /// Both branch listings are read here rather than handed in.
     ///
-    /// The local half used to arrive from the create sheet, which loaded it in a task of its own,
+    /// The local half used to arrive from the create window, which loaded it in a task of its own,
     /// and the two tasks raced: this one read the sheet's list before the other had written it, so
     /// on every open the local half was empty. A branch that had never been pushed was missing
     /// from the picker altogether, and one that existed on both sides was offered as "(remote)"

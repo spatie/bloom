@@ -3,7 +3,7 @@ import Foundation
 /// Everything a caller has to say to get a workspace with an agent ready to work in it.
 ///
 /// One value rather than eleven arguments, because there are now four routes to a workspace and
-/// they had already drifted apart: the create sheet could choose a base branch, a branch name, a
+/// they had already drifted apart: the create window could choose a base branch, a branch name, a
 /// backend, a model, an effort and a permission mode; the `bloom://` link, the Services menu and
 /// the Shortcuts intent were each hardwired to chat, the default branch and the default model,
 /// not by decision but because nobody carried the arguments through. A route that fills in a

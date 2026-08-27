@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import BloomCore
 
-/// What the create sheet's source picker offers, how it ranks what was typed, and what the button
+/// What the create window's source picker offers, how it ranks what was typed, and what the button
 /// that opens it says afterwards.
 ///
 /// The bug behind the suite: "New branch from freekmurze/figma-mcp-check" was picked out of an

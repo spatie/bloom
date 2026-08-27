@@ -189,10 +189,10 @@ one too, by looking for `await Git.` and `await Shell.` under `Sources/Bloom/Vie
 calls are all async and the pure helpers on the same types are not, so the test costs no exception
 list of its own. The three of those that live under `Views/` are named in the allow-list because
 they are what a view calls **instead** of reaching for a process itself; `WorkspaceModel` is outside
-that path, so the rule never sees it and needs no entry. `CreateWorkspaceSheet` was the last
+that path, so the rule never sees it and needs no entry. `CreateWorkspaceView` was the last
 exception, calling `Git.branches` from its own `.task`; that loading and both branch decisions it
-fed are `WorkspaceStartContext` in the core now, tested, so the sheet's entry came off and the
-allow-list in `Tools/house-rules.sh` is back to the three helper types it was meant to hold.
+fed are `WorkspaceStartContext` in the core now, tested, so its entry came off and the allow-list
+in `Tools/house-rules.sh` is back to the three helper types it was meant to hold.
 
 ## Where a file goes
 
@@ -224,10 +224,10 @@ subjects so that "this is a view's decision, moved" stays visible.
 `Sources/Bloom` is grouped the same way, by **pane rather than by kind**. `Views/` holds one
 directory per region of the window (`Sidebar`, `Center`, `Inspector`, `Home`, `Transcript`,
 `Terminal`, `Chrome`, `Tabs`) and one per thing that gets a window or a sheet of its own
-(`Archive`, `Code`, `Markdown`, `Oceans`, `OpenIn`, `RepoSettings`), and the two that outgrew a
-single directory are split by what they are for rather than by what they are: `Center/Composer`,
-`Center/Panes`, `Center/Attachments`, `Center/Browser`; `Chrome/Window`, `Chrome/Settings`,
-`Chrome/MenuBar`, `Chrome/App`, `Chrome/Feedback`, `Chrome/Notices`.
+(`Archive`, `Code`, `CreateWorkspace`, `Markdown`, `Oceans`, `OpenIn`, `RepoSettings`), and the
+two that outgrew a single directory are split by what they are for rather than by what they are:
+`Center/Composer`, `Center/Panes`, `Center/Attachments`, `Center/Browser`; `Chrome/Window`,
+`Chrome/Settings`, `Chrome/MenuBar`, `Chrome/App`, `Chrome/Feedback`, `Chrome/Notices`.
 
 Four directories sit beside `Views/` and are not panes, because none of them is drawn in one
 place. `Design/` is the theme and the snapshot galleries, `State/` is `AppModel` with its

@@ -642,7 +642,7 @@ struct HomeView: View {
         }
     }
 
-    /// Handed to `RootView`, which owns the only create sheet in the app.
+    /// Handed to `RootView`, which is what opens the create window. See `openCreateWindow`.
     private func requestWorkspace(in repo: Repo?) {
         NotificationCenter.default.post(name: .bloomNewWorkspace, object: repo)
     }

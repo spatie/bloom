@@ -89,7 +89,7 @@ public struct WorkspaceManager: Sendable {
     /// asking first, so there is one place that reads the row and one place that writes it.
     ///
     /// **The row is read again here rather than taken from the `Repo` the caller is holding.**
-    /// That value can be minutes old, because it came off the sidebar, out of a create sheet
+    /// That value can be minutes old, because it came off the sidebar, out of a create window
     /// somebody left open, or through the bridge from a `project_list` earlier in the same turn,
     /// and `project_hide` can have landed on the real row since. A stale copy would answer this
     /// question about a project as it used to be.
@@ -139,7 +139,7 @@ public struct WorkspaceManager: Sendable {
     /// the whole of that and is what a route calls.
     ///
     /// **Internal, and that is the point.** It was public, and every route that reached it grew
-    /// its own half of the orchestration around it: the create sheet had all of it, the `bloom://`
+    /// its own half of the orchestration around it: the create window had all of it, the `bloom://`
     /// link and the Services menu had none of it, and the Shortcuts intent could not reach it at
     /// all and polled the database instead. Internal means the app target cannot call this, so the
     /// compiler holds the line for every route outside the core, and `Tools/house-rules.sh` holds
@@ -263,7 +263,7 @@ public struct WorkspaceManager: Sendable {
         // detached worktree, ran `gh pr checkout`, and got back "fatal:
         // 'freekmurze/figma-mcp-check' is already used by worktree at
         // '/Users/freek/conductor/workspaces/there-there/adelaide'" with "failed to run git: exit
-        // status 128" on the end, which reached a dialogue as it stood. The create sheet asks the
+        // status 128" on the end, which reached a dialogue as it stood. The create window asks the
         // same question before Create is pressed, so this is the second of two agreeing
         // mechanisms rather than the only one: every other way in, the bridge and a `bloom://`
         // link included, arrives here without having asked anything.

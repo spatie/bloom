@@ -9,7 +9,7 @@ import Foundation
 ///
 /// Two ways to say the same workspace: the id `workspace_list` and `reveal` print, and the name in
 /// the sidebar. The id is unique in the database so it cannot be ambiguous; the name is not,
-/// because `AgentWorkspaceOrder.name` deliberately does not dedupe and the create sheet does not
+/// because `AgentWorkspaceOrder.name` deliberately does not dedupe and the create window does not
 /// either, and an ambiguous name is refused rather than resolved to whichever row sorted first.
 ///
 /// It is one function rather than one per tool because `reveal` had it and `workspace_rename`

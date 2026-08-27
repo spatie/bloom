@@ -93,7 +93,7 @@ struct WorkspaceStartPlanTests {
 
 /// What survives a person changing their mind about which of the two things they are doing.
 ///
-/// The whole reason the create sheet chooses a mode first is that the two-button version could
+/// The whole reason the create window chooses a mode first is that the two-button version could
 /// take a sentence, name a workspace after it and never say so. Choosing first removes the input,
 /// which only helps if what was written comes with it.
 @Suite("Crossing between chat and terminal")
@@ -166,7 +166,7 @@ struct WorkspaceModeCrossingTests {
     }
 }
 
-@Suite("What the create sheet opens on")
+@Suite("What the create window opens on")
 struct WorkspaceStartModeTests {
     /// Nineteen creations out of twenty are chats, and somebody who has not chosen yet can back
     /// out of chat mode by simply typing.
@@ -204,9 +204,9 @@ struct WorkspaceStartModeTests {
     /// segment beside it, which is not a thing a list has a member for.
     @Test("only the segment that runs an agent says more than its tab's name")
     func onlyChatSaysMoreThanItsName() {
-        #expect(WorkspaceStartMode.chat.sheetLabel == "Chat with an agent")
-        #expect(WorkspaceStartMode.terminal.sheetLabel == WorkspaceStartMode.terminal.label)
-        #expect(WorkspaceStartMode.browser.sheetLabel == WorkspaceStartMode.browser.label)
+        #expect(WorkspaceStartMode.chat.pickerLabel == "Chat with an agent")
+        #expect(WorkspaceStartMode.terminal.pickerLabel == WorkspaceStartMode.terminal.label)
+        #expect(WorkspaceStartMode.browser.pickerLabel == WorkspaceStartMode.browser.label)
     }
 
     /// The sheet's heading lower-cases the label to say what is being opened in, so a label that

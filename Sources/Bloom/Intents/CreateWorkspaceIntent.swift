@@ -42,7 +42,7 @@ struct CreateWorkspaceIntent: AppIntent {
 
         guard await RunningApp.waitUntilReady() else { throw IntentFailure.appNeverAppeared }
 
-        // Straight into the same code the create sheet runs, and it answers with the workspace or
+        // Straight into the same code the create window runs, and it answers with the workspace or
         // with what went wrong.
         //
         // It used to build a `bloom://` URL, hand it to the window, and then read the database

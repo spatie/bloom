@@ -12,7 +12,7 @@ struct ComposerFooterView: View {
     var onChange: @MainActor (ComposerControls) -> Void
     /// Nil until the session has run a turn, because that is the first moment the agent says
     /// anything about the window. Absent rather than zero: a gauge reading 0% would be a claim.
-    /// Always nil in the create sheet, where there is not yet anything to report.
+    /// Always nil in the create window, where there is not yet anything to report.
     var context: ContextWindowUsage?
     var isRunning: Bool = false
     var canSend: Bool
@@ -20,7 +20,7 @@ struct ComposerFooterView: View {
     var intent: ComposerIntent = .send
     /// The checkout the output style menu should look in for styles this project defines, or nil
     /// where there is not one yet. A repository can carry its own `.claude/output-styles`, and in
-    /// the create sheet the worktree does not exist, so the repository is the honest answer there.
+    /// the create window the worktree does not exist, so the repository is the honest answer there.
     var project: String?
     var onAttach: @MainActor () -> Void
     /// What choosing a quick prompt does, or nil where there is nowhere to put one. Nil hides the
@@ -31,7 +31,7 @@ struct ComposerFooterView: View {
     var onStop: @MainActor () -> Void = {}
     /// Whether the row carries the choices the agent runs on.
     ///
-    /// False for a terminal workspace, which has no agent: the create sheet was offering a model,
+    /// False for a terminal workspace, which has no agent: the create window was offering a model,
     /// a reasoning effort, a permission mode, fast mode and a paperclip for a workspace that opens
     /// a shell and never sends any of them anywhere. What is left is the send button, which is the
     /// one control on the row that still does something.

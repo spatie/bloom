@@ -318,7 +318,7 @@ struct WorkspaceCheckoutTests {
 
     /// Git's refusal to check a branch out twice is **per repository**, and a branch name is not
     /// unique across them: `main`, `develop` and `staging` exist in nearly every project on a
-    /// machine. Matching on the name alone meant the create sheet for one project labelled its own
+    /// machine. Matching on the name alone meant the create window for one project labelled its own
     /// `develop` as held by a workspace in another, and picking that row dismissed the sheet and
     /// selected the other project's workspace.
     @Test("a branch of the same name in another project is not this project's branch")

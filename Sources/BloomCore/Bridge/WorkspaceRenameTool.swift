@@ -94,7 +94,7 @@ public enum WorkspaceRenameTrouble: Error, Sendable, Equatable {
 /// ## The report that produced it
 ///
 /// An agent nine commits into an app redesign found its workspace still called "test", which is
-/// what the owner had typed into the create sheet before either of them knew what the branch would
+/// what the owner had typed into the create window before either of them knew what the branch would
 /// become. It had `pane_rename` for a tab and `workspace_start` takes a name for a workspace that
 /// does not exist yet, and there was nothing for the one it was standing in, so it stopped and
 /// asked the owner to double click the row in the sidebar. That is a person interrupted for a
@@ -144,7 +144,7 @@ public enum WorkspaceRenameTrouble: Error, Sendable, Equatable {
 ///
 /// ## The race it does not have, and why
 ///
-/// A workspace started from the create sheet with no name wears a plant codename while a model is
+/// A workspace started from the create window with no name wears a plant codename while a model is
 /// asked what to call it, and that answer can land seconds into the first turn, which is exactly
 /// when an agent that has read the task is likeliest to call this. It cannot overwrite what this
 /// wrote: `WorkspaceNaming.mayApplyName` compares the row's name against the exact placeholder

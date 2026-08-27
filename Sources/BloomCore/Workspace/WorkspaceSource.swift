@@ -21,7 +21,7 @@ public enum PullRequestOffer: Sendable, Hashable {
 /// One row the source picker can offer, over the three verbs the picker exists to put side by
 /// side.
 ///
-/// The bug that forced this: the create sheet's "Start from" menu listed "New branch from <name>"
+/// The bug that forced this: the create window's "Start from" menu listed "New branch from <name>"
 /// for every branch in the project and filed "Open an existing branch" underneath all of them,
 /// unsearchable. Picking a colleague's branch out of the top of that list cuts a fresh branch off
 /// their head, so the workspace opens empty and its Changes tab says nothing differs. The two

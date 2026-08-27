@@ -9,7 +9,7 @@ import Foundation
 /// place is a much more expensive question, and `Git+Safety.swift` is where it is asked.
 ///
 /// `WorktreeEntry` and the parsing of `git worktree list --porcelain` are `WorktreeListing`, in
-/// its own file, because which branches are already taken is a question the create sheet asks
+/// its own file, because which branches are already taken is a question the create window asks
 /// before it is a question this file answers.
 
 extension Git {

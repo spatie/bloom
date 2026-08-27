@@ -31,7 +31,7 @@ struct RepoHeaderRow: View {
     /// How many workspace rows are drawn under this project, which is what the filter is letting
     /// through. Said out loud rather than drawn: see `name`.
     var workspaceCount: Int
-    /// Raised to the sidebar, which owns the create sheet.
+    /// Raised to the sidebar, which asks for the create window.
     var onCreateWorkspace: (Repo) -> Void
 
     @Environment(AppModel.self) private var app

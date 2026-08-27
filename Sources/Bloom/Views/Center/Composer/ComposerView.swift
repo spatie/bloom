@@ -4,7 +4,7 @@ import BloomCore
 
 /// The prompt box at the bottom of the centre column.
 ///
-/// The surface itself is `ComposerPrompt`, which the create sheet uses too. What is left here is
+/// The surface itself is `ComposerPrompt`, which the create window uses too. What is left here is
 /// everything that is true of a conversation and of nothing else: the draft belongs to a
 /// transcript and is saved back to it, the divider above the box, the footer's values coming off
 /// a `Session` row, and the first-open defaults.
@@ -520,7 +520,7 @@ struct ComposerView: View {
 
         // The marker is what separates "never opened" from "opened and left alone", which the
         // column values cannot express: a session created with the built-in defaults looks exactly
-        // like one the user deliberately set to the same values. The create sheet writes it too,
+        // like one the user deliberately set to the same values. The create window writes it too,
         // so a model chosen there is never overruled the first time the workspace is opened.
         let appliedKey = ComposerControls.defaultsAppliedKey(sessionID: sessionID)
         let wasPrepared = (try? await store.setting(appliedKey)) == "1"

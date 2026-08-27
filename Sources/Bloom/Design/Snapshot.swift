@@ -208,7 +208,7 @@ enum Snapshot {
         #endif
     }
 
-    /// Creates the workspace the create sheet's terminal mode makes, so it can be photographed.
+    /// Creates the workspace the create window's terminal mode makes, so it can be photographed.
     ///
     ///     Bloom --terminal-workspace plumage
     ///
@@ -482,19 +482,24 @@ enum Snapshot {
             // now: the archived workspaces are Home under its Archived chip, and what they cost
             // is `--settings --settings-tab storage`.
 
-            // `--create-sheet` opens the New Workspace sheet and captures the sheet rather than
-            // the window behind it. Without it that sheet could only be looked at by asking a
+            // `--create-sheet` opens the New Workspace window and captures it rather than the
+            // main window behind it. Without it that surface could only be looked at by asking a
             // human for a screenshot, which is why it went years without one. Pass it LAST, for
             // the reason spelled out for `--settings` just below.
-            let wantsCreateSheet = arguments.contains("--create-sheet")
-            if wantsCreateSheet {
+            //
+            // The flag keeps its old name, as `--new-project` does: it is what the scripts and
+            // the people who run them already type, and what it opens is the same surface with a
+            // title bar of its own. What did change is where the picture comes from, which is the
+            // second-window branch below rather than the attached-sheet one.
+            let wantsCreateWindow = arguments.contains("--create-sheet")
+            if wantsCreateWindow {
                 NotificationCenter.default.post(name: .bloomNewWorkspace, object: nil)
                 try? await Task.sleep(for: .seconds(2))
             }
 
             // `--new-project` opens the sheet that starts a project, for the same reason
-            // `--create-sheet` opens the other one: it is a sheet, and a sheet has no way in that
-            // a capture run can press. Pass it LAST, as above. The flag keeps the old name because
+            // `--create-sheet` opens the window beside it: neither has a way in that a capture run
+            // can press. Pass it LAST, as above. The flag keeps the old name because
             // that is what the notification is still called: `StartProjectSheet` absorbed the
             // second door rather than replacing the first.
             let wantsNewProject = arguments.contains("--new-project")
@@ -563,13 +568,15 @@ enum Snapshot {
             // showing, and it titles the MAIN window after the selected workspace, so a title
             // comparison against "Bloom" matched neither and every settings capture silently
             // returned a picture of the main window instead.
-            if wantsSettings || wantsRepoSettings || wantsAbout || wantsWelcome {
+            if wantsSettings || wantsRepoSettings || wantsAbout || wantsWelcome || wantsCreateWindow {
                 let main = candidate
                 candidate = nil
                 for _ in 0..<40 {
                     candidate = capturableWindows().first { $0 !== main }
                     if candidate != nil { break }
-                    if wantsRepoSettings {
+                    if wantsCreateWindow {
+                        NotificationCenter.default.post(name: .bloomNewWorkspace, object: nil)
+                    } else if wantsRepoSettings {
                         NotificationCenter.default.post(
                             name: .bloomOpenRepoSettings, object: repoSettingsProject
                         )
@@ -585,8 +592,8 @@ enum Snapshot {
             }
 
             // The Help menu sheets and their thank-you cards, raised by
-            // `FeedbackPresenter.presentIfRequested` rather than from here, but captured the
-            // same way `--create-sheet` is: the sheet, not the window behind it.
+            // `FeedbackPresenter.presentIfRequested` rather than from here, and captured as
+            // sheets: the sheet, not the window behind it.
             let wantsFeedbackSheet = [
                 "--feedback-sheet", "--feedback-logs", "--feedback-problems", "--feedback-sent",
                 "--prompt-sheet", "--prompt-problems", "--prompt-sent",
@@ -595,7 +602,7 @@ enum Snapshot {
             // A sheet is its own window, hanging off the one it was presented from, and it is
             // never in `capturableWindows()`: it carries no title bar. Asked for by name here
             // rather than searched for, so nothing else on screen can be picked by mistake.
-            if wantsCreateSheet || wantsNewProject || wantsProjectSetup || wantsFeedbackSheet {
+            if wantsNewProject || wantsProjectSetup || wantsFeedbackSheet {
                 for _ in 0..<20 where candidate?.attachedSheet == nil {
                     try? await Task.sleep(for: .milliseconds(250))
                 }

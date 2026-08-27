@@ -174,7 +174,7 @@ extension AppModel {
             controls.agentKind = agent
         }
 
-        // Both halves of the order's source, handed to the same two arguments the create sheet's
+        // Both halves of the order's source, handed to the same two arguments the create window's
         // two tabs fill in. Nothing is decided here: `AgentStartSource` has already found the
         // branch in the project and refused the call if it is not there, so this side is the same
         // pass-through it always was.

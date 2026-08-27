@@ -92,7 +92,7 @@ extension Git {
     /// The branch a prompt would be cut on, before anything checks whether it is free.
     ///
     /// One function because two places need the same answer and only one of them can act on it:
-    /// `WorkspaceManager.cut` puts a worktree on it, and the create sheet prints it under the box
+    /// `WorkspaceManager.cut` puts a worktree on it, and the create window prints it under the box
     /// so somebody can see what they are about to make. Those were two copies of the same three
     /// lines, one of them carrying a comment saying it mirrored the other, which is a drift waiting
     /// for the next change to either side. A preview that has drifted is a lie in a monospaced font.

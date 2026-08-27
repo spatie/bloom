@@ -76,16 +76,16 @@ struct BloomCommands: Commands {
 
         CommandGroup(replacing: .newItem) {
             MenuCommand(.newWorkspace) {
-                // The sheet lives in RootView, and the sidebar and Home already open it this
-                // way. Setting a flag on the model instead would leave it stuck true with no
-                // sheet.
+                // `RootView` opens the window, and the sidebar and Home already ask for it this
+                // way. It is not `openWindow` from here because which project is meant depends on
+                // what the main window has selected. See `RootView.openCreateWindow`.
                 NotificationCenter.default.post(name: .bloomNewWorkspace, object: nil)
             }
             .disabled(model.repos.isEmpty)
 
             // Directly under New Workspace, because it starts one, and at the top level of File
             // rather than nowhere. Opening a workspace on somebody else's pull request was a whole
-            // feature that could only be found by opening the create sheet, opening its "Start
+            // feature that could only be found by opening the create window, opening its "Start
             // from" control and reading down past a list of branches: two levels in, behind a
             // control most people never press, which is the same as not shipping it.
             //
@@ -556,7 +556,7 @@ struct BloomCommands: Commands {
             // Option+Command+F rather than Command+F, which belongs to finding in the pane in
             // front. Feedback keeps this key: it is the one somebody already knows.
             // The sheets themselves are raised from `RootView`, through `FeedbackPresenter`, for
-            // the reason the create sheet is: a menu item cannot present anything, and the draft
+            // the reason the create window is: a menu item cannot present anything, and the draft
             // has to outlive the sheet it was typed into.
             MenuCommand(.sendFeedback) {
                 FeedbackPresenter.shared.open(.report)

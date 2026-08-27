@@ -155,7 +155,7 @@ extension AppModel {
         //
         // Off the main actor, like `resolvedControls` above and for the same reason: the load
         // reads and parses every settings file this project answers to, and this line sits on the
-        // frame that is dismissing the create sheet.
+        // frame that is dismissing the create window.
         let seaBranch: String?
         if let pick {
             let path = repo.path
@@ -309,7 +309,7 @@ extension AppModel {
 
     /// The model, effort and permission mode the owner has actually chosen for this project.
     ///
-    /// The same resolution the composer and the create sheet do, so a workspace created without a
+    /// The same resolution the composer and the create window do, so a workspace created without a
     /// window agrees with one created from the sheet rather than falling back to the built-in.
     /// Repository settings first, then the Settings screen, then a machine-wide file. See
     /// `ComposerDefaults.resolve`.

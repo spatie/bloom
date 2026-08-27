@@ -1,7 +1,7 @@
 import Foundation
 
 /// What a workspace opens on the first time you see it, and which of the three things the create
-/// sheet is asking for.
+/// window is asking for.
 ///
 /// Deliberately a starting layout rather than a mode of the workspace. A terminal workspace, a
 /// browser workspace and a chat workspace are the same thing: same worktree, same setup script,
@@ -12,14 +12,14 @@ import Foundation
 /// That is the whole reason this is one enum and a single stored hint rather than a mode: there is
 /// no second set of rules to keep consistent, and nothing a workspace can be locked out of.
 ///
-/// It is a mode of the SHEET, though, and that is new. The sheet used to offer both routes at once
-/// as two buttons beside each other, which meant a person could write five hundred words and then
-/// press the button that never sends them anywhere. Choosing first is what removes that, because
-/// the input the other route would have thrown away is not on screen in the first place. See
-/// `WorkspaceStartPlan.carriedName` for what does survive the crossing.
+/// It is a mode of the WINDOW that starts one, though, and that is new. That window used to offer
+/// both routes at once as two buttons beside each other, which meant a person could write five
+/// hundred words and then press the button that never sends them anywhere. Choosing first is what
+/// removes that, because the input the other route would have thrown away is not on screen in the
+/// first place. See `WorkspaceStartPlan.carriedName` for what does survive the crossing.
 ///
-/// In `BloomCore` rather than in the sheet, because everything below this line is a decision, and
-/// a decision taken inside a `View` is a decision nothing can test.
+/// In `BloomCore` rather than in `CreateWorkspaceView`, because everything below this line is a
+/// decision, and a decision taken inside a `View` is a decision nothing can test.
 public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable {
     /// Describe a task, and the agent starts on it. The branch name is derived from what you typed.
     case chat
@@ -42,7 +42,7 @@ public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// What the create sheet's segmented control calls it.
+    /// What the create window's segmented control calls it.
     ///
     /// Chat is the only one longer than `label`, and it is the only one with anything extra to
     /// say: what separates the three is whether an agent runs, so that segment names the agent and
@@ -53,7 +53,7 @@ public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable {
     /// once, and a control offering three starting points reads as a list, which a disclaimer is
     /// not a member of. The tab is called Terminal everywhere else in the window; this says the
     /// same word.
-    public var sheetLabel: String {
+    public var pickerLabel: String {
         switch self {
         case .chat: "Chat with an agent"
         case .terminal: "Terminal"
@@ -61,7 +61,7 @@ public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Whether an agent runs here. The one question the rest of the sheet is downstream of: the
+    /// Whether an agent runs here. The one question the rest of the window is downstream of: the
     /// model, the reasoning effort, the output style, the permission mode and the paperclip all
     /// exist to qualify a turn, and a terminal or browser workspace has no turn to qualify.
     public var runsAnAgent: Bool { self == .chat }
@@ -93,7 +93,7 @@ public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    // MARK: - What the sheet opens on
+    // MARK: - What the create window opens on
 
     /// Where the last choice is kept.
     ///
@@ -110,7 +110,7 @@ public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable {
     /// pays the click once.
     public static let rememberedKey = "create.mode"
 
-    /// Which mode the sheet opens on, given whatever is in the defaults.
+    /// Which mode the window opens on, given whatever is in the defaults.
     ///
     /// Chat for a fresh install, for the reason above: it is what nineteen in twenty want, and it
     /// is the only one of the three that a person who has not decided yet can back out of by

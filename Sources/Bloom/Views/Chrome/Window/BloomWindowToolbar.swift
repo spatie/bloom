@@ -128,8 +128,8 @@ struct BloomWindowToolbar: ToolbarContent {
 
     // MARK: - Actions
 
-    /// Every entry point goes through the same notification so the sheet behaves identically
-    /// whether it came from the toolbar, the sidebar, Home or the menu bar.
+    /// Every entry point goes through the same notification so the create window behaves
+    /// identically whether it came from the toolbar, the sidebar, Home or the menu bar.
     private func presentCreate() {
         NotificationCenter.default.post(name: .bloomNewWorkspace, object: nil)
     }

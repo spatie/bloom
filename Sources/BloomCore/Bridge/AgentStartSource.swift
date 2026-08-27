@@ -3,8 +3,8 @@ import Foundation
 /// Where a workspace an agent asked for starts: a fresh branch cut from one, or a branch that
 /// already exists carried on.
 ///
-/// **The choice is the create sheet's, and it is reused rather than restated.** The sheet puts it
-/// in a tab strip, `WorkspaceSourceTab`: "Create new branch", where commits land on a new branch
+/// **The choice is the create window's, and it is reused rather than restated.** That window puts
+/// it in a tab strip, `WorkspaceSourceTab`: "Create new branch", where commits land on a new branch
 /// and merge into the branch you picked, and "Continue on existing branch", where they land on the
 /// branch you picked and merge when it does. Over the bridge the same choice is two arguments, and
 /// everything below is the translation between them. The verbs, the sentence each one carries, the

@@ -1,7 +1,7 @@
 import Testing
 @testable import BloomCore
 
-/// The two branch decisions the create sheet used to make inside its own `load`, which is why
+/// The two branch decisions the create window used to make inside its own `load`, which is why
 /// they had no tests until they moved here.
 @Suite("Workspace start context")
 struct WorkspaceStartContextTests {

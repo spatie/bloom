@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import BloomCore
 
-/// The choice the create sheet draws as two tabs, as `workspace_start` takes it: cut a new branch
+/// The choice the create window draws as two tabs, as `workspace_start` takes it: cut a new branch
 /// from one, or carry on one that already exists.
 ///
 /// Everything here is the pure half, which is where the decisions are. What the tool does with
@@ -157,7 +157,7 @@ struct AgentStartSourceTests {
     }
 
     /// The point of the whole thing: what reaches `WorkspaceManager` is the same `WorkspaceCheckout`
-    /// the create sheet hands it, so the worktree lands on the branch rather than beside it.
+    /// the create window hands it, so the worktree lands on the branch rather than beside it.
     @Test("an existing branch carries a checkout and no base")
     func existingBranchSource() {
         let branch = ExistingBranch(name: "freek/figma", isLocal: true)

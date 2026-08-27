@@ -5,7 +5,7 @@ import AppKit
 /// for the same reason.
 ///
 /// Two questions and so two panels below. `choose` is the file panel that acts on what it is
-/// given, which is what the Settings window and the create sheet's empty state raise; `chooseTarget`
+/// given, which is what the Settings window and the create window's empty state raise; `chooseTarget`
 /// is the one inside `StartProjectSheet`, which writes its answer into a field and decides nothing.
 /// The main window's own controls no longer raise the first of the two.
 @MainActor

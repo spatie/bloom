@@ -13,7 +13,7 @@ import SwiftUI
 /// This one therefore does not move. It is the last control in the footer in every state, which is
 /// what makes it the thing the hand goes to without looking, and it is what Return does.
 ///
-/// In the create sheet it is the same button doing the same job for a conversation that does not
+/// In the create window it is the same button doing the same job for a conversation that does not
 /// exist yet, so it says what it is about to do and shows the key that does it. See
 /// `ComposerIntent`.
 struct ComposerSendButton: View {
@@ -34,7 +34,7 @@ struct ComposerSendButton: View {
     /// Not private, because `ComposerStopButton` sits next to it and has to be the same circle.
     static let glyph = Metrics.rowHeight - Metrics.spacingSmall * 2
 
-    /// A named action rather than a glyph, which only the create sheet uses. A round arrow is
+    /// A named action rather than a glyph, which only the create window uses. A round arrow is
     /// enough for a message going into a conversation the user is looking at; a control that is
     /// about to cut a branch and a worktree should say so, and the return glyph beside it says
     /// which key does it without a tooltip.

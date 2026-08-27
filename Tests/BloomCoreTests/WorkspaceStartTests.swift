@@ -101,7 +101,7 @@ struct WorkspaceStartTests {
 
     // MARK: - The choices the sheet used to be the only route to carry
 
-    /// Every one of these was reachable from the create sheet and from nowhere else. The link, the
+    /// Every one of these was reachable from the create window and from nowhere else. The link, the
     /// Services menu and the Shortcuts intent all opened a chat on the app-wide default model
     /// whatever the caller wanted, and nothing said so.
     @Test("the chosen backend, model, effort and permission mode reach the session row")

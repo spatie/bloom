@@ -48,7 +48,7 @@ struct QuickPromptDeliveryTests {
 
     // MARK: - What a surface can do
 
-    /// The create sheet: no conversation to send into, no strip to open a chat on. Every prompt
+    /// The create window: no conversation to send into, no strip to open a chat on. Every prompt
     /// writes into the box there, which is what it did before either switch existed.
     @Test("a surface that can do neither writes into the box, whatever the prompt asks")
     func composeOnlySurface() {

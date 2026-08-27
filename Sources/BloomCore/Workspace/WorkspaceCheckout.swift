@@ -1,6 +1,6 @@
 import Foundation
 
-/// A pull request as the create sheet needs to talk about one: enough to list it, enough to name
+/// A pull request as the create window needs to talk about one: enough to list it, enough to name
 /// the workspace after it, and enough to know which branch it will land on.
 ///
 /// Separate from `PullRequest` on purpose. That type describes the pull request belonging to a
@@ -171,7 +171,7 @@ public extension WorkspaceCheckout {
     }
 }
 
-/// The decisions the create sheet used to have nowhere to make: which pull requests are worth
+/// The decisions the create window used to have nowhere to make: which pull requests are worth
 /// offering, what a typed number or URL means, what the branch is called once names collide, and
 /// what to do about a branch that is already open somewhere.
 public enum WorkspaceCheckoutPlan {
@@ -370,7 +370,7 @@ public enum WorkspaceCheckoutPlan {
     ///
     /// **The project is the half this was missing.** Git's refusal is per repository, and a branch
     /// name is not unique across them: `main`, `develop` and `staging` exist in nearly every
-    /// project on a machine. Matching on the name alone meant the create sheet for project A
+    /// project on a machine. Matching on the name alone meant the create window for project A
     /// labelled A's own `develop` "In use by ‹a workspace in project B›", and picking that row
     /// dismissed the sheet and selected B's workspace. Somebody asked for a workspace in A and
     /// landed in an unrelated project, with nothing on screen saying why.

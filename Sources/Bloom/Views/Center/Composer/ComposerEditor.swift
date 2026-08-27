@@ -29,7 +29,7 @@ struct ComposerEditor: View {
     /// How a file that has finished copying gets into the text as an edit the text system can
     /// undo. See `ComposerEditorHandle`.
     var handle: ComposerEditorHandle?
-    /// What an empty box says. A parameter rather than a constant because the create sheet asks a
+    /// What an empty box says. A parameter rather than a constant because the create window asks a
     /// different question of the same box: there is no conversation yet to ask for changes to.
     var placeholder: String = ComposerEditor.chatPlaceholder
     /// What the field announces itself as, passed through to the text view. A parameter for the

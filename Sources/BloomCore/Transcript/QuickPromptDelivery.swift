@@ -18,7 +18,7 @@ import Foundation
 /// which says in words what the combination will do. A disabled control with no reason attached is
 /// worse than a sentence, and hiding one would hide a real behaviour.
 ///
-/// **A surface that cannot do what a prompt asks composes instead.** The create sheet has no chat
+/// **A surface that cannot do what a prompt asks composes instead.** The create window has no chat
 /// to send into and no strip to open a tab on, and a conversation dropped in without a workspace
 /// model behind it has no way to make a second one. Falling back to the draft is the only answer
 /// that loses nothing: the words are in the box, and the person presses Send.

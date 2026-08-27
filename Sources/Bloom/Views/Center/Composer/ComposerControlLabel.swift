@@ -6,7 +6,7 @@ import SwiftUI
 /// The height is pinned rather than derived from the label, because the footer mixes a menu, two
 /// toggles and a send button, and every one of those sizes itself differently when left alone.
 ///
-/// The mark is a slot rather than an SF Symbol name so the create sheet's project control can put
+/// The mark is a slot rather than an SF Symbol name so the create window's project control can put
 /// a `RepoIcon` in it and still be the same control as the pickers beside it. Everything that
 /// names an SF Symbol goes through the convenience initialiser below and reads exactly as it did.
 struct ComposerControlLabel<Icon: View>: View {

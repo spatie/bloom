@@ -62,7 +62,7 @@ struct ComposerOptionItems: View {
 
     /// The picker writes back through the caller rather than into storage of its own, because
     /// where the choice lives is the caller's business: a session row in a conversation, a value
-    /// carried into a workspace that does not exist yet in the create sheet.
+    /// carried into a workspace that does not exist yet in the create window.
     private var binding: Binding<String> {
         Binding(get: { selection }, set: { id in MainActor.assumeIsolated { onSelect(id) } })
     }

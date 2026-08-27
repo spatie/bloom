@@ -39,7 +39,7 @@ import BloomCore
 /// `contextMenu` hands out no `NSMenu` to set it on in any case.
 struct ProjectMenuItems: View {
     var repo: Repo
-    /// Raised to the sidebar, which owns the create sheet.
+    /// Raised to the sidebar, which asks for the create window.
     var onCreateWorkspace: (Repo) -> Void
     /// The rename is a field on the row itself, so the row starts it.
     var onRename: () -> Void

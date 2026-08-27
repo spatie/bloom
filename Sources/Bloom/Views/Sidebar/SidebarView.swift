@@ -632,15 +632,17 @@ struct SidebarView: View {
 
     // MARK: - Actions
 
-    /// The create sheet lives in `RootView`, so every entry point (the toolbar, the repo header's
-    /// `+`, the menu bar command) goes through one notification and behaves identically.
+    /// The create window is opened by `RootView`, so every entry point (the toolbar, the repo
+    /// header's `+`, the menu bar command) goes through one notification and behaves identically:
+    /// which project is meant depends on what the main window has selected, and only that window
+    /// knows. See `RootView.openCreateWindow`.
     private func presentCreate(in repo: Repo?) {
         renaming = nil
         NotificationCenter.default.post(name: .bloomNewWorkspace, object: repo)
     }
 
-    /// The sheet lives in `RootView` for the same reason the create sheet does, so every entry
-    /// point posts and behaves identically.
+    /// The sheet lives in `RootView` for the same reason the create window is opened from there,
+    /// so every entry point posts and behaves identically.
     private func startProject() {
         NotificationCenter.default.post(name: .bloomNewProject, object: nil)
     }

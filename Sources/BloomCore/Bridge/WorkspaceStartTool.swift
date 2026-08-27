@@ -21,7 +21,7 @@ public struct AgentWorkspaceOrder: Sendable, Hashable {
     /// only to the tool would make the two doors behave differently for no reason visible from
     /// either. The accidental duplicate, a retried call, is already handled by `spawnID`.
     public let name: String?
-    /// Which of the create sheet's two routes this call asked for: a fresh branch cut from
+    /// Which of the create window's two routes this call asked for: a fresh branch cut from
     /// something, or an existing branch carried on. Defaulted to a new branch from the project's
     /// default, which is what every call made before there was a choice gets. See
     /// `AgentStartSource`.
@@ -196,7 +196,7 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             Use it when a task splits into parts that do not need to see each other's edits, and \
             you want them worked on at the same time rather than one after another.
 
-            There are two ways to start it, the two Bloom's own create sheet offers, and picking \
+            There are two ways to start it, the two Bloom's own create window offers, and picking \
             the wrong one is the mistake worth avoiding here.
 
             '\(WorkspaceSourceTab.newBranch.title)' is the default and needs nothing said. \
