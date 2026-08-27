@@ -53,6 +53,13 @@ public struct TranscriptPaneState: Equatable, Sendable {
 
     /// The sequence numbers of the rows the reader had unfolded.
     public var expanded: Set<Int>
+    /// The runs of tool calls the reader had opened, by the sequence number of the first call in
+    /// each. See `TranscriptFold`.
+    ///
+    /// Here rather than in the view for exactly the reason `expanded` is here, and the bug is the
+    /// same one: this view is destroyed by every tab switch, so a run somebody opened to read
+    /// would fold itself away again the moment they looked at the changes and came back.
+    public var unfolded: Set<Int>
     /// Where the view was, in points from the top of the content.
     ///
     /// The fallback, not the answer. See `anchorSeq`.
@@ -99,6 +106,7 @@ public struct TranscriptPaneState: Equatable, Sendable {
 
     public init(
         expanded: Set<Int>,
+        unfolded: Set<Int> = [],
         offset: Double,
         anchorSeq: Int? = nil,
         anchorDelta: Double = 0,
@@ -107,6 +115,7 @@ public struct TranscriptPaneState: Equatable, Sendable {
         drawn: TranscriptWindow = TranscriptWindow(start: 0, end: 0)
     ) {
         self.expanded = expanded
+        self.unfolded = unfolded
         self.offset = offset
         self.anchorSeq = anchorSeq
         self.anchorDelta = anchorDelta

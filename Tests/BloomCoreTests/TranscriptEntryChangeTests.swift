@@ -158,6 +158,65 @@ struct TranscriptEntryChangeTests {
         #expect(rebuilt == new)
     }
 
+    // MARK: - Folding a run of tool calls
+
+    /// **The whole reason `TranscriptFold` is shaped the way it is, written down as the four
+    /// shapes it has to produce.** Every one of these must be a single contiguous edit: `.rebuilt`
+    /// is a `reloadData()`, which throws away every cell and the reader's text selection, and a
+    /// fold that cost one of those on every run in a turn would be slower than no fold at all.
+    ///
+    /// The run here is rows 10 to 13, closed by prose at 14, and `fold.10` is the line above it.
+    private func withFold(_ seqs: [Int]) -> [TranscriptEntryID] {
+        [.setup, .fold(10)] + rows(seqs) + [.sending, .streaming]
+    }
+
+    /// A run reaching four calls puts its line into the list while the run is still growing, which
+    /// is an insertion in the middle of the rows and nothing else.
+    @Test("a run's line goes in while the run is still open")
+    func theFoldLineArrives() {
+        let old = drawn([10, 11, 12])
+        let new = withFold([10, 11, 12, 13])
+        #expect(TranscriptEntryChange.between(old, new) == .grew(head: 1..<2, tail: 5..<6))
+    }
+
+    /// **The pass that folds a closed run is a removal and nothing else**, because the line was
+    /// already there and the row the fold keeps is the last one, which does not move. This is the
+    /// shape that fails if the fold's line is emitted only when it is folded.
+    @Test("folding a closed run takes rows out and puts none in")
+    func foldingIsOneRemoval() {
+        let open = withFold([10, 11, 12, 13, 14])
+        let folded = withFold([13, 14])
+        #expect(TranscriptEntryChange.between(open, folded) == .shrank(head: 2..<5, tail: 0..<0))
+    }
+
+    /// And opening one is the mirror. The line stays put, the rows go back in behind it.
+    @Test("opening a fold puts its rows back in one run")
+    func unfoldingIsOneInsertion() {
+        let folded = withFold([13, 14])
+        let open = withFold([10, 11, 12, 13, 14])
+        #expect(TranscriptEntryChange.between(folded, open) == .grew(head: 2..<5, tail: 0..<0))
+    }
+
+    /// The row that closes a run lands one pass BEFORE the fold, which is why the runs are held in
+    /// state and refreshed from an `onChange` rather than computed in the body. Both edits on one
+    /// pass would be a removal and an insertion at once, which has no answer but `.rebuilt`.
+    @Test("the row that closes a run lands on a pass of its own")
+    func theClosingRowIsItsOwnPass() {
+        let running = withFold([10, 11, 12, 13])
+        let closed = withFold([10, 11, 12, 13, 14])
+        #expect(TranscriptEntryChange.between(running, closed) == .grew(head: 6..<7, tail: 0..<0))
+    }
+
+    /// And the shape that would happen if it did not: both at once, which is a full reload. Here
+    /// so that anybody who moves the fold back into the body finds out from a test rather than
+    /// from a scroll.
+    @Test("a row landing and a run folding on one pass is a rebuild")
+    func bothAtOnceIsARebuild() {
+        let running = withFold([10, 11, 12, 13])
+        let closedAndFolded = withFold([13, 14])
+        #expect(TranscriptEntryChange.between(running, closedAndFolded) == .rebuilt)
+    }
+
     // MARK: - The five kinds of entry
 
     /// A delivery and a row must never be spelled into each other however the two lists grow,
@@ -168,5 +227,8 @@ struct TranscriptEntryChangeTests {
         #expect(TranscriptEntryID.streaming.seq == nil)
         #expect(TranscriptEntryID.setup != TranscriptEntryID.streaming)
         #expect(TranscriptEntryID.pending(DeliveryID("1")) != TranscriptEntryID.row(1))
+        // A run's line and the first row of that run hold the same number and are in the list at
+        // the same time.
+        #expect(TranscriptEntryID.fold(1) != TranscriptEntryID.row(1))
     }
 }

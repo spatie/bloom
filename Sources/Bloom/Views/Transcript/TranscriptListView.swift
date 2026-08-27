@@ -55,6 +55,7 @@ struct TranscriptListView: View {
         // that is `@ObservationIgnored`, so asking costs nothing and subscribes to nothing.
         let remembered = memory?.remembered(session: transcript.session.id)
         _expanded = State(initialValue: remembered?.expanded ?? [])
+        _unfolded = State(initialValue: remembered?.unfolded ?? [])
         let rows = transcript.rows
         _drawn = State(initialValue: Drawn(
             session: transcript.session.id,
@@ -78,6 +79,28 @@ struct TranscriptListView: View {
     /// re-folded every time the reader looked at the changes and came back. It is seeded from, and
     /// written to, the pane's own memory, which lasts as long as the launch and no longer.
     @State private var expanded: Set<Int> = []
+    /// Which runs of tool calls the reader has opened, by the sequence number of the first call in
+    /// each. Kept in the pane's memory beside `expanded` and for the same reason: a run somebody
+    /// opened to read must not fold itself away again behind a tab switch.
+    @State private var unfolded: Set<Int> = []
+    /// Every run of consecutive tool calls in this session. See `TranscriptFold`.
+    ///
+    /// **State rather than a computed property, and the lag is the point.** It is refreshed from
+    /// an `onChange` on the row count, which runs after the pass that drew the new row, so the
+    /// arrival is one `.grew` and the fold that follows it is one `.shrank`. Computed in `entries`
+    /// instead, a run closing would insert the row that closed it and remove the rows it hides in
+    /// a single pass, and two edits in one list is the `.rebuilt` that throws away every cell and
+    /// the reader's text selection.
+    ///
+    /// **And empty rather than seeded in `init`, which is not where the other three come from.**
+    /// The expression inside a `State(initialValue:)` is evaluated on every rebuild of this struct
+    /// and thrown away on all but the first, and this view is rebuilt by every row that lands: a
+    /// scan of the whole session there would be a walk of four thousand rows per arrival, to
+    /// produce a value that already exists. The first pass therefore draws a conversation with no
+    /// folds in it and the `onChange` below folds it on the next, which costs nothing at all,
+    /// because a pane arriving at a session is held blank until `arrived()` and only the last pass
+    /// that landed while it was held is ever applied. See `TranscriptTable.Coordinator.apply`.
+    @State private var folds = TranscriptFold.Runs.none
     @State private var geometry = TranscriptGeometry()
     /// The width a bubble may fill, held as an object rather than in `geometry` so a pane changing
     /// width invalidates the handful of views that draw a bubble rather than this whole body. See
@@ -276,6 +299,63 @@ struct TranscriptListView: View {
         return nil
     }
 
+    /// The rows something has asked to be visible, which is what stops a fold hiding them.
+    ///
+    /// The first is the reader: a tool result they opened while a turn was running would otherwise
+    /// vanish the moment the run around it closed.
+    ///
+    /// **The rest is the row this session was OPENED on, and it is worse than cosmetic.** A scroll
+    /// can only find a row the table is drawing, so a search hit, an unread mark or the row a
+    /// returning reader left at the top of the pane, folded away, is not a row somewhere off
+    /// screen: `put(at:)` finds no index, nothing moves, and the reader lands at the top of a
+    /// conversation they were meant to be put back into. They are exactly the seqs
+    /// `mustReachIndex` widens the window for, said again as sequence numbers.
+    ///
+    /// **Read from `opening` rather than from the two things that answered it, because both are
+    /// gone moments later.** `takeTranscriptTarget` consumes the search result and `markAllRead`
+    /// clears the unread mark, both in `position`, so a rule that asked them directly would fold
+    /// the run away a beat after putting the reader inside it. `opening` is what that decision was
+    /// written down as and it lasts as long as the visit. The live two are still asked, because
+    /// the pass that assembles the entries runs before `position` has run at all.
+    ///
+    /// The cost is one run staying open for the visit, at the place the reader was put. That is
+    /// the run whose context they are most likely to want.
+    private var revealedSeqs: Set<Int> {
+        var out = expanded
+        if case .row(let seq, _)? = opening { out.insert(seq) }
+        if let target = app.pendingTranscriptTarget,
+           target.workspaceID == transcript.workspace?.id {
+            out.insert(target.seq)
+        }
+        if let unread = transcript.firstUnreadSeq { out.insert(unread) }
+        return out
+    }
+
+    /// The runs of this session, read off the rows in the only terms `TranscriptFold` needs.
+    ///
+    /// Static, because it reads nothing this view holds and a rescan must not quietly depend on
+    /// one. Lazy, so the session is not projected into an array of facts to walk once:
+    /// `TranscriptFold.runs` only ever touches the tail it is extending, which is what keeps a
+    /// turn's worth of arrivals off a walk of the whole conversation each time.
+    private static func rescan(
+        _ rows: [TranscriptRow], extending previous: TranscriptFold.Runs
+    ) -> TranscriptFold.Runs {
+        TranscriptFold.runs(
+            in: rows.lazy.map {
+                TranscriptFold.Fact(
+                    seq: $0.seq,
+                    kind: $0.kind,
+                    // A refusal travels as `is_error` too, and both are the same fact here: a call
+                    // that did not do what it was asked is a call the reader is looking for.
+                    failed: $0.isError || $0.refusal != nil,
+                    nested: $0.parentToolUseID != nil,
+                    drawsNothing: TranscriptRowInk.drawsNothing(kind: $0.kind, payload: $0.payload)
+                )
+            },
+            extending: previous
+        )
+    }
+
     /// What a link in any row of this transcript does. Comparable, so that a fresh struct per pass
     /// is not a change: see `TranscriptRowEnvironment`, which is what carries it to the rows.
     private var linkActions: TranscriptLinkActions {
@@ -345,6 +425,22 @@ struct TranscriptListView: View {
         let stoppedTurnSeq = transcript.stoppedTurnSeq
         let paneHeight = geometry.paneHeight
         let arrivals = self.arrivals
+        // The fold's three inputs, read once for the pass for the reason the eight above are: each
+        // is a property of an `@Observable` or a set this body copies, and reading one inside a
+        // per-row closure records an observation edge per row.
+        let folds = self.folds
+        let unfolded = self.unfolded
+        let revealed = revealedSeqs
+        let sessionID = transcript.session.id
+        // Read once, and the range taken off the slice itself rather than off `drawnWindow` a
+        // second time, so the range a fold is measured against cannot disagree with the rows being
+        // walked.
+        let drawnRows = visibleRows
+        let drawnRange = drawnRows.startIndex..<drawnRows.endIndex
+        // The run the loop below is inside, so a fold's own line is emitted once, at the first row
+        // of it the window actually holds.
+        var runSeq: Int?
+        var runIsFolded = false
 
         var out: [TranscriptTableEntry] = []
         // A workspace's setup script, its worktree events and its opening prompt. All three are
@@ -381,7 +477,33 @@ struct TranscriptListView: View {
             ))
         }
 
-        for row in visibleRows where !TranscriptNoise.isHidden(row) {
+        for index in drawnRows.indices {
+            let row = drawnRows[index]
+            // A run of consecutive tool calls, drawn as its last call with a line above it saying
+            // how many came before. See `TranscriptFold`, which holds every decision about what
+            // forms a run and when one refuses to fold; what happens here is only the emitting.
+            if let run = folds.run(containing: index) {
+                if run.firstSeq != runSeq {
+                    runSeq = run.firstSeq
+                    runIsFolded = TranscriptFold.isFolded(
+                        run, unfolded: unfolded, revealed: revealed, drawn: drawnRange
+                    )
+                    out.append(foldEntry(
+                        run: run,
+                        isFolded: runIsFolded,
+                        // A run that cannot fold, and one held open by anything other than the
+                        // reader's own click, has no line: a control that answers nothing when it
+                        // is pressed is worse than no control. Its entry stays in the list all the
+                        // same, drawing nothing, because an entry that came and went in the middle
+                        // of the list is the `.rebuilt` this is all arranged to avoid.
+                        shows: run.canFold && (runIsFolded || unfolded.contains(run.firstSeq)),
+                        session: sessionID
+                    ))
+                }
+                // Folded, only the last call in the run is still drawn.
+                if runIsFolded, index != run.lastDrawnIndex { continue }
+            }
+            guard !TranscriptNoise.isHidden(row) else { continue }
             let isExpanded = expanded.contains(row.seq)
             let wasStopped = row.seq == stoppedTurnSeq
             let recovered = recoveredRuns[row.seq]
@@ -568,6 +690,47 @@ struct TranscriptListView: View {
         return out
     }
 
+    /// The line that stands for a folded run, or an entry holding its place while it does not.
+    ///
+    /// **The session is in the key, and it is load bearing for the reason the streaming tail's
+    /// is.** The height cache survives a workspace switch and every other entry is keyed by a row
+    /// id, which is unique across sessions; a run's first sequence number is not, so without this
+    /// the next conversation's fold would be handed the last one's height.
+    private func foldEntry(
+        run: TranscriptFold.Run, isFolded: Bool, shows: Bool, session: SessionID
+    ) -> TranscriptTableEntry {
+        TranscriptTableEntry(
+            id: .fold(run.firstSeq),
+            contentKey: TranscriptContentKey {
+                $0.combine("fold")
+                $0.combine(session)
+                $0.combine(run.firstSeq)
+                $0.combine(run.hiddenCount)
+                $0.combine(isFolded)
+                $0.combine(shows)
+            },
+            // Not a guess. This entry draws nothing because it has been told to draw nothing, so
+            // the table can give it no view at all rather than build one to find out. See
+            // `TranscriptRowInk`, which is the estimate this is the certain version of.
+            drawsNothing: !shows,
+            content: {
+                guard shows else { return AnyView(EmptyView()) }
+                return AnyView(
+                    TranscriptFoldRowView(
+                        hiddenCount: run.hiddenCount,
+                        isExpanded: !isFolded,
+                        onToggle: { toggleFold(run.firstSeq) }
+                    )
+                    // The same two insets every row in this list carries: one here, and one inside
+                    // `transcriptRowFrame`. A fold's line drawn with only the inner one would sit
+                    // a gutter to the left of the run it stands for.
+                    .padding(.horizontal, TranscriptLayout.inset)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                )
+            }
+        )
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -617,6 +780,17 @@ struct TranscriptListView: View {
             // A row arriving is another chance to notice that the window stops short of it.
             growWindowDown()
             trackArrivals()
+            // **The runs are refreshed HERE, one pass behind the row that changed them, and that
+            // is the whole reason folding costs no reload.** The pass above has already drawn the
+            // new row, so it was one insertion; this writes state, so the fold it causes is one
+            // removal on a pass of its own. Computed inside `entries` instead, a run closing would
+            // put its closing row in and take four rows out at once, which
+            // `TranscriptEntryChange` can only call `.rebuilt`.
+            //
+            // Guarded, because `@State` does not compare before it invalidates and most row
+            // arrivals leave the runs exactly as they were.
+            let rescanned = Self.rescan(transcript.rows, extending: folds)
+            if rescanned != folds { folds = rescanned }
             // A row has landed, so the end of the content has moved. Between rows the tail grows
             // without any of this being told, which is what `isStreaming` below is for.
             follower.nudge()
@@ -658,6 +832,10 @@ struct TranscriptListView: View {
             // The folds of the session being arrived at, which are its own and are usually none.
             let remembered = memory?.remembered(session: transcript.session.id)
             expanded = remembered?.expanded ?? []
+            unfolded = remembered?.unfolded ?? []
+            // From nothing rather than extended: the rows below this pane have been replaced
+            // wholesale, so there is no tail of the last conversation worth keeping.
+            folds = Self.rescan(transcript.rows, extending: .none)
             // A session opens at its live end whatever the one being left was scrolled to, and the
             // anchor is read before the new rows arrive.
             geometry.isNearBottom = true
@@ -1088,6 +1266,7 @@ struct TranscriptListView: View {
         target.memory.remember(
             TranscriptPaneState(
                 expanded: expanded,
+                unfolded: unfolded,
                 offset: contentOffset.value,
                 // The row at the top of the pane and how far into it the reader was, which is the
                 // place; the offset above is what answers when there is no row to name.
@@ -1164,6 +1343,24 @@ struct TranscriptListView: View {
             return
         }
         arrivals.absorb(seqs)
+    }
+
+    /// A run of tool calls opened, or shut again.
+    ///
+    /// **No `willUnfold`, unlike `toggle` below, and the difference is what actually moves.** A
+    /// tool result opening changes one row's height, which is a number the table animates. A run
+    /// opening puts rows into the list and takes them out, and `rowsArrived` and `rowsLeft` do
+    /// that with no animation at all, exactly as a row landing during a turn does. Asking for a
+    /// travel here would animate the fold's own line, which is one line tall either way.
+    private func toggleFold(_ firstSeq: Int) {
+        if unfolded.contains(firstSeq) {
+            unfolded.remove(firstSeq)
+        } else {
+            unfolded.insert(firstSeq)
+        }
+        // Written down at once, for the reason `toggle` gives: opening a run to read it and
+        // switching tab to look at what it did is one gesture.
+        remember()
     }
 
     private func toggle(_ seq: Int) {
