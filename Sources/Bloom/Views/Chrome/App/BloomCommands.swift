@@ -199,13 +199,12 @@ struct BloomCommands: Commands {
 
             Divider()
 
-            // Two doors rather than one, and the words are the whole point of the pair: New
-            // makes a folder and a repository for somebody with an idea, Add takes a repository
-            // that already exists. See `NewProjectSheet`.
-            MenuCommand(.newProject) {
+            // One door. It was two, and both of them ended in a project in the sidebar, which is
+            // why the second one is gone rather than reworded: whether a folder is added, made or
+            // tracked is worked out from the folder. See `StartProjectSheet`.
+            MenuCommand(.startProject) {
                 NotificationCenter.default.post(name: .bloomNewProject, object: nil)
             }
-            MenuCommand(.addProjectFolder, perform: addProjectFolder)
         }
 
         // The item this file used to say did not exist. Two views bind Cmd+S (the project settings
@@ -922,13 +921,6 @@ struct BloomCommands: Commands {
             return
         }
         FindInPlace.perform(action)
-    }
-
-    private func addProjectFolder() {
-        Task {
-            guard let path = await ProjectFolderPicker.choose() else { return }
-            await model.addRepository(at: path)
-        }
     }
 
     // MARK: - What the Workspace menu is about

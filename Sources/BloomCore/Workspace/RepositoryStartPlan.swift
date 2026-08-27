@@ -531,6 +531,29 @@ public struct FolderContents: Sendable, Equatable {
         byteSize >= Self.largeUploadLimit || fileCount >= Self.manyFilesLimit || truncated
     }
 
+    /// What is being kept out of it, in one line, and nil when nothing is.
+    ///
+    /// In the core rather than beside a sheet because two windows say it now: the offer raised by
+    /// the file panel, and the one field that replaced the two doors. Two copies of this sentence
+    /// is how the two of them would start wording the same exclusion differently.
+    public var excludedSummary: String? {
+        let secrets = sensitiveFiles.count
+        let repositories = nestedRepositories.count
+        var parts: [String] = []
+        if secrets > 0 {
+            parts.append(secrets == 1
+                ? "1 file that looks like a credential"
+                : "\(secrets) files that look like credentials")
+        }
+        if repositories > 0 {
+            parts.append(repositories == 1
+                ? "1 repository of its own"
+                : "\(repositories) repositories of their own")
+        }
+        guard !parts.isEmpty else { return nil }
+        return "Kept out and added to .gitignore: " + parts.joined(separator: ", ") + "."
+    }
+
     /// What the first commit will contain, in one line, with the uncertainty kept in.
     ///
     /// "At most", because an existing `.gitignore` is applied by git and not by this walk, so the

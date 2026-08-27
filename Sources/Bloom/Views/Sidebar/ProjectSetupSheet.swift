@@ -244,7 +244,7 @@ struct ProjectSetupSheet: View {
                     HStack(spacing: Metrics.spacingSmall) {
                         Image(systemName: isShowingExcluded ? "chevron.down" : "chevron.right")
                             .font(Typo.micro)
-                        Text(excludedSummary)
+                        Text(request.contents.excludedSummary ?? "")
                             .font(Typo.caption)
                     }
                     .foregroundStyle(Palette.textSecondary)
@@ -292,23 +292,6 @@ struct ProjectSetupSheet: View {
         .padding(Metrics.inset)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
-    }
-
-    private var excludedSummary: String {
-        let secrets = request.contents.sensitiveFiles.count
-        let repositories = request.contents.nestedRepositories.count
-        var parts: [String] = []
-        if secrets > 0 {
-            parts.append(secrets == 1
-                ? "1 file that looks like a credential"
-                : "\(secrets) files that look like credentials")
-        }
-        if repositories > 0 {
-            parts.append(repositories == 1
-                ? "1 repository of its own"
-                : "\(repositories) repositories of their own")
-        }
-        return "Kept out and added to .gitignore: " + parts.joined(separator: ", ")
     }
 
     // MARK: - The GitHub half

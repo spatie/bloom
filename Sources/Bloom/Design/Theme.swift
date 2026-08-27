@@ -984,8 +984,8 @@ struct Hairline: View {
 /// Something the user has to read before pressing, or after it went wrong.
 ///
 /// Here rather than beside the sheet that first drew it: `ProjectSetupSheet` and
-/// `NewProjectSheet` are the two halves of one question, so a warning worded and tinted two ways
-/// would be the same fault the two dialogs were split to avoid.
+/// `StartProjectSheet` say the same things about the same folders, so a warning worded and tinted
+/// two ways would be the same fault the two dialogs were split to avoid.
 struct Callout: View {
     enum Tone {
         case warning

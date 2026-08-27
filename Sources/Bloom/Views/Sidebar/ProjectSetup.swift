@@ -14,11 +14,16 @@ enum ProjectSetupSurface: Sendable, Equatable {
 
 /// The one way Bloom offers to make a folder into a project.
 ///
-/// Everything that adds a project goes through `AppModel.addRepository`, and there are four
-/// routes into it: the sidebar's plus and its empty state, Home's empty state, the toolbar, the
-/// File menu's Add Project Folder at shift-command-O, and the Settings window's project list.
-/// None of them decides anything. They ask for a folder and hand it over, so the offer below is
-/// reached identically from all of them.
+/// Everything that adds a project through the file panel goes through `AppModel.addRepository`,
+/// and what is left of that is the Settings window's project list, the create sheet's empty state
+/// and `project_add` over the bridge. None of them decides anything. They ask for a folder and
+/// hand it over, so the offer below is reached identically from all of them.
+///
+/// The main window's own routes no longer come this way. The sidebar's `+`, Home's empty state,
+/// the toolbar and the File menu all raise `StartProjectSheet`, which asks the same questions of
+/// the same folder and answers them in one field rather than behind a file panel. This offer
+/// stays because Settings is a separate scene and cannot present the main window's sheet, and
+/// because the GitHub half of it lives nowhere else.
 @MainActor
 @Observable
 final class ProjectSetup {

@@ -55,6 +55,15 @@ public enum NewProjectStarter {
                 atPath: (path as NSString).appendingPathComponent(".git")
             )
             facts.targetIsEmpty = isEmpty(path)
+            facts.isTargetWritable = manager.isWritableFile(atPath: path)
+            // One `fileExists` per child, so it is asked only where its answer is used: a folder
+            // that is there, has something in it and is not itself a repository is the only shape
+            // `FolderVerdict` asks it about. `~/dev/code` holds 293 of them on this Mac and the
+            // question is put on every settled keystroke, which is why it is not asked of the
+            // other three.
+            if !facts.targetIsRepository, !facts.targetIsEmpty {
+                facts.childRepositories = RepositoryStarter.childRepositories(of: path)
+            }
         }
 
         facts.enclosingRepository = Git.enclosingRepositoryRoot(of: path)
@@ -62,6 +71,26 @@ public enum NewProjectStarter {
         facts.nearestExistingAncestor = ancestor
         facts.isAncestorWritable = manager.isWritableFile(atPath: ancestor)
         return facts
+    }
+
+    /// The same walk, from the one line the sheet has.
+    ///
+    /// Here rather than in the view for the reason the rest of this file is: resolving a name or a
+    /// path and then looking at what is there are two halves of one answer, and a view that did
+    /// the first half itself would be a view holding a rule.
+    public static func inspect(
+        typed: String,
+        defaultLocation: String,
+        home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+        workspacesRoot: String = WorkspaceManager.workspacesRoot.path
+    ) -> NewProjectFacts {
+        let target = ProjectTarget.resolve(typed, defaultLocation: defaultLocation, home: home)
+        return inspect(
+            name: target.name,
+            location: target.location,
+            home: home,
+            workspacesRoot: workspacesRoot
+        )
     }
 
     /// Whether a folder holds nothing worth keeping.

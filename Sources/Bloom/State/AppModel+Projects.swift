@@ -52,14 +52,15 @@ extension AppModel {
         }
     }
 
-    /// Registers a project Bloom has just made, and hands the row back so the first workspace can
-    /// follow.
+    /// Registers what `StartProjectSheet` ended with, and hands the row back so a first workspace
+    /// can follow where there is one to start.
     ///
     /// The same call as adding a folder somebody chose, deliberately: by the time this runs the
-    /// folder is a git repository with a commit in it, which is exactly what `addRepository`
-    /// takes, and a second registration path is how two lists of rules start disagreeing. See
-    /// `FolderVerdict`, which is the last thing to have had that happen to it.
-    func addCreatedProject(at path: String) async -> Repo? {
+    /// folder is a git repository with a commit in it, whether Bloom made it a moment ago or found
+    /// it that way, which is exactly what `addRepository` takes. A second registration path is how
+    /// two lists of rules start disagreeing. See `FolderVerdict`, which is the last thing to have
+    /// had that happen to it.
+    func addStartedProject(at path: String) async -> Repo? {
         await addKnownRepository(at: path)
     }
 
