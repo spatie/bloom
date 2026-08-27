@@ -372,7 +372,8 @@ struct TranscriptListView: View {
                     // A refusal travels as `is_error` too, and both are the same fact here: a call
                     // that did not do what it was asked is a call the reader is looking for.
                     failed: $0.isError || $0.refusal != nil,
-                    drawsNothing: TranscriptRowInk.drawsNothing(kind: $0.kind, payload: $0.payload),
+                    drawsNothing: TranscriptNoise.isHidden($0)
+                        || TranscriptRowInk.drawsNothing(kind: $0.kind, payload: $0.payload),
                     settled: settled($0)
                 )
             },

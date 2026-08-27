@@ -121,8 +121,6 @@ struct TurnFooterView: View {
                     Color.clear.frame(width: 0, height: 0)
                 }
 
-                Spacer(minLength: TranscriptLayout.tight)
-
                 CopyButton(text: summaryText, title: "Copy this answer")
 
                 // The menu's three do not flash the tick beside them. It is one button saying
@@ -145,7 +143,7 @@ struct TurnFooterView: View {
             }
             .foregroundStyle(Palette.textSecondary)
             .padding(.horizontal, TranscriptLayout.inset)
-            .padding(.vertical, TranscriptLayout.inset)
+            .padding(.vertical, Metrics.spacingSmall)
 
             // Under the row rather than in it, and only when there is something to say. This is
             // the one place in a turn that can name what went undone and what would undo it, and
