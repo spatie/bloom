@@ -9,44 +9,20 @@ import Foundation
 /// and never built. Hiding views inside a `DisclosureGroup` would have kept every one of those
 /// costs and bought nothing, so the fold happens here, in the list, before the table ever sees it.
 ///
-/// # The unit is a turn, and it was a stretch of consecutive tool calls
+/// # The unit is consecutive activity
 ///
-/// The owner's words, reading a real transcript: "I expect everything between my blue bubble and
-/// the answer of the AI to be grouped. All those items in between." What he was looking at was
-/// three short folds where he expected one, because a line of interim narration and a rate limit
-/// notice sat between the tool calls and each of them cut the run.
-///
-/// So the boundaries are the two things a reader navigates by: **their own message, and the turn's
-/// answer.** Everything between them is work and folds into one line: tool calls, the agent
-/// narrating what it is about to do, thinking, notices, rate limits, a subagent's own rows,
-/// and the stream events that draw nothing anyway. Nothing in between is consulted for its kind
-/// except to decide where the work ENDS.
+/// Grey activity rows are the implementation log: tool calls, thinking, notices and settled
+/// questions. Consecutive rows of that kind fold into one line. Black assistant prose is the
+/// useful account of what the agent found or intends to do, so every prose row remains visible and
+/// divides the activity before and after it into separate groups.
 ///
 /// The tool's own name is never consulted, here or in the label, and that is not laziness: the
 /// name lives inside the payload, reading it is the decode this whole mechanism exists to avoid,
 /// and the prefix sniff that would find it is Claude Code's line shape rather than Codex's.
 ///
-/// # Which prose is the answer
-///
-/// **The trailing one, and "trailing" is doing the work rather than "last".** A turn can hold two
-/// prose blocks with tool calls between them, and the first is narration: it is not what the
-/// reader came back to read, so it folds. The answer is the run of rows at the END of the turn
-/// that hold nothing a reader would call work, and it is only an answer if there is prose in it.
-/// Walking back rather than taking the last prose block is what keeps a turn that says something
-/// and then goes back to work as one fold rather than a fold, an answer, and a loose tail.
-///
-/// Two cases fall out of that and both were asked about:
-///
-/// - **A turn that ends on a tool call has no answer.** Nothing follows the last work row, so the
-///   walk back finds no prose and the whole turn is work. Its newest settled row remains visible
-///   as the fold label, which is also what a streaming turn shows before its answer arrives.
-/// - **A turn with two prose blocks and work between them** has one answer, the second, and the
-///   first folds with everything around it.
-///
-/// A streaming turn has not said its answer yet, so its trailing prose is provisional: it is
-/// treated as the answer while it is the last thing, and folds in the moment the agent goes back
-/// to work. That is the same rule, not an exception, and it is what puts the newest row on screen
-/// throughout a turn.
+/// A prose row closes the activity above it as answered. Activity after that prose starts a fresh
+/// live group. This distinction lets a live group refold when another log row arrives without ever
+/// taking prose away from the reader.
 ///
 /// # What is never hidden
 ///
@@ -88,10 +64,9 @@ public enum TranscriptFold {
     /// say, the pass that folds a turn is a removal and nothing else.
     public static let leastWork = 2
 
-    /// What an expanded fold says. A collapsed fold uses its newest hidden row as its label and
-    /// puts this count in the leading circle instead.
+    /// What a fold says to accessibility and places that do not draw the count badge.
     public static func label(hiding count: Int, showsMore: Bool) -> String {
-        let unit = count == 1 ? "step" : "steps"
+        let unit = count == 1 ? "action" : "actions"
         return showsMore ? "\(count) earlier \(unit)" : "\(count) \(unit)"
     }
 
@@ -173,12 +148,12 @@ public enum TranscriptFold {
             self.settled = settled
         }
 
-        /// Whether this row is one a reader would call work, which is what the walk back from the
-        /// end of a turn stops at. Prose, a notice and anything that draws nothing are not.
-        var isWork: Bool {
+        /// Whether this is a grey activity row that may belong to a compact group. Black prose and
+        /// the structural rows around a turn are boundaries.
+        var isActivity: Bool {
             switch kind {
-            case .toolUse, .thinking, .permissionAsk, .error: !drawsNothing
-            case .assistantText, .notice, .system, .user, .toolResult, .result: false
+            case .toolUse, .thinking, .permissionAsk, .notice, .system, .error: !drawsNothing
+            case .assistantText, .user, .toolResult, .result: false
             }
         }
 
@@ -201,8 +176,7 @@ public enum TranscriptFold {
         }
     }
 
-    /// One row of a turn as the scan is carrying it: where it is, and the three questions the
-    /// walk back at the end of a turn asks about it.
+    /// One row of activity as the scan is carrying it.
     ///
     /// Beside the other types rather than inside `folds(in:extending:)`, which is where it reads
     /// best and where Swift will not have it: a type cannot be nested in a generic function. A
@@ -210,9 +184,6 @@ public enum TranscriptFold {
     /// into a tuple either.
     private struct Item {
         var row: Row
-        /// Whether a reader would call this row work, which is what the walk back stops at.
-        var isWork: Bool
-        var isProse: Bool
         /// Whether this row may be hidden: settled, and not one that has to stay.
         var ready: Bool
         /// A permanent boundary inside a turn, such as a failed call. Activity after it starts a
@@ -341,24 +312,16 @@ public enum TranscriptFold {
             found = previous.all.filter { $0.span.upperBound <= start }
         }
 
-        // The turn being built. `items` is every row of it that draws something, carrying what the
-        // walk back at the end needs to know about each.
+        // The consecutive activity being built. Black prose and structural turn rows close it.
         var items: [Item] = []
         var resume = start
 
-        func close() {
+        func close(hasAnswer: Bool) {
             defer { items = [] }
-            // The answer: the rows at the end of the turn that hold no working, and only an answer
-            // if there is prose among them. See the header for why this walks back rather than
-            // taking the last prose block.
-            var end = items.count
-            while end > 0, !items[end - 1].isWork { end -= 1 }
-            let hasAnswer = items[end...].contains { $0.isProse }
-            let working = hasAnswer ? Array(items[..<end]) : items
-            var segmentStart = working.startIndex
+            var segmentStart = items.startIndex
 
             func appendSegment(endingAt segmentEnd: Int) {
-                let segment = working[segmentStart..<segmentEnd]
+                let segment = items[segmentStart..<segmentEnd]
                 guard segment.count >= leastWork,
                       let first = segment.first,
                       let last = segment.last else { return }
@@ -375,29 +338,34 @@ public enum TranscriptFold {
                 ))
             }
 
-            for index in working.indices where working[index].mustShow {
+            for index in items.indices where items[index].mustShow {
                 appendSegment(endingAt: index)
-                segmentStart = working.index(after: index)
+                segmentStart = items.index(after: index)
             }
-            appendSegment(endingAt: working.endIndex)
+            appendSegment(endingAt: items.endIndex)
         }
 
         for offset in start..<count {
             let fact = facts[facts.index(facts.startIndex, offsetBy: offset)]
-            // The two boundaries a reader navigates by. Neither is inside a fold, and both settle
-            // everything above them.
+            // A user's message and the footer settle everything above them. Neither belongs to an
+            // activity group.
             if fact.kind == .user || fact.kind == .result {
-                close()
+                close(hasAnswer: false)
                 resume = offset + 1
+                continue
+            }
+            // Black assistant prose is content, never log noise. It remains visible and closes the
+            // grey activity above it as answered. Any activity after it starts a fresh group.
+            if fact.kind == .assistantText {
+                close(hasAnswer: true)
                 continue
             }
             // A row that draws nothing is not a row the reader can see, so it is swallowed by
             // whatever is folded around it and counted as nothing. See `TranscriptRowInk`.
             if fact.drawsNothing { continue }
+            guard fact.isActivity else { continue }
             items.append(Item(
                 row: Row(index: offset, seq: fact.seq),
-                isWork: fact.isWork,
-                isProse: fact.kind == .assistantText,
                 // **A failure counts as settled whatever the caller said, and that is the invariant
                 // the monotonicity rests on.** A result writes `is_error` and the payload in one
                 // go, so a call cannot have failed without having settled; read the other way
@@ -407,10 +375,9 @@ public enum TranscriptFold {
                 mustShow: fact.mustShow
             ))
         }
-        // Whatever is left at the end is a turn that is still running, and it is treated exactly
-        // like any other: folding while the turn works is the point, and the entry has to be in the
-        // list before it folds.
-        close()
+        // Whatever is left is live activity. Folding while the turn works is the point, and the
+        // entry has to be in the list before it folds.
+        close(hasAnswer: false)
 
         return Folds(all: found, scannedRows: count, resumeIndex: min(resume, count))
     }

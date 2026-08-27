@@ -70,22 +70,19 @@ struct TranscriptFoldTests {
 
     // MARK: What a turn's working is
 
-    /// **The owner's own screenshot, and the whole reason this stopped being about tool calls.**
-    /// He was looking at three short folds where he expected one, because a line of interim
-    /// narration and a rate limit notice sat between the calls and each of them cut the run. His
-    /// words: "I expect everything between my blue bubble and the answer of the AI to be grouped.
-    /// All those items in between."
-    @Test("interim prose and a notice are inside the working, not boundaries in it")
-    func aTurnIsOneFold() throws {
+    /// Black prose is the useful account of what the agent is doing. It stays in the transcript
+    /// and divides the grey activity before and after it into separate groups.
+    @Test("assistant prose remains visible between consecutive activity groups")
+    func proseSeparatesActivity() {
         let facts = [user(0)]
             + (1..<4).map { tool($0) } + [prose(4)]
             + (5..<8).map { tool($0) } + [notice(8)]
             + (9..<12).map { tool($0) } + [prose(12), footer(13)]
-        let work = try only(facts)
-        #expect(work.span == 1..<12)
-        #expect(work.rows.count == 11)
-        #expect(work.hasAnswer)
-        #expect(hides(work) == 11)
+        let folds = TranscriptFold.folds(in: facts)
+        #expect(folds.all.map(\.span) == [1..<4, 5..<12])
+        #expect(folds.all.map(\.rows.count) == [3, 7])
+        #expect(folds.all.map(\.hasAnswer) == [true, true])
+        #expect(folds.all.map { hides($0) } == [3, 7])
     }
 
     @Test("thinking, a subagent's rows and the stream events between them all fold")
@@ -98,8 +95,7 @@ struct TranscriptFoldTests {
         #expect(hides(work) == 3)
     }
 
-    /// The two boundaries a reader navigates by, and the only two.
-    @Test("the reader's own message and the turn's footer are the boundaries")
+    @Test("user messages, assistant prose and turn footers are boundaries")
     func theBoundaries() {
         let facts = [user(0)]
             + (1..<5).map { tool($0) } + [prose(5), footer(6), user(7)]
@@ -109,18 +105,14 @@ struct TranscriptFoldTests {
         #expect(folds.all.map(\.span) == [1..<5, 8..<12])
     }
 
-    // MARK: Which prose is the answer
+    // MARK: Prose remains visible
 
-    /// **The trailing one, and "trailing" is doing the work rather than "last".** A turn that says
-    /// something, goes back to work and says something else has one answer, the second, and the
-    /// first folds with everything around it.
-    @Test("two prose blocks with work between them leave one answer")
-    func twoProseBlocks() throws {
+    @Test("two prose blocks divide the activity around them")
+    func twoProseBlocks() {
         let facts = [user(0), tool(1), tool(2), prose(3), tool(4), tool(5), prose(6), footer(7)]
-        let work = try only(facts)
-        #expect(work.hasAnswer)
-        #expect(work.rows.map(\.seq) == [1, 2, 3, 4, 5])
-        #expect(hides(work) == 5)
+        let folds = TranscriptFold.folds(in: facts)
+        #expect(folds.all.map { $0.rows.map(\.seq) } == [[1, 2], [4, 5]])
+        #expect(folds.all.map(\.hasAnswer) == [true, true])
     }
 
     /// A turn that ends on a settled tool call has no answer, so all of it is working. The view
@@ -134,14 +126,12 @@ struct TranscriptFoldTests {
         #expect(work.rows[hides(work) - 1].seq == 7)
     }
 
-    /// And prose followed by more work is narration rather than an answer, so it folds too. Taking
-    /// the LAST prose block instead would leave a fold, an answer, and a loose tail of rows.
-    @Test("prose with work after it is narration, not the answer")
-    func proseThenWork() throws {
+    @Test("prose before more work stays outside both activity groups")
+    func proseThenWork() {
         let facts = [user(0), tool(1), tool(2), prose(3), tool(4), tool(5), tool(6), footer(7)]
-        let work = try only(facts)
-        #expect(!work.hasAnswer)
-        #expect(work.rows.map(\.seq) == [1, 2, 3, 4, 5, 6])
+        let folds = TranscriptFold.folds(in: facts)
+        #expect(folds.all.map { $0.rows.map(\.seq) } == [[1, 2], [4, 5, 6]])
+        #expect(folds.all.map(\.hasAnswer) == [true, false])
     }
 
     /// A rate limit notice landing after the answer is not working, so it stays with the answer
@@ -357,8 +347,8 @@ struct TranscriptFoldTests {
     /// Expanded folds spell out the count. Collapsed folds show it in their leading circle.
     @Test("the expanded line names what is hidden and how many")
     func theLabel() {
-        #expect(TranscriptFold.label(hiding: 14, showsMore: false) == "14 steps")
-        #expect(TranscriptFold.label(hiding: 11, showsMore: true) == "11 earlier steps")
+        #expect(TranscriptFold.label(hiding: 14, showsMore: false) == "14 actions")
+        #expect(TranscriptFold.label(hiding: 11, showsMore: true) == "11 earlier actions")
     }
 
     /// Two wordings for two different claims. While a turn is working there is a row of it still on
@@ -366,8 +356,8 @@ struct TranscriptFoldTests {
     /// the working is behind the line and there is no "earlier" left for the word to mean.
     @Test("the singular is there for whoever lowers the threshold")
     func theLabelHasASingular() {
-        #expect(TranscriptFold.label(hiding: 1, showsMore: true) == "1 earlier step")
-        #expect(TranscriptFold.label(hiding: 1, showsMore: false) == "1 step")
+        #expect(TranscriptFold.label(hiding: 1, showsMore: true) == "1 earlier action")
+        #expect(TranscriptFold.label(hiding: 1, showsMore: false) == "1 action")
     }
 
     @Test("an open live turn folds back when new work reaches the live end")
