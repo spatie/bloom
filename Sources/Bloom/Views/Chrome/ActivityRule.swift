@@ -206,7 +206,7 @@ private struct StillActivityRule: View {
             // exactly what a screenshot of this rule has shown since it was drawn. It is in the set
             // so the comparison has a control in it, and this is the state where it loses.
             Rectangle()
-                .fill(Palette.accent)
+                .fill(Palette.running)
                 .opacity(BusyRule.opacity(at: BusyRule.resting))
                 .frame(maxWidth: .infinity)
                 .frame(height: BusyRule.restingHeight)
@@ -216,7 +216,7 @@ private struct StillActivityRule: View {
     /// The lit line the crest rides, which is the whole width and is never dark.
     private var track: some View {
         Rectangle()
-            .fill(Palette.accent)
+            .fill(Palette.running)
             .opacity(BusyCrest.trackOpacity)
             .frame(maxWidth: .infinity)
             .frame(height: BusyRule.restingHeight)
@@ -236,7 +236,7 @@ private struct StillActivityRule: View {
         LinearGradient(
             stops: stops.map {
                 Gradient.Stop(
-                    color: Palette.accent.opacity($0.opacity * scale),
+                    color: Palette.running.opacity($0.opacity * scale),
                     location: CGFloat($0.location)
                 )
             },
@@ -389,14 +389,16 @@ final class ActivityRuleView: BusyPulseLayerView {
     override func applyColors() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        let accent = resolved(Palette.accentNSColor)
-        track.backgroundColor = accent.copy(alpha: BusyCrest.trackOpacity) ?? accent
+        // `running` and not `accent`, which is what this drew for as long as the two were the
+        // same value. See `Palette.running`: a lit rule and a passing tick may not be one colour.
+        let running = resolved(Palette.runningNSColor)
+        track.backgroundColor = running.copy(alpha: BusyCrest.trackOpacity) ?? running
         // Hidden rather than transparent for the swell: its own core layer is the whole width and
         // is the rule, so a track under it would be a second line at a strength nobody chose.
         track.isHidden = variant == .swell
         let stops = gradientStops
-        apply(stops, scale: 1, to: core, accent: accent)
-        apply(stops, scale: BusyCrest.glowShare, to: glow, accent: accent)
+        apply(stops, scale: 1, to: core, tint: running)
+        apply(stops, scale: BusyCrest.glowShare, to: glow, tint: running)
         CATransaction.commit()
     }
 
@@ -416,9 +418,9 @@ final class ActivityRuleView: BusyPulseLayerView {
     }
 
     private func apply(
-        _ stops: [BusyCrest.Stop], scale: Double, to gradient: CAGradientLayer, accent: CGColor
+        _ stops: [BusyCrest.Stop], scale: Double, to gradient: CAGradientLayer, tint: CGColor
     ) {
-        gradient.colors = stops.map { (accent.copy(alpha: $0.opacity * scale) ?? accent) as Any }
+        gradient.colors = stops.map { (tint.copy(alpha: $0.opacity * scale) ?? tint) as Any }
         gradient.locations = stops.map { NSNumber(value: $0.location) }
     }
 

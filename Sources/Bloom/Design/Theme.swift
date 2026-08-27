@@ -340,6 +340,11 @@ enum Palette {
     /// That is fine and deliberate: `WorkspaceStatusGlyph` already draws every state as a
     /// different shape, so the column can be read by someone who cannot tell the red one from the
     /// green one, and the reference collapses the same two the same way.
+    ///
+    /// **`running` was on that list too and is not any more**, which is the one collapse that was
+    /// not fine: a finished workspace and a working one are the two states a glance most needs to
+    /// tell apart, and they were the same value. See `running` below, and `PaletteContrastTests`,
+    /// which now fails if the two ever meet again.
     static let positive = accent
 
     /// The wash and the rule of the agent's question card while it is holding the turn open.
@@ -420,9 +425,36 @@ enum Palette {
     /// percent of value and invisible: it measured 4.39 to 1 on the sunken surface, and the sunken
     /// surface is where a strip sits.
     static let warning = dynamic(PaletteInk.warning)
-    /// An agent mid turn. The ramp is explicit that this is the accent rather than a green of its
-    /// own: "Running, healthy, done. Reuse the accent, do not invent a green."
-    static let running = accent
+    /// An agent mid turn: the sidebar's dot, the tab's dot, and the rule under the tab strip.
+    ///
+    /// **A hue of its own, and it must never equal `positive`.** It was `accent`, which is what
+    /// `positive` is too, and the report was that "a green busy indicator is easily being confused
+    /// with another green icon status": in one screenshot a passing workspace's tick sat two rows
+    /// above a running workspace's dot and the Chat tab's dot was the same value again, so three
+    /// marks meaning three different things were one colour and only their shapes told them apart.
+    /// Hue is what a glance reads first, and it was saying nothing.
+    ///
+    /// Amber was asked for and orange is what it became, because `warning` is amber and taking it
+    /// would have bought the same defect one column over. `WorkspaceStatusGlyph.tint` already
+    /// draws `awaitingPermission` and `checksRunning` in `warning`, and a raised hand is the one
+    /// state on Home that stops for a person while this one is the definition of the lane that
+    /// does not: `HomeLane` splits them as `waiting` and `working`. Two states that far apart may
+    /// not share a colour.
+    ///
+    /// So it stands between the amber and the red, at hue 27 in both members, which is the widest
+    /// gap the two of them leave: measured as CIEDE2000, `#B85300` sits 15.1 from `warning` and
+    /// 15.2 from `negative` in light, `#FA7000` sits 17.0 and 17.9 in dark, and no other orange
+    /// that clears its contrast floor does better on the worse of the pair. Full saturation in
+    /// both, for the reason `warning`'s own note gives: at this lightness the headroom goes into
+    /// the hue or the colour comes out brown. It clears the text floor on every ground it is drawn
+    /// on, `PaletteContrastTests` says so, and its distance from `positive` is 46.9 and 55.4,
+    /// which is the number the report was actually about.
+    static let running = dynamic(PaletteInk.running)
+
+    /// The same pair as an `NSColor`, for `ActivityRuleView`'s layers. See `accentNSColor`.
+    static let runningNSColor = dynamicNSColor(
+        light: PaletteInk.running.light, dark: PaletteInk.running.dark
+    )
 
     /// A pull request that has landed.
     ///

@@ -926,6 +926,12 @@ enum Snapshot {
                 AnyView(SidebarIndentGallery(app: model)),
                 Gallery.sidebarIndent.size
             ),
+            // The four marks the busy indicator has to be told apart from, which is the page the
+            // hue was chosen with. It belongs offscreen for the reason `status-column` does and
+            // one more: it is about colour, and colour is the one thing a still can settle
+            // completely. Everything on it that would otherwise be a layer is asked for held
+            // still, so nothing here comes out as a placeholder. See `RunningColourGallery`.
+            ("running-colour", AnyView(RunningColourGallery()), Gallery.runningColour.size),
             // No review-comments and no inspector-tabs scene, deliberately, and for one reason:
             // `ImageRenderer` paints SwiftUI's yellow placeholder over an `NSViewRepresentable`,
             // and each of those two pages exists to show one. The review comment box is the

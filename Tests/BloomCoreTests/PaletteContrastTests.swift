@@ -68,6 +68,7 @@ struct PaletteContrastTests {
             ("negative", PaletteInk.negative),
             ("stop", PaletteInk.stop),
             ("warning", PaletteInk.warning),
+            ("running", PaletteInk.running),
             ("merged", PaletteInk.merged),
         ]
 
@@ -298,6 +299,48 @@ struct PaletteContrastTests {
             abs(inLight - inDark) < 0.75,
             "light reads at \(inLight.rounded(to: 2)) and dark at \(inDark.rounded(to: 2))"
         )
+    }
+
+    /// The report this suite exists to keep answered: two roles resolving to one number.
+    ///
+    /// `Palette.running` was `Palette.positive` was `Palette.accent`, three names for `#0C7A6E` and
+    /// `#4FD8C4`, and the report was that a green busy indicator is easily confused with another
+    /// green icon status. A doc comment saying "these must differ" is the kind of claim
+    /// `PaletteInk`'s own header says was wrong several times over, so it is a number here.
+    ///
+    /// Equality is the floor and it is not the test. The four meaning colours are read as an index
+    /// down one 260 point column, so what matters is that a glance separates them, and CIEDE2000 is
+    /// what says whether it can. `warning` and `negative` were already neighbours at 27.9 in light
+    /// before any of this, so that pair is the standard the new hue is held to rather than a number
+    /// invented for it: running has to be at least half of it from both, which is the most an
+    /// orange squeezed between an amber and a red can be.
+    @Test("running is a hue of its own, and far enough from the three it is read beside")
+    func runningIsNotAnyoneElse() {
+        for (appearance, isDark) in Self.appearances {
+            let running = PaletteInk.running.member(dark: isDark)
+            let positive = PaletteInk.accent.member(dark: isDark)
+            let warning = PaletteInk.warning.member(dark: isDark)
+            let negative = PaletteInk.negative.member(dark: isDark)
+
+            #expect(running != positive, "running is \(appearance)'s positive again")
+
+            let neighbours = Contrast.deltaE(running, warning)
+            let alarm = Contrast.deltaE(running, negative)
+            let floor = Contrast.deltaE(warning, negative) / 2
+            #expect(
+                neighbours >= floor,
+                "running against warning, \(appearance): \(neighbours.rounded(to: 1)) against \(floor.rounded(to: 1))"
+            )
+            #expect(
+                alarm >= floor,
+                "running against negative, \(appearance): \(alarm.rounded(to: 1)) against \(floor.rounded(to: 1))"
+            )
+            // The one the report was actually about, and it is not close.
+            #expect(
+                Contrast.deltaE(running, positive) >= 40,
+                "running against positive, \(appearance): \(Contrast.deltaE(running, positive).rounded(to: 1))"
+            )
+        }
     }
 
     /// A boundary is not read, so it holds the non-text floor rather than the text one. `border`

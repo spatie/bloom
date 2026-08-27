@@ -81,6 +81,7 @@ extension Snapshot {
         .systemAccent,
         .activityRule,
         .sidebarIndent,
+        .runningColour,
     ]
 
     /// The page `--gallery` names, falling back to the first rather than failing: a capture run

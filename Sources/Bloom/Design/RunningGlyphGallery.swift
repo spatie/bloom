@@ -39,13 +39,14 @@ struct RunningGlyphGallery: View {
                 enlarged("Selected", onSelection: true)
             }
 
-            // The dot is a filled circle in the accent, and so is the unread mark, which makes
-            // this the one page where that can be looked at. The column's rule is that its states
-            // differ in shape before they differ in colour, and these two now differ in size, in
-            // whether they move, and in nothing else. Drawn side by side so the question is asked
-            // by the picture rather than left to be discovered in a sidebar.
+            // The dot was a filled circle in the accent and so is the unread mark, which made this
+            // the one page where that could be looked at: the column's rule is that its states
+            // differ in shape before they differ in colour, and those two differed in size, in
+            // whether they moved, and in nothing else. The dot is `Palette.running` now and the
+            // row is kept rather than deleted, because it is the picture that says the two are no
+            // longer one hue. See `RunningColourGallery` for why they stopped being.
             VStack(alignment: .leading, spacing: 8) {
-                Text("Against the other accent marks")
+                Text("Against the marks it used to share a colour with")
                     .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
                 HStack(alignment: .top, spacing: 24) {
