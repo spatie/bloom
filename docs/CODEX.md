@@ -339,38 +339,78 @@ and Bloom's `DiffParser` reads that shape.
 ## 7. Permissions
 
 **None of Claude Code's rule grammar exists on this protocol.** No `permission-rule`, no allow list
-to append to, no `--permission-prompt-tool`. What Codex has is a policy crossed with a sandbox, and
-five request shapes.
+to append to, no `--permission-prompt-tool`. What Codex has is a policy crossed with a sandbox
+crossed with a reviewer, and five request shapes.
 
 ### Policy, per turn
 
 `approvalPolicy` is `untrusted` | `on-request` | `never` | `{granular: {…}}`, crossed with
-`sandbox` (`read-only` | `workspace-write` | `danger-full-access`). Bloom's four `PermissionMode`
-cases do not map onto that grid, and **`plan` has no equivalent at all**.
+`sandbox` (`read-only` | `workspace-write` | `danger-full-access`), crossed with
+`approvalsReviewer` (`user` | `auto_review` | `guardian_subagent`). **`plan` has no equivalent at
+all**, and the other four `PermissionMode` cases are exactly Codex's own four presets:
 
-Proposal, and it should be argued with:
+| Bloom mode | Codex preset | `approvalPolicy` | `sandbox` | `approvalsReviewer` |
+| --- | --- | --- | --- | --- |
+| `auto`, "Read only" | `read-only` | `on-request` | `read-only` | `user` |
+| `acceptEdits`, "Ask for approval" | `workspace` | `on-request` | `workspace-write` | `user` |
+| `autoReview`, "Approve for me" | `auto` | `on-request` | `workspace-write` | `auto_review` |
+| `bypassPermissions`, "Full access" | `full-access` | `never` | `danger-full-access` | `user` |
+| `plan` | **not offered** | | | |
 
-| Bloom mode | Codex `approvalPolicy` | Codex `sandbox` |
-| --- | --- | --- |
-| Ask (`auto`) | `on-request` | `read-only` |
-| Accept edits | `on-request` | `workspace-write` |
-| Full access | `never` | `danger-full-access` |
-| Plan | **not offered** | |
-
-**Shipped, and measured.** Ask means "do not write without telling me", and read-only is the
+**Shipped, and measured.** Read only means "do not write without telling me", and read-only is the
 sandbox that means it: reads and commands run untouched, writes arrive as questions. The measured
 run is above, and the number that matters is zero questions for two shell commands. `untrusted`
 was the stricter alternative and was rejected on that same evidence: it asks about reads too, which
-would make Ask a mode nobody leaves on rather than a strict one.
+would make the strictest mode one nobody leaves on rather than one somebody works in.
 
-Accept edits differs by exactly one thing, which is the one thing its name promises: the sandbox
-lets the worktree be written, so an edit inside it is not a question. `workspaceWrite` names the
-worktree as its only writable root, so a Codex chat can write where its own workspace is and
-nowhere else.
+Ask for approval differs by exactly one thing: the sandbox lets the worktree be written, so an edit
+inside it is not a question. `workspaceWrite` names the worktree as its only writable root, so a
+Codex chat can write where its own workspace is and nowhere else.
+
+Approve for me differs from Ask for approval by exactly one field, and it is not the policy or the
+sandbox: it is who answers. `approvalsReviewer: auto_review` hands each question to a subagent of
+Codex's own, which gathers context and applies a risk framework before approving or denying it.
+`codex --approve-for-me` says the same in its own help, "Route approval requests through automatic
+review using the workspace-write sandbox".
+
+**Bloom shipped without that row, and a user said so**, having read the Codex app's picker beside
+Bloom's: three rows in Claude Code's vocabulary, and the one he wanted, the one the Codex app calls
+"Approve for me", nowhere. `acceptEdits` was already sending the pair that app calls "Ask for
+approval", so the middle mode was genuinely absent rather than merely renamed. Measured against
+0.149.1 while adding it: both `thread/start` and `turn/start` parse `approvalsReviewer`, and a
+value neither knows comes back as ``unknown variant `bogus_value`, expected one of `user`,
+`auto_review`, `guardian_subagent` ``. The third is the older spelling of the second and Bloom does
+not offer it.
+
+**The reviewer is named on every turn, not only on the turn that wants it.** The field is sticky,
+"this turn and subsequent turns", so a chat that ran one turn as Approve for me and was then moved
+back would keep the reviewer while the chip in the composer said otherwise.
+
+**What Bloom does not yet draw.** With `auto_review` the server also emits
+`item/autoApprovalReview/started` and `.../completed`, and offers
+`thread/approveGuardianDeniedAction` so a person can overrule a denial the subagent made. Bloom
+ignores both, so an action the reviewer denies is denied without a row saying so. They are marked
+`[UNSTABLE]` in the app-server schema, "This shape is expected to change soon", which is why the
+mode ships without them rather than waiting for them.
 
 `plan` is **absent from the picker for a Codex chat and the picker says why**: "Plan is a Claude
 Code mode. Codex has no equivalent." Absent and silent would leave somebody who knows Bloom has a
 Plan mode hunting for it.
+
+### The words over the rows
+
+**Each backend's modes are labelled in that backend's own vocabulary**, which is `PermissionVocabulary`
+in the core. The same user's report is the reason: Bloom was printing "Ask, Accept edits, Full
+access" over a Codex chat, and somebody who has read one product's documentation could not find the
+row he wanted. The labels and the one-line sentences above them are the vendors' own, from the
+`codex` binary at 0.149.1 and from `claude` at 2.1.246; the sentence for the selected row is the
+permission menu's footnote, because an `NSMenu` row is one line with no room under it.
+
+Claude Code's side of that was wrong too, and in the same direction. Its `--permission-mode auto`
+is documented in the CLI as "Use a model classifier to approve/deny permission prompts", which is
+the mode Codex calls Approve for me; Bloom had been labelling it "Ask". It reads "Auto" now, which
+is what Claude Code calls it, and it is why Approve for me is offered for Codex only: a second row
+for Claude Code would be two names for one `--permission-mode auto`.
 
 ### The five questions
 

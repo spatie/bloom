@@ -313,6 +313,7 @@ struct TranscriptListView: View {
         let projectName = transcript.projectName
         let rows = transcript.rows
         let permissionMode = transcript.session.permissionMode
+        let agentKind = transcript.session.agentKind
         let recoveredRuns = transcript.recoveredRuns
         let stoppedTurnSeq = transcript.stoppedTurnSeq
         let paneHeight = geometry.paneHeight
@@ -398,6 +399,7 @@ struct TranscriptListView: View {
                                 row: row,
                                 worktree: home.worktree,
                                 permissionMode: permissionMode,
+                                agentKind: agentKind,
                                 wasStopped: wasStopped,
                                 recovered: recovered
                             )

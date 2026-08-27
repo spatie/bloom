@@ -11,6 +11,14 @@ import BloomCore
 /// Reads and writes go through the `Store` actor, so the values are loaded once into `@State` in
 /// `.task` and written back on change. Nothing in `body` touches the store or the file system.
 struct ModelSettingsView: View {
+    /// What the app-wide default may be set to. Approve for me is the one mode left out, and the
+    /// reason is worth writing down: this default is chosen before any backend is, so the rows
+    /// are in Claude Code's vocabulary, and Claude Code's name for that mode is Auto. Offering
+    /// both would draw two rows reading "Auto" in one menu. A Codex chat reaches it from the
+    /// composer, which is where a chat picks a backend at all.
+    private static let defaultablePermissionModes: [PermissionMode] =
+        PermissionMode.allCases.filter { $0 != .autoReview }
+
     @Environment(AppModel.self) private var app
 
     @State private var defaults = AppDefaults()
@@ -61,7 +69,7 @@ struct ModelSettingsView: View {
                 }
 
                 Picker(selection: $defaults.permissionMode) {
-                    ForEach(PermissionMode.allCases, id: \.self) { mode in
+                    ForEach(Self.defaultablePermissionModes, id: \.self) { mode in
                         Text(mode.label).tag(mode)
                     }
                 } label: {

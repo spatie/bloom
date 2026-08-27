@@ -162,8 +162,11 @@ struct ComposerFooterView: View {
             outputStyleDetail: controls.offersOutputStyle
                 ? outputStyles.detail(of: controls.outputStyle)
                 : nil,
+            // Labelled in the backend's own vocabulary, not Bloom's. A Codex chat's menu reads
+            // the way the Codex app reads and a Claude Code chat's reads the way that CLI does,
+            // which is the whole of `PermissionVocabulary`.
             permissionModes: controls.availablePermissionModes.map {
-                ComposerOption(id: $0.rawValue, label: $0.label)
+                ComposerOption(id: $0.rawValue, label: $0.label(on: controls.agentKind))
             },
             context: context?.reading
         )
@@ -219,7 +222,7 @@ struct ComposerFooterView: View {
 
                 ComposerOptionMenu(
                     options: choices.permissionModes,
-                    footnote: controls.missingPermissionModeNote,
+                    footnote: controls.permissionModeNote,
                     selection: controls.permissionMode.rawValue,
                     heading: "Permission mode",
                     systemImage: Self.permissionGlyph(controls.permissionMode),
@@ -373,11 +376,11 @@ struct ComposerFooterView: View {
             $0.model = id
             $0.agentKind = backend
             $0.effort = catalog.resolvedEffort($0.effort, for: backend, model: id)
-            // A mode the new backend does not have cannot survive the move. Codex has no Plan, and
-            // a chat left holding it would be in a mode nothing implements.
-            if !$0.availablePermissionModes.contains($0.permissionMode) {
-                $0.permissionMode = .acceptEdits
-            }
+            // A mode the new backend does not have cannot survive the move: Codex has no Plan
+            // and Claude Code has no Approve for me, and a chat left holding either would be in a
+            // mode nothing implements. Where it lands is `PermissionMode.nearest(on:)`, in the
+            // core, because it is a decision and this is a view.
+            $0.permissionMode = $0.permissionMode.nearest(on: backend)
         }
     }
 
@@ -385,6 +388,9 @@ struct ComposerFooterView: View {
         switch mode {
         case .auto: "hand.raised"
         case .acceptEdits: "checkmark.shield"
+        // A shield with somebody else's judgement in it, which is what the mode is: the approval
+        // still happens, and a reviewer that is not you does it.
+        case .autoReview: "checkmark.shield.fill"
         case .bypassPermissions: "exclamationmark.shield"
         case .plan: "list.bullet.rectangle"
         }

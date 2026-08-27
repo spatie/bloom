@@ -149,16 +149,53 @@ private func eventually(
         #expect(params["sandboxPolicy"]?["type"]?.stringValue == "workspaceWrite")
         // A Codex chat may write where its own worktree is, and nowhere else.
         #expect(params["sandboxPolicy"]?["writableRoots"]?[0]?.stringValue == "/tmp/w")
+        // Named on every turn, not only on the turn that wants a reviewer of its own. The field
+        // is sticky on this protocol, so a mode that left it out would inherit whatever the last
+        // turn asked for.
+        #expect(params["approvalsReviewer"]?.stringValue == "user")
     }
 
-    @Test func mapsEveryPermissionModeOntoThePolicyAndSandboxPair() {
+    @Test func mapsEveryPermissionModeOntoThePolicySandboxAndReviewerTriple() {
         #expect(CodexRunner.approvalPolicy(for: .bypassPermissions) == .never)
         #expect(CodexRunner.sandboxMode(for: .bypassPermissions) == .dangerFullAccess)
         #expect(CodexRunner.approvalPolicy(for: .acceptEdits) == .onRequest)
         #expect(CodexRunner.sandboxMode(for: .acceptEdits) == .workspaceWrite)
         #expect(CodexRunner.approvalPolicy(for: .auto) == .onRequest)
-        // Ask means do not write without telling me, and read-only is the sandbox that means it.
+        // Read only means do not write without telling me, and read-only is the sandbox for it.
         #expect(CodexRunner.sandboxMode(for: .auto) == .readOnly)
+
+        // The four are Codex's own four presets: read-only, workspace, auto, full-access.
+        for mode in [PermissionMode.auto, .acceptEdits, .bypassPermissions, .plan] {
+            #expect(CodexRunner.approvalsReviewer(for: mode) == .user)
+        }
+    }
+
+    /// The bug a user reported: Bloom's Codex menu had no row for the preset the Codex app calls
+    /// "Approve for me", so the only mode that reaches Codex's own reviewer was unreachable.
+    /// Approve for me and Ask for approval differ in exactly one field, which is who answers.
+    @Test func approveForMeIsAskForApprovalWithCodexsOwnReviewerAnswering() {
+        #expect(CodexRunner.approvalsReviewer(for: .autoReview) == .autoReview)
+        #expect(CodexRunner.approvalsReviewer(for: .acceptEdits) == .user)
+        #expect(CodexRunner.approvalPolicy(for: .autoReview) == CodexRunner.approvalPolicy(for: .acceptEdits))
+        #expect(CodexRunner.sandboxMode(for: .autoReview) == CodexRunner.sandboxMode(for: .acceptEdits))
+        // The value the server parses. Measured against codex 0.149.1, which rejects anything
+        // else with "unknown variant, expected one of `user`, `auto_review`, `guardian_subagent`".
+        #expect(CodexApprovalsReviewer.autoReview.rawValue == "auto_review")
+        #expect(CodexApprovalsReviewer.user.rawValue == "user")
+    }
+
+    @Test func sendsTheReviewerWithTheTurnWhenApproveForMeIsChosen() async throws {
+        let store = try makeTestStore("codex-runner-approve-for-me")
+        let (session, _) = try await makeCodexSession(store, permissionMode: .autoReview)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+
+        try await runner.send("hello")
+
+        let turn = try #require(box.process.sentFrame { $0["method"]?.stringValue == "turn/start" })
+        let params = try #require(turn["params"])
+        #expect(params["approvalsReviewer"]?.stringValue == "auto_review")
+        #expect(params["sandboxPolicy"]?["type"]?.stringValue == "workspaceWrite")
     }
 
     @Test func replaysARecordedTurnIntoTheTranscript() async throws {

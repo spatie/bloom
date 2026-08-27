@@ -60,14 +60,18 @@ public enum TurnEnding: Sendable, Hashable {
     /// Said once for the turn rather than on each row it applies to, because the answer is one
     /// fact and repeating it fifteen times would be noise. A turn that simply finished, and one
     /// that failed with a row of its own already explaining why, say nothing here.
-    public func note(permissionMode: PermissionMode) -> String? {
+    ///
+    /// - Parameter agentKind: which CLI ran the turn, because the mode is named in that CLI's own
+    ///   words. A Codex chat denied in `auto` was denied in Read only, and telling its owner it
+    ///   was denied in "Ask" names a row that is not in the menu he is about to open.
+    public func note(permissionMode: PermissionMode, agentKind: AgentKind) -> String? {
         switch self {
         case .finished, .failed:
             nil
         case .denied(let count):
             "\(count == 1 ? "1 tool call was" : "\(count) tool calls were") denied in "
-                + "\(permissionMode.label). Pick another permission mode under the composer, "
-                + "then ask again."
+                + "\(permissionMode.label(on: agentKind)). Pick another permission mode under "
+                + "the composer, then ask again."
         case .stopped:
             // What a person wants to know the moment after they press Stop is whether they have
             // just thrown away the work. They have not: the agent's edits are on disk in the

@@ -28,9 +28,9 @@ public enum AskConversation {
     ///
     /// `acceptEdits` would be no better and is not the middle ground it sounds like: there is no
     /// worktree for an accepted edit to be in, so what it accepts is edits anywhere the agent can
-    /// reach. So the mode is the one that asks, and the composer still offers the other three for
-    /// the day somebody wants one. `ComposerDefaults.resolve` is what stops the owner's default
-    /// landing on this chat the first time it is opened.
+    /// reach. So the mode is the narrowest one there is, and the composer still offers the others
+    /// for the day somebody wants one. `ComposerDefaults.resolve` is what stops the owner's
+    /// default landing on this chat the first time it is opened.
     public static let permissionMode = PermissionMode.auto
 
     /// The chat's working directory: its own, empty, and made once.
@@ -93,9 +93,9 @@ public enum AskConversation {
     /// `abandonPendingPermissionAsks` are built on, which is that a launch boundary ends what a
     /// person's presence justified.
     ///
-    /// So: honoured for the rest of the launch, back to Ask on the next one, and the permission
-    /// menu's own footnote says so before the choice is made. See
-    /// `ComposerControls.missingPermissionModeNote`.
+    /// So: honoured for the rest of the launch, back to the narrowest mode on the next one, and
+    /// the permission menu's own footnote says so before the choice is made. See
+    /// `ComposerControls.permissionModeNote`.
     public static func modeOnOpening(
         stored: PermissionMode,
         isFirstOpenSinceLaunch: Bool

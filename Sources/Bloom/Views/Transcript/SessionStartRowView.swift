@@ -13,8 +13,11 @@ struct SessionStartRowView: View {
         ComposerOption.label(for: info.model, in: ComposerOption.models)
     }
 
+    /// In the backend's own words, because that is what the composer's menu says and a chip
+    /// naming a row that is not in that menu sends the reader looking for it.
     private var permissionLabel: String {
-        PermissionMode(rawValue: info.permissionMode)?.label ?? ComposerOption.titleCased(info.permissionMode)
+        PermissionMode(rawValue: info.permissionMode)?.label(on: info.agentKind)
+            ?? ComposerOption.titleCased(info.permissionMode)
     }
 
     var body: some View {

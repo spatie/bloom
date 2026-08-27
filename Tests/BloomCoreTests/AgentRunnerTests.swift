@@ -389,6 +389,9 @@ struct AgentRunnerArgvTests {
     @Test("maps every permission mode to a value the CLI accepts", arguments: [
         (PermissionMode.auto, "auto"),
         (.acceptEdits, "acceptEdits"),
+        // Two rows answer `auto` and neither is a mistake: Approve for me is offered for Codex
+        // only because Claude Code's own Auto already is that mode. See `PermissionMode.cliValue`.
+        (.autoReview, "auto"),
         (.bypassPermissions, "bypassPermissions"),
         (.plan, "plan"),
     ])
@@ -404,7 +407,7 @@ struct AgentRunnerArgvTests {
     func coversEveryPermissionMode() {
         // A new case added to the enum has to be added to the table above too, or the CLI is
         // handed a value nothing checked.
-        #expect(PermissionMode.allCases.count == 4)
+        #expect(PermissionMode.allCases.count == 5)
     }
 
     @Test("launches in the worktree, resuming once the agent session is known")

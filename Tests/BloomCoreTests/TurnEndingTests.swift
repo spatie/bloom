@@ -7,7 +7,7 @@ struct TurnEndingTests {
     @Test("a clean turn is a finish")
     func cleanFinish() {
         #expect(TurnEnding.of(wasStopped: false, succeeded: true, denials: 0) == .finished)
-        #expect(TurnEnding.of(wasStopped: false, succeeded: true, denials: 0).note(permissionMode: .auto) == nil)
+        #expect(TurnEnding.of(wasStopped: false, succeeded: true, denials: 0).note(permissionMode: .auto, agentKind: .claudeCode) == nil)
     }
 
     @Test("a stop is named before the error the stop caused")
@@ -23,7 +23,7 @@ struct TurnEndingTests {
     func failureIsStillAFailure() {
         #expect(TurnEnding.of(wasStopped: false, succeeded: false, denials: 0) == .failed)
         // Its own row already says what went wrong, at length, so the footer adds nothing.
-        #expect(TurnEnding.of(wasStopped: false, succeeded: false, denials: 0).note(permissionMode: .auto) == nil)
+        #expect(TurnEnding.of(wasStopped: false, succeeded: false, denials: 0).note(permissionMode: .auto, agentKind: .claudeCode) == nil)
     }
 
     @Test("declined calls are still reported on a turn that otherwise succeeded")
@@ -33,7 +33,7 @@ struct TurnEndingTests {
 
     @Test("a stopped turn says so, in words, and says the work is safe")
     func stopSpeaks() {
-        let note = TurnEnding.stopped.note(permissionMode: .auto)
+        let note = TurnEnding.stopped.note(permissionMode: .auto, agentKind: .claudeCode)
         #expect(note?.contains("You stopped this turn") == true)
         // The question somebody actually has the moment after pressing Stop.
         #expect(note?.contains("worktree") == true)
@@ -42,10 +42,10 @@ struct TurnEndingTests {
 
     @Test("the sentence about declined calls names the setting that declined them")
     func denialsNameTheMode() {
-        let note = TurnEnding.denied(1).note(permissionMode: .acceptEdits)
+        let note = TurnEnding.denied(1).note(permissionMode: .acceptEdits, agentKind: .claudeCode)
         #expect(note?.contains("1 tool call was") == true)
-        #expect(note?.contains(PermissionMode.acceptEdits.label) == true)
-        #expect(TurnEnding.denied(4).note(permissionMode: .auto)?.contains("4 tool calls were") == true)
+        #expect(note?.contains(PermissionMode.acceptEdits.label(on: .claudeCode)) == true)
+        #expect(TurnEnding.denied(4).note(permissionMode: .auto, agentKind: .claudeCode)?.contains("4 tool calls were") == true)
     }
 }
 

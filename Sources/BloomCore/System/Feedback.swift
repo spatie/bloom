@@ -264,8 +264,12 @@ public enum Feedback {
     /// splits a column on somebody's chart in two.
     public static func wireName(_ mode: PermissionMode) -> String {
         switch mode {
+        // The slugs are older than the labels over them and they stay as they are: `ask` is the
+        // mode the menu now calls Auto or Read only, and renaming it would split a column on
+        // somebody's chart in two for no gain.
         case .auto: "ask"
         case .acceptEdits: "accept-edits"
+        case .autoReview: "approve-for-me"
         case .bypassPermissions: "full-access"
         case .plan: "plan"
         }

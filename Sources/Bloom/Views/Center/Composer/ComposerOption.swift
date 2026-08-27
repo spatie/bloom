@@ -24,10 +24,6 @@ struct ComposerOption: Identifiable, Hashable {
         ComposerOption(id: "max", label: "Max"),
     ]
 
-    static let permissionModes = PermissionMode.allCases.map {
-        ComposerOption(id: $0.rawValue, label: $0.label)
-    }
-
     /// The built-in list plus any id the app is in, or has been in, that is not on it.
     ///
     /// Model and effort ids are an open set. A repository's settings file, `~/.conductor` or the

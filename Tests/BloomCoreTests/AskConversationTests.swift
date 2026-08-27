@@ -125,13 +125,14 @@ struct AskConversationTests {
             session: Session(workspaceID: WorkspaceID("w1")), isFastMode: false, outputStyle: ""
         )
         #expect(inWorktree.hasWorktree)
-        #expect(inWorktree.missingPermissionModeNote == nil)
+        // The chosen mode's own sentence, and nothing about the machine.
+        #expect(!inWorktree.permissionModeNote.contains("whole machine"))
 
         let ask = ComposerControls(
             session: AskConversation.newSession(), isFastMode: false, outputStyle: ""
         )
         #expect(!ask.hasWorktree)
-        let note = ask.missingPermissionModeNote ?? ""
+        let note = ask.permissionModeNote
         #expect(note.contains("whole machine"))
         #expect(note.contains("Bloom next starts"))
     }

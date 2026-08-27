@@ -188,6 +188,12 @@ extension WorkspaceManager {
         var session: Session?
         if request.opensSession {
             let controls = request.controls
+            let backend = controls?.agentKind ?? .claudeCode
+            // A mode the chosen backend has no row for cannot be written to a session: Codex has
+            // no Plan and Claude Code has no Approve for me, and the app-wide default in Settings
+            // is picked before any backend is. `nearest(on:)` says where each one lands.
+            let mode = (controls?.permissionMode ?? AppDefaults.fallbackPermissionMode)
+                .nearest(on: backend)
             let opened = try await store.upsert(Session(
                 workspaceID: workspace.id,
                 // Not the prompt. The WORKSPACE is named after the work, by `namer` above and
@@ -201,8 +207,8 @@ extension WorkspaceManager {
                 // A request chooses a backend for the first chat and for no other. Every chat
                 // opened in this worktree afterwards picks its own, and two chats in one worktree
                 // can be on different ones.
-                agentKind: controls?.agentKind ?? .claudeCode,
-                permissionMode: controls?.permissionMode ?? AppDefaults.fallbackPermissionMode
+                agentKind: backend,
+                permissionMode: mode
             ))
             // Fast mode and the output style have no column. Writing them here also marks the
             // session settled, which is what stops the composer's first-open defaults from

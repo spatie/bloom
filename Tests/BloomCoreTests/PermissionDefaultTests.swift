@@ -18,7 +18,7 @@ struct PermissionDefaultTests {
     @Test("a brand new session may act without asking")
     func fallbackIsFullAccess() {
         #expect(AppDefaults.fallbackPermissionMode == .bypassPermissions)
-        #expect(PermissionMode.bypassPermissions.label == "Full access")
+        #expect(PermissionMode.bypassPermissions.label(on: .codex) == "Full access")
     }
 
     /// The three values that stand in for "nobody has said anything yet", which must agree. Each
@@ -93,7 +93,7 @@ struct PermissionDefaultTests {
     }
 
     /// What Codex is told, which is a different shape: an approval policy crossed with a sandbox
-    /// rather than a mode. Full access is the only one of the four that turns the sandbox off, so
+    /// rather than a mode. Full access is the only mode that turns the sandbox off, so
     /// a Codex chat on the default may write outside its own worktree, which the Accept edits it
     /// replaces could not.
     @Test("on Codex it is no approvals and no sandbox")

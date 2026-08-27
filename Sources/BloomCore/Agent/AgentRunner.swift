@@ -1075,9 +1075,14 @@ private final class ProcessHandle: Sendable {
 public extension PermissionMode {
     /// What `--permission-mode` expects. Bloom's names happen to line up with the CLI's today,
     /// but they are two separate vocabularies and drift is a matter of time.
+    ///
+    /// Two cases answer `auto` and neither is a mistake. `autoReview` is not offered for a Claude
+    /// Code chat precisely because `auto` already is that mode here, so a row that somehow carries
+    /// it, out of a settings default or a session written before the backend moved, runs as the
+    /// thing it names rather than being quietly rewritten into something stricter.
     var cliValue: String {
         switch self {
-        case .auto: "auto"
+        case .auto, .autoReview: "auto"
         case .acceptEdits: "acceptEdits"
         case .bypassPermissions: "bypassPermissions"
         case .plan: "plan"

@@ -14,11 +14,11 @@ struct ComposerOptionMenu: View {
     /// agent each name belongs to, and picking a name is picking an agent.
     var sections: [ComposerModelSection]?
     /// A disabled line under the rows, for something the menu has to say rather than offer. Two
-    /// pickers use it and they use it differently. The permission mode menu explains an absence,
-    /// because Codex has no Plan mode and a picker that simply dropped it would leave somebody who
-    /// knows Bloom has one wondering where it went. The output style menu describes the style
-    /// that is selected, because a style's own sentence is the only thing that tells you what
-    /// picking it would do, and an `NSMenu` row is one line with no room for it.
+    /// pickers use it and both use it to describe the selected row, because a row's own sentence
+    /// is the only thing that says what picking it would do and an `NSMenu` row is one line with
+    /// no room for it. The permission mode menu adds what is absent to that: Codex has no Plan
+    /// mode, and a picker that simply dropped it would leave somebody who knows Bloom has one
+    /// wondering where it went.
     var footnote: String?
     var selection: String
     /// What the list is a list of, drawn as the menu's own heading, or nil when the items name

@@ -31,7 +31,7 @@ public struct ComposerControls: Equatable, Sendable {
     public var outputStyle: String
     /// Whether this chat has a worktree behind it. False is Ask Bloom, and it is here rather than
     /// left to the view because it changes what the permission menu has to say. See
-    /// `missingPermissionModeNote`.
+    /// `permissionModeNote`.
     public var hasWorktree: Bool
 
     public init(
@@ -71,33 +71,50 @@ public struct ComposerControls: Equatable, Sendable {
     /// Codex has no Plan. Its permission story is an approval policy crossed with a sandbox, and
     /// there is nothing in that grid that means "work it out and do not touch anything". Offering
     /// the mode anyway would be a control that silently does nothing.
+    ///
+    /// Claude Code has no Approve for me, and loses nothing by it: its own Auto mode is that mode
+    /// under another name, so a second row would be two names for one `--permission-mode auto`.
+    /// See `PermissionMode.autoReview`.
     public var availablePermissionModes: [PermissionMode] {
         switch agentKind {
         case .codex: PermissionMode.allCases.filter { $0 != .plan }
-        case .claudeCode, .cursor, .openCode: PermissionMode.allCases
+        case .claudeCode, .cursor, .openCode: PermissionMode.allCases.filter { $0 != .autoReview }
         }
     }
 
-    /// What the permission menu says under its rows: which mode is missing and why, and what a
-    /// mode means here when it does not mean what it usually means.
+    /// What the permission menu says under its rows: what the chosen mode does, which mode is
+    /// missing and why, and what a mode means here when it does not mean what it usually means.
     ///
-    /// Two facts, and both can be true at once, so they are joined rather than one winning. The
-    /// second is the one worth reading twice. Every other chat in Bloom is in a worktree, which is
-    /// a copy of a project cut for the purpose, so Full access there is full access to a copy. This
-    /// conversation has no worktree, and the same words would mean the whole machine.
-    public var missingPermissionModeNote: String? {
-        var notes: [String] = []
+    /// Three facts, and all three can be true at once, so they are joined rather than one winning.
+    ///
+    /// The first is here because a row is a label and a label is not enough. "Only ask for actions
+    /// detected as potentially unsafe" is the sentence that made Approve for me legible to the
+    /// person who asked for it, and there is nowhere else to put it: an `NSMenu` row is one line.
+    /// The output style picker already prints the selected style's own sentence in this same spot
+    /// and for this same reason.
+    ///
+    /// The last is the one worth reading twice. Every other chat in Bloom is in a worktree, which
+    /// is a copy of a project cut for the purpose, so the widest mode there is full access to a
+    /// copy. This conversation has no worktree, and the same words would mean the whole machine.
+    ///
+    /// Never nil, unlike the `missingPermissionModeNote` it replaced: there is always a chosen
+    /// mode and it always has a sentence, so the footnote is a fixture of the menu rather than
+    /// something that appears and disappears as the selection moves.
+    public var permissionModeNote: String {
+        let mode = permissionMode
+        var notes = ["\(mode.label(on: agentKind)): \(mode.summary(on: agentKind))"]
         if agentKind == .codex {
             notes.append("Plan is a Claude Code mode. Codex has no equivalent.")
         }
         if !hasWorktree {
             notes.append(
-                "This conversation has no worktree, so anything wider than Ask reaches the whole "
-                    + "machine rather than a copy of a project. Whatever you choose lasts until "
-                    + "Bloom next starts, and then it is Ask again."
+                "This conversation has no worktree, so anything wider than "
+                    + "\(PermissionMode.auto.label(on: agentKind)) reaches the whole machine "
+                    + "rather than a copy of a project. Whatever you choose lasts until Bloom "
+                    + "next starts, and then it is back to that."
             )
         }
-        return notes.isEmpty ? nil : notes.joined(separator: " ")
+        return notes.joined(separator: " ")
     }
 
     /// Whether this backend has output styles at all.

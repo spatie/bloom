@@ -124,7 +124,8 @@ public actor CodexRunner: SessionRunner {
             model: session.model,
             effort: session.effort,
             approvalPolicy: Self.approvalPolicy(for: session.permissionMode),
-            sandboxPolicy: Self.sandboxPolicy(for: session.permissionMode, writableRoot: workspacePath)
+            sandboxPolicy: Self.sandboxPolicy(for: session.permissionMode, writableRoot: workspacePath),
+            approvalsReviewer: Self.approvalsReviewer(for: session.permissionMode)
         )
         handle.begin(turnID: turn.id)
 
@@ -300,7 +301,8 @@ public actor CodexRunner: SessionRunner {
                 cwd: workspacePath,
                 model: session.model,
                 approvalPolicy: Self.approvalPolicy(for: session.permissionMode),
-                sandbox: sandbox
+                sandbox: sandbox,
+                approvalsReviewer: Self.approvalsReviewer(for: session.permissionMode)
             )
         }
 
@@ -319,27 +321,51 @@ public actor CodexRunner: SessionRunner {
 
     // MARK: - Permission policy
 
-    /// How Bloom's four modes reach a protocol that has no modes.
+    /// How Bloom's five modes reach a protocol that has no modes.
     ///
-    /// Codex crosses an approval policy with a sandbox, and the grid does not line up with the
-    /// picker: `plan` has no equivalent at all and must not be offered for a Codex chat, and Ask
-    /// and Accept edits differ only in how much the sandbox lets through without a question.
+    /// Codex crosses an approval policy with a sandbox and a reviewer, and the grid does not line
+    /// up with the picker: `plan` has no equivalent at all and must not be offered for a Codex
+    /// chat. The other four are exactly Codex's own four presets, which is not a coincidence but
+    /// the point, and their labels come out of `PermissionVocabulary`:
+    ///
+    /// | Bloom | Codex preset | policy | sandbox | reviewer |
+    /// | --- | --- | --- | --- | --- |
+    /// | `auto` | `read-only` | `on-request` | `read-only` | `user` |
+    /// | `acceptEdits` | `workspace` | `on-request` | `workspace-write` | `user` |
+    /// | `autoReview` | `auto` | `on-request` | `workspace-write` | `auto_review` |
+    /// | `bypassPermissions` | `full-access` | `never` | `danger-full-access` | `user` |
     public static func approvalPolicy(for mode: PermissionMode) -> CodexApprovalPolicy {
         switch mode {
         case .bypassPermissions: .never
         // `untrusted` asks about nearly everything, including reads, which is a mode nobody leaves
         // on. `on-request` is the one that asks about what the sandbox refused.
-        case .auto, .acceptEdits, .plan: .onRequest
+        case .auto, .acceptEdits, .autoReview, .plan: .onRequest
         }
     }
 
     public static func sandboxMode(for mode: PermissionMode) -> CodexSandboxMode {
         switch mode {
         case .bypassPermissions: .dangerFullAccess
-        case .acceptEdits: .workspaceWrite
-        // Ask and Plan both mean "do not write without telling me". Read-only is the sandbox that
-        // means it, and a write then arrives as a question rather than as a fact.
+        // Approve for me differs from Ask for approval in who answers, not in what is asked, so
+        // the two share a sandbox. `codex --approve-for-me` says the same thing in its own help:
+        // "Route approval requests through automatic review using the workspace-write sandbox."
+        case .acceptEdits, .autoReview: .workspaceWrite
+        // Read only and Plan both mean "do not write without telling me". Read-only is the sandbox
+        // that means it, and a write then arrives as a question rather than as a fact.
         case .auto, .plan: .readOnly
+        }
+    }
+
+    /// Who answers, which is the whole of what Approve for me adds.
+    ///
+    /// **Sent on every turn, including the modes that want the default.** The field is sticky on
+    /// this protocol, "this turn and subsequent turns", so a chat that ran one turn as Approve for
+    /// me and was then moved back would keep the reviewer it had while the chip in the composer
+    /// said otherwise. Naming it every time is what keeps the chip and the server in step.
+    public static func approvalsReviewer(for mode: PermissionMode) -> CodexApprovalsReviewer {
+        switch mode {
+        case .autoReview: .autoReview
+        case .auto, .acceptEdits, .bypassPermissions, .plan: .user
         }
     }
 
