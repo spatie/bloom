@@ -156,8 +156,11 @@ struct SidebarEmptyNoticeRow: View {
             // thing sits on the header above and only appears on hover. The owner has overruled
             // that: the `+` is enough, and a second control for one action inside one project is
             // the thing this window has spent a night removing.
+            // No font of its own, which is what the rows around it do. It was `Typo.caption`,
+            // a size smaller than every name above and below it, and in a pane where each project
+            // can carry one of these the small type read as a second class of row rather than as
+            // a quiet one. The tertiary ink is what makes it quiet.
             Text(isFiltered ? "Nothing matches the filter" : "No workspaces yet")
-                .font(Typo.caption)
                 .foregroundStyle(Palette.textTertiary)
         } icon: {
             Color.clear
