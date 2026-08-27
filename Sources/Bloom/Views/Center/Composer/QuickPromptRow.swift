@@ -77,9 +77,11 @@ struct QuickPromptRow: View {
         .buttonStyle(.plain)
         .accessibilityLabel(prompt.resolvedName)
         .accessibilityValue(
-            QuickPromptDelivery(prompt) == .compose
-                ? prompt.preview
-                : prompt.preview + ". " + QuickPromptDelivery(prompt).sentence
+            // The quiet combination has no sentence of its own to read out, which is the same
+            // reason the form no longer prints one under its switches.
+            [prompt.preview, QuickPromptDelivery(prompt).sentence]
+                .compactMap { $0 }
+                .joined(separator: ". ")
         )
         // The labels above set no emphasized colour, and that is the other half of this decision.
         // They used to switch to white whenever the row was selected and the window was active,
@@ -128,7 +130,7 @@ struct QuickPromptRow: View {
                 if delivery.opensNewChat { glyph("plus.bubble") }
                 if delivery.sends { glyph("paperplane") }
             }
-            .help(delivery.sentence)
+            .help(delivery.sentence ?? "")
         }
     }
 

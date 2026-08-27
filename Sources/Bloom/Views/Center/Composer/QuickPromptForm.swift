@@ -216,11 +216,13 @@ struct QuickPromptForm: View {
                 toggle("Send it straight away", isOn: $sendsImmediately)
                 toggle("Open it in a new chat tab", isOn: $opensNewChat)
 
-                Text(delivery.sentence)
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let sentence = delivery.sentence {
+                    Text(sentence)
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
     }

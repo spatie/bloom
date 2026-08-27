@@ -78,22 +78,28 @@ public enum QuickPromptDelivery: Equatable, Sendable, CaseIterable {
     /// Whether a chat is opened for them.
     public var opensNewChat: Bool { self == .composeInNewChat || self == .sendInNewChat }
 
-    /// What the form says under the two switches, in the words of what will happen.
+    /// What the form says under the two switches, in the words of what will happen, or nothing
+    /// when both switches are off.
     ///
     /// Written here rather than in the form because it is the same decision the four cases above
     /// are, said to a person instead of to a `switch`, and because a sentence a suite can read back
     /// is a sentence that stays true when a fifth case is added.
     ///
-    /// The middle one names the rest of the draft on purpose. Sending straight away sends what is
-    /// already in the box along with the prompt, which is the one thing about these switches
-    /// somebody could be surprised by after the fact.
-    public var sentence: String {
+    /// **Both switches off says nothing.** It said "The words go in the composer here, and nothing
+    /// is sent until you send it", and the owner read that line and could not tell what it meant.
+    /// It is the state the form opens in and the state every prompt had before these switches
+    /// existed, so it is the one combination nobody is asking a question about, and a sentence
+    /// there is a sentence explaining that nothing unusual will happen.
+    ///
+    /// Sending in place names the rest of the draft on purpose. It sends what is already in the
+    /// box along with the prompt, which is the one thing about these switches somebody could be
+    /// surprised by after the fact.
+    public var sentence: String? {
         switch self {
         case .compose:
-            "The words go in the composer here, and nothing is sent until you send it."
+            nil
         case .send:
-            "The words go in the composer here and are sent at once, "
-                + "along with anything already typed there."
+            "Sent as soon as you choose it, along with anything already typed in the composer."
         case .composeInNewChat:
             "A new chat tab opens with the words waiting in its composer. Nothing is sent."
         case .sendInNewChat:
