@@ -636,33 +636,48 @@ struct TranscriptTable: NSViewRepresentable {
             return CGFloat(heights.assumed(for: entry.contentKey, drawsNothing: entry.drawsNothing))
         }
 
-        /// A fresh `NSHostingView` per measurement, at the exact width the cell is laid out at.
+        /// The one thing a row is hosted in to be measured, kept rather than built per row. See
+        /// `measure(_:at:)`, which carries why keeping it is safe now and was not before. Lazy, so
+        /// a coordinator that never measures never builds one.
+        private lazy var sizer = NSHostingController(rootView: AnyView(EmptyView()))
+
+        /// **What this row comes to at this width, asked of a hosting controller.**
         ///
-        /// **The other half of the wrong heights.** One hosting view reused for every row, with
-        /// its size invalidated by hand, gave a long conversation several hundred points of blank
-        /// between rows: an `NSHostingView` keeps its own fitting size and does not reliably
-        /// forget the row before. A fresh one has no previous answer to hand back, and a whole
-        /// SwiftUI graph per row is what this arrangement can afford: 2.1ms a layout pass against
-        /// the lazy stack's 11.9ms.
+        /// It was a fresh `NSHostingView` per row, with a required width constraint,
+        /// `layoutSubtreeIfNeeded()` and `fittingSize`. The comment beside it said a reused
+        /// hosting view "does not reliably forget the row before", and that is a description of
+        /// `fittingSize` rather than of reuse: `fittingSize` is the Auto Layout engine's answer for
+        /// the view as it stands, so a reused view hands back whatever the last solve left in it.
+        /// `sizeThatFits(in:)` takes a PROPOSAL and answers for the content it has been handed, so
+        /// there is nothing left over to forget and the controller can be kept. It is also the
+        /// supported width-constrained measurement, where `fittingSize` under a constraint is a
+        /// solver result that happens to agree.
         ///
-        /// The width is a required CONSTRAINT rather than a frame, because that is what makes
-        /// `fittingSize` solve the layout at that width instead of handing back the unwrapped
-        /// ideal width of a paragraph.
+        /// Timed on this Mac against the owner's session: 0.270ms a row for the fresh view, 0.103ms
+        /// for this. Nothing else about the measurement moves. `HostedRow` is untouched, because
+        /// the measuring copy and the drawing copy passing through identical modifiers is the whole
+        /// reason that type exists; `.id` is added here, which the drawing copy already had, so the
+        /// two are now closer rather than further apart, and it is what tells SwiftUI that the next
+        /// row is a different view rather than this one changing.
+        ///
+        /// The width is still `columnWidth`, carried in through `TranscriptRowHeights.measure`,
+        /// which is the TABLE's width and not the clip view's. See `columnWidth`, which carries
+        /// what measuring against the wrong one clipped.
         private func measure(_ entry: TranscriptTableEntry, at width: CGFloat) -> CGFloat {
             guard let rowEnvironment else { return 0 }
-            // The one place a hosting view is built to measure a row, so the one place worth
-            // counting. See `TranscriptHoldCensus`.
+            // The one place a row is hosted to measure it, so the one place worth counting. See
+            // `TranscriptHoldCensus`.
             TranscriptHoldCensus.measured()
-            let host = NSHostingView(rootView: AnyView(
+            sizer.rootView = AnyView(
                 HostedRow(content: entry.content(), report: { _ in }, fills: false)
+                    .id(entry.id)
                     .transcriptRowEnvironment(rowEnvironment)
-            ))
-            host.translatesAutoresizingMaskIntoConstraints = false
-            let constraint = host.widthAnchor.constraint(equalToConstant: width)
-            constraint.isActive = true
-            host.layoutSubtreeIfNeeded()
-            let height = host.fittingSize.height
-            constraint.isActive = false
+            )
+            // Unconstrained downwards, which is what `fills: false` is for: the measuring copy
+            // takes its own ideal height rather than filling a row it has not been given.
+            let height = sizer.sizeThatFits(
+                in: CGSize(width: width, height: .greatestFiniteMagnitude)
+            ).height
             // Nought is a real answer, and `TranscriptRowHeights` carries what pretending
             // otherwise cost.
             return height
