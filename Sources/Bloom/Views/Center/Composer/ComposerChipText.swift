@@ -451,16 +451,31 @@ final class AttachmentChipCell: NSTextAttachmentCell {
     /// name nothing, keeps the chip exactly the width it had so the line does not reflow under the
     /// pointer, and is what `AttachmentChip` and `SlashCommandChip` already do above the box.
     ///
-    /// `.secondaryLabelColor` because it is only ever drawn on the composer's own ground; the
-    /// bubble's ink is not reached through here, because a sent turn is never removable.
+    /// **A drawn X on a plate, not `xmark.circle.fill`.** That symbol knocks its X out of a filled
+    /// disc, so the X is a hole showing whatever is behind the chip: grey on grey at eleven
+    /// points, which is a smudge rather than a control.
     ///
-    /// Built per draw rather than held: one chip shows it, only while the pointer is on it, and
-    /// SF Symbols does its own caching underneath.
+    /// That was found and fixed on `AttachmentChip`, and this chip kept the smudge, because the
+    /// two are the same object drawn by two renderers and only one of them is a view. The chip
+    /// above the box was the one read; the chip *inside* the box, which is the one a file dropped
+    /// into the composer actually becomes, was the one complained about. They read one set of
+    /// numbers now: see `ChipRemoveMark`, and `ChipRemoveImage` for the drawing.
+    ///
+    /// The composer's own ground, because a sent turn is never removable: `isRemovable` wants a
+    /// `ComposerTextView` and the bubble is not one. So the disc is `Palette.surface` under a
+    /// `surfaceRaised` chip, which is the step `AttachmentChip` takes, and it is not a fourth
+    /// member of `Ground` because the other ground would have to invent a value it can never draw.
+    ///
+    /// Built per draw rather than held: one chip shows it, only while the pointer is on it, and it
+    /// is a disc with a glyph on it.
     private var close: NSImage? {
-        let size = NSImage.SymbolConfiguration(pointSize: iconSize, weight: .regular)
-        let ink = NSImage.SymbolConfiguration(paletteColors: [.secondaryLabelColor])
-        return NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Remove")?
-            .withSymbolConfiguration(size.applying(ink))
+        ChipRemoveImage.of(
+            diameter: iconSize,
+            ink: ground.ink,
+            plate: NSColor(Palette.surface),
+            border: ground.border,
+            label: "Remove \(filename)"
+        )
     }
 
     /// Where a click takes the file off rather than opening it: the icon's slot and the padding

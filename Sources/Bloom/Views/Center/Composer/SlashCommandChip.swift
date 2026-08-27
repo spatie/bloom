@@ -97,16 +97,10 @@ struct SlashCommandChip: View {
     @ViewBuilder
     private var leading: some View {
         if isHovered {
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .resizable()
-                    .frame(width: Self.slot, height: Self.slot)
-                    .foregroundStyle(Palette.textSecondary)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .help("Remove /\(name)")
-            .accessibilityLabel("Remove /\(name)")
+            // The shared control rather than an `xmark.circle.fill` of its own, which cut its X
+            // out of the disc so the X was the chip showing through. See `ChipRemoveMark`: this
+            // chip is a sibling of `AttachmentChip` by design and was still missed by its fix.
+            ChipRemoveButton(diameter: Self.slot, label: "Remove /\(name)", action: onRemove)
         } else {
             Image(systemName: glyph)
                 .resizable()

@@ -72,16 +72,10 @@ struct ReviewCommentChip: View {
     @ViewBuilder
     private var leading: some View {
         if isHovered {
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .resizable()
-                    .frame(width: Self.slot, height: Self.slot)
-                    .foregroundStyle(Palette.textSecondary)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .help("Remove the comment")
-            .accessibilityLabel("Remove the comment")
+            // The same control the other chips in this strip draw, out of the same numbers. It
+            // was an `xmark.circle.fill`, whose X is a hole in the disc rather than a mark on it.
+            // See `ChipRemoveMark`.
+            ChipRemoveButton(diameter: Self.slot, label: "Remove the comment", action: onRemove)
         } else {
             Image(systemName: "text.bubble")
                 .resizable()
