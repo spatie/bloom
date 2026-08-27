@@ -21,22 +21,21 @@ import Testing
         // The case that bit last time. Whatever the collapsed minimum is, adding the inspector and
         // its divider has to land exactly on the presented one: a presented minimum that asked for
         // more than that would be a window the split view overflows the moment the pane arrives.
-        #expect(
-            widths.minimum(withInspector: false) + widths.inspector + widths.divider
-                == widths.minimum(withInspector: true)
-        )
-        #expect(
-            widths.detailHalf(withInspector: false) + widths.inspector + widths.divider
-                == widths.detailHalf(withInspector: true)
-        )
+        //
+        // One line each, and that is not a style choice. A `#expect` whose operator starts a
+        // continuation line reported `1122.0 == 1122.0` as a failure on CI: swift-testing folds the
+        // operators of a broken `SequenceExpr` itself to find the one to split on, and it split
+        // this on the wrong one. Both sides printed the same number in the failure message, which
+        // is the tell. Keep a comparison on one line here.
+        let inspectorAndItsDivider = widths.inspector + widths.divider
+        #expect(widths.minimum(withInspector: false) + inspectorAndItsDivider == widths.minimum(withInspector: true))
+        #expect(widths.detailHalf(withInspector: false) + inspectorAndItsDivider == widths.detailHalf(withInspector: true))
     }
 
     @Test func theDetailHalfIsTheWindowMinimumLessTheSidebarAndItsDivider() {
         for showing in [true, false] {
-            #expect(
-                widths.minimum(withInspector: showing) - widths.sidebar - widths.divider
-                    == widths.detailHalf(withInspector: showing)
-            )
+            let half = widths.minimum(withInspector: showing) - widths.sidebar - widths.divider
+            #expect(half == widths.detailHalf(withInspector: showing))
         }
     }
 
