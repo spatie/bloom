@@ -74,6 +74,9 @@ struct CreateWorkspaceSheet: View {
     @State private var heldProblem: String?
     @State private var isResolvingReference = false
     @State private var branchPrefix: String?
+    /// Whether this project runs anything after the worktree is cut, so the footer can say so.
+    /// Read with the branches, from the same settings the rest of this sheet is built from.
+    @State private var hasSetupScript = false
     @State private var isLoading = false
 
     /// Whether a model will be asked to name this workspace, which decides what the sheet may
@@ -183,6 +186,24 @@ struct CreateWorkspaceSheet: View {
     /// name field beside a chosen pull request would be a box that changes nothing, which is worse
     /// than no box: it is a box that lies. The checkout's own chip under the sheet says what the
     /// workspace will be called instead.
+    /// One line saying what pressing Create actually does.
+    ///
+    /// The sheet asked for a task and a branch and never said what it would make, so somebody
+    /// meeting Bloom read "New workspace" and had to infer that a workspace is a worktree on disk.
+    /// It names the two things that happen and nothing else: the checkout, and the setup script
+    /// where the project has one. No worktree jargon, because a person who knows the word does not
+    /// need the sentence and a person who does not is not helped by it.
+    private var consequence: some View {
+        Text(hasSetupScript
+            ? "Creates a separate copy of the project on this Mac, on its own branch, and runs this project's setup script in it."
+            : "Creates a separate copy of the project on this Mac, on its own branch.")
+            .font(Typo.caption)
+            .foregroundStyle(Palette.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.bottom, Metrics.gutter)
+    }
+
     private var offersName: Bool { checkout == nil }
 
     var body: some View {
@@ -195,6 +216,7 @@ struct CreateWorkspaceSheet: View {
                     .padding(Metrics.gutter)
             } else {
                 composer
+                consequence
             }
         }
         .frame(width: Self.width)
@@ -903,6 +925,8 @@ struct CreateWorkspaceSheet: View {
 
         branches = context.branches
         branchPrefix = context.settings.branchPrefix
+        hasSetupScript = !(context.settings.setupScript ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         isNamingAvailable = context.isNamingAvailable
         controls = ComposerControls(
             defaults: ComposerDefaults.resolve(repo: context.settings, app: appDefaults),
