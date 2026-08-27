@@ -43,7 +43,7 @@ struct StreamingThinkingView: View {
                 .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
                 .italic()
-                .lineSpacing(TranscriptLayout.proseLeading)
+                .proseLeading(Typo.label)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, TranscriptLayout.detailIndent)
                 .padding(.trailing, TranscriptLayout.inset)

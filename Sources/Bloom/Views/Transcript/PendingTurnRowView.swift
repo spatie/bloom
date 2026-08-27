@@ -88,7 +88,7 @@ struct PendingTurnRowView: View {
         CappedWidth(width: bubbleWidth?.cap ?? UserTurnRowView.uncappedFallback) {
             Text(displayText)
                 .font(Typo.body)
-                .lineSpacing(TranscriptLayout.proseLeading)
+                .proseLeading()
                 .foregroundStyle(Palette.textSecondary)
                 .textSelection(.enabled)
                 // No `maxWidth: .infinity`. `CappedWidth` measures the text at the cap and then

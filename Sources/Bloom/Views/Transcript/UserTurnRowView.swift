@@ -185,7 +185,9 @@ struct UserTurnRowView: View {
                         // White, the same ink a selected row uses on the same fill. Measured 5.2
                         // to 1 on Spatie Blue, which passes AA for body text in both appearances.
                         color: .alternateSelectedControlTextColor,
-                        lineSpacing: TranscriptLayout.proseLeading,
+                        lineSpacing: TranscriptLayout.proseLeading(
+                            Typo.body, scale: fontScale, face: chatFont
+                        ),
                         chipGround: .userBubble
                     ),
                     linkColor: NSColor(Palette.linkInverted),

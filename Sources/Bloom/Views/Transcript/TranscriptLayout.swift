@@ -75,18 +75,11 @@ enum TranscriptLayout {
     /// The horizontal inset a `Chip` keeps, so a chip drawn by hand is the same shape as one that
     /// is not, which matters in the footer where the two sit next to each other.
     static let chipInset = Metrics.chipInsetH
-    /// Extra leading for the two places that render real prose rather than one line.
-    static let proseLeading: CGFloat = 3
-    /// Extra leading for a block of code that wraps, which is the permission panel's command.
-    ///
-    /// A point more than prose gets, and decided on its own rather than borrowed from it. A
-    /// wrapped shell command is the hardest thing in the window to read: it has no sentence shape
-    /// to fall back on, the eye has to find the start of the next line by position alone, and set
-    /// solid at eleven points a continuation line sat as close to its own predecessor as two
-    /// separate commands would. Four points on a thirteen point line box is a line height of about
-    /// 1.3, which is the ratio code is set at in every editor and is a rung of the spacing scale
-    /// rather than a number invented here.
-    static let codeLeading: CGFloat = Metrics.spacingSmall
+    // Leading is not here, and it is the one thing in this file that is not. A line of prose and a
+    // line of a wrapped command are each a ratio of the size the conversation is set at rather
+    // than a constant, so both have to ask a font how tall its line box is before they can answer:
+    // see `TranscriptProseLeading` beside this file, and `TextLeading` in the core for the ratios.
+
     /// How wide a paragraph is allowed to get.
     ///
     /// Nothing else in the window is read a line at a time, so nothing else needs a measure. With

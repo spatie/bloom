@@ -245,7 +245,14 @@ private struct MarkdownBlockView: View {
                     font: rung.resolvedNSFont(scale: fontScale, face: chatFont),
                     code: rung.monospacedCompanionNSFont(scale: fontScale, face: chatFont),
                     color: NSColor(color),
-                    lineSpacing: TranscriptLayout.proseLeading
+                    // The block's leading, not this rung's. A paragraph is led once, by the
+                    // caller's `.proseLeading()`, and the `Text` branch below inherits that
+                    // number through the environment; asking for a heading's own here would set
+                    // a heading with a link in it differently from the heading beside it and
+                    // change what the row measures at.
+                    lineSpacing: TranscriptLayout.proseLeading(
+                        Typo.body, scale: fontScale, face: chatFont
+                    )
                 ),
                 linkColor: Palette.linkNSColor,
                 selectionColor: .selectedTextBackgroundColor,

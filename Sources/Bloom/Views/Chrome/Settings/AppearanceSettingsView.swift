@@ -151,7 +151,11 @@ private struct ChatTextPreview: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.spacing) {
+            // Led the way the transcript leads it. Without this the preview answered the "what
+            // does this setting do" question in the size and the face but not in the line height,
+            // which is the third thing the setting moves and the one the owner asked for.
             MarkdownView(Self.sample)
+                .proseLeading()
 
             HStack(spacing: Metrics.spacing) {
                 Chip(text: "Sources/BloomCore/Store.swift", systemImage: "doc", monospaced: true)

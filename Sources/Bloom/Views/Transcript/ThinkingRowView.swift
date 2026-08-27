@@ -24,7 +24,7 @@ struct ThinkingRowView: View {
                 Text(text)
                     .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
-                    .lineSpacing(TranscriptLayout.proseLeading)
+                    .proseLeading(Typo.label)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, TranscriptLayout.detailIndent)

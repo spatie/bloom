@@ -46,6 +46,19 @@ struct PermissionAskRowView: View {
     @State private var reason = ""
     @FocusState private var isReasonFocused: Bool
 
+    /// What the conversation is set at, for the leading below and for nothing else. The face is
+    /// read with it because `TranscriptLayout.codeLeading` takes both, and it costs nothing here:
+    /// a monospaced rung resolves to the system mono whatever the prose face is.
+    @Environment(\.fontScale) private var fontScale
+    @Environment(\.chatFont) private var chatFont
+
+    /// The leading a wrapped command is set with, held at a ratio of its own line box rather than
+    /// at a fixed four points. See `TranscriptLayout.codeLeading` for why it moved and for why it
+    /// is still not the number prose gets.
+    private var codeLeading: CGFloat {
+        TranscriptLayout.codeLeading(Typo.codeSmall, scale: fontScale, face: chatFont)
+    }
+
     private var isOpen: Bool { decision == nil }
 
     /// Which allows this ask may honestly draw, widest first, and the sentence under them.
@@ -160,7 +173,7 @@ struct PermissionAskRowView: View {
                 Text(ask.subject)
                     .font(ask.subjectIsCode ? Typo.codeSmall : Typo.label)
                     .foregroundStyle(Palette.textPrimary)
-                    .lineSpacing(ask.subjectIsCode ? TranscriptLayout.codeLeading : 0)
+                    .lineSpacing(ask.subjectIsCode ? codeLeading : 0)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
