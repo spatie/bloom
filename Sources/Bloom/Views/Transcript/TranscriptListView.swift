@@ -234,6 +234,22 @@ struct TranscriptListView: View {
         /// somebody is being SHOWN. See `TranscriptPaneState.anchorDelta`.
         case rowOffset(Int, Double)
         case offset(Double)
+
+        /// The row this opening names, for the two cases that name one.
+        ///
+        /// **Asked in one place rather than pattern matched at the call site, because the call
+        /// site got it wrong the moment a second case named a row.** `revealedSeqs` matched
+        /// `.row` alone, so a returning reader, who has been restored through `.rowOffset` since
+        /// the anchor delta was added, could have the row they left at the top of the pane folded
+        /// away underneath them: `put(at:)` then finds no index for it and nothing moves at all.
+        /// A switch with no `default` means the next case that names a row cannot be added without
+        /// answering this.
+        var seq: Int? {
+            switch self {
+            case .row(let seq, _), .rowOffset(let seq, _): seq
+            case .liveEnd, .offset: nil
+            }
+        }
     }
 
     /// A user bubble takes this share of the pane, and never gets narrower than the floor, so a
@@ -309,7 +325,9 @@ struct TranscriptListView: View {
     /// returning reader left at the top of the pane, folded away, is not a row somewhere off
     /// screen: `put(at:)` finds no index, nothing moves, and the reader lands at the top of a
     /// conversation they were meant to be put back into. They are exactly the seqs
-    /// `mustReachIndex` widens the window for, said again as sequence numbers.
+    /// `mustReachIndex` widens the window for, said again as sequence numbers. Which openings
+    /// name a row is `Opening.seq`'s question, and it is asked there because asking it here was
+    /// how the returning reader's case went missing.
     ///
     /// **Read from `opening` rather than from the two things that answered it, because both are
     /// gone moments later.** `takeTranscriptTarget` consumes the search result and `markAllRead`
@@ -322,7 +340,7 @@ struct TranscriptListView: View {
     /// the run whose context they are most likely to want.
     private var revealedSeqs: Set<Int> {
         var out = expanded
-        if case .row(let seq, _)? = opening { out.insert(seq) }
+        if let seq = opening?.seq { out.insert(seq) }
         if let target = app.pendingTranscriptTarget,
            target.workspaceID == transcript.workspace?.id {
             out.insert(target.seq)
