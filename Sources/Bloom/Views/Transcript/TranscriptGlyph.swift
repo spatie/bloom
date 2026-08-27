@@ -24,16 +24,20 @@ struct TranscriptGlyph: View {
     var body: some View {
         Group {
             if let foldCount {
-                Text(foldCount, format: .number)
-                    .font(Typo.micro)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(Color.white)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .offset(y: 0.5)
-                    .frame(width: 20, height: 20)
-                    .background(Palette.textTertiary, in: Circle())
+                ZStack {
+                    Circle()
+                        .fill(Palette.textTertiary)
+
+                    Text(foldCount, format: .number)
+                        .font(Typo.micro)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.white)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .padding(2)
+                }
+                .frame(width: 20, height: 20)
             } else {
                 Image(systemName: symbol)
                     .font(Typo.label)

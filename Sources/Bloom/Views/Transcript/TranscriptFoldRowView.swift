@@ -3,9 +3,9 @@ import SwiftUI
 
 /// The one line that stands for a turn's working.
 ///
-/// Collapsed, the count replaces the newest row's glyph and the rest of that row stays intact.
-/// This keeps the current action visible while making the whole block one compact control.
-/// Expanded, the ordinary disclosure label returns so there is an unambiguous way to close it.
+/// The disclosure and count keep the same geometry in both states. Collapsed, the rest of the
+/// newest row stays intact. Expanded, a quiet noun replaces it while the disclosed rows provide
+/// the detail. Only the caret and the content after the badge change when the row is toggled.
 struct TranscriptFoldRowView: View {
     var hiddenCount: Int
     var showsMore: Bool
@@ -29,19 +29,24 @@ struct TranscriptFoldRowView: View {
                             .accessibilityHidden(true)
                     }
                 } else {
-                    HStack(spacing: TranscriptLayout.glyphGap) {
+                    HStack(spacing: Metrics.spacingSmall) {
                         TranscriptDisclosure(isExpanded: isExpanded, isVisible: true)
-                            .frame(width: TranscriptLayout.glyphWidth)
+                            .frame(width: TranscriptLayout.disclosureWidth)
 
-                        Text(TranscriptFold.label(hiding: hiddenCount, showsMore: showsMore))
-                            .font(Typo.label)
-                            .foregroundStyle(Palette.textTertiary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
+                        HStack(spacing: TranscriptLayout.glyphGap) {
+                            TranscriptGlyph(symbol: "circle")
+                                .environment(\.transcriptFoldCount, hiddenCount)
 
-                        Spacer(minLength: 0)
+                            Text(showsMore ? "earlier steps" : "steps")
+                                .font(Typo.label)
+                                .foregroundStyle(Palette.textTertiary)
+                                .lineLimit(1)
+
+                            Spacer(minLength: 0)
+                        }
+                        .transcriptRowFrame()
+
                     }
-                    .transcriptRowFrame()
                 }
             }
         }
