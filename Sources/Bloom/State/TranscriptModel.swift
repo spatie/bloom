@@ -1177,7 +1177,15 @@ final class TranscriptModel {
     }
 
     /// Text and thinking that has arrived and is not on screen yet. See `scheduleStreamFlush`.
-    private var buffer = (text: "", thinking: "")
+    ///
+    /// **`@ObservationIgnored`, and it is the difference between a redraw costing one pass over
+    /// the transcript and a token costing one.** This is staging. It is written on every delta,
+    /// which is tens to hundreds of times a second, and nothing outside `flushStream` has any
+    /// business reading it. Observed, it was an edge that anything reading `isStreaming` took, and
+    /// `TranscriptListView` was one of those: on the owner's 2,981 row session every single token
+    /// walked the whole list's dependencies to find that nothing it draws had moved, and then the
+    /// same again fifty milliseconds later when the flush it was staging for actually happened.
+    @ObservationIgnored private var buffer = (text: "", thinking: "")
     private var streamFlush: Task<Void, Never>?
 
     /// How often the live tail is allowed to redraw while an answer arrives.
@@ -1230,9 +1238,20 @@ final class TranscriptModel {
         streamingToolName = nil
     }
 
+    /// Whether an answer is arriving, as far as anything that draws is concerned.
+    ///
+    /// **Deliberately blind to `buffer`.** The staging is `@ObservationIgnored`, so a term reading
+    /// it would be a term nothing is told about, and this would go stale rather than late. Over
+    /// the flushed properties alone it moves at `streamFlushInterval` instead of per token, which
+    /// is the whole of what a reader of this wants: twenty answers a second about something that
+    /// is only redrawn twenty times a second.
+    ///
+    /// Nothing appears late because of it. The live tail is drawn on `isRunning || isStreaming`,
+    /// and `isRunning` is written synchronously by `deliver` before the send is even awaited, so
+    /// the tail is on screen from the frame the turn begins whatever this says. See
+    /// `StreamingTailView`.
     var isStreaming: Bool {
         !streamingText.isEmpty || !streamingThinking.isEmpty || streamingToolName != nil
-            || !buffer.text.isEmpty || !buffer.thinking.isEmpty
     }
 
     private func notifyFinished(result: AgentResult) async {

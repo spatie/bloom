@@ -265,10 +265,10 @@ struct TranscriptListView: View {
     /// an empty state on its way in, and not while setup is showing, which has something worth
     /// reading at the top of the pane.
     ///
-    /// `isStreaming` is last, and the position is the point rather than a tidying: it reads the
-    /// per-token buffers that `StreamingTailView` exists to keep out of this body, and `&&`
-    /// short-circuits, so a term only reached when a session is loaded, idle, without a setup row
-    /// and with nothing at all in it is a term never reached while an answer is streaming.
+    /// `isStreaming` is last, and the position is the point rather than a tidying: it moves on
+    /// every flush of a running turn, which is the one thing this body must not be woken by, and
+    /// `&&` short-circuits, so a term only reached when a session is loaded, idle, without a setup
+    /// row and with nothing at all in it is a term never reached while an answer is streaming.
     private var showsPlaceholder: Bool {
         transcript.isLoaded
             && !transcript.isRunning
@@ -598,11 +598,17 @@ struct TranscriptListView: View {
             // without any of this being told, which is what `isStreaming` below is for.
             follower.nudge()
         }
-        // The things that decide whether the follower may move anything, said out loud rather than
-        // read from a body: it writes no state and reads none, so nothing else would tell it.
-        .onChange(of: transcript.isStreaming, initial: true) { _, streaming in
-            follower.isStreaming = streaming
+        // Whether an answer is arriving, which is the one input the follower needs that moves
+        // while a turn runs. In a child rather than in an `onChange` here: the value expression of
+        // an `onChange` is evaluated inside the body it is written on, so this one made the list's
+        // whole `entries` pass a cost of the stream. See `TranscriptStreamingSignal`.
+        .background {
+            TranscriptStreamingSignal(transcript: transcript) { follower.isStreaming = $0 }
         }
+        // The rest of what decides whether the follower may move anything, said out loud rather
+        // than read from a body: it writes no state and reads none, so nothing else would tell it.
+        // Both of these move when a person changes something about the window, which is not a
+        // thing that happens while an answer arrives.
         .onChange(of: activeState, initial: true) { _, state in
             follower.isFrontmost = state != .inactive
         }
