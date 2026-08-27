@@ -38,11 +38,20 @@ extension TranscriptLayout {
     static func proseLeading(
         _ rung: ScaledFont, scale: CGFloat, face: ChatFont, lineHeight: ChatLineHeight
     ) -> CGFloat {
+        proseLeading(rung, scale: scale, face: face, ratio: lineHeight.ratio)
+    }
+
+    /// The same calculation for a surface whose rhythm is derived from, but not identical to,
+    /// the selected prose step.
+    @MainActor
+    static func proseLeading(
+        _ rung: ScaledFont, scale: CGFloat, face: ChatFont, ratio: Double
+    ) -> CGFloat {
         let font = rung.resolvedNSFont(scale: scale, face: face)
         return CGFloat(TextLeading.overPointSize(
             lineHeight: Double(lineBox(of: font)),
             pointSize: Double(font.pointSize),
-            ratio: lineHeight.ratio
+            ratio: ratio
         ))
     }
 

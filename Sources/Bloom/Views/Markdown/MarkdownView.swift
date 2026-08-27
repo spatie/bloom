@@ -142,6 +142,7 @@ extension View {
 extension EnvironmentValues {
     @Entry var markdownIsStreaming: Bool = false
     @Entry var markdownLinkActions = TranscriptLinkActions()
+    @Entry var markdownLineSpacingOverride: CGFloat?
 }
 
 private struct MarkdownBlocksView: View {
@@ -177,8 +178,17 @@ private struct MarkdownBlockView: View {
     @Environment(\.chatLineHeight) private var chatLineHeight
     @Environment(\.markdownIsStreaming) private var isStreaming
     @Environment(\.markdownLinkActions) private var linkActions
+    @Environment(\.markdownLineSpacingOverride) private var lineSpacingOverride
 
     private var markerWidth: CGFloat { MarkdownMetrics.markerWidth * fontScale }
+    private var listLineSpacing: CGFloat {
+        TranscriptLayout.proseLeading(
+            Typo.body,
+            scale: fontScale,
+            face: chatFont,
+            ratio: chatLineHeight.listRatio
+        )
+    }
 
     @ViewBuilder
     var body: some View {
@@ -253,7 +263,7 @@ private struct MarkdownBlockView: View {
                     // number through the environment; asking for a heading's own here would set
                     // a heading with a link in it differently from the heading beside it and
                     // change what the row measures at.
-                    lineSpacing: TranscriptLayout.proseLeading(
+                    lineSpacing: lineSpacingOverride ?? TranscriptLayout.proseLeading(
                         Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight
                     )
                 ),
@@ -295,6 +305,8 @@ private struct MarkdownBlockView: View {
                 HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
                     marker(start.map { "\($0 + offset)." } ?? "\u{2022}")
                     MarkdownBlocksView(blocks: items[offset], foreground: foreground)
+                        .lineSpacing(listLineSpacing)
+                        .environment(\.markdownLineSpacingOverride, listLineSpacing)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
@@ -312,6 +324,8 @@ private struct MarkdownBlockView: View {
                         .frame(width: markerWidth, alignment: .trailing)
                         .accessibilityLabel(item.checked ? "Done" : "Not done")
                     inlineText(item.inline, rung: Typo.body, color: foreground)
+                        .lineSpacing(listLineSpacing)
+                        .environment(\.markdownLineSpacingOverride, listLineSpacing)
                 }
             }
         }

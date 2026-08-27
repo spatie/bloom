@@ -92,4 +92,17 @@ struct ChatLineHeightTests {
         #expect(!ChatLineHeight.allCases.map(\.ratio).contains(TextLeading.codeRatio))
         #expect(TextLeading.overLineBox(lineHeight: 13) == 4)
     }
+
+    @Test("wrapped list lines stay compact while following the setting")
+    func listsUseATighterLadder() {
+        let ratios = ChatLineHeight.allCases.map(\.listRatio)
+
+        for (actual, expected) in zip(ratios, [1.3, 1.375, 1.45, 1.525, 1.6]) {
+            #expect(abs(actual - expected) < 0.0001)
+        }
+        #expect(ChatLineHeight.standard.listRatio < ChatLineHeight.standard.ratio)
+        for (tighter, looser) in zip(ratios, ratios.dropFirst()) {
+            #expect(looser > tighter)
+        }
+    }
 }

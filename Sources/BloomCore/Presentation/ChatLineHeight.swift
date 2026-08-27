@@ -70,6 +70,12 @@ public enum ChatLineHeight: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Lists are scanned item by item, so their wrapped lines use a tighter version of the
+    /// selected prose rhythm. The setting still moves them, but at half the distance.
+    public var listRatio: Double {
+        1.3 + (ratio - 1.4) / 2
+    }
+
     /// Comparatives rather than adjectives, so the control says which way each segment moves and
     /// where the range stops. "Tight" and "Relaxed" next to each other read as two named densities
     /// with no order between them; these cannot.
