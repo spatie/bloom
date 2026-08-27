@@ -123,6 +123,9 @@ struct HomeListRow: View {
         // it only the text is, and a list where half of each row ignores the pointer feels broken
         // long before anyone works out why.
         .contentShape(Rectangle())
+        // Command-Backspace is delete-to-start-of-line in a text box, and the menu bar had it
+        // for Archive Workspace. See `FocusedValues.isTypingProse`.
+        .focusedValue(\.isTypingProse, fieldFocused)
         // Merged into one sentence. Left as separate elements, VoiceOver reads a name, a repeated
         // project name, two bare numbers and "1d", in that order, which says nothing. Not while
         // renaming, though: the merge swallowed the rename field, so Rename from this row's own

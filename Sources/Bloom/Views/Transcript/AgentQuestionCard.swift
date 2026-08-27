@@ -248,6 +248,9 @@ struct AgentQuestionCard: View {
             }
             .padding(.vertical, Metrics.spacing)
             .padding(.horizontal, Metrics.spacingWide)
+            // Command-Backspace is delete-to-start-of-line in a text box, and the menu bar had it
+            // for Archive Workspace. See `FocusedValues.isTypingProse`.
+            .focusedValue(\.isTypingProse, otherFocus != nil)
         } else if isOpen {
             Button {
                 isWritingOther.insert(question.id)
