@@ -756,10 +756,17 @@ struct TranscriptTable: NSViewRepresentable {
         /// takes the queue out of flight, and if the hold turns out not to have changed the width
         /// then everything in it is still true and has to be said. See `holdEnded`.
         private func drainOwedHeights() {
-            guard owedWork == nil, !owedHeights.isEmpty else { return }
+            // A height correction moves the table's document and restoring the visible anchor
+            // moves the clip view. Both are correct while the view is still, but either one fights
+            // AppKit's own offset while a trackpad gesture or its momentum is in flight. Keep
+            // taking the measurements into the cache, then tell the table once the reader lets go.
+            guard owedWork == nil, !owedHeights.isEmpty, !isLiveScrolling else { return }
             owedWork = Task { @MainActor [weak self] in
                 guard let self else { return }
                 owedWork = nil
+                // The task begins on a later main-actor turn. A gesture can start between being
+                // scheduled and arriving here, so check again before taking the queue out.
+                guard !isLiveScrolling else { return }
                 let owed = owedHeights
                 owedHeights = []
                 // **Where each of them is NOW.** An id that has left the list is dropped, which is
@@ -1407,6 +1414,10 @@ struct TranscriptTable: NSViewRepresentable {
             guard isLiveScrolling else { return }
             isLiveScrolling = false
             onLiveScrollChange?(false)
+            // Rows first seen during the gesture have reported their exact heights, but applying
+            // those reports was held so the content could not be pushed against the reader's
+            // movement. Apply them now as one anchored correction.
+            drainOwedHeights()
             // Not the settle itself. Where the reader ends up is written down when the view has
             // stopped moving, and a flick that ends with momentum still running has not.
             scheduleSettle()
@@ -1503,7 +1514,18 @@ struct TranscriptTable: NSViewRepresentable {
                 // one row rather than sixty.
                 await Task.yield()
             }
-            guard !moved.isEmpty, !Task.isCancelled, !isHeld else { return }
+            guard !moved.isEmpty, !isHeld else { return }
+            // `willStartLiveScroll` can arrive after the final yielded measurement and before this
+            // point, while `clipMoved` has not yet had a chance to cancel the warming task. Keep
+            // every height already learned, but hand its table correction to the same queue drawn
+            // rows use so background preparation never moves the document under a hand.
+            if Task.isCancelled || isLiveScrolling {
+                for row in moved where entries.indices.contains(row) {
+                    owedHeights.insert(entries[row].id)
+                }
+                drainOwedHeights()
+                return
+            }
             // The heights of rows ABOVE the reader, so telling the table moves everything below
             // them, which is the whole document under the screen. Anchored, exactly as a
             // correction landing during a scroll is, and cheaper here because nothing is moving.
