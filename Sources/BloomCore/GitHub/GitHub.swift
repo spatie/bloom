@@ -297,10 +297,9 @@ public enum GitHub {
     // `gh pr merge` used to run from this file, followed by an explicit
     // `git push --delete -- origin refs/heads/<branch>`, because `--delete-branch` makes gh check
     // out the base branch and a worktree cannot check out the branch the main copy is standing on.
-    // Both commands now live in `MergeInstructions`, a file in the repository that the workspace's
-    // agent is asked to follow, and everything that was known about them here is written down
-    // there in the words the agent reads. There is one way to merge a pull request in this app and
-    // it goes through the transcript.
+    // Both commands now live in `MergeInstructions`, in the words the turn hands the workspace's
+    // agent, and everything that was known about them here is written down there. There is one
+    // way to merge a pull request in this app and it goes through the transcript.
 
     /// Pushes the current HEAD to `branch` on origin.
     ///

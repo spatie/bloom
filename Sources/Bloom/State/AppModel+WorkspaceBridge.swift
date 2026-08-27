@@ -129,9 +129,9 @@ extension AppModel {
     ///
     /// The whole of the app side, and it deliberately does nothing of its own. `requestMerge` is
     /// what the strip's Merge button calls, so the template the owner may have edited in Settings,
-    /// the project's `.bloom/merge-instructions.md` and the guard that refuses mid turn are all
-    /// reached through one path rather than two. Anything this function added would be a second
-    /// way to move the same state.
+    /// Bloom's own merge rules, whatever the project adds to them and the guard that refuses mid
+    /// turn are all reached through one path rather than two. Anything this function added would
+    /// be a second way to move the same state.
     ///
     /// The chat's title comes back because the tool's answer has to name where to watch the turn,
     /// and `requestMerge` has just made that chat the active one.

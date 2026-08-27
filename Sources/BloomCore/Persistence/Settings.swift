@@ -27,6 +27,8 @@ public enum SettingsKey: String, Sendable, Hashable, CaseIterable {
     case filesToCopy = "file_include_globs"
     case branchPrefix = "git.branch_prefix"
     case deleteBranchOnArchive = "git.delete_branch_on_archive"
+    case mergeInstructions = "instructions.merge"
+    case conflictInstructions = "instructions.fix_conflicts"
 
     /// The key path as components, for the document editor.
     public var path: [String] { rawValue.components(separatedBy: ".") }
@@ -70,6 +72,13 @@ public struct RepoSettings: Sendable, Hashable {
     public var filesToCopy: [String] = [".env*"]
     public var branchPrefix: String?
     public var deleteBranchOnArchive: Bool = false
+    /// What this project adds to the turn Bloom sends when someone presses Merge, and the one it
+    /// sends for Fix merge conflicts. Bloom's own words are not here and never were: they are in
+    /// the message it composes. These are the project's, and they are attached to the turn only
+    /// when there are any. See `ProjectInstructions`, which also says why the same words written
+    /// into `.bloom/merge-instructions.md` beat these.
+    public var mergeInstructions: String?
+    public var conflictInstructions: String?
     /// Set by a file inside the repository. Ranks ABOVE the app-level defaults, because pinning
     /// a model in a project's own settings is a deliberate statement about that project.
     public var defaultModel: String?
@@ -283,6 +292,17 @@ public enum SettingsLoader {
         if let delete = toml["git.delete_branch_on_archive"]?.boolValue {
             settings.deleteBranchOnArchive = delete
             note(.deleteBranchOnArchive)
+        }
+        // An empty string is a statement here for the same reason it is one for a script: it is
+        // the only way a file can say "this project has nothing extra to say about merging"
+        // loudly enough to beat a file below it that does.
+        if let text = toml["instructions.merge"]?.stringValue {
+            settings.mergeInstructions = text.isEmpty ? nil : text
+            note(.mergeInstructions)
+        }
+        if let text = toml["instructions.fix_conflicts"]?.stringValue {
+            settings.conflictInstructions = text.isEmpty ? nil : text
+            note(.conflictInstructions)
         }
         if let model = toml["models.default"]?.stringValue {
             settings.defaultModel = model

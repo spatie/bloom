@@ -70,65 +70,20 @@ struct MergePromptTests {
 
 /// The instructions the agent actually follows. Every assertion here is a thing that, if it were
 /// missing, would let an agent do something to somebody's repository that nobody asked for.
-@Suite("Merge instructions", .tags(.git), .scratchDirectory)
+///
+/// They were a file until they were not: written into `.bloom/scratch/merge-instructions.md` on
+/// every press and attached straight back, so what an agent had been told about a command that
+/// changes a server lived in a file git will not report. They are in the message now, and the
+/// tests that used to be about writing that file are gone with it. What a project adds on top is
+/// `ProjectInstructionsTests`.
+@Suite("Merge instructions")
 struct MergeInstructionsTests {
-    @Test("Bloom's own copy is written into the shielded scratch folder, not next to the user's work")
-    func writesOnDemand() throws {
-        let worktree = TestScratch.unique("worktree")
-        try FileManager.default.createDirectory(atPath: worktree, withIntermediateDirectories: true)
-
-        let path = MergeInstructions.ensure(in: worktree)
-
-        #expect(path == MergeInstructions.scratchPath)
-        #expect(WorktreeScratch.isShielded(path ?? ""))
-        let full = (worktree as NSString).appendingPathComponent(MergeInstructions.scratchPath)
-        #expect(try String(contentsOfFile: full, encoding: .utf8)
-            == MergeInstructions.defaultMarkdown)
-        #expect(FileManager.default.fileExists(
-            atPath: (worktree as NSString).appendingPathComponent(MergeInstructions.projectPath)
-        ) == false)
-    }
-
-    /// The same bug `PullRequestInstructionsTests.surviveAddEverything` exists for, asserted
-    /// against the real git binary. Bloom's own file went out in a user's pull request once.
-    @Test("an agent told to commit everything cannot commit Bloom's copy")
-    func surviveAddEverything() async throws {
-        let repo = try await TempRepo()
-        defer { repo.cleanUp() }
-
-        #expect(MergeInstructions.ensure(in: repo.path) != nil)
-
-        try await Shell.check("git", ["add", "-A"], cwd: repo.path)
-        let staged = try await Shell.check(
-            "git", ["diff", "--cached", "--name-only"], cwd: repo.path
-        )
-        #expect(staged.trimmed.isEmpty, "git staged \(staged.trimmed)")
-    }
-
-    @Test("the project's own file wins and is never rewritten")
-    func projectsFileWins() async throws {
-        let repo = try await TempRepo()
-        defer { repo.cleanUp() }
-
-        try repo.write(MergeInstructions.projectPath, "We merge on Fridays only.")
-
-        let path = MergeInstructions.ensure(in: repo.path)
-
-        #expect(path == MergeInstructions.projectPath)
-        #expect(repo.read(MergeInstructions.projectPath) == "We merge on Fridays only.")
-        #expect(repo.exists(MergeInstructions.scratchPath) == false)
-    }
-
-    @Test("a worktree that cannot be written to answers nil rather than throwing")
-    func failsSoftly() {
-        #expect(MergeInstructions.ensure(in: "/dev/null/nowhere") == nil)
-    }
-
-    /// The instructions are shared by every workspace in the repository, so the pull request, the
-    /// branch and the method cannot be in them. They arrive in the message.
-    @Test("the default instructions name no pull request, branch or method")
+    /// The rules are shared by every workspace in the repository, so the pull request, the branch
+    /// and the method cannot be in them. They arrive in the sentence above them, which the merge
+    /// prompt renders and this deliberately does not.
+    @Test("the instructions name no pull request, branch or method")
     func namesNothingWorkspaceSpecific() {
-        let text = MergeInstructions.defaultMarkdown
+        let text = MergeInstructions.canonical
 
         #expect(!text.contains("gh pr merge 42"))
         #expect(text.contains("<number>"))
@@ -141,7 +96,7 @@ struct MergeInstructionsTests {
     /// ever wrote the delete out by hand.
     @Test("the merge and the branch deletion are separate steps, in that order")
     func twoStepsNotOne() {
-        let text = MergeInstructions.defaultMarkdown
+        let text = MergeInstructions.canonical
 
         #expect(text.contains("gh pr merge <number> <method flag>"))
         #expect(text.contains("git push --delete -- origin refs/heads/<branch>"))
@@ -163,7 +118,7 @@ struct MergeInstructionsTests {
     /// produced it.
     @Test("a refusal is an answer, and nothing may be forced to get round it")
     func refusalIsAnAnswer() {
-        let text = MergeInstructions.defaultMarkdown
+        let text = MergeInstructions.canonical
 
         #expect(text.contains("If GitHub refuses the merge, stop."))
         #expect(text.contains("do not force it"))
@@ -176,17 +131,23 @@ struct MergeInstructionsTests {
     /// most afraid of losing.
     @Test("nothing on this machine is touched")
     func nothingLocalIsTouched() {
-        let text = MergeInstructions.defaultMarkdown
+        let text = MergeInstructions.canonical
 
         #expect(text.contains("Change nothing on this machine."))
         #expect(text.contains("Do not commit and do not push."))
     }
 
-    /// A file git will not report is a file nobody finds by accident, so it has to say where it is
-    /// and how to adopt it.
-    @Test("the default says how to make it the project's own")
-    func saysHowToAdoptIt() {
-        #expect(MergeInstructions.defaultMarkdown.contains(MergeInstructions.projectPath))
+    /// A constant rather than the prompt's `defaultTemplate`, so that somebody rewording the
+    /// sentence that names the pull request cannot delete the paragraph forbidding `--admin` by
+    /// accident. The template carries the facts and this carries the rules, and neither may drift
+    /// into being the other.
+    @Test("the editable template holds none of the rules")
+    func theTemplateHoldsNoRules() {
+        let template = PromptRegistry.definition(for: .mergePullRequest).defaultTemplate
+
+        #expect(!template.contains("--admin"))
+        #expect(!template.contains("git push --delete"))
+        #expect(!MergeInstructions.canonical.contains("{{"))
     }
 }
 

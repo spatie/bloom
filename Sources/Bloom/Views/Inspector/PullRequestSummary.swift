@@ -55,8 +55,8 @@ struct PullRequestSummary: View {
 
     /// The merge instructions ask for the branch to be deleted on GitHub, and for nothing on this
     /// machine to be touched. It is named in the confirmation rather than left as a surprise. See
-    /// `MergeInstructions.defaultMarkdown`, which is what the agent actually follows, and which is
-    /// where the reason gh's own `--delete-branch` is never used is written down.
+    /// `MergeInstructions.canonical`, which is what the agent actually follows, and which is where
+    /// the reason gh's own `--delete-branch` is never used is written down.
     private static let deletesBranch = true
 
     private var status: PullRequestStatus { pullRequest.status(local: localWork) }

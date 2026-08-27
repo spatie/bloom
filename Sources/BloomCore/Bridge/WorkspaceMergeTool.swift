@@ -41,8 +41,9 @@ public enum WorkspaceMergeHandoff: Sendable, Equatable {
 /// turn lives in the main-actor UI graph, and a bridge handler runs off it on a background task
 /// per connection. The far side of this closure is `WorkspaceModel.requestMerge`, unchanged and
 /// not copied, so the prompt an MCP caller triggers is the prompt the button composes, rendered
-/// against the template the owner may have edited in Settings, with the project's own
-/// `.bloom/merge-instructions.md` attached by the same code path. **One way to move a state.**
+/// against the template the owner may have edited in Settings, carrying Bloom's own merge rules,
+/// and attaching whatever the project adds to them by the same code path. **One way to move a
+/// state.**
 public typealias WorkspaceMergeRequesting =
     @Sendable (Workspace, PullRequest, GitHub.MergeMethod) async -> WorkspaceMergeHandoff
 

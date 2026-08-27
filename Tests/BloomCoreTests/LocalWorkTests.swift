@@ -256,7 +256,7 @@ struct LocalWorkTests {
         #expect(text.contains("3 files to commit"))
         #expect(text.contains("None of that is part of what is merged"))
         // And the agent is told the same thing, so the dialog is not promising something the
-        // instructions do not say. See `MergeInstructions.defaultMarkdown`.
+        // instructions do not say. See `MergeInstructions.canonical`.
         #expect(text.contains("leave it alone rather than commit it first"))
     }
 

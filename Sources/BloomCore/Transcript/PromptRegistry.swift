@@ -270,16 +270,23 @@ public enum PromptRegistry {
     /// command, goes through the permission mode the user already set, and can say in words that
     /// a required check is missing rather than throwing.
     ///
-    /// The steps are not here. They are in `.bloom/merge-instructions.md`, or in Bloom's own copy
-    /// of it, for the same reason the pull request steps are in a file: they belong to the project
-    /// and not to this app. This is only the sentence that carries it, and the three facts the
-    /// file cannot know, which are the pull request, the branch and the method.
+    /// The steps are not here, and this is the one prompt where that is a safety decision rather
+    /// than a tidying one. They are `MergeInstructions.canonical`, a constant the turn is built
+    /// from, because a template is editable in Settings and somebody rewording the sentence that
+    /// names the pull request must not be able to delete the paragraph forbidding `--admin` by
+    /// accident. What belongs here is the four facts the rules cannot know: the pull request, the
+    /// branch it is on, the branch it goes into, and the method.
+    ///
+    /// The steps used to be a file, written into the worktree on every press and attached back.
+    /// See `MergeInstructions` for why they are not one any more, and `ProjectInstructions` for
+    /// what still is.
     static let mergePullRequest = PromptDefinition(
         id: .mergePullRequest,
         title: "Merge a pull request",
         summary: """
-        Sent when you confirm Merge, with the project's `.bloom/merge-instructions.md` attached. \
-        The agent runs `gh pr merge` in front of you, not Bloom.
+        Sent when you confirm Merge, with Bloom's own merge steps under it and the project's own \
+        instructions attached when it has any. The agent runs `gh pr merge` in front of you, not \
+        Bloom.
         """,
         variables: [
             PromptVariable(name: MergePullRequest.workspace, summary: "The workspace's name."),
@@ -312,13 +319,16 @@ public enum PromptRegistry {
     /// to run `gh pr merge` on something GitHub had already refused to merge. The state has one
     /// remedy, a person resolving the conflict, and the button now offers that instead.
     ///
-    /// No instructions file, and that is the difference from the merge prompt rather than an
-    /// omission. `MergeInstructions` is a file because merging is policy about a server: which
-    /// flags are allowed, what to do when GitHub refuses, when the branch is deleted, and a
-    /// project that merges differently has to be able to say so once for everybody. Resolving a
-    /// conflict is ordinary work in this worktree, of the kind every other turn asks for, and the
-    /// conventions for it are already in front of the agent in the project's own instruction
-    /// files. A second file repeating them would be a second place to keep them right.
+    /// Every step is in this template, where the merge prompt keeps its own in a constant no
+    /// override can reach. That is the difference between the two rather than an omission.
+    /// Merging is policy about a server: which flags are allowed, what to do when GitHub refuses,
+    /// when the branch is deleted, and getting one of those wrong changes somebody else's
+    /// repository. Resolving a conflict is ordinary work in this worktree, of the kind every
+    /// other turn asks for, so somebody who wants it worded differently is welcome to reword it.
+    ///
+    /// A project that has more to say about conflicts than this says it once, for everybody, in
+    /// `.bloom/conflict-instructions.md` or in the project settings window, and Bloom attaches it.
+    /// See `ProjectInstructions`.
     ///
     /// **The template pushes the resolution, and it used to stop short of that.** The argument for
     /// stopping was that a resolved worktree is the state the strip's Commit and push button is

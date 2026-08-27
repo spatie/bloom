@@ -42,6 +42,35 @@ struct RepoSettingsDraftTests {
         #expect(edits == [.setupScript("bun install")])
     }
 
+    /// Both boxes in the Instructions pane, and the one that was not touched staying out of the
+    /// save. A project's settings file is shared, so opening the window and looking at it must not
+    /// add a key to it.
+    @Test("only the instructions box that changed is written")
+    func onlyTheEditedInstructionsAreWritten() {
+        var settings = RepoSettings()
+        settings.mergeInstructions = "Squash."
+        settings.conflictInstructions = "Regenerate the lock file."
+
+        var draft = RepoSettingsDraft(settings)
+        draft.mergeInstructions = "Squash unless the branch is a stack."
+
+        #expect(draft.edits(comparedTo: settings)
+            == [.mergeInstructions("Squash unless the branch is a stack.")])
+    }
+
+    /// Emptying the box is what a project says when it has nothing extra to add after all, and it
+    /// has to reach the file rather than being read as "nothing changed".
+    @Test("emptying the instructions box is a change")
+    func emptyingTheBoxIsAChange() {
+        var settings = RepoSettings()
+        settings.mergeInstructions = "Squash."
+
+        var draft = RepoSettingsDraft(settings)
+        draft.mergeInstructions = "  \n "
+
+        #expect(draft.edits(comparedTo: settings) == [.mergeInstructions("")])
+    }
+
     @Test("clearing the glob field asks for nothing to be copied")
     func clearingGlobsIsAnAnswer() {
         var settings = RepoSettings()

@@ -1494,25 +1494,33 @@ final class WorkspaceModel {
         )
         let render = context.render(template: overrides.template(for: .mergePullRequest))
 
+        let text = await turn(render.text, for: .merge)
         activeSessionID = session.id
-        await transcript(for: session).submit(mergeTurn(text: render.text))
+        await transcript(for: session).submit(text)
         return nil
     }
 
-    /// The merge turn, with the instructions named in it.
+    /// One of Bloom's own turns about landing a branch, with Bloom's rules under it and the
+    /// project's own instructions attached when it has any.
     ///
-    /// Synchronous where `pullRequestTurn` is not, because `MergeInstructions` has no reclaim step
-    /// to await. See the note on that type for why it does not have one.
+    /// Merge and Fix merge conflicts go through this same call, because the two differ only in
+    /// which subject they name. What each subject contributes is `ProjectInstructions`, in the
+    /// core, where what an agent is about to be told can be asserted without a worktree.
     ///
-    /// When the file cannot be written the instructions go into the message itself, which matters
-    /// more here than it does for creating a pull request: this is the turn whose instructions say
-    /// what not to do to somebody's repository, and a read-only checkout is not a reason to send
-    /// it without them.
-    private func mergeTurn(text: String) -> String {
-        if let path = MergeInstructions.ensure(in: workspace.path) {
-            return MergeInstructions.asking(text, toFollow: path)
-        }
-        return text + "\n\n" + MergeInstructions.defaultMarkdown
+    /// The settings are re-read rather than taken from the copy this model holds. That copy is
+    /// refreshed when the workspace is selected, and the sequence that has to work is typing an
+    /// instruction in the project settings window and pressing Merge in the window behind it
+    /// without touching the sidebar in between.
+    private func turn(_ text: String, for subject: ProjectInstructions.Subject) async -> String {
+        await reloadSettings()
+        let stated = ProjectInstructions.stated(subject, in: settings)
+        let path = workspace.path
+        // Off the main actor: it reads a file in the worktree and may write one, and this runs on
+        // a button press with a sheet dismissing over it.
+        let extra = await Task.detached(priority: .userInitiated) {
+            ProjectInstructions.resolve(subject, in: path, stated: stated)
+        }.value
+        return ProjectInstructions.turn(text, for: subject, adding: extra)
     }
 
     /// Asks the workspace's agent to bring the base branch in and resolve the conflicts.
@@ -1521,11 +1529,12 @@ final class WorkspaceModel {
     /// already said the branch does not apply to its base, so the only thing that press could
     /// produce was the agent running `gh pr merge` and reading the refusal back out.
     ///
-    /// The same route as the other three buttons in the strip, with two
-    /// differences that are both about what this turn does NOT do. There is no instructions file,
+    /// The same route as the other three buttons in the strip, with two differences that are both
+    /// about what this turn does NOT do. Bloom adds no rules of its own under the template,
     /// because nothing here acts on a server and the project's conventions for resolving a
     /// conflict are already in front of the agent; and there is no confirmation in front of it,
-    /// for the reason written out at `PullRequestSummary.fixConflictsButton`.
+    /// for the reason written out at `PullRequestSummary.fixConflictsButton`. A project that has
+    /// more to say still gets it attached, by the same call the merge turn goes through.
     ///
     /// Returns nil on success, or the sentence to put in front of the user.
     func requestFixConflicts(
@@ -1546,8 +1555,9 @@ final class WorkspaceModel {
         )
         let render = context.render(template: overrides.template(for: .fixConflicts))
 
+        let text = await turn(render.text, for: .fixConflicts)
         activeSessionID = session.id
-        await transcript(for: session).submit(render.text)
+        await transcript(for: session).submit(text)
         return nil
     }
 

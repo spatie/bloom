@@ -10,6 +10,8 @@ public enum SettingsEdit: Sendable, Hashable {
     case filesToCopy([String])
     case branchPrefix(String?)
     case deleteBranchOnArchive(Bool)
+    case mergeInstructions(String?)
+    case conflictInstructions(String?)
 
     public var key: SettingsKey {
         switch self {
@@ -20,6 +22,8 @@ public enum SettingsEdit: Sendable, Hashable {
         case .filesToCopy: .filesToCopy
         case .branchPrefix: .branchPrefix
         case .deleteBranchOnArchive: .deleteBranchOnArchive
+        case .mergeInstructions: .mergeInstructions
+        case .conflictInstructions: .conflictInstructions
         }
     }
 }
@@ -355,6 +359,17 @@ public enum SettingsWriter {
             document.set(.strings(globs), at: SettingsKey.filesToCopy.path)
         case .runScripts(let scripts):
             writeRunScripts(scripts, to: &document, files: runFiles)
+        // Prose rather than a program, so it stays in the settings file whatever its length. A
+        // script gets a file of its own because it wants a shebang, `shellcheck` and a terminal;
+        // none of that is true of a paragraph an agent reads, and a project that would rather
+        // keep it in a file of its own already has `.bloom/merge-instructions.md`, which wins.
+        case .mergeInstructions(let text):
+            set(text, at: SettingsKey.mergeInstructions.path, in: &document, overriding: overriding)
+        case .conflictInstructions(let text):
+            set(
+                text, at: SettingsKey.conflictInstructions.path, in: &document,
+                overriding: overriding
+            )
         }
     }
 
