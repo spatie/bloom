@@ -909,6 +909,16 @@ enum Snapshot {
             // photograph can settle. The moving rows come out as yellow placeholders here; they
             // are what `--snapshot-gallery --gallery activity-rule` is for.
             ("activity-rule-still", AnyView(ActivityRuleGallery()), Gallery.activityRule.size),
+            // The one column the source list is built on, with a rule drawn down it. This one
+            // belongs offscreen more than most: it is a page about where things sit rather than
+            // about how they move, nothing on it is layer backed, and it is the only picture of
+            // the sidebar's alignment an agent can take without a window in front of whoever is
+            // using this Mac. See `SidebarIndentGallery` for why nothing on it is running.
+            (
+                "sidebar-indent",
+                AnyView(SidebarIndentGallery(app: model)),
+                Gallery.sidebarIndent.size
+            ),
             // No review-comments and no inspector-tabs scene, deliberately, and for one reason:
             // `ImageRenderer` paints SwiftUI's yellow placeholder over an `NSViewRepresentable`,
             // and each of those two pages exists to show one. The review comment box is the

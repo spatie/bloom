@@ -80,6 +80,7 @@ extension Snapshot {
         .browserToolbar,
         .systemAccent,
         .activityRule,
+        .sidebarIndent,
     ]
 
     /// The page `--gallery` names, falling back to the first rather than failing: a capture run

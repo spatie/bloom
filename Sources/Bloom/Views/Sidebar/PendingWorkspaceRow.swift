@@ -11,10 +11,10 @@ import BloomCore
 /// # It is drawn as a workspace row, on purpose
 ///
 /// The same `Label`, the same `SidebarRowLabelStyle`, the same `rowIndent`, and the mark in the
-/// same `Metrics.glyph` box every other mark in the column is centred in. That is what makes the
-/// swap invisible: when the stored row arrives it takes this row's id and this row's place, at the
-/// same height with its name starting on the same pixel, and the only thing that changes is that
-/// it becomes something you can click.
+/// same `SidebarMetrics.markColumn` box every other mark in the column is centred in. That is what
+/// makes the swap invisible: when the stored row arrives it takes this row's id and this row's
+/// place, at the same height with its name starting on the same pixel, and the only thing that
+/// changes is that it becomes something you can click.
 ///
 /// The mark is `.settingUp`, which is not a stand-in for a mark of its own. A worktree being cut
 /// and a setup script installing dependencies are one thing to somebody watching the sidebar,

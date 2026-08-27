@@ -39,45 +39,59 @@ enum SidebarMetrics {
     /// The gutter the project's disclosure chevron sits in, at the leading edge of a header.
     ///
     /// Wide enough for the chevron and nothing else. It is what pushes the project's tile clear of
-    /// the pane's own edge, and it is the step the rows underneath are indented by, so the two
+    /// the pane's own edge, and the rows underneath start on the far side of it, so the two
     /// numbers are one number.
     static let caretGutter: CGFloat = 11
 
-    /// How far a workspace row, and the notice that stands in for one, are pushed right of the
-    /// leading edge the list hands them.
+    /// How far a workspace row, and everything else that hangs under a project, is pushed right of
+    /// the leading edge the list hands it.
     ///
-    /// The chevron gutter, so a row starts where the project's own tile starts rather than left of
-    /// it. Measured on the drawn marks: the tile spans 31 to 47 points from the pane's edge, and
-    /// with this indent a row's status mark is drawn from 33.5 to 46.5, sitting inside the tile's
-    /// column instead of in a column of its own two points to the left of it. The workspace names
-    /// then start five points right of the project's name.
+    /// Where the project's own tile starts: past the chevron's gutter and the gap after it, which
+    /// are the first two terms of `RepoHeaderRow`'s own `HStack`. Written as those terms rather
+    /// than as the seventeen points they come to, because the header's layout is what this has to
+    /// agree with and a literal here would agree with it only until the tile changed size.
     ///
-    /// This reverses an earlier arrangement, where the mark deliberately fell BETWEEN the chevron
-    /// and the tile. That reads as a third column rather than as nesting: the rows began left of
-    /// the thing they belong to. The owner compared the two against Conductor, where the rows are
-    /// indented past the project's icon, and asked for this one.
-    static let rowIndent: CGFloat = caretGutter
+    /// Two arrangements came before it and both are worth knowing about. The mark first fell
+    /// BETWEEN the chevron and the tile, which reads as a third column rather than as nesting:
+    /// the rows began left of the thing they belong to. It then moved to the chevron's gutter, so
+    /// the mark sat inside the tile's column and every name under a project sat five points right
+    /// of the project's own. That is the one this replaces, and what was wrong with it is the five
+    /// points: two text columns, one of them a rank of names and the other a single heading, close
+    /// enough to look like a mistake and far enough not to line up. See `nameColumn`.
+    static let rowIndent: CGFloat = caretGutter + Metrics.spacing
+
+    /// The box a row's status mark is centred in, which is the project's tile exactly.
+    ///
+    /// The tile's own width, so the marks run down the middle of the column the project's mark is
+    /// drawn in. That column is what the icon vacated when the names moved right, and putting the
+    /// marks in it is what keeps them scannable: a reader looking for the one workspace that is
+    /// running reads one narrow strip, and the names beside them are a second strip that starts
+    /// under the project's name.
+    static let markColumn: CGFloat = Metrics.repoIcon
+
+    /// Where a project's name begins, and with it every name drawn under that project.
+    ///
+    /// The owner asked for this: the rows used to start under the project's ICON, which put a
+    /// workspace's name a tile and a gap right of the project's and left the pane with two text
+    /// columns. One column reads as the project naming the things under it. So a row spends the
+    /// tile's width on its status mark instead and its name lands here, on the project's own.
+    ///
+    /// Derived rather than measured, and that is the point. It is the header's `HStack` written
+    /// out: the chevron's gutter, the gap, the tile, the gap. Resize the tile and the project's
+    /// name and every name beneath it move together, which a number chosen off a capture would
+    /// not do.
+    static let nameColumn: CGFloat = rowIndent + markColumn + Metrics.spacing
 
     /// How far a subagent's row is pushed right of the workspace row it belongs to.
     ///
-    /// The same step again, so the pane's three levels are evenly spaced and a subagent's mark
-    /// falls where a workspace's name begins. It is the last step this pane gets: a fourth would
-    /// leave a name six characters wide at the 260 point default, which is why `SubagentRow.rows`
-    /// draws a subagent's own children at this indent rather than one further in.
+    /// The chevron's gutter, so a subagent's mark and its name each sit one step right of the
+    /// workspace's. It is a real step because it has to be: a workspace row shares the project's
+    /// name column rather than stepping in from it, so the only thing left saying a subagent is
+    /// inside its workspace is this indent. It is also the last step this pane gets, because a
+    /// fourth would leave a name six characters wide at the 260 point default, which is why
+    /// `SubagentRow.rows` draws a subagent's own children at this indent rather than one further
+    /// in.
     static let subagentIndent: CGFloat = caretGutter
-
-    /// The gap between a workspace row's status mark and the name beside it.
-    ///
-    /// Measured off the rows as the system's own `Label` drew them, so that `SidebarRowLabelStyle`
-    /// could take the layout over without moving anything: the mark's ink ran from 33 to 46.5
-    /// points off the pane's edge and the name's ink began at 57.5.
-    static let markToText: CGFloat = 10.5
-
-    /// What the system's `Label` was insetting a sidebar row's icon column by, on top of the row
-    /// indent, and which `SidebarRowLabelStyle` has to put back by hand now that it does the
-    /// layout itself. Measured: without it every mark and name sat 6.5 points left of where they
-    /// had been, which would have unpicked the alignment `rowIndent` was chosen for.
-    static let markInset: CGFloat = 6.5
 
     /// The click target of a control that lives on a workspace row, such as the archive button
     /// that is revealed under the pointer.

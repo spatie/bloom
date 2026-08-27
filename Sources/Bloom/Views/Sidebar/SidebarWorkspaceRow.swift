@@ -139,7 +139,8 @@ struct SidebarWorkspaceRow: View {
 ///
 /// A `Label` with nothing in its icon, so the sentence starts on the same column a workspace's
 /// name starts on rather than on a column of its own. It is a sentence about the project, not an
-/// item in the list, so it takes the name's column and not the mark's.
+/// item in the list, so it takes the name's column and not the mark's, and that column is the
+/// project's own name: the sentence begins directly under the name it is about.
 ///
 /// It is a row in the run like any other now that the pane is flat, which is why it refuses both
 /// selection and the drag: a sentence is not something to pick up, and `SidebarReorder` refuses it

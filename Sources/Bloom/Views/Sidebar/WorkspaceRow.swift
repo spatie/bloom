@@ -19,9 +19,10 @@ import BloomCore
 /// project line up with each other and with the notice that stands in for them when a project is
 /// empty, instead of the three columns the hand-built stack produced.
 ///
-/// The whole row is then indented one chevron gutter by `SidebarWorkspaceRow`, which is what
-/// puts it under the project it belongs to rather than under Home and Search. See
-/// `SidebarMetrics.rowIndent`.
+/// The whole row is then indented to the project's tile by `SidebarWorkspaceRow`, which is what
+/// puts it under the project it belongs to rather than under Home and Search: the mark lands in
+/// the tile's column and the name on the project's own. See `SidebarMetrics.rowIndent` and
+/// `SidebarMetrics.nameColumn`.
 ///
 /// The row draws no background of its own. It lives in a `List` with `.listStyle(.sidebar)`, and
 /// that list already draws AppKit selection: the accent colour while the list has the keyboard, a
