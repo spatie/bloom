@@ -164,10 +164,16 @@ struct WorkspaceStatusTests {
             text: "Checks failing", detail: "1 required check failed", canMerge: true
         ),
         (
-            name: "pending checks are a warning",
+            name: "a check nobody has picked up is a warning, and says so in both lines",
             json: #"{"number":1,"title":"t","url":"u","state":"OPEN","statusCheckRollup":[{"__typename":"CheckRun","name":"a","status":"QUEUED"}]}"#,
             tone: .warning,
-            text: "Checks running", detail: "1 check pending", canMerge: true
+            text: "Checks queued", detail: "1 check queued", canMerge: true
+        ),
+        (
+            name: "a check a runner has is a warning too, in the other vocabulary",
+            json: #"{"number":1,"title":"t","url":"u","state":"OPEN","statusCheckRollup":[{"__typename":"CheckRun","name":"a","status":"IN_PROGRESS"}]}"#,
+            tone: .warning,
+            text: "Checks running", detail: "1 check running", canMerge: true
         ),
         (
             name: "changes requested is a warning even with green checks",
