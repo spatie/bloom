@@ -4,8 +4,8 @@ import BloomCore
 
 /// The window's one heartbeat, while an agent is working.
 ///
-/// Everything that moves while agents are running reads its phase from here: the shared rule under
-/// the title bar, which carries a crest along its whole width (`ActivityRule`), the dot at the
+/// Everything that moves while agents are running reads its phase from here: the rule that closes
+/// off the centre column's tab strip, which carries a crest (`ActivityRule`), the dot at the
 /// head of every working row in the sidebar (`WorkspaceRunningGlyph`), and the same dot beside
 /// "Working" in the transcript and in front of a running tab's label (`ActivityDot`). None of them
 /// starts an animation of its own, and that is the whole reason this type exists.

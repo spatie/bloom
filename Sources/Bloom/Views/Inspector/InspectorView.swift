@@ -43,14 +43,17 @@ struct InspectorView: View {
             // rule ran from y=83 and this one from y=85, two points of step across the join, which
             // is exactly the point this row used to spend on the top edge plus the point the rule
             // used to add underneath.
-            // The busy signal lights this half of the same rule. An overlay rather than a
-            // background, because unlike the strip beside it nothing in this row is opaque and
-            // there is nothing here for the rule to be broken by. It needs to know nothing about
-            // the strip beside it: both segments run off one epoch, so they cannot disagree. See
-            // `ActivityRule`.
+            //
+            // **This half of the rule is deliberately not lit**, and it was for a fortnight. The
+            // busy signal used to run here too, off the same epoch as the centre column's, and the
+            // report on it was "there seems to be two going, one in middle pane, one in right".
+            // Both halves were right on their own terms and that was the problem: they shared a
+            // period and therefore not a speed, so two crests set off from two leading edges at
+            // two rates, and what the eye counted was two objects rather than one thing passing
+            // behind a divider. See `ActivityRule` for the continuous version that was measured
+            // and not built.
             InspectorToolbar(model: model)
                 .overlay(alignment: .bottom) { Hairline() }
-                .overlay { ActivityRule() }
 
             // What the list below is measured from, when it is not measured from everything.
             //
