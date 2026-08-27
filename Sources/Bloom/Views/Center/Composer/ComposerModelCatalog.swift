@@ -75,12 +75,13 @@ final class ComposerModelCatalog {
     /// A backend whose list has not arrived yet is left out rather than shown empty, because an
     /// empty section is a heading over nothing.
     func sections(includingCurrent current: String, on kind: AgentKind) -> [ComposerModelSection] {
-        AgentKind.allCases.filter(\.canRunWorkspaces).compactMap { backend in
+        let owner = backend(ofModel: current, current: kind)
+        return AgentKind.allCases.filter(\.canRunWorkspaces).compactMap { backend in
             var options = self.options(for: backend)
             // Whatever this chat is set to stays on the list even when nothing recognises it: a
             // settings file can pin an id Bloom has never heard of, and a picker that dropped it
             // would be a one-way door out of the model actually in force.
-            if backend == kind {
+            if backend == owner {
                 options = ComposerOption.adding([current], to: options)
             }
             guard !options.isEmpty else { return nil }

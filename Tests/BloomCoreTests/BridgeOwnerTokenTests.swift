@@ -163,6 +163,17 @@ struct BridgeOwnerCommandTests {
         #expect(command.hasSuffix("-- '/Applications/Bloom.app/Contents/MacOS/bloom-bridge'"))
     }
 
+    @Test("Codex receives the same owner connection")
+    func codexShape() {
+        let command = BridgeRegistration.ownerCodexAddCommand(attachment())
+
+        #expect(command.hasPrefix("codex mcp add \(BridgeRegistration.ownerServerName) "))
+        #expect(command.contains("--env 'BLOOM_BRIDGE_SOCKET=/tmp/bloom-bridge-abc.sock'"))
+        #expect(command.contains("--env 'BLOOM_BRIDGE_TOKEN=deadbeef'"))
+        #expect(command.contains("--env 'BLOOM_BRIDGE_ROLE=owner'"))
+        #expect(command.hasSuffix("-- '/Applications/Bloom.app/Contents/MacOS/bloom-bridge'"))
+    }
+
     /// The name the owner registers under cannot be the one Bloom's own `--mcp-config` uses: that
     /// file is additive over the user's configuration, so a shared name would put two entries
     /// called the same thing in one client, one of them holding the owner's token.

@@ -440,11 +440,17 @@ final class TranscriptModel {
         title: String? = nil,
         model: String? = nil,
         effort: String? = nil,
-        permissionMode: PermissionMode? = nil
+        permissionMode: PermissionMode? = nil,
+        agentKind: AgentKind? = nil
     ) async {
         guard let store else { return }
         try? await store.updateSessionPreferences(
-            id: session.id, title: title, model: model, effort: effort, permissionMode: permissionMode
+            id: session.id,
+            title: title,
+            model: model,
+            effort: effort,
+            permissionMode: permissionMode,
+            agentKind: agentKind
         )
         await refreshSession()
     }

@@ -34,20 +34,20 @@ struct CommandLineSettingsView: View {
 
     /// Resolved once when the pane opens rather than in `body`. Reading the token touches the file
     /// system, and a `body` that does it runs it again on every redraw.
-    @State private var command: String?
+    @State private var attachment: BridgeAttachment?
     @State private var isRegenerating = false
 
     var body: some View {
         Form {
-            if let command {
-                connectSection(command)
+            if let attachment {
+                connectSection(attachment)
                 regenerateSection
             } else {
                 unavailableSection
             }
         }
         .settingsForm()
-        .task { command = app.bridge?.ownerAttachment().map(BridgeRegistration.ownerAddCommand) }
+        .task { attachment = app.bridge?.ownerAttachment() }
     }
 
     // MARK: - Sections
@@ -58,17 +58,18 @@ struct CommandLineSettingsView: View {
     /// already-running sessions will not pick it up, and what the entry is called. Only the last
     /// two are facts a person needs while they are here, and both are short enough to sit beside
     /// the Copy button instead of above the box.
-    private func connectSection(_ command: String) -> some View {
+    private func connectSection(_ attachment: BridgeAttachment) -> some View {
         Section {
-            CommandLineInstruction()
+            CommandLineInstruction(supportsMultipleClients: true)
 
-            // Keyed on the command so Regenerate hands the box a new identity rather than a new
-            // string: the Copied flash inside it is its own state, and a box that kept saying
-            // Copied over a token that had just been revoked would be advertising the wrong line.
-            CommandLineOffer(command: command)
-                .id(command)
-
-            legacyEntryNote
+            commandOffer(
+                title: "Claude Code",
+                command: BridgeRegistration.ownerAddCommand(attachment)
+            )
+            commandOffer(
+                title: "Codex",
+                command: BridgeRegistration.ownerCodexAddCommand(attachment)
+            )
         } header: {
             Text("Use Bloom from your own terminal")
         } footer: {
@@ -77,41 +78,14 @@ struct CommandLineSettingsView: View {
         }
     }
 
-    /// The one thing this rename leaves behind, said once and left to the reader.
-    ///
-    /// Every copy of Bloom used to register as `bloom-owner-bridge`, so anybody who ran the
-    /// earlier command has that entry in `~/.claude.json` still, and nothing here will take it
-    /// out: Bloom does not edit a person's own configuration file, which is the whole reason this
-    /// feature is a command to copy rather than a write. The entry is not harmless enough to leave
-    /// unmentioned either. If it names this same copy of Bloom it still works, and the owner gets
-    /// two of every tool in one client under two names; if it names a copy that has gone, Claude
-    /// Code reports a failed server at the start of every session with nothing to say why.
-    ///
-    /// So: one sentence and the line that removes it, in the pane the refusal message already
-    /// sends people to. Behind a disclosure, because it is addressed to people who ran a command
-    /// that no longer exists and is noise to everybody installing Bloom for the first time, which
-    /// is now most readers of this pane. Closed it costs one line; deleted it would leave a
-    /// stranger with a broken entry and nothing to say why.
-    private var legacyEntryNote: some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                Text(
-                    "Earlier versions registered as bloom-owner-bridge, whatever copy of Bloom "
-                        + "they came from. If you ran that command, remove the old entry:"
-                )
-                .fixedSize(horizontal: false, vertical: true)
+    private func commandOffer(title: String, command: String) -> some View {
+        VStack(alignment: .leading, spacing: Metrics.spacingTight) {
+            Text(title)
+                .font(Typo.bodyEmphasis)
 
-                Text("claude mcp remove --scope user bloom-owner-bridge")
-                    .font(Typo.codeSmall)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .settingsFootnote()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, Metrics.spacingSmall)
-        } label: {
-            Text("Upgrading from an earlier version")
-                .settingsFootnote()
+            // A regenerated token gives the offer a new identity, clearing its Copied flash.
+            CommandLineOffer(command: command)
+                .id(command)
         }
     }
 
@@ -166,7 +140,7 @@ struct CommandLineSettingsView: View {
         defer { isRegenerating = false }
         do {
             try bridge.regenerateOwnerToken()
-            command = bridge.ownerAttachment().map(BridgeRegistration.ownerAddCommand)
+            attachment = bridge.ownerAttachment()
         } catch {
             app.alert = BloomAlert(
                 title: "Could not regenerate the token",

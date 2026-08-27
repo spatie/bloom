@@ -84,6 +84,7 @@ struct CommandLineInstruction: View {
     /// caption there would be the one sentence explaining the offer set smaller than the warning
     /// under it.
     var isLead = false
+    var supportsMultipleClients = false
 
     var body: some View {
         Group {
@@ -99,7 +100,11 @@ struct CommandLineInstruction: View {
     }
 
     private var sentence: String {
-        "Run this once, and Claude Code in your terminal can list your projects, add a "
+        if supportsMultipleClients {
+            return "Run either command once, and that client can list your projects, add a "
+                + "repository and start a workspace."
+        }
+        return "Run this once, and Claude Code in your terminal can list your projects, add a "
             + "repository and start a workspace."
     }
 }

@@ -307,9 +307,20 @@ struct ComposerView: View {
     /// Same workspace, same worktree, same branch: a fork is cheap, and it is far less surprising
     /// than losing the conversation that is on screen.
     private func fork(onto kind: AgentKind, with controls: ComposerControls) {
-        guard let model, let store = app.store else { return }
-        let title = BackendChange.forkedTitle(transcript.session.title, to: kind)
         let draft = transcript.draft
+
+        // Ask Bloom has no workspace and therefore no tab beside this one to fork into. Its
+        // equivalent is a fresh conversation: the old one is archived, so its transcript is
+        // retained, while the new backend starts with a thread it actually owns.
+        guard let model else {
+            Task { @MainActor in
+                await app.ask.startFresh(controls: controls, draft: draft)
+            }
+            return
+        }
+
+        guard let store = app.store else { return }
+        let title = BackendChange.forkedTitle(transcript.session.title, to: kind)
 
         Task { @MainActor in
             guard let session = await model.createSession(title: title) else { return }

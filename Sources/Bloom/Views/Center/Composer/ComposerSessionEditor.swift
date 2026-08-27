@@ -30,7 +30,8 @@ struct ComposerSessionEditor {
                 title: session.title,
                 model: session.model,
                 effort: session.effort,
-                permissionMode: session.permissionMode
+                permissionMode: session.permissionMode,
+                agentKind: session.agentKind
             )
         }
     }

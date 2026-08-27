@@ -105,7 +105,7 @@ final class AskModel {
     /// Archived rather than deleted, which is what the column already means everywhere else: the
     /// old conversation is still in the database, with its cost and its permission history, and
     /// nothing that has been said is thrown away because somebody wanted a clean start.
-    func startFresh() async {
+    func startFresh(controls: ComposerControls? = nil, draft: String = "") async {
         guard let store = app.store, let current = session else { return }
         transcript?.teardown()
         transcript = nil
@@ -114,6 +114,20 @@ final class AskModel {
         // row and may have written any of them since this copy was read.
         _ = try? await store.update(sessionID: current.id) { $0.archivedAt = Date() }
         app.bridge?.retire(sessionID: current.id)
+
+        if let controls {
+            var next = AskConversation.newSession()
+            next.model = controls.model
+            next.effort = controls.effort
+            next.agentKind = controls.agentKind
+            next.permissionMode = controls.permissionMode
+            if let made = try? await store.upsert(next) {
+                await controls.store(sessionID: made.id, in: store)
+                if !draft.isEmpty {
+                    try? await store.saveDraft(sessionID: made.id, body: draft)
+                }
+            }
+        }
         await open()
     }
 

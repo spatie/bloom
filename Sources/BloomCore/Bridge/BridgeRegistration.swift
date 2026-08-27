@@ -139,6 +139,16 @@ public enum BridgeRegistration {
             + shellQuoted(attachment.shimPath)
     }
 
+    /// The same owner connection registered in Codex's user configuration.
+    public static func ownerCodexAddCommand(_ attachment: BridgeAttachment) -> String {
+        let environment = attachment.environment
+            .sorted { $0.key < $1.key }
+            .map { "--env \(shellQuoted("\($0.key)=\($0.value)"))" }
+            .joined(separator: " ")
+        return "codex mcp add \(ownerServerName) \(environment) -- "
+            + shellQuoted(attachment.shimPath)
+    }
+
     /// A POSIX single quoted word. The one character that cannot appear inside single quotes is a
     /// single quote, which is closed, escaped and reopened in the usual way.
     static func shellQuoted(_ value: String) -> String {
