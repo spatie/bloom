@@ -122,34 +122,49 @@ struct PendingTurnRowView: View {
     /// stronger reason: it is the same view at two tints rather than a view appearing. The opacity
     /// it used to fade was there for exactly this and is gone with the fade.
     ///
-    /// **The sentence is last in the row and the row carries no trailing padding**, so its right
-    /// edge is the enclosing `VStack`'s trailing edge, which is the bubble's. Nothing here
+    /// **The two controls are last in the row and the row carries no trailing padding**, so their
+    /// right edge is the enclosing `VStack`'s trailing edge, which is the bubble's. Nothing here
     /// re-states the alignment: one container aligns both, and the two edges agree by
     /// construction. The bubble's outline is a `strokeBorder`, which draws inside the frame rather
     /// than astride it, so the frame edge really is the edge you can see.
     ///
-    /// It read wrong before because the button was last and the sentence in front of it. The
-    /// button holds its width whether or not it is drawn, so the sentence sat a button and a
-    /// gutter and a bubble's padding in from the bubble above it, near enough centred under it to
-    /// look like a caption somebody had dropped there rather than a label belonging to that
-    /// bubble.
+    /// The sentence was last and the words Edit and Delete led the row, which put two pieces of
+    /// prose in one caption competing to be read first. The marks are the things you act on, so
+    /// they take the edge under the bubble's own corner; the sentence, when there is one, explains
+    /// from the left.
+    ///
+    /// **Marks rather than the words.** "Edit" and "Delete" set in caption beside a sentence in
+    /// the same size and the same resting ink read as three pieces of prose, and the reader has to
+    /// tell which two of them are pressable. A pencil and a bin are the two most legible glyphs in
+    /// the system for exactly these, and each keeps the sentence it had as its tooltip and its
+    /// accessibility label, so nothing is lost to somebody who cannot read a glyph.
     @ViewBuilder
     private var caption: some View {
         HStack(spacing: Metrics.gutter) {
+            if let sentence = hold?.sentence {
+                Text(sentence)
+                    .foregroundStyle(Palette.textTertiary)
+            }
+
             // First, because it is the safer of the two and the one wanted more often. Offered
             // only for a message the composer could actually be handed back as text, which is
             // `PendingMessageEdit.canEdit`: a disabled button with no explanation says less than
             // no button at all.
             if PendingMessageEdit.canEdit(delivery) {
-                action("Edit", help: "Takes this message back into the composer to change it.", run: onEdit)
+                action(
+                    "pencil",
+                    label: "Edit",
+                    help: "Takes this message back into the composer to change it.",
+                    run: onEdit
+                )
             }
 
-            action("Delete", help: "Takes this message back out of the queue. It is not sent.", run: onDelete)
-
-            if let hold {
-                Text(hold.sentence)
-                    .foregroundStyle(Palette.textTertiary)
-            }
+            action(
+                "trash",
+                label: "Delete",
+                help: "Takes this message back out of the queue. It is not sent.",
+                run: onDelete
+            )
         }
         .font(Typo.caption)
     }
@@ -160,12 +175,16 @@ struct PendingTurnRowView: View {
     /// was lost. A plain button takes the colour it is given, and `.pointerStyle` puts back the
     /// one thing the link style was buying.
     private func action(
-        _ label: String, help: String, run: @escaping @MainActor () -> Void
+        _ symbol: String, label: String, help: String, run: @escaping @MainActor () -> Void
     ) -> some View {
-        Button(label, action: run)
-            .buttonStyle(.plain)
-            .foregroundStyle(isPointedAt ? Palette.link : Palette.textTertiary)
-            .pointerStyle(.link)
-            .help(help)
+        Button(action: run) {
+            Image(systemName: symbol)
+                .imageScale(.medium)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isPointedAt ? Palette.link : Palette.textTertiary)
+        .pointerStyle(.link)
+        .help(help)
+        .accessibilityLabel(label)
     }
 }

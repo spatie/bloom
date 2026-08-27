@@ -312,8 +312,14 @@ public struct WorkspaceListTool: BridgeToolHandling {
             "cost_usd": .number(session.costUSD),
             "context_tokens": .integer(session.contextTokens),
             "queued_messages": .integer(pending),
-            "hold_note": .string(hold.sentence),
         ]
+
+        // Absent when nothing is holding the queue, which is the same answer the transcript gives
+        // by drawing no sentence: a note saying a message goes with the next message tells a
+        // caller nothing `state` has not already said.
+        if let note = hold.sentence {
+            answer["hold_note"] = .string(note)
+        }
 
         if !asks.isEmpty {
             answer["questions"] = .array(asks.map {

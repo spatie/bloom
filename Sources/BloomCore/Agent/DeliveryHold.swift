@@ -55,18 +55,25 @@ public enum DeliveryHold: Equatable, Sendable, CaseIterable {
     /// Whether a drain triggered right now may hand the next delivery to the runner.
     public var allowsDelivery: Bool { self == .none }
 
-    /// What the pending bubble says under itself.
+    /// What the pending bubble says under itself, or nothing when nothing is holding it.
     ///
     /// Only the first one in the queue carries it. A column of four bubbles each explaining that
     /// it is waiting for the same turn says the same thing four times; the ones behind the first
     /// are visibly behind it, which is the whole of what they have to say.
-    public var sentence: String {
+    ///
+    /// **Nothing holding it says nothing.** It said "Goes with your next message", which is the
+    /// ordinary way a queued message behaves and the only thing it could have been waiting for;
+    /// the four sentences above are worth reading because each names a specific thing to wait on,
+    /// and a fifth explaining that there is nothing to wait on made the other four look like
+    /// decoration. `setupFailed` still says it, because there the reader is being told why
+    /// something did NOT go.
+    public var sentence: String? {
         switch self {
         case .setup: "Goes as soon as setup finishes."
         case .question: "Goes once you have answered the question above."
         case .turn: "Goes when this turn ends."
         case .setupFailed: "Setup failed, so this has not gone. It goes with your next message."
-        case .none: "Goes with your next message."
+        case .none: nil
         }
     }
 }

@@ -50,11 +50,13 @@ struct DeliveryHoldTests {
         #expect(hold.allowsDelivery)
     }
 
-    @Test("every hold says something, and only one of them lets a message go")
+    @Test("every hold that is holding something says what, and only one lets a message go")
     func everyHoldSpeaks() {
-        for hold in DeliveryHold.allCases {
-            #expect(!hold.sentence.isEmpty)
+        for hold in DeliveryHold.allCases where hold != .none {
+            #expect(hold.sentence?.isEmpty == false)
         }
+        // Nothing to wait on, so nothing to say. See `DeliveryHold.sentence`.
+        #expect(DeliveryHold.none.sentence == nil)
         #expect(DeliveryHold.allCases.filter(\.allowsDelivery) == [.none])
     }
 }
