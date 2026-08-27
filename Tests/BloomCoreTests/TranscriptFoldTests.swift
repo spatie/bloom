@@ -215,16 +215,29 @@ struct TranscriptFoldTests {
         #expect(hides(work) == 0)
     }
 
-    /// **Rule 2.** A failed command is the one you are scrolling to find. It stops the fold where
-    /// it is rather than unfolding what was already folded, so what the reader sees is the line,
-    /// the failure, and everything after it. That is a line's difference from showing the whole
-    /// working, and unfolding under a reader mid turn is the thing this design forbids.
-    @Test("a failed call stops the fold and everything after it is drawn")
-    func aFailureStopsTheFold() throws {
+    /// A failed command remains visible and divides the surrounding activity into two compact
+    /// groups. It must not expose every ordinary action that follows it.
+    @Test("a failed call separates consecutive activity groups")
+    func aFailureSeparatesGroups() {
         let facts = [user(0)] + (1..<10).map { tool($0, failed: $0 == 5) }
-        let work = try only(facts)
-        #expect(hides(work) == 4)
-        #expect(work.rows[hides(work)].seq == 5)
+        let folds = TranscriptFold.folds(in: facts)
+        #expect(folds.all.count == 2)
+        #expect(folds.all.map(\.rows.count) == [4, 4])
+        #expect(folds.all.map { hides($0) } == [4, 4])
+        #expect(folds.index(containing: 5) == nil)
+    }
+
+    @Test("many ordinary rows after consecutive failures form another group")
+    func activityAfterFailuresFoldsAgain() {
+        let facts = [user(0)]
+            + (1..<41).map { tool($0) }
+            + [tool(41, failed: true), tool(42, failed: true)]
+            + (43..<63).map { tool($0) }
+        let folds = TranscriptFold.folds(in: facts)
+        #expect(folds.all.map(\.rows.count) == [40, 20])
+        #expect(folds.all.map { hides($0) } == [40, 20])
+        #expect(folds.index(containing: 41) == nil)
+        #expect(folds.index(containing: 42) == nil)
     }
 
     /// An error row is the turn itself failing, and it is treated the same way.
@@ -360,6 +373,12 @@ struct TranscriptFoldTests {
     @Test("an open live turn folds back when new work reaches the live end")
     func refoldingLiveWork() throws {
         let live = try only([user(0)] + (1..<7).map { tool($0) })
+        let laterLive = TranscriptFold.Work(
+            span: 20..<24,
+            rows: (20..<24).map { TranscriptFold.Row(index: $0, seq: $0) },
+            ready: 4,
+            hasAnswer: false
+        )
         let historical = TranscriptFold.Work(
             span: 10..<14,
             rows: (10..<14).map { TranscriptFold.Row(index: $0, seq: $0) },
@@ -367,12 +386,12 @@ struct TranscriptFoldTests {
             hasAnswer: true
         )
         let folds = TranscriptFold.Folds(
-            all: [historical, live], scannedRows: 7, resumeIndex: 1
+            all: [historical, live, laterLive], scannedRows: 24, resumeIndex: 1
         )
 
         #expect(
             TranscriptFold.refoldedAtLiveEnd(
-                [historical.firstSeq, live.firstSeq], in: folds
+                [historical.firstSeq, live.firstSeq, laterLive.firstSeq], in: folds
             ) == [historical.firstSeq]
         )
         #expect(

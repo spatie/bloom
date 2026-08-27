@@ -19,10 +19,15 @@ struct TranscriptFoldRowView: View {
         ExpandableRowHeader(isExpanded: isExpanded, onToggle: onToggle) {
             Group {
                 if !isExpanded, let latest {
-                    latest
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                        .overlay(alignment: .leading) { countBadge }
+                    HStack(spacing: Metrics.spacingSmall) {
+                        TranscriptDisclosure(isExpanded: false, isVisible: true)
+                            .frame(width: TranscriptLayout.disclosureWidth)
+
+                        latest
+                            .environment(\.transcriptFoldCount, hiddenCount)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
                 } else {
                     HStack(spacing: TranscriptLayout.glyphGap) {
                         TranscriptDisclosure(isExpanded: isExpanded, isVisible: true)
@@ -45,16 +50,4 @@ struct TranscriptFoldRowView: View {
         .onHover { isHovered = $0 }
     }
 
-    private var countBadge: some View {
-        Text(hiddenCount, format: .number)
-            .font(Typo.micro)
-            .fontWeight(.semibold)
-            .foregroundStyle(Color.white)
-            .monospacedDigit()
-            .lineLimit(1)
-            .minimumScaleFactor(0.65)
-            .frame(width: 19, height: 19)
-            .background(Palette.textTertiary, in: Circle())
-            .frame(width: TranscriptLayout.glyphWidth)
-    }
 }

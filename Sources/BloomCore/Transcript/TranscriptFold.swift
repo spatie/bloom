@@ -50,17 +50,16 @@ import Foundation
 ///
 /// # What is never hidden
 ///
-/// Four things stop the fold where they are rather than breaking it in two. Everything from the
-/// first of them onwards is drawn, and everything before it stays folded.
+/// Four things remain visible. Permanent outcomes split consecutive activity into a new fold;
+/// temporary or reader-selected rows cap the current fold without rearranging it.
 ///
 /// 1. **A row whose result has not come back.** What such a row says can still change, and a fold
 ///    that had to reveal a row it had hidden is a transcript rearranging itself under somebody who
 ///    is reading it. A tool call with no result yet, and a permission question nobody has answered
 ///    yet, are the same fact here.
-/// 2. **A failed call, and an error row.** A failed command is the one you are scrolling to find,
-///    and this is VS Code's `chat.tools.autoExpandFailures` and its default. It stops the fold
-///    rather than unfolding what was already folded, so what the reader sees is the line, the
-///    failure, and everything after it.
+/// 2. **A failed call, and an error row.** A failed command is the one you are scrolling to find.
+///    It remains visible and divides the ordinary activity before and after it into separate
+///    compact groups.
 /// 3. **A permission question nobody has answered.** It is covered by 1, and it is written down
 ///    separately because burying a question the turn is stopped on would be the worst fault this
 ///    file could have. Answered, it folds away with the rest.
@@ -100,11 +99,10 @@ public enum TranscriptFold {
     /// fold it back so the newest item remains visible and the completed items return to their
     /// count. Away from the end the reader is inspecting that log, so their disclosure stays open.
     public static func refoldedAtLiveEnd(_ unfolded: Set<Int>, in folds: Folds) -> Set<Int> {
-        guard let live = folds.all.last, !live.hasAnswer, unfolded.contains(live.firstSeq) else {
-            return unfolded
-        }
+        let live = folds.all.reversed().prefix { !$0.hasAnswer }.map(\.firstSeq)
+        guard live.contains(where: unfolded.contains) else { return unfolded }
         var result = unfolded
-        result.remove(live.firstSeq)
+        result.subtract(live)
         return result
     }
 
@@ -217,6 +215,9 @@ public enum TranscriptFold {
         var isProse: Bool
         /// Whether this row may be hidden: settled, and not one that has to stay.
         var ready: Bool
+        /// A permanent boundary inside a turn, such as a failed call. Activity after it starts a
+        /// fresh fold instead of remaining exposed for the rest of the turn.
+        var mustShow: Bool
     }
 
     /// One turn's working, as the list needs it.
@@ -229,9 +230,9 @@ public enum TranscriptFold {
         /// How many rows from the front may be hidden.
         ///
         /// A prefix rather than a count, because a gap in the middle would let a row that is still
-        /// waiting be hidden behind one that has landed. It stops at the first row that has not
-        /// settled or must stay, and it never goes backwards, which is what makes the fold
-        /// monotone.
+        /// waiting be hidden behind one that has landed. Permanent visible rows are not part of
+        /// this work segment. It stops at the first row that has not settled, and it never goes
+        /// backwards, which is what makes the fold monotone.
         public var ready: Int
         /// Whether the turn has said its answer, so nothing of the working need stay on screen.
         public var hasAnswer: Bool
@@ -342,7 +343,6 @@ public enum TranscriptFold {
 
         // The turn being built. `items` is every row of it that draws something, carrying what the
         // walk back at the end needs to know about each.
-        var turnStart = 0
         var items: [Item] = []
         var resume = start
 
@@ -355,16 +355,31 @@ public enum TranscriptFold {
             while end > 0, !items[end - 1].isWork { end -= 1 }
             let hasAnswer = items[end...].contains { $0.isProse }
             let working = hasAnswer ? Array(items[..<end]) : items
-            guard working.count >= leastWork, let last = working.last else { return }
-            // The prefix stops at the first row that could still change or that has to stay.
-            var ready = 0
-            while ready < working.count, working[ready].ready { ready += 1 }
-            found.append(Work(
-                span: turnStart..<(last.row.index + 1),
-                rows: working.map(\.row),
-                ready: ready,
-                hasAnswer: hasAnswer
-            ))
+            var segmentStart = working.startIndex
+
+            func appendSegment(endingAt segmentEnd: Int) {
+                let segment = working[segmentStart..<segmentEnd]
+                guard segment.count >= leastWork,
+                      let first = segment.first,
+                      let last = segment.last else { return }
+                var ready = 0
+                while ready < segment.count,
+                      segment[segment.index(segment.startIndex, offsetBy: ready)].ready {
+                    ready += 1
+                }
+                found.append(Work(
+                    span: first.row.index..<(last.row.index + 1),
+                    rows: segment.map(\.row),
+                    ready: ready,
+                    hasAnswer: hasAnswer
+                ))
+            }
+
+            for index in working.indices where working[index].mustShow {
+                appendSegment(endingAt: index)
+                segmentStart = working.index(after: index)
+            }
+            appendSegment(endingAt: working.endIndex)
         }
 
         for offset in start..<count {
@@ -379,7 +394,6 @@ public enum TranscriptFold {
             // A row that draws nothing is not a row the reader can see, so it is swallowed by
             // whatever is folded around it and counted as nothing. See `TranscriptRowInk`.
             if fact.drawsNothing { continue }
-            if items.isEmpty { turnStart = offset }
             items.append(Item(
                 row: Row(index: offset, seq: fact.seq),
                 isWork: fact.isWork,
@@ -389,7 +403,8 @@ public enum TranscriptFold {
                 // go, so a call cannot have failed without having settled; read the other way
                 // round, a row that is hidden has already settled and can therefore never turn into
                 // a failure afterwards.
-                ready: (fact.settled || fact.failed) && !fact.mustShow
+                ready: fact.settled || fact.failed,
+                mustShow: fact.mustShow
             ))
         }
         // Whatever is left at the end is a turn that is still running, and it is treated exactly
