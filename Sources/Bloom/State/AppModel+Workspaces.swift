@@ -100,9 +100,12 @@ extension AppModel {
         // paths in the sentence now, and every reader below this line is naming something after
         // what was asked for: a workspace called `9JVKW4` after the folder a screenshot was copied
         // into would be a name nobody could recognise.
-        let spoken = AttachmentDraft.withoutAttachments(
-            prompt, paths: staged?.attachments.map(\.path) ?? []
-        )
+        //
+        // `prompt` is the draft as it was written, files and all. The sheet used to strip them
+        // before handing it over, which named the workspace correctly and left the agent reading a
+        // sentence about screenshots it had never been told about. See `WorkspaceStartAttachments`.
+        let stagedPaths = staged?.attachments.map(\.path) ?? []
+        let spoken = WorkspaceStartAttachments.spoken(prompt, staged: stagedPaths)
 
         // A caller with no controls gets the ones the owner actually chose, not the built-in
         // fallback. The sheet and the bridge both pass controls; a `bloom://` link, the Services
@@ -271,35 +274,17 @@ extension AppModel {
             )
         }
 
-        // The files come across whichever mode asked for the workspace.
-        //
-        // This used to be inside the `.chat` branch below, so a workspace opened as a terminal
-        // dropped every staged file on the floor: nothing moved them into the worktree, and
-        // `AttachmentStaging.discard` deleted them a moment later. Nothing said so, and the chips
-        // had already gone with the sheet. A screenshot somebody dragged in is a file they wanted
-        // in the worktree, and the shell they are about to get is standing in that worktree, so
-        // the honest answer is to carry it rather than to announce a deletion.
-        var moved: Set<String> = []
-        if let staged, !staged.attachments.isEmpty {
-            moved = Set(
-                AttachmentFiles
-                    .adopt(staged.attachments, from: staged.directory, into: started.workspace.path)
-                    .map(\.path)
-            )
-        }
-
-        // The agent gets the sentence as it was written, files and all, because the paths in it
-        // are already the paths those files have in the worktree: staging lays a draft out under
-        // exactly the layout it will have here, so this is a move and nothing has to be rewritten.
-        // What is taken out is anything that failed to arrive, which is a path to nothing and
-        // worse than one file fewer. Only this half is a chat's: a workspace with no agent has no
-        // turn to put a sentence in, which is the whole of the difference between them.
-        var opening: String? = opensWith == .chat ? prompt : nil
-        if opensWith == .chat, let staged, !moved.isEmpty {
-            opening = AttachmentDraft
-                .parse(prompt, paths: staged.attachments.map(\.path))
-                .keeping { moved.contains($0) }
-        }
+        // The files come across whichever mode asked for the workspace, and the sentence names
+        // whichever of them arrived. Both halves are `WorkspaceStartAttachments`, in the core,
+        // because an attachment is only correct when the two agree and neither is visible from
+        // the other's side.
+        let arrived: Set<String> = staged.map {
+            WorkspaceStartAttachments
+                .adopt(stagedPaths, from: $0.directory, into: started.workspace.path)
+        } ?? []
+        let opening = WorkspaceStartAttachments.opening(
+            prompt, staged: stagedPaths, arrived: arrived, isChatWorkspace: opensWith == .chat
+        )
 
         // Setup runs whether or not there is an agent turn to follow it. Only the turn is skipped
         // for a terminal workspace.

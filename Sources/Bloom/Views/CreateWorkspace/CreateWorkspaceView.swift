@@ -1082,15 +1082,23 @@ struct CreateWorkspaceView: View {
     /// attachments, the same staging, the same funnel. See `AppModel.createWorkspace`, which is
     /// the one way a workspace is started whoever is asking.
     ///
-    /// `task` is the sentence in chat mode and the name field in the other two, and both arrive at
-    /// `startWorkspace` as `prompt` because that is what it derives a name and a branch from. What
+    /// What arrives at `startWorkspace` as `prompt` is the draft in chat mode, files and all, and
+    /// the name field in the other two, which is `WorkspaceStartAttachments.handover`. What
     /// separates them is `opensWith`, which decides whether an opening turn is ever sent and which
     /// tab the workspace is first shown on.
     private func create() {
         guard let repo, canCreate else { return }
 
         let chosen = mode
-        let text = task.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The draft as it was written, files and all, and deliberately not `task`. `task` is
+        // `spokenPrompt` in chat mode, which is the sentence with every attachment taken back out
+        // of it: the right answer for the name, the branch and the Create button, and the wrong
+        // one for the agent. Handing it over here is what sent "investigate this problem" to an
+        // agent that had been given three screenshots and told about none of them.
+        // See `WorkspaceStartAttachments`.
+        let text = WorkspaceStartAttachments.handover(
+            isChatWorkspace: chosen.runsAnAgent, draft: prompt, name: terminalName
+        )
         let base = baseBranch.isEmpty ? repo.defaultBranch : baseBranch
         let source = checkout
         let chosenControls = controls
