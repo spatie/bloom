@@ -391,7 +391,12 @@ struct TranscriptTable: NSViewRepresentable {
             // The first width the table ever has, and any change of text size. Until a width
             // arrives every measurement is refused, and a table told a hair per row is a
             // transcript that is not there. See `TranscriptRowHeights.reset`.
-            let remeasured = heights.reset(width: columnWidth, scale: scale) || wrapsDifferently
+            // The line height comes off the environment rather than beside `scale`, because it
+            // arrives with everything else a row is drawn from and a second argument saying the
+            // same thing is a second thing to forget to pass. See `TranscriptRowHeights.Measure`.
+            let remeasured = heights.reset(
+                width: columnWidth, scale: scale, leading: environment.lineHeight.ratio
+            ) || wrapsDifferently
 
             let newIDs = newEntries.map(\.id)
             let change = TranscriptEntryChange.between(ids, newIDs)

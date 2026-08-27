@@ -172,6 +172,9 @@ private struct MarkdownBlockView: View {
     @Environment(\.fontScale) private var fontScale
     /// The conversation's face, for the same reason: prose set in it, inline code paired to it.
     @Environment(\.chatFont) private var chatFont
+    /// And its line height, which the `Text` branch below inherits through the environment but
+    /// the `NSTextView` one has to be handed as a number.
+    @Environment(\.chatLineHeight) private var chatLineHeight
     @Environment(\.markdownIsStreaming) private var isStreaming
     @Environment(\.markdownLinkActions) private var linkActions
 
@@ -251,7 +254,7 @@ private struct MarkdownBlockView: View {
                     // a heading with a link in it differently from the heading beside it and
                     // change what the row measures at.
                     lineSpacing: TranscriptLayout.proseLeading(
-                        Typo.body, scale: fontScale, face: chatFont
+                        Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight
                     )
                 ),
                 linkColor: Palette.linkNSColor,

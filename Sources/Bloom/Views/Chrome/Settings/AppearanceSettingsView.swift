@@ -14,10 +14,16 @@ import BloomCore
 /// The two sizes are separate because they are different things. The conversation is prose set in
 /// a face of its own and scales as a whole scale of rungs; a terminal is a monospaced grid at one
 /// point size that the user has already chosen once, in Ghostty.
+///
+/// Line height sits under text size rather than in a pane of its own, because they are one
+/// subject: both are about how the conversation is set, both are read off the same preview, and a
+/// person who finds one has found the other. It is the last of the three because it is the one
+/// worth adjusting only after the size and the face are settled.
 struct AppearanceSettingsView: View {
     @AppStorage("appearance") private var appearance = "system"
     @AppStorage(ChatTextSize.defaultsKey) private var chatTextSize = ChatTextSize.standard
     @AppStorage(ChatFont.defaultsKey) private var chatFont = ChatFont.standard
+    @AppStorage(ChatLineHeight.defaultsKey) private var chatLineHeight = ChatLineHeight.standard
     @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
     /// Zero means "no override, follow Ghostty". Read here as well as in `TerminalTextSize` so the
     /// pane redraws when a Cmd+Plus in a terminal moves it while this window is open.
@@ -53,9 +59,17 @@ struct AppearanceSettingsView: View {
                 }
                 .pickerStyle(.segmented)
 
+                Picker("Line height", selection: $chatLineHeight) {
+                    ForEach(ChatLineHeight.allCases) { step in
+                        Text(step.title).tag(step)
+                    }
+                }
+                .pickerStyle(.segmented)
+
                 ChatTextPreview()
                     .environment(\.fontScale, chatTextSize.scale)
                     .environment(\.chatFont, chatFont)
+                    .environment(\.chatLineHeight, chatLineHeight)
             } header: {
                 Text("Conversation")
             } footer: {
@@ -151,9 +165,10 @@ private struct ChatTextPreview: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.spacing) {
-            // Led the way the transcript leads it. Without this the preview answered the "what
-            // does this setting do" question in the size and the face but not in the line height,
-            // which is the third thing the setting moves and the one the owner asked for.
+            // Led the way the transcript leads it, off the same environment the pickers above
+            // write. This is the only control in the pane whose effect is invisible without the
+            // preview: a step is a couple of points between lines, which nobody can picture from
+            // the word "Looser" and everybody can see in a paragraph.
             MarkdownView(Self.sample)
                 .proseLeading()
 
@@ -169,7 +184,7 @@ private struct ChatTextPreview: View {
             RoundedRectangle(cornerRadius: Metrics.corner)
                 .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
         }
-        .accessibilityLabel("Preview of the conversation in this font and text size")
+        .accessibilityLabel("Preview of the conversation in this font, text size and line height")
     }
 }
 

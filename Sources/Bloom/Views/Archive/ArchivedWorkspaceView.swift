@@ -35,10 +35,12 @@ struct ArchivedWorkspaceView: View {
     @State private var source: RestoreSource?
     @State private var isLocating = true
 
-    /// The same two settings the live conversation is drawn with, scoped to the same subtree, so a
-    /// transcript does not change size when it is read from here instead of from there.
+    /// The same three settings the live conversation is drawn with, scoped to the same subtree,
+    /// so a transcript does not change size or line height when it is read from here instead of
+    /// from there.
     @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.standard
     @AppStorage(ChatFont.defaultsKey) private var chatFont = ChatFont.standard
+    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.standard
 
     private var workspace: Workspace { model.workspace }
 
@@ -54,6 +56,7 @@ struct ArchivedWorkspaceView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .environment(\.fontScale, textSize.scale)
                 .environment(\.chatFont, chatFont)
+                .environment(\.chatLineHeight, lineHeight)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.windowBackground)

@@ -22,14 +22,20 @@ import Foundation
 /// against the point size would silently change what was agreed. Two denominators, two functions,
 /// and nothing shared between them but this file.
 public enum TextLeading {
-    /// What a line of prose comes to, as a multiple of the size it is set at.
+    /// What a line of prose comes to, as a multiple of the size it is set at, when the reader has
+    /// not said otherwise.
     ///
     /// 1.7, from the page the owner asked for. It is also where the readability advice sits for a
     /// column of this measure: the WCAG 1.4.12 floor is 1.5, and the range typography guides give
     /// for body text on a screen is 1.5 to 1.8, so 1.7 is the generous end of that rather than a
     /// number past it. The transcript is the one surface in the window that is read a line at a
     /// time instead of scanned, which is why it gets the generous end and nothing else does.
-    public static let proseRatio: Double = 1.7
+    ///
+    /// It is `ChatLineHeight.standard.ratio` rather than a literal, because the owner then asked
+    /// for the line height to be a setting and 1.7 became the middle of five. Two places saying
+    /// 1.7 is one place that can be moved and one that will not be, and this is the one every
+    /// caller that has no reader to ask reaches for.
+    public static let proseRatio: Double = ChatLineHeight.standard.ratio
 
     /// What a line of wrapped code comes to, as a multiple of its own line box.
     ///

@@ -2,7 +2,7 @@ import SwiftUI
 import BloomCore
 
 /// What the conversation's line height is at every step of `ChatTextSize`, before and after it
-/// stopped being a constant.
+/// stopped being a constant, and what the five steps of `ChatLineHeight` do to it.
 ///
 /// The owner put an agent's generated HTML page next to Bloom's transcript and asked for the
 /// page's line height in the chat. The page was set at about 1.7 and the transcript at three fixed
@@ -13,7 +13,12 @@ import BloomCore
 ///
 /// The right hand column of each pair is the real modifier reading a real environment, so the page
 /// cannot drift from what the transcript does: `.proseLeading()` resolves the rung against
-/// `\.fontScale` and `\.chatFont` exactly as `ProseRowView` does.
+/// `\.fontScale`, `\.chatFont` and `\.chatLineHeight` exactly as `ProseRowView` does.
+///
+/// The last column is the setting the owner then asked for, at one text size, because the question
+/// there is a different one: not whether the ratio holds across the sizes but whether a reader can
+/// tell one step from the next. A picker whose middle segments look alike is a control that does
+/// nothing, and this is where that is judged rather than argued.
 ///
 ///     Bloom --snapshot-gallery <dir> --gallery prose-leading
 ///
@@ -54,6 +59,7 @@ struct ProseLeadingGallery: View {
                 commandBlock()
                     .environment(\.fontScale, size.scale)
             }
+            lineHeightColumn()
         }
         .environment(\.chatFont, face)
         .padding(32)
@@ -82,11 +88,44 @@ struct ProseLeadingGallery: View {
         .frame(width: Self.paneWidth, alignment: .leading)
     }
 
+    /// The same five drawings at the default text size, one per step of the line height setting.
+    /// One size, because the axis this column is about is the other one.
+    private func lineHeightColumn() -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Prose, the five line-height steps")
+                .font(Typo.title)
+                .foregroundStyle(Palette.textPrimary)
+
+            ForEach(ChatLineHeight.allCases) { step in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(caption(for: step))
+                        .font(Typo.micro)
+                        .foregroundStyle(Palette.textTertiary)
+                    prose()
+                        .environment(\.fontScale, ChatTextSize.standard.scale)
+                        .environment(\.chatLineHeight, step)
+                }
+            }
+        }
+        .frame(width: Self.paneWidth, alignment: .leading)
+    }
+
     /// The step's name and the leading it resolves to, so the numbers in the report can be read
     /// off the picture rather than trusted.
     private func caption(for size: ChatTextSize) -> String {
-        let leading = TranscriptLayout.proseLeading(Typo.body, scale: size.scale, face: face)
+        let leading = TranscriptLayout.proseLeading(
+            Typo.body, scale: size.scale, face: face, lineHeight: .standard
+        )
         return "\(size.title), prose +\(Int(leading))pt"
+    }
+
+    /// The same line for the other axis: the step, its ratio, and the points it comes to at the
+    /// default text size.
+    private func caption(for step: ChatLineHeight) -> String {
+        let leading = TranscriptLayout.proseLeading(
+            Typo.body, scale: ChatTextSize.standard.scale, face: face, lineHeight: step
+        )
+        return "\(step.title), \(step.ratio) of the size, prose +\(Int(leading))pt"
     }
 
     /// `ProseRowView`'s own drawing, minus the row's padding, which is not what this page is about.
@@ -138,12 +177,13 @@ private struct CommandSample: View {
 extension Gallery {
     /// The registry entry for this page. See `Gallery`.
     ///
-    /// Three columns of five, tall rather than wide, because the question is what happens ACROSS
-    /// the range of text sizes and that only reads if they are stacked.
+    /// Four columns of five, tall rather than wide, because the question is what happens ACROSS
+    /// the range of text sizes and that only reads if they are stacked. The fourth column is the
+    /// other axis, the line height setting, at one size.
     static let proseLeading = Gallery(
         name: "prose-leading",
-        title: "Line height across the chat text sizes",
-        size: CGSize(width: 1_180, height: 1_320),
+        title: "Line height across the chat text sizes and the line-height steps",
+        size: CGSize(width: 1_560, height: 1_320),
         needsFocus: false,
         view: { _ in AnyView(ProseLeadingGallery()) }
     )

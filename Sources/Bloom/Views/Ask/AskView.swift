@@ -21,6 +21,7 @@ struct AskView: View {
 
     @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.standard
     @AppStorage(ChatFont.defaultsKey) private var chatFont = ChatFont.standard
+    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.standard
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,6 +44,7 @@ struct AskView: View {
         .background(Palette.windowBackground)
         .environment(\.fontScale, textSize.scale)
         .environment(\.chatFont, chatFont)
+        .environment(\.chatLineHeight, lineHeight)
         // Not in a body: `open()` writes observed state and can create a session row.
         .task { await app.ask.open() }
     }

@@ -49,12 +49,13 @@ struct ReviewPaneView: View {
     /// beside the box, every time the draft rewrapped a line.
     @State private var room = ComposerRoom()
 
-    /// The conversation's text size and face, applied to the composer here exactly as
-    /// `ChatPaneView` applies them to its whole subtree. Without this the same composer would
-    /// change size as the reader moved between the conversation and the review, which reads as a
-    /// bug rather than a setting.
+    /// The conversation's text size, face and line height, applied to the composer here exactly
+    /// as `ChatPaneView` applies them to its whole subtree. Without this the same composer would
+    /// change as the reader moved between the conversation and the review, which reads as a bug
+    /// rather than a setting.
     @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.standard
     @AppStorage(ChatFont.defaultsKey) private var chatFont = ChatFont.standard
+    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.standard
 
     var body: some View {
         VStack(spacing: 0) {
@@ -70,6 +71,7 @@ struct ReviewPaneView: View {
                 ComposerView(transcript: transcript, model: model, room: room)
                     .environment(\.fontScale, textSize.scale)
                     .environment(\.chatFont, chatFont)
+                    .environment(\.chatLineHeight, lineHeight)
             }
         }
         .onGeometryChange(for: CGFloat.self) { PaneMeasure.room($0.size.height) } action: {

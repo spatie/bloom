@@ -10,13 +10,14 @@ import BloomCore
 /// a line of a particular font is before it can answer, which brings a font cache and a view
 /// modifier with it, and none of that is what a reader opens `TranscriptLayout` to find.
 ///
-/// The rule it applies is `TextLeading` in the core, where the two ratios and the reason there are
-/// two of them are written down. What is here is only how a view reaches it: the rung, the scale
-/// and the face come out of the environment, and the line box comes out of the font they resolve
-/// to.
+/// The rule it applies is `TextLeading` in the core, where the two denominators and the reason
+/// there are two of them are written down, and `ChatLineHeight`, which holds the five ratios a
+/// reader picks between. What is here is only how a view reaches them: the rung, the scale, the
+/// face and the step come out of the environment, and the line box comes out of the font they
+/// resolve to.
 extension TranscriptLayout {
-    /// Extra leading for a run of prose set on `rung`, so the line height holds at
-    /// `TextLeading.proseRatio` whatever size the conversation is set at.
+    /// Extra leading for a run of prose set on `rung`, so the line height holds at the step the
+    /// reader chose whatever size the conversation is set at.
     ///
     /// **A fixed number of points is a different line height at every text size, which is how this
     /// came to be wrong at the default in the first place.** Three points on the sixteen point
@@ -29,11 +30,19 @@ extension TranscriptLayout {
     /// at `Typo.label` and a paragraph led for thirteen points is too airy for twelve. What a
     /// caller must not do is pass a rung the run is not actually set in: see `MarkdownView`, which
     /// leads a whole markdown block from `Typo.body` because that is what the block was handed.
+    ///
+    /// `lineHeight` has no default on purpose. Every measured row in the transcript moves with it,
+    /// and a defaulted argument is how a call site quietly keeps the old number: the compiler
+    /// naming each one is worth more here than the four characters it saves.
     @MainActor
-    static func proseLeading(_ rung: ScaledFont, scale: CGFloat, face: ChatFont) -> CGFloat {
+    static func proseLeading(
+        _ rung: ScaledFont, scale: CGFloat, face: ChatFont, lineHeight: ChatLineHeight
+    ) -> CGFloat {
         let font = rung.resolvedNSFont(scale: scale, face: face)
         return CGFloat(TextLeading.overPointSize(
-            lineHeight: Double(lineBox(of: font)), pointSize: Double(font.pointSize)
+            lineHeight: Double(lineBox(of: font)),
+            pointSize: Double(font.pointSize),
+            ratio: lineHeight.ratio
         ))
     }
 
@@ -43,6 +52,15 @@ extension TranscriptLayout {
     /// shell command has no sentence shape to fall back on and the eye has to find the start of
     /// the next line by position alone, which is a different reason from wanting a paragraph to
     /// breathe. See `TextLeading.codeRatio`, which holds the number that argument arrived at.
+    ///
+    /// **So it takes no `lineHeight`, and the conversation's line height setting does not reach
+    /// it.** The two are ratios of different things, so the reader's step could not be handed over
+    /// as it stands: 1.4 of a point size is about 1.15 of the line box, and 1.4 of the line box is
+    /// already looser than the 1.3 this was decided at. Scaling it instead, so the tightest step
+    /// took the command down with it, is worse still, because a wrapped command led at nearly
+    /// nothing is exactly what `codeRatio` exists to prevent. Its leading is a floor rather than a
+    /// preference, and there is one such block in the window: the permission panel's command,
+    /// which is not what anybody is looking at while they move this setting.
     ///
     /// It became a ratio for the same reason prose did and for no other. It used to be
     /// `Metrics.spacingSmall`, and losing the spacing scale is the price: a command at the largest
@@ -71,6 +89,8 @@ extension TranscriptLayout {
     /// It needs no bound and cannot grow into one. What can be put in it is the rungs of `Typo`
     /// crossed with the five steps of `ChatTextSize` and the four faces of `ChatFont`, which is
     /// under two hundred entries and is reached in the first minute of reading a conversation.
+    /// The line height does not multiply that: it changes what is added to a line box, never
+    /// which font resolves, so it is not part of this key and must not become one.
     @MainActor
     private static func lineBox(of font: NSFont) -> CGFloat {
         if let held = lineBoxes[font] { return held }
@@ -100,8 +120,22 @@ private struct ProseLeadingModifier: ViewModifier {
 
     @Environment(\.fontScale) private var scale
     @Environment(\.chatFont) private var face
+    @Environment(\.chatLineHeight) private var lineHeight
 
     func body(content: Content) -> some View {
-        content.lineSpacing(TranscriptLayout.proseLeading(rung, scale: scale, face: face))
+        content.lineSpacing(
+            TranscriptLayout.proseLeading(rung, scale: scale, face: face, lineHeight: lineHeight)
+        )
     }
+}
+
+extension EnvironmentValues {
+    /// The step the conversation's line height is set to, for the subtree the setting is scoped
+    /// to, which is the same subtree `fontScale` and `chatFont` are scoped to and for the same
+    /// reason: the sidebar, the inspector and the toolbar are chrome.
+    ///
+    /// Here rather than beside `ChatLineHeight` the way `chatFont` sits beside `ChatFont`, because
+    /// that type is in the core and the core imports no UI framework. This file is how a view
+    /// reaches the leading rule, and an environment value is exactly that.
+    @Entry var chatLineHeight: ChatLineHeight = .standard
 }

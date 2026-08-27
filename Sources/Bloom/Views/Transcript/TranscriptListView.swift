@@ -148,6 +148,9 @@ struct TranscriptListView: View {
     /// point into a document laid out at another.
     @Environment(\.fontScale) private var fontScale
     @Environment(\.chatFont) private var chatFont
+    /// And the line height, for the same reason: a step is points on every line of every
+    /// paragraph, so a row at another step is another height.
+    @Environment(\.chatLineHeight) private var chatLineHeight
 
     /// How much of the session the table is being handed, and which session that is about.
     ///
@@ -284,6 +287,7 @@ struct TranscriptListView: View {
             linkActions: linkActions,
             fontScale: fontScale,
             chatFont: chatFont,
+            lineHeight: chatLineHeight,
             reduceMotion: reduceMotion
         )
     }

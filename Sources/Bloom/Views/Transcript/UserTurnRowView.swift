@@ -37,10 +37,12 @@ struct UserTurnRowView: View {
     /// a fresh pair of closures on every pass is churn the row's AppKit text view then has to
     /// swallow on each update.
     @Environment(\.markdownLinkActions) private var linkActions
-    /// What the conversation is set at and which face it is in, because the bubble now resolves a
-    /// real `NSFont` rather than handing SwiftUI a rung to resolve for itself.
+    /// What the conversation is set at, which face it is in and how far apart its lines are,
+    /// because the bubble now resolves a real `NSFont` and a real paragraph style rather than
+    /// handing SwiftUI a rung and a modifier to resolve for themselves.
     @Environment(\.fontScale) private var fontScale
     @Environment(\.chatFont) private var chatFont
+    @Environment(\.chatLineHeight) private var chatLineHeight
     /// Where a hovered chip says it is, so the card is drawn over the scroll view rather than
     /// inside a bubble that would clip it. See `TranscriptHoverOverlay`.
     @Environment(\.transcriptHoverHost) private var hoverHost
@@ -185,8 +187,11 @@ struct UserTurnRowView: View {
                         // White, the same ink a selected row uses on the same fill. Measured 5.2
                         // to 1 on Spatie Blue, which passes AA for body text in both appearances.
                         color: .alternateSelectedControlTextColor,
+                        // The reader's line height, and handing it in is also what keeps the
+                        // bubble's own cache honest: `SentTurnKey` is keyed on this number, so a
+                        // step just moved is a miss rather than a bubble redrawn at the old one.
                         lineSpacing: TranscriptLayout.proseLeading(
-                            Typo.body, scale: fontScale, face: chatFont
+                            Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight
                         ),
                         chipGround: .userBubble
                     ),

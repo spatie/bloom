@@ -15,13 +15,13 @@ import Foundation
 /// The content is a `TranscriptContentKey`, which is a hash rather than the string it used to be:
 /// see that type for what building four hundred of those strings on every pass cost.
 ///
-/// A row's height depends on three things: what it draws, how wide it is drawn, and the text size
-/// it is drawn at. The obvious spelling folds all three into one key, which is what the spike did,
-/// and it is wrong in a way that only shows up after a while: the pane is resized all day, so the
-/// cache accumulates one entry per row per width it has ever been, none of which will ever be
-/// asked for again. Width and scale are properties of the whole cache instead, held once, and
-/// changing either empties it. That is also the truthful shape, because there is never more than
-/// one width in play.
+/// A row's height depends on four things: what it draws, how wide it is drawn, the text size it is
+/// drawn at, and how far apart its lines are set. The obvious spelling folds all four into one
+/// key, which is what the spike did, and it is wrong in a way that only shows up after a while:
+/// the pane is resized all day, so the cache accumulates one entry per row per width it has ever
+/// been, none of which will ever be asked for again. Width, scale and leading are properties of
+/// the whole cache instead, held once, and changing any of them empties it. That is also the
+/// truthful shape, because there is never more than one width in play.
 ///
 /// ## Nothing is measured up front
 ///
@@ -70,7 +70,7 @@ import Foundation
 /// succession under `Session started`, then three, then three more above a turn footer. So
 /// nothing is stored and returned exactly as it arrives.
 public struct TranscriptRowHeights: Equatable, Sendable {
-    /// The width and text size every height in this cache was taken at.
+    /// The width, text size and line height every height in this cache was taken at.
     ///
     /// One measure for the whole cache rather than part of each key: see the header. Nil until a
     /// width has arrived at all, which is the state a table is in for its first pass, before it
@@ -78,15 +78,25 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     public struct Measure: Equatable, Sendable {
         public var width: Double
         public var scale: Double
+        /// The prose line height the rows were laid out at, as `ChatLineHeight.ratio` states it.
+        ///
+        /// Here because the owner made the line height a setting, and a setting that moves every
+        /// measured row while the cache holds the old numbers is rows drawn on top of each other.
+        /// It is the ratio rather than the step, so nothing in the core has to know that a step is
+        /// what a person picks.
+        public var leading: Double
 
-        public init(width: Double, scale: Double) {
+        public init(width: Double, scale: Double, leading: Double) {
             self.width = width
             self.scale = scale
+            self.leading = leading
         }
 
         /// Whether two measures are the same one.
         func matches(_ other: Measure) -> Bool {
-            TranscriptRowHeights.isSameWidth(width, other.width) && scale == other.scale
+            TranscriptRowHeights.isSameWidth(width, other.width)
+                && scale == other.scale
+                && leading == other.leading
         }
     }
 
@@ -174,9 +184,9 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// is not there.
     public static let narrowest: Double = 1
 
-    /// The width and text size every height in here was taken at, or nothing before a width has
-    /// arrived. What a caller measures a fresh row against, so that it cannot measure at one width
-    /// and file the answer under another.
+    /// The width, text size and line height every height in here was taken at, or nothing before a
+    /// width has arrived. What a caller measures a fresh row against, so that it cannot measure at
+    /// one width and file the answer under another.
     public private(set) var measure: Measure?
     private var heights: [TranscriptContentKey: Double] = [:]
     /// The keys whose height was taken at a width that no longer holds. See `rewidth`.
@@ -201,7 +211,8 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// How many rows are remembered. For tests and for a probe; nothing decides anything on it.
     public var count: Int { heights.count }
 
-    /// Declares the width and text size the cache is now for, and says whether that emptied it.
+    /// Declares the width, text size and line height the cache is now for, and says whether that
+    /// emptied it.
     ///
     /// True means every height the caller holds is now unknown and the rows have to be renoted to
     /// the table. False means nothing moved and there is nothing to do, which is the answer on
@@ -210,9 +221,9 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// A width narrower than `narrowest` is not an answer and is refused: it leaves the cache
     /// exactly as it was rather than emptying it against a number no row will be drawn at.
     @discardableResult
-    public mutating func reset(width: Double, scale: Double) -> Bool {
+    public mutating func reset(width: Double, scale: Double, leading: Double) -> Bool {
         guard width > Self.narrowest else { return false }
-        let wanted = Measure(width: width, scale: scale)
+        let wanted = Measure(width: width, scale: scale, leading: leading)
         if let measure, measure.matches(wanted) { return false }
         measure = wanted
         heights.removeAll()
@@ -237,13 +248,13 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// and notices whose height does not depend on the width at all, so for most of the list the
     /// old number is not a guess, it is the answer.
     ///
-    /// Only ever a width: a text size change goes through `reset`, because a paragraph at another
-    /// size is not an estimate of anything.
+    /// Only ever a width: a text size or line height change goes through `reset`, because a
+    /// paragraph set at another size, or led differently, is not an estimate of anything.
     @discardableResult
     public mutating func rewidth(to width: Double) -> Bool {
         guard let current = measure, width > Self.narrowest else { return false }
         guard !Self.isSameWidth(current.width, width) else { return false }
-        measure = Measure(width: width, scale: current.scale)
+        measure = Measure(width: width, scale: current.scale, leading: current.leading)
         stale = Set(heights.keys)
         return true
     }
@@ -377,8 +388,8 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         max(0, height.rounded(.up))
     }
 
-    /// Empties the cache without changing the width it is for. What a text size change and a
-    /// finished resize both come down to.
+    /// Empties the cache without changing the width it is for. What a text size change, a line
+    /// height change and a finished resize all come down to.
     public mutating func forget() {
         heights.removeAll()
         stale.removeAll()

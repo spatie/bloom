@@ -44,6 +44,9 @@ struct ChatPaneView: View {
     @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.standard
     /// And the face, scoped to exactly the same subtree for exactly the same reason.
     @AppStorage(ChatFont.defaultsKey) private var chatFont = ChatFont.standard
+    /// And the line height, which is the third thing the appearance pane moves about the
+    /// conversation and is scoped with the other two.
+    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.standard
 
     var body: some View {
         VStack(spacing: 0) {
@@ -85,5 +88,6 @@ struct ChatPaneView: View {
         .background(Palette.windowBackground)
         .environment(\.fontScale, textSize.scale)
         .environment(\.chatFont, chatFont)
+        .environment(\.chatLineHeight, lineHeight)
     }
 }
