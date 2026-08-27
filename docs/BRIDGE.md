@@ -79,9 +79,13 @@ other ways to say so. It follows that regenerating the token from Settings cuts 
 what a revocation should do.
 
 Identity is minted by Bloom and handed to the CLI through the shim's environment, never claimed by
-the agent. That is what lets every tool be implicitly scoped: **no tool takes a workspace id as a
-parameter**, so there is nothing for a model to forge, mistype or hold on to after it has gone
-stale.
+the agent. That is what lets a tool be implicitly scoped: **nothing a workspace agent calls takes a
+workspace id as a parameter**, so there is nothing for a model to forge, mistype or hold on to after
+it has gone stale. The owner's own client is the exception and has to be, because it is sitting in
+no workspace: `reveal`, `workspace_merge` and `workspace_rename` are named a workspace out loud,
+resolved against the rows that exist, and refused when a name is shared by two of them. A workspace
+agent calling the last of those may not name one, and is refused rather than quietly given its
+own.
 
 The token is **not a secret and must not be commented as one**. Any process running as the user can
 read `ps`, the mode 0600 config file and the socket itself, and an agent has the user's whole home
@@ -99,7 +103,7 @@ uses, so Bloom and Bloom Dev can never land on one. The landmine there is `socka
 
 ## 3. The tools
 
-Twenty-six, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
+Twenty-seven, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
 gate. A list of handlers rather than a switch, because a switch would put every tool in three
 places: the listing, the dispatch and the gate.
 
@@ -112,6 +116,7 @@ places: the listing, the dispatch and the gate.
 | `project_unhide` | Put it back, in the place it already had | | | ✓ |
 | `workspace_list` | Every workspace, its state, its worktree path, its chats and their cost, what an agent is stopped on, what is queued and why | | | ✓ |
 | `workspace_start` | Cut a worktree and put an agent in it with a task, on a new branch or on a branch that already exists | ✓ | | ✓ |
+| `workspace_rename` | Give a workspace the name the work in it turned out to be about. Its own, for a workspace agent; any of them, named out loud, for the owner | ✓ | | ✓ |
 | `workspace_merge` | Ask a workspace's own agent to merge its pull request | | | ✓ |
 | `reveal` | Point Bloom's window at one workspace, or at Home narrowed by project, scope and search. Navigation and nothing else: it creates nothing and archives nothing | | | ✓ |
 | `pane_open` | Open a chat, a terminal or a browser in a new tab of the caller's own workspace | ✓ | | |
@@ -146,9 +151,9 @@ transport failure the CLI may retry or surface as a broken server; an errored re
 model reads and can act on. "You are not allowed to do that" is something to tell the model, not
 something to tell the transport.
 
-### The sixteen that need the app, and the ten that do not
+### The sixteen that need the app, and the eleven that do not
 
-`BridgeToolbox.standard` holds the ten that reach nothing but the store, and it is what a
+`BridgeToolbox.standard` holds the eleven that reach nothing but the store, and it is what a
 `BridgeServer` built without the app serves, which is every test that did not ask for more.
 `AppModel.bridgeToolbox()` adds the other sixteen to it, because starting a workspace has to reach
 the main-actor graph that runs one, asking for a merge has to reach the same path the Merge button
@@ -185,6 +190,15 @@ re-reads. The panel used to read that list once and never again, so a prompt wri
 bridge was invisible for the rest of the session; it subscribes now. An injected main-actor closure
 here would have been a second way to write the same row.
 
+`workspace_rename` is on the same side for the same reason, and it is worth saying because a
+workspace looks far more like a thing the window owns than a quick prompt does. It is not. A
+workspace's name is one column of the `workspaces` table, the sidebar draws it from there, and the
+sidebar re-reads on the `workspaces` domain already, because that is how it finds out about a
+rename typed into the row itself. The write goes through `Store.update(workspaceID:)` and never
+`upsert`: a diff stat refresh writes to that row every six seconds and an agent turn writes to it
+for ten minutes, and a whole-value write would put both back to whatever the rename had read. See
+`Tests/BloomCoreTests/WorkspaceWriteIsolationTests.swift`, which is that bug written down.
+
 `BridgeServer` **never constructs an `AgentRunner`, and nothing added to it ever may.** One runner
 per session is held in main-actor UI object identity, and a handler that built its own would put a
 second CLI process on the same session row and the same worktree, both writing `agent_session_id`
@@ -203,12 +217,17 @@ Nothing here opens or closes a tab except the tools whose whole subject that is.
 brings an existing tab forward and will not make one on the way, which is what keeps "go back to the
 terminal" from forking a second terminal.
 
-Nothing archives. `workspace_archive` is not one of the twenty-six: it removes a worktree and can
+Nothing archives. `workspace_archive` is not one of the twenty-seven: it removes a worktree and can
 remove a branch with it, and the whole reason Bloom asks before archiving by hand is that the
 answer is sometimes no. `reveal` is the answer to the request that wants one. Asked to clean up the
 finished workspaces, an agent ends by putting the candidates on screen, selected, with the owner
 looking at them and the button under their finger, which is a different thing from eight worktrees
 being gone.
+
+Nothing a rename touches is on disk. `workspace_rename` writes one column of one row: the branch,
+the worktree, the pull request and the directory keep the names they have. That is worth saying out
+loud in the tool's own description as well, because a model asked to "rename this workspace" that
+believed the branch moved with it would report something to the owner that never happened.
 
 Nothing merges. `workspace_merge` **does not merge**: it composes the request Bloom's own Merge
 button composes and sends it into that workspace's chat as an ordinary message, so the agent runs
@@ -456,7 +475,7 @@ So `BridgeToolApproval` names the tools Bloom answers for itself:
 
 | Self-approved | Not |
 | --- | --- |
-| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `pane_list`, `workspace_tabs`, `workspace_tab_select`, `browser_read`, `quick_prompt_list`, `reveal` | everything else |
+| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `workspace_rename`, `pane_list`, `workspace_tabs`, `workspace_tab_select`, `browser_read`, `quick_prompt_list`, `reveal` | everything else |
 
 It is a list rather than "anything with our prefix", so a tool added later is opted in by somebody
 thinking about it rather than by inheriting a decision made before it existed.
@@ -473,6 +492,17 @@ The four pane tools are on the list because each adds or changes something the r
 undo, in the workspace whose agent is asking and nowhere else. `pane_close` refuses the two cases
 that would cost anything: it will not empty the centre column, and it cannot close the review or
 the notes, which hold the reader's own work.
+
+`workspace_rename` is on it, and it is the entry that had to be argued against the quick prompt
+paragraph below rather than against the pane one above, because it overwrites something and keeps
+no copy. Three things settle it. What it overwrites is one column of one row, and a label Bloom
+proposed most of the time, rather than a paragraph the owner wrote by hand. The change is in the
+sidebar row the reader is looking at as it lands, which is the same visibility a pane's name has,
+and typing over it is a double click away. And the answer carries the name the workspace had, so
+undoing it from the far side of the socket costs one more call. Against that sits the reason it
+must not ask: this tool exists because an agent nine commits into a piece of work stopped and asked
+the owner to rename the workspace by hand, and a permission prompt on a parent running unattended
+is the hung turn this whole section is about, spent on a label.
 
 The two tab tools follow them. `workspace_tabs` reports the same furniture `pane_list` reports in
 another shape, all of it on the screen in front of the reader and none of it the contents of a

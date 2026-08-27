@@ -84,8 +84,11 @@ struct BridgeServerTests {
         // `tools/list` is. The rest of a parent's surface (`workspace_start` and the four pane
         // tools) needs a seam into the window and is added by `AppModel.bridgeToolbox()`, which
         // there is none of here. The two quick prompt tools are on this list because a quick
-        // prompt is a row in the store and nothing else.
-        #expect(names == ["quick_prompt_create", "quick_prompt_list", "whoami"])
+        // prompt is a row in the store and nothing else, and `workspace_rename` is on it because
+        // a workspace's name is one column of one row.
+        #expect(names == [
+            "quick_prompt_create", "quick_prompt_list", "whoami", "workspace_rename",
+        ])
 
         let called = try await caller.call(
             #"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"whoami","arguments":{}}}"#

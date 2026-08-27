@@ -62,11 +62,6 @@ public struct RevealOrder: Sendable, Equatable {
 }
 
 public enum RevealChoice {
-    /// How many names a refusal lists before it stops. The same ten `WorkspaceTabChoice` stops at,
-    /// and for the same reason: a refusal that prints four hundred workspaces is a refusal nobody
-    /// reads.
-    static let listLimit = 10
-
     /// Reads the arguments, with nothing looked up yet.
     ///
     /// **A workspace and a Home narrowing together is a refusal rather than a precedence rule.**
@@ -157,31 +152,27 @@ public enum RevealChoice {
         return .success(RevealPlan(target: .home(filter), sentence: homeSentence(filter, project: project)))
     }
 
+    /// Which workspace a name means is `BridgeWorkspaceLookup`'s answer rather than this file's,
+    /// so `reveal` and `workspace_rename` cannot come to disagree about it. The sentences stay
+    /// here, because a refusal is about the tool that refused: this one offers the names there
+    /// are, since the caller is a person asking to be shown something.
     private static func workspaceTarget(
         _ name: String,
         among workspaces: [Workspace],
         projects: [Repo]
     ) -> Result<RevealPlan, PaneRefusal> {
-        if let exact = workspaces.first(where: { $0.id.rawValue == name }) {
+        switch BridgeWorkspaceLookup.find(name, among: workspaces) {
+        case .found(let workspace):
             return .success(RevealPlan(
-                target: .workspace(exact.id), sentence: sentence(for: exact, projects: projects)
+                target: .workspace(workspace.id),
+                sentence: sentence(for: workspace, projects: projects)
             ))
-        }
-
-        let needle = name.lowercased()
-        let matches = workspaces.filter { $0.name.lowercased() == needle }
-        switch matches.count {
-        case 1:
-            return .success(RevealPlan(
-                target: .workspace(matches[0].id),
-                sentence: sentence(for: matches[0], projects: projects)
-            ))
-        case 0:
+        case .unknown:
             return .failure(PaneRefusal(
                 "There is no workspace called '\(name)'. There is: "
                     + list(workspaces.map(\.name)) + "."
             ))
-        default:
+        case .ambiguous(let matches):
             return .failure(PaneRefusal(
                 "\(matches.count) workspaces are called '\(name)', in "
                     + list(matches.map { projectName($0, projects: projects) })
@@ -218,12 +209,11 @@ public enum RevealChoice {
     }
 
     /// Names, comma separated, cut off before a refusal turns into a directory listing.
-    static func list(_ names: [String]) -> String {
-        guard !names.isEmpty else { return "nothing" }
-        let shown = names.prefix(listLimit).joined(separator: ", ")
-        let rest = names.count - listLimit
-        return rest > 0 ? shown + " and \(rest) more" : shown
-    }
+    ///
+    /// The cap and the wording moved to `BridgeWorkspaceLookup` when `workspace_rename` needed
+    /// the same sentence ending. Kept here as the name this file's own refusals call it by, and
+    /// as the name the suite pins the cap through.
+    static func list(_ names: [String]) -> String { BridgeWorkspaceLookup.list(names) }
 
     private static func text(_ value: JSONValue?) -> String? {
         guard let raw = value?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),

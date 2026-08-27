@@ -35,6 +35,14 @@ import Foundation
 /// all and the whole of why they ask. `quick_prompt_list` is on the list below; the other three
 /// are not.
 ///
+/// `workspace_rename` is the near miss on that paragraph and is on the list, so the line between
+/// them is worth stating. It overwrites something with no copy kept too, and what makes it
+/// different is what is overwritten and what it costs to put back. A quick prompt is a paragraph
+/// the owner wrote; a workspace name is a label Bloom proposed and the owner accepted, it is one
+/// column of one row, and it is on the screen in the row the reader is looking at the moment it
+/// changes. The answer carries the previous name, so undoing it from the far side of the socket
+/// is one more call. See `WorkspaceRenameTool`.
+///
 /// ## The browser pane, which is where the line got its sharpest test
 ///
 /// Seven tools reach a browser pane the owner has open, and two of them are on the list. The
@@ -95,6 +103,14 @@ public enum BridgeToolApproval {
         // typing the old one back. There is nothing here for a person to weigh that they cannot
         // see and reverse in a second.
         "pane_rename",
+        // A workspace's own name, which is a bigger label than a tab's and answers the same two
+        // questions. There is nothing for a person to weigh: one column of one row, nothing
+        // destroyed, nothing published, and the change is in the row they are looking at as it
+        // lands. And the way back costs one call, because the answer carries the name it had. The
+        // reason it must not ask is the bug it was written from: an agent nine commits into a
+        // piece of work stopped and asked the owner to rename the workspace by hand, and an ask
+        // on this from a parent running unattended is the hung turn described above.
+        "workspace_rename",
         // The only one of the four quick prompt tools on this list, and the only one of them a
         // parent can call unattended. It reads the owner's own library and changes nothing in it,
         // so the ask would carry nothing for a person to weigh, and an unanswered ask on a read is
