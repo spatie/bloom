@@ -783,11 +783,54 @@ enum Metrics {
     /// The same mark set inline in a line of caption text, where the full size outweighs the
     /// words beside it.
     static let repoIconSmall: CGFloat = 13
-    /// The box a sidebar row's state glyph sits in, matching the cap height of the text beside
-    /// it so the glyphs line up down the column whichever state each row is in.
+    /// The box a sidebar row's state glyph sits in, so the glyphs line up down the column
+    /// whichever state each row is in. It is the point size of the name beside them, not the cap
+    /// height of it, which measures 9.16 at that rung.
+    ///
+    /// A box, and not a size. What a mark draws INSIDE it is `glyphInk`, and the gap between the
+    /// two is the whole of the report the three constants under this one were written for.
     static let glyph: CGFloat = 13
-    /// A status dot, sized to sit on a text baseline rather than to be noticed on its own.
-    static let dot: CGFloat = 6
+
+    /// What a round mark in that box actually puts on the page.
+    ///
+    /// Measured rather than chosen, because the number a mark is given says nothing about the
+    /// number it draws. An SF Symbol sits inside its em box with its own bearing, so a filled one
+    /// comes out under the box it is framed in; a `Circle()` fills the frame it is handed exactly.
+    /// Hand the two the same 13 and they are not the same size, which is how a column meant to
+    /// read as one family ends up reading as two.
+    ///
+    /// The report was "that green dot feels too big", with a filled tick, a busy dot and a dotted
+    /// ring in three rows of one project. Measured off a headless render of the real symbols at
+    /// twenty times, in the configuration this column asks for (`Typo.caption`, semibold,
+    /// `.imageScale(.medium)`): every round mark draws 11.25 across, `circle.fill`,
+    /// `checkmark.circle.fill`, `xmark.circle.fill`, `slash.circle`, `clock` and `circle.dotted`
+    /// alike, which is what makes this one number instead of thirteen.
+    static let glyphInk: CGFloat = 11.25
+
+    /// The bare disc in that same column: the unread mark, which is `circle.fill` a type rung
+    /// down, `Typo.micro` against `Typo.caption`.
+    ///
+    /// Ten elevenths of the ink above, because a symbol's ink tracks its point size one for one:
+    /// measured, 11.25 at the eleven point rung and 10.25 at the ten. Written as the ratio of the
+    /// two rungs rather than as a measurement of its own, so a column that changes rung moves
+    /// both marks together.
+    static let glyphDisc: CGFloat = glyphInk * 10 / 11
+
+    /// A status dot, sized to sit on a text baseline rather than to be noticed on its own: the
+    /// busy mark in the sidebar, on a tab and in the transcript, and the bullets the inspector and
+    /// the settings set beside a line.
+    ///
+    /// Derived, and that is what the report bought. It was a free six, chosen against a
+    /// measurement of the unread disc that had been taken at the wrong image scale, so the one
+    /// mark in the column drawn as a shape rather than as a symbol came out at little over half
+    /// of what it stood beside.
+    ///
+    /// The dot swells by `BusyDot.peakScale` while it works, and the one thing it must never do
+    /// is reach the unread disc: that is the same shape in another hue, and two circles of one
+    /// size would be told apart only by which of them happened to be moving. So the peak is set
+    /// at nine tenths of the disc and the resting figure falls out of it: 6.8 at rest and 9.2 at
+    /// the top of the pulse, against the disc's 10.2 and the box's 13.
+    static let dot: CGFloat = glyphDisc * 0.9 / CGFloat(BusyDot.peakScale)
     /// What a `Chip` keeps inside its fill. Named because the transcript footer draws a two colour
     /// chip by hand next to a real one, and the two have to be the same shape.
     static let chipInsetH: CGFloat = 5

@@ -67,6 +67,12 @@ enum SidebarMetrics {
     /// marks in it is what keeps them scannable: a reader looking for the one workspace that is
     /// running reads one narrow strip, and the names beside them are a second strip that starts
     /// under the project's name.
+    ///
+    /// How large the marks inside it are drawn is NOT here, and deliberately. `Metrics.glyph`,
+    /// `Metrics.glyphInk` and `Metrics.dot` are one family, and Home, the tab strip and the
+    /// transcript read them as well as this pane does: a size named after one pane and used from
+    /// another is how the two drift, which is the argument `Metrics.headerButton` already carries.
+    /// This is the column the marks are centred in; those three are the marks.
     static let markColumn: CGFloat = Metrics.repoIcon
 
     /// Where a project's name begins, and with it every name drawn under that project.

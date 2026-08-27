@@ -49,6 +49,15 @@ struct WorkspaceStatusGlyph: View {
                 // swapped; the marks that are already solid barely move at semibold, which is
                 // the mass the stroked ones are being brought up to.
                 .fontWeight(.semibold)
+                // How big the mark is is the mark's own business, not its container's.
+                // `.imageScale` is an environment value and `SidebarRowLabelStyle` raises it for
+                // the list's icon slot, so this tick drew 11.25 points across on Home and 14.35 in
+                // the sidebar: the same state, two sizes, the larger of them standing over the 13
+                // point box that exists to line the column up. That is the report ("that green dot
+                // feels too big"), and pinning the scale here is what makes the answer hold
+                // wherever the mark is drawn. Measured off a headless render of the real symbols
+                // at twenty times: `.large` is 1.276 of `.medium` on every one of them.
+                .imageScale(.medium)
                 .foregroundStyle(
                     isOnSelection ? AnyShapeStyle(Palette.textInverted) : Self.tint(for: status)
                 )

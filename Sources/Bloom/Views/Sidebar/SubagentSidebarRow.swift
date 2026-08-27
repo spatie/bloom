@@ -91,6 +91,11 @@ struct SubagentMarkGlyph: View {
         default:
             Image(systemName: Self.symbol(for: mark))
                 .font(Typo.micro)
+                // Pinned for the reason `WorkspaceStatusGlyph` pins it, and pinned here as well
+                // because these rows ride the same `SidebarRowLabelStyle`: without it a subagent's
+                // tick came out WIDER than the workspace's above it, which reads as the child
+                // outranking its parent. A rung down in type is the step this row is meant to be.
+                .imageScale(.medium)
                 .foregroundStyle(isOnSelection ? Palette.textInverted : Self.tint(for: mark))
                 // The shapes are distinct and the tints are distinct, and neither reaches
                 // VoiceOver: it read the subagent's name and never said the thing had failed.
