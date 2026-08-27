@@ -543,8 +543,8 @@ struct TranscriptListView: View {
                     }
                     out.append(foldEntry(
                         firstSeq: work.firstSeq,
-                        hiding: would,
-                        showsMore: would < work.rows.count,
+                        hiding: hidden > 0 ? would : work.rows.count,
+                        showsMore: hidden > 0 && would < work.rows.count,
                         isFolded: hidden > 0,
                         latest: would > 0 ? rows[work.rows[would - 1].index] : nil,
                         home: home,
@@ -1516,12 +1516,10 @@ struct TranscriptListView: View {
 
     /// A turn's working opened, or shut again.
     ///
-    /// **No `willUnfold`, unlike `toggle` below, and the difference is what actually moves.** A
-    /// tool result opening changes one row's height, which is a number the table animates. A turn
-    /// opening puts rows into the list and takes them out, and `rowsArrived` and `rowsLeft` do
-    /// that with no animation at all, exactly as a row landing during a turn does. Asking for a
-    /// travel here would animate the fold's own line, which is one line tall either way.
+    /// A group opening adds rows and closing removes them. Tell the table this is a reader-driven
+    /// change so it can cross-fade those rows without applying that effect to live arrivals.
     private func toggleFold(_ firstSeq: Int) {
+        controller.willChangeFoldRows()
         if unfolded.contains(firstSeq) {
             unfolded.remove(firstSeq)
         } else {

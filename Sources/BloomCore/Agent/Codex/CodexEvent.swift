@@ -580,10 +580,11 @@ public struct CodexTokenUsage: Sendable, Hashable {
         self.contextWindow = contextWindow
     }
 
-    /// The `total` breakdown, which is the running figure for the whole thread. `last` is the same
-    /// shape for the most recent request and is what a per-turn readout would use.
-    static func decode(_ json: JSONValue, threadID: String, turnID: String, key: String) -> CodexTokenUsage {
-        let breakdown = json[key] ?? .object([:])
+    /// The `last` breakdown is what the model had in front of it for its latest request. `total`
+    /// accumulates the whole thread and can exceed the context window many times over, so it cannot
+    /// drive either the context gauge or the per-turn usage Bloom stores.
+    static func decode(_ json: JSONValue, threadID: String, turnID: String) -> CodexTokenUsage {
+        let breakdown = json["last"] ?? .object([:])
         return CodexTokenUsage(
             threadID: threadID,
             turnID: turnID,
@@ -761,8 +762,7 @@ public enum CodexEvent: Sendable {
             return .tokenUsage(CodexTokenUsage.decode(
                 params["tokenUsage"] ?? .null,
                 threadID: threadID,
-                turnID: turnID,
-                key: "total"
+                turnID: turnID
             ))
 
         case "account/rateLimits/updated":

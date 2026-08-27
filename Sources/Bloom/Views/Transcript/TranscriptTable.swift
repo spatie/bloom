@@ -115,6 +115,9 @@ final class TranscriptTableController {
     /// A fold is about to open or close. See `Coordinator.pendingUnfolds`.
     func willUnfold(_ entryID: TranscriptEntryID) { coordinator?.willUnfold(entryID) }
 
+    /// A transcript activity group is about to add or remove its disclosed rows.
+    func willChangeFoldRows() { coordinator?.willChangeFoldRows() }
+
     /// **The conversation this pane was pointed at is in, and in the place the reader left it.**
     ///
     /// Said by the pane rather than worked out here, because the only thing that knows a
@@ -316,6 +319,9 @@ struct TranscriptTable: NSViewRepresentable {
         /// Rows whose next height change is a fold the reader just clicked, and may therefore be
         /// animated. Consumed by the pass that applies it. See `willUnfold`.
         private var pendingUnfolds: Set<TranscriptEntryID> = []
+        /// The next row-list change came from a disclosure click rather than from live activity.
+        /// Only that change gets the brief cross-fade requested for opening and closing a group.
+        private var pendingFoldRows = false
 
         /// **Whether the transcript is being held still while a pane is resized.** Nothing in here
         /// measures, reloads or moves while it is on. See `TranscriptHoldView`.
@@ -451,6 +457,9 @@ struct TranscriptTable: NSViewRepresentable {
 
             let newIDs = newEntries.map(\.id)
             let change = TranscriptEntryChange.between(ids, newIDs)
+            let fadesFoldRows = pendingFoldRows && change.movesRows
+                && rowEnvironment?.reduceMotion != true
+            if change.movesRows { pendingFoldRows = false }
 
             // What has changed about the entries the two lists share, in the NEW list's indices,
             // and which of those are a fold the reader just clicked.
@@ -502,9 +511,9 @@ struct TranscriptTable: NSViewRepresentable {
             case .same:
                 break
             case .grew(let head, let tail):
-                rowsArrived(head: head, tail: tail, in: tableView)
+                rowsArrived(head: head, tail: tail, fading: fadesFoldRows, in: tableView)
             case .shrank(let head, let tail):
-                rowsLeft(head: head, tail: tail, in: tableView)
+                rowsLeft(head: head, tail: tail, fading: fadesFoldRows, in: tableView)
             case .rebuilt:
                 rebuiltEverything(in: tableView)
             }
@@ -945,6 +954,10 @@ struct TranscriptTable: NSViewRepresentable {
             pendingUnfolds.insert(entryID)
         }
 
+        func willChangeFoldRows() {
+            pendingFoldRows = true
+        }
+
         /// How long a fold takes, or nothing at all under Reduce Motion. Read from the row
         /// environment rather than from the setting, so the table and the rows inside it cannot
         /// disagree about whether this reader wants movement.
@@ -1217,24 +1230,36 @@ struct TranscriptTable: NSViewRepresentable {
         /// next `sample` can tell them apart**. An earlier profile put `apply` at 47.7 per cent of
         /// the main thread with `NSHostingView` under it and `measure` at half a per cent, which
         /// only means a reload rebuilding cells if the shape really was `.rebuilt`.
-        private func rowsArrived(head: Range<Int>, tail: Range<Int>, in tableView: NSTableView) {
+        private func rowsArrived(
+            head: Range<Int>, tail: Range<Int>, fading: Bool, in tableView: NSTableView
+        ) {
+            NSAnimationContext.beginGrouping()
+            NSAnimationContext.current.duration = fading ? Motion.hoverSeconds : 0
             tableView.beginUpdates()
             // The head first, so that the indices the tail is named by are the indices the table
             // has by the time it hears about them. Both are indices into the NEW list, which is
             // what `TranscriptEntryChange` promises and what its own test checks by rebuilding the
             // list from them.
-            if !head.isEmpty { tableView.insertRows(at: IndexSet(integersIn: head), withAnimation: []) }
-            if !tail.isEmpty { tableView.insertRows(at: IndexSet(integersIn: tail), withAnimation: []) }
+            let animation: NSTableView.AnimationOptions = fading ? .effectFade : []
+            if !head.isEmpty { tableView.insertRows(at: IndexSet(integersIn: head), withAnimation: animation) }
+            if !tail.isEmpty { tableView.insertRows(at: IndexSet(integersIn: tail), withAnimation: animation) }
             tableView.endUpdates()
+            NSAnimationContext.endGrouping()
         }
 
-        private func rowsLeft(head: Range<Int>, tail: Range<Int>, in tableView: NSTableView) {
+        private func rowsLeft(
+            head: Range<Int>, tail: Range<Int>, fading: Bool, in tableView: NSTableView
+        ) {
+            NSAnimationContext.beginGrouping()
+            NSAnimationContext.current.duration = fading ? Motion.hoverSeconds : 0
             tableView.beginUpdates()
             // And the tail first here, for the same reason turned around: both are indices into
             // the OLD list, so the later run has to go before the earlier one moves it.
-            if !tail.isEmpty { tableView.removeRows(at: IndexSet(integersIn: tail), withAnimation: []) }
-            if !head.isEmpty { tableView.removeRows(at: IndexSet(integersIn: head), withAnimation: []) }
+            let animation: NSTableView.AnimationOptions = fading ? .effectFade : []
+            if !tail.isEmpty { tableView.removeRows(at: IndexSet(integersIn: tail), withAnimation: animation) }
+            if !head.isEmpty { tableView.removeRows(at: IndexSet(integersIn: head), withAnimation: animation) }
             tableView.endUpdates()
+            NSAnimationContext.endGrouping()
         }
 
         /// Every cell thrown away and the visible ones built again. A session being replaced, and

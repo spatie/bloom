@@ -31,7 +31,8 @@ struct TranscriptGlyph: View {
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
-                    .frame(width: 19, height: 19)
+                    .offset(y: 0.5)
+                    .frame(width: 20, height: 20)
                     .background(Palette.textTertiary, in: Circle())
             } else {
                 Image(systemName: symbol)
