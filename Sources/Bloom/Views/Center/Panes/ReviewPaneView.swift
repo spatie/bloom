@@ -11,8 +11,8 @@ import BloomCore
 /// (Cmd+\) puts the conversation beside the diff instead of above it.
 ///
 /// It draws no chrome of its own. `DiffView` already carries the bar that names the file and
-/// holds Viewed, revert, the layout toggles and the Diff / Edit pair, and a second bar over the
-/// top of it would say the same things twice.
+/// holds revert, the layout toggles and the Diff / Edit pair, and a second bar over the top of it
+/// would say the same things twice.
 struct ReviewPaneView: View {
     @Bindable var model: WorkspaceModel
     var tab: CenterTab
@@ -107,8 +107,7 @@ struct ReviewPaneView: View {
     private var content: some View {
         if let changed {
             // Keyed on the path so walking to the next file builds a new view rather than
-            // reusing this one's loaded rows, and so the header bar's Viewed toggle rebinds to
-            // the new file's defaults key.
+            // reusing this one's loaded rows.
             DiffView(model: model, file: changed)
                 .id(changed.path)
         } else if tab.path.isEmpty {

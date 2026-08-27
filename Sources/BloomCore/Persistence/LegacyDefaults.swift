@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Every `@AppStorage` value in the app lives in the bundle identifier's domain: terminal theme
 /// and text sizes, notification switches, inspector and panel geometry, prompt overrides, tab and
-/// split layouts, which workspace was last open, which files have been marked viewed. Changing
+/// split layouts, which workspace was last open. Changing
 /// the bundle identifier does not lose any of it, but it does make all of it invisible, which
 /// looks exactly like losing it.
 ///

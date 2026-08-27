@@ -2,8 +2,8 @@ import SwiftUI
 import AppKit
 import BloomCore
 
-/// The bar above a file: which file it is, whether it has been reviewed, and every choice that
-/// applies to this file rather than to the workspace.
+/// The bar above a file: which file it is, and every choice that applies to this file rather than
+/// to the workspace.
 ///
 /// The layout choice and the whitespace choice are bound straight to the same defaults keys the
 /// inspector's own toolbar uses, so there is one source of truth per setting and no way for two
@@ -52,13 +52,12 @@ struct FileHeaderBar: View {
             UnsavedEditsDot(session: session, path: absolutePath)
 
             // Lower priority than the name beside it, so a wide bar spends its slack on
-            // the gap rather than on squeezing the path chip that has room to spare.
+            // the gap rather than on squeezing the path that has room to spare.
             Spacer(minLength: InspectorLayout.tight)
                 .layoutPriority(-1)
 
             ViewThatFits(in: .horizontal) {
-                controls(compact: false)
-                controls(compact: true)
+                controls
                 collapsed
             }
         }
@@ -86,9 +85,11 @@ struct FileHeaderBar: View {
 
     // MARK: - Control clusters
 
-    private func controls(compact: Bool) -> some View {
+    /// One arrangement rather than two. `compact` existed to hide the word "Viewed" and leave its
+    /// tick behind, and with the toggle gone every control in this row was already icon only, so
+    /// the two branches drew the same thing and `ViewThatFits` measured the first one twice.
+    private var controls: some View {
         HStack(spacing: InspectorLayout.gap) {
-            viewedToggle(compact: compact)
             revertButton
             layoutPicker
             whitespaceToggle
@@ -101,7 +102,6 @@ struct FileHeaderBar: View {
     /// The narrow arrangement: what this file is, and everything else behind an overflow menu.
     private var collapsed: some View {
         HStack(spacing: InspectorLayout.gap) {
-            viewedToggle(compact: true)
             Menu {
                 Picker("Layout", selection: $isSideBySide) {
                     Text("Unified").tag(false)
@@ -129,13 +129,6 @@ struct FileHeaderBar: View {
 
             modePicker
         }
-    }
-
-    private func viewedToggle(compact: Bool) -> some View {
-        ViewedToggle(workspaceID: model.workspace.id, path: file.path, compact: compact)
-            // The key is built when the property wrapper is, so the toggle has to be a new view
-            // whenever the file changes or it would keep writing to the previous file's key.
-            .id("\(model.workspace.id)/\(file.path)")
     }
 
     /// Destructive, the way the collapsed arrangement already draws it.
