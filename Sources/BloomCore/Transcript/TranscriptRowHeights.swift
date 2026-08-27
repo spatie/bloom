@@ -266,6 +266,32 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// NOT have to measure, which is the whole of what the hold buys.
     public var staleCount: Int { stale.count }
 
+    /// **Whether this content is owed a measurement, and a hit in here is not always the answer.**
+    ///
+    /// A stored row's key is hashed from everything that can change what it draws, so a number
+    /// filed under one is the answer until the key moves and this can say no. Four of the entries
+    /// in a transcript are not stored rows, and each of them redraws itself from its own
+    /// observation inside the cell it is in: the streaming tail, the setup log, the bubble on its
+    /// way out and the delivery at the head of the queue. Their keys carry the session and nothing
+    /// else that moves, so a hit for one of those is not what it draws, it is **what it happened to
+    /// be the last time somebody looked**.
+    ///
+    /// The tail is the one that bites, and it is the reader's report: leave a workspace with a
+    /// turn running and the last number taken from that tail is several hundred points; come back
+    /// once the turn has finished and it draws nothing at all, under the same key, with the table
+    /// still laying out the several hundred. That is a screen and a half of blank between the last
+    /// turn's footer and the composer, and every mechanism that could put it right declines to.
+    /// The caller's `measureExactly` skipped it because the cache knows it, the warming pass skips
+    /// it on purpose, and the screen census cannot see it because the cache and the table agree
+    /// about a number that is wrong in both.
+    ///
+    /// So the caller says which kind of entry it is holding and this says whether what is held is
+    /// still evidence. See `TranscriptEntryID.redrawsItself`, which is the claim, and the census's
+    /// `screenWrong`, which is the counter this shape is invisible to.
+    public func needsMeasuring(_ contentKey: TranscriptContentKey, redrawsItself: Bool) -> Bool {
+        redrawsItself || heights[contentKey] == nil || stale.contains(contentKey)
+    }
+
     /// The remembered height of this content, or nothing if it has never been measured.
     public func height(for contentKey: TranscriptContentKey) -> Double? {
         heights[contentKey]

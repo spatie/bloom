@@ -608,6 +608,54 @@ struct TranscriptRowHeightsTests {
         #expect(!TranscriptRowHeights.isSameWidth(831.5, 833))
     }
 
+    // MARK: - What is still owed a measurement
+
+    @Test("a row nobody has measured is owed one")
+    func anUnknownRowIsOwed() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1, leading: 1.7)
+        #expect(heights.needsMeasuring(key("row.7"), redrawsItself: false))
+    }
+
+    @Test("a stored row that has been measured is not owed another")
+    func aMeasuredRowIsNotOwed() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1, leading: 1.7)
+        heights.note(120, for: key("row.7"))
+        #expect(!heights.needsMeasuring(key("row.7"), redrawsItself: false))
+    }
+
+    /// A row measured at a width the pane no longer has is owed one at the width it does have.
+    @Test("a row measured at another width is owed another")
+    func aStaleRowIsOwed() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1, leading: 1.7)
+        heights.note(120, for: key("row.7"))
+        let moved = heights.rewidth(to: 600)
+        #expect(moved)
+        #expect(heights.needsMeasuring(key("row.7"), redrawsItself: false))
+    }
+
+    /// **The blank between the last turn's footer and the composer, written down.** The streaming
+    /// tail's key carries the session and nothing else, so it is the same key whether the tail is
+    /// several hundred points of a running answer or nothing at all between turns. A hit for it is
+    /// not what it draws, it is what it drew when somebody last looked, and a workspace switch is
+    /// exactly the gap in which that stops being true.
+    @Test("an entry that redraws itself is always owed a measurement")
+    func anEntryThatRedrawsItselfIsAlwaysOwed() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1, leading: 1.7)
+        heights.note(480, for: key("streaming.session-a"))
+        #expect(heights.height(for: key("streaming.session-a")) == 480)
+        #expect(heights.needsMeasuring(key("streaming.session-a"), redrawsItself: true))
+    }
+
+    @Test("nothing is owed before a width has arrived, because nothing has been measured")
+    func everythingIsOwedBeforeAWidth() {
+        let heights = TranscriptRowHeights()
+        #expect(heights.needsMeasuring(key("row.7"), redrawsItself: false))
+    }
+
     // MARK: - Forgetting
 
     @Test("forgetting empties the cache and keeps the width")

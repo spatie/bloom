@@ -331,6 +331,27 @@ struct TranscriptTable: NSViewRepresentable {
         /// The conversation this pane is currently drawing. A change of it is an arrival, and an
         /// arrival is not drawn until it is ready. See `showing(session:in:)`.
         private var shownSession: SessionID?
+        /// **What makes a cell rebuild even when its content key has not moved.**
+        ///
+        /// A cell recycles on its content key, which is the whole of what a table buys over a
+        /// stack, and twice that is not enough. A pool holds cells from the conversation the pane
+        /// has left, keyed by ids that are singletons across sessions (`.setup`, `.sending`,
+        /// `.streaming`), so coming back to a conversation can hand a row the very cell it had
+        /// last time: `apply` sees the key it already holds, returns, and the cell goes on hosting
+        /// a row built from the OTHER session's model, which is still running and still growing.
+        /// Its height reports are filed under this session's key, because the ids carry no session
+        /// to tell them apart, and the gap that opens is under the newest row.
+        ///
+        /// The second is the environment. `apply` reloads the table when the environment moves,
+        /// on the argument that every cell holds values from the one it was built in, and the key
+        /// guard silently defeated it: a reload re-asks for views and the pool hands the same
+        /// cells straight back, still carrying the pane a link opens into from the workspace
+        /// before last.
+        ///
+        /// Bumped rather than cleared per cell, because there is no reaching into an
+        /// `NSTableView`'s reuse pool: a number the cells carry is the only way to say "whatever
+        /// you are holding is from before".
+        private var cellGeneration = 0
         weak var holdView: TranscriptHoldView?
 
         /// The width a row is actually drawn at, which is the TABLE's width and not the clip
@@ -406,6 +427,10 @@ struct TranscriptTable: NSViewRepresentable {
             let previous = rowEnvironment
             rowEnvironment = environment
             let environmentMoved = previous != nil && previous != environment
+            // The reload below is what says every cell holds values from the environment it was
+            // built in, and a cell that recycles on its content key alone would take none of it.
+            // See `cellGeneration`.
+            if environmentMoved { cellGeneration += 1 }
             let wrapsDifferently = previous?.wraps(differentlyFrom: environment) ?? false
             if wrapsDifferently { heights.forget() }
 
@@ -570,7 +595,9 @@ struct TranscriptTable: NSViewRepresentable {
             // really replace the root view, because a recycled cell holding what it already holds
             // returns early. See `TranscriptHoldCensus.cellSeconds`.
             let started = TranscriptHoldCensus.clock()
-            let rebuilt = cell.apply(entry: entry, environment: rowEnvironment)
+            let rebuilt = cell.apply(
+                entry: entry, environment: rowEnvironment, generation: cellGeneration
+            )
             TranscriptHoldCensus.askedCell(
                 rebuilt: rebuilt, seconds: TranscriptHoldCensus.since(started)
             )
@@ -1496,6 +1523,9 @@ struct TranscriptTable: NSViewRepresentable {
             holdView = view
             guard shownSession != session else { return }
             shownSession = session
+            // Nothing in the reuse pool belongs to this conversation, whatever key it says it
+            // holds. See `cellGeneration`.
+            cellGeneration += 1
             view.hold(.nothing)
         }
 
@@ -1562,16 +1592,21 @@ struct TranscriptTable: NSViewRepresentable {
 
         /// Measures these rows now, at the width the cache is for, and says which of them moved.
         ///
-        /// A row is measured here if nobody has measured it at all, or if what is held for it was
-        /// taken at another width. Everything else is already the answer.
+        /// A row is measured here if nobody has measured it at all, if what is held for it was
+        /// taken at another width, or if it is one of the entries whose key cannot say what it
+        /// draws. Everything else is already the answer, and the rule for which is which is
+        /// `TranscriptRowHeights.needsMeasuring`, which carries the blank this used to leave under
+        /// the newest row.
         @discardableResult
         private func measureExactly(_ rows: Range<Int>) -> IndexSet {
             guard let sizing = heights.measure else { return IndexSet() }
             var moved = IndexSet()
             for row in rows where entries.indices.contains(row) {
-                let key = entries[row].contentKey
-                guard heights.height(for: key) == nil || heights.isStale(key) else { continue }
-                if heights.note(measure(entries[row], at: CGFloat(sizing.width)), for: key) {
+                let entry = entries[row]
+                guard heights.needsMeasuring(
+                    entry.contentKey, redrawsItself: entry.id.redrawsItself
+                ) else { continue }
+                if heights.note(measure(entry, at: CGFloat(sizing.width)), for: entry.contentKey) {
                     moved.insert(row)
                 }
             }
@@ -1703,6 +1738,9 @@ private struct HostedRow: View {
 final class TranscriptTableCell: NSView {
     private let host: NSHostingView<AnyView>
     private var appliedKey: TranscriptContentKey?
+    /// Which generation of the table's cells this one is from. Nothing to start with, so a cell
+    /// built here is always behind and is always applied. See `Coordinator.cellGeneration`.
+    private var appliedGeneration: Int?
     private var unclip: Task<Void, Never>?
     var onHeightChange: (@MainActor (TranscriptEntryID, CGFloat) -> Void)?
 
@@ -1726,13 +1764,21 @@ final class TranscriptTableCell: NSView {
     /// Returns whether the root view had to be replaced, which is the expensive half and the only
     /// half worth timing. See `TranscriptHoldCensus.cellSeconds`.
     @discardableResult
-    func apply(entry: TranscriptTableEntry, environment: TranscriptRowEnvironment) -> Bool {
+    func apply(
+        entry: TranscriptTableEntry, environment: TranscriptRowEnvironment, generation: Int
+    ) -> Bool {
         // The recycling. A cell that already holds this content is left exactly as it is, which
         // is what a table buys over a stack that rebuilds every realised row on every pass. The
         // three entries that re-render themselves are NOT excepted, and used to be: handing the
         // streaming tail a new root view on every pass rebuilt it several times a second.
-        guard appliedKey != entry.contentKey else { return false }
+        //
+        // **The key alone was not enough, and both ways it was not enough were bugs the reader
+        // could see.** See `Coordinator.cellGeneration`: a cell from the conversation the pane has
+        // left can come back for the same singleton key, and a cell built in an environment that
+        // has since moved is what a reload was supposed to replace.
+        guard appliedKey != entry.contentKey || appliedGeneration != generation else { return false }
         appliedKey = entry.contentKey
+        appliedGeneration = generation
         let id = entry.id
         host.rootView = AnyView(
             HostedRow(
