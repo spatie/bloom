@@ -69,6 +69,19 @@ public struct TranscriptPaneState: Equatable, Sendable {
     /// Nil when the pane had no row on screen to name, which is an empty conversation and the
     /// frames before the first layout. The offset carries those.
     public var anchorSeq: Int?
+    /// How far above that row's top the pane started, which is `TranscriptAnchor.delta`.
+    ///
+    /// **The row alone puts a reader back at the top of the row they were in, and that is not
+    /// where they were.** A single answer is regularly two thousand points tall, so somebody who
+    /// left half way down one came back to its first line and had to find their place again. The
+    /// pair is what every implementation that has written this down keeps: Element, Zulip, VS Code
+    /// and CodeMirror all store an id and an offset within it, and the delta was already being
+    /// computed for the in-session case by `TranscriptTable`'s own anchor. It simply was not
+    /// written down.
+    ///
+    /// Usually negative, for the reason `TranscriptAnchor.delta` gives: the row at the top of the
+    /// pane is normally part way scrolled off it.
+    public var anchorDelta: Double
     /// Whether that offset was the live end.
     ///
     /// Kept as a flag rather than inferred from the offset, because a turn can run while the
@@ -88,6 +101,7 @@ public struct TranscriptPaneState: Equatable, Sendable {
         expanded: Set<Int>,
         offset: Double,
         anchorSeq: Int? = nil,
+        anchorDelta: Double = 0,
         isAtLiveEnd: Bool,
         rowCount: Int,
         drawn: TranscriptWindow = TranscriptWindow(start: 0, end: 0)
@@ -95,6 +109,7 @@ public struct TranscriptPaneState: Equatable, Sendable {
         self.expanded = expanded
         self.offset = offset
         self.anchorSeq = anchorSeq
+        self.anchorDelta = anchorDelta
         self.isAtLiveEnd = isAtLiveEnd
         self.rowCount = rowCount
         self.drawn = drawn
@@ -110,8 +125,9 @@ public enum TranscriptPlacement: Equatable, Sendable {
     case liveEnd
     /// The reader left this many points down. The fallback, for a pane that could not name a row.
     case offset(Double)
-    /// The reader left this row at the top of the pane, so that is where it goes back.
-    case row(Int)
+    /// The reader left this row at the top of the pane, this far above the row's own top, so
+    /// that is where they go back. See `TranscriptPaneState.anchorDelta`.
+    case row(seq: Int, delta: Double)
 }
 
 /// The rule for what a pane may do with what it remembers.
@@ -192,9 +208,9 @@ public enum TranscriptResume {
         // of a scroll target layout, and measured on this list that layout costs too much to keep:
         // p99 went from 21.8ms to 39.2ms scrolling a 225 row chat with nothing else changed. So
         // the row is what an AppKit list would buy, and until then this is the honest fallback.
-        // The row they were reading, which survives every re-measurement and every width. See
-        // `TranscriptPaneState.anchorSeq`.
-        if let seq = remembered.anchorSeq { return .row(seq) }
+        // The row they were reading, which survives every re-measurement and every width, and how
+        // far into it they were. See `TranscriptPaneState.anchorSeq`.
+        if let seq = remembered.anchorSeq { return .row(seq: seq, delta: remembered.anchorDelta) }
         // **Nought is a place: it is the top of the conversation.** This used to refuse it, on the
         // reasoning that a pane which has never been laid out reports nought and restoring that
         // would be a restore of nothing. The pane not being laid out is a fact about the PANE, and
@@ -203,5 +219,32 @@ public enum TranscriptResume {
         // scrolled to the very top of a long conversation being told they had no place at all, and
         // sent to their first unread row instead. That is the second half of the report.
         return .offset(remembered.offset)
+    }
+
+    /// Whether a pane may write down where it is at all.
+    ///
+    /// **The owner's report was that a workspace switch loses the place, and what it turned out to
+    /// be is not a failure to restore it: it is the arriving session overwriting it.** Pointing
+    /// this pane at another conversation sets the write target to the session being ARRIVED at and
+    /// then suspends on `transcript.load()`. A scroll settling inside that window wrote, under the
+    /// arriving session's key, a live end flag forced true by the switch, an anchor of nothing,
+    /// and the offset of the conversation being left.
+    ///
+    /// So the same guard the list's two other after-the-fact writers already had:
+    /// `TranscriptListView.growWindow` and `trackArrivals` both open by refusing to act until the
+    /// session has finished arriving. `arrived` is the session the pane has settled on and
+    /// `writingTo` is the session the measurements belong to, which is deliberately not the one
+    /// the model is pointed at now: on the way out of a conversation they are the one being left,
+    /// and that write is the one this whole file exists for.
+    ///
+    /// The other two are unchanged and are about the pane rather than the session: nothing is
+    /// written down about a pane that has drawn no rows, or that has never been laid out. Nought
+    /// is a real place to a reader at the top of a conversation, so the height is what says a
+    /// layout has happened.
+    public static func mayRemember(
+        arrived: SessionID?, writingTo: SessionID?, drawnRows: Int, paneHeight: Double
+    ) -> Bool {
+        guard let writingTo, arrived == writingTo else { return false }
+        return drawnRows > 0 && paneHeight > 0
     }
 }

@@ -82,6 +82,11 @@ final class TranscriptTableController {
     /// Lets go of the standing instruction above, without moving anything.
     func releaseEnd() { coordinator?.releaseEnd() }
 
+    /// Whether that instruction is standing now. Read by the pane when it writes down where the
+    /// reader was: an instruction to be at the end is where somebody is, even on the frames a
+    /// height correction has left the view a few points short of it.
+    var holdsEnd: Bool { coordinator?.holdsEnd ?? false }
+
     /// **`TranscriptLiveEndFollower` is driving the clip view from here on, so nothing in the
     /// table may touch it.**
     ///
@@ -98,6 +103,13 @@ final class TranscriptTableController {
     func scroll(to entryID: TranscriptEntryID, anchor: UnitPoint) {
         coordinator?.scroll(to: entryID, anchor: anchor)
     }
+
+    /// Put this row back this far above the top of the pane, which is where a reader who was part
+    /// way down a long answer left it. See `TranscriptAnchor.offset(rowTop:delta:)`.
+    func scroll(to entryID: TranscriptEntryID, delta: CGFloat) {
+        coordinator?.scroll(to: entryID, delta: delta)
+    }
+
     func scroll(toY y: CGFloat) { coordinator?.scroll(toY: y) }
 
     /// A fold is about to open or close. See `Coordinator.pendingUnfolds`.
@@ -111,8 +123,9 @@ final class TranscriptTableController {
     /// pane draws nothing. See `TranscriptHoldView.hold(_:)`.
     func arrived() { coordinator?.arrived() }
 
-    /// The entry at the top of the pane, which is the place a reader is put back at.
-    var topmostEntry: TranscriptEntryID? { coordinator?.topmostEntry }
+    /// Where the reader is, as the pair that puts them back: the stored row at the top of the
+    /// pane, and how far above its own top the pane starts. See `Coordinator.topmostPlace`.
+    var topmostPlace: (seq: Int, delta: CGFloat)? { coordinator?.topmostPlace }
 
     var geometry: TranscriptTableGeometry {
         coordinator?.currentGeometry ?? TranscriptTableGeometry()
@@ -279,7 +292,11 @@ struct TranscriptTable: NSViewRepresentable {
 
         /// **A standing instruction to be at the end of the conversation.** See
         /// `TranscriptTableController.goToEnd`, which carries why a single scroll cannot mean it.
-        private var holdsEnd = false
+        ///
+        /// Readable through the controller, because the pane has to write down whether the reader
+        /// was at the live end and an instruction to be there is where somebody is. Written here
+        /// and nowhere else: `goToEnd` and `releaseEnd` are the only two things that move it.
+        fileprivate private(set) var holdsEnd = false
         /// Whether this file is the thing moving the clip view right now, so that the escape below
         /// does not read the transcript's own arrival at the end as the reader scrolling away.
         private var isPutting = false
@@ -927,6 +944,41 @@ struct TranscriptTable: NSViewRepresentable {
             return entries[range.location].id
         }
 
+        /// The row at the top of the pane and how far above its own top the pane starts, which is
+        /// the pair `TranscriptAnchor` restores a reader from.
+        ///
+        /// **A chain rather than the topmost entry alone, because four of the entries in this list
+        /// are not stored rows and have no sequence number at all.** A reader anywhere near the
+        /// live end has the streaming tail, the bubble being sent or a queued message at the top of
+        /// the pane, and `topmostEntry` named one of those: `seq` was nil, the pane wrote down no
+        /// anchor, and it fell back to a point measured against a content height that is a fact
+        /// about what has been measured rather than about the conversation. That is where the nil
+        /// anchors came from.
+        ///
+        /// Upwards first, to the last stored row above the fold, because that is what the delta is
+        /// for: it is normally negative anyway, and the row starting above the viewport restores
+        /// the same place exactly. Downwards only when there is nothing above, which is a reader at
+        /// the very top of a conversation with the setup log over it.
+        var topmostPlace: (seq: Int, delta: CGFloat)? {
+            guard let tableView, let scrollView else { return nil }
+            let visible = scrollView.contentView.documentVisibleRect
+            let range = tableView.rows(in: visible)
+            guard range.length > 0 else { return nil }
+            func place(_ row: Int) -> (seq: Int, delta: CGFloat)? {
+                guard entries.indices.contains(row), let seq = entries[row].id.seq else { return nil }
+                return (seq, CGFloat(TranscriptAnchor.delta(
+                    rowTop: tableView.rect(ofRow: row).minY, viewportTop: visible.minY
+                )))
+            }
+            for row in stride(from: range.location, through: 0, by: -1) {
+                if let found = place(row) { return found }
+            }
+            for row in stride(from: range.location + 1, to: entries.count, by: 1) {
+                if let found = place(row) { return found }
+            }
+            return nil
+        }
+
         // MARK: The end, and holding it
 
         func goToEnd() {
@@ -1020,6 +1072,31 @@ struct TranscriptTable: NSViewRepresentable {
             }
             // Aimed at where the estimates say the row is, measured there, and then aimed again at
             // where it turned out to be: measuring the screen is what moves it.
+            measureLanding(at: target())
+            put(target(), in: scrollView)
+        }
+
+        /// The same as above, aimed by a delta rather than by a `UnitPoint`, and it says itself
+        /// twice for the same reason.
+        func scroll(to entryID: TranscriptEntryID, delta: CGFloat) {
+            aimingElsewhere()
+            put(at: entryID, delta: delta)
+            reaimWork?.cancel()
+            reaimWork = Task { @MainActor [weak self] in
+                await Task.yield()
+                guard !Task.isCancelled, let self else { return }
+                reaimWork = nil
+                put(at: entryID, delta: delta)
+            }
+        }
+
+        private func put(at entryID: TranscriptEntryID, delta: CGFloat) {
+            guard let tableView, let scrollView, let row = index[entryID] else { return }
+            func target() -> CGFloat {
+                CGFloat(TranscriptAnchor.offset(
+                    rowTop: tableView.rect(ofRow: row).minY, delta: delta
+                ))
+            }
             measureLanding(at: target())
             put(target(), in: scrollView)
         }

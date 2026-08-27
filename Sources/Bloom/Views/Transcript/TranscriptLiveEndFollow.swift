@@ -114,6 +114,14 @@ final class TranscriptLiveEndFollower {
     /// to a scroll view never reads a pane's worth of content as an arrival.
     private var lastHeight: CGFloat = 0
 
+    /// Whether the link is up, which is this object holding the view at the live end.
+    ///
+    /// Read by the pane when it writes down where the reader was. Mid travel the view is up to
+    /// `TranscriptFollow.takeBack` behind the end on purpose, and a pane that wrote that down
+    /// exactly would remember somebody who was watching a turn arrive as somebody who had
+    /// scrolled up, and bring them back anchored to a row while the agent went on writing.
+    var isFollowing: Bool { link != nil }
+
     /// A row has landed. Keeps the following up for a moment even if nothing is streaming.
     func nudge() {
         deadline = CACurrentMediaTime() + Self.grace

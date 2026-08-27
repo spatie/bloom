@@ -112,10 +112,29 @@ struct TranscriptListView: View {
     /// How far below the viewport the end of the conversation is, read for one thing only: how
     /// long the jump pill's travel back to the live end should run for.
     @State private var reachToEnd = GeometryBox(0.0)
-    /// The row at the top of the pane, in a box for the reason the two above are: it moves on
-    /// every frame of a scroll and nothing draws from it. It replaces the set of visible row ids the
-    /// lazy stack had to keep, because a table can simply be asked which row is at the top.
-    @State private var topSeq = GeometryBox(0)
+    /// The row at the top of the pane and how far above its top the pane starts, in a box for the
+    /// reason the two above are: it moves on every frame of a scroll and nothing draws from it. It
+    /// replaces the set of visible row ids the lazy stack had to keep, because a table can simply
+    /// be asked which row is at the top.
+    ///
+    /// Both halves, because the row alone is the top of the row: see
+    /// `TranscriptPaneState.anchorDelta`. Nil until the table has a stored row to name, and never
+    /// cleared by a pane that cannot see one, so what is written down is the last real place.
+    @State private var topPlace = GeometryBox<(seq: Int, delta: CGFloat)?>(nil)
+    /// Whether the pane is at the live end EXACTLY, which is not `geometry.isNearBottom`.
+    ///
+    /// **Two different questions, and one number was answering both.** `ScrollEnd.threshold` is 96
+    /// points and it answers "may an arriving row move the view", which is a question about a
+    /// reader who has nudged the wheel and is still following along. What is written down here is
+    /// "where was this person", and somebody ninety points up is somebody who scrolled up ninety
+    /// points: coming back to the live end instead is the pane deciding it knows better.
+    /// `TranscriptAnchor.isAtEnd` is the exact test and its doc comment already draws the line.
+    ///
+    /// Exact, and then the two standing claims to be there, because neither of those is a reader
+    /// who has gone anywhere: `TranscriptTableController.holdsEnd` is somebody having asked for
+    /// the end out loud, and `TranscriptLiveEndFollower.isFollowing` is a turn being watched
+    /// arrive, which parks the view up to `TranscriptFollow.takeBack` behind the end on purpose.
+    @State private var atLiveEnd = GeometryBox(false)
 
     /// Which rows have only just turned up, so they settle in rather than appear at full opacity
     /// in a single frame. An object rather than `@State` because a table's cells are built after
@@ -187,6 +206,10 @@ struct TranscriptListView: View {
     private enum Opening: Equatable {
         case liveEnd
         case row(Int, UnitPoint)
+        /// A row and how far above its top the pane started, which is where a reader who was part
+        /// way down a long answer left off. Not the same as `.row(seq, .top)`, which is a row
+        /// somebody is being SHOWN. See `TranscriptPaneState.anchorDelta`.
+        case rowOffset(Int, Double)
         case offset(Double)
     }
 
@@ -653,7 +676,8 @@ struct TranscriptListView: View {
             writingTo = memory.map { WriteTarget(memory: $0, session: transcript.session.id) }
             resumed = TranscriptResume.isResuming(remembered) ? transcript.session.id : nil
             isGrowing.value = false
-            topSeq.value = 0
+            topPlace.value = nil
+            atLiveEnd.value = true
             // Nothing in the session being arrived at counts as having arrived. Cleared here as
             // well as set in `task`, because leaving a session before it had settled and coming
             // straight back must not find its own id still recorded and settle its whole tail.
@@ -810,7 +834,8 @@ struct TranscriptListView: View {
             offset: table.offset
         )
         contentOffset.value = table.offset
-        if let seq = controller.topmostEntry?.seq { topSeq.value = seq }
+        if let place = controller.topmostPlace { topPlace.value = place }
+        atLiveEnd.value = table.isAtEnd || controller.holdsEnd || follower.isFollowing
 
         var measured = TranscriptGeometry(
             paneHeight: TranscriptGeometry.height(table.viewportHeight),
@@ -838,6 +863,11 @@ struct TranscriptListView: View {
            drawn.window.canGrowDown(rowCount: transcript.rows.count) {
             measured.isNearBottom = false
             measured.isFarFromEnd = true
+            // And the same correction to what is written down: a pane whose window stops short of
+            // the newest row is at the end of what is drawn rather than at the end of the
+            // conversation, and coming back to "the live end" from that is coming back somewhere
+            // else.
+            atLiveEnd.value = false
         }
         // Written only on a change, because this runs on every frame of every scroll and each
         // write is a pass over this body. The report to the composer goes with it: one per frame
@@ -986,11 +1016,13 @@ struct TranscriptListView: View {
             opening = .liveEnd
         case .offset(let y):
             opening = .offset(y)
-        case .row(let seq):
-            // At the top of the pane, which is where it was: the anchor IS the row the reader had
-            // at the top. Not centred, which is what a search result gets, because a search result
-            // is a row somebody is being shown rather than a place somebody is being put back.
-            opening = .row(seq, .top)
+        case .row(let seq, let delta):
+            // The row the reader had at the top of the pane, put back where it was rather than at
+            // the top of the pane: an answer two thousand points tall read half way down is a
+            // place, and `.top` on its row is that answer's first line. Not centred either, which
+            // is what a search result gets, because a search result is a row somebody is being
+            // shown rather than a place somebody is being put back.
+            opening = .rowOffset(seq, delta)
         case .first:
             // A search result outranks both of the others. Somebody who clicked a line of a
             // transcript in the search screen asked for that line. Centred rather than at the top,
@@ -1021,6 +1053,8 @@ struct TranscriptListView: View {
         switch opening {
         case .row(let seq, let anchor):
             controller.scroll(to: .row(seq), anchor: anchor)
+        case .rowOffset(let seq, let delta):
+            controller.scroll(to: .row(seq), delta: CGFloat(delta))
         case .liveEnd:
             controller.goToEnd()
         case .offset(let y):
@@ -1039,19 +1073,27 @@ struct TranscriptListView: View {
     /// dropped: a reader who arrives, reads what is on screen and switches tab has scrolled
     /// nothing and folded nothing, and is exactly the case this whole file is about.
     private func remember() {
-        // Nothing is written down about a pane that has not drawn anything yet, or has not been
-        // laid out yet. The height is what says a layout has happened, and it is checked HERE
-        // rather than where the memory is read, because nought is a real place to a reader who is
-        // at the top of a conversation.
-        guard let target = writingTo, drawn.window.count > 0, geometry.paneHeight > 0 else { return }
+        // What may be written down at all, including the arrival guard its two neighbours here
+        // already had. It is a rule rather than a line of this method because it was the bug: see
+        // `TranscriptResume.mayRemember`.
+        guard let target = writingTo,
+              TranscriptResume.mayRemember(
+                  arrived: arrivalSession,
+                  writingTo: target.session,
+                  drawnRows: drawn.window.count,
+                  paneHeight: geometry.paneHeight
+              )
+        else { return }
+        let place = topPlace.value
         target.memory.remember(
             TranscriptPaneState(
                 expanded: expanded,
                 offset: contentOffset.value,
-                // The row at the top of the pane, which is the place; the offset above is what
-                // answers when there is no row to name.
-                anchorSeq: topSeq.value > 0 ? topSeq.value : nil,
-                isAtLiveEnd: geometry.isNearBottom,
+                // The row at the top of the pane and how far into it the reader was, which is the
+                // place; the offset above is what answers when there is no row to name.
+                anchorSeq: place?.seq,
+                anchorDelta: Double(place?.delta ?? 0),
+                isAtLiveEnd: atLiveEnd.value,
                 rowCount: transcript.rows.count,
                 drawn: drawn.window
             ),
