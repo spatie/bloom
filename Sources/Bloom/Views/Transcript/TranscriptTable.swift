@@ -1798,6 +1798,21 @@ final class TranscriptTableCell: NSView {
         host = NSHostingView(rootView: TranscriptCellRoot())
         super.init(frame: .zero)
         self.identifier = identifier
+        // **The window's safe area is not a transcript row's.** A hosting view resolves the safe
+        // area from wherever it is, so a cell near the top of the pane could be laid out inside an
+        // inset the row it is drawing knows nothing about, while the copy that measured that row
+        // has no window and therefore no inset at all. Two answers for one row is the whole class
+        // of bug this file is about. `safeAreaRegions` is the supported way to say it, and it is
+        // what `_disableSafeArea` was reached for before there was one.
+        host.safeAreaRegions = []
+        // **Nothing here needs the hosting view's own size**, and each option it is asked for is a
+        // layout measurement it has to perform: its own documentation says so. The cell pins this
+        // view to its four edges below and the table decides the height, so an intrinsic content
+        // size, a minimum and a maximum are three answers nobody reads. The height a row reports
+        // does not come from here either: it comes from the geometry reader inside `HostedRow`,
+        // over the content at its own ideal size. `DetailSplitViewController` and `TitleBarStrip`
+        // make the same call for the same reason.
+        host.sizingOptions = []
         host.translatesAutoresizingMaskIntoConstraints = false
         addSubview(host)
         NSLayoutConstraint.activate([
