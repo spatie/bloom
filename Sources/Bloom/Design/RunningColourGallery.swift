@@ -1,19 +1,25 @@
 import SwiftUI
 import BloomCore
 
-/// The four marks a glance has to tell apart, side by side, at the size they are read at.
+/// Every mark a glance has to tell the busy one from, side by side, at the size they are read at.
 ///
 /// It exists because of one report: "a green busy indicator is easily being confused with another
 /// green icon status". `Palette.running` was `Palette.positive` was `Palette.accent`, three names
 /// for one value, so a passing workspace's tick and a working workspace's dot were the same hue two
 /// rows apart and only their shapes said which was which. Nothing in the source showed that. The
 /// decision is one `case` in `WorkspaceStatusGlyph.tint` and one `static let` in `Palette`, and
-/// what was wrong with it is how four of these look **beside each other** down a 260 point column.
+/// what was wrong with it is how these look **beside each other** down a 260 point column.
 ///
 /// So this page is that column, and it is the picture the argument was settled with, the way
-/// `ActivityRule`'s own note says this codebase settles a colour twice over. It is also the page
-/// that catches the next collision: put a fifth meaning colour anywhere near this hue and the four
-/// swatches at the foot will say so before a window has to.
+/// `ActivityRule`'s own note says this codebase settles a colour twice over.
+///
+/// **The page grew when the mark went blue, and what it grew is the point of it.** The first answer
+/// to that report was orange, which had no near neighbour in this palette at all, and four rows was
+/// the whole question. The owner asked for the house blue instead, and a blue lands between three
+/// things: `positive`, which is a teal-green; `merged`, which is GitHub violet; and the tertiary
+/// ink, which in dark is a blue-grey at hue 198. A quiet workspace and a working one going the same
+/// colour is the same defect as the one being fixed, so the grey states are on the page now, and so
+/// is the violet. See `Palette.running` for the measurements; this is them, drawn.
 ///
 /// `--snapshot` writes it as `running-colour-<appearance>.png`, which is both appearances and is
 /// the whole of "does it work in dark": nothing here is drawn twice on one page, because
@@ -29,13 +35,23 @@ import BloomCore
 struct RunningColourGallery: View {
     /// The states the report put next to each other, in the order the sidebar had them.
     ///
-    /// A running workspace, a passing one, a pending check and a failing one: one from each of the
-    /// four meaning colours the column can draw, which is the set a hue has to be told apart from.
+    /// One from each colour the column can draw, which is the set a hue has to be told apart from:
+    /// the running mark, the accent, amber, red, GitHub violet, and a grey. The last two are here
+    /// because the mark is blue: violet is the nearest hue the palette owns, and a grey state is
+    /// what a blue that drifted toward the tertiary ink would be mistaken for, which would say a
+    /// workspace has nothing happening in it at exactly the moment it does.
+    ///
+    /// `clean` rather than `draft` or `closed` for the grey, because it is the state a working
+    /// workspace most often was a minute ago and will be again, so the two really are read in the
+    /// same place. `unread` carries the accent as well and is left off: `RunningGlyphGallery` is
+    /// the page for that pair, and it has been since the mark was a dot at all.
     private static let states: [Mark] = [
         Mark(status: .running, name: "Working"),
         Mark(status: .checksPassed, name: "Checks passed"),
         Mark(status: .checksRunning, name: "Checks running"),
         Mark(status: .checksFailing, name: "Checks failing"),
+        Mark(status: .merged, name: "Merged"),
+        Mark(status: .clean, name: "No changes"),
     ]
 
     /// One row of the four. A named type rather than a tuple, because `ForEach` wants an identity
@@ -53,7 +69,7 @@ struct RunningColourGallery: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Running, against what it sits beside")
                     .font(Typo.title)
-                Text("The four marks a glance has to tell apart, and the hues they are drawn in.")
+                Text("What the busy mark has to be told from, and the hues they are drawn in.")
                     .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
             }
@@ -97,10 +113,10 @@ struct RunningColourGallery: View {
         }
     }
 
-    /// The same four at six times, so a hue can be read rather than guessed at.
+    /// The same set at six times, so a hue can be read rather than guessed at.
     private var enlarged: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("The same four, six times")
+            Text("The same marks, six times")
                 .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
             HStack(alignment: .top, spacing: 24) {
@@ -123,10 +139,11 @@ struct RunningColourGallery: View {
     // MARK: The other two places the window says it
 
     /// The tab's dot and the tab strip's rule, which are the other two marks the report named, with
-    /// a passing tick beside each so the pair can be judged rather than admired on its own.
+    /// a passing tick beside the dot so the pair can be judged rather than admired on its own, and
+    /// the fill the rule has to survive being drawn above.
     private var elsewhere: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("On a tab, and on the rule under the strip")
+            Text("On a tab, on the rule under the strip, and above a user's own message")
                 .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
             Text("Held still: what Reduce Motion draws, and the only figure a render can photograph.")
@@ -145,7 +162,32 @@ struct RunningColourGallery: View {
                 ActivityRuleFigure(variant: .crest, isMoving: false)
             }
             .frame(width: Self.ruleWidth, height: 26)
+
+            bubble
         }
+    }
+
+    /// The rule with the house fill directly under it, which is the case a blue rule has and an
+    /// orange one did not.
+    ///
+    /// A user's own message is drawn in `Palette.accentFill`, `#197593`, and the busy rule is now
+    /// a blue 12.9 from it. `ActivityRuleGallery` has carried this row since the rule was the
+    /// accent, on the argument that a mark in the accent an inch above a block of the accent is the
+    /// one place a lit line can be lit and still not be seen. That argument came back the moment
+    /// the mark went blue, so the row is here too rather than one page away: the claim is that
+    /// twelve degrees round the wheel and a step up in lightness are enough, and this is where it
+    /// is either true or not.
+    private var bubble: some View {
+        HStack {
+            Spacer(minLength: 0)
+            Text("Have another look at the transcript stutter")
+                .font(Typo.body)
+                .foregroundStyle(Palette.textInverted)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Palette.accentFill, in: RoundedRectangle(cornerRadius: 12))
+        }
+        .frame(width: Self.ruleWidth)
     }
 
     /// The centre column at a window somebody would work in, which is the width the rule was tuned
@@ -183,6 +225,9 @@ struct RunningColourGallery: View {
                 swatch("positive", Palette.positive, PaletteInk.accent)
                 swatch("warning", Palette.warning, PaletteInk.warning)
                 swatch("negative", Palette.negative, PaletteInk.negative)
+                swatch("merged", Palette.merged, PaletteInk.merged)
+                swatch("textTertiary", Palette.textTertiary, PaletteInk.textTertiary)
+                swatch("accentFill", Palette.accentFill, PaletteInk.accentFill)
             }
         }
     }
@@ -191,7 +236,7 @@ struct RunningColourGallery: View {
         VStack(alignment: .leading, spacing: 6) {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(colour)
-                .frame(width: 120, height: 44)
+                .frame(width: 96, height: 44)
             Text(name)
                 .font(Typo.micro)
                 .foregroundStyle(Palette.textSecondary)
@@ -217,7 +262,7 @@ extension Gallery {
     static let runningColour = Gallery(
         name: "running-colour",
         title: "Running, against what it sits beside",
-        size: CGSize(width: 900, height: 900),
+        size: CGSize(width: 900, height: 1100),
         needsFocus: false,
         view: { _ in AnyView(RunningColourGallery()) }
     )

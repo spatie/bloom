@@ -308,13 +308,21 @@ struct PaletteContrastTests {
     /// green icon status. A doc comment saying "these must differ" is the kind of claim
     /// `PaletteInk`'s own header says was wrong several times over, so it is a number here.
     ///
-    /// Equality is the floor and it is not the test. The four meaning colours are read as an index
-    /// down one 260 point column, so what matters is that a glance separates them, and CIEDE2000 is
-    /// what says whether it can. `warning` and `negative` were already neighbours at 27.9 in light
-    /// before any of this, so that pair is the standard the new hue is held to rather than a number
-    /// invented for it: running has to be at least half of it from both, which is the most an
-    /// orange squeezed between an amber and a red can be.
-    @Test("running is a hue of its own, and far enough from the three it is read beside")
+    /// **Equality is the floor and it is not the test**, and the blue is why that distinction had
+    /// to be paid for. The busy mark was orange first, which sat in an empty quadrant of the wheel
+    /// and was 46.9 from `positive`; the house blue it became is a near neighbour of the teal it
+    /// has to be told from, so a test that only asked "are these two numbers different" would have
+    /// passed on `accentFill` itself, at 17.9 in light, which is closer than `positive` is to the
+    /// tertiary ink and is the reported bug wearing another hue.
+    ///
+    /// So the bars are this app's own separations rather than numbers invented for the occasion,
+    /// and there are two of them because the neighbours are of two kinds. `warning` and `negative`
+    /// are the closest pair of meaning colours Bloom deliberately draws apart, at 27.9 in light and
+    /// 28.8 in dark, and `positive` is what running was confused with, so that is the bar it is
+    /// held to in full. `warning`, `negative` and `merged` are further round and are held to half
+    /// of it, which is all an ink squeezed between two hues can promise. `negative` and `stop` are
+    /// deliberately 7.0 apart and are not a counter-example: they are one meaning at two volumes.
+    @Test("running is a hue of its own, and far enough from the four it is read beside")
     func runningIsNotAnyoneElse() {
         for (appearance, isDark) in Self.appearances {
             let running = PaletteInk.running.member(dark: isDark)
@@ -324,23 +332,86 @@ struct PaletteContrastTests {
 
             #expect(running != positive, "running is \(appearance)'s positive again")
 
-            let neighbours = Contrast.deltaE(running, warning)
-            let alarm = Contrast.deltaE(running, negative)
-            let floor = Contrast.deltaE(warning, negative) / 2
+            // The one the report was actually about, held to the full bar.
+            let confusable = Contrast.deltaE(running, positive)
+            let bar = Contrast.deltaE(warning, negative)
             #expect(
-                neighbours >= floor,
-                "running against warning, \(appearance): \(neighbours.rounded(to: 1)) against \(floor.rounded(to: 1))"
+                confusable >= bar,
+                "running against positive, \(appearance): \(confusable.rounded(to: 1)) against \(bar.rounded(to: 1))"
             )
+
+            let others: [(String, UInt32)] = [
+                ("warning", warning),
+                ("negative", negative),
+                ("merged", PaletteInk.merged.member(dark: isDark)),
+            ]
+            for (name, other) in others {
+                let measured = Contrast.deltaE(running, other)
+                #expect(
+                    measured >= bar / 2,
+                    "running against \(name), \(appearance): \(measured.rounded(to: 1)) against \(bar.rounded(to: 1) / 2)"
+                )
+            }
+        }
+    }
+
+    /// The neighbour a blue busy mark has that an orange one did not: Bloom's own tertiary ink.
+    ///
+    /// `textTertiary` is `#69757B` and `#769AAA`, and the dark member is a blue-grey at hue 198,
+    /// eight degrees off `accentFill`. The status column draws greys in it, so a running dot that
+    /// drifted toward it would read as a workspace with nothing happening, which is the opposite of
+    /// what it says. This is not a floor anybody chose either: `merged` and `textTertiary` already
+    /// sit 14.2 and 14.9 apart in this window, so that is what running has to beat, and it is the
+    /// pair that decides how light the dark member is allowed to be.
+    @Test("the busy mark cannot be mistaken for a dim one")
+    func runningIsNotTheQuietInk() {
+        for (appearance, isDark) in Self.appearances {
+            let running = PaletteInk.running.member(dark: isDark)
+            let quiet = PaletteInk.textTertiary.member(dark: isDark)
+            let bar = Contrast.deltaE(PaletteInk.merged.member(dark: isDark), quiet)
+            let measured = Contrast.deltaE(running, quiet)
             #expect(
-                alarm >= floor,
-                "running against negative, \(appearance): \(alarm.rounded(to: 1)) against \(floor.rounded(to: 1))"
-            )
-            // The one the report was actually about, and it is not close.
-            #expect(
-                Contrast.deltaE(running, positive) >= 40,
-                "running against positive, \(appearance): \(Contrast.deltaE(running, positive).rounded(to: 1))"
+                measured >= bar,
+                "running against textTertiary, \(appearance): \(measured.rounded(to: 1)) against \(bar.rounded(to: 1))"
             )
         }
+    }
+
+    /// Why the busy mark is not `accentFill`, which is the colour anybody asking for "the house
+    /// blue" means, and which this palette cannot spend here.
+    ///
+    /// Written as a failing measurement rather than as a sentence, because "we tried the obvious
+    /// thing and it did not work" is exactly the note that gets deleted by the next person who
+    /// thinks they have a tidier idea. Two things are wrong with it and only one is about hue.
+    ///
+    /// In dark it is not an ink. `accentFill` is one value in both appearances by design, a fill
+    /// with white text on it, and `#197593` on the raised surface a card is drawn on measures under
+    /// the floor a mark holds without even being read. In light it is legible and still wrong: it
+    /// is nearer `positive` than the app's own quiet ink is, which is the reported confusion with
+    /// the green swapped for a blue.
+    @Test("the house blue is a fill, and cannot be the busy mark itself")
+    func theHouseBlueCannotDoThisJob() {
+        let fill = PaletteInk.accentFill.dark
+        let raised = PaletteInk.surfaceRaised.dark
+        #expect(
+            Contrast.ratio(fill, raised) < Contrast.nonTextFloor,
+            "accentFill on the raised surface in dark: \(Contrast.ratio(fill, raised).rounded(to: 2)) to 1"
+        )
+
+        let toPositive = Contrast.deltaE(PaletteInk.accentFill.light, PaletteInk.accent.light)
+        let quiet = Contrast.deltaE(PaletteInk.accent.light, PaletteInk.textTertiary.light)
+        #expect(
+            toPositive < quiet,
+            "accentFill sits \(toPositive.rounded(to: 1)) from positive, the tertiary ink \(quiet.rounded(to: 1))"
+        )
+
+        // And the blue that was drawn instead is still recognisably it: nearer the house fill than
+        // Bloom's own accent is, which is the whole of "the same family, moved off the teal".
+        let running = PaletteInk.running.light
+        #expect(
+            Contrast.deltaE(running, PaletteInk.accentFill.light) < quiet,
+            "running sits \(Contrast.deltaE(running, PaletteInk.accentFill.light).rounded(to: 1)) from the house fill"
+        )
     }
 
     /// A boundary is not read, so it holds the non-text floor rather than the text one. `border`

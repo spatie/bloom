@@ -434,21 +434,31 @@ enum Palette {
     /// marks meaning three different things were one colour and only their shapes told them apart.
     /// Hue is what a glance reads first, and it was saying nothing.
     ///
-    /// Amber was asked for and orange is what it became, because `warning` is amber and taking it
-    /// would have bought the same defect one column over. `WorkspaceStatusGlyph.tint` already
-    /// draws `awaitingPermission` and `checksRunning` in `warning`, and a raised hand is the one
-    /// state on Home that stops for a person while this one is the definition of the lane that
-    /// does not: `HomeLane` splits them as `waiting` and `working`. Two states that far apart may
-    /// not share a colour.
+    /// It was orange for a day, which was the first answer to that report and is not this one. The
+    /// owner looked at it in the window and asked for the house blue instead, and the whole of what
+    /// follows is why the house blue could not simply be taken.
     ///
-    /// So it stands between the amber and the red, at hue 27 in both members, which is the widest
-    /// gap the two of them leave: measured as CIEDE2000, `#B85300` sits 15.1 from `warning` and
-    /// 15.2 from `negative` in light, `#FA7000` sits 17.0 and 17.9 in dark, and no other orange
-    /// that clears its contrast floor does better on the worse of the pair. Full saturation in
-    /// both, for the reason `warning`'s own note gives: at this lightness the headroom goes into
-    /// the hue or the colour comes out brown. It clears the text floor on every ground it is drawn
-    /// on, `PaletteContrastTests` says so, and its distance from `positive` is 46.9 and 55.4,
-    /// which is the number the report was actually about.
+    /// **`accentFill` itself is not usable here, and the numbers say so twice.** In dark it is not
+    /// an ink at all: `#197593` on `surfaceRaised` measures 2.62 to 1, under even the 3.0 floor a
+    /// mark holds without being read, which is the whole reason that pair is one value in both
+    /// appearances and is documented as a FILL that carries white text. And in light it is 17.9
+    /// from `positive` by CIEDE2000, closer than `positive` is to the tertiary ink, which is the
+    /// same bug in a new hue: a teal-blue dot two rows under a teal-green tick.
+    ///
+    /// So it is moved round the wheel until it stops being teal, and no further: hue 195 to 207 in
+    /// light and to 211 in dark, twelve degrees and sixteen. That buys 31.1 and 30.4 from
+    /// `positive`, both past the 27.9 and 28.8 that `warning` and `negative` already sit apart at,
+    /// which is the closest two meaning colours in this app are deliberately drawn. It is still
+    /// recognisably the same blue: 12.9 from `accentFill` in light, where `accent`'s own light
+    /// member is 17.9 from it.
+    ///
+    /// What a blue costs that the orange did not is that it has two near neighbours instead of
+    /// none. `merged` is GitHub violet, at 21.3 and 25.0, and `textTertiary` is a blue-grey in dark
+    /// (`#769AAA`, hue 198), at 17.8 and 15.1. Both clear the 14.2 and 14.9 that `merged` and
+    /// `textTertiary` are already drawn at in this window, so neither is a new kind of closeness,
+    /// but they are why the lightness is where it is: darker in light and lighter in dark than the
+    /// separation alone would want, so the mark is never a grey one. `PaletteContrastTests` pins
+    /// all of it.
     static let running = dynamic(PaletteInk.running)
 
     /// The same pair as an `NSColor`, for `ActivityRuleView`'s layers. See `accentNSColor`.
