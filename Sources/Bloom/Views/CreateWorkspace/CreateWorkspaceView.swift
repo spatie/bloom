@@ -1097,7 +1097,7 @@ struct CreateWorkspaceView: View {
         // agent that had been given three screenshots and told about none of them.
         // See `WorkspaceStartAttachments`.
         let text = WorkspaceStartAttachments.handover(
-            isChatWorkspace: chosen.runsAnAgent, draft: prompt, name: terminalName
+            isChatWorkspace: chosen.runsAnAgent, draft: prompt, name: typedName
         )
         let base = baseBranch.isEmpty ? repo.defaultBranch : baseBranch
         let source = checkout
