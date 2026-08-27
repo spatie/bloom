@@ -95,9 +95,26 @@ struct ActivityRule: View {
 
     private var pulse: BusyPulse { .shared }
 
-    /// Read from the one observable set, not from a flag of this view's own. See
+    /// **This workspace's turn, not anybody's.** It was `!runningWorkspaceIDs.isEmpty`, so one
+    /// agent working anywhere lit the rule over every workspace in the window, and the report was
+    /// that the busy indicator shows on all workspaces if any workspace has a running AI. The rule
+    /// is drawn once per centre column and the centre column shows one workspace, so it answers
+    /// for that one.
+    ///
+    /// The Ask conversation is scoped to no workspace and has a turn of its own, which is why this
+    /// asks the selection rather than a workspace id: reading `runningWorkspaceIDs` alone would
+    /// have left Ask permanently dark.
+    ///
+    /// The clock stays shared. `BusyPulse` still ticks off the whole set, so every rule and dot in
+    /// the app agrees on the phase, and what changes here is only which of them is visible. See
     /// `AppModel.runningWorkspaceIDs`.
-    private var isRunning: Bool { !app.runningWorkspaceIDs.isEmpty }
+    private var isRunning: Bool {
+        switch app.selection {
+        case .ask: app.ask.isRunning
+        case .home: false
+        default: app.selection.workspaceID.map(app.runningWorkspaceIDs.contains) ?? false
+        }
+    }
 
     var body: some View {
         ActivityRuleFigure(variant: variant, isMoving: pulse.isTicking)
