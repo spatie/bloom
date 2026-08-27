@@ -15,7 +15,7 @@
 # tried to second-guess it would be wrong the first time a file moved.
 
 .DEFAULT_GOAL := help
-.PHONY: help build test app run lint swiftlint master dev dev-db release dmg
+.PHONY: help build test app run lint swiftlint master dev ssh dev-db release dmg
 
 help: ## Show this list
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -46,6 +46,9 @@ master: ## Build HEAD and install it to ~/Applications/Bloom.app
 
 dev: ## Build HEAD as Bloom Dev, a second app that cannot reach the real data
 	./Tools/dev-build.sh
+
+ssh: ## Build HEAD as Bloom SSH, a third app for the work that talks to real servers
+	./Tools/dev-build.sh --identity ssh
 
 dev-db: ## Copy the real database into Bloom Dev's own container
 	./Tools/dev-db.sh

@@ -7,8 +7,9 @@ import Foundation
 /// MCP server as a stdio command or an HTTP URL, Codex as a stdio `command` or a streamable HTTP
 /// `--url`, and that is the whole list on both. HTTP on localhost was refused for a different
 /// reason: one port for the whole machine, reachable by every local process, and impossible to
-/// share between Bloom and Bloom Dev, which are a documented permanent pair. So the registered
-/// transport is stdio, and the socket sits behind it.
+/// share between Bloom and the copies installed beside it, which are a documented permanent
+/// arrangement rather than a test setup. So the registered transport is stdio, and the socket sits
+/// behind it.
 ///
 /// The shim is a line relay and deliberately not an MCP implementation. Every behaviour that
 /// lives in the shim is a behaviour that can skew against the app, because Sparkle replaces the
