@@ -157,7 +157,9 @@ struct FileTreeView: View {
                 isChanged: changedPaths.contains(path),
                 fullPath: fullPath(path),
                 action: { activate(item.node) },
-                onOpenTerminal: { FolderTerminalTab.open(folder: fullPath(path), in: model) }
+                onOpenTerminal: { FolderTerminalTab.open(folder: fullPath(path), in: model) },
+                onOpenPage: { BrowserTab.openFile(fullPath(path), in: model) },
+                onSplitPage: { BrowserTab.splitFile(fullPath(path), in: model, axis: $0) }
             )
             .equatable()
         }

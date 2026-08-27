@@ -37,7 +37,10 @@ struct BrowserTabView: View {
     @Environment(\.controlActiveState) private var activeState
 
     private var tabs: CenterTabStore { .shared }
-    private var session: BrowserSession { tabs.browser(for: tab) }
+    /// The worktree is handed over with the tab, because a page opened from a file row is a
+    /// `file://` address and the session cannot fetch that page's stylesheet without it. See
+    /// `LocalPage.fileURL`.
+    private var session: BrowserSession { tabs.browser(for: tab, root: model.workspace.path) }
 
     /// Focused, and in the window the keys are going to.
     private var isRingVisible: Bool { isAddressFocused && activeState.showsFocusRing }

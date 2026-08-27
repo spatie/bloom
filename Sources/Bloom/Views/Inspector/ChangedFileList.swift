@@ -295,7 +295,9 @@ struct ChangedFileList: View {
                 // deselected would now close nothing while making the row you just aimed at go
                 // quiet.
                 onSelect: { move(to: file.path) },
-                onRevert: { pendingRevert = file }
+                onRevert: { pendingRevert = file },
+                onOpenPage: { BrowserTab.openFile(fullPath(file.path), in: model) },
+                onSplitPage: { BrowserTab.splitFile(fullPath(file.path), in: model, axis: $0) }
             )
             .equatable()
         }

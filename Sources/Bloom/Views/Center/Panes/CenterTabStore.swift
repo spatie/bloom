@@ -371,9 +371,15 @@ final class CenterTabStore {
     // MARK: - Sessions
 
     /// The live web view for a browser tab, created on first use and reused forever after.
-    func browser(for tab: CenterTab) -> BrowserSession {
+    ///
+    /// `root` is the workspace's worktree, and it is passed in rather than looked up because this
+    /// store holds tabs keyed by workspace and knows nothing else about one. It is only read when
+    /// the tab's address is a `file://` one, which is a page out of that worktree opened from a
+    /// file row: see `LocalPage.fileURL`. Empty means no local page will load, which is right for
+    /// a caller with no workspace to name.
+    func browser(for tab: CenterTab, root: String = "") -> BrowserSession {
         if let existing = browsers[tab.id] { return existing }
-        let session = BrowserSession(url: tab.url)
+        let session = BrowserSession(url: tab.url, root: root)
         browsers[tab.id] = session
         return session
     }

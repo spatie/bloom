@@ -26,6 +26,11 @@ struct FileTreeRow: View, Equatable {
     var action: () -> Void
     /// Opens a shell in this row, which only a folder row offers. See `FolderTerminal`.
     var onOpenTerminal: () -> Void
+    /// Opens this row as a page in the workspace's browser tab, and in the half a split opens.
+    /// Only a file that is a page is offered them, which `LocalPageItems` decides. Closures rather
+    /// than the model, so the row keeps comparing on its values alone: see `==` above.
+    var onOpenPage: @MainActor () -> Void
+    var onSplitPage: @MainActor (SplitAxis) -> Void
 
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -86,6 +91,9 @@ struct FileTreeRow: View, Equatable {
             if FolderTerminal.canOpen(folder: fullPath) {
                 Button(FolderTerminal.menuTitle, action: onOpenTerminal)
             }
+            // The other half of that pair, and the same argument for where it sits. The two are
+            // never both drawn: a shell wants a folder and a page is a file.
+            LocalPageItems(path: fullPath, open: onOpenPage, split: onSplitPage)
             Button("Copy path", action: copyPath)
         }
         .help(item.node.path)
