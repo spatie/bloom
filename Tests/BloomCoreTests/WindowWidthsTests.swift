@@ -22,20 +22,24 @@ import Testing
         // its divider has to land exactly on the presented one: a presented minimum that asked for
         // more than that would be a window the split view overflows the moment the pane arrives.
         //
-        // One line each, and that is not a style choice. A `#expect` whose operator starts a
-        // continuation line reported `1122.0 == 1122.0` as a failure on CI: swift-testing folds the
-        // operators of a broken `SequenceExpr` itself to find the one to split on, and it split
-        // this on the wrong one. Both sides printed the same number in the failure message, which
-        // is the tell. Keep a comparison on one line here.
-        let inspectorAndItsDivider = widths.inspector + widths.divider
-        #expect(widths.minimum(withInspector: false) + inspectorAndItsDivider == widths.minimum(withInspector: true))
-        #expect(widths.detailHalf(withInspector: false) + inspectorAndItsDivider == widths.detailHalf(withInspector: true))
+        // The comparison is made before `#expect` sees it, and that is not a style choice. Written
+        // as `#expect(a + b == c)` this reported `1122.0 == 1122.0` as a FAILURE on CI, twice, with
+        // both sides printing the same number, which is a comparison swift-testing took apart and
+        // put back together wrong rather than an inequality. Every expectation in this file that
+        // compares a computed width to another computed width does it this way; the ones that
+        // compare against a literal are fine as they are.
+        let step = widths.inspector + widths.divider
+        let windowLandsExactly = widths.minimum(withInspector: false) + step == widths.minimum(withInspector: true)
+        let halfLandsExactly = widths.detailHalf(withInspector: false) + step == widths.detailHalf(withInspector: true)
+        #expect(windowLandsExactly)
+        #expect(halfLandsExactly)
     }
 
     @Test func theDetailHalfIsTheWindowMinimumLessTheSidebarAndItsDivider() {
         for showing in [true, false] {
             let half = widths.minimum(withInspector: showing) - widths.sidebar - widths.divider
-            #expect(half == widths.detailHalf(withInspector: showing))
+            let agrees = half == widths.detailHalf(withInspector: showing)
+            #expect(agrees)
         }
     }
 
@@ -93,9 +97,11 @@ import Testing
             for screen in [768.0, 1024, 1280, 1440, 1800, 3008] {
                 let fit = widths.presenting(windowWidth: window, screenWidth: screen)
                 let settled = fit.windowWidth ?? window
-                #expect(settled >= window)
+                let neverShrinks = settled >= window
+                #expect(neverShrinks)
                 let sidebar = fit.foldsSidebar ? 0 : (fit.sidebarWidth ?? widths.sidebar)
-                #expect(sidebar + widths.divider + widths.detailHalf(withInspector: true) <= settled)
+                let panesFit = sidebar + widths.divider + widths.detailHalf(withInspector: true) <= settled
+                #expect(panesFit)
             }
         }
     }
