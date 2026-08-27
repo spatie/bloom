@@ -19,10 +19,10 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
     case setup
     /// A stored row, by its sequence number within the session.
     case row(Int)
-    /// The line above a run of consecutive tool calls, by the sequence number of the FIRST call in
-    /// it. See `TranscriptFold`.
+    /// The line over a turn's working, by the sequence number of the FIRST row of it. See
+    /// `TranscriptFold`.
     ///
-    /// **It is in the list from the run's second call onwards, whether it is folded or not, and
+    /// **It is in the list from the working's second row onwards, whether it is folded or not, and
     /// drawing nothing when it is not.** That is the same argument the four singletons below carry
     /// and it is the whole reason folding is cheap: an entry that came and went in the middle of
     /// the list would make the pass that folds a run both an insertion and a removal, which

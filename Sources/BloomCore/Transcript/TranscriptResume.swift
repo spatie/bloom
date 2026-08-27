@@ -53,7 +53,7 @@ public struct TranscriptPaneState: Equatable, Sendable {
 
     /// The sequence numbers of the rows the reader had unfolded.
     public var expanded: Set<Int>
-    /// The runs of tool calls the reader had opened, by the sequence number of the first call in
+    /// The turns whose working the reader had opened, by the sequence number of the first row of
     /// each. See `TranscriptFold`.
     ///
     /// Here rather than in the view for exactly the reason `expanded` is here, and the bug is the

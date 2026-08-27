@@ -1,88 +1,93 @@
 import Foundation
 
-/// A run of consecutive tool calls, folded down to the newest of them and a line saying how many
-/// came before it.
+/// A turn's work, folded down to one line and whatever of it the reader still needs to see.
 ///
 /// **This is a performance fix wearing a disclosure triangle, and the shape follows from that.**
 /// The list handed to the table is `entries`, the table's row count is `entries.count`, and every
-/// entry is keyed, given a height, offered a view and walked by `TranscriptEntryChange`. A run of
-/// seven that draws as one entry is six rows that are never keyed, never measured and never built.
-/// Hiding views inside a `DisclosureGroup` would have kept every one of those costs and bought
-/// nothing, so the fold happens here, in the list, before the table ever sees it.
+/// entry is keyed, given a height, offered a view and walked by `TranscriptEntryChange`. A turn of
+/// forty rows that draws as two entries is thirty-eight rows that are never keyed, never measured
+/// and never built. Hiding views inside a `DisclosureGroup` would have kept every one of those
+/// costs and bought nothing, so the fold happens here, in the list, before the table ever sees it.
 ///
-/// # What forms a run
+/// # The unit is a turn, and it was a stretch of consecutive tool calls
 ///
-/// Consecutive `toolUse` rows at one nesting level. Everything the reader would have read breaks a
-/// run: prose, thinking, a user turn, a permission question, an error, a notice, a turn's result
-/// row, an orphaned tool result, and a session start. What draws nothing does not break one:
-/// sixty per cent of a real session is `system` rows with three to five of them between every pair
-/// of tool calls, and a rule that let those break a run would find no runs at all. See
-/// `TranscriptRowInk`, which is where "draws nothing" is decided and which is deliberately a sniff
-/// rather than a decode.
+/// The owner's words, reading a real transcript: "I expect everything between my blue bubble and
+/// the answer of the AI to be grouped. All those items in between." What he was looking at was
+/// three short folds where he expected one, because a line of interim narration and a rate limit
+/// notice sat between the tool calls and each of them cut the run.
 ///
-/// A mixed run joins. `Read`, then five `Bash`, with an `Edit` in the middle of them, is the case
-/// the owner was looking at when he asked for this, and cutting it at the `Edit` would leave two
-/// short runs and three rows on screen where the whole point was to leave one. The tool's own name
-/// is not consulted at all, here or in the label, and that is not laziness: the name lives inside
-/// the payload, reading it is the decode this whole mechanism exists to avoid, and the prefix
-/// sniff that would find it is Claude Code's line shape rather than Codex's.
+/// So the boundaries are the two things a reader navigates by: **their own message, and the turn's
+/// answer.** Everything between them is work and folds into one line: tool calls, the agent
+/// narrating what it is about to do, thinking, notices, rate limits, a subagent's own rows,
+/// and the stream events that draw nothing anyway. Nothing in between is consulted for its kind
+/// except to decide where the work ENDS.
 ///
-/// # It folds while the turn is running, and everything below is what that costs
+/// The tool's own name is never consulted, here or in the label, and that is not laziness: the
+/// name lives inside the payload, reading it is the decode this whole mechanism exists to avoid,
+/// and the prefix sniff that would find it is Claude Code's line shape rather than Codex's.
 ///
-/// The first spelling waited for a run to be closed by a following drawn row, on the argument that
-/// rows arriving during a turn are what the reader is watching. The owner read it and asked for
-/// the opposite: a run should fold as soon as it is long enough, so that a turn's log is one line
-/// and the call happening now, rather than forty lines that push the answer off the screen.
+/// # Which prose is the answer
 ///
-/// That closing row was doing a second job nobody had noticed. It was also the moment every tool
-/// result in the run had arrived, because the CLI writes a call, then its result, then the next
-/// call. Folding earlier means a call can be hidden while it is still running, and a result
-/// landing afterwards can say it failed. So the rule that a failure is never hidden would have had
-/// to unfold a run under a reader who is watching it, which is a worse interruption than the one
-/// folding on completion was avoiding.
+/// **The trailing one, and "trailing" is doing the work rather than "last".** A turn can hold two
+/// prose blocks with tool calls between them, and the first is narration: it is not what the
+/// reader came back to read, so it folds. The answer is the run of rows at the END of the turn
+/// that hold nothing a reader would call work, and it is only an answer if there is prose in it.
+/// Walking back rather than taking the last prose block is what keeps a turn that says something
+/// and then goes back to work as one fold rather than a fold, an answer, and a loose tail.
 ///
-/// **So what may be hidden is a prefix, and the prefix only ever grows.** Three rules, and between
-/// them nothing this type does can ever reveal a row it had hidden:
+/// Two cases fall out of that and both were asked about:
 ///
-/// 1. **Only a call whose result has arrived may be hidden.** What such a call says is final: the
-///    result sets `is_error`, the refusal and the duration in one write, so a hidden call cannot
-///    change its mind. The newest call is always shown, running or not, which is the point of the
-///    whole feature; and a burst of parallel calls, which arrive together with no results yet, is
-///    simply drawn until the results land.
-/// 2. **A failed call closes the run.** It is therefore the last call in its run and the row that
-///    stays on screen, and the calls after it start a run of their own. This is the rule that
-///    changed when folding moved to arrival: "a run holding a failure does not fold" cannot
-///    survive a failure arriving after the fold, whereas closing the run keeps the promise that
-///    matters, which is that a failed command is never the thing hidden. It is VS Code's
-///    `chat.tools.autoExpandFailures` with the run cut at the failure rather than abandoned.
-/// 3. **The prefix stops at anything asked to be visible**, rather than the run refusing to fold.
-///    A tool result the reader opened is a row they are reading, and a run that grew past it would
-///    otherwise have to unfold. Stopping the prefix there leaves the fold exactly as it was and
-///    draws the opened call beside the newest one.
+/// - **A turn that ends on a tool call has no answer.** Nothing follows the last work row, so the
+///   walk back finds no prose and the whole turn is work. Its newest row stays on screen, which is
+///   also what every streaming turn looks like before its answer arrives.
+/// - **A turn with two prose blocks and work between them** has one answer, the second, and the
+///   first folds with everything around it.
 ///
-/// The one thing something asked to be visible cannot be is worse than cosmetic: a scroll can only
-/// find a row the table is drawing, so a search hit or an unread mark hidden inside a fold is not
-/// a row somewhere off screen, it is a scroll that lands nowhere at all.
+/// A streaming turn has not said its answer yet, so its trailing prose is provisional: it is
+/// treated as the answer while it is the last thing, and folds in the moment the agent goes back
+/// to work. That is the same rule, not an exception, and it is what puts the newest row on screen
+/// throughout a turn.
+///
+/// # What is never hidden
+///
+/// Four things stop the fold where they are rather than breaking it in two. Everything from the
+/// first of them onwards is drawn, and everything before it stays folded.
+///
+/// 1. **A row whose result has not come back.** What such a row says can still change, and a fold
+///    that had to reveal a row it had hidden is a transcript rearranging itself under somebody who
+///    is reading it. A tool call with no result yet, and a permission question nobody has answered
+///    yet, are the same fact here.
+/// 2. **A failed call, and an error row.** A failed command is the one you are scrolling to find,
+///    and this is VS Code's `chat.tools.autoExpandFailures` and its default. It stops the fold
+///    rather than unfolding what was already folded, so what the reader sees is the line, the
+///    failure, and everything after it.
+/// 3. **A permission question nobody has answered.** It is covered by 1, and it is written down
+///    separately because burying a question the turn is stopped on would be the worst fault this
+///    file could have. Answered, it folds away with the rest.
+/// 4. **A row something has asked to be visible**: a tool result the reader opened, and the row
+///    this session was opened on. The last of those is worse than cosmetic, because a scroll can
+///    only find a row the table is DRAWING, so a search hit or an unread mark inside a fold is not
+///    a row somewhere off screen, it is a scroll that lands nowhere at all.
+///
+/// **Every one of them is a stopping point rather than a refusal**, and that is the property the
+/// rest of this file is arranged around: what a fold hides only ever grows.
 public enum TranscriptFold {
-    /// The shortest run worth folding, counted in calls.
+    /// The fewest rows worth hiding.
     ///
-    /// A fold costs one line for its own header, so a run of N leaves N minus one on screen: at
-    /// two it saves nothing whatsoever, at three it saves a single line in exchange for a control
-    /// and a decision, and at four it halves the run. Three is also about as much as a reader
-    /// takes in at a glance (read the file, change it, check it), which is a thought rather than a
-    /// log. So four, which is three hidden and one shown.
-    public static let leastRun = 4
+    /// A fold costs one line for itself, so hiding N rows saves N minus one: at one it saves
+    /// nothing whatsoever, at two it saves a single line in exchange for a control and a decision,
+    /// and at three it starts to pay. Three is also about as much as a reader takes in at a glance
+    /// (read the file, change it, check it), which is a thought rather than a log.
+    public static let leastHidden = 3
 
-    /// How many calls a group needs before its fold gets an entry in the list at all.
+    /// How many rows a turn's work needs before its fold gets an entry in the list at all.
     ///
-    /// **Deliberately less than `leastRun`, and that gap is load bearing.** The fold's line is an
-    /// entry of its own, and an entry appearing in the middle of the list on the same pass that
+    /// **Deliberately less than `leastHidden`, and that gap is load bearing.** The fold's line is
+    /// an entry of its own, and an entry appearing in the middle of the list on the same pass that
     /// rows leave it is two edits `TranscriptEntryChange` can only answer `.rebuilt` to. In the
-    /// list from the second call onwards, drawing nothing until there is something to say, the
-    /// pass that folds a run is a removal and nothing else. A group of one can never fold whatever
-    /// the threshold, and a single call between two paragraphs is the commonest shape in a
-    /// transcript, so it is the one that is not given an entry.
-    public static let leastGroup = 2
+    /// list from the second row of the work onwards, drawing nothing until there is something to
+    /// say, the pass that folds a turn is a removal and nothing else.
+    public static let leastWork = 2
 
     /// What the fold's line says, which has to name what is hidden and how many.
     ///
@@ -95,46 +100,49 @@ public enum TranscriptFold {
     /// Code's CLI says "Ran 4 commands", Codex says "Ran 4 commands", Cursor says "Explored N
     /// tools".
     ///
-    /// "Commands" is theirs and cannot be ours, because a run here mixes `Read`, `Edit` and `Bash`
-    /// and five of those are not five commands. "Tool call" is what the rest of this app calls
-    /// one, from `AgentToolUse` down to `ToolRowHeader`, and it is true of every run whatever it
-    /// holds. "Earlier" is doing work too: the rows still on screen are the END of the run, so the
-    /// hidden ones are the ones above them.
+    /// **It said "tool calls" and cannot any more**, because what is hidden is now a turn's whole
+    /// working: calls, the narration between them, thinking, a notice. "Step" is what covers all
+    /// of those and it is the word every agent surface uses for exactly this. It is not the
+    /// todo list's "step": that one is a thing the agent PLANS to do, this one is a thing it has
+    /// already done, and they never appear in the same place.
     ///
-    /// The same words whether the fold is open or shut. A disclosure label names what is behind
-    /// it, which does not change when it is opened, and a row whose text swapped on every click
-    /// would read as two different rows.
-    public static func label(hiding count: Int) -> String {
-        count == 1 ? "1 earlier tool call" : "\(count) earlier tool calls"
+    /// Two wordings, for two different claims rather than for variety. While a turn is working
+    /// there is a row of it still on screen, so the hidden ones are the ones above it and the line
+    /// says so. Once the answer has landed the whole of the working is behind the line, and there
+    /// is no "earlier" left for the word to mean.
+    public static func label(hiding count: Int, showsMore: Bool) -> String {
+        let unit = count == 1 ? "step" : "steps"
+        return showsMore ? "\(count) earlier \(unit)" : "\(count) \(unit)"
     }
 
-    /// How many calls at the front of this run are hidden right now, or nought for a run that is
-    /// not folded.
+    /// How many rows at the front of this turn's work are hidden right now, or nought for a fold
+    /// that is not folded.
     ///
     /// **A prefix that only grows, which is the whole of why nothing unfolds under a reader.**
-    /// Every term below moves in one direction only: results arrive and never un-arrive, calls are
-    /// appended and never removed, and `revealed` only ever gains a row that is already on screen.
-    /// So the answer for a given run never goes down, and the fold is a rehearsal of removals
-    /// rather than a state that can flip.
+    /// Every term moves in one direction only: results arrive and never un-arrive, questions get
+    /// answered and never unanswered, rows are appended and never removed, and `revealed` only ever
+    /// gains a row that is already on screen. So the answer for a given turn never goes down.
     ///
     /// `revealed` is every sequence number something has asked to be visible: the tool results the
-    /// reader has opened, and the row this session was opened on, which is a search hit or an
-    /// unread mark. `drawn` is the window of rows the list is handing to the table, because the
-    /// row a fold keeps on screen has to be a row that is being drawn.
-    public static func hides(_ run: Run, revealed: Set<Int>, drawn: Range<Int>) -> Int {
-        // Never the last call. The newest one is the row the fold exists to keep on screen, and
-        // hiding it is the one way this feature can take away the thing it was asked for.
-        var count = min(run.settled, run.calls.count - 1)
-        // Cut short at the first call somebody is reading or being taken to, rather than refusing
-        // to fold at all: refusing would unfold a run that had already folded.
+    /// reader has opened, and the row this session was opened on. `drawn` is the window of rows the
+    /// list is handing to the table, because a fold has to be able to draw what it leaves.
+    public static func hides(_ work: Work, revealed: Set<Int>, drawn: Range<Int>) -> Int {
+        // The last row stays while the turn has not said its answer yet: it is the thing happening
+        // now, and hiding it is the one way this feature can take away what it was asked for. Once
+        // the answer is on screen there is nothing left to keep, so the whole working goes.
+        var count = min(work.ready, work.hasAnswer ? work.rows.count : work.rows.count - 1)
+        // Cut short at the first row somebody is reading or being taken to, rather than refusing to
+        // fold at all: refusing would unfold a turn that had already folded.
         if !revealed.isEmpty,
-           let stop = run.calls.prefix(count).firstIndex(where: { revealed.contains($0.seq) }) {
+           let stop = work.rows.prefix(count).firstIndex(where: { revealed.contains($0.seq) }) {
             count = stop
         }
-        guard count >= leastRun - 1 else { return 0 }
-        // The first call that stays has to be one the table is drawing. A fold whose only surviving
-        // row falls outside the window is a line standing over nothing.
-        guard drawn.contains(run.calls[count].index) else { return 0 }
+        guard count >= leastHidden else { return 0 }
+        // A window that stops inside the working cannot fold it: the rows it would leave are rows
+        // the table is not drawing, and the line would stand over nothing. Only the window's END is
+        // asked about, because its start only ever moves down and what is hidden is an absolute
+        // range of rows rather than one measured from the window.
+        guard work.span.upperBound <= drawn.upperBound else { return 0 }
         return count
     }
 
@@ -149,42 +157,51 @@ public enum TranscriptFold {
         /// The call reported an error or was refused. Both travel as `is_error`, so they are one
         /// fact here.
         public var failed: Bool
-        /// The row came from inside a subagent. A change of nesting breaks a run: two indent
-        /// levels folded into one line would be a fold that lies about where its rows were.
-        public var nested: Bool
         /// What `TranscriptRowInk` says, which is that most `system` rows draw no view at all.
         public var drawsNothing: Bool
-        /// The call's result has arrived, so nothing it says can change again. False for every
-        /// row that is not a call. See rule 1 in the header.
+        /// **Nothing this row says can change again**, which is the whole of what lets a fold hide
+        /// it while the turn is still running.
         ///
-        /// `failed` implies this, and the scan enforces it rather than trusting the caller: the
-        /// two are written in the same breath when a result lands, and a call that could fail
-        /// after being hidden would be a fold that has to unfold.
+        /// False for a tool call whose result has not come back, and false for a permission
+        /// question nobody has answered. True for everything else, because a row of prose is
+        /// finished the moment it is stored. `failed` implies it, and the scan enforces that rather
+        /// than trusting the caller: a result writes `is_error` and the payload in one go, so a
+        /// call that could fail after being hidden would be a fold that has to unfold.
         public var settled: Bool
 
         public init(
             seq: Int,
             kind: MessageKind,
-            failed: Bool,
-            nested: Bool,
-            drawsNothing: Bool,
-            settled: Bool = false
+            failed: Bool = false,
+            drawsNothing: Bool = false,
+            settled: Bool = true
         ) {
             self.seq = seq
             self.kind = kind
             self.failed = failed
-            self.nested = nested
             self.drawsNothing = drawsNothing
             self.settled = settled
         }
+
+        /// Whether this row is one a reader would call work, which is what the walk back from the
+        /// end of a turn stops at. Prose, a notice and anything that draws nothing are not.
+        var isWork: Bool {
+            switch kind {
+            case .toolUse, .thinking, .permissionAsk, .error: !drawsNothing
+            case .assistantText, .notice, .system, .user, .toolResult, .result: false
+            }
+        }
+
+        /// Whether this row has to stay on screen once it is reached. See rule 2 in the header.
+        var mustShow: Bool { failed || kind == .error }
     }
 
-    /// One call in a run: where its row is, and what it is called.
+    /// One row of a turn's working: where it is, and what it is called.
     ///
-    /// The index answers "is this row hidden", which is a comparison against the first call that
+    /// The index answers "is this row hidden", which is a comparison against the first row that
     /// stays. The seq answers "is this the row somebody asked to see", which arrives as a set of
     /// sequence numbers from the view. Both are needed and neither can be derived from the other.
-    public struct Call: Equatable, Sendable {
+    public struct Row: Equatable, Sendable {
         public var index: Int
         public var seq: Int
 
@@ -194,94 +211,112 @@ public enum TranscriptFold {
         }
     }
 
-    /// One run, as the list needs it.
-    public struct Run: Equatable, Sendable {
-        /// The rows the run spans, as indices into the session's rows. Interior rows that draw
-        /// nothing are inside it.
-        public var rows: Range<Int>
-        /// Every call in the run, in order.
-        public var calls: [Call]
-        /// How many calls from the front have their result in.
-        ///
-        /// A prefix rather than a count, because a gap in the middle would let a call whose result
-        /// is still outstanding be hidden behind one that has landed. It stops at the first call
-        /// that has not settled and it never goes backwards, which is what makes the fold monotone.
-        public var settled: Int
+    /// One row of a turn as the scan is carrying it: where it is, and the three questions the
+    /// walk back at the end of a turn asks about it.
+    ///
+    /// Beside the other types rather than inside `folds(in:extending:)`, which is where it reads
+    /// best and where Swift will not have it: a type cannot be nested in a generic function. A
+    /// struct rather than a tuple, because the walk maps over one field and there is no key path
+    /// into a tuple either.
+    private struct Item {
+        var row: Row
+        /// Whether a reader would call this row work, which is what the walk back stops at.
+        var isWork: Bool
+        var isProse: Bool
+        /// Whether this row may be hidden: settled, and not one that has to stay.
+        var ready: Bool
+    }
 
-        /// The fold's identity, which is the sequence number of the FIRST call in it.
+    /// One turn's working, as the list needs it.
+    public struct Work: Equatable, Sendable {
+        /// The rows the working spans, as indices into the session's rows. The rows between them
+        /// that draw nothing are inside it; the answer is not.
+        public var span: Range<Int>
+        /// Every row of the working that draws something, in order.
+        public var rows: [Row]
+        /// How many rows from the front may be hidden.
         ///
-        /// **The first rather than the last, and it is the whole reason a growing run is cheap.**
-        /// The fold's own entry sits at the head of the run and is in the list from the moment the
-        /// run reaches `leastGroup`, folded or not, so folding one removes rows after an entry
+        /// A prefix rather than a count, because a gap in the middle would let a row that is still
+        /// waiting be hidden behind one that has landed. It stops at the first row that has not
+        /// settled or must stay, and it never goes backwards, which is what makes the fold
+        /// monotone.
+        public var ready: Int
+        /// Whether the turn has said its answer, so nothing of the working need stay on screen.
+        public var hasAnswer: Bool
+
+        /// The fold's identity, which is the sequence number of the FIRST row of the working.
+        ///
+        /// **The first rather than the last, and it is the whole reason a growing turn is cheap.**
+        /// The fold's own entry sits at the head of the working and is in the list from the moment
+        /// there are `leastWork` rows in it, folded or not, so folding removes rows after an entry
         /// that was already there and `TranscriptEntryChange` answers `.shrank`. Named by the last
-        /// call instead, the entry would move every time a call arrived.
-        public var firstSeq: Int { calls.first?.seq ?? 0 }
+        /// row instead, the entry would move every time one arrived.
+        public var firstSeq: Int { rows.first?.seq ?? 0 }
 
-        public init(rows: Range<Int>, calls: [Call], settled: Int) {
+        public init(span: Range<Int>, rows: [Row], ready: Int, hasAnswer: Bool) {
+            self.span = span
             self.rows = rows
-            self.calls = calls
-            self.settled = settled
+            self.ready = ready
+            self.hasAnswer = hasAnswer
         }
     }
 
-    /// Every run in a session, and where a rescan may start from.
+    /// Every turn's working in a session, and where a rescan may start from.
     ///
     /// **Held by the list rather than recomputed in its body, and that is not only about cost.**
-    /// A pass that both inserted a row and folded a run away is two edits in one list, which
+    /// A pass that both inserted a row and folded a turn away is two edits in one list, which
     /// `TranscriptEntryChange` cannot say as a single run of indices, so it answers `.rebuilt` and
     /// the table throws away every cell and the reader's text selection with them. Recomputed one
     /// pass later, the arrival is a `.grew` on its own and the fold is a `.shrank` on its own, and
     /// neither costs a reload. See `TranscriptListView`, where the recompute hangs off the row
     /// count.
     ///
-    /// **One shape is still a reload, and it is left in on purpose.** A group born past the
-    /// threshold in a single pass, with every result already back, has no line in the list for the
-    /// removal to hang off, so that pass is an insertion and a removal at once. Rule 1 is what
-    /// makes it unreachable in practice: calls the CLI writes in a burst are parallel calls, and
-    /// parallel calls arrive with no results at all, so they are drawn until the results land and
-    /// the line is in the list by then. What is left needs the main thread stalled across a run
-    /// boundary while four calls and four results buffer up, and it costs one `reloadData`.
-    /// Defending it would mean carrying "was this run already listed" from scan to scan, which is
+    /// **One shape is still a reload, and it is left in on purpose.** A turn born with more than
+    /// `leastHidden` settled rows in a single pass has no line in the list for the removal to hang
+    /// off, so that pass is an insertion and a removal at once. Rule 1 is what makes it unreachable
+    /// in practice: rows the CLI writes in a burst are a message's parallel tool calls, and those
+    /// arrive with no results at all, so they are drawn until the results land and the line is in
+    /// the list by then. What is left needs the main thread stalled across a turn boundary.
+    /// Defending it would mean carrying "was this turn already listed" from scan to scan, which is
     /// history this type deliberately does not keep: everything here is a function of the rows as
     /// they are now, plus an index saying where a rescan may start.
-    public struct Runs: Equatable, Sendable {
-        public var runs: [Run]
+    public struct Folds: Equatable, Sendable {
+        public var all: [Work]
         /// How many rows produced this, so a rescan can tell an append from a new session.
         public var scannedRows: Int
-        /// Where the next scan starts, which is just past the last row that BROKE a run.
+        /// Where the next scan starts, which is just past the last row that ENDED a turn.
         ///
-        /// Not past the last run. A run cut short by a failure or by a change of indent is still
-        /// open to being cut somewhere else when a result lands, and a run with a call still
-        /// running has a settled prefix that is going to grow. Only a row the reader can see,
-        /// sitting between two runs, settles everything above it: the CLI writes it after every
-        /// result in the run above has come back.
+        /// Only a user's message and a turn's result row settle everything above them. A turn that
+        /// is still running has a working whose answer is provisional and whose settled prefix is
+        /// about to grow, so it is rescanned in full every time a row lands. A turn is a few
+        /// hundred rows at worst and the facts are read off the row rather than out of its payload.
         public var resumeIndex: Int
 
-        public static let none = Runs(runs: [], scannedRows: 0, resumeIndex: 0)
+        public static let none = Folds(all: [], scannedRows: 0, resumeIndex: 0)
 
-        public init(runs: [Run], scannedRows: Int, resumeIndex: Int) {
-            self.runs = runs
+        public init(all: [Work], scannedRows: Int, resumeIndex: Int) {
+            self.all = all
             self.scannedRows = scannedRows
             self.resumeIndex = resumeIndex
         }
 
-        /// Where in `runs` the run holding this row index is, or nothing.
+        /// Where in `all` the working holding this row index is, or nothing.
         ///
         /// A binary search rather than a scan, because the list asks it once per row of the window
         /// on every pass that assembles the entries.
         ///
-        /// **An index rather than the run itself, and that is the per-row cost rather than a
-        /// style.** A `Run` carries an array, so handing one back is a retain and a release on
-        /// every row of the window on every pass. The caller takes the value once per RUN, where
-        /// it needs the calls, and asks this question with nothing to release.
-        public func runIndex(containing index: Int) -> Int? {
+        /// **An index rather than the value, and that is the per-row cost rather than a style.** A
+        /// `Work` carries an array, so handing one back is a retain and a release on every row of
+        /// the window on every pass. The caller takes the value once per TURN, where it needs the
+        /// rows, and asks this question with nothing to release.
+        public func index(containing index: Int) -> Int? {
             var low = 0
-            var high = runs.count
+            var high = all.count
             while low < high {
                 let middle = low + (high - low) / 2
-                if runs[middle].rows.upperBound <= index {
+                if all[middle].span.upperBound <= index {
                     low = middle + 1
-                } else if index < runs[middle].rows.lowerBound {
+                } else if index < all[middle].span.lowerBound {
                     high = middle
                 } else {
                     return middle
@@ -290,88 +325,86 @@ public enum TranscriptFold {
             return nil
         }
 
-        /// The run this row index belongs to, or nothing.
-        public func run(containing index: Int) -> Run? {
-            runIndex(containing: index).map { runs[$0] }
+        /// The working this row index belongs to, or nothing.
+        public func fold(containing index: Int) -> Work? {
+            self.index(containing: index).map { all[$0] }
         }
     }
 
-    /// The runs in a session, extending what was already known about it.
+    /// The workings in a session, extending what was already known about it.
     ///
     /// Rows are appended and never reordered, so everything below `previous.resumeIndex` is
-    /// settled and only the tail is rescanned. Handed a shorter list than last time, which is a
-    /// session being replaced rather than grown, it starts again from nothing.
-    public static func runs<Facts: RandomAccessCollection>(
-        in facts: Facts, extending previous: Runs = .none
-    ) -> Runs where Facts.Element == Fact, Facts.Index == Int {
+    /// settled and only the last turn is rescanned. Handed a shorter list than last time, which is
+    /// a session being replaced rather than grown, it starts again from nothing.
+    public static func folds<Facts: RandomAccessCollection>(
+        in facts: Facts, extending previous: Folds = .none
+    ) -> Folds where Facts.Element == Fact, Facts.Index == Int {
         let count = facts.count
         var start = previous.resumeIndex
-        var found: [Run] = []
+        var found: [Work] = []
         if count < previous.scannedRows || start > count {
             start = 0
         } else {
-            found = previous.runs.filter { $0.rows.upperBound <= start }
+            found = previous.all.filter { $0.span.upperBound <= start }
         }
 
-        // The group being built: where it began, which indent level it is at, the calls in it,
-        // and how many of those from the front have their results in. Empty between groups.
-        var groupStart = 0
-        var groupNested = false
-        var calls: [Call] = []
-        var settled = 0
+        // The turn being built. `items` is every row of it that draws something, carrying what the
+        // walk back at the end needs to know about each.
+        var turnStart = 0
+        var items: [Item] = []
         var resume = start
 
         func close() {
-            defer {
-                calls = []
-                settled = 0
-            }
-            guard calls.count >= leastGroup, let last = calls.last else { return }
-            found.append(Run(
-                rows: groupStart..<(last.index + 1), calls: calls, settled: settled
+            defer { items = [] }
+            // The answer: the rows at the end of the turn that hold no working, and only an answer
+            // if there is prose among them. See the header for why this walks back rather than
+            // taking the last prose block.
+            var end = items.count
+            while end > 0, !items[end - 1].isWork { end -= 1 }
+            let hasAnswer = items[end...].contains { $0.isProse }
+            let working = hasAnswer ? Array(items[..<end]) : items
+            guard working.count >= leastWork, let last = working.last else { return }
+            // The prefix stops at the first row that could still change or that has to stay.
+            var ready = 0
+            while ready < working.count, working[ready].ready { ready += 1 }
+            found.append(Work(
+                span: turnStart..<(last.row.index + 1),
+                rows: working.map(\.row),
+                ready: ready,
+                hasAnswer: hasAnswer
             ))
         }
 
         for offset in start..<count {
             let fact = facts[facts.index(facts.startIndex, offsetBy: offset)]
-            if fact.kind == .toolUse {
-                // A change of indent is a new run rather than a longer one: a fold that swallowed
-                // a subagent's rows into its parent's would be a line that lies about where they
-                // happened.
-                if !calls.isEmpty, groupNested != fact.nested { close() }
-                if calls.isEmpty {
-                    groupStart = offset
-                    groupNested = fact.nested
-                }
-                // The prefix stops at the first call still waiting, so a later call settling
-                // cannot reach over one that has not.
-                //
-                // **A failure counts as settled here whatever the caller said, and that is the
-                // invariant the monotonicity rests on.** A result writes `is_error`, the refusal
-                // and the payload in one go, so a call cannot have failed without having settled;
-                // read the other way round, a call that is hidden has already settled and can
-                // therefore never turn into a failure afterwards. Spelled out rather than trusted,
-                // because a caller that let the two come apart would make a fold unfold.
-                if fact.settled || fact.failed, settled == calls.count { settled += 1 }
-                calls.append(Call(index: offset, seq: fact.seq))
-                // A failure closes the run around itself, so it is the last call and therefore the
-                // one that stays on screen. See rule 2 in the header. `resume` is deliberately not
-                // advanced: the flag arrives with a result rather than with the row, so this cut
-                // has to be able to move when the next rescan reads it.
-                if fact.failed { close() }
+            // The two boundaries a reader navigates by. Neither is inside a fold, and both settle
+            // everything above them.
+            if fact.kind == .user || fact.kind == .result {
+                close()
+                resume = offset + 1
                 continue
             }
-            // A row that draws nothing is not a row the reader can see, so it neither starts a run
-            // nor ends one. See `TranscriptRowInk`.
+            // A row that draws nothing is not a row the reader can see, so it is swallowed by
+            // whatever is folded around it and counted as nothing. See `TranscriptRowInk`.
             if fact.drawsNothing { continue }
-            close()
-            resume = offset + 1
+            if items.isEmpty { turnStart = offset }
+            items.append(Item(
+                row: Row(index: offset, seq: fact.seq),
+                isWork: fact.isWork,
+                isProse: fact.kind == .assistantText,
+                // **A failure counts as settled whatever the caller said, and that is the invariant
+                // the monotonicity rests on.** A result writes `is_error` and the payload in one
+                // go, so a call cannot have failed without having settled; read the other way
+                // round, a row that is hidden has already settled and can therefore never turn into
+                // a failure afterwards.
+                ready: (fact.settled || fact.failed) && !fact.mustShow
+            ))
         }
-        // Whatever is left at the end is a run that is still growing, and it is emitted exactly
-        // like any other: folding while the turn runs is the point, and the entry has to be in the
+        // Whatever is left at the end is a turn that is still running, and it is treated exactly
+        // like any other: folding while the turn works is the point, and the entry has to be in the
         // list before it folds.
         close()
 
-        return Runs(runs: found, scannedRows: count, resumeIndex: min(resume, count))
+        return Folds(all: found, scannedRows: count, resumeIndex: min(resume, count))
     }
 }

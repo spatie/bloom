@@ -1,11 +1,11 @@
 import SwiftUI
 import BloomCore
 
-/// The one line that stands for the hidden part of a run of consecutive tool calls: a triangle and
-/// the words for what is behind it.
+/// The one line that stands for a turn's working: a triangle and the words for what is behind it.
 ///
-/// It stands above the calls that are still drawn, which are the newest of the run and the one
-/// running right now. The count is what is hidden, so it climbs as a turn works.
+/// While the turn is running it stands above the row happening now, and the count climbs as the
+/// agent works. Once the answer has landed the whole of the working is behind it and it sits
+/// between the reader's own message and the answer, which is where the owner asked for it.
 ///
 /// **Words rather than a number in a grey oval**, which is what was asked for and which macOS has
 /// already spent on notification badges. `TranscriptFold.label` carries that argument and the
@@ -20,6 +20,10 @@ import BloomCore
 /// nobody could tell was clickable.
 struct TranscriptFoldRowView: View {
     var hiddenCount: Int
+    /// Whether any of the turn's working is still drawn below this line, which is what decides
+    /// whether the count is of the rows "earlier" than something or of the whole of it. See
+    /// `TranscriptFold.label`.
+    var showsMore: Bool
     var isExpanded: Bool
     var onToggle: () -> Void
 
@@ -34,7 +38,7 @@ struct TranscriptFoldRowView: View {
                 TranscriptDisclosure(isExpanded: isExpanded, isVisible: true)
                     .frame(width: TranscriptLayout.glyphWidth)
 
-                Text(TranscriptFold.label(hiding: hiddenCount))
+                Text(TranscriptFold.label(hiding: hiddenCount, showsMore: showsMore))
                     .font(Typo.label)
                     .foregroundStyle(Palette.textTertiary)
                     .lineLimit(1)
