@@ -29,8 +29,8 @@ struct FileHeaderBar: View {
     @State private var isConfirmingRevert = false
     @State private var didCopy = false
     @State private var copyReset: Task<Void, Never>?
-    /// The bar's own width, which is the only thing that can decide whether the folder chip has
-    /// room. `ViewThatFits` cannot: it is handed the share of the row the layout has already
+    /// The bar's own width, which is the only thing that can decide how much of the path there is
+    /// room for. `ViewThatFits` cannot: it is handed the share of the row the layout has already
     /// apportioned, so it dropped the folder while there was still most of a pane to spare.
     @State private var width: CGFloat = 0
 
@@ -44,12 +44,12 @@ struct FileHeaderBar: View {
 
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {
-            FilePathChip(
-                file: file,
-                session: session,
-                absolutePath: absolutePath,
-                showsDirectory: FileBarLayout.showsDirectory(width: width)
-            )
+            FilePathLabel(path: file.path, width: width)
+
+            // Whether Edit mode is holding changes that are not on disk yet. Asked by
+            // `UnsavedEditsDot` rather than answered here, so a keystroke invalidates the dot
+            // instead of the bar it sits in.
+            UnsavedEditsDot(session: session, path: absolutePath)
 
             // Lower priority than the name beside it, so a wide bar spends its slack on
             // the gap rather than on squeezing the path chip that has room to spare.

@@ -219,17 +219,89 @@ struct DiffDocumentTests {
     }
 }
 
-/// One number, asked by both of the bars that draw a file's name, which is why it is in the core
-/// rather than written out as a private constant in each of them.
+/// How much of a file's path each of the three bars that draw one can show, which is why it is in
+/// the core rather than written out as a private constant in each of them.
 @Suite("File bar layout")
 struct FileBarLayoutTests {
-    @Test("the folder is kept above the threshold and dropped below it")
-    func folderFollowsTheWidth() {
-        #expect(FileBarLayout.showsDirectory(width: FileBarLayout.folderThreshold))
-        #expect(FileBarLayout.showsDirectory(width: FileBarLayout.folderThreshold + 1))
-        #expect(!FileBarLayout.showsDirectory(width: FileBarLayout.folderThreshold - 1))
+    /// The path the request came from was `config/horizon.php`. This is the deep case it stands
+    /// for, and the one the old chip mangled.
+    private let deep = "app/Domain/Channels/Jobs"
+
+    @Test("a wide bar shows the whole path")
+    func wideKeepsEverything() {
+        let crumbs = FileBarLayout.crumbs(for: deep, width: 600)
+
+        #expect(crumbs.components == ["app", "Domain", "Channels", "Jobs"])
+        #expect(!crumbs.isElided)
+    }
+
+    /// The point of the whole exercise. `app/` is the half worth losing; the component touching
+    /// the filename is the one that answers which of the four `Handler.php` files this is.
+    @Test("narrowing drops components from the leading end, never the trailing")
+    func trimsFromTheFront() {
+        var previous = FileBarLayout.crumbs(for: deep, width: 600).components
+
+        let floor = FileBarLayout.reserve + FileBarLayout.floor
+        for width in stride(from: CGFloat(599), through: floor, by: -1) {
+            let kept = FileBarLayout.crumbs(for: deep, width: width).components
+            // Whatever survives is a suffix of what survived at the width above it, so the last
+            // component can only be lost when there is nothing left at all.
+            #expect(previous.suffix(kept.count) == ArraySlice(kept))
+            previous = kept
+        }
+
+        #expect(previous == ["Jobs"])
+    }
+
+    /// A bar this narrow used to draw no folder whatsoever. One component and an ellipsis is
+    /// worth more than the bare filename that width used to buy.
+    @Test("the last component survives down to the floor")
+    func narrowKeepsTheNearestFolder() {
+        let atTheFloor = FileBarLayout.crumbs(for: deep, width: FileBarLayout.reserve + FileBarLayout.floor)
+
+        #expect(atTheFloor.components == ["Jobs"])
+        #expect(atTheFloor.isElided)
+    }
+
+    @Test("below the floor the folder is dropped rather than squeezed")
+    func belowTheFloorNothingIsDrawn() {
+        let tooNarrow = FileBarLayout.crumbs(for: deep, width: FileBarLayout.reserve + FileBarLayout.floor - 1)
+
+        #expect(tooNarrow.isEmpty)
+        #expect(!tooNarrow.isElided)
         // A bar that has not been measured yet has room for nothing.
-        #expect(!FileBarLayout.showsDirectory(width: 0))
+        #expect(FileBarLayout.crumbs(for: deep, width: 0).isEmpty)
+    }
+
+    /// Once there is any budget at all the nearest folder is taken before the budget is consulted,
+    /// so a long single component is shown and left for the view to truncate rather than dropped.
+    @Test("a single component is never elided away")
+    func oneComponentIsAlwaysKept() {
+        let long = FileBarLayout.crumbs(for: "SupportingInfrastructure", width: FileBarLayout.reserve + FileBarLayout.floor)
+
+        #expect(long.components == ["SupportingInfrastructure"])
+        #expect(!long.isElided)
+    }
+
+    @Test("a file at the root of the worktree has no folder to show")
+    func rootHasNoFolder() {
+        #expect(FileBarLayout.crumbs(for: "", width: 600).isEmpty)
+        #expect(!FileBarLayout.crumbs(for: "", width: 600).isElided)
+    }
+
+    /// `ChangedFile.directory` is `deletingLastPathComponent`, which leaves no leading slash, but
+    /// an absolute path reaches these bars from the worktree tree and an empty component drawn
+    /// between two slashes would read as a folder with no name.
+    @Test("empty components are not path components")
+    func slashesDoNotBecomeComponents() {
+        #expect(FileBarLayout.crumbs(for: "/app//Jobs/", width: 600).components == ["app", "Jobs"])
+    }
+
+    @Test("the folder never outgrows its ceiling, however wide the pane")
+    func widthIsCapped() {
+        #expect(FileBarLayout.folderWidth(width: 4_000) == FileBarLayout.ceiling)
+        #expect(FileBarLayout.folderWidth(width: 0) == 0)
+        #expect(FileBarLayout.folderWidth(width: FileBarLayout.reserve + 60) == 60)
     }
 }
 

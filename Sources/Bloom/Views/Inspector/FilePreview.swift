@@ -18,8 +18,6 @@ struct FilePreview: View {
     private static let lineLimit = 5_000
     /// A horizontal scroll wider than this helps nobody and makes the scroller useless.
     private static let columnLimit = 800
-    /// The same cap `FilePathChip` puts on the folder above a diff.
-    private static let chipWidth: CGFloat = 170
 
     @State private var lines: [String] = []
     @State private var carries: [LexState] = []
@@ -110,19 +108,9 @@ struct FilePreview: View {
     /// to say: nothing here has a diff, a revert or two layouts to choose between.
     private var header: some View {
         HStack(spacing: InspectorLayout.gap) {
-            if FileBarLayout.showsDirectory(width: width), !directory.isEmpty {
-                Chip(text: directory)
-                    .frame(maxWidth: Self.chipWidth, alignment: .leading)
-                    .layoutPriority(-1)
-            }
+            FilePathLabel(path: path, width: width)
 
-            Text(filename)
-                .font(Typo.bodyEmphasis)
-                .foregroundStyle(Palette.textPrimary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-
-            // The same dot `FilePathChip` puts after a changed file's name, because Edit mode
+            // The same dot `FileHeaderBar` puts after a changed file's name, because Edit mode
             // holds its text in `FileEditSession` rather than on this view: switching to View,
             // to another file or to another workspace keeps the typing, and the dot is the only
             // thing that says so.
@@ -217,8 +205,6 @@ struct FilePreview: View {
     private func openInPreferredApp() {
         Reveal.inEditor(absolutePath, repo: model.repo?.id)
     }
-
-    private var directory: String { (path as NSString).deletingLastPathComponent }
 
     /// `GeometryReader` because the sheet has to be at least as wide as the container AND at least
     /// as wide as the longest line, and there is no container-relative modifier that expresses a
