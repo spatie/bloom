@@ -150,10 +150,7 @@ struct PullRequestCreator: View {
                 // first candidate, and "Create pull request" therefore kept its title at every
                 // pane width and the icon-only form was unreachable. See
                 // `PullRequestSummary.continueButton`.
-                ViewThatFits(in: .horizontal) {
-                    createButton.labelStyle(.titleOnly).fixedSize()
-                    createButton.labelStyle(.iconOnly).fixedSize()
-                }
+                createButton.labelStyle(.titleOnly).fixedSize()
             }
         }
         // Reading the name is half of what a truncated branch name is wanted for. The other half
