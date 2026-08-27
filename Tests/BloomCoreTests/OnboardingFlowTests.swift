@@ -23,7 +23,8 @@ struct OnboardingFlowTests {
     func endsAtTheChecks() {
         var flow = OnboardingFlow(step: .checks)
         #expect(flow.next == nil)
-        #expect(!flow.advance())
+        let moved = flow.advance()
+        #expect(!moved)
         #expect(flow.step == .checks)
     }
 
@@ -31,10 +32,12 @@ struct OnboardingFlowTests {
     func endsAtTheOffer() {
         var flow = OnboardingFlow(step: .checks, offersCommandLine: true)
         #expect(flow.next == .commandLine)
-        #expect(flow.advance())
+        let moved = flow.advance()
+        #expect(moved)
         #expect(flow.step == .commandLine)
         #expect(flow.next == nil)
-        #expect(!flow.advance())
+        let moved2 = flow.advance()
+        #expect(!moved2)
     }
 
     @Test("Back exists from the checks and nowhere else, and from the offer once it is there")
@@ -56,7 +59,8 @@ struct OnboardingFlowTests {
     @Test("The step somebody is standing on stays in the sequence when the offer is withdrawn")
     func standingOnAWithdrawnStep() {
         var flow = OnboardingFlow(step: .checks, offersCommandLine: true)
-        #expect(flow.advance())
+        let moved = flow.advance()
+        #expect(moved)
         flow.offerCommandLine(false)
         #expect(flow.step == .commandLine)
         #expect(flow.steps.contains(.commandLine))

@@ -60,6 +60,13 @@ against this machine, with `BLOOM_LOCAL_PROJECT` naming the checkout the last of
 `BLOOM_LIVE=1` to drive the real `claude` binary (**this costs money**), and
 `BLOOM_TEST_SWIFT_ARGS` for flags like `--sanitize=thread`.
 
+**A mutating call cannot go inside `#expect`.** The macro rewrites its argument into a closure
+taking the value immutably, so `#expect(flow.advance())` fails to compile with "cannot use mutating
+member on immutable value: `$0` is immutable", and the error is reported against expanded code
+rather than against the line you wrote. Lift it: `let moved = flow.advance()` and then
+`#expect(moved)`. This has cost two separate agents an hour each, on `TranscriptRowHeights` and on
+`OnboardingFlow`, and it is the sort of thing nobody deduces twice.
+
 **A green `make test` does not mean the app compiles.** The mirror has no app target, so the
 core suite has stayed green while `Sources/Bloom` was broken, four times, every one of them a
 widened enum leaving a switch in a view non-exhaustive. Run `make build` before committing
