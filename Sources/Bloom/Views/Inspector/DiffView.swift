@@ -834,7 +834,7 @@ struct DiffView: View {
 
         for (hunkIndex, hunk) in document.file.hunks.enumerated() {
             appendGap(&rows, document: document, hunkIndex: hunkIndex, hunk: hunk, split: false)
-            rows.append(.header(hunk: hunkIndex, text: Self.headerText(hunk)))
+            appendHeading(&rows, document: document, hunkIndex: hunkIndex)
 
             let lines = hunk.lines
             for chunk in Self.chunks(
@@ -863,7 +863,7 @@ struct DiffView: View {
 
         for (hunkIndex, hunk) in document.file.hunks.enumerated() {
             appendGap(&rows, document: document, hunkIndex: hunkIndex, hunk: hunk, split: true)
-            rows.append(.header(hunk: hunkIndex, text: Self.headerText(hunk)))
+            appendHeading(&rows, document: document, hunkIndex: hunkIndex)
 
             // Folding one hunk at a time keeps the boundaries that `sideBySide()` flattens away.
             var single = document.file
@@ -947,10 +947,20 @@ struct DiffView: View {
         }
     }
 
-    private static func headerText(_ hunk: DiffHunk) -> String {
-        let trimmed = hunk.header.trimmingCharacters(in: .whitespaces)
-        if !trimmed.isEmpty { return trimmed }
-        return "@@ -\(hunk.oldStart),\(hunk.oldCount) +\(hunk.newStart),\(hunk.newCount) @@"
+    /// The `@@` band, drawn only where it says something the numbers beside it do not.
+    ///
+    /// Both the rule and the text are `DiffHunkHeading`, in the core, so the two layouts cannot
+    /// end up showing different bands and so the rule has a test. It is asked here rather than in
+    /// `appendGap` because a hunk with no gap above it still comes through this line.
+    private func appendHeading(
+        _ rows: inout [DiffRow],
+        document: DiffDocument,
+        hunkIndex: Int
+    ) {
+        guard let text = DiffHunkHeading.text(
+            for: document.file.hunks, at: hunkIndex, revealed: revealedGaps[hunkIndex] ?? 0
+        ) else { return }
+        rows.append(.header(hunk: hunkIndex, text: text))
     }
 
     // MARK: Collapsing
