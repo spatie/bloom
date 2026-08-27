@@ -70,10 +70,12 @@ struct TerminalSplitView: View {
                             length: divider.axis == .horizontal
                                 ? divider.frame.height
                                 : divider.frame.width,
-                            color: dividerColor
-                        ) { ratio in
-                            splits.setRatio(ratio, at: divider.path, in: ownerID)
-                        }
+                            color: dividerColor,
+                            onChange: { ratio in
+                                splits.setRatio(ratio, at: divider.path, in: ownerID)
+                            },
+                            onChangeEnded: { splits.persistRatio(in: ownerID) }
+                        )
                         .position(x: divider.frame.midX, y: divider.frame.midY)
                     }
                 }

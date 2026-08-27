@@ -198,7 +198,7 @@ struct ProjectSetupSheet: View {
             HStack(alignment: .top, spacing: Metrics.spacingWide) {
                 Image(systemName: choice == value ? "largecircle.fill.circle" : "circle")
                     .font(Typo.body)
-                    .foregroundStyle(choice == value ? Palette.accent : Palette.textTertiary)
+                    .foregroundStyle(choice == value ? Palette.controlAccent : Palette.textTertiary)
                     .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: Metrics.spacingTight) {
@@ -222,7 +222,10 @@ struct ProjectSetupSheet: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Metrics.corner)
-                    .strokeBorder(choice == value ? Palette.accent : Palette.border, lineWidth: Metrics.outline)
+                    .strokeBorder(
+                        choice == value ? Palette.controlAccent : Palette.border,
+                        lineWidth: Metrics.outline
+                    )
             )
         }
         .buttonStyle(.plain)

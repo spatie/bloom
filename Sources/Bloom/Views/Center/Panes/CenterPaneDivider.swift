@@ -35,6 +35,9 @@ struct CenterPaneDivider: View {
     /// The single pane on the trailing or bottom side, on the same terms.
     var second: String?
     var onResize: (Double) -> Void
+    /// Commits the final live ratio. Kept separate from `onResize` so pointer updates do not encode
+    /// and write the whole pane arrangement dozens of times during one drag.
+    var onResizeEnded: () -> Void
     /// A pane being carried, with the pointer in the column's coordinate space.
     var onMoveChanged: (String, CGPoint) -> Void
     var onMoveEnded: (String, CGPoint) -> Void
@@ -81,12 +84,19 @@ struct CenterPaneDivider: View {
                 }
             }
             .gesture(drag)
-            .onTapGesture(count: 2) { onResize(0.5) }
+            .onTapGesture(count: 2) {
+                onResize(0.5)
+                onResizeEnded()
+            }
+            // A view can disappear while AppKit still owns the mouse. Commit the last ratio and
+            // release TranscriptHoldView just as an ordinary gesture end would.
+            .onDisappear { finishResize() }
             .accessibilityElement()
             .accessibilityLabel(axis == .horizontal ? "Pane divider" : "Pane divider, stacked")
             .accessibilityValue(Text(ratio, format: .percent.precision(.fractionLength(0))))
             .accessibilityAdjustableAction { direction in
                 onResize(ratio + (direction == .increment ? Self.step : -Self.step))
+                onResizeEnded()
             }
     }
 
@@ -160,12 +170,16 @@ struct CenterPaneDivider: View {
             }
             .onEnded { value in
                 if let carrying { onMoveEnded(carrying, value.location) }
-                if dragOrigin != nil {
-                    NotificationCenter.default.post(name: .bloomPaneResizeEnded, object: nil)
-                }
                 carrying = nil
-                dragOrigin = nil
+                finishResize()
             }
+    }
+
+    private func finishResize() {
+        guard dragOrigin != nil else { return }
+        onResizeEnded()
+        NotificationCenter.default.post(name: .bloomPaneResizeEnded, object: nil)
+        dragOrigin = nil
     }
 
     /// A point in the column's space, as an offset inside this view.

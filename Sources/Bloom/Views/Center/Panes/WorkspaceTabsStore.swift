@@ -511,6 +511,11 @@ final class WorkspaceTabsStore {
         guard var arrangement = arrangements[tab.id],
               arrangement.layout.setRatio(ratio, at: path) else { return }
         arrangements[tab.id] = arrangement
+    }
+
+    /// The divider updates its observable layout continuously, then writes the final shape once.
+    /// Double-click and accessibility adjustments use the same boundary immediately.
+    func persistRatio(in tab: PaneContent) {
         persist(tab.id)
     }
 

@@ -118,6 +118,10 @@ struct CenterPanesView: View {
                                 guard let tab else { return }
                                 tabs.setRatio(ratio, at: divider.path, in: tab)
                             },
+                            onResizeEnded: {
+                                guard let tab else { return }
+                                tabs.persistRatio(in: tab)
+                            },
                             onMoveChanged: { pane, point in
                                 move = PaneMove(
                                     pane: pane,

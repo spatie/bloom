@@ -227,6 +227,11 @@ final class TranscriptModel {
     /// last line of the read. `SingleFlight` is named after, and documents, the transcript that
     /// would not draw when the two of them ran the read at once.
     private let loader = SingleFlight()
+    /// The newest stored message this model has ingested, whether or not that message became a
+    /// row. Tool results fold into their tool-use row, so the rendered rows cannot answer this
+    /// without both walking the whole transcript and still sometimes returning an older sequence.
+    /// Outside observation because it is only a database cursor and nothing draws it.
+    @ObservationIgnored private var highestSeenMessageSeq = -1
     /// When the current turn was handed to the runner, so a session row written before that can be
     /// recognised as belonging to the previous turn.
     private var turnStartedAt: Date?
@@ -298,14 +303,17 @@ final class TranscriptModel {
         let built = await Task.detached(priority: .userInitiated) {
             var rows: [TranscriptRow] = []
             var index: [String: Int] = [:]
+            var highestMessageSeq = -1
             for message in messages {
+                highestMessageSeq = max(highestMessageSeq, message.seq)
                 Self.absorb(message, decisions: decisions, into: &rows, indexByRefID: &index)
             }
-            return (rows: rows, index: index)
+            return (rows: rows, index: index, highestMessageSeq: highestMessageSeq)
         }.value
 
         rows = built.rows
         indexByRefID = built.index
+        highestSeenMessageSeq = built.highestMessageSeq
 
         // The parsing every row of the window is about to want, done now and off this thread. See
         // `TranscriptPrime`, which is where the whole argument for it is. Nothing cancels it: it
@@ -1155,15 +1163,17 @@ final class TranscriptModel {
         // still on its way in, and the read ends by putting the whole list on the model in one go:
         // a row appended here in the meantime would simply be overwritten.
         await loader.wait()
-        // `lazy`, because this runs on every assistant text, tool use and tool result event and the
-        // eager map allocated an array the length of the whole transcript each time. Not
-        // `rows.last?.seq`: a tool result folds onto a row that is already there rather than
-        // appending, so the last row is not reliably the highest sequence.
-        let after = rows.lazy.map(\.seq).max() ?? -1
-        let fresh = (try? await store.messages(sessionID: session.id, afterSeq: after)) ?? []
+        let fresh = (
+            try? await store.messages(sessionID: session.id, afterSeq: highestSeenMessageSeq)
+        ) ?? []
         guard !fresh.isEmpty else { return }
         let appendedFrom = rows.count
-        for message in fresh { absorb(message) }
+        for message in fresh {
+            // Before folding, because a tool result changes an old row rather than appending one.
+            // The cursor belongs to stored messages, not to their presentation.
+            highestSeenMessageSeq = max(highestSeenMessageSeq, message.seq)
+            absorb(message)
+        }
         // Over what actually arrived, not over the transcript. A tool result folds onto a row that
         // is already there rather than appending, so the slice can be empty, and an empty one
         // leaves the held reading exactly where it was.
