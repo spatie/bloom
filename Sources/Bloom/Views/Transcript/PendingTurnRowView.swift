@@ -23,6 +23,8 @@ import BloomCore
 /// nobody has sent it. See `Delivery`.
 struct PendingTurnRowView: View {
     var delivery: Delivery
+    /// Where attachment paths resolve and which workspace opens when a pill is clicked.
+    var home: TranscriptHome = .init()
     /// The sentence saying why the queue is waiting, under the last bubble in it and nowhere else.
     ///
     /// One sentence for the queue rather than one per message: four bubbles each explaining the
@@ -41,11 +43,21 @@ struct PendingTurnRowView: View {
     /// reason `TranscriptBubbleWidth` sets out: a number passed in is a number the list has to
     /// read, and a list that reads it is a list that is rebuilt whenever the pane changes width.
     @Environment(\.transcriptBubbleWidth) private var bubbleWidth
+    @Environment(AppModel.self) private var app
+    @Environment(\.markdownLinkActions) private var linkActions
+    @Environment(\.fontScale) private var fontScale
+    @Environment(\.chatFont) private var chatFont
+    @Environment(\.chatLineHeight) private var chatLineHeight
+    @Environment(\.transcriptHoverHost) private var hoverHost
     /// Draws the row as though the pointer were on it, for `--snapshot`. An offscreen render has
     /// no pointer, and the state worth photographing here is the one under it.
     var pointerInside = false
 
     @State private var isHovered = false
+    @State private var hovered: FileChipHover?
+    @State private var textFrame: CGRect = .zero
+    @State private var hoverTask: Task<Void, Never>?
+    @State private var published: TranscriptHoverCard?
 
     private var isPointedAt: Bool { isHovered || pointerInside }
 
@@ -72,13 +84,32 @@ struct PendingTurnRowView: View {
         .padding(.horizontal, TranscriptLayout.inset)
         .padding(.vertical, TranscriptLayout.inset)
         .onHover { isHovered = $0 }
+        .onChange(of: hovered) { _, chip in
+            hoverTask?.cancel()
+            guard let chip else {
+                withdraw()
+                return
+            }
+            let wanted = card(for: chip.path)
+            hoverTask = Task {
+                try? await Task.sleep(for: Motion.hoverCardDelay)
+                guard !Task.isCancelled, textFrame != .zero else { return }
+                publish(wanted, at: chip.frame.offsetBy(dx: textFrame.minX, dy: textFrame.minY))
+            }
+        }
+        .onDisappear {
+            hoverTask?.cancel()
+            withdraw()
+        }
     }
 
     /// A queued review turn is drawn as what was asked rather than as the rendered prompt: the
     /// typed words and a count. The full text goes to the agent untouched; only the drawing of
     /// the wait is summarised, the same bargain the sent bubble makes with its chips.
     private var displayText: String {
-        guard let review = ReviewTurn.split(delivery.body) else { return delivery.body }
+        guard let review = ReviewTurn.split(delivery.body) else {
+            return attachmentTurn.body
+        }
         let count = review.chips.count
         let suffix = "\(count) review comment\(count == 1 ? "" : "s") attached"
         return review.message.isEmpty ? suffix : "\(review.message)\n\(suffix)"
@@ -86,23 +117,94 @@ struct PendingTurnRowView: View {
 
     private var bubble: some View {
         CappedWidth(width: bubbleWidth?.cap ?? UserTurnRowView.uncappedFallback) {
-            Text(displayText)
-                .font(Typo.body)
-                .proseLeading()
-                .foregroundStyle(Palette.textSecondary)
-                .textSelection(.enabled)
-                // No `maxWidth: .infinity`. `CappedWidth` measures the text at the cap and then
-                // takes the width it actually used, and filling the proposal defeats exactly
-                // that: three words came out in a bubble the full width of the pane with the
-                // words floating at one end of it, while the sent bubble a line above hugged its
-                // own sentence. Two drawings of one object have to agree about this.
-                .padding(Self.padding)
+            VStack(alignment: .leading, spacing: TranscriptLayout.block) {
+                if !displayText.isEmpty {
+                    TranscriptTextView(
+                        text: TranscriptLink.attributedString(
+                            sent: displayText,
+                            font: Typo.body.resolvedNSFont(scale: fontScale, face: chatFont),
+                            color: NSColor(Palette.textSecondary),
+                            lineSpacing: TranscriptLayout.proseLeading(
+                                Typo.body,
+                                scale: fontScale,
+                                face: chatFont,
+                                lineHeight: chatLineHeight
+                            ),
+                            chipGround: .composer
+                        ),
+                        linkColor: NSColor(Palette.link),
+                        selectionColor: .selectedTextBackgroundColor,
+                        actions: linkActions.opening(file: open, hovering: { hovered = $0 })
+                    )
+                    .background { chipProbe }
+                }
+
+                if !attachmentTurn.paths.isEmpty {
+                    ChipFlow(spacing: Metrics.spacingSmall, lineSpacing: Metrics.spacingSmall) {
+                        ForEach(attachmentTurn.paths, id: \.self) { path in
+                            AttachmentChip(
+                                attachment: .sent(path: path),
+                                worktree: home.worktree,
+                                onOpen: { open(path) },
+                                onPreview: { frame in preview(path, frame) },
+                                verifiesOnDisk: false
+                            )
+                        }
+                    }
+                }
+            }
+            // No `maxWidth: .infinity`. `CappedWidth` measures the contents at the cap and then
+            // takes the width they actually use, matching the sent bubble above it.
+            .padding(Self.padding)
         }
         .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Self.corner))
         .overlay {
             RoundedRectangle(cornerRadius: Self.corner)
                 .strokeBorder(Palette.textTertiary, style: Self.dots)
         }
+    }
+
+    private var attachmentTurn: (body: String, paths: [String]) {
+        AttachmentTrailer.split(delivery.body)
+    }
+
+    private func open(_ path: String) {
+        guard let id = home.workspaceID, let model = app.existingModel(for: id) else { return }
+        FileReview.open(path: path, in: model)
+    }
+
+    private func card(for path: String) -> TranscriptHoverCard {
+        let target = FileChipTarget.resolve(path, in: home.worktree)
+        return .file(attachment: .sent(path: target.path), worktree: target.worktree)
+    }
+
+    @ViewBuilder
+    private var chipProbe: some View {
+        if hoverHost != nil, hovered != nil {
+            Color.clear
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                    textFrame = $0
+                }
+        }
+    }
+
+    private func preview(_ path: String, _ frame: CGRect?) {
+        guard let frame else {
+            withdraw()
+            return
+        }
+        publish(card(for: path), at: frame)
+    }
+
+    private func publish(_ card: TranscriptHoverCard, at frame: CGRect) {
+        published = card
+        hoverHost?.request = TranscriptHoverRequest(card: card, frame: frame)
+    }
+
+    private func withdraw() {
+        defer { published = nil }
+        guard let published, hoverHost?.request?.card == published else { return }
+        hoverHost?.request = nil
     }
 
     /// Why it is waiting, and the way out of it.

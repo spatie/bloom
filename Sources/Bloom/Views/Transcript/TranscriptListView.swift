@@ -731,6 +731,7 @@ struct TranscriptListView: View {
                     AnyView(
                         PendingTurnRowView(
                             delivery: delivery,
+                            home: transcript.home,
                             hold: hold,
                             onEdit: { Task { await transcript.editPending(delivery) } },
                             onDelete: { transcript.askToDiscard(delivery) }
