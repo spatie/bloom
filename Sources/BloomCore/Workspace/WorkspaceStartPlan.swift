@@ -54,7 +54,7 @@ public enum WorkspaceStartPlan {
         return Git.title(from: prompt)
     }
 
-    /// What a terminal workspace is called.
+    /// What a workspace that runs no agent is called, which is a terminal one and a browser one.
     ///
     /// A branch somebody typed is the name, because they have already said what this is. Otherwise
     /// it is the sea claimed for it, which is the whole reason a promptless start can have a name
@@ -70,9 +70,9 @@ public enum WorkspaceStartPlan {
         return claimedSea
     }
 
-    // MARK: - Crossing between the two modes
+    // MARK: - Crossing between the modes
 
-    /// What the terminal mode's name field carries over when the sheet leaves chat mode.
+    /// What the name field carries over when the sheet leaves chat mode.
     ///
     /// This is the whole question the two-button sheet answered silently. Pressing "Just a
     /// terminal" with a sentence in the box did use that sentence: `Git.title(from:)` cut its
@@ -112,7 +112,7 @@ public enum WorkspaceStartPlan {
         return name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    // MARK: - What terminal mode says about itself
+    // MARK: - What a mode with no agent says about itself
 
     /// The line under the name field.
     ///
@@ -126,17 +126,23 @@ public enum WorkspaceStartPlan {
     ///
     /// Every branch ends the same way. "Nothing is sent to an agent" is the sentence the two
     /// button sheet never said, and it is the only half here that has to be on screen in every
-    /// state: it is the whole difference between the two modes.
+    /// state: it is the whole difference between the modes that run one and the modes that do not.
     ///
     /// In the core rather than in the view because it is three sentences chosen by two conditions,
     /// which is a decision, and because a rule about what the app may not say is worth a test that
     /// fails when somebody puts it back.
-    public static func terminalNote(hasCheckout: Bool, name: String) -> String {
+    ///
+    /// - Parameter mode: only ever one that runs no agent, because a chat has a box rather than a
+    ///   field and says what it is for by being one. Its clause is `openingSentence`, which is on
+    ///   the mode so that a fourth of them cannot be added without answering for this sentence.
+    public static func startNote(
+        mode: WorkspaceStartMode, hasCheckout: Bool, name: String
+    ) -> String {
         let agentless = "Nothing is sent to an agent."
         guard !hasCheckout else {
             // A checkout arrives with its own name, so there is no field and nothing to say about
             // one. What is left worth saying is what the workspace will be.
-            return "The worktree stands on it and a shell opens in the worktree. " + agentless
+            return "The worktree stands on it and \(mode.openingSentence). " + agentless
         }
         return name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "Leave it empty and Bloom names it for you. " + agentless

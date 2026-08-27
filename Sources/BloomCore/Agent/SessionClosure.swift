@@ -13,7 +13,7 @@ import Foundation
 /// The state the button was guarding is not one to be guarded from. It is designed for, at some
 /// length: `CenterPaneView.noConversationState` is written for it word by word ("This workspace has
 /// no conversation"), the tab strip reasons about "a workspace whose conversations have all been
-/// closed" in two places, and `WorkspaceStartMode.consumeOpensOnTerminal` makes a workspace that
+/// closed" in two places, and `WorkspaceStartMode.consumeOpeningTab` makes a workspace that
 /// has never had a conversation at all, so a workspace can be born in it. There is a way out of it
 /// on screen in every case: the empty state offers a terminal, and the plus offers a chat.
 ///

@@ -89,7 +89,7 @@ struct CreateWorkspaceSheet: View {
     /// pick up the previous draft's screenshots.
     @State private var draftID = PromptAttachments.newShortID()
 
-    /// Which of the two things this sheet is being used for, and the last answer, kept.
+    /// Which of the three things this sheet is being used for, and the last answer, kept.
     ///
     /// Read through `WorkspaceStartMode.remembered` rather than by giving `@AppStorage` a default,
     /// so the fresh-install answer and the reason for it live in the core beside the tests instead
@@ -97,11 +97,11 @@ struct CreateWorkspaceSheet: View {
     /// `WorkspaceStartMode.rememberedKey`.
     @AppStorage(WorkspaceStartMode.rememberedKey) private var rememberedMode: String?
 
-    /// What the name field holds in terminal mode. Separate from `prompt` rather than sharing it,
-    /// which is what lets a draft survive a person changing their mind twice: the box keeps its
-    /// sentence while the field is on screen and the field keeps its name while the box is. See
-    /// `WorkspaceStartPlan.carriedName`.
-    @State private var terminalName = ""
+    /// What the name field holds in the two modes that run no agent. Separate from `prompt`
+    /// rather than sharing it, which is what lets a draft survive a person changing their mind
+    /// twice: the box keeps its sentence while the field is on screen and the field keeps its name
+    /// while the box is. See `WorkspaceStartPlan.carriedName`.
+    @State private var typedName = ""
     @FocusState private var isNameFocused: Bool
 
     /// Wider than the form was. The composer's footer carries four pickers, a paperclip and the
@@ -112,7 +112,7 @@ struct CreateWorkspaceSheet: View {
     /// against the 572 this frame leaves inside its padding, and "Just a terminal" beside Create
     /// took it to 691, which put every picker on the glyph-only rung at once. Choosing the mode
     /// above the box rather than the route beside Create is what hands those labels back, and it
-    /// is not a happy accident: a control that says which of two things you are doing does not
+    /// is not a happy accident: a control that says which of three things you are doing does not
     /// belong in the row that qualifies the turn. Do not put a second button back here.
     ///
     /// **And then a fifth control arrived and took the words again.** The row carries fast mode
@@ -151,13 +151,13 @@ struct CreateWorkspaceSheet: View {
 
     /// What the create button is about to be given as the task.
     ///
-    /// In chat mode it is the sentence, attachments and all. In terminal mode it is the name
-    /// field, because that is what `AppModel.startWorkspace` derives a terminal workspace's name
+    /// In chat mode it is the sentence, attachments and all. In the modes with no agent it is the
+    /// name field, because that is what `AppModel.startWorkspace` derives such a workspace's name
     /// and branch from, and an empty one is what claims a sea. One property rather than a branch
     /// at each call site, so the button, its enabled state and the hint under the box cannot end
     /// up asking about different text.
     private var task: String {
-        mode.runsAnAgent ? spokenPrompt : terminalName
+        mode.runsAnAgent ? spokenPrompt : typedName
     }
 
     /// Whether Create may be pressed. Words are required for a chat, and for nothing else.
@@ -286,8 +286,6 @@ struct CreateWorkspaceSheet: View {
                     .controlSize(.small)
                     .accessibilityLabel("Loading branches")
             }
-
-            worktreeNote
         }
         // The same padding as `ProjectSetupSheet`'s header, which is the app's other sheet header
         // sitting above a hairline: `gutter` across, `inset` down.
@@ -301,10 +299,11 @@ struct CreateWorkspaceSheet: View {
         //
         // Only the vertical was ever wrong. The title already stood on 12 points, because it
         // carried six of its own on top of the strip's six, and it still does. What the strip
-        // gains across is a trailing margin that matches: the overflow control now keeps the same
-        // 12 from the right edge that the title keeps from the left, where it kept six. Widening
+        // gains across is a trailing margin that matches: the row's trailing edge now keeps the
+        // same 12 from the right edge that the title keeps from the left, where it kept six. Widening
         // this sheet from 620 to 700 spent nothing on either edge, so neither number had moved
-        // since the strip held no title at all.
+        // since the strip held no title at all. What ends the row has changed since; the margin
+        // has not.
         .padding(.horizontal, Metrics.gutter)
         .padding(.vertical, Metrics.inset)
     }
@@ -439,20 +438,6 @@ struct CreateWorkspaceSheet: View {
         }
     }
 
-    /// Where the worktree is going to be cut.
-    ///
-    /// It was an ellipsis menu labelled "More options" whose entire content was one `Text`: not
-    /// clickable, not copyable, not selectable, and behind a press. A menu with nothing to choose
-    /// in it is not a menu, and a control that opens onto one line of prose is a tooltip that
-    /// charges a click. The sentence is the tooltip now, and the glyph says what it is about.
-    private var worktreeNote: some View {
-        Image(systemName: "folder")
-            .font(Typo.caption)
-            .foregroundStyle(Palette.textTertiary)
-            .help("Worktree in \(WorkspaceManager.workspacesRoot.path)")
-            .accessibilityLabel("Worktree in \(WorkspaceManager.workspacesRoot.path)")
-    }
-
     // MARK: - The choice, and then the box
 
     private var composer: some View {
@@ -488,7 +473,10 @@ struct CreateWorkspaceSheet: View {
 
             switch mode {
             case .chat: chatBox
-            case .terminal: terminalBox
+            // One box for both, because they ask the same question. What differs between a
+            // terminal and a browser start is which tab the workspace lands on, and that is
+            // settled after the sheet is gone. See `WorkspaceStartMode.pane`.
+            case .terminal, .browser: nameBox
             }
 
             statusRow
@@ -496,12 +484,13 @@ struct CreateWorkspaceSheet: View {
         .padding(Metrics.gutter)
     }
 
-    /// Which of the two things this sheet is for.
+    /// Which of the three things this sheet is for.
     ///
     /// Above the question rather than beside Create, which is the whole of the change. A second
     /// button next to Create was two ways to finish where one of them silently repurposed the
     /// input, and it cost the footer's five labels to say so. A choice made before anything is
-    /// typed cannot discard what was typed, because in terminal mode the box is not there.
+    /// typed cannot discard what was typed, because in the modes with no agent the box is not
+    /// there.
     ///
     /// `Text` rather than `Label` in the rows. A segmented picker on macOS is an
     /// `NSSegmentedControl`, whose cells carry a title and an `NSImage`, so a SwiftUI icon inside
@@ -510,8 +499,8 @@ struct CreateWorkspaceSheet: View {
     private var modePicker: some View {
         // "Start with", not "Start workspace", which is what was asked for and would have said
         // the title's word back to it eight points underneath. The title names the thing; this
-        // names the choice, and the two halves of the sentence it makes are the segments
-        // themselves: start with a chat with an agent, or start with just a terminal.
+        // names the choice, and the segments finish the sentence: start with a chat with an
+        // agent, with a terminal, or with a browser.
         //
         // The label is drawn by the picker rather than by a `Text` beside it, so AppKit places it
         // and VoiceOver gets the association for nothing. `labelsHidden` used to be here, which
@@ -528,7 +517,7 @@ struct CreateWorkspaceSheet: View {
         // anything but Blue is another app's colour sitting in Bloom's sheet. Measured on a
         // capture: bright system blue beside the sheet's teal Create button.
         .tint(Palette.accentFill)
-        .help("Start a chat with an agent, or just cut a worktree and open a shell in it")
+        .help("Start a chat with an agent, or cut a worktree and open a shell or a browser in it")
     }
 
     /// Writing the choice down, and carrying the draft across with it.
@@ -536,20 +525,21 @@ struct CreateWorkspaceSheet: View {
     /// Both directions, because the sheet now opens on whichever was used last: somebody who was
     /// last in a terminal opens in one, and a sentence typed there has to survive the trip to chat
     /// exactly as a sentence typed in chat has to survive the trip the other way. Both rules are
-    /// `WorkspaceStartPlan`'s. See `carriedName`.
+    /// `WorkspaceStartPlan`'s. See `carriedName`. Terminal to browser crosses nothing, because
+    /// both are showing the same field with the same name in it.
     private var modeBinding: Binding<WorkspaceStartMode> {
         Binding(
             get: { mode },
             set: { chosen in
                 guard chosen != mode else { return }
                 switch chosen {
-                case .terminal:
-                    terminalName = WorkspaceStartPlan.carriedName(
-                        prompt: spokenPrompt, currentName: terminalName
+                case .terminal, .browser:
+                    typedName = WorkspaceStartPlan.carriedName(
+                        prompt: spokenPrompt, currentName: typedName
                     )
                 case .chat:
                     prompt = WorkspaceStartPlan.carriedPrompt(
-                        name: terminalName, currentPrompt: prompt
+                        name: typedName, currentPrompt: prompt
                     )
                     caret = (prompt as NSString).length
                 }
@@ -595,20 +585,21 @@ struct CreateWorkspaceSheet: View {
         }
     }
 
-    /// Terminal mode: a name, and the button that cuts the worktree.
+    /// Terminal and browser mode: a name, and the button that cuts the worktree.
     ///
     /// Not the composer with its controls disabled. A model, a reasoning effort, an output style,
     /// a permission mode and a paperclip are all qualifiers on a turn, and there is no turn here,
     /// so the honest drawing of them is none of them. What is left is the one field that decides
     /// anything and the one button that finishes the sheet.
     ///
-    /// **It keeps the chat box's height, to the point.** See `boxContentHeight`.
-    private var terminalBox: some View {
+    /// **It is as tall as what is in it**, which it was not until somebody looked at the gap. See
+    /// the note over `.composerBox` at the foot of this view.
+    private var nameBox: some View {
         VStack(alignment: .leading, spacing: Metrics.spacingWide) {
             if offersName {
                 // "Optional", not "Named after a sea". The placeholder's job is to say the field
                 // may be left alone; the line under it says what happens if it is.
-                TextField("Optional", text: $terminalName)
+                TextField("Optional", text: $typedName)
                     .textFieldStyle(.roundedBorder)
                     .font(Typo.body)
                     .focused($isNameFocused)
@@ -616,7 +607,7 @@ struct CreateWorkspaceSheet: View {
                     .accessibilityLabel("Workspace name")
             }
 
-            Text(terminalNote)
+            Text(startNote)
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -624,7 +615,7 @@ struct CreateWorkspaceSheet: View {
             // Files staged in chat mode and then left behind by a change of mind. There is no
             // paperclip here and no turn to put them in, so the only two honest answers were to
             // carry them or to say they are being dropped. They are carried, by
-            // `AppModel.startWorkspace`, into the worktree the shell is about to stand in, and
+            // `AppModel.startWorkspace`, into the worktree the tab is about to stand beside, and
             // this is where that is said. Silence is what the two-button sheet did, and it deleted
             // them.
             if let sentence = attachmentNote {
@@ -634,8 +625,6 @@ struct CreateWorkspaceSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Spacer(minLength: 0)
-
             HStack(spacing: Metrics.spacing) {
                 Spacer(minLength: 0)
                 // Beside Create rather than in the row below it. The two things that end this
@@ -644,12 +633,28 @@ struct CreateWorkspaceSheet: View {
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 // The same button the composer's footer ends with, in the same corner of the same
-                // box, doing the same job. One way to finish the sheet in both modes, Return
-                // presses it in both, and it does not move when the mode changes.
+                // box, doing the same job. One way to finish the sheet in every mode, and Return
+                // presses it in every one.
                 ComposerSendButton(intent: .create, canSend: canCreate, onSend: create)
             }
         }
-        .frame(height: boxContentHeight, alignment: .top)
+        // **No fixed height here any more, and that is a rule traded rather than dropped.**
+        //
+        // This card used to be padded out to the chat box's height so that Create landed on the
+        // same point in both modes. What it bought was reported by the owner as a large blank gap:
+        // a name field, one line of caption, and then some forty points of nothing above the
+        // buttons. It was worse than that number, because the padding tracked `editorHeight`, so a
+        // fifteen line draft in chat mode and then a click on Terminal made a card with a field at
+        // the top and two hundred points of air under it.
+        //
+        // The half of the rule worth keeping still holds for free: the mode is chosen with the
+        // segmented control, that control and everything above it sit above this card, and the
+        // container's top edge does not move, so nothing under the pointer moves when the card
+        // resizes. What does move is the button row inside the card and the bottom edge below it,
+        // by about the height of the gap. Air that is always there against a button that settles
+        // forty points higher on a click nobody is aiming below: the air was the thing being
+        // looked at.
+        //
         // The card, and deliberately not its focus ring. `composerBox` draws one because the text
         // view inside it has none of its own; a `.roundedBorder` field brings its own, so passing
         // focus through here drew two rings, one inside the other, which reads as a mistake rather
@@ -657,8 +662,8 @@ struct CreateWorkspaceSheet: View {
         .composerBox(isFocused: .constant(false))
     }
 
-    /// What terminal mode says about the files that came with the draft, or nothing when there
-    /// are none.
+    /// What a mode with no agent says about the files that came with the draft, or nothing when
+    /// there are none.
     ///
     /// One read of `PromptAttachmentStore` rather than two. It was asked whether the list was
     /// empty and then asked again for its count, and both go through a shared store and build an
@@ -671,31 +676,10 @@ struct CreateWorkspaceSheet: View {
             : "The \(count) files you attached are copied into the worktree."
     }
 
-    /// What is inside the box, in both modes, measured from the same numbers.
-    ///
-    /// The sheet must not change height when the mode does. What the eye is on at that moment is
-    /// the segmented control that was just clicked and the row of buttons at the bottom, and a
-    /// sheet that grows or shrinks between them moves both away from under the pointer. The
-    /// segmented control sits above the box so it never moves; this is what stops everything below
-    /// the box moving either.
-    ///
-    /// Terminal mode is the smaller of the two by a long way, so the space it does not need is
-    /// left as air under the caption rather than spent on making the field or the type bigger than
-    /// it should be. Air under a short answer reads as a short answer. A 400 point name field
-    /// would read as a mistake.
-    ///
-    /// The figure is `ComposerPrompt`'s own stack: the editor, one `spacingWide` and the footer
-    /// row. The box's twelve points of padding are added by `composerBox` on both sides of the
-    /// branch, so they are deliberately not in here. It tracks `editorHeight`, which grows with
-    /// what is typed, so a long draft and then a switch to terminal still moves nothing.
-    private var boxContentHeight: CGFloat {
-        editorHeight + Metrics.spacingWide + Metrics.rowHeight
-    }
-
-    /// What terminal mode says about itself. The three sentences and the choice between them are
+    /// What a mode with no agent says about itself. The sentences and the choice between them are
     /// `WorkspaceStartPlan`'s, where a test holds them to not naming a sea.
-    private var terminalNote: String {
-        WorkspaceStartPlan.terminalNote(hasCheckout: !offersName, name: terminalName)
+    private var startNote: String {
+        WorkspaceStartPlan.startNote(mode: mode, hasCheckout: !offersName, name: typedName)
     }
 
     /// What the box is asking for. A review workspace is opened to read something, so the task is
@@ -703,12 +687,18 @@ struct CreateWorkspaceSheet: View {
     /// button no longer requires.
     private var heading: String {
         guard mode.runsAnAgent else {
+            // The noun the segmented control was clicked with, in lower case. Stated again here it
+            // would be a second list of the same words, and the heading would go on saying
+            // "terminal" the day a third one was added, which is exactly what it did.
+            let opened = mode.label.lowercased()
             switch checkout {
-            case .pullRequest(let request): return "Open #\(request.number) in a terminal"
-            case .branch(let branch): return "Open \(branch.name) in a terminal"
+            case .pullRequest(let request): return "Open #\(request.number) in a \(opened)"
+            case .branch(let branch): return "Open \(branch.name) in a \(opened)"
             // Not "Name this workspace". The band above it already says "New workspace", and the
-            // two together read as a stutter.
-            case .none: return "Give it a name"
+            // two together read as a stutter. It is the field's label rather than an instruction,
+            // which is what "Give it a name" was: the caption under the field is already one, and
+            // two in four points of each other is one too many.
+            case .none: return "Workspace name"
             }
         }
         switch checkout {
@@ -770,7 +760,7 @@ struct CreateWorkspaceSheet: View {
             EmptyView()
         } else if task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             // Only chat mode has anything to say here, and only when no model is going to write
-            // the name. Terminal mode has already said it: the line under the name field says
+            // the name. The other modes have said it already: the line under the name field says
             // Bloom will name it, and the branch follows the name. A second sentence eight points
             // lower saying the same thing again was the third place this sheet explained a
             // mechanism nobody had asked about, and the mechanism is the part that was wrong.
@@ -1020,7 +1010,7 @@ struct CreateWorkspaceSheet: View {
         focusTheBox()
     }
 
-    /// Puts the keyboard in whichever of the two boxes this mode is showing.
+    /// Puts the keyboard in whichever box this mode is showing.
     private func focusTheBox() {
         isFocused = mode.runsAnAgent
         isNameFocused = !mode.runsAnAgent && offersName
@@ -1096,10 +1086,10 @@ struct CreateWorkspaceSheet: View {
     /// attachments, the same staging, the same funnel. See `AppModel.createWorkspace`, which is
     /// the one way a workspace is started whoever is asking.
     ///
-    /// `task` is the sentence in chat mode and the name field in terminal mode, and both arrive at
-    /// `startWorkspace` as `prompt` because that is what it derives a name and a branch from. The
-    /// difference between the two is `opensWith`, which is what decides whether an opening turn is
-    /// ever sent.
+    /// `task` is the sentence in chat mode and the name field in the other two, and both arrive at
+    /// `startWorkspace` as `prompt` because that is what it derives a name and a branch from. What
+    /// separates them is `opensWith`, which decides whether an opening turn is ever sent and which
+    /// tab the workspace is first shown on.
     private func create() {
         guard let repo, canCreate else { return }
 

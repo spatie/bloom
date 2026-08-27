@@ -23,8 +23,8 @@ extension AppModel {
     /// because the code was on the main actor in a target nothing else can reach.
     ///
     /// `opensWith` decides the starting layout, not a mode: see `WorkspaceStartMode`. A terminal
-    /// workspace skips the session and the opening message, because there is nobody to send one
-    /// to, and names its own branch since there is no task to derive one from.
+    /// or browser workspace skips the session and the opening message, because there is nobody to
+    /// send one to, and names its own branch since there is no task to derive one from.
     ///
     /// `controls` are the model, effort, permission mode and fast mode chosen in the create
     /// sheet's composer footer. Nil everywhere else, which keeps those callers exactly as they
@@ -137,9 +137,10 @@ extension AppModel {
             userSuppliedBranch: branch,
             isChatWorkspace: opensWith == .chat,
             wantsAutomaticName: wantsAName,
-            // A terminal workspace started with nothing written has no other source of a name:
-            // no turn is sent, so no model is asked, and there is no sentence to slug a branch
-            // out of. The sea is both, and it is the name for good rather than a placeholder.
+            // A workspace with no agent, started with nothing written, has no other source of a
+            // name: no turn is sent, so no model is asked, and there is no sentence to slug a
+            // branch out of. The sea is both, and it is the name for good rather than a
+            // placeholder.
             hasTask: !spoken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         ) {
             pick = try? await store?.claimOcean()
@@ -174,11 +175,14 @@ extension AppModel {
         // here changes nothing about what `start` does with it: the closure below hands back this
         // value, `start` still reports it as `placeholder`, and `adopt` still starts the automatic
         // rename against it.
-        let suppliedName = name ?? (opensWith == .terminal
-            ? WorkspaceStartPlan.terminalName(
+        // Asked as "does an agent run here" rather than as "is this a terminal", which is what it
+        // said while terminal was the only answer. A browser workspace has no turn either, so it
+        // has to settle its own name here for the same reason and by the same rule.
+        let suppliedName = name ?? (opensWith.runsAnAgent
+            ? nil
+            : WorkspaceStartPlan.terminalName(
                 userSuppliedBranch: branch, claimedSea: pick?.ocean.name
-            )
-            : nil)
+            ))
         let placeholder: String?
         if suppliedName == nil, checkout == nil, wantsAName {
             // The AI rename compares against the exact placeholder handed over, so the sea's name
@@ -216,8 +220,8 @@ extension AppModel {
             // The claimed sea's slug when there is one, so the branch and the name tell the same
             // story. `Git.uniqueBranch` still suffixes a collision with an earlier voyage.
             branch: branch ?? seaBranch,
-            // A terminal workspace is named after the branch the user typed, or after the sea it
-            // just claimed when nothing was typed at all. Either way the name is settled above
+            // A workspace with no agent is named after the branch the user typed, or after the
+            // sea it just claimed when nothing was typed at all. Either way the name is settled above
             // rather than left to the namer, because nothing is going to be asked: passing a name
             // is also what stops `start` returning a placeholder and so what stops `adopt`
             // kicking off an automatic rename with no first turn to read.
@@ -288,8 +292,8 @@ extension AppModel {
         // are already the paths those files have in the worktree: staging lays a draft out under
         // exactly the layout it will have here, so this is a move and nothing has to be rewritten.
         // What is taken out is anything that failed to arrive, which is a path to nothing and
-        // worse than one file fewer. Only this half is a chat's: a terminal workspace has no turn
-        // to put a sentence in, which is the whole of the difference between the two.
+        // worse than one file fewer. Only this half is a chat's: a workspace with no agent has no
+        // turn to put a sentence in, which is the whole of the difference between them.
         var opening: String? = opensWith == .chat ? prompt : nil
         if opensWith == .chat, let staged, !moved.isEmpty {
             opening = AttachmentDraft
