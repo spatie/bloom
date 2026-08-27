@@ -69,6 +69,7 @@ extension Snapshot {
         .diffScope,
         .pendingDelete,
         .runningGlyph,
+        .statusColumn,
         .retries,
         .subagentRows,
         .paneTabs,

@@ -45,6 +45,7 @@ struct PullRequestHoverCardTests {
         number: Int = 362,
         title: String = "Answer a review support question",
         state: String = "OPEN",
+        mergeable: String? = nil,
         checks: PullRequest.Checks = .none,
         checksSummary: String = "",
         reviewDecision: String? = nil
@@ -54,6 +55,7 @@ struct PullRequestHoverCardTests {
             title: title,
             url: "https://github.com/spatie/bloom/pull/\(number)",
             state: state,
+            mergeable: mergeable,
             checks: checks,
             checksSummary: checksSummary,
             reviewDecision: reviewDecision
@@ -167,6 +169,25 @@ struct PullRequestHoverCardTests {
         #expect(card.state == "Checks failing")
         #expect(card.detail == "1 of 12 required checks failed")
         #expect(card.status == .checksFailing)
+    }
+
+    /// The card drew a green tick over the words "Merge conflicts", because the mark came from
+    /// `WorkspaceStatus.ofBranch`, which had no conflicted state and fell through to the rollup,
+    /// while the words came from `PullRequestStatus`, which has had one all along. Two halves of
+    /// one card, disagreeing, is the thing this file exists to catch.
+    @Test("A conflicted branch is not marked with the checks it happens to have passed")
+    func conflictsBeatTheRollup() {
+        let card = WorkspaceHoverCard.pullRequestBand(
+            workspace: workspace(additions: 42, changedFiles: 3),
+            pullRequest: pullRequest(
+                mergeable: "CONFLICTING", checks: .passing, checksSummary: "12 checks passed"
+            ),
+            now: Self.now
+        )
+
+        #expect(card.state == "Merge conflicts")
+        #expect(card.detail == "This branch conflicts with the base branch")
+        #expect(card.status == .conflicted)
     }
 
     /// gh reports its own rollup, and for a failing run it is often the same three words the state

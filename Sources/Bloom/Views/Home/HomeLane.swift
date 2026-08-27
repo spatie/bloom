@@ -2,9 +2,9 @@ import BloomCore
 
 /// Which of Home's questions a workspace is an answer to.
 ///
-/// Three lanes rather than thirteen states, because Home is read from across the room: the user
+/// Three lanes rather than fifteen states, because Home is read from across the room: the user
 /// wants to know whether anything is burning, whether anything is moving, and whether the rest can
-/// be ignored. The thirteen states stay the source of truth and are still drawn on every row; this
+/// be ignored. The fifteen states stay the source of truth and are still drawn on every row; this
 /// only says which pile each of them falls into.
 ///
 /// All that is left of the digest Home used to be built from. The grid of per-project cards, the
@@ -27,7 +27,10 @@ extension WorkspaceStatus {
         // Not `working`. A blocked agent is the definition of this lane: the one row on Home that
         // is asking for something rather than getting on with it.
         case .awaitingPermission: .waiting
-        case .setupFailed, .unread, .checksFailing, .checksPassed, .merged, .closed: .waiting
+        // Conflicted with the rest of the bad news rather than with `resting`: it is the one
+        // pull request state that cannot move again without a person, which is this lane.
+        case .setupFailed, .unread, .conflicted, .checksFailing, .checksPassed, .merged, .closed:
+            .waiting
         case .draft, .pullRequestOpen, .changed, .clean: .resting
         }
     }

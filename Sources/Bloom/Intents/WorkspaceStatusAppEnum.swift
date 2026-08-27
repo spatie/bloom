@@ -15,6 +15,7 @@ enum WorkspaceStatusAppEnum: String, AppEnum {
     case unread
     case merged
     case closed
+    case conflicted
     case checksFailing
     case checksRunning
     case checksPassed
@@ -33,6 +34,7 @@ enum WorkspaceStatusAppEnum: String, AppEnum {
         .unread: DisplayRepresentation(title: "Unread"),
         .merged: DisplayRepresentation(title: "Merged"),
         .closed: DisplayRepresentation(title: "Pull request closed"),
+        .conflicted: DisplayRepresentation(title: "Merge conflicts"),
         .checksFailing: DisplayRepresentation(title: "Checks failing"),
         .checksRunning: DisplayRepresentation(title: "Checks running"),
         .checksPassed: DisplayRepresentation(title: "Checks passed"),
@@ -51,6 +53,7 @@ enum WorkspaceStatusAppEnum: String, AppEnum {
         case .unread: self = .unread
         case .merged: self = .merged
         case .closed: self = .closed
+        case .conflicted: self = .conflicted
         case .checksFailing: self = .checksFailing
         case .checksRunning: self = .checksRunning
         case .checksPassed: self = .checksPassed

@@ -896,6 +896,12 @@ enum Snapshot {
             // overwritten by a yellow bar. Here neither picture is wrong, which is worse, because
             // nothing about the file would say which one it is.
             ("running-glyph-still", AnyView(RunningGlyphGallery()), Gallery.runningGlyph.size),
+            // The rest of that column, which unlike the running mark holds no representable at
+            // all once the two that do are left off it. So this one is a real photograph rather
+            // than a consolation, and it is the only way to look at the marks side by side
+            // without opening the app in front of whoever is using this Mac. See
+            // `StatusColumnGallery` for what is on it and what is deliberately not.
+            ("status-column", AnyView(StatusColumnGallery()), Gallery.statusColumn.size),
             // The activity rule, on the same terms and for a better reason than most: the still
             // figure is the point of that page rather than a consolation. It is what `Reduce
             // Motion` draws, and the claim being made about it is that a crest parked at the

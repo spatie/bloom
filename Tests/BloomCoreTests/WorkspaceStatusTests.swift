@@ -78,6 +78,11 @@ struct WorkspaceStatusTests {
             json: #"{"number":1,"title":"t","url":"u","state":"OPEN","statusCheckRollup":[]}"#,
             expected: .pullRequestOpen
         ),
+        (
+            name: "a conflict outranks its own green checks",
+            json: #"{"number":1,"title":"t","url":"u","state":"OPEN","mergeable":"CONFLICTING","statusCheckRollup":[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"SUCCESS"}]}"#,
+            expected: .conflicted
+        ),
     ])
     func pullRequestDecides(name: String, json: String, expected: WorkspaceStatus) throws {
         let status = WorkspaceStatus.resolve(
@@ -334,6 +339,146 @@ struct WorkspaceStatusTests {
             setupState: setup,
             additions: additions,
             deletions: deletions,
+            unread: unread
+        )
+    }
+}
+
+/// The state the sidebar had no word for.
+///
+/// The band under the title bar said "Merge conflicts" in red, `PullRequest.status` had produced a
+/// `.fixConflicts` remedy to draw the button beside it, and the row in the sidebar for the same
+/// workspace drew a green tick, because the mark fell through the conflict to whatever CI last
+/// said about a commit the base branch has since moved away from. So these tests are about where
+/// the state sits against everything it can be true alongside, and about the two panes agreeing.
+@Suite("Merge conflicts", .tags(.agentProtocol))
+struct ConflictedStatusTests {
+    /// Everything a conflict can be true at the same time as, and which of the two the row says.
+    ///
+    /// The order is `PullRequest.status`'s own, not a second one: a conflict is what a push cannot
+    /// clear and what nothing but a person resolves, so it takes the row from the rollup and from
+    /// the draft flag. What it does NOT take it from is a pull request that has already ended;
+    /// gh's `mergeable` on a merged or closed pull request is a leftover about a branch nobody is
+    /// landing, and "Merge conflicts" over a merged pull request would be an alarm about nothing.
+    @Test("where a conflict sits against everything else GitHub reports", arguments: [
+        (
+            name: "outranks a green rollup",
+            json: #"{"number":1,"title":"t","url":"u","state":"OPEN","mergeable":"CONFLICTING","statusCheckRollup":[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"SUCCESS"}]}"#,
+            expected: WorkspaceStatus.conflicted
+        ),
+        (
+            name: "outranks a failing rollup, which a push could clear and this cannot",
+            json: #"{"number":1,"title":"t","url":"u","state":"OPEN","mergeable":"CONFLICTING","statusCheckRollup":[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"FAILURE","isRequired":true}]}"#,
+            expected: .conflicted
+        ),
+        (
+            name: "outranks checks that have not finished",
+            json: #"{"number":1,"title":"t","url":"u","state":"OPEN","mergeable":"CONFLICTING","statusCheckRollup":[{"__typename":"CheckRun","name":"a","status":"IN_PROGRESS"}]}"#,
+            expected: .conflicted
+        ),
+        (
+            name: "outranks the draft flag, because a draft that conflicts still conflicts",
+            json: #"{"number":1,"title":"t","url":"u","state":"OPEN","isDraft":true,"mergeable":"CONFLICTING","statusCheckRollup":[]}"#,
+            expected: .conflicted
+        ),
+        (
+            name: "an older gh calls the same thing DIRTY",
+            json: #"{"number":1,"title":"t","url":"u","state":"OPEN","mergeStateStatus":"DIRTY","statusCheckRollup":[]}"#,
+            expected: .conflicted
+        ),
+        (
+            name: "merged wins, because the branch it conflicted with is landed",
+            json: #"{"number":1,"title":"t","url":"u","state":"MERGED","mergeable":"CONFLICTING","statusCheckRollup":[]}"#,
+            expected: .merged
+        ),
+        (
+            name: "closed wins, for the same reason",
+            json: #"{"number":1,"title":"t","url":"u","state":"CLOSED","mergeable":"CONFLICTING","statusCheckRollup":[]}"#,
+            expected: .closed
+        ),
+        (
+            name: "a pull request gh could not compute a merge for is not a conflicted one",
+            json: #"{"number":1,"title":"t","url":"u","state":"OPEN","mergeable":"UNKNOWN","statusCheckRollup":[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"SUCCESS"}]}"#,
+            expected: .checksPassed
+        ),
+    ])
+    func precedence(name: String, json: String, expected: WorkspaceStatus) throws {
+        #expect(try mark(json) == expected, "\(name)")
+    }
+
+    /// The agent still outranks it, like every other thing GitHub has to say. A conflict will keep
+    /// until the turn ends; a running agent is the thing happening now.
+    @Test("the workspace's own state still comes first")
+    func localStateStillWins() throws {
+        let conflicting = try decode(
+            #"{"number":1,"title":"t","url":"u","state":"OPEN","mergeable":"CONFLICTING","statusCheckRollup":[]}"#
+        )
+        #expect(
+            WorkspaceStatus.resolve(
+                workspace: workspace(), isRunning: true, pullRequest: conflicting
+            ) == .running
+        )
+        #expect(
+            WorkspaceStatus.resolve(
+                workspace: workspace(unread: true), isRunning: false, pullRequest: conflicting
+            ) == .unread
+        )
+    }
+
+    /// The bug, written down: one workspace, two panes, one verdict. `WorkspaceHoverCard`'s own
+    /// suite covers the card; this is the mark the sidebar row draws against the words the band
+    /// draws, which is the pair that disagreed.
+    @Test("the row's mark and the band's headline say the same thing")
+    func theTwoPanesAgree() throws {
+        let conflicting = try decode(
+            #"{"number":1,"title":"t","url":"u","state":"OPEN","mergeable":"CONFLICTING","statusCheckRollup":[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"SUCCESS"}]}"#
+        )
+        let mark = WorkspaceStatus.ofBranch(workspace: workspace(), pullRequest: conflicting)
+
+        #expect(mark == .conflicted)
+        #expect(mark.label == conflicting.status.text)
+        #expect(conflicting.status.remedy == .fixConflicts)
+    }
+
+    /// It belongs in the legend's second half, which is generated from this property rather than
+    /// from a list beside it, and its detail is the conflict rather than the rollup: "Merge
+    /// conflicts, pull request #1: 12 checks passed" is a tooltip arguing with its own headline.
+    @Test("it reads as a GitHub state, and its detail is about the conflict")
+    func legendAndTooltip() throws {
+        #expect(WorkspaceStatus.conflicted.describesPullRequest)
+        #expect(WorkspaceStatus.conflicted.label == "Merge conflicts")
+
+        let conflicting = try decode(
+            #"{"number":7,"title":"t","url":"u","state":"OPEN","mergeable":"CONFLICTING","statusCheckRollup":[{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"SUCCESS"}]}"#
+        )
+        let detail = WorkspaceStatus.conflicted.detail(pullRequest: conflicting)
+        #expect(detail == "This branch conflicts with the base branch")
+
+        let summary = WorkspaceStatus.conflicted.summary(pullRequest: conflicting)
+        #expect(summary == "Merge conflicts, pull request #7: This branch conflicts with the base branch")
+    }
+
+    // MARK: - Fixtures
+
+    private func mark(_ json: String) throws -> WorkspaceStatus {
+        WorkspaceStatus.resolve(
+            workspace: workspace(), isRunning: false, pullRequest: try decode(json)
+        )
+    }
+
+    private func decode(_ json: String) throws -> PullRequest {
+        try GitHub.decodePullRequest(from: Data(json.utf8))
+    }
+
+    private func workspace(unread: Bool = false) -> Workspace {
+        Workspace(
+            repoID: RepoID("repo"),
+            name: "Glyphs",
+            branch: "feature/glyphs",
+            path: "/tmp/glyphs",
+            baseBranch: "main",
+            setupState: .succeeded,
+            additions: 3,
             unread: unread
         )
     }

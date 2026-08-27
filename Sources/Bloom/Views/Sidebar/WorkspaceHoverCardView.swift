@@ -108,7 +108,7 @@ struct WorkspaceHoverCardView: View {
     /// the card, which is where the eye lands first.
     ///
     /// `WorkspaceStatusGlyph` rather than a glyph of its own, so a state that is a pencil in the
-    /// sidebar is a pencil here. Every one of the fourteen shapes and its colour is decided there
+    /// sidebar is a pencil here. Every one of the fifteen shapes and its colour is decided there
     /// and in `WorkspaceStatus`, and the legend draws from the same type.
     private var title: some View {
         HStack(alignment: .top, spacing: Metrics.spacing) {

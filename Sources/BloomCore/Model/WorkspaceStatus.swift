@@ -29,6 +29,14 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
     case merged
     /// The pull request was closed without merging.
     case closed
+    /// The branch cannot be applied to its base, so nothing merges until a person resolves it.
+    ///
+    /// Above the check rollup and above `draft`, which is where `PullRequest.status` already puts
+    /// it. Without a case of its own a conflicted branch fell through to whatever CI last said, so
+    /// the pull request band drew "Merge conflicts" in red while the sidebar row beside it drew a
+    /// green tick: one workspace, two verdicts, in two panes an inch apart. A conflict is also the
+    /// only state in this block that a push cannot clear.
+    case conflicted
     /// CI has rejected the branch.
     case checksFailing
     /// CI has not finished with the branch.
@@ -86,6 +94,11 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
         if let pullRequest {
             if pullRequest.isMerged { return .merged }
             if pullRequest.isClosed { return .closed }
+            // Before the draft flag and before the rollup, in `PullRequest.status`'s order rather
+            // than in one invented here. Green checks on a branch that cannot be applied to the
+            // base is the combination where the cheerful answer is the wrong one, and a draft that
+            // also conflicts still conflicts.
+            if pullRequest.hasConflicts { return .conflicted }
             if pullRequest.isDraft { return .draft }
             switch pullRequest.checks {
             case .failing: return .checksFailing
@@ -108,6 +121,8 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
         case .unread: "Unread"
         case .merged: "Merged"
         case .closed: "Pull request closed"
+        // The band's own words, so the row and the strip name one thing one way.
+        case .conflicted: "Merge conflicts"
         case .checksFailing: "Checks failing"
         case .checksRunning: "Checks running"
         case .checksPassed: "Checks passed"
@@ -121,7 +136,7 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
     /// Whether this verdict came from GitHub rather than from the worktree.
     public var describesPullRequest: Bool {
         switch self {
-        case .merged, .closed, .checksFailing, .checksRunning, .checksPassed, .draft,
+        case .merged, .closed, .conflicted, .checksFailing, .checksRunning, .checksPassed, .draft,
              .pullRequestOpen:
             true
         default:
@@ -158,6 +173,10 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
     /// that a card built on a copy of this would have said it twice.
     public func detail(pullRequest: PullRequest?) -> String? {
         guard describesPullRequest, let pullRequest else { return nil }
+        // The rollup is not what is wrong with a conflicted branch, and "Merge conflicts: 12 of 12
+        // checks passed" is a tooltip arguing with its own headline. The band's sentence instead,
+        // read off the band rather than copied from it, so the two cannot drift.
+        if self == .conflicted { return pullRequest.status.detail }
         let detail = pullRequest.checksSummary
         guard !detail.isEmpty, detail != label else { return nil }
         return detail
