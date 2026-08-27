@@ -195,6 +195,9 @@ struct WorkspaceRow: View {
         // cannot see it still has the accessibility value, which is what that line was really for.
         .accessibilityValue(statusDescription)
         .contentShape(Rectangle())
+        // Command-Backspace is delete-to-start-of-line in a text box, and the menu bar had it
+        // for Archive Workspace. See `FocusedValues.isTypingProse`.
+        .focusedValue(\.isTypingProse, fieldFocused)
         .onHover { isHovered = $0 }
         // Only rows that exist ask GitHub anything, and the id carries the branch and whether
         // there is any work at all, because both change what is worth asking about.

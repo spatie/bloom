@@ -120,6 +120,9 @@ struct QuickPromptForm: View {
             buttons
         }
         .padding(Metrics.pane)
+        // Command-Backspace is delete-to-start-of-line in a text box, and the menu bar had it
+        // for Archive Workspace. See `FocusedValues.isTypingProse`.
+        .focusedValue(\.isTypingProse, isNameFocused)
         .onAppear(perform: prepare)
         // Escape leaves the form and goes back to the list, rather than closing the whole panel and
         // losing what was typed with it. While the picker is up it has Escape first, and gives it
