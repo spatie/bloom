@@ -650,6 +650,24 @@ struct TranscriptRowHeightsTests {
         #expect(heights.needsMeasuring(key("streaming.session-a"), redrawsItself: true))
     }
 
+    /// **And the other half of that, which is the case a reader of the two callers flagged.** A
+    /// fold's line is not a stored row and it holds no sequence number, so the obvious reading is
+    /// that it must redraw itself like the tail above. It must not: everything a fold draws is
+    /// hashed into its key, so a measurement filed under one is the answer until the key moves.
+    /// Getting that wrong costs twice over, because `TranscriptTable.viewFor` also refuses to
+    /// silence an entry that redraws itself, and a fold that has been measured at nothing is
+    /// exactly the entry worth silencing: there is one per run of tool calls in the session, and
+    /// most of them have nothing to say.
+    @Test("a fold's line is answered from its key, like the row it stands over")
+    func aFoldIsAnsweredFromItsKey() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1, leading: 1.7)
+        let fold = TranscriptEntryID.fold(41)
+        heights.note(0, for: key("fold.41|shows-nothing"))
+        #expect(!fold.redrawsItself)
+        #expect(!heights.needsMeasuring(key("fold.41|shows-nothing"), redrawsItself: fold.redrawsItself))
+    }
+
     @Test("nothing is owed before a width has arrived, because nothing has been measured")
     func everythingIsOwedBeforeAWidth() {
         let heights = TranscriptRowHeights()
