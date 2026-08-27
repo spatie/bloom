@@ -45,12 +45,14 @@ Everything real is a script in `Tools/`; the `Makefile` is the index.
     make app        assemble a debug .app   make run        release .app, launched
     make master     install ~/Applications/Bloom.app  (see the guard below)
     make dev        install ~/Applications/Bloom Dev.app
+    make ssh        install ~/Applications/Bloom SSH.app
     make dev-db     copy the real database into the dev copy
     make release    sign, notarise and staple a zip and a disk image into dist/
     make dmg        wrap the newest built .app in the beach disk image
 
 Anything that takes an argument is run directly: `./Tools/test-core.sh DiffParser`,
-`./Tools/master.sh v0.3.0`, `./Tools/dev-build.sh --no-launch`.
+`./Tools/master.sh v0.3.0`, `./Tools/dev-build.sh --no-launch`,
+`./Tools/dev-db.sh --identity ssh`.
 
 `./Tools/test-core.sh` mirrors the core sources into a throwaway package with no app target, so one
 broken view cannot stop the core suite. Its head documents the environment it reads: `BLOOM_TEST_ID`
@@ -321,12 +323,27 @@ URL scheme, so it cannot swallow a `bloom://` link meant for the real copy. It i
 rust and orange icon, by "Bloom Dev" in the Dock and the switcher, and by `[DEV] ` in front of every
 window title. Both copies run at once.
 
+**`make ssh` is the same mechanism with a third identity.** It installs
+`~/Applications/Bloom SSH.app`, bundle id `be.spatie.bloom.ssh`, database under
+`~/Library/Application Support/Bloom SSH/`, scheme `bloomssh:`, a violet icon and `[SSH] ` in front
+of every window title. It exists so the work on driving agents over SSH can run a build that talks
+to real servers without pointing the copy the owner works in at them, and its database is its own
+precisely because it will hold servers and not only workspaces. All three copies run at once.
+
+There is one script, `Tools/dev-build.sh --identity <key>`, and one table, at the head of
+`Tools/guard.sh`, holding the name, bundle id, URL scheme, icon rotation and title mark of every
+identity. A fourth is four strings and a `Makefile` line. `real` is deliberately not a key any of
+these scripts may select, and `bloom_require_installable_app` refuses any destination that is not
+one of the identities that may be installed, which is how a mistyped path stops the build rather
+than being removed and replaced.
+
 **Open the dev copy with `open`, never by running its executable.** `LSEnvironment` is applied by
 LaunchServices, so `~/Applications/Bloom\ Dev.app/Contents/MacOS/Bloom` started by hand gets no
 `BLOOM_DB_PATH`. That used to mean it fell back to the real database and defeated every separation
 above. It does not any more: with no `BLOOM_DB_PATH`, `Store` derives the directory from
 `Bundle.main.bundleIdentifier`, and only `be.spatie.bloom` resolves to `Bloom`. The dev bundle id
-resolves to `Bloom Dev`, which is where `make dev` points it anyway; a binary in no bundle at all,
+resolves to `Bloom Dev` and the SSH one to `Bloom SSH`, which is where each build points it anyway;
+a binary in no bundle at all,
 which is `swift run` or `.build/debug/Bloom` and which nothing used to warn about, resolves to
 `Bloom (unbundled)` and starts empty. Open it properly all the same, because the check at the foot
 of `dev-build.sh` is worth having and because two agreeing mechanisms are the point.
@@ -336,10 +353,12 @@ at. It never writes back. It copies the `-wal` and `-shm` as well as `bloom.sqli
 mode everything since the last checkpoint lives in the WAL and the main file alone is stale, and it
 never opens the real database at all, because opening a WAL database writes to it. It also points
 the copied workspace rows at a root that does not exist, so the dev copy can show every workspace
-and cannot delete a real worktree. `--keep-paths` opts out and says why you should not.
+and cannot delete a real worktree. `--keep-paths` opts out and says why you should not, and
+`--identity ssh` fills the SSH copy instead.
 
 **`make master` will refuse if you are inside the app it would replace**, because that script
 removes `~/Applications/Bloom.app` and kills the process running from it. `Tools/guard.sh` finds the
 app either as a real ancestor of this shell or, for a terminal pane whose tmux server has reparented
-away, by the socket name derived from the database path. Do not work around it. Build `make dev`
-instead.
+away, by the socket name derived from the database path. It sweeps all three identities rather than
+the one it was handed, so the refusal is right even when a destination and a database have drifted
+apart. Do not work around it. Build `make dev` or `make ssh` instead.

@@ -1,12 +1,15 @@
 #!/bin/zsh
-# Puts a copy of the owner's real database into Bloom Dev's own container, so
-# the dev copy has his projects, his workspaces and his transcripts to look at.
+# Puts a copy of the owner's real database into a side identity's own container,
+# so that copy has his projects, his workspaces and his transcripts to look at.
 #
-#   ./Tools/dev-db.sh              copy, and detach the worktree paths
-#   ./Tools/dev-db.sh --keep-paths copy, and leave the worktree paths pointing
-#                                  at the real worktrees. Read the warning
+#   ./Tools/dev-db.sh                  copy into Bloom Dev, detach the worktree paths
+#   ./Tools/dev-db.sh --identity ssh   copy into Bloom SSH instead
+#   ./Tools/dev-db.sh --keep-paths     copy, and leave the worktree paths pointing
+#                                      at the real worktrees. Read the warning
 #
-# `make dev-db` is the first of those.
+# `make dev-db` is the first of those. The identity is a key from the table at the
+# head of Tools/guard.sh, and that table is what stops `--identity` naming the
+# owner's own copy: `real` is not one of the keys a script here may select.
 #
 # IT COPIES OUT. IT NEVER WRITES BACK. There is no flag on this script that
 # writes the real database, and adding one is not a small change: the real
@@ -45,19 +48,29 @@ cd "$(dirname "$0")/.."
 source "$PWD/Tools/guard.sh"
 
 KEEP_PATHS=0
-for arg in "$@"; do
-  case "$arg" in
+IDENTITY=dev
+while (( $# > 0 )); do
+  case "$1" in
     --keep-paths) KEEP_PATHS=1 ;;
-    *) echo "unknown option: $arg" >&2; exit 1 ;;
+    --identity)
+      shift
+      (( $# > 0 )) || { echo "--identity needs one of: ${BLOOM_INSTALLABLE_IDENTITIES[*]}" >&2; exit 1 }
+      IDENTITY="$1"
+      ;;
+    *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
+  shift
 done
 
-SOURCE="$BLOOM_REAL_DB"
-DEST="$BLOOM_DEV_DB"
+bloom_use_identity "$IDENTITY"
 
-# The destination goes through the guard even though it is a constant, so that a
-# future edit which makes it an argument inherits the refusal instead of
-# needing to remember it.
+SOURCE="$BLOOM_REAL_DB"
+DEST="$BLOOM_DB"
+
+# The destination goes through the guard even though it comes from the identity
+# table and can only be one of two paths, because the guard is what makes that
+# sentence true rather than believed: it is the one check that does not care
+# where the path came from.
 bloom_refuse_real_db "$DEST"
 
 if [[ ! -f "$SOURCE" ]]; then
@@ -65,18 +78,18 @@ if [[ ! -f "$SOURCE" ]]; then
   exit 1
 fi
 
-# The dev copy holds its database open in WAL mode exactly as the real one does,
-# so replacing the file underneath it corrupts it. Quit it first. By pid, and
-# only ever pids of the dev bundle.
-running=($(bloom_app_pids "$BLOOM_DEV_APP"))
+# The copy being written holds its database open in WAL mode exactly as the real
+# one does, so replacing the file underneath it corrupts it. Quit it first. By
+# pid, and only ever pids of that one bundle.
+running=($(bloom_app_pids "$BLOOM_APP"))
 if (( ${#running} > 0 )); then
-  print -ru2 -- "==> Bloom Dev is running as pid ${running[*]}."
+  print -ru2 -- "==> $BLOOM_NAME is running as pid ${running[*]}."
   print -ru2 -- "    Quit it and run this again. Replacing a database under a live"
   print -ru2 -- "    connection corrupts it rather than updating it."
   exit 1
 fi
 
-mkdir -p "$BLOOM_DEV_DB_DIR"
+mkdir -p "$BLOOM_DB_DIR"
 
 # ------------------------------------------------------------------- the copy
 
@@ -147,15 +160,15 @@ done
 # archive it, and archiving deletes the branch and removes the worktree.
 #
 # So by default the copied rows are pointed at a root that does not exist. The
-# dev copy then shows every project, every workspace, every session and every
+# side copy then shows every project, every workspace, every session and every
 # transcript, because all of that is in the database, and every destructive
 # action fails on a missing directory instead of removing somebody's work. That
-# is the trade: a dev copy that is fully realistic to read and inert to act on.
+# is the trade: a side copy that is fully realistic to read and inert to act on.
 #
 # `repos.path` is deliberately NOT rewritten. Those are the real repositories,
 # and pointing Bloom Dev at the real Bloom checkout is the entire reason this
-# exists. A workspace the dev copy creates for itself is cut fresh, under its own
-# name, and only the dev database knows about it, so only the dev copy can
+# exists. A workspace a side copy creates for itself is cut fresh, under its own
+# name, and only that copy's database knows about it, so only that copy can
 # archive it. It does land under the same workspaces root as the real copy's,
 # because `WorkspaceManager.workspacesRoot` has no override: it reads the same
 # home directory as the real copy and answers with the same folder, whichever of
@@ -166,13 +179,13 @@ if (( KEEP_PATHS )); then
   cat <<EOF
 ==> --keep-paths: the copied rows point at the REAL worktrees.
 
-    Bloom Dev and Bloom now both believe they manage the same directories.
+    $BLOOM_NAME and Bloom now both believe they manage the same directories.
     Archiving a workspace in either one deletes the other one's worktree and
-    its branch. Read in the dev copy, do not act in it.
+    its branch. Read in that copy, do not act in it.
 
 EOF
 else
-  /usr/bin/python3 - "$DEST" "$BLOOM_DEV_WORKSPACES_ROOT" <<'PY'
+  /usr/bin/python3 - "$DEST" "$BLOOM_WORKSPACES_ROOT" <<'PY'
 import os
 import sqlite3
 import sys
@@ -189,7 +202,7 @@ connection.commit()
 connection.close()
 print("==> detached %d worktree paths to %s" % (len(rows), root))
 PY
-  echo "    Nothing in the dev copy now points at a real worktree."
+  echo "    Nothing in $BLOOM_NAME now points at a real worktree."
 fi
 
 # ------------------------------------------------------------------- the proof
