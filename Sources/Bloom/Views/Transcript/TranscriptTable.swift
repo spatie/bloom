@@ -1734,6 +1734,41 @@ private struct HostedRow: View {
     }
 }
 
+/// The one root type every cell's hosting view holds.
+///
+/// **`NSHostingView<AnyView>` was a different underlying type per row kind.** `entry.content()` is
+/// an `AnyView` over `TranscriptRowView`, `TurnFooterView`, `UserTurnRowView`,
+/// `PendingTurnRowView`, `WorkspaceEventsView`, `StreamingTailView` or `TranscriptFoldRowView`,
+/// and assigning a root view of a different underlying type is a different view arriving rather
+/// than the same view with new inputs, so a recycled cell tore its whole graph down and built
+/// another instead of updating the one it had. Timed on the census's own clock: 0.114ms a rebuild
+/// against 0.066ms with the outer type held still.
+///
+/// The `AnyView` INSIDE stays, and has to: no concrete type spans those seven, and the closure that
+/// builds one of them is what keeps a pass over four thousand entries to four thousand closures.
+/// What this fixes is the type SwiftUI reads to decide what kind of update it is making.
+///
+/// Every field is optional because a cell exists before it holds a row, and a cell holding no row
+/// draws nothing at all.
+private struct TranscriptCellRoot: View {
+    var content: AnyView?
+    var id: TranscriptEntryID?
+    var environment: TranscriptRowEnvironment?
+    var report: (@MainActor (CGFloat) -> Void)?
+
+    var body: some View {
+        if let content, let id, let environment {
+            HostedRow(content: content, report: { height in report?(height) })
+                // A recycled cell is handed an unrelated row, and without an identity SwiftUI
+                // treats that as the same view changing rather than a different view arriving,
+                // which is what gives it something to animate between. It is also what makes
+                // `onAppear` fire for the arrival settle. See `HostedRow`.
+                .id(id)
+                .transcriptRowEnvironment(environment)
+        }
+    }
+}
+
 /// One row of the table: an `NSHostingView` and the key of what is in it.
 ///
 /// The hosting view is exactly the row, so there is no second opinion about its height. What the
@@ -1751,7 +1786,7 @@ private struct HostedRow: View {
 /// risk rather than on evidence, and the evidence is a build with this line changed and nothing
 /// else. If that build overlaps too, the fault is older than the mask and this can come back.
 final class TranscriptTableCell: NSView {
-    private let host: NSHostingView<AnyView>
+    private let host: NSHostingView<TranscriptCellRoot>
     private var appliedKey: TranscriptContentKey?
     /// Which generation of the table's cells this one is from. Nothing to start with, so a cell
     /// built here is always behind and is always applied. See `Coordinator.cellGeneration`.
@@ -1760,7 +1795,7 @@ final class TranscriptTableCell: NSView {
     var onHeightChange: (@MainActor (TranscriptEntryID, CGFloat) -> Void)?
 
     init(identifier: NSUserInterfaceItemIdentifier) {
-        host = NSHostingView(rootView: AnyView(EmptyView()))
+        host = NSHostingView(rootView: TranscriptCellRoot())
         super.init(frame: .zero)
         self.identifier = identifier
         host.translatesAutoresizingMaskIntoConstraints = false
@@ -1795,17 +1830,12 @@ final class TranscriptTableCell: NSView {
         appliedKey = entry.contentKey
         appliedGeneration = generation
         let id = entry.id
-        host.rootView = AnyView(
-            HostedRow(
-                content: entry.content(),
-                report: { [weak self] height in self?.onHeightChange?(id, height) }
-            )
-            // A recycled cell is handed an unrelated row, and without an identity SwiftUI treats
-            // that as the same view changing rather than a different view arriving, which is what
-            // gives it something to animate between. It is also what makes `onAppear` fire for the
-            // arrival settle. See `HostedRow`.
-            .id(id)
-            .transcriptRowEnvironment(environment)
+        // One concrete root type, whatever the row is. See `TranscriptCellRoot`.
+        host.rootView = TranscriptCellRoot(
+            content: entry.content(),
+            id: id,
+            environment: environment,
+            report: { [weak self] height in self?.onHeightChange?(id, height) }
         )
         return true
     }
