@@ -114,7 +114,23 @@ struct CreateWorkspaceView: View {
     /// put every one of them back on the glyph-only rung: a window asking what you want to work on
     /// while showing five unlabelled symbols is a window that tells you nothing about what it is
     /// about to do. The number below is what the same row needs with its words on.
-    private static let width: CGFloat = 700
+    ///
+    /// **And then a sixth did.** The quick prompt button carries a word as well, and it arrived
+    /// after that number was last measured. At 700 the labelled row wants 676 points against the
+    /// 652 this frame leaves inside the composer's two twelve point paddings, which is twenty four
+    /// short and all it takes for `ViewThatFits` to fall to the glyph-only rung again. That is what
+    /// the owner reported after putting this window and the composer at the bottom of the main one
+    /// side by side. Measured control by control with AppKit's text metrics at the 12 point callout
+    /// these labels are set in: model 83, effort 71, output style 85, permission mode 153 with
+    /// "Bypass permissions" on it, fast 49, quick prompts 111, paperclip 28, Create 75, plus the
+    /// spacer and eight two point gaps.
+    ///
+    /// 760 leaves 712, so that row has thirty six points in hand: enough for the widest effort the
+    /// menu offers ("Extra high", thirty points more than "High") or the longest built-in model
+    /// name. The footer is told outright not to drop its words here, so a project whose output
+    /// style has a long name shortens that one label instead of taking the words off all six
+    /// controls; the width is what keeps the shortening rare. See `ComposerFooterView.adaptsToWidth`.
+    private static let width: CGFloat = 760
     /// What the writing area opens at. Five lines, because the question is "what do you want to
     /// work on" and a one-line box answers it with "something short".
     private static let minEditorLines: CGFloat = 5
@@ -291,8 +307,8 @@ struct CreateWorkspaceView: View {
         // carried six of its own on top of the strip's six, and it still does. What the strip
         // gains across is a trailing margin that matches: the row's trailing edge now keeps the
         // same 12 from the right edge that the title keeps from the left, where it kept six. Widening
-        // this sheet from 620 to 700 spent nothing on either edge, so neither number had moved
-        // since the strip held no title at all. What ends the row has changed since; the margin
+        // this window from 620 to 700, and then to 760, spent nothing on either edge, so neither
+        // number has moved since the strip held no title at all. What ends the row has changed since; the margin
         // has not.
         .padding(.horizontal, Metrics.gutter)
         .padding(.vertical, Metrics.inset)
@@ -561,6 +577,9 @@ struct CreateWorkspaceView: View {
                 onChange: { controls = $0 },
                 canSend: canCreate,
                 intent: .create,
+                // This window's width is fixed and was chosen for this row with its words on, so
+                // there is no narrow case to fall back for. See `width` above.
+                adaptsToWidth: false,
                 // The repository, because the worktree this window is about to cut does not
                 // exist yet and a style the project defines is already in the repository.
                 project: repo?.path,

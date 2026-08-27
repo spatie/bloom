@@ -18,6 +18,23 @@ struct ComposerFooterView: View {
     var canSend: Bool
     /// What the button at the end of the row does. See `ComposerIntent`.
     var intent: ComposerIntent = .send
+    /// Whether the row is allowed to drop its words to fit the space it is given.
+    ///
+    /// True in the centre column, whose width the user owns: it can be dragged to 420 points and
+    /// split in two, and at that width something has to give. False in the create window, whose
+    /// width is fixed and was measured against this row with every word on.
+    ///
+    /// It is a parameter of its own rather than something read off `ComposerIntent`, because the
+    /// intent says what the primary button does and nothing about how much room there is. Welding
+    /// the two would mean that any other surface wanting the labels would have to claim it was
+    /// creating a workspace to get them.
+    ///
+    /// The reason it has to be said at all: the row grew a sixth labelled control, the quick
+    /// prompt button, after the create window's width was last measured, so the labelled row no
+    /// longer fitted and `ViewThatFits` quietly took every word off. Five unlabelled glyphs in a
+    /// window asking what you want to work on say nothing about what it is about to do, which is
+    /// what the owner reported after putting the two composers side by side.
+    var adaptsToWidth: Bool = true
     /// The checkout the output style menu should look in for styles this project defines, or nil
     /// where there is not one yet. A repository can carry its own `.claude/output-styles`, and in
     /// the create window the worktree does not exist, so the repository is the honest answer there.
@@ -94,10 +111,23 @@ struct ComposerFooterView: View {
         // had no way to send. Each step drops the least load-bearing thing left: first the words
         // beside the picker glyphs, then the context reading, which is the one control here that
         // reports rather than does.
-        return ViewThatFits(in: .horizontal) {
-            row(isCompact: false, showsContext: true, choices: choices)
-            row(isCompact: true, showsContext: true, choices: choices)
-            row(isCompact: true, showsContext: false, choices: choices)
+        //
+        // Only where the width is the user's to change. Where the caller owns it and has sized the
+        // window to this row, the full row is drawn outright: a candidate list is a set of ways to
+        // give up, and a window that cannot be resized has nothing to give up for. What a label too
+        // long for the room does there is truncate, which is what `lineLimit(1)` on the label and
+        // the horizontal give in `ComposerOptionMenu` already arrange, and one shortened word reads
+        // better than five missing ones.
+        return Group {
+            if adaptsToWidth {
+                ViewThatFits(in: .horizontal) {
+                    row(isCompact: false, showsContext: true, choices: choices)
+                    row(isCompact: true, showsContext: true, choices: choices)
+                    row(isCompact: true, showsContext: false, choices: choices)
+                }
+            } else {
+                row(isCompact: false, showsContext: true, choices: choices)
+            }
         }
         // Outside the `ViewThatFits`, so narrowing the pane cannot take the presenter out of the
         // tree while the popover is up.
