@@ -335,7 +335,11 @@ public struct WorkspaceStartTool: BridgeToolHandling {
 
         let order = AgentWorkspaceOrder(
             prompt: prompt,
-            name: filled(request.param("name")),
+            // `WorkspaceName.given` rather than `filled`, which is otherwise the same trim, so
+            // that the two doors a name can arrive through cannot drift: `workspace_rename` reads
+            // its argument with the same function, and a name this door accepts and that one
+            // refuses would be a workspace an agent can create and then cannot correct.
+            name: WorkspaceName.given(request.stringParam("name")),
             source: source,
             agent: agent
         )
