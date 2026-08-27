@@ -63,10 +63,7 @@ struct MergeSplitButton: View {
         // form below it was never once drawn. The candidates carry their own, on `control`, which
         // is what makes each of them report the width its label really wants. See
         // `PullRequestSummary.continueButton`, where the same slip was on four more.
-        ViewThatFits(in: .horizontal) {
-            styled.labelStyle(.titleAndIcon)
-            styled.labelStyle(.iconOnly)
-        }
+        styled.labelStyle(.titleAndIcon)
         // **The label and the tick are one value, and this is what makes that true.** A `Menu`'s
         // content is not evaluated when the view is rebuilt; it is evaluated when the menu opens,
         // out of the closure SwiftUI stored, and the tick is drawn from the selection that closure

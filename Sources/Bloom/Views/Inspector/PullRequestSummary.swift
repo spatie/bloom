@@ -335,21 +335,20 @@ struct PullRequestSummary: View {
     /// headline is more than the pane's default width carries, and the headline is the part that
     /// must not be the thing that truncates.
     ///
-    /// **The `.fixedSize()` is on the candidates, never on the `ViewThatFits`.** It sat outside on
-    /// all five of the strip's two-form controls, and that is what made the second form
-    /// unreachable: `.fixedSize()` proposes an unspecified width to what it wraps, and a
-    /// `ViewThatFits` measuring against an unspecified width finds its FIRST candidate fits, every
-    /// time and at every pane width. So "Continue", "Archive", "Commit and push" and "Fix merge
-    /// conflicts" kept their titles always, and the fallback four doc comments in this file
-    /// promise had never once been drawn. Inside, it does the job it was reached for: each
-    /// candidate reports the width its own label wants rather than a truncated one, and the row
-    /// takes the first that fits what it was actually offered. `InspectorToolbar` puts it on the
-    /// candidate and has always been right about it.
+    /// **The label always shows, and the icon-only fallback is gone.**
+    ///
+    /// It was a `ViewThatFits` dropping the title in a narrow pane, and for a long time it could
+    /// not fire at all because a `.fixedSize()` outside the stack proposed an unspecified width;
+    /// making it reachable is what finally showed the owner what it did. His answer on seeing it:
+    /// he does not want the smaller button, and the label should be there in every state.
+    ///
+    /// He is right, and the reason is what this strip is for. A glyph alone cannot tell "Fix merge
+    /// conflicts" from "Commit and push" from "Merge", and those are three different irreversible
+    /// things one press apart. The headline beside it is what gives way instead: it already
+    /// truncates, it is a description rather than a control, and a truncated sentence with a full
+    /// button beats a complete sentence beside a button nobody can name.
     private var continueButton: some View {
-        ViewThatFits(in: .horizontal) {
-            continueControl.labelStyle(.titleAndIcon).fixedSize()
-            continueControl.labelStyle(.iconOnly).fixedSize()
-        }
+        continueControl.labelStyle(.titleAndIcon).fixedSize()
     }
 
     /// Untinted, deliberately.
@@ -395,10 +394,7 @@ struct PullRequestSummary: View {
     ///
     /// Two forms, with the `.fixedSize()` on the candidates for the reason `continueButton` gives.
     private var archiveButton: some View {
-        ViewThatFits(in: .horizontal) {
-            archiveControl.labelStyle(.titleAndIcon).fixedSize()
-            archiveControl.labelStyle(.iconOnly).fixedSize()
-        }
+        archiveControl.labelStyle(.titleAndIcon).fixedSize()
     }
 
     private var archiveControl: some View {
@@ -429,10 +425,7 @@ struct PullRequestSummary: View {
     /// the headline truncate keeps the sentence, which is the part that cannot be guessed from a
     /// glyph. The `.fixedSize()` is on the candidates for the reason `continueButton` gives.
     private var pushButton: some View {
-        ViewThatFits(in: .horizontal) {
-            pushControl.labelStyle(.titleAndIcon).fixedSize()
-            pushControl.labelStyle(.iconOnly).fixedSize()
-        }
+        pushControl.labelStyle(.titleAndIcon).fixedSize()
     }
 
     private var pushControl: some View {
@@ -478,10 +471,7 @@ struct PullRequestSummary: View {
     /// label in the strip and the headline is the part that must not be what truncates. The
     /// `.fixedSize()` is on the candidates for the reason `continueButton` gives.
     private var fixConflictsButton: some View {
-        ViewThatFits(in: .horizontal) {
-            fixConflictsControl.labelStyle(.titleAndIcon).fixedSize()
-            fixConflictsControl.labelStyle(.iconOnly).fixedSize()
-        }
+        fixConflictsControl.labelStyle(.titleAndIcon).fixedSize()
     }
 
     /// Tinted `status.tone.fill`, which in this state is red, and deliberately so.
