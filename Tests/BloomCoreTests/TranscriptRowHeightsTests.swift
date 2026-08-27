@@ -668,6 +668,29 @@ struct TranscriptRowHeightsTests {
         #expect(!heights.needsMeasuring(key("fold.41|shows-nothing"), redrawsItself: fold.redrawsItself))
     }
 
+    // MARK: - When a screenful is worth putting right
+
+    /// **The blank under a fold's line, written down as the rule that missed it.** The repair ran
+    /// on the table and the cache disagreeing, and a row nobody has measured at all is the two of
+    /// them agreeing perfectly about the running mean. So the census counted the guess, printed it
+    /// in debug builds, and did nothing about it.
+    @Test("a visible row nobody has measured is worth putting right on its own")
+    func aGuessIsWorthRepairing() {
+        #expect(TranscriptRowHeights.needsRepair(guessed: 1, wrong: 0))
+    }
+
+    @Test("and so is the table disagreeing with the cache")
+    func aDisagreementIsWorthRepairing() {
+        #expect(TranscriptRowHeights.needsRepair(guessed: 0, wrong: 3))
+    }
+
+    /// A screen where every row has been measured and the table has been told is a screen to leave
+    /// alone: the repair writes heights, which moves the document.
+    @Test("a screen that is right is left alone")
+    func aRightScreenIsLeftAlone() {
+        #expect(!TranscriptRowHeights.needsRepair(guessed: 0, wrong: 0))
+    }
+
     @Test("nothing is owed before a width has arrived, because nothing has been measured")
     func everythingIsOwedBeforeAWidth() {
         let heights = TranscriptRowHeights()

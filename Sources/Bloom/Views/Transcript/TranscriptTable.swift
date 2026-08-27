@@ -520,6 +520,23 @@ struct TranscriptTable: NSViewRepresentable {
                 // The cells first, so that a row whose height is about to travel already holds
                 // what it is travelling to show. See `noteHeights(_:over:)`.
                 tableView.reloadData(forRowIndexes: changed, columnIndexes: IndexSet(integer: 0))
+                // **A key that has just moved is a key nothing has measured, and this pass is the
+                // cheapest moment to take it.** It used to go straight to `noteHeights`, which
+                // tells the table what the cache holds, and for a new key the cache holds nothing:
+                // `assumed` answers the running mean and the row is drawn at it.
+                //
+                // Nothing put that right afterwards. `HostedRow` reports through
+                // `onChange(of: proxy.size.height)`, so a row whose key moved without its height
+                // moving never reports again; the cell is not rebuilt as a new identity, so the
+                // `initial: true` that would have does not fire; the warming pass only walks rows
+                // ABOVE the screen; and the screen census saw the cache and the table agreeing
+                // about the mean. A fold's line is the case that shipped: its key carries the
+                // count in its words, so it moves on every call that lands, and it is one line
+                // tall in every one of those states.
+                //
+                // `measureExactly` skips any key the cache already knows, so the ordinary changed
+                // row, one that has been in this state before, costs a dictionary lookup.
+                measureExactly(changed)
                 noteHeights(changed.subtracting(unfolding))
                 noteHeights(unfolding, over: unfoldSeconds)
             }
@@ -811,7 +828,9 @@ struct TranscriptTable: NSViewRepresentable {
             //
             // On the settle only. It writes heights, which moves the document, and doing that on a
             // frame somebody is scrolling is the stutter rather than the cure.
-            if settled, wrong > 0 { repairTheScreen() }
+            if settled, TranscriptRowHeights.needsRepair(guessed: estimated, wrong: wrong) {
+                repairTheScreen()
+            }
             #if DEBUG
             // Which rows, once the screen has stopped moving, because a guess that is standing
             // there is worth naming and a guess mid flick is not.
@@ -836,6 +855,12 @@ struct TranscriptTable: NSViewRepresentable {
             guard !rows.isEmpty else { return }
             let wasAtEnd = isFollowingAlong
             let anchor = anchorEntry()
+            // **Measured before it is told, because re-telling a guess tells the table the guess
+            // again.** This used to hand the table whatever `assumed` said, which for a row nobody
+            // has measured is the running mean, so a screenful of guesses was reported by the
+            // census and then confirmed by the repair. `measureExactly` skips every key the cache
+            // knows, so on a screen that is already right this costs one lookup a row.
+            measureExactly(rows)
             noteHeights(rows)
             keepPlace(wasAtEnd: wasAtEnd, anchor: anchor)
             reportGeometry()
@@ -1612,8 +1637,11 @@ struct TranscriptTable: NSViewRepresentable {
         /// draws. Everything else is already the answer, and the rule for which is which is
         /// `TranscriptRowHeights.needsMeasuring`, which carries the blank this used to leave under
         /// the newest row.
+        ///
+        /// Over any sequence of row indices rather than a range, because a pass with a handful of
+        /// changed keys has an `IndexSet` and its rows are not next to each other.
         @discardableResult
-        private func measureExactly(_ rows: Range<Int>) -> IndexSet {
+        private func measureExactly(_ rows: some Sequence<Int>) -> IndexSet {
             guard let sizing = heights.measure else { return IndexSet() }
             var moved = IndexSet()
             for row in rows where entries.indices.contains(row) {

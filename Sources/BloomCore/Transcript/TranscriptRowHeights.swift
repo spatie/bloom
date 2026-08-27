@@ -292,6 +292,29 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         redrawsItself || heights[contentKey] == nil || stale.contains(contentKey)
     }
 
+    /// **Whether a screenful the reader has stopped on is worth putting right.**
+    ///
+    /// Two faults, one answer, and the second one is why this is not simply `wrong > 0`.
+    ///
+    /// `wrong` is the table and the cache disagreeing: a number was taken and the table was never
+    /// told. `guessed` is a visible row the table is drawing at a height NOBODY has measured, and
+    /// there the two agree perfectly about a number that is wrong in both, which is what makes it
+    /// invisible to a disagreement count. That is the shape this file has now been wrong about
+    /// twice: once as the streaming tail, where the cache held a stale number and the row was not
+    /// even counted as a guess, and once as a fold's line, where the cache holds nothing at all.
+    ///
+    /// A fold's line is the case that forced this. Its content key carries the count in its words,
+    /// so the key moves every time a call lands, and the row is one line tall in every one of
+    /// those states. `HostedRow` reports through `onChange(of: proxy.size.height)`, so an entry
+    /// whose key moves without its height moving never reports again after the first time, and the
+    /// cache has nothing for the key the table is currently drawing. `assumed` then answers the
+    /// running mean, which is `assumedRowHeight` at worst and a prose-heavy conversation's average
+    /// at best, and what the reader sees is a one line row with most of a screen of nothing under
+    /// it. The screen census counted it and nothing acted on the count.
+    public static func needsRepair(guessed: Int, wrong: Int) -> Bool {
+        guessed > 0 || wrong > 0
+    }
+
     /// The remembered height of this content, or nothing if it has never been measured.
     public func height(for contentKey: TranscriptContentKey) -> Double? {
         heights[contentKey]
