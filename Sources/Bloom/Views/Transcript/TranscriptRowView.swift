@@ -87,13 +87,16 @@ struct TranscriptRowView: View, Equatable {
             // and both branches below need it: the second used to reach it through `userTurn`, so
             // an ordinary bubble built the same string twice per pass.
             let typed = userText
+            let merge = MergeTurn.split(typed)
+            let visible = merge?.message ?? typed
             // A review turn first: its message is mostly scaffolding the reader never typed, so
             // it renders as the typed words plus a chip per comment. `split` is strict and
             // returns nil for everything else, which falls through to the ordinary bubble.
-            if let review = ReviewTurn.split(typed) {
+            if let review = ReviewTurn.split(visible) {
                 UserTurnRowView(
                     text: review.message,
                     reviewChips: review.chips,
+                    instructions: merge?.instructions,
                     home: home
                 )
             } else {
@@ -103,10 +106,11 @@ struct TranscriptRowView: View, Equatable {
                 // returns the text untouched at the first thing that is not exactly the shape the
                 // composer writes, so a message that merely talks about attached files is never
                 // edited.
-                let turn = AttachmentTrailer.split(typed)
+                let turn = AttachmentTrailer.split(visible)
                 UserTurnRowView(
                     text: turn.body,
                     attachments: turn.paths,
+                    instructions: merge?.instructions,
                     home: home
                 )
             }
@@ -125,6 +129,12 @@ struct TranscriptRowView: View, Equatable {
             if let use = toolUse {
                 if let media = successfulMediaRequest(use) {
                     MediaShowRowView(request: media, home: home)
+                } else if let image = successfulCodexImageRequest(use) {
+                    MediaShowRowView(
+                        request: MediaShowRequest(path: image.path),
+                        home: home,
+                        source: .codexImageView
+                    )
                 } else {
                     ToolRowView(
                         use: use,
@@ -223,6 +233,13 @@ struct TranscriptRowView: View, Equatable {
     private func successfulMediaRequest(_ use: AgentToolUse) -> MediaShowRequest? {
         guard row.resultPayload != nil, !row.isError, row.refusal == nil else { return nil }
         return MediaShowRequest(use: use)
+    }
+
+    /// Codex's native image viewer is also deliberate visible content. Its absolute paths often
+    /// point at `/tmp`, so it uses the narrower image-only resolver rather than the MCP resolver.
+    private func successfulCodexImageRequest(_ use: AgentToolUse) -> CodexImageViewRequest? {
+        guard row.resultPayload != nil, !row.isError, row.refusal == nil else { return nil }
+        return CodexImageViewRequest(use: use)
     }
 
     /// A tool result whose call never made it into the transcript. Rare, but it must not vanish.

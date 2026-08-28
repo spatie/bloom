@@ -203,75 +203,19 @@ struct ComposerFooterView: View {
     private func row(isCompact: Bool, showsContext: Bool, choices: Choices) -> some View {
         HStack(spacing: Metrics.spacingTight) {
             if showsAgentControls {
-                ComposerOptionMenu(
-                    options: [],
-                    // One section per backend that can run a chat. A flat list of five names says
-                    // nothing about which agent each one belongs to, and picking a name here is
-                    // picking an agent.
-                    sections: choices.models,
-                    selection: controls.model,
-                    // No heading. Opus 5 and Sonnet 5 are names, and the chip this opened from is
-                    // showing one of them.
-                    heading: nil,
-                    systemImage: "sparkle",
+                ComposerSettingsPicker(
+                    controls: controls,
+                    models: choices.models,
+                    efforts: choices.efforts,
+                    outputStyles: choices.outputStyles,
+                    permissionModes: choices.permissionModes,
                     isCompact: isCompact,
-                    help: "Choose the model",
-                    onSelect: selectModel
+                    onModel: selectModel,
+                    onEffort: { id in edit { $0.effort = id } },
+                    onOutputStyle: { id in edit { $0.outputStyle = id } },
+                    onPermissionMode: selectPermissionMode,
+                    onFastMode: { value in edit { $0.isFastMode = value } }
                 )
-
-                ComposerOptionMenu(
-                    options: choices.efforts,
-                    selection: controls.effort,
-                    heading: "Reasoning effort",
-                    systemImage: "chart.bar.fill",
-                    isCompact: isCompact,
-                    help: "Choose reasoning effort",
-                    onSelect: { id in edit { $0.effort = id } }
-                )
-
-                // Beside the model and the effort rather than after the permission mode, because
-                // those three all answer "how does it think and how does it write", and the
-                // permission mode answers "what may it touch". Absent entirely for Codex, which
-                // has no output styles: see `ComposerControls.offersOutputStyle`.
-                if controls.offersOutputStyle {
-                    // A panel rather than a menu, because each style says what it is in its own
-                    // words: the CLI's own sentence for the four it compiles in, and the file's
-                    // `description` for a custom one. Those sentences were printed under the menu,
-                    // for the selected style only. See `ComposerOptionPicker`.
-                    ComposerOptionPicker(
-                        options: choices.outputStyles,
-                        selection: controls.outputStyle,
-                        heading: "Output style",
-                        systemImage: "textformat",
-                        isCompact: isCompact,
-                        help: "Choose the output style",
-                        onSelect: { id in edit { $0.outputStyle = id } }
-                    )
-                }
-
-                // The picker this change was reported against. The four rows are how much a coding
-                // agent may do without asking, and Bypass permissions is a decision to read before
-                // making rather than after, which is what a one line `NSMenu` row could not offer.
-                ComposerOptionPicker(
-                    options: choices.permissionModes,
-                    // What is left of the footnote once every row carries its own sentence: the
-                    // one fact that is about the conversation rather than about any mode in it.
-                    // Nil in a worktree, which is every chat but Ask Bloom.
-                    footnote: controls.permissionModeNote,
-                    selection: controls.permissionMode.rawValue,
-                    heading: "Permission mode",
-                    systemImage: Self.permissionGlyph(controls.permissionMode),
-                    tint: controls.permissionMode == .bypassPermissions
-                        ? Palette.warning
-                        : Palette.textSecondary,
-                    isCompact: isCompact,
-                    help: "Choose permission mode",
-                    onSelect: selectPermissionMode
-                )
-
-                // After the three pickers rather than between them: the pickers all answer "which",
-                // and a toggle wedged into that run made the row read as four unrelated controls.
-                fastToggle(isCompact: isCompact)
             }
 
             if intent != .create {
@@ -366,23 +310,6 @@ struct ComposerFooterView: View {
         }
     }
 
-    private func fastToggle(isCompact: Bool) -> some View {
-        Button {
-            edit { $0.isFastMode.toggle() }
-        } label: {
-            ComposerControlLabel(
-                systemImage: "bolt.fill",
-                text: isCompact ? nil : "Fast",
-                tint: controls.isFastMode ? Palette.accent : Palette.textSecondary,
-                isActive: controls.isFastMode
-            )
-        }
-        .buttonStyle(.plain)
-        .help("Fast mode trades some reasoning for a quicker reply")
-        .accessibilityLabel("Fast mode")
-        .accessibilityAddTraits(controls.isFastMode ? .isSelected : [])
-    }
-
     // MARK: - Edits
 
     private func edit(_ change: (inout ComposerControls) -> Void) {
@@ -425,17 +352,6 @@ struct ComposerFooterView: View {
         }
     }
 
-    private static func permissionGlyph(_ mode: PermissionMode) -> String {
-        switch mode {
-        case .auto: "hand.raised"
-        case .acceptEdits: "checkmark.shield"
-        // A shield with somebody else's judgement in it, which is what the mode is: the approval
-        // still happens, and a reviewer that is not you does it.
-        case .autoReview: "checkmark.shield.fill"
-        case .bypassPermissions: "exclamationmark.shield"
-        case .plan: "list.bullet.rectangle"
-        }
-    }
 }
 
 /// The footer's own coordinate space, so the gauge can report where it is inside it.

@@ -42,4 +42,13 @@ struct UserTurnPromptTests {
 
         #expect(UserTurnPrompt.summary(in: payload(turn)) == "Attached screenshot.png")
     }
+
+    @Test("merge rules stay out of the pinned question")
+    func mergeRulesStayOut() {
+        let turn = ProjectInstructions.turn(
+            "Merge pull request #42.", for: .merge, adding: .nothing
+        )
+
+        #expect(UserTurnPrompt.summary(in: payload(turn)) == "Merge pull request #42.")
+    }
 }

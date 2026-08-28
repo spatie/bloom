@@ -56,6 +56,31 @@ public struct WorkspaceMedia: Sendable, Hashable {
         guard !relative.isEmpty else { return nil }
         return WorkspaceMedia(url: file, relativePath: relative, kind: kind)
     }
+
+    /// Resolves an image Codex has explicitly asked its host to view.
+    ///
+    /// Unlike the MCP media tool, Codex's native image viewer commonly points at a temporary file
+    /// outside the worktree. That path came from the local Codex process rather than an MCP
+    /// caller, so it may be absolute. It is still restricted to an existing image file.
+    public static func resolveImageView(path: String, in worktree: String) -> WorkspaceMedia? {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if !trimmed.hasPrefix("/"), worktree.isEmpty { return nil }
+        let candidate = trimmed.hasPrefix("/")
+            ? URL(filePath: trimmed)
+            : URL(filePath: worktree, directoryHint: .isDirectory).appending(path: trimmed)
+        let file = candidate.resolvingSymlinksInPath().standardizedFileURL
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory),
+              !isDirectory.boolValue,
+              let type = UTType(filenameExtension: file.pathExtension),
+              type.conforms(to: .image)
+        else { return nil }
+
+        return WorkspaceMedia(url: file, relativePath: file.lastPathComponent, kind: .image)
+    }
 }
 
 public struct MediaShowOrder: Sendable, Hashable {
@@ -84,6 +109,11 @@ public struct MediaShowRequest: Sendable, Hashable {
     public let path: String
     public let caption: String
 
+    public init(path: String, caption: String = "") {
+        self.path = path
+        self.caption = caption
+    }
+
     public init?(use: AgentToolUse) {
         let expected = "mcp__\(BridgeRegistration.serverName)__\(MediaShowToolName.show)"
         guard use.name == expected,
@@ -96,6 +126,20 @@ public struct MediaShowRequest: Sendable, Hashable {
     }
 }
 
+/// A native Codex `imageView` item, promoted from a grey action into visible media.
+public struct CodexImageViewRequest: Sendable, Hashable {
+    public let path: String
+
+    public init?(use: AgentToolUse) {
+        guard case .other(let type, _, let json)? = CodexTranslation.item(in: use.input),
+              type == "imageView",
+              let path = json["path"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !path.isEmpty
+        else { return nil }
+        self.path = path
+    }
+}
+
 public enum MediaShowRow {
     private static let probeLength = 1_024
     private static let marker = Data(
@@ -104,6 +148,16 @@ public enum MediaShowRow {
 
     /// A cheap row-list test. Tool names occur before their inputs in both transcript envelopes,
     /// so this avoids decoding every action while still keeping a media row out of an action fold.
+    public static func isCall(_ payload: Data) -> Bool {
+        payload.prefix(probeLength).range(of: marker) != nil
+    }
+}
+
+public enum CodexImageViewRow {
+    private static let probeLength = 1_024
+    private static let marker = Data("\"type\":\"imageView\"".utf8)
+
+    /// A cheap row-list test matching the compact JSON written by `CodexTranslation`.
     public static func isCall(_ payload: Data) -> Bool {
         payload.prefix(probeLength).range(of: marker) != nil
     }

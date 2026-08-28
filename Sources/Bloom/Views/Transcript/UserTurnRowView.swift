@@ -29,6 +29,9 @@ struct UserTurnRowView: View {
     /// bubble then shows `text` as the typed message and one chip per comment, the way the
     /// composer showed them a moment before the send.
     var reviewChips: [ReviewTurnRecord.Chip] = []
+    /// Fixed context Bloom added to an automatic turn. It stays available without pretending the
+    /// user typed several pages of operational policy into the conversation.
+    var instructions: String?
     /// Which worktree those paths are relative to, and which review the chips open into.
     var home: TranscriptHome
 
@@ -43,6 +46,7 @@ struct UserTurnRowView: View {
     @Environment(\.fontScale) private var fontScale
     @Environment(\.chatFont) private var chatFont
     @Environment(\.chatLineHeight) private var chatLineHeight
+    @Environment(\.colorScheme) private var windowColorScheme
     /// Where a hovered chip says it is, so the card is drawn over the scroll view rather than
     /// inside a bubble that would clip it. See `TranscriptHoverOverlay`.
     @Environment(\.transcriptHoverHost) private var hoverHost
@@ -74,6 +78,7 @@ struct UserTurnRowView: View {
     /// pointer crossing from one chip to the next raises the second before the first is told it
     /// was left.
     @State private var published: TranscriptHoverCard?
+    @State private var showsInstructions = false
 
     /// How much of the pane a user turn always leaves empty on its left, so it reads as one side of
     /// a conversation even when it is short.
@@ -209,6 +214,21 @@ struct UserTurnRowView: View {
                 ReviewTurnChips(chips: reviewChips, home: home)
             }
 
+            if let instructions {
+                Button {
+                    showsInstructions.toggle()
+                } label: {
+                    Chip(text: "Merge instructions", systemImage: "doc.text")
+                }
+                .buttonStyle(.plain)
+                .help("Show the instructions Bloom sent with this merge request")
+                .accessibilityHint("Shows the complete merge instructions")
+                .popover(isPresented: $showsInstructions, arrowEdge: .bottom) {
+                    MergeInstructionsPopover(instructions: instructions)
+                        .environment(\.colorScheme, windowColorScheme)
+                }
+            }
+
             if !attachments.isEmpty {
                 // The composer's own flow layout, so a turn carrying eight files wraps them the
                 // same way the box did rather than pushing the bubble off the pane.
@@ -310,6 +330,26 @@ struct UserTurnRowView: View {
         defer { published = nil }
         guard let published, hoverHost?.request?.card == published else { return }
         hoverHost?.request = nil
+    }
+}
+
+private struct MergeInstructionsPopover: View {
+    let instructions: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Metrics.spacingWide) {
+            Text("Merge instructions")
+                .font(Typo.title)
+
+            ScrollView {
+                Text(.init(instructions))
+                    .font(Typo.body)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(Metrics.pane)
+        .frame(width: 440, height: 360)
     }
 }
 

@@ -378,7 +378,8 @@ struct TranscriptListView: View {
                     // A refusal travels as `is_error` too, and both are the same fact here: a call
                     // that did not do what it was asked is a call the reader is looking for.
                     failed: $0.isError || $0.refusal != nil,
-                    featured: MediaShowRow.isCall($0.payload),
+                    featured: MediaShowRow.isCall($0.payload)
+                        || CodexImageViewRow.isCall($0.payload),
                     drawsNothing: TranscriptNoise.isHidden($0)
                         || TranscriptRowInk.drawsNothing(kind: $0.kind, payload: $0.payload),
                     settled: settled($0)
@@ -664,17 +665,25 @@ struct TranscriptListView: View {
             },
             content: {
                 guard let sending else { return AnyView(EmptyView()) }
-                let review = ReviewTurn.split(sending.body)
-                let turn = AttachmentTrailer.split(sending.body)
+                let merge = MergeTurn.split(sending.body)
+                let visible = merge?.message ?? sending.body
+                let review = ReviewTurn.split(visible)
+                let turn = AttachmentTrailer.split(visible)
                 return AnyView(
                     Group {
                         if let review {
                             UserTurnRowView(
-                                text: review.message, reviewChips: review.chips, home: transcript.home
+                                text: review.message,
+                                reviewChips: review.chips,
+                                instructions: merge?.instructions,
+                                home: transcript.home
                             )
                         } else {
                             UserTurnRowView(
-                                text: turn.body, attachments: turn.paths, home: transcript.home
+                                text: turn.body,
+                                attachments: turn.paths,
+                                instructions: merge?.instructions,
+                                home: transcript.home
                             )
                         }
                     }

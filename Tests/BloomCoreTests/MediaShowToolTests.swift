@@ -86,6 +86,28 @@ struct MediaShowToolTests {
         #expect(WorkspaceMedia.resolve(path: "notes.txt", in: root.path) == nil)
         #expect(WorkspaceMedia.resolve(path: outside.path, in: root.path) == nil)
         #expect(WorkspaceMedia.resolve(path: "../\(outside.lastPathComponent)", in: root.path) == nil)
+        #expect(WorkspaceMedia.resolveImageView(path: outside.path, in: root.path)?.kind == .image)
+    }
+
+    @Test("a native Codex image view is recognised as visible media")
+    func codexImageView() throws {
+        let item = CodexItem.other(
+            type: "imageView",
+            id: "image-1",
+            json: .object([
+                "type": .string("imageView"),
+                "id": .string("image-1"),
+                "path": .string("/tmp/result.png"),
+            ])
+        )
+        let use = AgentToolUse(
+            id: "image-1",
+            name: CodexTranslation.toolName(for: item),
+            input: CodexTranslation.input(for: item)
+        )
+
+        #expect(CodexImageViewRequest(use: use)?.path == "/tmp/result.png")
+        #expect(CodexImageViewRow.isCall(Data("{\"type\":\"imageView\"}".utf8)))
     }
 
     @Test("media presentation does not interrupt the agent with a permission question")

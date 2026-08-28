@@ -54,10 +54,9 @@ struct ComposerOptionList: View {
     /// its rounded corners into the panel's own rounding and reads as a band painted across the
     /// popover. `QuickPromptMenu` measured the same number.
     private static let listInset: CGFloat = Metrics.spacingWide
-    /// About four two line rows. Past that a picker stops being a glance, and the output style
-    /// list is the one that can grow: a repository may carry as many `.claude/output-styles` as
-    /// somebody cares to write.
-    private static let maxListHeight: CGFloat = 300
+    /// Enough for the built-in output styles without scrolling. A repository can still carry
+    /// more custom styles than fit comfortably, so genuinely long lists remain scrollable.
+    private static let maxListHeight: CGFloat = 460
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

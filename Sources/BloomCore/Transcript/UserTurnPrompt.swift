@@ -23,15 +23,16 @@ public enum UserTurnPrompt {
     }
 
     public static func summary(of text: String, limit: Int = summaryLimit) -> String? {
+        let presented = MergeTurn.split(text)?.message ?? text
         let visible: String
-        if let review = ReviewTurn.split(text) {
+        if let review = ReviewTurn.split(presented) {
             visible = if review.message.isEmpty {
                 "\(review.chips.count) review comment\(review.chips.count == 1 ? "" : "s")"
             } else {
                 review.message
             }
         } else {
-            let turn = AttachmentTrailer.split(text)
+            let turn = AttachmentTrailer.split(presented)
             if !turn.body.isEmpty {
                 visible = turn.body
             } else if turn.paths.count == 1, let path = turn.paths.first {
@@ -39,7 +40,7 @@ public enum UserTurnPrompt {
             } else if !turn.paths.isEmpty {
                 visible = "\(turn.paths.count) attachments"
             } else {
-                visible = text
+                visible = presented
             }
         }
 

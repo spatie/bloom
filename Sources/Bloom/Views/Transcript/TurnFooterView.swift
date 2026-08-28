@@ -83,7 +83,12 @@ struct TurnFooterView: View {
                         .help(outcome.label)
                 }
 
-                Text(TurnDuration.wholeSeconds(row.durationMS ?? result?.durationMS ?? 0))
+                Text(
+                    Self.durationLabel(
+                        outcome: outcome,
+                        milliseconds: row.durationMS ?? result?.durationMS ?? 0
+                    )
+                )
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textSecondary)
                     .monospacedDigit()
@@ -172,6 +177,15 @@ struct TurnFooterView: View {
             }
         }
         .task(id: row.seq) { await scanFiles() }
+    }
+
+    private static func durationLabel(outcome: TurnEnding, milliseconds: Int) -> String {
+        let duration = TurnDuration.wholeSeconds(milliseconds)
+        return switch outcome {
+        case .finished, .denied: "Completed in \(duration)"
+        case .failed: "Failed after \(duration)"
+        case .stopped: "Stopped after \(duration)"
+        }
     }
 
     // MARK: Turn facts

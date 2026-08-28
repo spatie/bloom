@@ -169,6 +169,25 @@ struct ProjectInstructionsTests {
         #expect(turn.contains(MergeInstructions.canonical))
     }
 
+    @Test("the transcript can separate fixed merge rules from the visible request")
+    func mergeRulesHaveACompactPresentation() throws {
+        let worktree = try emptyWorktree()
+        let turn = ProjectInstructions.turn(
+            "Merge #42.", for: .merge,
+            adding: ProjectInstructions.resolve(.merge, in: worktree, stated: nil)
+        )
+
+        let presented = try #require(MergeTurn.split(turn))
+
+        #expect(presented.message == "Merge #42.")
+        #expect(presented.instructions == MergeInstructions.canonical)
+    }
+
+    @Test("ordinary user text is never mistaken for a merge request")
+    func ordinaryTextDoesNotBecomeMergeContext() {
+        #expect(MergeTurn.split("Please merge these two arrays.") == nil)
+    }
+
     /// The asymmetry between the two, asserted rather than left to be rediscovered. Everything the
     /// conflict turn asks for is in its template, where somebody may reword it; the merge rules
     /// are not, because a reworded template must not be able to delete the paragraph about

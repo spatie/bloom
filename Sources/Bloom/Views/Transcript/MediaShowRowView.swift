@@ -11,8 +11,14 @@ import SwiftUI
 /// assistant prose, stays out of action folds, and leaves the ordinary tool row behind only when
 /// the bridge confirmed the file was safe to show.
 struct MediaShowRowView: View {
+    enum Source {
+        case workspace
+        case codexImageView
+    }
+
     var request: MediaShowRequest
     var home: TranscriptHome
+    var source: Source = .workspace
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -26,7 +32,7 @@ struct MediaShowRowView: View {
                     .textSelection(.enabled)
             }
 
-            if let media = WorkspaceMedia.resolve(path: request.path, in: home.worktree) {
+            if let media = resolvedMedia {
                 mediaView(media)
 
                 HStack(spacing: Metrics.spacingWide) {
@@ -68,6 +74,15 @@ struct MediaShowRowView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, TranscriptLayout.inset)
         .padding(.vertical, TranscriptLayout.block)
+    }
+
+    private var resolvedMedia: WorkspaceMedia? {
+        switch source {
+        case .workspace:
+            WorkspaceMedia.resolve(path: request.path, in: home.worktree)
+        case .codexImageView:
+            WorkspaceMedia.resolveImageView(path: request.path, in: home.worktree)
+        }
     }
 
     @ViewBuilder
