@@ -9,9 +9,9 @@ import BloomCore
 /// It is attached to the DETAIL column, never to the `NavigationSplitView`. See `RootView` for the
 /// crash that taught us the difference.
 ///
-/// The navigation pane toggle lives here beside the traffic lights. The inspector control lives
-/// at the leading edge of `TitleBarStrip`, after the native search item and beside its own pane.
-/// Both use `WindowPaneToggle`, so their geometry and interaction remain a matched pair.
+/// The navigation pane toggle lives here beside the traffic lights. The inspector control is the
+/// primary action after the native search item. Both use `WindowPaneToggle`, so their geometry and
+/// interaction remain a matched pair.
 ///
 /// **Nor is there a `+` any more.** It appeared only while the sidebar was folded away, on the
 /// argument that nothing else in the window starts work in that state. What the owner saw was a
@@ -96,13 +96,25 @@ struct BloomWindowToolbar: ToolbarContent {
         // end, the band takes the window's. See `TitleBarStrip`.
         ToolbarSpacer(.flexible, placement: .navigation)
 
+        if app.selectedModel != nil {
+            ToolbarItem(placement: .primaryAction) {
+                WindowPaneToggle(
+                    edge: .trailing,
+                    isVisible: app.isInspectorVisible
+                ) {
+                    app.isInspectorVisible.toggle()
+                }
+            }
+            .sharedBackgroundVisibility(.hidden)
+        }
+
         // The worktree's menu is not here any more. It was a trailing toolbar item, pinned to the
         // window's own edge, which put it directly above the inspector's pull request strip: two
         // stacked rows in the top right corner, both describing the same workspace. The strip has
         // taken the top row, since it is the one with a state in it, and the menu moved one place
-        // left to where the centre column ends. Both now live in `TitleBarStrip`, which is a title
-        // bar accessory rather than a toolbar item, because a toolbar item is sized by its content
-        // and this band has to be as wide as the pane under it.
+        // left to where the centre column ends. The pull request band stays in `TitleBarStrip`,
+        // because it has to be as wide as the pane below it. The inspector button is a primary
+        // toolbar action so AppKit places it directly after the native search field.
     }
 
 }

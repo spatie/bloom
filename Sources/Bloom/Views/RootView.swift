@@ -118,9 +118,6 @@ struct RootView: View {
                         prompt: Text("Search")
                     )
                     .searchFocused($isSearchFocused)
-                    .onChange(of: app.selectedWorkspace != nil, initial: true) { _, available in
-                        InspectorGeometry.shared.setWorkspaceAvailable(available)
-                    }
                     // Published to the model, because the pane that needs the answer cannot see a
                     // `@FocusState` declared up here and Home's list was taking the keyboard off this
                     // field mid word. See `HomeListKeyboard` for the sequence that did it.

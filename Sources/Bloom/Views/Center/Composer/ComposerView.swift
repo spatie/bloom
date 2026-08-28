@@ -135,10 +135,6 @@ struct ComposerView: View {
                 onStop: transcript.stop
             )
         }
-        // Command-Backspace is delete-to-start-of-line in every text box on macOS, and the menu bar
-        // had it for Archive Workspace. A user typing a prompt reached for it and archived the
-        // workspace he was writing in. See `FocusedValues.isTypingProse`.
-        .focusedValue(\.isTypingProse, isFocused)
         .task(id: transcript.session.id) { await prepare() }
         .onChange(of: transcript.draft) { _, _ in scheduleDraftSave() }
         // Something put words in the box for the owner to carry on writing, which today is Edit on

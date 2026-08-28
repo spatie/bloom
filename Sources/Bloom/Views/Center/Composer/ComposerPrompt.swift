@@ -168,6 +168,9 @@ struct ComposerPrompt<Footer: View>: View {
             isDropTarget: isDropTarget,
             fillsPanel: fillsPanel
         )
+        // Publish this from the shared prompt rather than individual screens. This keeps prose
+        // editing shortcuts, including Command-Backspace, inside every prompt editor.
+        .focusedValue(\.isTypingProse, isFocused)
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
             boxWidth = frame.width
             boxTop = frame.minY
