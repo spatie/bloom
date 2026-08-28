@@ -160,7 +160,7 @@ struct BrowserToolbarView: View {
             pageAction(toolbar.screenshot, action: capture)
             Hairline(axis: .vertical)
             BrowserShareButton(control: toolbar.share, shareable: toolbar.shareable)
-                .frame(width: Metrics.controlHeight, height: Metrics.controlHeight)
+                .frame(width: pageActionWidth, height: Metrics.controlHeight)
         }
         .frame(height: Metrics.controlHeight)
         .clipShape(Capsule())
@@ -172,8 +172,12 @@ struct BrowserToolbarView: View {
         _ control: BrowserToolbar.Control, action: @escaping @MainActor () -> Void
     ) -> some View {
         BrowserToolbarButton(control: control, action: action)
-            .frame(width: Metrics.controlHeight, height: Metrics.controlHeight)
+            .frame(width: pageActionWidth, height: Metrics.controlHeight)
     }
+
+    /// A little wider than the control is tall, matching a compact Mac toolbar button without
+    /// letting three adjacent glyphs crowd their separators.
+    private var pageActionWidth: CGFloat { Metrics.controlHeight + Metrics.spacingSmall }
 
     /// How far the page has got, over the glass and under the address.
     ///

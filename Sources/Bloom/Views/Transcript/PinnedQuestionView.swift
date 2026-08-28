@@ -57,7 +57,7 @@ struct PinnedQuestionView: View {
     var onOpen: () -> Void
 
     /// The space navigation to a question must leave above its real bubble.
-    static let height: CGFloat = Metrics.barHeight
+    static let height: CGFloat = Metrics.barHeight + Metrics.hairline
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
