@@ -83,6 +83,11 @@ struct BrowserToolbarTests {
         #expect(!Self.toolbar(isCapturing: true).screenshot.isEnabled)
     }
 
+    @Test("A pane with no page has nothing to capture")
+    func cameraNeedsAPage() {
+        #expect(!Self.toolbar(address: "").screenshot.isEnabled)
+    }
+
     // MARK: - Sharing
 
     @Test("A pane with nowhere to be has nothing to share")
