@@ -59,6 +59,12 @@ final class InspectorGeometry {
     /// nobody can see.
     private(set) var isVisible = false
 
+    /// Whether the title bar needs to reserve the inspector toggle's slot.
+    ///
+    /// A closed inspector has a width of zero, but its button must remain available to open it.
+    /// Home and Search have no workspace inspector, so they reserve no empty slot.
+    private(set) var hasWorkspace = false
+
     /// Called when the pane's width moves, and told whether the move is the column opening or
     /// collapsing rather than a divider drag, a window resize or a launch.
     ///
@@ -77,6 +83,12 @@ final class InspectorGeometry {
         width = value
         if value > 1 { bandWidth = value }
         onChange?(sliding)
+    }
+
+    func setWorkspaceAvailable(_ available: Bool) {
+        guard hasWorkspace != available else { return }
+        hasWorkspace = available
+        onChange?(false)
     }
 
     /// Said by the accessory as it starts to open and again once it has finished closing. See
@@ -139,7 +151,16 @@ struct TitleBarStrip: View {
     private var inspector: InspectorGeometry { .shared }
 
     var body: some View {
-        Group {
+        HStack(spacing: 0) {
+            if inspector.hasWorkspace {
+                WindowPaneToggle(
+                    edge: .trailing,
+                    isVisible: app.isInspectorVisible
+                ) {
+                    app.isInspectorVisible.toggle()
+                }
+            }
+
             if let model = shown, inspector.isVisible {
                 PullRequestBar(model: model)
                     // As wide as the pane below it, so the band ends where the pane does and the
@@ -147,6 +168,7 @@ struct TitleBarStrip: View {
                     // because a band on its way out is still a band: see `InspectorGeometry`.
                     .frame(width: inspector.bandWidth, height: height)
                     .background { ground(for: model) }
+                    .overlay(alignment: .leading) { Hairline(axis: .vertical) }
                     .background { HoverCardAnchorReader(anchor: anchor) }
                     // The whole band is the target, button included, and that is a decision rather
                     // than the easy way to write it. The band is one subject: the branch, where it
@@ -208,7 +230,6 @@ struct TitleBarStrip: View {
         // two things in the title bar cannot drift apart no matter what clock either is on.
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: height)
-        .overlay(alignment: .leading) { Hairline(axis: .vertical) }
         // The model's identity rather than its row: a workspace row is rewritten every six seconds
         // by the diff stat refresh, and the only thing this needs to hear about is the band being
         // for a different workspace. `initial` seeds it for a window that comes up on one.
@@ -345,13 +366,15 @@ final class TitleBarStripController: NSTitlebarAccessoryViewController {
     /// Reduce Motion arrives the same way: the split view is told not to animate and publishes no
     /// slide.
     private func resize(sliding: Bool) {
-        let target = max(InspectorGeometry.shared.width, 1)
+        let geometry = InspectorGeometry.shared
+        let toggleWidth = geometry.hasWorkspace ? Metrics.barHeight : 0
+        let target = max(geometry.width + toggleWidth, 1)
         // A view with no window has no display to take a link from, and a slide whose clock never
         // ticks is an accessory stuck at the width it set off from. Nothing can be watching such a
         // window anyway, so it lands rather than travels. This is also the first call, from `init`.
         guard sliding, view.window != nil else {
             endSlide()
-            InspectorGeometry.shared.setBandVisible(target > 1)
+            InspectorGeometry.shared.setBandVisible(geometry.width > 1)
             apply(target)
             return
         }
@@ -370,7 +393,9 @@ final class TitleBarStripController: NSTitlebarAccessoryViewController {
         }
         // Mounted before the first step rather than when the width crosses a point, so the band has
         // been laid out by the time there is enough accessory to see any of it in.
-        if target > 1 { InspectorGeometry.shared.setBandVisible(true) }
+        if InspectorGeometry.shared.width > 1 {
+            InspectorGeometry.shared.setBandVisible(true)
+        }
         slide = InspectorSlide(
             from: view.frame.width, to: target, seconds: Motion.inspectorSeconds
         )
@@ -393,7 +418,7 @@ final class TitleBarStripController: NSTitlebarAccessoryViewController {
         let elapsed = sender.targetTimestamp - startedAt
         apply(slide.width(after: elapsed))
         guard slide.hasFinished(after: elapsed) else { return }
-        InspectorGeometry.shared.setBandVisible(slide.to > 1)
+        InspectorGeometry.shared.setBandVisible(InspectorGeometry.shared.width > 1)
         endSlide()
     }
 

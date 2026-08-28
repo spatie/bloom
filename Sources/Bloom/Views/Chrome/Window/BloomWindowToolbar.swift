@@ -9,10 +9,9 @@ import BloomCore
 /// It is attached to the DETAIL column, never to the `NavigationSplitView`. See `RootView` for the
 /// crash that taught us the difference.
 ///
-/// The two pane toggles live here as one matched pair. The navigation control follows the traffic
-/// lights and the inspector control takes the trailing action position. They use the same quiet
-/// icon treatment, so the window reads as navigation, content and inspection rather than as one
-/// native toolbar button and one unrelated control in the tab strip.
+/// The navigation pane toggle lives here beside the traffic lights. The inspector control lives
+/// at the leading edge of `TitleBarStrip`, after the native search item and beside its own pane.
+/// Both use `WindowPaneToggle`, so their geometry and interaction remain a matched pair.
 ///
 /// **Nor is there a `+` any more.** It appeared only while the sidebar was folded away, on the
 /// argument that nothing else in the window starts work in that state. What the owner saw was a
@@ -31,9 +30,7 @@ import BloomCore
 struct BloomWindowToolbar: ToolbarContent {
     let app: AppModel
     let isSidebarVisible: Bool
-    let isInspectorVisible: Bool
     let toggleSidebar: @MainActor @Sendable () -> Void
-    let toggleInspector: @MainActor @Sendable () -> Void
     let startFreshAskConversation: () -> Void
 
     var body: some ToolbarContent {
@@ -98,17 +95,6 @@ struct BloomWindowToolbar: ToolbarContent {
         // in it, so the two do not compete for the edge: the field takes the toolbar's trailing
         // end, the band takes the window's. See `TitleBarStrip`.
         ToolbarSpacer(.flexible, placement: .navigation)
-
-        if app.selectedWorkspace != nil {
-            ToolbarItem(placement: .primaryAction) {
-                WindowPaneToggle(
-                    edge: .trailing,
-                    isVisible: isInspectorVisible,
-                    action: toggleInspector
-                )
-            }
-            .sharedBackgroundVisibility(.hidden)
-        }
 
         // The worktree's menu is not here any more. It was a trailing toolbar item, pinned to the
         // window's own edge, which put it directly above the inspector's pull request strip: two
