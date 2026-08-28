@@ -67,7 +67,7 @@ public enum TranscriptFold {
     /// What a fold says to accessibility and places that do not draw the count badge.
     public static func label(hiding count: Int, showsMore: Bool) -> String {
         let unit = count == 1 ? "action" : "actions"
-        return showsMore ? "\(count) earlier \(unit)" : "\(count) \(unit)"
+        return "\(count) \(unit)"
     }
 
     /// An opened live turn becomes a growing log again when another item arrives. At the live end,

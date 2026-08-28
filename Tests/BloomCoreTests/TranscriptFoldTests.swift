@@ -348,7 +348,7 @@ struct TranscriptFoldTests {
     @Test("the expanded line names what is hidden and how many")
     func theLabel() {
         #expect(TranscriptFold.label(hiding: 14, showsMore: false) == "14 actions")
-        #expect(TranscriptFold.label(hiding: 11, showsMore: true) == "11 earlier actions")
+        #expect(TranscriptFold.label(hiding: 11, showsMore: true) == "11 actions")
     }
 
     /// Two wordings for two different claims. While a turn is working there is a row of it still on
@@ -356,7 +356,7 @@ struct TranscriptFoldTests {
     /// the working is behind the line and there is no "earlier" left for the word to mean.
     @Test("the singular is there for whoever lowers the threshold")
     func theLabelHasASingular() {
-        #expect(TranscriptFold.label(hiding: 1, showsMore: true) == "1 earlier action")
+        #expect(TranscriptFold.label(hiding: 1, showsMore: true) == "1 action")
         #expect(TranscriptFold.label(hiding: 1, showsMore: false) == "1 action")
     }
 

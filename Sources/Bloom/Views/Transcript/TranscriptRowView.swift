@@ -243,9 +243,6 @@ struct TranscriptRowView: View, Equatable {
     /// A user turn is the line Bloom itself wrote to stdin, so it is read straight out of the
     /// stored request rather than through the event decoder, which only knows about tool results.
     private var userText: String {
-        guard let blocks = json?["message"]?["content"]?.arrayValue else { return "" }
-        return blocks
-            .compactMap { $0["text"]?.stringValue }
-            .joined(separator: "\n")
+        UserTurnPrompt.text(in: row.payload)
     }
 }

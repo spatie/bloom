@@ -25,6 +25,7 @@ struct RootView: View {
     @Bindable private var feedback = FeedbackPresenter.shared
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var isStartingFreshAskConversation = false
     /// Whether the window's search field has the keyboard. Shift+Cmd+F, and Cmd+F where nothing in
     /// front can find, put it here. See `FindCommand`.
     @FocusState private var isSearchFocused: Bool
@@ -74,9 +75,11 @@ struct RootView: View {
                     animated: !reduceMotion
                 )
                     .toolbar {
-                        BloomWindowToolbar(app: app) {
-                            toggleSidebar()
-                        }
+                        BloomWindowToolbar(
+                            app: app,
+                            toggleSidebar: toggleSidebar,
+                            startFreshAskConversation: { isStartingFreshAskConversation = true }
+                        )
                     }
                     // Said here as well as under `navigationTitle` below, and deliberately.
                     //
@@ -241,6 +244,18 @@ struct RootView: View {
                 // Naming what disappears, rather than asking "are you sure?". Written by
                 // `ArchiveRequest` in the core, where it can be tested.
                 Text(request.message)
+            }
+            .confirmationDialog(
+                "Start a new conversation?",
+                isPresented: $isStartingFreshAskConversation,
+                titleVisibility: .visible
+            ) {
+                Button("Start New Conversation") {
+                    Task { await app.ask.startFresh() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The current Ask Bloom conversation will be cleared from view.")
             }
             // The question asked before a session that is still working is closed. On the window for
             // the reason the archive confirmation above is: it is raised from the tab strip's close

@@ -150,6 +150,12 @@ struct TranscriptListView: View {
     /// `TranscriptPaneState.anchorDelta`. Nil until the table has a stored row to name, and never
     /// cleared by a pane that cannot see one, so what is written down is the last real place.
     @State private var topPlace = GeometryBox<(seq: Int, delta: CGFloat)?>(nil)
+    /// User turns indexed once as rows arrive. The scroll callback reads it every frame without
+    /// making this body observe those reads or walking backwards through the transcript.
+    @State private var questionIndex = GeometryBox(PinnedQuestionIndex())
+    /// The question whose output is currently under the reader, only while its full bubble has
+    /// passed above the viewport.
+    @State private var pinnedQuestion: PinnedQuestion?
     /// Whether the pane is at the live end EXACTLY, which is not `geometry.isNearBottom`.
     ///
     /// **Two different questions, and one number was answering both.** `ScrollEnd.threshold` is 96
@@ -730,6 +736,8 @@ struct TranscriptListView: View {
                             delivery: delivery,
                             home: transcript.home,
                             hold: hold,
+                            canRetry: transcript.canRetry(delivery),
+                            onRetry: { Task { await transcript.retryPending() } },
                             onEdit: { Task { await transcript.editPending(delivery) } },
                             onDelete: { transcript.askToDiscard(delivery) }
                         )
@@ -837,6 +845,16 @@ struct TranscriptListView: View {
                 scroller.stop()
             }
         )
+        .overlay(alignment: .top) {
+            if let pinnedQuestion {
+                PinnedQuestionView(
+                    question: pinnedQuestion,
+                    onOpen: { showPinnedQuestion(pinnedQuestion) }
+                )
+                .transition(.opacity)
+            }
+        }
+        .animation(reduceMotion ? nil : Motion.hover, value: pinnedQuestion?.seq)
         .overlay { TranscriptHoverOverlay(host: hoverHost) }
         .overlay {
             if showsPlaceholder {
@@ -853,6 +871,10 @@ struct TranscriptListView: View {
             isGrowing.value = false
         }
         .onChange(of: transcript.rows.count, initial: true) { _, _ in
+            questionIndex.value.update(
+                session: transcript.session.id, rows: transcript.rows
+            )
+            updatePinnedQuestion()
             position()
             // A row arriving is another chance to notice that the window stops short of it.
             growWindowDown()
@@ -914,6 +936,10 @@ struct TranscriptListView: View {
             didPosition = false
             isLiveScrolling.value = false
             opening = nil
+            pinnedQuestion = nil
+            questionIndex.value.update(
+                session: transcript.session.id, rows: transcript.rows
+            )
             // The folds of the session being arrived at, which are its own and are usually none.
             let remembered = memory?.remembered(session: transcript.session.id)
             expanded = remembered?.expanded ?? []
@@ -1100,6 +1126,7 @@ struct TranscriptListView: View {
         )
         contentOffset.value = table.offset
         if let place = controller.topmostPlace { topPlace.value = place }
+        updatePinnedQuestion()
         atLiveEnd.value = table.isAtEnd || controller.holdsEnd || follower.isFollowing
 
         var measured = TranscriptGeometry(
@@ -1256,6 +1283,52 @@ struct TranscriptListView: View {
                 return
             }
         }
+    }
+
+    /// Returns to the full user bubble represented by the compact header.
+    private func showPinnedQuestion(_ question: PinnedQuestion) {
+        let rows = transcript.rows
+        guard let index = TranscriptWindow.index(
+            ofSeqAtOrAfter: question.seq, in: rows.lazy.map(\.seq)
+        ) else { return }
+
+        scroller.stop()
+        follower.stop()
+        controller.releaseEnd()
+
+        if drawn.session != transcript.session.id
+            || index < drawn.window.start
+            || index >= drawn.window.end {
+            let tailStart = drawn.session == transcript.session.id ? drawn.window.start : rows.count
+            drawn = Drawn(
+                session: transcript.session.id,
+                window: TranscriptWindow.opening(
+                    rowCount: rows.count, tailStart: tailStart, mustReach: index
+                )
+            )
+            TranscriptDrawn.note(drawn.window.count)
+        }
+
+        Task { @MainActor in
+            await Task.yield()
+            controller.scroll(to: .row(question.seq), anchor: .top)
+        }
+    }
+
+    /// Updates the compact header only when the reader crosses a user-turn boundary. The geometry
+    /// callback reaches this every frame, but the binary lookup and one equality check do not make
+    /// scrolling invalidate the transcript.
+    private func updatePinnedQuestion() {
+        guard let place = controller.topmostPlace,
+              let question = questionIndex.value.latest(atOrBefore: place.seq)
+        else {
+            if pinnedQuestion != nil { pinnedQuestion = nil }
+            return
+        }
+
+        let passed = controller.hasPassedTop(.row(question.seq)) ?? (question.seq < place.seq)
+        let next = passed ? question : nil
+        if pinnedQuestion != next { pinnedQuestion = next }
     }
 
     /// Where a session opens: on the first thing the reader has not read, which is the whole point

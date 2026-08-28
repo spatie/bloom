@@ -597,6 +597,17 @@ final class TranscriptModel {
         await deliver(next)
     }
 
+    /// Whether this delivery is at the front of an idle queue and can be attempted now.
+    func canRetry(_ delivery: Delivery) -> Bool {
+        Delivery.next(from: pendingDeliveries, hold: deliveryHold)?.id == delivery.id
+    }
+
+    /// Attempts the front of the queue again without changing its order or duplicating its text.
+    func retryPending() async {
+        wasStoppedByHand = false
+        await drain()
+    }
+
     /// The queued message the owner has asked to delete, and the reason the sheet is up.
     ///
     /// Here rather than in the row that draws it because the question outlives the row: the drain
@@ -730,7 +741,8 @@ final class TranscriptModel {
     /// it once, to whoever is looking at that moment, and then it is gone; the transcript is where
     /// somebody goes a minute later to work out what happened, and it held nothing at all. So the
     /// account of it goes in as an `.error` row, drawn by `AgentErrorRowView` beside every other
-    /// way a turn can fail, and the alert stays for the person who is watching now.
+    /// way a turn can fail. A modal alert would hide that recovery UI and require dismissal before
+    /// the person can act, so it is reserved for the exceptional case where no row can be stored.
     ///
     /// The delivery goes back to being pending rather than reading as sent. It used to go back
     /// into the composer, which was right when the composer was the only place an unsent prompt
@@ -747,18 +759,19 @@ final class TranscriptModel {
         )
 
         // Everything durable needs the database, and one of the two ways in here is the database
-        // never having opened. The alert below is outside this on purpose: it is the half that
-        // still works when there is nowhere to write, and the half nobody can be left without.
-        if let store {
-            try? await store.restoreDelivery(id: delivery.id)
-            await refreshQueue()
-
-            let row = AgentError.notStarted(message: complaint)
-            _ = try? await store.appendNext(sessionID: session.id, kind: .error, payload: row.raw)
-            await appendLatestMessages()
+        // never having opened. Only that path needs an alert because it has nowhere to put an
+        // inline explanation or a message that can be retried.
+        guard let store else {
+            app.alert = BloomAlert(title: "Could not start the agent", message: complaint)
+            return
         }
 
-        app.alert = BloomAlert(title: "Could not start the agent", message: complaint)
+        try? await store.restoreDelivery(id: delivery.id)
+        await refreshQueue()
+
+        let row = AgentError.notStarted(message: complaint)
+        _ = try? await store.appendNext(sessionID: session.id, kind: .error, payload: row.raw)
+        await appendLatestMessages()
     }
 
     func saveDraft() async {
@@ -960,7 +973,11 @@ final class TranscriptModel {
             statusLabel = "Working"
 
         case .status(let label):
-            statusLabel = label.capitalizedFirst
+            // "Requesting" describes the CLI's protocol state, not what the person is waiting
+            // for. The model has the request at this point and has not started answering yet.
+            statusLabel = label.lowercased() == "requesting"
+                ? "Waiting for model"
+                : label.capitalizedFirst
 
         case .retrying(let retry):
             absorb(retry)

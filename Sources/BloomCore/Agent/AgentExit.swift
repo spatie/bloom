@@ -135,9 +135,10 @@ public struct AgentExit: Sendable, Hashable {
             """
         case .notStarted:
             """
-            Nothing was said to the agent and nothing in this worktree was touched. Your message \
-            is back in the queue above the composer, so it goes with your next one, and you can \
-            cancel it there if you would rather send something else.
+            Nothing was said to the agent and no files were touched. Your message is still in the \
+            queue above the composer. Choose Try Again there when the agent is available, or edit \
+            or delete the message. If trying again fails, quit and reopen Bloom to restart the \
+            agent connection.
             """
         }
     }

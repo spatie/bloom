@@ -107,6 +107,24 @@ final class AskModel {
     /// nothing that has been said is thrown away because somebody wanted a clean start.
     func startFresh(controls: ComposerControls? = nil, draft: String = "") async {
         guard let store = app.store, let current = session else { return }
+
+        let carriedControls: ComposerControls
+        if let controls {
+            carriedControls = controls
+        } else {
+            let isFastMode = (try? await store.setting(
+                ComposerControls.fastModeKey(sessionID: current.id)
+            )) == "1"
+            let outputStyle = (try? await store.setting(
+                ComposerControls.outputStyleKey(sessionID: current.id)
+            )) ?? OutputStyle.defaultName
+            carriedControls = ComposerControls(
+                session: current,
+                isFastMode: isFastMode,
+                outputStyle: outputStyle
+            )
+        }
+
         transcript?.teardown()
         transcript = nil
         session = nil
@@ -115,17 +133,15 @@ final class AskModel {
         _ = try? await store.update(sessionID: current.id) { $0.archivedAt = Date() }
         app.bridge?.retire(sessionID: current.id)
 
-        if let controls {
-            var next = AskConversation.newSession()
-            next.model = controls.model
-            next.effort = controls.effort
-            next.agentKind = controls.agentKind
-            next.permissionMode = controls.permissionMode
-            if let made = try? await store.upsert(next) {
-                await controls.store(sessionID: made.id, in: store)
-                if !draft.isEmpty {
-                    try? await store.saveDraft(sessionID: made.id, body: draft)
-                }
+        var next = AskConversation.newSession()
+        next.model = carriedControls.model
+        next.effort = carriedControls.effort
+        next.agentKind = carriedControls.agentKind
+        next.permissionMode = carriedControls.permissionMode
+        if let made = try? await store.upsert(next) {
+            await carriedControls.store(sessionID: made.id, in: store)
+            if !draft.isEmpty {
+                try? await store.saveDraft(sessionID: made.id, body: draft)
             }
         }
         await open()

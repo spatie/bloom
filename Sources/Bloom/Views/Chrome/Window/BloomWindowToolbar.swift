@@ -33,6 +33,7 @@ import BloomCore
 struct BloomWindowToolbar: ToolbarContent {
     let app: AppModel
     let toggleSidebar: () -> Void
+    let startFreshAskConversation: () -> Void
 
     var body: some ToolbarContent {
         // NavigationSplitView's default sidebar item offers a label-style context menu on macOS
@@ -68,6 +69,16 @@ struct BloomWindowToolbar: ToolbarContent {
         // one. The switch is the one `WindowTitleControl`'s notes name: it turns the plate off
         // rather than dividing it, so the item still sits where it sat.
         .sharedBackgroundVisibility(.hidden)
+
+        if app.selection == .ask, app.ask.session != nil {
+            ToolbarItem(placement: .navigation) {
+                Button(action: startFreshAskConversation) {
+                    Image(systemName: "square.and.pencil")
+                }
+                .help("Start a new Ask Bloom conversation")
+                .accessibilityLabel("Start a new Ask Bloom conversation")
+            }
+        }
 
         // The elastic middle of the bar, and the whole reason the search field sits at the
         // window's trailing edge rather than beside the name.

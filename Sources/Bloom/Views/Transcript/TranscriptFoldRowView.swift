@@ -23,7 +23,7 @@ struct TranscriptFoldRowView: View {
                     TranscriptGlyph(symbol: "circle")
                         .environment(\.transcriptFoldCount, hiddenCount)
 
-                    Text(showsMore ? "earlier actions" : "actions")
+                    Text("actions")
                         .font(Typo.label)
                         .foregroundStyle(Palette.textTertiary)
                         .lineLimit(1)

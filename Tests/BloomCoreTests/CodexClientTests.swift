@@ -293,4 +293,14 @@ struct CodexRequestTimeoutTests {
         #expect(error != .timedOut(method: "turn/start", seconds: 120))
         #expect(error != .connectionClosed("thread/start"))
     }
+
+    @Test("timeouts are described without exposing RPC method names")
+    func timeoutDescriptionsAreForPeople() {
+        let resume = CodexClientError.timedOut(method: "thread/resume", seconds: 120)
+        let turn = CodexClientError.timedOut(method: "turn/start", seconds: 120)
+
+        #expect(resume.readableMessage == "Codex did not respond while reopening this conversation.")
+        #expect(turn.readableMessage == "Codex did not accept the message in time.")
+        #expect(!resume.readableMessage.contains("thread/resume"))
+    }
 }

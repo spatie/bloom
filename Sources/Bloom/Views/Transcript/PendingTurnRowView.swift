@@ -33,6 +33,10 @@ struct PendingTurnRowView: View {
     /// a divider somebody had left in. At the foot of the run it reads as what it is, which is a
     /// note about everything above it.
     var hold: DeliveryHold?
+    /// Whether the message is at the front of an idle queue after a failed start.
+    var canRetry = false
+    /// Attempts this queued message again without adding a duplicate to the queue.
+    var onRetry: @MainActor () -> Void = {}
     /// Takes this one out of the queue and puts its words back in the composer. No question first:
     /// nothing is lost, so a dialog would only be in the way. See `PendingMessageEdit`.
     var onEdit: @MainActor () -> Void
@@ -246,6 +250,14 @@ struct PendingTurnRowView: View {
             if let sentence = hold?.sentence {
                 Text(sentence)
                     .foregroundStyle(Palette.textTertiary)
+            }
+
+            if canRetry {
+                Button("Try Again", action: onRetry)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.link)
+                    .pointerStyle(.link)
+                    .help("Try to send this message again.")
             }
 
             // First, because it is the safer of the two and the one wanted more often. Offered

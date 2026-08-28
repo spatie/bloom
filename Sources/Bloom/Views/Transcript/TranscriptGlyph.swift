@@ -26,18 +26,18 @@ struct TranscriptGlyph: View {
             if let foldCount {
                 ZStack {
                     Circle()
-                        .fill(Palette.textTertiary)
+                        .fill(Palette.textTertiary.opacity(0.16))
 
                     Text(foldCount, format: .number)
                         .font(Typo.micro)
                         .fontWeight(.semibold)
-                        .foregroundStyle(Color.white)
+                        .foregroundStyle(Palette.textTertiary)
                         .monospacedDigit()
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
                         .padding(2)
                 }
-                .frame(width: 20, height: 20)
+                .frame(width: 18, height: 18)
             } else {
                 Image(systemName: symbol)
                     .font(Typo.label)
