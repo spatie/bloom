@@ -27,14 +27,6 @@ public enum FileBarLayout {
     /// buys as many components as it can pay for.
     public static let reserve: CGFloat = 170
 
-    /// The most the folder may take, however wide the pane gets.
-    ///
-    /// Forty characters, which is `app/Domain/Channels/Jobs` with a component to spare. The
-    /// filename is the loudest thing in this bar and the folder is there to qualify it; a folder
-    /// allowed to grow with the window stops being a qualifier somewhere around here and starts
-    /// being the sentence.
-    public static let ceiling: CGFloat = 240
-
     /// Below this much room the folder is dropped rather than squeezed.
     ///
     /// About seven characters and the slash after them, which is `Sources/` or `Domain/`. Under
@@ -45,7 +37,7 @@ public enum FileBarLayout {
 
     /// One character of the folder's type, near enough to budget with.
     ///
-    /// `Typo.caption` is `.subheadline`, which resolves to 11 point on macOS, and path components
+    /// `Typo.body` resolves to the same size as the filename, and path components
     /// are lowercase words. Six is deliberately generous rather than an average: the view draws
     /// the components as a single `Text` that head-truncates, so an estimate that is too tight
     /// only wastes a few points, while one that is too loose is caught by the layout and eats the
@@ -80,7 +72,7 @@ public enum FileBarLayout {
     /// apportioned the row by the time a fitting view is offered a share of it, so the folder was
     /// dropped while there was still most of a pane to spare.
     public static func folderWidth(width: CGFloat) -> CGFloat {
-        min(max(width - reserve, 0), ceiling)
+        max(width - reserve, 0)
     }
 
     /// Which components of a file's containing directory the bar can show at this width.

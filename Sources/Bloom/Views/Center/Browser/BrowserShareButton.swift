@@ -23,7 +23,7 @@ struct BrowserShareButton: View {
     @State private var anchor = SharePickerAnchor()
 
     var body: some View {
-        BrowserToolbarButton(control: control) { anchor.present(shareable) }
+        BrowserToolbarRoundButton(control: control) { anchor.present(shareable) }
             .background(SharePickerAnchorView(anchor: anchor))
     }
 }

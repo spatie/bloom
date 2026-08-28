@@ -208,6 +208,7 @@ struct TitleBarStrip: View {
         // two things in the title bar cannot drift apart no matter what clock either is on.
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: height)
+        .overlay(alignment: .leading) { Hairline(axis: .vertical) }
         // The model's identity rather than its row: a workspace row is rewritten every six seconds
         // by the diff stat refresh, and the only thing this needs to hear about is the band being
         // for a different workspace. `initial` seeds it for a window that comes up on one.

@@ -52,6 +52,7 @@ struct ComposerPrompt<Footer: View>: View {
     /// What clicking a chip does. A conversation opens the file in its review tab; the sheet has
     /// no tabs to open one in and hands it to the Finder instead.
     var onOpenAttachment: @MainActor (PromptAttachment) -> Void
+    var fillsPanel = false
     /// The footer, handed what it can ask this view to write into the draft. Passed in rather than
     /// reached for, because everything an attachment and a quick prompt do lives here and the
     /// footer is only the buttons. See `ComposerPromptActions`.
@@ -162,7 +163,11 @@ struct ComposerPrompt<Footer: View>: View {
 
             footer(ComposerPromptActions(attach: attachFiles, insert: insert(quickPrompt:)))
         }
-        .composerBox(isFocused: $isFocused, isDropTarget: isDropTarget)
+        .composerBox(
+            isFocused: $isFocused,
+            isDropTarget: isDropTarget,
+            fillsPanel: fillsPanel
+        )
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
             boxWidth = frame.width
             boxTop = frame.minY

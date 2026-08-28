@@ -26,6 +26,19 @@ struct BrowserToolbarButton: View {
     }
 }
 
+struct BrowserToolbarRoundButton: View {
+    var control: BrowserToolbar.Control
+    var action: @MainActor () -> Void
+
+    var body: some View {
+        BrowserToolbarButton(control: control, action: action)
+            .frame(width: Metrics.controlHeight, height: Metrics.controlHeight)
+            .clipShape(Circle())
+            .glassEffect(.regular.interactive(), in: Circle())
+            .overlay { Circle().strokeBorder(Palette.border, lineWidth: Metrics.outline) }
+    }
+}
+
 /// The browser pane's toolbar: where you have been, where you are, and who else gets the page.
 ///
 /// Its own view rather than a method on `BrowserTabView` so that a fixture can draw it. The pane
@@ -34,7 +47,7 @@ struct BrowserToolbarButton: View {
 ///
 /// **Three groups, which is the anatomy every Mac browser's bar has.** Back and forward joined in
 /// one capsule; the address in a capsule of its own, with the connection glyph at one end and
-/// Reload at the other; then the two glyphs that hand this page to somebody else, bare. There is
+/// Reload at the other; then the two round controls that hand this page to somebody else. There is
 /// no stock component for any of it, and `BrowserToolbar` says why: the toolbar, the joined pair
 /// and the search item are all `NSWindow`'s, and this is a pane inside a split inside a tab.
 ///
@@ -43,9 +56,8 @@ struct BrowserToolbarButton: View {
 /// so this bar sits above the page rather than over it. What the two shapes sample is the bar's
 /// own `surfaceSunken`, which is ours.
 ///
-/// The camera and Share stay `.accessoryBar` rather than taking `.buttonStyle(.glass)`. Four
-/// raised capsules in a row is a bar with no groups left in it, and Safari's own two are bare
-/// glyphs until the pointer is on them. The camera is on that side because with Reload inside the
+/// Camera and Share use the same circular treatment. Their glyphs still use `.accessoryBar` for
+/// the native hover and pressed states. The camera is on that side because with Reload inside the
 /// field, what is left on the right is the pair that takes this page elsewhere.
 struct BrowserToolbarView: View {
     var toolbar: BrowserToolbar
@@ -87,7 +99,7 @@ struct BrowserToolbarView: View {
             HStack(spacing: Metrics.spacingWide) {
                 navigation
                 addressField
-                BrowserToolbarButton(control: toolbar.screenshot, action: capture)
+                BrowserToolbarRoundButton(control: toolbar.screenshot, action: capture)
                 BrowserShareButton(control: toolbar.share, shareable: toolbar.shareable)
             }
         }

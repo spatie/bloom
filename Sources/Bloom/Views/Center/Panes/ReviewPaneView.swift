@@ -68,7 +68,12 @@ struct ReviewPaneView: View {
             // comments on this screen and then leaving it to send them. A second composer view
             // was considered and rejected: one draft, one send path, nothing to keep in step.
             if let transcript = composerTranscript {
-                ComposerView(transcript: transcript, model: model, room: room)
+                ComposerView(
+                    transcript: transcript,
+                    model: model,
+                    room: room,
+                    destinationLabel: "Messages are sent to Chat"
+                )
                     .environment(\.fontScale, textSize.scale)
                     .environment(\.chatFont, chatFont)
                     .environment(\.chatLineHeight, lineHeight)

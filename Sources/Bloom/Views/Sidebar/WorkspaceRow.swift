@@ -138,7 +138,9 @@ struct WorkspaceRow: View {
                             // The palette's rung rather than AppKit's third, which `textTertiary`
                             // was retuned away from: the system's is 1.9 to 1 and means a disabled
                             // control. Home draws the same pin and always did it this way.
-                            .foregroundStyle(Palette.textTertiary)
+                            .foregroundStyle(
+                                isEmphasized ? Palette.textInverted : Palette.textTertiary
+                            )
                             .accessibilityLabel("Pinned")
                     }
 

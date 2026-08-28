@@ -274,7 +274,9 @@ struct ComposerFooterView: View {
                 fastToggle(isCompact: isCompact)
             }
 
-            Spacer(minLength: Metrics.spacing)
+            if intent != .create {
+                Spacer(minLength: Metrics.spacing)
+            }
 
             // On the far side of the spacer, away from the pickers. It is a reading rather than
             // something to choose, and among the three menus it read as a fourth one.
@@ -342,6 +344,10 @@ struct ComposerFooterView: View {
                 .buttonStyle(.plain)
                 .help("Attach a file")
                 .accessibilityLabel("Attach a file")
+            }
+
+            if intent == .create {
+                Spacer(minLength: Metrics.spacing)
             }
 
             // Stop before Send, and only while there is a turn to stop. The pair used to be one

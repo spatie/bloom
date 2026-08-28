@@ -297,9 +297,9 @@ struct FileBarLayoutTests {
         #expect(FileBarLayout.crumbs(for: "/app//Jobs/", width: 600).components == ["app", "Jobs"])
     }
 
-    @Test("the folder never outgrows its ceiling, however wide the pane")
-    func widthIsCapped() {
-        #expect(FileBarLayout.folderWidth(width: 4_000) == FileBarLayout.ceiling)
+    @Test("the folder uses spare room in a wide pane")
+    func widthUsesAvailableSpace() {
+        #expect(FileBarLayout.folderWidth(width: 4_000) == 4_000 - FileBarLayout.reserve)
         #expect(FileBarLayout.folderWidth(width: 0) == 0)
         #expect(FileBarLayout.folderWidth(width: FileBarLayout.reserve + 60) == 60)
     }

@@ -24,6 +24,7 @@ struct ComposerView: View {
     /// passes its own, because a conversation that cannot change a file should not open by
     /// inviting somebody to ask it to.
     var placeholder: String = ComposerEditor.chatPlaceholder
+    var destinationLabel: String?
 
     @Environment(AppModel.self) private var app
 
@@ -63,6 +64,19 @@ struct ComposerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let destinationLabel {
+                HStack(spacing: Metrics.spacingSmall) {
+                    Image(systemName: "bubble.left")
+                    Text(destinationLabel)
+                }
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textTertiary)
+                .padding(.horizontal, Metrics.gutter)
+                .frame(maxWidth: .infinity, minHeight: Metrics.rowHeight, alignment: .leading)
+                .background(Palette.surfaceSunken)
+                .overlay(alignment: .bottom) { Hairline() }
+            }
+
             ComposerResizeHandle(
                 onDrag: resize(by:),
                 onDragEnd: endResize,
@@ -104,7 +118,8 @@ struct ComposerView: View {
             editorHeight: editorHeight,
             onContentHeightChange: { contentHeight = $0 },
             onKey: handle(key:),
-            onOpenAttachment: open(attachment:)
+            onOpenAttachment: open(attachment:),
+            fillsPanel: true
         ) { actions in
             ComposerFooterView(
                 controls: controls,
@@ -119,8 +134,6 @@ struct ComposerView: View {
                 onStop: transcript.stop
             )
         }
-        .padding(.horizontal, Metrics.gutter)
-        .padding(.bottom, Metrics.gutter)
         // Command-Backspace is delete-to-start-of-line in every text box on macOS, and the menu bar
         // had it for Archive Workspace. A user typing a prompt reached for it and archived the
         // workspace he was writing in. See `FocusedValues.isTypingProse`.

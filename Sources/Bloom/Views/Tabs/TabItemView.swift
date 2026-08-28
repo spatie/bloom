@@ -162,13 +162,9 @@ struct TabItemView: View {
         .padding(.horizontal, Metrics.inset)
         .frame(maxWidth: Self.maximumWidth)
         .frame(height: Metrics.barHeight)
-        // The selected tab takes the content colour and fills the strip's full height, the way an
-        // editor tab bar on this platform does. A rounded capsule of selection grey floating in a
-        // strip is a browser chrome idiom, and it read as a solid block rather than as a tab.
-        //
-        // The fill is opaque and reaches the bottom of the strip on purpose: the rule that closes
-        // the strip off from the pane is painted BEHIND the tabs, so this covers it and the
-        // selected tab runs into the content underneath rather than sitting in a box above it.
+        // The selected tab takes the content colour while leaving the strip's lower rule visible.
+        // A rounded capsule of selection grey floating in a strip is a browser chrome idiom, and
+        // it read as a solid block rather than as a tab.
         //
         // Rounded at the top and square at the bottom for the same reason. Safari's selected tab
         // is the toolbar's own colour where the rest of its strip is a recess about five per cent
@@ -251,6 +247,7 @@ struct TabItemView: View {
                     TabItemOutline(radius: Self.cornerRadius, skipsLeadingEdge: isAtPaneEdge)
                         .strokeBorder(Palette.border, lineWidth: Metrics.outline)
                 }
+                .padding(.bottom, Metrics.outline)
                 .matchedGeometryEffect(id: Self.selectionID, in: namespace)
         } else if isHovered {
             shape.fill(Palette.hover)

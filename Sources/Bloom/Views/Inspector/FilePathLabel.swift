@@ -35,7 +35,7 @@ struct FilePathLabel: View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
             if let folder {
                 folder
-                    .font(Typo.caption)
+                    .font(Typo.body)
                     .lineLimit(1)
                     // The safety net under `FileBarLayout.crumbs`, which budgets in estimated
                     // character widths rather than measuring the font. If the estimate comes out
