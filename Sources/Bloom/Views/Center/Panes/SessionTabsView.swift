@@ -188,11 +188,7 @@ struct SessionTabsView: View {
             TabStripSeparator(isHidden: entries.last.map { $0 == selected } ?? true)
 
             newTabMenu
-        } trailing: {
-            TabStripSeparator()
-
-            inspectorToggle
-        }
+        } trailing: {}
         // The list, and nothing else. Reconciling used to be here too, right after this line, and
         // it was wrong by exactly one await: this body has no suspension point in it, so it ran
         // while `WorkspaceModel` was still on the `Store` actor and judged real tool tabs against
@@ -382,20 +378,6 @@ struct SessionTabsView: View {
         .frame(width: Metrics.barHeight, height: Metrics.barHeight)
         .contentShape(Rectangle())
         .help("New tab in this workspace")
-    }
-
-    /// The right pane's control, at the trailing end of the strip that borders it.
-    ///
-    /// It used to be a toolbar item, where it sat above all three columns and so said nothing
-    /// about which of them it would move. On the boundary it opens, the target is the thing it is
-    /// pointing at.
-    ///
-    /// What it looks like is `InspectorToggle`, which is a view of its own so that the gallery can
-    /// draw it with the inspector both ways and show they come out the same.
-    private var inspectorToggle: some View {
-        @Bindable var app = app
-
-        return InspectorToggle(isVisible: $app.isInspectorVisible)
     }
 
     /// Whether this tab can be opened beside the one the user is in. The pair of menu items is

@@ -12,6 +12,7 @@ import BloomCore
 /// for a control that is there and cannot be pressed.
 struct BrowserToolbarButton: View {
     var control: BrowserToolbar.Control
+    var opticalOffsetY: CGFloat = 0
     var action: @MainActor () -> Void
 
     var body: some View {
@@ -19,6 +20,7 @@ struct BrowserToolbarButton: View {
             Label(control.name, systemImage: control.symbol)
                 .labelStyle(.iconOnly)
                 .foregroundStyle(control.isEnabled ? Palette.textSecondary : Palette.textDisabled)
+                .offset(y: opticalOffsetY)
         }
         .buttonStyle(.accessoryBar)
         .disabled(!control.isEnabled)
@@ -159,7 +161,11 @@ struct BrowserToolbarView: View {
             Hairline(axis: .vertical)
             pageAction(toolbar.screenshot, action: capture)
             Hairline(axis: .vertical)
-            BrowserShareButton(control: toolbar.share, shareable: toolbar.shareable)
+            BrowserShareButton(
+                control: toolbar.share,
+                shareable: toolbar.shareable,
+                opticalOffsetY: 0.5
+            )
                 .frame(width: pageActionWidth, height: Metrics.controlHeight)
         }
         .frame(height: Metrics.controlHeight)

@@ -1847,7 +1847,11 @@ private struct HostedRow: View {
         // three or four of them between two one line Bash rows is the hundred points of blank this
         // was reported for. A stack is a container and lays out at nothing, which is a height.
         let measured = VStack(alignment: .leading, spacing: 0) { content }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // One centred reading column for every row kind. The content inside can still align
+            // leading or trailing, but it does so inside the same measure as the rest of the
+            // conversation. On a narrow pane this frame naturally shrinks to the available width.
+            .frame(maxWidth: TranscriptLayout.conversationMeasure, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
             .fixedSize(horizontal: false, vertical: true)
             .background(
                 GeometryReader { proxy in

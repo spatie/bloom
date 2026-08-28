@@ -485,6 +485,7 @@ struct TranscriptListView: View {
         // walked.
         let drawnRows = visibleRows
         let drawnRange = drawnRows.startIndex..<drawnRows.endIndex
+        let lastVisibleSeq = drawnRows.last(where: { !TranscriptNoise.isHidden($0) })?.seq
         // The turn the loop below is inside, so a fold's own line is emitted once, and the first
         // row of that turn's working which is NOT hidden. Every row before it is skipped.
         var foldSeq: Int?
@@ -570,6 +571,7 @@ struct TranscriptListView: View {
             let isExpanded = expanded.contains(row.seq)
             let wasStopped = row.seq == stoppedTurnSeq
             let recovered = recoveredRuns[row.seq]
+            let closesTranscript = row.kind == .result && row.seq == lastVisibleSeq
             // The same fields `TranscriptRowView.==` compared, and for the same reason: the
             // payload is never read, because comparing it is 1.6MB of `Data` per pass.
             //
@@ -590,6 +592,7 @@ struct TranscriptListView: View {
                 $0.combine(row.parentToolUseID)
                 $0.combine(wasStopped)
                 $0.combine(recovered != nil)
+                $0.combine(closesTranscript)
             }
             // Free, and no for the two kinds that make up most of a long session, so it is asked
             // here rather than inside the closure that runs per cell.
@@ -603,9 +606,10 @@ struct TranscriptListView: View {
                     id: .row(row.seq), contentKey: key, drawsNothing: blank,
                     content: {
                         AnyView(
-                            // No top padding: the rule inside the footer carries its own air. The
-                            // bottom is deliberately the wider of the two, so the footer reads as
-                            // belonging to the turn above rather than to the one below.
+                            // No top padding: the rule inside the footer carries its own air. A
+                            // completed turn keeps the wider paragraph gap before a following
+                            // message. At the live end it keeps only the tight inset, so the
+                            // duration sits evenly between its own rule and the composer rule.
                             TurnFooterView(
                                 rows: rows,
                                 row: row,
@@ -617,7 +621,10 @@ struct TranscriptListView: View {
                             )
                             .arrivingRow(settles && arrivals.isArriving(row.seq))
                             .padding(.horizontal, TranscriptLayout.inset)
-                            .padding(.bottom, TranscriptLayout.turnGap)
+                            .padding(
+                                .bottom,
+                                closesTranscript ? TranscriptLayout.tight : TranscriptLayout.turnGap
+                            )
                             .frame(maxWidth: .infinity, alignment: .leading)
                         )
                     }
@@ -717,10 +724,6 @@ struct TranscriptListView: View {
                 AnyView(
                     StreamingTailView(transcript: transcript)
                         .padding(.horizontal, TranscriptLayout.inset)
-                        // The other half of the air. This entry is always in the list, and is
-                        // nothing at all between turns, so it is also what stops the last row of a
-                        // quiet conversation sitting against the bottom edge.
-                        .padding(.bottom, TranscriptLayout.block)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 )
             }

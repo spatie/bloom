@@ -88,4 +88,12 @@ enum TranscriptLayout {
     /// loses the start of the next line. Generous on purpose: at the sizes the window is usually
     /// dragged to this never bites, and it only ever stops prose running away.
     static let proseMeasure: CGFloat = 680
+
+    /// The shared reading column for a conversation in a wide pane.
+    ///
+    /// Individual paragraphs still use `proseMeasure`, but every transcript row now belongs to
+    /// this wider column. That keeps user bubbles, working rows, answers and turn footers on one
+    /// axis instead of leaving an answer at the far left while its question sits at the far right
+    /// of a large window. Below this width the column simply takes all available room.
+    static let conversationMeasure: CGFloat = 760
 }

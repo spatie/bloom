@@ -12,6 +12,7 @@ struct StreamingTailView: View {
         Group {
             if transcript.isRunning || transcript.isStreaming {
                 StreamingRowView(transcript: transcript)
+                    .padding(.bottom, TranscriptLayout.block)
             }
         }
     }

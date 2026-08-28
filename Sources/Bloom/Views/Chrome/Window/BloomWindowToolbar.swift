@@ -9,12 +9,10 @@ import BloomCore
 /// It is attached to the DETAIL column, never to the `NavigationSplitView`. See `RootView` for the
 /// crash that taught us the difference.
 ///
-/// There are no pane toggles here any more. A toolbar item sits above all three columns and so
-/// says nothing about which of them it moves, and on macOS 26 a `.button` toggle's on state is a
-/// saturated accent fill, which made two permanently-on panes read as two alarms. Both controls
-/// now live on the boundary they open: the inspector's on the end of the centre tab strip, the
-/// terminal panel's on the panel's own strip. The worktree's own menu went the same way and for
-/// the same reason: it is in the title bar over the column it describes, in `TitleBarStrip`.
+/// The two pane toggles live here as one matched pair. The navigation control follows the traffic
+/// lights and the inspector control takes the trailing action position. They use the same quiet
+/// icon treatment, so the window reads as navigation, content and inspection rather than as one
+/// native toolbar button and one unrelated control in the tab strip.
 ///
 /// **Nor is there a `+` any more.** It appeared only while the sidebar was folded away, on the
 /// argument that nothing else in the window starts work in that state. What the owner saw was a
@@ -32,7 +30,10 @@ import BloomCore
 /// nothing teaches the user that the list is not to be trusted.
 struct BloomWindowToolbar: ToolbarContent {
     let app: AppModel
-    let toggleSidebar: () -> Void
+    let isSidebarVisible: Bool
+    let isInspectorVisible: Bool
+    let toggleSidebar: @MainActor @Sendable () -> Void
+    let toggleInspector: @MainActor @Sendable () -> Void
     let startFreshAskConversation: () -> Void
 
     var body: some ToolbarContent {
@@ -41,12 +42,13 @@ struct BloomWindowToolbar: ToolbarContent {
         // "Icon Only" has no useful effect. RootView removes that default item and this image-only
         // button keeps the native placement and action without advertising a setting Bloom ignores.
         ToolbarItem(placement: .navigation) {
-            Button(action: toggleSidebar) {
-                Image(systemName: "sidebar.left")
-            }
-            .help("Toggle sidebar")
-            .accessibilityLabel("Toggle sidebar")
+            WindowPaneToggle(
+                edge: .leading,
+                isVisible: isSidebarVisible,
+                action: toggleSidebar
+            )
         }
+        .sharedBackgroundVisibility(.hidden)
 
         // The window's title, drawn by us rather than by AppKit.
         //
@@ -96,6 +98,17 @@ struct BloomWindowToolbar: ToolbarContent {
         // in it, so the two do not compete for the edge: the field takes the toolbar's trailing
         // end, the band takes the window's. See `TitleBarStrip`.
         ToolbarSpacer(.flexible, placement: .navigation)
+
+        if app.selectedWorkspace != nil {
+            ToolbarItem(placement: .primaryAction) {
+                WindowPaneToggle(
+                    edge: .trailing,
+                    isVisible: isInspectorVisible,
+                    action: toggleInspector
+                )
+            }
+            .sharedBackgroundVisibility(.hidden)
+        }
 
         // The worktree's menu is not here any more. It was a trailing toolbar item, pinned to the
         // window's own edge, which put it directly above the inspector's pull request strip: two

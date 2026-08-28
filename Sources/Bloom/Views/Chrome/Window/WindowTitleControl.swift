@@ -49,15 +49,14 @@ import BloomCore
 /// `.toolbar(removing: .title)`, which governs the title item SwiftUI contributes from
 /// `navigationTitle`. The first shipped without the second and the window wore its name twice.
 ///
-/// ## The glass capsule is the toolbar's own, and there is nothing here to draw it
+/// ## The toolbar background is AppKit's, and there is nothing here to draw it
 ///
-/// The owner asked for the name to sit in a glass component, matching `InspectorToggle` a few
-/// points to its left, and an earlier report said a bare `Text` in a toolbar item picked up no
-/// capsule at all. That report was wrong, and the way it was wrong is why the bar looked broken.
+/// An earlier report said a bare `Text` in a toolbar item picked up no capsule at all. That report
+/// was wrong, and the way it was wrong is why the bar looked broken.
 /// On macOS 26 every toolbar item is given a shared background: AppKit wraps it in an
 /// `NSToolbarPlatterView` holding an `NSGlassEffectView`, which is the same plate
-/// `.buttonStyle(.glass)` puts under the inspector's control, so the two already match and a
-/// `.glassEffect` of ours would be a second treatment over the first.
+/// used for toolbar controls, so a `.glassEffect` of ours would be a second treatment over the
+/// first.
 ///
 /// What there was instead was a capsule nobody could see, because the search field's capsule
 /// began eight points after it and the two read as one long run of glass. Rendered offscreen at

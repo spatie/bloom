@@ -77,7 +77,10 @@ struct RootView: View {
                     .toolbar {
                         BloomWindowToolbar(
                             app: app,
+                            isSidebarVisible: columnVisibility != .detailOnly,
+                            isInspectorVisible: isInspectorPresented,
                             toggleSidebar: toggleSidebar,
+                            toggleInspector: { app.isInspectorVisible.toggle() },
                             startFreshAskConversation: { isStartingFreshAskConversation = true }
                         )
                     }

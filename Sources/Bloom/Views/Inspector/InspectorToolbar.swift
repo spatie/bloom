@@ -55,10 +55,12 @@ struct InspectorToolbar: View {
                 // Walking the files one at a time is Cmd+Option+J and K.
                 Toggle(isOn: $isTree) {
                     Label("Group changes by folder", systemImage: "folder")
+                        .frame(width: Metrics.controlHeight, height: Metrics.controlHeight)
                 }
                 .labelStyle(.iconOnly)
                 .toggleStyle(.button)
                 .inspectorBarControl()
+                .fixedSize()
                 .disabled(model.changedFiles.isEmpty)
                 .help(
                     isTree
