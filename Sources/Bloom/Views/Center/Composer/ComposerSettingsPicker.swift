@@ -77,12 +77,11 @@ private struct ComposerSettingsPanel: View {
     var onPermissionMode: @MainActor (String) -> Void
     var onFastMode: @MainActor (Bool) -> Void
 
-    private static let width: CGFloat = 340
-    private static let fieldWidth: CGFloat = 180
+    private static let width: CGFloat = 300
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Grid(alignment: .leading, horizontalSpacing: Metrics.pane, verticalSpacing: Metrics.spacingWide) {
+            VStack(alignment: .leading, spacing: Metrics.spacing) {
                 settingRow("Model") { modelPicker }
                 settingRow("Reasoning") {
                     optionPicker("Reasoning", selection: controls.effort, options: efforts, onSelect: onEffort)
@@ -108,16 +107,23 @@ private struct ComposerSettingsPanel: View {
                     )
                 }
             }
-            .padding(.horizontal, Metrics.pane)
-            .padding(.vertical, Metrics.spacingWide)
+            .padding(Metrics.gutter)
 
             Hairline()
 
-            Toggle("Prefer faster replies", isOn: fastBinding)
-                .toggleStyle(.switch)
-                .font(Typo.label)
-                .padding(.horizontal, Metrics.pane)
-                .padding(.vertical, Metrics.spacingWide)
+            HStack(spacing: Metrics.spacing) {
+                Text("Prefer faster replies")
+                    .font(Typo.label)
+
+                Spacer(minLength: Metrics.spacing)
+
+                Toggle("Prefer faster replies", isOn: fastBinding)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+            }
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.vertical, Metrics.inset)
         }
         .frame(width: Self.width)
     }
@@ -126,16 +132,16 @@ private struct ComposerSettingsPanel: View {
         _ title: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        GridRow {
+        HStack(spacing: Metrics.spacing) {
             Text(title)
                 .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
-                .gridColumnAlignment(.leading)
+
+            Spacer(minLength: Metrics.spacing)
 
             content()
-                .frame(width: Self.fieldWidth, alignment: .trailing)
-                .gridColumnAlignment(.trailing)
         }
+        .frame(minHeight: Metrics.rowHeight)
     }
 
     private var modelPicker: some View {
@@ -150,6 +156,7 @@ private struct ComposerSettingsPanel: View {
         }
         .labelsHidden()
         .pickerStyle(.menu)
+        .controlSize(.small)
     }
 
     private func optionPicker(
@@ -168,6 +175,7 @@ private struct ComposerSettingsPanel: View {
         }
         .labelsHidden()
         .pickerStyle(.menu)
+        .controlSize(.small)
     }
 
     private var modelBinding: Binding<String> {

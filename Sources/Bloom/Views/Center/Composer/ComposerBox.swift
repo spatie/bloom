@@ -34,7 +34,7 @@ struct ComposerBox: ViewModifier {
         content
             .padding(.horizontal, Metrics.gutter)
             .padding(.top, Metrics.gutter)
-            .padding(.bottom, fillsPanel ? Metrics.spacingTight : Metrics.gutter)
+            .padding(.bottom, fillsPanel ? Metrics.spacingWide : Metrics.gutter)
             .background {
                 // Sunken rather than raised. `surfaceRaised` resolves to the same white as the
                 // transcript above it, so the box read as a hairline drawn on nothing rather than

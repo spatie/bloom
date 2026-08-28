@@ -53,15 +53,24 @@ struct InspectorToolbar: View {
                 // room, and the diff is not under it any more: it is a tab in the centre column
                 // at the full height of the window, and the list stays beside it the whole time.
                 // Walking the files one at a time is Cmd+Option+J and K.
-                Toggle(isOn: $isTree) {
-                    Label("Group changes by folder", systemImage: "folder")
-                        .frame(width: Metrics.controlHeight, height: Metrics.controlHeight)
+                Button {
+                    isTree.toggle()
+                } label: {
+                    Image(systemName: "folder")
+                        .frame(width: Metrics.controlHeight + 4, height: Metrics.controlHeight)
+                        .background {
+                            if isTree {
+                                RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+                                    .fill(Palette.selected)
+                            }
+                        }
+                        .frame(width: Metrics.controlHeight + 8, height: InspectorLayout.barHeight)
+                        .contentShape(Rectangle())
                 }
-                .labelStyle(.iconOnly)
-                .toggleStyle(.button)
-                .inspectorBarControl()
-                .fixedSize()
+                .buttonStyle(.plain)
                 .disabled(model.changedFiles.isEmpty)
+                .accessibilityLabel("Group changes by folder")
+                .accessibilityAddTraits(isTree ? .isSelected : [])
                 .help(
                     isTree
                         ? "Show the changed files as a flat list"
