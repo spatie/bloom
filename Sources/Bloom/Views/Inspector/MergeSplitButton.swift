@@ -77,6 +77,7 @@ struct MergeSplitButton: View {
     private var styled: some View {
         control
             .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
             // The label, the chevron and the hairline in white. See the type's note: the system
             // will not tint this control, so the only lever left over its ink is the appearance
             // it draws itself for.
@@ -86,11 +87,7 @@ struct MergeSplitButton: View {
                 // draws a disabled prominent button and therefore how this one has to look beside
                 // them.
                 fill.opacity(isLive ? 1 : 0.35),
-                // A capsule, because that is what macOS 26 draws a `.borderedProminent` button as.
-                // Painted as a six point rounded rectangle, this fill's corners sat outside the
-                // control's own bezel and its silhouette disagreed with every other prominent
-                // button in the strip.
-                in: .capsule
+                in: RoundedRectangle(cornerRadius: Metrics.corner)
             )
     }
 
