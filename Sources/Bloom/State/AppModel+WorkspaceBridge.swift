@@ -1,3 +1,4 @@
+import Foundation
 import BloomCore
 
 /// The tools an agent can call back into this window with, and the app work behind each of them.
@@ -204,9 +205,7 @@ extension AppModel {
         if let sessionID = identity.sessionID, let session = try await store.session(id: sessionID) {
             controls = ComposerControls(session: session, isFastMode: false, outputStyle: OutputStyle.defaultName)
         }
-        if let agent = order.agent {
-            controls.agentKind = agent
-        }
+        controls = try await workspaceControls(for: order, inheriting: controls)
 
         // Both halves of the order's source, handed to the same two arguments the create window's
         // two tabs fill in. Nothing is decided here: `AgentStartSource` has already found the
@@ -230,6 +229,61 @@ extension AppModel {
             branch: workspace.branch,
             path: workspace.path
         )
+    }
+
+    /// Keeps the backend and model one valid choice. Changing only the backend used to carry the
+    /// caller's model across with it, which is how a Codex workspace was started with `opus`.
+    private func workspaceControls(
+        for order: AgentWorkspaceOrder,
+        inheriting inherited: ComposerControls
+    ) async throws -> ComposerControls {
+        var controls = inherited
+        let inheritedAgent = controls.agentKind
+        let agent = order.agent ?? inheritedAgent
+        controls.agentKind = agent
+
+        switch agent {
+        case .claudeCode:
+            let models = Set(ComposerOption.models.map(\.id))
+            if let model = order.model {
+                guard models.contains(model) else {
+                    throw BridgeWorkspaceModelFailure.invalid(
+                        model: model,
+                        agent: agent,
+                        available: models.sorted()
+                    )
+                }
+                controls.model = model
+            } else if agent != inheritedAgent {
+                controls.model = AppDefaults.fallbackModel
+            }
+        case .codex:
+            if order.model == nil, agent == inheritedAgent { return controls }
+
+            let models = try await CodexModelCatalog.live().pickerModels()
+            let chosen: CodexModel?
+            if let requested = order.model {
+                chosen = models.first { $0.id == requested }
+                guard chosen != nil else {
+                    throw BridgeWorkspaceModelFailure.invalid(
+                        model: requested,
+                        agent: agent,
+                        available: models.map(\.id)
+                    )
+                }
+            } else {
+                chosen = models.first { $0.isDefault } ?? models.first
+            }
+            guard let chosen else {
+                throw BridgeWorkspaceModelFailure.noneAvailable(agent)
+            }
+            controls.model = chosen.id
+            controls.effort = chosen.resolvedEffort(preferring: controls.effort)
+        case .cursor, .openCode:
+            throw BridgeWorkspaceModelFailure.noneAvailable(agent)
+        }
+
+        return controls
     }
 
     // MARK: - Panes
@@ -418,6 +472,21 @@ extension AppModel {
             case .browser: return .browser
             case .review, .notes: return nil
             }
+        }
+    }
+}
+
+private enum BridgeWorkspaceModelFailure: LocalizedError {
+    case invalid(model: String, agent: AgentKind, available: [String])
+    case noneAvailable(AgentKind)
+
+    var errorDescription: String? {
+        switch self {
+        case let .invalid(model, agent, available):
+            let choices = available.isEmpty ? "none were reported" : available.joined(separator: ", ")
+            return "The model '\(model)' is not available for \(agent.label). Available models: \(choices)."
+        case .noneAvailable(let agent):
+            return "Bloom could not find an available model for \(agent.label)."
         }
     }
 }

@@ -134,7 +134,7 @@ struct BrowserToolbarView: View {
             }
             field
         }
-        .padding(.horizontal, Metrics.spacing)
+        .padding(.horizontal, Metrics.spacingWide + Metrics.spacingSmall)
         .frame(height: Metrics.controlHeight)
         .background(alignment: .leading) { load }
         .clipShape(Capsule())

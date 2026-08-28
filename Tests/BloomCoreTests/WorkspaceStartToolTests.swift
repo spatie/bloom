@@ -143,6 +143,7 @@ struct WorkspaceStartToolTests {
                 "name": .string("Sentry importer"),
                 "base_branch": .string("develop"),
                 "agent": .string("codex"),
+                "model": .string("gpt-5.6-sol"),
             ]),
             as: fixture.identity,
             store: fixture.store
@@ -152,6 +153,7 @@ struct WorkspaceStartToolTests {
         #expect(order.name == "Sentry importer")
         #expect(order.baseBranch == "develop")
         #expect(order.agent == .codex)
+        #expect(order.model == "gpt-5.6-sol")
 
         _ = await recorder.tool().call(
             request(["prompt": .string("do a thing"), "name": .string("   ")]),
@@ -623,6 +625,10 @@ struct WorkspaceStartDedupTests {
         #expect(order(prompt: "Something else").spawnID(parentWorkspaceID: parent) != base)
         #expect(order(name: "Named").spawnID(parentWorkspaceID: parent) != base)
         #expect(order().spawnID(parentWorkspaceID: WorkspaceID(rawValue: "w-other")) != base)
+        #expect(
+            AgentWorkspaceOrder(prompt: "Import the webhooks", model: "gpt-5.6-sol")
+                .spawnID(parentWorkspaceID: parent) != base
+        )
     }
 
     @Test("it is short enough to read in a log")

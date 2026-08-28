@@ -52,7 +52,6 @@ struct TurnFooterView: View {
             succeeded: result?.succeeded != false,
             denials: result?.permissionDenials ?? 0
         )
-        let appearance = Self.appearance(of: outcome)
         let summaryText = result?.summary ?? ""
 
         return VStack(alignment: .leading, spacing: 0) {
@@ -74,17 +73,17 @@ struct TurnFooterView: View {
             // A turn's duration is the number a user goes looking for, so it sits a rung above
             // the counts and timings that decorate a single row.
             HStack(spacing: TranscriptLayout.block) {
-                Image(systemName: appearance.glyph)
-                    .font(Typo.caption)
-                    .imageScale(.medium)
-                    .foregroundStyle(appearance.tint)
-                    .accessibilityLabel(outcome.label)
-                    // Four ways a turn can end, collapsed into one 13 point mark, and this row is
-                    // the only place any of them is said. VoiceOver could read it and a pointer
-                    // could not; the `Menu` eight lines below already carries a tooltip.
-                    .help(outcome.label)
+                if outcome != .finished {
+                    let appearance = Self.appearance(of: outcome)
+                    Image(systemName: appearance.glyph)
+                        .font(Typo.caption)
+                        .imageScale(.medium)
+                        .foregroundStyle(appearance.tint)
+                        .accessibilityLabel(outcome.label)
+                        .help(outcome.label)
+                }
 
-                Text(TurnDuration.format(row.durationMS ?? result?.durationMS ?? 0))
+                Text(TurnDuration.wholeSeconds(row.durationMS ?? result?.durationMS ?? 0))
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textSecondary)
                     .monospacedDigit()
@@ -122,24 +121,6 @@ struct TurnFooterView: View {
                 }
 
                 CopyButton(text: summaryText, title: "Copy this answer")
-
-                // The menu's three do not flash the tick beside them. It is one button saying
-                // one thing, and it said "Copy this answer" while the raw event was what had
-                // just gone on the pasteboard.
-                Menu {
-                    Button("Copy answer") { Clipboard.copy(summaryText) }
-                    Button("Copy files touched") { Clipboard.copy(filesText) }
-                    Button("Copy raw event") { Clipboard.copy(rawEventText) }
-                } label: {
-                    Label("More for this turn", systemImage: "ellipsis")
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .labelStyle(.iconOnly)
-                .font(Typo.caption)
-                .imageScale(.medium)
-                .fixedSize()
-                .help("More for this turn")
             }
             .foregroundStyle(Palette.textSecondary)
             .padding(.horizontal, TranscriptLayout.inset)
@@ -277,7 +258,4 @@ struct TurnFooterView: View {
         }
     }
 
-    private var filesText: String { files.map(\.path).joined(separator: "\n") }
-
-    private var rawEventText: String { String(decoding: row.payload, as: UTF8.self) }
 }

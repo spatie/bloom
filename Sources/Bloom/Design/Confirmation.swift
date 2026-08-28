@@ -71,15 +71,9 @@ struct ConfirmationSheet: View {
                 .padding(.horizontal, Layout.textInset)
                 .padding(.top, Layout.titleToMessage)
 
-            VStack(spacing: Layout.betweenButtons) {
-                confirmButton
-                cancelButton
-            }
-            .padding(.horizontal, Layout.buttonInset)
-            .padding(.top, Layout.messageToButtons)
-            .padding(.bottom, Layout.bottom)
+            buttons
         }
-        .frame(width: Layout.width, alignment: .leading)
+        .frame(width: width, alignment: .leading)
         // The system alert's ground, and it took a measurement to say that. Sampled off window
         // captures against Bloom's own surfaces: in light it comes out a neutral grey a step
         // below the white pane, in dark a step above the deep blue one and carrying its hue.
@@ -93,6 +87,29 @@ struct ConfirmationSheet: View {
     }
 
     // MARK: - Buttons
+
+    @ViewBuilder
+    private var buttons: some View {
+        switch confirmation.layout {
+        case .standard:
+            VStack(spacing: Layout.betweenButtons) {
+                confirmButton
+                cancelButton
+            }
+            .padding(.horizontal, Layout.buttonInset)
+            .padding(.top, Layout.messageToButtons)
+            .padding(.bottom, Layout.bottom)
+        case .compact:
+            HStack(spacing: Layout.compactButtonSpacing) {
+                Spacer(minLength: 0)
+                compactCancelButton
+                compactConfirmButton
+            }
+            .padding(.horizontal, Layout.textInset)
+            .padding(.top, Layout.compactMessageToButtons)
+            .padding(.bottom, Layout.compactBottom)
+        }
+    }
 
     /// The answer that does the thing, drawn in the colour of what it does.
     ///
@@ -128,6 +145,32 @@ struct ConfirmationSheet: View {
         .focused($focus, equals: .cancel)
         // Escape, and only Escape. `.cancelAction` is a key equivalent, not a default button: it
         // does not put Return on this button, and it does not take Return off anything.
+        .keyboardShortcut(.cancelAction)
+    }
+
+    private var compactConfirmButton: some View {
+        Button { onConfirm() } label: {
+            Text(confirmation.confirmLabel)
+                .frame(minWidth: Layout.compactConfirmWidth)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .foregroundStyle(confirmation.tone.color)
+        .background(
+            RoundedRectangle(cornerRadius: Layout.compactButtonRadius)
+                .fill(confirmation.tone.color.opacity(Layout.plateTint))
+        )
+        .focused($focus, equals: .confirm)
+    }
+
+    private var compactCancelButton: some View {
+        Button { onCancel() } label: {
+            Text(confirmation.cancelLabel)
+                .frame(minWidth: Layout.compactCancelWidth)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .focused($focus, equals: .cancel)
         .keyboardShortcut(.cancelAction)
     }
 
@@ -175,6 +218,7 @@ struct ConfirmationSheet: View {
     /// system dialogs cannot drift apart. The top of the file says how.
     private enum Layout {
         static let width: CGFloat = 260
+        static let compactWidth: CGFloat = 320
         static let textInset: CGFloat = 21
         static let buttonInset: CGFloat = 15
         static let top: CGFloat = 19
@@ -182,11 +226,21 @@ struct ConfirmationSheet: View {
         static let messageToButtons: CGFloat = 14
         static let betweenButtons: CGFloat = 4
         static let bottom: CGFloat = 15
+        static let compactMessageToButtons: CGFloat = 18
+        static let compactButtonSpacing: CGFloat = 8
+        static let compactBottom: CGFloat = 18
+        static let compactCancelWidth: CGFloat = 68
+        static let compactConfirmWidth: CGFloat = 104
+        static let compactButtonRadius: CGFloat = 7
         /// How much of the tone shows through the button's own plate. macOS 26's destructive
         /// alert button samples as its red at roughly a fifth over the sheet; thirteen percent
         /// here, because this colour goes UNDER a plate that already darkens what is behind it
         /// rather than replacing that plate.
         static let plateTint: Double = 0.13
+    }
+
+    private var width: CGFloat {
+        confirmation.layout == .compact ? Layout.compactWidth : Layout.width
     }
 }
 
@@ -227,6 +281,12 @@ struct Confirmation: Equatable, Sendable {
     var confirmLabel: String
     var cancelLabel: String
     var tone: ConfirmationTone = .destructive
+    var layout: ConfirmationLayout = .standard
+}
+
+enum ConfirmationLayout: Equatable, Sendable {
+    case standard
+    case compact
 }
 
 /// What the confirm button means, which is the only thing that varies between the app's

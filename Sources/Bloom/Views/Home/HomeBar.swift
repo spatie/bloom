@@ -36,16 +36,21 @@ struct HomeBar: View {
     var isSearching: Bool
     @Binding var filter: HomeFilter
 
-    /// The chip under the pointer. Held here rather than in each chip so crossing the strip lights
-    /// one at a time, which is the same arrangement Home's rows use.
-    @State private var hovered: HomeScope?
-
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: Metrics.spacingSmall) {
-                ForEach(HomeScope.offered(searching: isSearching), id: \.self) { scope in
-                    chip(scope)
+                Picker("Scope", selection: $filter.scope) {
+                    ForEach(HomeScope.offered(searching: isSearching), id: \.self) { scope in
+                        Text(title(for: scope))
+                            .tag(scope)
+                            .accessibilityLabel(accessibilityLabel(for: scope))
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .fixedSize()
+                .help("Choose which work Home lists")
 
                 Spacer(minLength: Metrics.gutter)
 
@@ -64,66 +69,16 @@ struct HomeBar: View {
 
     // MARK: - Scopes
 
-    /// One scope, with the number that says what clicking it would show.
-    ///
-    /// **A chip at nought draws no number.** The strip read "Needs you 0, Running 0" at rest, which
-    /// is the state most of the time, so the noughts were what the eye learned to skip and the two
-    /// numbers that matter got skipped with them. See `HomeScopeCounts.badge`.
-    private func chip(_ scope: HomeScope) -> some View {
-        let isOn = filter.scope == scope
-        let badge = counts.badge(of: scope, searching: isSearching)
+    /// One native segmented title, with the number that says what choosing it would show.
+    private func title(for scope: HomeScope) -> String {
         let label = scope.label(searching: isSearching)
-
-        return Button {
-            filter.scope = scope
-        } label: {
-            HStack(spacing: Metrics.spacingSmall) {
-                Text(label)
-                    .font(Typo.caption)
-
-                if let badge {
-                    Text(badge, format: .number)
-                        .font(Typo.micro)
-                        .monospacedDigit()
-                        .foregroundStyle(isOn ? Palette.selectedEmphasizedText.opacity(0.8) : countTint(scope))
-                }
-            }
-            .foregroundStyle(isOn ? Palette.selectedEmphasizedText : Palette.textSecondary)
-            .padding(.horizontal, Metrics.spacing)
-            .frame(height: Metrics.controlHeight)
-            .background(fill(isOn: isOn, isHovered: hovered == scope), in: Capsule())
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .onHoverChange { hovered = $0 ? scope : (hovered == scope ? nil : hovered) }
-        .accessibilityLabel(badge.map { "\(label), \($0)" } ?? label)
-        .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
-        .help(help(for: scope))
+        guard let badge = counts.badge(of: scope, searching: isSearching) else { return label }
+        return "\(label) \(badge)"
     }
 
-    /// The selected chip uses the same emphasized selection colour as every other control.
-    private func fill(isOn: Bool, isHovered: Bool) -> Color {
-        if isOn { return Palette.selectedEmphasized }
-        return isHovered ? Palette.hover : .clear
-    }
-
-    /// The one chip whose number is worth noticing before it is read. Everything else on the strip
-    /// is a count; this one is a queue with a person at the end of it.
-    private func countTint(_ scope: HomeScope) -> Color {
-        scope == .needsYou && counts.needsYou > 0 ? Palette.warning : Palette.textTertiary
-    }
-
-    private func help(for scope: HomeScope) -> String {
-        switch scope {
-        case .all:
-            isSearching ? "Every kind of result" : "Everything on this Mac, archived work included"
-        case .needsYou: "An agent has asked something, or a finished turn has not been read"
-        case .running: "An agent is mid turn"
-        case .live: "Still has a worktree on disk"
-        case .archived: "Archived: readable, restorable, with nothing left on disk"
-        case .workspaces: "Matched by name, branch or project"
-        case .transcripts: "Matched in what the agents said"
-        }
+    private func accessibilityLabel(for scope: HomeScope) -> String {
+        let label = scope.label(searching: isSearching)
+        return counts.badge(of: scope, searching: isSearching).map { "\(label), \($0)" } ?? label
     }
 
     // MARK: - Order

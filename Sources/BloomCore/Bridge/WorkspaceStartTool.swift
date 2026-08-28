@@ -29,6 +29,8 @@ public struct AgentWorkspaceOrder: Sendable, Hashable {
     /// Nil inherits whatever the calling session is using, which is almost always what is wanted:
     /// an agent asking for help wants help from the thing it already trusts.
     public let agent: AgentKind?
+    /// An exact model id, or nil for the selected backend's current default.
+    public let model: String?
 
     /// What the worktree is cut from, or nil for the project's default. Nil for a checkout too,
     /// which brings its own base.
@@ -38,12 +40,14 @@ public struct AgentWorkspaceOrder: Sendable, Hashable {
         prompt: String,
         name: String? = nil,
         source: AgentStartSource = .newBranch(from: nil),
-        agent: AgentKind? = nil
+        agent: AgentKind? = nil,
+        model: String? = nil
     ) {
         self.prompt = prompt
         self.name = name
         self.source = source
         self.agent = agent
+        self.model = model
     }
 }
 
@@ -100,13 +104,15 @@ extension AgentWorkspaceOrder {
     }
 
     private func spawnID(scope: String) -> String {
-        let material = ([
+        var parts = [
             scope,
             prompt,
             name ?? "",
         ] + source.digestMaterial + [
             agent?.rawValue ?? "",
-        ]).joined(separator: "\u{0}")
+        ]
+        if let model { parts.append(model) }
+        let material = parts.joined(separator: "\u{0}")
 
         let digest = SHA256.hash(data: Data(material.utf8))
 
@@ -295,6 +301,16 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                             + "for Bloom's own default if you are not running in Bloom."
                     ),
                 ]),
+                "model": .object([
+                    "type": .string("string"),
+                    "description": .string(
+                        "The exact model id. Claude Code models are opus, sonnet, fable and "
+                            + "haiku. Codex model ids come from the signed-in Codex account, for "
+                            + "example gpt-5.6-sol. Do not use a Claude Code model with codex or "
+                            + "a Codex model with claudeCode. Leave this out to use the selected "
+                            + "agent's default model."
+                    ),
+                ]),
             ]),
             "required": .array([.string("prompt")]),
         ])
@@ -373,7 +389,8 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             // refuses would be a workspace an agent can create and then cannot correct.
             name: WorkspaceName.given(request.stringParam("name")),
             source: source,
-            agent: agent
+            agent: agent,
+            model: filled(request.param("model"))
         )
         let origin = origin(of: order, project: project, parent: parent)
 

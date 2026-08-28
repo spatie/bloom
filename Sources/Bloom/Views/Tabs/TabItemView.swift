@@ -162,7 +162,9 @@ struct TabItemView: View {
         .padding(.horizontal, Metrics.inset)
         .frame(maxWidth: Self.maximumWidth)
         .frame(height: Metrics.barHeight)
-        // The selected tab takes the content colour while leaving the strip's lower rule visible.
+        // The selected tab takes the content colour and covers the strip's lower rule. Its own
+        // neutral outline still closes the tab, while the activity colour remains visible only
+        // outside the selection.
         // A rounded capsule of selection grey floating in a strip is a browser chrome idiom, and
         // it read as a solid block rather than as a tab.
         //
@@ -247,7 +249,6 @@ struct TabItemView: View {
                     TabItemOutline(radius: Self.cornerRadius, skipsLeadingEdge: isAtPaneEdge)
                         .strokeBorder(Palette.border, lineWidth: Metrics.outline)
                 }
-                .padding(.bottom, Metrics.outline)
                 .matchedGeometryEffect(id: Self.selectionID, in: namespace)
         } else if isHovered {
             shape.fill(Palette.hover)
