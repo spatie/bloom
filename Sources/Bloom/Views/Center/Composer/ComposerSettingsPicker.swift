@@ -49,6 +49,7 @@ struct ComposerSettingsPicker: View {
                 onPermissionMode: onPermissionMode,
                 onFastMode: onFastMode
             )
+            .environment(\.fontScale, 1)
         }
     }
 
@@ -76,20 +77,11 @@ private struct ComposerSettingsPanel: View {
     var onPermissionMode: @MainActor (String) -> Void
     var onFastMode: @MainActor (Bool) -> Void
 
-    private static let width: CGFloat = 370
-    private static let fieldWidth: CGFloat = 190
+    private static let width: CGFloat = 340
+    private static let fieldWidth: CGFloat = 180
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("AGENT SETTINGS")
-                .font(Typo.micro)
-                .tracking(Typo.microTracking)
-                .foregroundStyle(Palette.textTertiary)
-                .padding(.horizontal, Metrics.pane)
-                .padding(.vertical, Metrics.spacingWide)
-
-            Hairline()
-
             Grid(alignment: .leading, horizontalSpacing: Metrics.pane, verticalSpacing: Metrics.spacingWide) {
                 settingRow("Model") { modelPicker }
                 settingRow("Reasoning") {
@@ -123,7 +115,7 @@ private struct ComposerSettingsPanel: View {
 
             Toggle("Prefer faster replies", isOn: fastBinding)
                 .toggleStyle(.switch)
-                .font(Typo.body)
+                .font(Typo.label)
                 .padding(.horizontal, Metrics.pane)
                 .padding(.vertical, Metrics.spacingWide)
         }
@@ -136,7 +128,7 @@ private struct ComposerSettingsPanel: View {
     ) -> some View {
         GridRow {
             Text(title)
-                .font(Typo.body)
+                .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
                 .gridColumnAlignment(.leading)
 

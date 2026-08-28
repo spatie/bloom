@@ -16,7 +16,7 @@ struct ContextWindowDetail: View {
         VStack(alignment: .leading, spacing: Metrics.spacingWide) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Context")
-                    .font(Typo.title)
+                    .font(Typo.labelEmphasis)
 
                 Spacer()
 

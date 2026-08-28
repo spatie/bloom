@@ -204,7 +204,7 @@ struct QuickPromptMenu: View {
         } else {
             VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
                 Text("Nothing here yet.")
-                    .font(Typo.body)
+                    .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
                 Text("A quick prompt is a few lines you find yourself typing again.")
                     .font(Typo.caption)
@@ -231,7 +231,7 @@ struct QuickPromptMenu: View {
                     .frame(width: Metrics.repoIcon, height: Metrics.repoIcon)
 
                 Text(newRowTitle)
-                    .font(Typo.body)
+                    .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
                     .lineLimit(1)
 

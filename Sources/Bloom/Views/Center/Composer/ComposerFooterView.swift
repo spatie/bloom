@@ -139,7 +139,10 @@ struct ComposerFooterView: View {
             attachmentAnchor: gaugeFrame.map { .rect(.rect($0)) } ?? .rect(.bounds),
             arrowEdge: .top
         ) {
-            if let context { ContextWindowDetail(usage: context) }
+            if let context {
+                ContextWindowDetail(usage: context)
+                    .environment(\.fontScale, 1)
+            }
         }
         .onChange(of: controls.model, initial: true) { _, id in
             remember(id, known: catalog.options(for: controls.agentKind), in: &extraModels)
@@ -274,6 +277,7 @@ struct ComposerFooterView: View {
                             onPick: onQuickPrompt,
                             onClose: { isShowingQuickPrompts = false }
                         )
+                        .environment(\.fontScale, 1)
                     }
                 }
             }

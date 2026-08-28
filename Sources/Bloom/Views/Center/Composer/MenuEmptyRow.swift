@@ -16,7 +16,7 @@ struct MenuEmptyRow: View {
 
     var body: some View {
         Text(text)
-            .font(Typo.body)
+            .font(Typo.label)
             .foregroundStyle(Palette.textTertiary)
             .lineLimit(1)
             .frame(height: Metrics.rowHeight)
