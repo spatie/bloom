@@ -1332,8 +1332,11 @@ struct TranscriptListView: View {
             return
         }
 
-        let passed = controller.hasPassedTop(.row(question.seq)) ?? (question.seq < place.seq)
-        let next = passed ? question : nil
+        // A long user turn can fill most of the pane after its top has scrolled away. Pinning a
+        // summary while that real bubble is still visible duplicates the loudest thing on screen.
+        // The navigation surface starts only after the row's bottom has left the viewport.
+        let isGone = controller.isAboveViewport(.row(question.seq)) ?? (question.seq < place.seq)
+        let next = isGone ? question : nil
         if pinnedQuestion != next { pinnedQuestion = next }
     }
 

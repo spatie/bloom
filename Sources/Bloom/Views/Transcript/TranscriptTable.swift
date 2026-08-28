@@ -132,10 +132,9 @@ final class TranscriptTableController {
     /// pane, and how far above its own top the pane starts. See `Coordinator.topmostPlace`.
     var topmostPlace: (seq: Int, delta: CGFloat)? { coordinator?.topmostPlace }
 
-    /// Whether the top edge of this entry has passed behind the viewport's top edge. Nil when the
-    /// entry is outside the drawn window.
-    func hasPassedTop(_ entryID: TranscriptEntryID) -> Bool? {
-        coordinator?.hasPassedTop(entryID)
+    /// Whether the whole entry is above the viewport. Nil when it is outside the drawn window.
+    func isAboveViewport(_ entryID: TranscriptEntryID) -> Bool? {
+        coordinator?.isAboveViewport(entryID)
     }
 
     var geometry: TranscriptTableGeometry {
@@ -1096,9 +1095,9 @@ struct TranscriptTable: NSViewRepresentable {
             return nil
         }
 
-        func hasPassedTop(_ entryID: TranscriptEntryID) -> Bool? {
+        func isAboveViewport(_ entryID: TranscriptEntryID) -> Bool? {
             guard let tableView, let scrollView, let row = index[entryID] else { return nil }
-            return tableView.rect(ofRow: row).minY < scrollView.contentView.bounds.minY
+            return tableView.rect(ofRow: row).maxY <= scrollView.contentView.bounds.minY
         }
 
         // MARK: The end, and holding it
