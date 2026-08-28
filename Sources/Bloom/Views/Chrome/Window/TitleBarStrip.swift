@@ -59,6 +59,12 @@ final class InspectorGeometry {
     /// nobody can see.
     private(set) var isVisible = false
 
+    /// Whether the title bar needs to reserve the inspector toggle's slot.
+    ///
+    /// A closed inspector has a width of zero, but its button must remain available to open it.
+    /// Home and Search have no workspace inspector, so they reserve no empty slot.
+    private(set) var hasWorkspace = false
+
     /// Called when the pane's width moves, and told whether the move is the column opening or
     /// collapsing rather than a divider drag, a window resize or a launch.
     ///
@@ -77,6 +83,12 @@ final class InspectorGeometry {
         width = value
         if value > 1 { bandWidth = value }
         onChange?(sliding)
+    }
+
+    func setWorkspaceAvailable(_ available: Bool) {
+        guard hasWorkspace != available else { return }
+        hasWorkspace = available
+        onChange?(false)
     }
 
     /// Said by the accessory as it starts to open and again once it has finished closing. See
@@ -140,6 +152,15 @@ struct TitleBarStrip: View {
 
     var body: some View {
         HStack(spacing: 0) {
+            if inspector.hasWorkspace {
+                WindowPaneToggle(
+                    edge: .trailing,
+                    isVisible: app.isInspectorVisible
+                ) {
+                    app.isInspectorVisible.toggle()
+                }
+            }
+
             if let model = shown, inspector.isVisible {
                 PullRequestBar(model: model)
                     // As wide as the pane below it, so the band ends where the pane does and the
@@ -346,7 +367,8 @@ final class TitleBarStripController: NSTitlebarAccessoryViewController {
     /// slide.
     private func resize(sliding: Bool) {
         let geometry = InspectorGeometry.shared
-        let target = max(geometry.width, 1)
+        let toggleWidth = geometry.hasWorkspace ? Metrics.barHeight : 0
+        let target = max(geometry.width + toggleWidth, 1)
         // A view with no window has no display to take a link from, and a slide whose clock never
         // ticks is an accessory stuck at the width it set off from. Nothing can be watching such a
         // window anyway, so it lands rather than travels. This is also the first call, from `init`.

@@ -19,11 +19,12 @@ import BloomCore
 struct BrowserShareButton: View {
     var control: BrowserToolbar.Control
     var shareable: BrowserToolbar.Shareable?
+    var opticalOffsetY: CGFloat = 0
 
     @State private var anchor = SharePickerAnchor()
 
     var body: some View {
-        BrowserToolbarButton(control: control) {
+        BrowserToolbarButton(control: control, opticalOffsetY: opticalOffsetY) {
             anchor.present(shareable)
         }
             .background(SharePickerAnchorView(anchor: anchor))
