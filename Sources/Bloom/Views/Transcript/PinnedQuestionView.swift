@@ -47,11 +47,11 @@ struct PinnedQuestionIndex {
     }
 }
 
-/// A quiet, toolbar-like reminder of the question whose answer is under the reader.
+/// A quiet reminder of the question whose answer is under the reader.
 ///
-/// It is deliberately not another blue bubble. The full bubble is conversation content; this is
-/// navigation, so it uses a translucent Mac header surface, one line and an upward arrow. The
-/// entire forty-point band is the hit target and the full question remains at its real position.
+/// It follows the trailing edge where user turns live, but stays chrome rather than becoming a
+/// second blue bubble. The full bubble is conversation content; this is navigation. A raised Mac
+/// surface keeps that distinction while the position still makes the relationship immediate.
 struct PinnedQuestionView: View {
     var question: PinnedQuestion
     var onOpen: () -> Void
@@ -60,39 +60,64 @@ struct PinnedQuestionView: View {
     @State private var isHovered = false
 
     var body: some View {
-        Button(action: onOpen) {
-            HStack(spacing: Metrics.spacingWide) {
-                Image(systemName: "arrow.up")
-                    .font(Typo.captionEmphasis)
-                    .foregroundStyle(Palette.accent)
-                    .accessibilityHidden(true)
+        HStack(spacing: 0) {
+            Spacer(minLength: UserTurnRowView.inset)
 
-                Text("You")
-                    .font(Typo.captionEmphasis)
-                    .foregroundStyle(Palette.accent)
+            Button(action: onOpen) {
+                CappedWidth(width: UserTurnRowView.uncappedFallback) {
+                    HStack(spacing: Metrics.spacing) {
+                        Text("You")
+                            .font(Typo.captionEmphasis)
+                            .foregroundStyle(Palette.accent)
 
-                Text(question.summary)
-                    .font(Typo.label)
-                    .foregroundStyle(Palette.textSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                        Text(question.summary)
+                            .font(Typo.label)
+                            .foregroundStyle(Palette.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
 
-                Spacer(minLength: 0)
+                        Image(systemName: "arrow.up")
+                            .font(Typo.captionEmphasis)
+                            .foregroundStyle(Palette.accent)
+                            .offset(y: isHovered ? -Self.arrowLift : 0)
+                            .accessibilityHidden(true)
+                    }
+                    .padding(.leading, Metrics.gutter)
+                    .padding(.trailing, Metrics.inset)
+                    .frame(minHeight: Self.height, maxHeight: Self.height)
+                    .contentShape(
+                        RoundedRectangle(cornerRadius: Self.corner, style: .continuous)
+                    )
+                }
             }
-            .padding(.horizontal, TranscriptLayout.inset + Metrics.spacingSmall)
-            .frame(maxWidth: .infinity, minHeight: 40, maxHeight: 40, alignment: .leading)
-            .contentShape(Rectangle())
-            .background(isHovered ? Palette.hover : .clear)
+            .buttonStyle(.plain)
+            .background {
+                RoundedRectangle(cornerRadius: Self.corner, style: .continuous)
+                    .fill(Palette.surfaceRaised)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Self.corner, style: .continuous)
+                            .fill(isHovered ? Palette.hover : .clear)
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Self.corner, style: .continuous)
+                            .strokeBorder(Palette.border, lineWidth: Metrics.outline)
+                    }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: Self.corner, style: .continuous))
+            .elevation(isHovered ? .lifted : .resting)
+            .onHover { isHovered = $0 }
+            .animation(reduceMotion ? nil : Motion.hover, value: isHovered)
+            .help("Show the full question")
+            .accessibilityLabel("Show question: \(question.summary)")
         }
-        .buttonStyle(.plain)
-        .background(.regularMaterial)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Palette.border).frame(height: Metrics.outline)
-        }
-        .onHover { hovered in
-            withAnimation(reduceMotion ? nil : Motion.hover) { isHovered = hovered }
-        }
-        .help("Show the full question")
-        .accessibilityLabel("Show question: \(question.summary)")
+        .padding(.top, Metrics.spacingSmall)
+        .padding(.horizontal, TranscriptLayout.inset)
     }
+
+    /// A large enough target to acquire without turning the pinned question into a toolbar band.
+    static let height: CGFloat = 40
+    /// Softer than a speech bubble and rounder than a six-point control.
+    private static let corner: CGFloat = 10
+    /// Just enough travel to confirm that the control returns to something above.
+    private static let arrowLift: CGFloat = 2
 }

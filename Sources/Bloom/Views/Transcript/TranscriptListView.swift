@@ -1311,7 +1311,10 @@ struct TranscriptListView: View {
 
         Task { @MainActor in
             await Task.yield()
-            controller.scroll(to: .row(question.seq), anchor: .top)
+            // Leave the row just inside the viewport instead of aiming its edge at the overlay's
+            // edge. That makes the real bubble visible, and because its top has no longer passed
+            // the viewport the compact navigation surface fades away.
+            controller.scroll(to: .row(question.seq), delta: Metrics.spacingWide)
         }
     }
 
