@@ -26,19 +26,6 @@ struct BrowserToolbarButton: View {
     }
 }
 
-struct BrowserToolbarRoundButton: View {
-    var control: BrowserToolbar.Control
-    var action: @MainActor () -> Void
-
-    var body: some View {
-        BrowserToolbarButton(control: control, action: action)
-            .frame(width: Metrics.controlHeight, height: Metrics.controlHeight)
-            .clipShape(Circle())
-            .glassEffect(.regular.interactive(), in: Circle())
-            .overlay { Circle().strokeBorder(Palette.border, lineWidth: Metrics.outline) }
-    }
-}
-
 /// The browser pane's toolbar: where you have been, where you are, and who else gets the page.
 ///
 /// Its own view rather than a method on `BrowserTabView` so that a fixture can draw it. The pane
@@ -99,8 +86,7 @@ struct BrowserToolbarView: View {
             HStack(spacing: Metrics.spacingWide) {
                 navigation
                 addressField
-                BrowserToolbarRoundButton(control: toolbar.screenshot, action: capture)
-                BrowserShareButton(control: toolbar.share, shareable: toolbar.shareable)
+                pageActions
             }
         }
         .padding(.horizontal, Metrics.spacingSmall)
@@ -147,10 +133,8 @@ struct BrowserToolbarView: View {
                     .accessibilityLabel(display.security.help ?? "")
             }
             field
-            BrowserToolbarButton(control: toolbar.reload, action: reloadOrStop)
         }
-        .padding(.leading, Metrics.spacing)
-        .padding(.trailing, Metrics.spacingTight)
+        .padding(.horizontal, Metrics.spacing)
         .frame(height: Metrics.controlHeight)
         .background(alignment: .leading) { load }
         .clipShape(Capsule())
@@ -164,6 +148,31 @@ struct BrowserToolbarView: View {
                 lineWidth: isRingVisible ? Self.focusRingWidth : Metrics.outline
             )
         }
+    }
+
+    /// Reload, capture and share are one family of page actions. A joined glass capsule gives
+    /// them equal hit targets and one boundary, while the native button style still supplies each
+    /// action's hover and pressed feedback.
+    private var pageActions: some View {
+        HStack(spacing: 0) {
+            pageAction(toolbar.reload, action: reloadOrStop)
+            Hairline(axis: .vertical)
+            pageAction(toolbar.screenshot, action: capture)
+            Hairline(axis: .vertical)
+            BrowserShareButton(control: toolbar.share, shareable: toolbar.shareable)
+                .frame(width: Metrics.controlHeight, height: Metrics.controlHeight)
+        }
+        .frame(height: Metrics.controlHeight)
+        .clipShape(Capsule())
+        .glassEffect(.regular.interactive(), in: Capsule())
+        .overlay { Capsule().strokeBorder(Palette.border, lineWidth: Metrics.outline) }
+    }
+
+    private func pageAction(
+        _ control: BrowserToolbar.Control, action: @escaping @MainActor () -> Void
+    ) -> some View {
+        BrowserToolbarButton(control: control, action: action)
+            .frame(width: Metrics.controlHeight, height: Metrics.controlHeight)
     }
 
     /// How far the page has got, over the glass and under the address.

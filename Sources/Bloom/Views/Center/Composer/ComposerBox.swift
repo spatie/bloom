@@ -68,7 +68,12 @@ struct ComposerBox: ViewModifier {
 
     @ViewBuilder private var border: some View {
         if fillsPanel {
-            Rectangle().strokeBorder(borderColour, lineWidth: borderWidth)
+            if isDropTarget {
+                VStack(spacing: 0) {
+                    Rectangle().fill(borderColour).frame(height: borderWidth)
+                    Spacer(minLength: 0)
+                }
+            }
         } else {
             RoundedRectangle(cornerRadius: Metrics.corner)
                 .strokeBorder(borderColour, lineWidth: borderWidth)
@@ -77,9 +82,10 @@ struct ComposerBox: ViewModifier {
 
     @ViewBuilder private var focusRing: some View {
         if fillsPanel {
-            Rectangle()
-                .strokeBorder(Palette.focusRing, lineWidth: Self.ringWidth)
-                .padding(Self.ringWidth / 2)
+            VStack(spacing: 0) {
+                Rectangle().fill(Palette.focusRing).frame(height: Self.ringWidth)
+                Spacer(minLength: 0)
+            }
                 .opacity(isRingVisible ? 1 : 0)
         } else {
             RoundedRectangle(cornerRadius: Metrics.corner + Self.ringWidth / 2)

@@ -77,13 +77,14 @@ struct ComposerView: View {
                 .overlay(alignment: .bottom) { Hairline() }
             }
 
-            ComposerResizeHandle(
-                onDrag: resize(by:),
-                onDragEnd: endResize,
-                onReset: resetHeight
-            )
-
             composer
+                .overlay(alignment: .top) {
+                    ComposerResizeHandle(
+                        onDrag: resize(by:),
+                        onDragEnd: endResize,
+                        onReset: resetHeight
+                    )
+                }
         }
         .background(Palette.surface)
         // The chrome is whatever is left once the editor's share is taken off, so this settles on

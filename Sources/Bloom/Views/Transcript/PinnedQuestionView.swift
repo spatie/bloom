@@ -51,13 +51,13 @@ struct PinnedQuestionIndex {
 ///
 /// It is deliberately not another blue bubble. The full bubble is conversation content; this is
 /// navigation, so it uses a translucent Mac header surface, one line and an upward arrow. The
-/// entire forty-point band is the hit target and the full question remains at its real position.
+/// entire toolbar-height band is the hit target and the full question remains at its real position.
 struct PinnedQuestionView: View {
     var question: PinnedQuestion
     var onOpen: () -> Void
 
     /// The space navigation to a question must leave above its real bubble.
-    static let height: CGFloat = 40
+    static let height: CGFloat = Metrics.barHeight
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
