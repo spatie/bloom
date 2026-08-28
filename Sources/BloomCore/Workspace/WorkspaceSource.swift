@@ -288,11 +288,11 @@ public enum WorkspaceSourceTab: String, Sendable, Hashable, CaseIterable, Identi
 
     public var id: String { rawValue }
 
-    /// The tab strip's own words. Both start with a verb so neither reads as a category.
+    /// The tab strip's own short labels. The sentence below explains what each choice does.
     public var title: String {
         switch self {
-        case .newBranch: "Create new branch"
-        case .existingBranch: "Continue on existing branch"
+        case .newBranch: "New branch"
+        case .existingBranch: "Existing branch"
         }
     }
 

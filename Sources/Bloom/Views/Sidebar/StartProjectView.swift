@@ -212,9 +212,9 @@ struct StartProjectView: View {
             // The line that was under the title, now the only thing in the band. The title itself
             // is the window's, which is where a window's title goes, and the same words in bold
             // fifteen points four points below it were the second drawing of it.
-            Text("a folder on this Mac, and a project in the sidebar")
-                .font(Typo.codeTiny)
-                .foregroundStyle(Palette.textTertiary)
+            Text("Create a folder on this Mac and add it to the sidebar.")
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textSecondary)
 
             Spacer(minLength: 0)
         }
@@ -248,7 +248,7 @@ struct StartProjectView: View {
             // Name and Location, were the same split as the menu one level further down.
             TextField("Name it, or point at a folder", text: $typed)
                 .textFieldStyle(.roundedBorder)
-                .font(Typo.code)
+                .font(Typo.body)
                 .focused($isFieldFocused)
                 .onSubmit(start)
             Button("Choose\u{2026}", action: chooseFolder)
