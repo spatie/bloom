@@ -51,7 +51,8 @@ struct ModelLabelTests {
 
     @Test("a part that does not start with a letter is not capitalised into nonsense")
     func nonLettersAreLeftAlone() {
-        #expect(ModelLabel.readable("gpt-5-codex") == "Gpt 5 Codex")
+        #expect(ModelLabel.readable("gpt-5-codex") == "GPT 5 Codex")
+        #expect(ModelLabel.readable("gpt-5-6-luna") == "GPT 5.6 Luna")
         #expect(ModelLabel.readable("o3-mini") == "O3 Mini")
     }
 }

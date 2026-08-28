@@ -51,14 +51,21 @@ public struct PaneCensusEntry: Sendable, Equatable {
     public var isShowing: Bool
     /// Browser panes only, and it is what the browser tools take.
     public var browser: BrowserPaneReport?
+    /// Terminal panes only, and it is what the terminal tools take.
+    public var terminal: TerminalPaneReport?
 
     public init(
-        kind: PaneCensusKind, name: String, isShowing: Bool, browser: BrowserPaneReport? = nil
+        kind: PaneCensusKind,
+        name: String,
+        isShowing: Bool,
+        browser: BrowserPaneReport? = nil,
+        terminal: TerminalPaneReport? = nil
     ) {
         self.kind = kind
         self.name = name
         self.isShowing = isShowing
         self.browser = browser
+        self.terminal = terminal
     }
 
     /// The listing's own shape, which is deliberately smaller than `browser_read`'s.
@@ -76,6 +83,10 @@ public struct PaneCensusEntry: Sendable, Equatable {
             fields["browser"] = .integer(browser.number)
             fields["address"] = .string(browser.address)
             fields["loading"] = .bool(browser.isLoading)
+        }
+        if let terminal {
+            fields["terminal"] = .integer(terminal.number)
+            fields["live"] = .bool(terminal.isLive)
         }
         return .object(fields)
     }

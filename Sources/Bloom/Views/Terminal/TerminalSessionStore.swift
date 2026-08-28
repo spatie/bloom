@@ -132,6 +132,46 @@ final class TerminalSessionStore {
         terminals[paneID] != nil
     }
 
+    /// Recent rendered output, with soft-wrapped screen rows joined back into logical lines.
+    /// Reading never starts a restored shell. A terminal tool that wants one has to start one
+    /// explicitly, rather than turning inspection into an action.
+    func output(paneID: String, lines limit: Int) -> (text: String, live: Bool)? {
+        guard let view = terminals[paneID] else { return nil }
+        let terminal = view.getTerminal()
+        var lines: [String] = []
+
+        var row = terminal.buffer.totalLinesTrimmed
+        while let line = terminal.getScrollInvariantLine(row: row) {
+            let text = line.translateToString(trimRight: true, skipNullCellsFollowingWide: true)
+            if line.isWrapped, !lines.isEmpty {
+                lines[lines.count - 1] += text
+            } else {
+                lines.append(text)
+            }
+            row += 1
+        }
+
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        return (lines.suffix(limit).joined(separator: "\n"), view.process?.running == true)
+    }
+
+    /// Bytes sent to the shell exactly as terminal input, without taking keyboard focus.
+    func write(_ text: String, submit: Bool, paneID: String) -> Bool {
+        guard let view = terminals[paneID], view.process?.running == true, !view.hasExited else {
+            return false
+        }
+        view.send(txt: text + (submit ? "\r" : ""))
+        return true
+    }
+
+    func send(_ key: TerminalKey, paneID: String) -> Bool {
+        guard let view = terminals[paneID], view.process?.running == true, !view.hasExited else {
+            return false
+        }
+        view.send(key.bytes)
+        return true
+    }
+
     /// The live shell for a tab, forked on first use and reused forever after.
     ///
     /// `directory` is what the tab asked for, empty for the worktree root, and it is checked here

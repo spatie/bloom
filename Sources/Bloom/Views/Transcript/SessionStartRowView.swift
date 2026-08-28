@@ -24,10 +24,10 @@ struct SessionStartRowView: View {
         HStack(spacing: TranscriptLayout.glyphGap) {
             TranscriptGlyph(symbol: "bolt.horizontal.circle")
 
-            Text("Session started")
+            Text("Started with")
                 .font(Typo.label)
                 .foregroundStyle(Palette.textSecondary)
-                .transcriptLabelColumn("Session started", font: Typo.label)
+                .transcriptLabelColumn("Started with", font: Typo.label)
 
             if !info.model.isEmpty {
                 Chip(text: modelLabel)

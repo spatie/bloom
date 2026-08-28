@@ -71,7 +71,7 @@ struct QuickPromptMarkPicker: View {
     /// around a 17 point mark there were seven points of air, and an emoji fills its em box where a
     /// symbol does not, so the rows read as touching even where the numbers said they were not.
     private static let cell: CGFloat = 36
-    private static let inset: CGFloat = Metrics.spacingWide
+    private static let inset: CGFloat = Metrics.gutter
     /// The point size a mark is drawn at inside its cell. See `QuickPromptMarkView`.
     private static let markPoints: CGFloat = 18
 

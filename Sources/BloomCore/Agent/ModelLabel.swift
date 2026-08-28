@@ -31,6 +31,8 @@ public enum ModelLabel {
     private static func tidy(_ part: Substring) -> String {
         let bracketed = part.replacing("[", with: " (").replacing("]", with: ")")
 
+        if bracketed.caseInsensitiveCompare("gpt") == .orderedSame { return "GPT" }
+
         guard let first = bracketed.first, first.isLetter else { return String(bracketed) }
 
         return first.uppercased() + bracketed.dropFirst()

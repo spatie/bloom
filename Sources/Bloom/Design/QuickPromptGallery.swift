@@ -159,10 +159,9 @@ struct QuickPromptGallery: View {
         _ caption: String, prompt: QuickPrompt, picking: Bool = false
     ) -> some View {
         captioned(caption) {
-            QuickPromptForm(
-                editing: prompt,
+            QuickPromptFormPreview(
+                prompt: prompt,
                 startsPickingMark: picking,
-                onCancel: {}, onSave: { _ in }, onDelete: {}
             )
             .frame(width: 380)
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: Metrics.corner + 2))
@@ -170,6 +169,24 @@ struct QuickPromptGallery: View {
                 RoundedRectangle(cornerRadius: Metrics.corner + 2)
                     .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
             }
+        }
+    }
+
+    private struct QuickPromptFormPreview: View {
+        @State private var draft: QuickPromptFormDraft
+        var startsPickingMark: Bool
+
+        init(prompt: QuickPrompt, startsPickingMark: Bool) {
+            _draft = State(initialValue: QuickPromptFormDraft(editing: prompt))
+            self.startsPickingMark = startsPickingMark
+        }
+
+        var body: some View {
+            QuickPromptForm(
+                draft: $draft,
+                startsPickingMark: startsPickingMark,
+                onCancel: {}, onSave: { _ in }, onDelete: {}
+            )
         }
     }
 

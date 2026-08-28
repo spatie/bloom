@@ -27,6 +27,11 @@ struct AgentStartSourceTests {
             AgentStartRequest.read(baseBranch: nil, existingBranch: "freek/figma")
                 == .existingBranch("freek/figma")
         )
+        #expect(
+            AgentStartRequest.read(
+                baseBranch: nil, existingBranch: nil, pullRequest: "#66"
+            ) == .pullRequest("#66")
+        )
     }
 
     /// Opposite in effect and one keystroke apart in intent, which is why the sheet draws them as
@@ -167,6 +172,22 @@ struct AgentStartSourceTests {
         #expect(source.baseBranch == nil)
         #expect(source.namedBranch == "freek/figma")
         #expect(source.checkout == .branch(branch))
+    }
+
+    @Test("a pull request carries its checkout and base")
+    func pullRequestSource() {
+        let request = PullRequestListing(
+            number: 66,
+            title: "Add name suffix",
+            headRefName: "name-suffix",
+            baseRefName: "main"
+        )
+        let source = AgentStartSource.pullRequest(request)
+
+        #expect(source.tab == .existingBranch)
+        #expect(source.baseBranch == nil)
+        #expect(source.namedBranch == "name-suffix")
+        #expect(source.checkout == .pullRequest(request))
     }
 
     // MARK: The spawn digest

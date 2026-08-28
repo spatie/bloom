@@ -91,6 +91,8 @@ struct ComposerFooterView: View {
     /// the button is in all three candidates `ViewThatFits` builds, and state inside a candidate
     /// belongs to the candidate.
     @State private var isShowingQuickPrompts = false
+    /// Kept outside the transient popover so changing apps does not discard a half-written prompt.
+    @State private var quickPromptDraft: QuickPromptFormDraft?
 
     var body: some View {
         // Everything the row is built out of, worked out once.
@@ -322,6 +324,7 @@ struct ComposerFooterView: View {
                     if let onQuickPrompt {
                         QuickPromptMenu(
                             catalog: QuickPromptCatalog.shared,
+                            draft: $quickPromptDraft,
                             onPick: onQuickPrompt,
                             onClose: { isShowingQuickPrompts = false }
                         )

@@ -103,7 +103,7 @@ uses, so Bloom and Bloom Dev can never land on one. The landmine there is `socka
 
 ## 3. The tools
 
-Twenty-seven, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
+Thirty-one, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
 gate. A list of handlers rather than a switch, because a switch would put every tool in three
 places: the listing, the dispatch and the gate.
 
@@ -115,7 +115,7 @@ places: the listing, the dispatch and the gate.
 | `project_hide` | Take a project out of the sidebar. A view preference and nothing more | | | ✓ |
 | `project_unhide` | Put it back, in the place it already had | | | ✓ |
 | `workspace_list` | Every workspace, its state, its worktree path, its chats and their cost, what an agent is stopped on, what is queued and why | | | ✓ |
-| `workspace_start` | Cut a worktree and put an agent in it with a task, on a new branch or on a branch that already exists | ✓ | | ✓ |
+| `workspace_start` | Cut a worktree and put an agent in it with a task, on a new branch, existing branch or GitHub pull request | ✓ | | ✓ |
 | `workspace_rename` | Give a workspace the name the work in it turned out to be about. Its own, for a workspace agent; any of them, named out loud, for the owner | ✓ | | ✓ |
 | `workspace_merge` | Ask a workspace's own agent to merge its pull request | | | ✓ |
 | `reveal` | Point Bloom's window at one workspace, or at Home narrowed by project, scope and search. Navigation and nothing else: it creates nothing and archives nothing | | | ✓ |
@@ -132,6 +132,11 @@ places: the listing, the dispatch and the gate.
 | `browser_scroll` | Move the page up, down, to the top or to the bottom, and say where it ended up | ✓ | | |
 | `browser_screenshot` | A picture of the pane as it is on screen, as an image | ✓ | | |
 | `browser_text` | The visible text of the page, wrapped as untrusted content | ✓ | | |
+| `terminal_start` | Open a terminal tab and run a command visibly inside it | ✓ | | |
+| `terminal_read` | Read recent rendered output from a terminal tab | ✓ | | |
+| `terminal_write` | Type text into a live terminal, optionally followed by Enter | ✓ | | |
+| `terminal_send_key` | Send Enter, Control-C, Tab, Escape or an arrow key to a live terminal | ✓ | | |
+| `media_show` | Show an image or video from the workspace inline in its chat | ✓ | | |
 | `quick_prompt_list` | The owner's own quick prompts, whole, with the ids the other three take | ✓ | | ✓ |
 | `quick_prompt_create` | Write a new quick prompt into that library | ✓ | | ✓ |
 | `quick_prompt_update` | Change one, field by field, leaving the fields it does not name alone | | | ✓ |
@@ -151,17 +156,17 @@ transport failure the CLI may retry or surface as a broken server; an errored re
 model reads and can act on. "You are not allowed to do that" is something to tell the model, not
 something to tell the transport.
 
-### The sixteen that need the app, and the eleven that do not
+### The twenty-one that need the app, and the eleven that do not
 
 `BridgeToolbox.standard` holds the eleven that reach nothing but the store, and it is what a
 `BridgeServer` built without the app serves, which is every test that did not ask for more.
-`AppModel.bridgeToolbox()` adds the other sixteen to it, because starting a workspace has to reach
+`AppModel.bridgeToolbox()` adds the other twenty-one to it, because starting a workspace has to reach
 the main-actor graph that runs one, asking for a merge has to reach the same path the Merge button
 takes, moving the selection is the window's own, and a pane is a thing the window owns. Each of
 those crosses the line as an injected closure
 (`WorkspaceStarting`, `WorkspaceMergeRequesting`, `Revealing`, `PaneOpening`, `PaneSplitting`,
-`PaneClosing`, `PaneRenaming`, `PaneListing`, `BrowserPaneCommanding`, `WorkspaceTabListing`,
-`WorkspaceTabSelecting`), so a pane an agent asks for is the pane the
+`PaneClosing`, `PaneRenaming`, `PaneListing`, `BrowserPaneCommanding`, `TerminalStarting`,
+`TerminalPaneCommanding`, `WorkspaceTabListing`, `WorkspaceTabSelecting`), so a pane an agent asks for is the pane the
 menu makes, unchanged and not copied. It adds them **to** `.standard` rather than listing its
 handlers again, because a copy of that list is a copy that drifts: a tool added to the core toolbox
 and not to the app's would pass every test in the suite and never reach the running app.
@@ -176,11 +181,15 @@ There is no table to read, so there was never a version of these two that lived 
 rest of the family follows: no workspace argument, so the caller reads and moves the strip of the
 workspace it is standing in and no other.
 
-**The last two of those are what a browser tool sees the window through.** `PaneListing` takes a
+**The browser and terminal seams are how their tools see the window.** `PaneListing` takes a
 workspace and gives back a `PaneCensus`, and that shape is the point: there is no argument on it
 that could ask the window to do anything, so the tool that reports cannot act. `BrowserPaneCommanding`
 carries one `BrowserPaneCommand` and is what the other six share, so the pane a call means is
 resolved once, by `BrowserPaneChoice.choose` in the core, rather than six times in the window.
+`TerminalPaneCommanding` does the equivalent for terminal reads, text and control keys.
+`TerminalStarting` is separate because opening a blank pane is self-approved while running a
+command is not. Folding the command into `pane_open` would let it bypass the agent's permission
+mode.
 
 **The four quick prompt tools are the case that shows where the line really is.** They write, and
 they need no seam at all, because a quick prompt is a row in `quick_prompt` and `Store` is an actor
@@ -209,15 +218,16 @@ directly, and a second `SQLiteDatabase` on the file is the cross-connection sequ
 
 ## 4. What an agent cannot reach through it
 
-Nothing here reads or writes a file, runs a command, or touches a repository's contents. The
-worktree path is handed over precisely so the agent uses **its own** tools on an ordinary git
-checkout, which `workspace_list`'s description says out loud.
+Nothing here reads or writes a file directly or changes Git state. Terminal tools can run a
+command in the workspace's visible interactive shell. Starting, typing and sending control keys
+go through the agent's permission machinery. Reading terminal output uses that same boundary,
+because it can contain secrets, and marks that output as untrusted content.
 
 Nothing here opens or closes a tab except the tools whose whole subject that is. `workspace_tab_select`
 brings an existing tab forward and will not make one on the way, which is what keeps "go back to the
 terminal" from forking a second terminal.
 
-Nothing archives. `workspace_archive` is not one of the twenty-seven: it removes a worktree and can
+Nothing archives. `workspace_archive` is not one of the thirty-two: it removes a worktree and can
 remove a branch with it, and the whole reason Bloom asks before archiving by hand is that the
 answer is sometimes no. `reveal` is the answer to the request that wants one. Asked to clean up the
 finished workspaces, an agent ends by putting the candidates on screen, selected, with the owner
@@ -409,6 +419,7 @@ translation between them.
 | --- | --- | --- |
 | `base_branch`, or nothing | Create new branch | It lands on a new branch, and merges into the branch that was named |
 | `existing_branch` | Continue on existing branch | It lands on the branch that was named, and merges when that branch does |
+| `pull_request` | Continue on existing branch | It checks out the pull request and keeps its GitHub identity, base branch, checks and merge controls |
 
 Nothing said is a new branch from the project's default branch, which is exactly what the tool did
 before there was a choice, so every caller written against the older tool keeps working. Naming
@@ -429,11 +440,11 @@ Bloom's rows, because git allows one worktree per branch and the alternative is 
 the middle of a start. Both refusals end by offering `base_branch` on the same name, which is a
 different intention and Bloom does not take it on a caller's behalf.
 
-A pull request cannot be named, though the sheet's second tab lists them beside the branches.
-Resolving one costs a `gh` call and a network round trip on a path that otherwise spends only local
-git, and an agent that wants a pull request's code can name its head branch, which is what the
-picker draws a listed pull request by anyway. `WorkspaceCheckout` already carries the case, so the
-day it is wanted it is an argument rather than a mechanism.
+A pull request can be named by number, `#number` or GitHub URL. Bloom resolves it through `gh` and
+hands the resulting `WorkspaceCheckout.pullRequest` to the same path as the create sheet. This is
+different from naming its head branch. The pull request checkout records the PR number and base,
+which lets the inspector show the existing checks and merge controls instead of offering to create
+a new pull request.
 
 ### How many a caller may start
 

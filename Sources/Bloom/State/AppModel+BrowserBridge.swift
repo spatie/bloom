@@ -27,13 +27,18 @@ extension AppModel {
         let entries = tabs.entries(in: model)
         let selected = tabs.selectedTab(in: model, entries: entries)
         let numbers = browserNumbers(in: model)
+        let terminalNumbers = terminalNumbers(in: model)
 
         var panes: [PaneCensusEntry] = []
         for entry in entries {
             for pane in tabs.layout(of: entry).panes {
                 let content = tabs.content(of: pane, in: entry)
                 guard let described = describe(
-                    content, in: model, showing: entry == selected, numbers: numbers
+                    content,
+                    in: model,
+                    showing: entry == selected,
+                    numbers: numbers,
+                    terminalNumbers: terminalNumbers
                 ) else { continue }
                 panes.append(described)
             }
@@ -77,7 +82,11 @@ extension AppModel {
     /// under an arrangement. Dropped rather than reported as an empty row, because a census a
     /// model reads should hold what is there.
     private func describe(
-        _ content: PaneContent, in model: WorkspaceModel, showing: Bool, numbers: [String: Int]
+        _ content: PaneContent,
+        in model: WorkspaceModel,
+        showing: Bool,
+        numbers: [String: Int],
+        terminalNumbers: [String: Int]
     ) -> PaneCensusEntry? {
         switch content {
         case .chat(let sessionID):
@@ -91,6 +100,17 @@ extension AppModel {
             guard let tab = centre.tabs(for: model.workspace.id).first(where: { $0.id == id })
             else { return nil }
             let name = centre.displayTitle(of: tab, in: model)
+            if tab.kind == .terminal, let number = terminalNumbers[tab.id] {
+                let live = TerminalSplitStore.shared.panes(of: tab.id).contains {
+                    TerminalSessionStore.shared.hasShell(paneID: $0)
+                }
+                return PaneCensusEntry(
+                    kind: .terminal,
+                    name: name,
+                    isShowing: showing,
+                    terminal: TerminalPaneReport(number: number, name: name, isLive: live)
+                )
+            }
             guard tab.kind == .browser else {
                 return PaneCensusEntry(
                     kind: PaneCensusKind(tab.kind), name: name, isShowing: showing

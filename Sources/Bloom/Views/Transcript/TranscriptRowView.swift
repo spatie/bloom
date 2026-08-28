@@ -123,22 +123,26 @@ struct TranscriptRowView: View, Equatable {
 
         case .toolUse:
             if let use = toolUse {
-                ToolRowView(
-                    use: use,
-                    presentation: TranscriptPresentationCache.presentation(
-                        rowID: row.id,
+                if let media = successfulMediaRequest(use) {
+                    MediaShowRowView(request: media, home: home)
+                } else {
+                    ToolRowView(
                         use: use,
-                        worktree: home.worktree
-                    ),
-                    home: home,
-                    result: toolResult,
-                    isError: row.isError,
-                    refusal: row.refusal,
-                    refusalReason: row.refusalReason,
-                    durationMS: row.durationMS,
-                    isExpanded: isExpanded,
-                    onToggle: onToggle
-                )
+                        presentation: TranscriptPresentationCache.presentation(
+                            rowID: row.id,
+                            use: use,
+                            worktree: home.worktree
+                        ),
+                        home: home,
+                        result: toolResult,
+                        isError: row.isError,
+                        refusal: row.refusal,
+                        refusalReason: row.refusalReason,
+                        durationMS: row.durationMS,
+                        isExpanded: isExpanded,
+                        onToggle: onToggle
+                    )
+                }
             }
 
         case .toolResult:
@@ -212,6 +216,13 @@ struct TranscriptRowView: View, Equatable {
     private var toolUse: AgentToolUse? {
         guard case .toolUse(let use)? = event else { return nil }
         return use
+    }
+
+    /// A media call becomes content only after its successful result arrives. Before that it stays
+    /// an ordinary pending tool row, and a refusal stays visible as the refusal it is.
+    private func successfulMediaRequest(_ use: AgentToolUse) -> MediaShowRequest? {
+        guard row.resultPayload != nil, !row.isError, row.refusal == nil else { return nil }
+        return MediaShowRequest(use: use)
     }
 
     /// A tool result whose call never made it into the transcript. Rare, but it must not vanish.

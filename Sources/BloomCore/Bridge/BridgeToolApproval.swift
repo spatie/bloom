@@ -125,6 +125,10 @@ public enum BridgeToolApproval {
         // that act on one.
         "pane_list",
         "browser_read",
+        // A presentation request, scoped to an image or movie that resolves inside the caller's
+        // own worktree. It changes no file and sends nothing away. The row it adds is the visible
+        // record and the file remains under the same agent permission that created or read it.
+        "media_show",
         // The strip, read as a strip, which is the same furniture `pane_list` reports in another
         // shape and is on the list for the same reason: it is on the screen in front of the reader
         // already, none of it is the contents of a page, a diff or a note, and it is the first

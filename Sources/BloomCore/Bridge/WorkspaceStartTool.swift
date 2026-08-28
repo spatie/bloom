@@ -131,6 +131,9 @@ public typealias WorkspaceStarting =
     @Sendable (AgentWorkspaceOrder, Repo, BridgeIdentity, WorkspaceOrigin) async throws
         -> StartedWorkspaceSummary
 
+public typealias PullRequestCheckoutResolving =
+    @Sendable (_ reference: String, _ repoPath: String) async -> WorkspaceCheckoutResolution
+
 /// `workspace_start`: an agent asking Bloom for another workspace in the same project.
 ///
 /// **Not `workspace_spawn`, and nothing here says "subagent".** A workspace an agent asked for is
@@ -174,9 +177,16 @@ public typealias WorkspaceStarting =
 /// about the Create sheet, where each of them is a press; here neither of them is.
 public struct WorkspaceStartTool: BridgeToolHandling {
     private let start: WorkspaceStarting
+    private let resolvePullRequest: PullRequestCheckoutResolving
 
-    public init(start: @escaping WorkspaceStarting) {
+    public init(
+        start: @escaping WorkspaceStarting,
+        resolvePullRequest: @escaping PullRequestCheckoutResolving = {
+            await WorkspaceCheckoutResolver.resolve($0, repoPath: $1)
+        }
+    ) {
         self.start = start
+        self.resolvePullRequest = resolvePullRequest
     }
 
     public let roles: Set<BridgeRole> = [.parent, .owner]
@@ -210,7 +220,12 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             you named. The branch has to exist already, and git allows one worktree per branch, \
             so a branch another workspace is sitting on is refused rather than opened twice.
 
-            Name one or the other, never both.
+            To review an existing GitHub pull request, use 'pull_request' with its number, '#123', \
+            or its GitHub URL. Bloom checks out the pull request itself, preserving its base and \
+            identity so the Changes, Checks and Merge controls refer to that pull request. Do not \
+            create a review branch with base_branch for this purpose.
+
+            Name only one of base_branch, existing_branch or pull_request.
 
             It returns as soon as the workspace exists, not when its work is done. The new agent \
             starts on its own and keeps running while you carry on. There is no way to wait for \
@@ -261,6 +276,15 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                             + "land on it. It has to exist already, locally or on the remote, and "
                             + "it must not be open in another workspace. Do not name it together "
                             + "with base_branch."
+                    ),
+                ]),
+                "pull_request": .object([
+                    "type": .string("string"),
+                    "description": .string(
+                        "Open this GitHub pull request itself for review, by number, #number or "
+                            + "GitHub URL. This preserves the PR connection so Bloom can show "
+                            + "checks and merge it. Do not combine it with base_branch or "
+                            + "existing_branch."
                     ),
                 ]),
                 "agent": .object([
@@ -319,7 +343,8 @@ public struct WorkspaceStartTool: BridgeToolHandling {
         let source: AgentStartSource
         switch AgentStartRequest.read(
             baseBranch: filled(request.param("base_branch")),
-            existingBranch: filled(request.param("existing_branch"))
+            existingBranch: filled(request.param("existing_branch")),
+            pullRequest: filled(request.param("pull_request"))
         ) {
         case .refused(let sentence):
             return .failure(sentence)
@@ -330,6 +355,13 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             switch AgentStartBranch.find(named, among: branches, project: project.name) {
             case .refused(let sentence): return .failure(sentence)
             case .found(let branch): source = .existingBranch(branch)
+            }
+        case .pullRequest(let reference):
+            switch await resolvePullRequest(reference, project.path) {
+            case .failure(let sentence): return .failure(sentence)
+            case .checkout(.pullRequest(let request)): source = .pullRequest(request)
+            case .checkout(.branch):
+                return .failure("Bloom resolved that pull request as a branch instead of a pull request.")
             }
         }
 

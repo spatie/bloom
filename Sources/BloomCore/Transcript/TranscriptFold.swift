@@ -122,6 +122,9 @@ public enum TranscriptFold {
         /// The call reported an error or was refused. Both travel as `is_error`, so they are one
         /// fact here.
         public var failed: Bool
+        /// Deliberate content carried by an activity-shaped row, such as inline media. It remains
+        /// visible and separates the ordinary implementation log on either side.
+        public var featured: Bool
         /// What `TranscriptRowInk` says, which is that most `system` rows draw no view at all.
         public var drawsNothing: Bool
         /// **Nothing this row says can change again**, which is the whole of what lets a fold hide
@@ -138,12 +141,14 @@ public enum TranscriptFold {
             seq: Int,
             kind: MessageKind,
             failed: Bool = false,
+            featured: Bool = false,
             drawsNothing: Bool = false,
             settled: Bool = true
         ) {
             self.seq = seq
             self.kind = kind
             self.failed = failed
+            self.featured = featured
             self.drawsNothing = drawsNothing
             self.settled = settled
         }
@@ -158,7 +163,7 @@ public enum TranscriptFold {
         }
 
         /// Whether this row has to stay on screen once it is reached. See rule 2 in the header.
-        var mustShow: Bool { failed || kind == .error }
+        var mustShow: Bool { failed || featured || kind == .error }
     }
 
     /// One row of a turn's working: where it is, and what it is called.

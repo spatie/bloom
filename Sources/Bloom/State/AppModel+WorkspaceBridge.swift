@@ -40,6 +40,10 @@ extension AppModel {
             guard let self else { return .refused("Bloom is still starting up.") }
             return await self.driveBrowserForBridge(command, in: workspaceID)
         }
+        let terminal: TerminalPaneCommanding = { [weak self] command, workspaceID in
+            guard let self else { return .refused("Bloom is still starting up.") }
+            return await self.driveTerminalForBridge(command, in: workspaceID)
+        }
 
         return BridgeToolbox(handlers: BridgeToolbox.standard.handlers + [
             WorkspaceStartTool { [weak self] order, project, identity, origin in
@@ -51,6 +55,17 @@ extension AppModel {
             PaneOpenTool { [weak self] order, workspaceID in
                 guard let self else { return .refused("Bloom is still starting up.") }
                 return await self.openPaneForBridge(order, in: workspaceID)
+            },
+            TerminalStartTool { [weak self] order, workspaceID in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return await self.startTerminalForBridge(order, in: workspaceID)
+            },
+            TerminalReadTool(terminal),
+            TerminalWriteTool(terminal),
+            TerminalSendKeyTool(terminal),
+            MediaShowTool { [weak self] order, workspaceID in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return self.showMediaForBridge(order, in: workspaceID)
             },
             PaneSplitTool { [weak self] order, axis, workspaceID in
                 guard let self else { return .refused("Bloom is still starting up.") }
@@ -99,6 +114,25 @@ extension AppModel {
                 return await self.revealForBridge(reveal)
             },
         ])
+    }
+
+    /// Confirms that the path the model named is a real image or movie inside its own worktree.
+    /// The transcript resolves it again before drawing, which closes the symlink race between the
+    /// tool call and a later visit to this row.
+    func showMediaForBridge(
+        _ order: MediaShowOrder, in workspaceID: WorkspaceID
+    ) -> MediaShowOutcome {
+        guard let model = paneTarget(workspaceID) else {
+            return .refused(Self.noWorkspaceForPane)
+        }
+        guard let media = WorkspaceMedia.resolve(path: order.path, in: model.workspace.path) else {
+            return .refused(
+                "That is not an image or video file inside this workspace. Save it in the "
+                    + "workspace, then call media_show with that path."
+            )
+        }
+        let noun = media.kind == .image ? "image" : "video"
+        return .shown("Showing \(noun) '\(media.relativePath)' inline in the chat.")
     }
 
     /// Point the window at something, because the owner's own chat asked to be shown it.
