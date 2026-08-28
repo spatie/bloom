@@ -26,9 +26,7 @@ struct ComposerSettingsPicker: View {
             ComposerControlLabel(
                 systemImage: "slider.horizontal.3",
                 text: isCompact ? nil : modelLabel,
-                tint: controls.permissionMode == .bypassPermissions
-                    ? Palette.warning
-                    : Palette.textSecondary,
+                tint: Palette.textSecondary,
                 isActive: isOpen,
                 showsMenuIndicator: true
             )
@@ -78,8 +76,8 @@ private struct ComposerSettingsPanel: View {
     var onPermissionMode: @MainActor (String) -> Void
     var onFastMode: @MainActor (Bool) -> Void
 
-    private static let width: CGFloat = 430
-    private static let fieldWidth: CGFloat = 230
+    private static let width: CGFloat = 370
+    private static let fieldWidth: CGFloat = 190
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
