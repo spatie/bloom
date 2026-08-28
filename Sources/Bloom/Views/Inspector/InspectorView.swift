@@ -3,8 +3,10 @@ import BloomCore
 
 /// The right hand column: what the agent changed, and what GitHub thinks of it.
 ///
-/// Everything here is a thin arrangement of the pieces below it: the pull request strip, what it
-/// has to say, the tab row, and whichever pane the tab row selected.
+/// Everything here is a thin arrangement of the pieces below it: the column's own top edge, what
+/// the pull request strip has to say, the tab row, and whichever pane the tab row selected. The
+/// strip itself is above the column rather than in it, in the title bar, at the width this pane
+/// happens to be. See `TitleBarStrip`.
 ///
 /// It shows no file contents. It used to: the list sat above a drawer that held the diff, and the
 /// two shared the column's height, so a wide diff got a narrow pane and a long list got a short
@@ -17,32 +19,8 @@ struct InspectorView: View {
     /// control raised it, so the pull request strip and the checks tab share one presentation.
     @Bindable private var signIn = GitHubSignIn.shared
 
-    @State private var pullRequestAnchor = HoverCardAnchor()
-
     var body: some View {
         VStack(spacing: 0) {
-            PullRequestBar(model: model)
-                .background { HoverCardAnchorReader(anchor: pullRequestAnchor) }
-                .onHoverChange { inside in
-                    let source = WorkspaceHoverCardPresenter.Source
-                        .pullRequestBand(model.workspace.id)
-                    if inside {
-                        WorkspaceHoverCardPresenter.shared.pointerEntered(
-                            source,
-                            card: pullRequestCard,
-                            anchor: { pullRequestAnchor.screenFrame },
-                            side: .below
-                        )
-                    } else {
-                        WorkspaceHoverCardPresenter.shared.pointerExited(source)
-                    }
-                }
-                .onDisappear {
-                    WorkspaceHoverCardPresenter.shared
-                        .pointerExited(.pullRequestBand(model.workspace.id))
-                }
-            Hairline()
-
             // What the strip above just did, said in the column rather than in the band.
             //
             // Here rather than in the strip because the strip is one row tall and cannot grow:
@@ -134,14 +112,6 @@ struct InspectorView: View {
         // Once, here, rather than a repository id threaded through every row of two lists that
         // have no other use for one. See `EnvironmentValues.openInRepoID`.
         .environment(\.openInRepoID, model.repo?.id)
-    }
-
-    private func pullRequestCard() -> WorkspaceHoverCard {
-        WorkspaceHoverCard.pullRequestBand(
-            workspace: model.workspace,
-            pullRequest: model.pullRequest,
-            localWork: model.localWork
-        )
     }
 
     @ViewBuilder
