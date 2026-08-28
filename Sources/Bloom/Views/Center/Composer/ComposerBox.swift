@@ -81,13 +81,7 @@ struct ComposerBox: ViewModifier {
     }
 
     @ViewBuilder private var focusRing: some View {
-        if fillsPanel {
-            VStack(spacing: 0) {
-                Rectangle().fill(Palette.focusRing).frame(height: Self.ringWidth)
-                Spacer(minLength: 0)
-            }
-                .opacity(isRingVisible ? 1 : 0)
-        } else {
+        if !fillsPanel {
             RoundedRectangle(cornerRadius: Metrics.corner + Self.ringWidth / 2)
                 .strokeBorder(Palette.focusRing, lineWidth: Self.ringWidth)
                 .padding(-Self.ringWidth / 2)
