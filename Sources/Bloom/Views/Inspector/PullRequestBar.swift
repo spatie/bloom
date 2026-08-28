@@ -1,7 +1,7 @@
 import SwiftUI
 import BloomCore
 
-/// The pull request strip along the top edge of the window, over the inspector column.
+/// The pull request strip at the top of the inspector column.
 ///
 /// The bar owns the state colour rather than its contents doing, so the tint runs the full width
 /// of the pane including the insets its rows keep. A wash painted by the row inside had to grow
@@ -13,13 +13,8 @@ import BloomCore
 /// without `gh`, or with `gh` signed out, simply never gets a pull request back, and a background
 /// refresh is never a reason to put a dialog in front of anybody.
 ///
-/// It is exactly one row tall, always, and that is a hard requirement rather than a preference.
-/// The strip is a title bar accessory now (`TitleBarStrip`), and an accessory is laid out from a
-/// frame its controller sets by hand rather than from anything SwiftUI measures. Anything this
-/// view draws below that one row is drawn into a band with no room for it: the content is centred
-/// in the frame and cut off at both ends, which is what happened to the Continue notice. So what
-/// the strip has to SAY, as opposed to show, goes to `model.pullRequestNotice` and is drawn by
-/// `InspectorView` at the top of the column, one row lower and as tall as it needs to be.
+/// It is exactly one row tall so the inspector keeps a stable header. Longer notices go to
+/// `model.pullRequestNotice` and are drawn by `InspectorView` one row lower.
 struct PullRequestBar: View {
     let model: WorkspaceModel
 

@@ -91,15 +91,7 @@ struct RootView: View {
                     // title item is not a thing reading the interface settles. The window came up
                     // wearing its name twice once already. Both, until a picture says which one did it.
                     .toolbar(removing: .title)
-                    // The window's search field, on the trailing edge of the toolbar, which is where
-                    // Finder and Mail publish search on this platform.
-                    //
-                    // Which edge it lands on is not this modifier's to say. `SearchFieldPlacement` on
-                    // macOS offers `automatic`, `toolbar`, `toolbarPrincipal` and `sidebar`, and none
-                    // of them names an edge: the item is appended after the toolbar's own items and
-                    // goes wherever the packing leaves it. What puts it at the end is the
-                    // `ToolbarSpacer` in `BloomWindowToolbar`, and without that it sits against the
-                    // window's name a third of the way across.
+                    // The window's search field, centred between the matched pane controls.
                     //
                     // `.searchable` rather than the hand built field this replaced, and that is the
                     // whole reason it moved. An `NSSearchToolbarItem` is compact at rest, expands over
@@ -107,16 +99,12 @@ struct RootView: View {
                     // ring, and answers Escape, none of which a `TextField` in a `RoundedRectangle`
                     // with a hand drawn stroke ever quite did.
                     //
-                    // `HomeBar` used to argue against exactly this, on the grounds that a field in the
-                    // toolbar would look like it searched the transcript and the inspector too. That
-                    // was right while the field was a filter for one list. It searches every workspace
-                    // on the Mac and the full text of every transcript now, so the objection became
-                    // the case for it: this belongs to the window rather than to a column. Finding a
-                    // word in what you are reading is still Cmd+F and still the pane's own, which is
-                    // Xcode's split. See `FindCommand`.
+                    // It searches every workspace on the Mac and the full text of every transcript,
+                    // so it belongs to the window rather than to one column. Finding a word in the
+                    // current pane remains Cmd+F. See `FindCommand`.
                     .searchable(
                         text: $app.homeFilter.query,
-                        placement: .toolbar,
+                        placement: .toolbarPrincipal,
                         prompt: Text("Search")
                     )
                     .searchFocused($isSearchFocused)
