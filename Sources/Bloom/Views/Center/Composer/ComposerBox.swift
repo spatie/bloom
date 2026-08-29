@@ -34,7 +34,11 @@ struct ComposerBox: ViewModifier {
         content
             .padding(.horizontal, Metrics.gutter)
             .padding(.top, Metrics.gutter)
-            .padding(.bottom, fillsPanel ? Metrics.spacingWide : Metrics.gutter)
+            // The main composer ends beside the sidebar's 32-point status bar. Its controls are
+            // 28 points high, so two points below them puts both strips on the same centre line.
+            // A wider bottom inset lifted the model label above the sidebar controls and made the
+            // shared window footer look stepped.
+            .padding(.bottom, fillsPanel ? Metrics.spacingTight : Metrics.gutter)
             .background {
                 // Sunken rather than raised. `surfaceRaised` resolves to the same white as the
                 // transcript above it, so the box read as a hairline drawn on nothing rather than

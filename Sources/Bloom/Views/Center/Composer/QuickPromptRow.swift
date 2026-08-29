@@ -24,7 +24,7 @@ struct QuickPromptRow: View {
 
     var body: some View {
         Button(action: onPick) {
-            HStack(spacing: Metrics.spacingWide) {
+            HStack(spacing: Metrics.gutter) {
                 // Larger than the glyph column the one line lists use, and deliberately. This row
                 // is two lines tall, and `Metrics.glyph` beside it read as a speck someone had
                 // dropped rather than as the mark that tells five prompts apart at a glance, which

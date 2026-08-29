@@ -224,7 +224,7 @@ struct QuickPromptMenu: View {
         Button {
             draft = QuickPromptFormDraft(suggestedName: matches.isEmpty ? query : "")
         } label: {
-            HStack(spacing: Metrics.spacing) {
+            HStack(spacing: Metrics.gutter) {
                 Image(systemName: "plus")
                     .imageScale(.medium)
                     .foregroundStyle(Palette.textSecondary)

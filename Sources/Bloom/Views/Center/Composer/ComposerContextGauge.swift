@@ -5,7 +5,6 @@ import SwiftUI
 /// It sits with the model and the permission mode because it answers the same kind of question:
 /// something about the next turn that the user may want to act on before sending it.
 struct ComposerContextGauge: View {
-    var usage: ContextWindowUsage
     /// The percentage and the spoken sentence, formatted by the footer. Passed in rather than
     /// worked out here because this control is built two or three times per pass: see
     /// `ContextWindowUsage.Reading`.
@@ -23,29 +22,21 @@ struct ComposerContextGauge: View {
 
     @State private var isHovered = false
 
-    /// The bar in the footer. Narrow, because the number beside it is the reading and this only
-    /// says how close to full that number is.
-    private static let barWidth: CGFloat = 26
-    private static let barHeight: CGFloat = 4
-
     var body: some View {
         Button {
             isShowingDetail = true
         } label: {
-            HStack(spacing: Metrics.spacingSmall) {
-                bar
-                Text(reading.percent)
-                    .monospacedDigit()
-            }
-            .font(Typo.label)
-            .foregroundStyle(Palette.textSecondary)
-            .padding(.horizontal, Metrics.spacing)
-            .frame(height: Metrics.rowHeight)
-            .background {
-                RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                    .fill(isHovered ? Palette.hover : .clear)
-            }
-            .contentShape(Rectangle())
+            Text(reading.percent)
+                .monospacedDigit()
+                .font(Typo.label)
+                .foregroundStyle(Palette.textSecondary)
+                .padding(.horizontal, Metrics.spacing)
+                .frame(height: Metrics.rowHeight)
+                .background {
+                    RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+                        .fill(isHovered ? Palette.hover : .clear)
+                }
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
@@ -53,11 +44,6 @@ struct ComposerContextGauge: View {
         .help("Context window")
         .accessibilityLabel("Context window")
         .accessibilityValue(reading.spoken)
-    }
-
-    private var bar: some View {
-        ContextWindowBar(fraction: usage.fraction, isCrowded: usage.isCrowded)
-            .frame(width: Self.barWidth, height: Self.barHeight)
     }
 }
 

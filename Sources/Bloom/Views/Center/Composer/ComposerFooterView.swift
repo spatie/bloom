@@ -227,9 +227,9 @@ struct ComposerFooterView: View {
 
             // On the far side of the spacer, away from the pickers. It is a reading rather than
             // something to choose, and among the three menus it read as a fourth one.
-            if let context, let reading = choices.context, showsContext {
+            if let reading = choices.context, showsContext {
                 ComposerContextGauge(
-                    usage: context, reading: reading, isShowingDetail: $isShowingContextDetail
+                    reading: reading, isShowingDetail: $isShowingContextDetail
                 )
                 // In the footer's space rather than the window's, which is what
                 // `attachmentAnchor` wants. Only the gauge is measured, and only while it is
@@ -248,13 +248,8 @@ struct ComposerFooterView: View {
                     isShowingQuickPrompts = true
                 } label: {
                     ComposerControlLabel(
-                        // Named while there is room, and a glyph alone only when there is not.
-                        // The paperclip beside it can afford to be a glyph forever because
-                        // everybody already knows what a paperclip does; this is a new idea with
-                        // no icon anybody has learned, and unlabelled it is a button people do not
-                        // press. It drops its word on the same step the pickers drop theirs.
                         systemImage: "text.badge.plus",
-                        text: isCompact ? nil : "Quick prompts",
+                        text: nil,
                         isActive: isShowingQuickPrompts
                     )
                 }
