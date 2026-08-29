@@ -12,6 +12,8 @@ import BloomCore
 struct FilePreview: View {
     let model: WorkspaceModel
     let path: String
+    let absolutePathOverride: String?
+    let canEditInBloom: Bool
 
     /// Far more than fits on a screen, and enough that scrolling never reaches the truncation on
     /// any file a person would open on purpose.
@@ -41,11 +43,21 @@ struct FilePreview: View {
     /// editor. `DiffView` seeds its own mode the same way and for the same reason: coming back to
     /// a file you were typing in and finding the read only half is indistinguishable from finding
     /// the typing gone.
-    init(model: WorkspaceModel, path: String) {
+    init(
+        model: WorkspaceModel,
+        path: String,
+        absolutePathOverride: String? = nil,
+        canEditInBloom: Bool = true
+    ) {
         self.model = model
         self.path = path
-        let absolute = (model.workspace.path as NSString).appendingPathComponent(path)
-        _isEditing = State(initialValue: FileEditSession.shared.isDirty(absolute))
+        self.absolutePathOverride = absolutePathOverride
+        self.canEditInBloom = canEditInBloom
+        let absolute = absolutePathOverride
+            ?? (model.workspace.path as NSString).appendingPathComponent(path)
+        _isEditing = State(
+            initialValue: canEditInBloom && FileEditSession.shared.isDirty(absolute)
+        )
     }
 
     private struct LoadID: Hashable {
@@ -119,7 +131,9 @@ struct FilePreview: View {
             Spacer(minLength: InspectorLayout.tight)
 
             openInMenu
-            modePicker
+            if canEditInBloom {
+                modePicker
+            }
         }
         .padding(.horizontal, InspectorLayout.inset)
         .frame(height: InspectorLayout.barHeight)
@@ -190,7 +204,8 @@ struct FilePreview: View {
     private var filename: String { (path as NSString).lastPathComponent }
 
     private var absolutePath: String {
-        (model.workspace.path as NSString).appendingPathComponent(path)
+        absolutePathOverride
+            ?? (model.workspace.path as NSString).appendingPathComponent(path)
     }
 
     /// Names the application, so the button says what it will do before it is pressed.
@@ -273,6 +288,10 @@ struct FilePreview: View {
         // Same call and same answer as `DiffView`, so the two bars never disagree about whether a
         // file can be edited.
         let absolute = absolutePath
+        guard canEditInBloom else {
+            isEditable = false
+            return
+        }
         isEditable = await Task.detached(priority: .utility) {
             FileEditor.isEditable(absolute)
         }.value

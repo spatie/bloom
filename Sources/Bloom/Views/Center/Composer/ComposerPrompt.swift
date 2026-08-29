@@ -52,6 +52,9 @@ struct ComposerPrompt<Footer: View>: View {
     /// What clicking a chip does. A conversation opens the file in its review tab; the sheet has
     /// no tabs to open one in and hands it to the Finder instead.
     var onOpenAttachment: @MainActor (PromptAttachment) -> Void
+    /// Opens a slash command's backing file. Conversations use a Bloom file tab; prompts shown
+    /// before a workspace exists retain the chip's external-editor fallback.
+    var onOpenCommand: (@MainActor (String) -> Void)?
     var fillsPanel = false
     /// The footer, handed what it can ask this view to write into the draft. Passed in rather than
     /// reached for, because everything an attachment and a quick prompt do lives here and the
@@ -142,6 +145,13 @@ struct ComposerPrompt<Footer: View>: View {
                         name: name,
                         command: named,
                         onRemove: removeCommand,
+                        onOpen: { path in
+                            if let onOpenCommand {
+                                onOpenCommand(path)
+                            } else {
+                                Reveal.inEditor(path, repo: nil)
+                            }
+                        },
                         onHover: { isCommandPreviewed = $0 }
                     )
 

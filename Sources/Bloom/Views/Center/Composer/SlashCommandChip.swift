@@ -18,6 +18,11 @@ struct SlashCommandChip: View {
     /// not noticed yet. The chip still draws, because the text still says what it says.
     var command: SlashCommand?
     var onRemove: @MainActor () -> Void
+    /// Opens the command's source inside Bloom. The create window has no workspace tabs, so its
+    /// default keeps the older external-editor behaviour.
+    var onOpen: @MainActor (String) -> Void = { path in
+        Reveal.inEditor(path, repo: nil)
+    }
     /// Raised once the pointer has settled, and lowered the moment it leaves.
     var onHover: @MainActor (Bool) -> Void
 
@@ -172,10 +177,7 @@ struct SlashCommandChip: View {
     }
 
     private var openTitle: String {
-        guard let app = path.flatMap({ OpenIn.preferred(for: .file($0), repo: repoID) }) else {
-            return "Open /\(name)"
-        }
-        return "Open in \(app.app.name)"
+        "Open /\(name) in Bloom"
     }
 
     private var helpText: String {
@@ -183,13 +185,11 @@ struct SlashCommandChip: View {
         return detail.isEmpty ? "/\(name)" : "/\(name)  \(detail)"
     }
 
-    /// The application the rest of the app would use, which is what "open it up" has to mean here:
-    /// the file is in `~/.claude`, outside the worktree, so the review tab cannot show it and the
-    /// editor the reader already opens everything else in is the honest answer.
+    /// The primary action stays inside Bloom. The context menu still offers external editors for
+    /// readers who explicitly ask for one.
     private func open() {
         guard let path else { return }
-        // One call: `Reveal.inEditor` asks `OpenIn.preferred` itself now, and records the choice.
-        Reveal.inEditor(path, repo: repoID)
+        onOpen(path)
     }
 
     private func hover(_ hovering: Bool) {

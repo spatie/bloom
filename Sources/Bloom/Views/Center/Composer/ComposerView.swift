@@ -120,6 +120,7 @@ struct ComposerView: View {
             onContentHeightChange: { contentHeight = $0 },
             onKey: handle(key:),
             onOpenAttachment: open(attachment:),
+            onOpenCommand: open(commandPath:),
             fillsPanel: true
         ) { actions in
             ComposerFooterView(
@@ -493,6 +494,13 @@ struct ComposerView: View {
     private func open(attachment: PromptAttachment) {
         guard let model else { return }
         FileReview.open(path: attachment.path, in: model)
+    }
+
+    /// Skill and command files use the same in-app file tab as attachments. Absolute paths are
+    /// supported by the review pane for skills installed outside the current worktree.
+    private func open(commandPath path: String) {
+        guard let model else { return }
+        FileReview.open(path: path, in: model)
     }
 
     /// A comment chip opens the diff it was written on, where its band is.

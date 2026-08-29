@@ -94,7 +94,7 @@ struct ReviewPaneView: View {
         // again.
         .task(id: ExistsID(path: tab.path, generation: model.changesGeneration)) {
             let path = tab.path
-            let absolute = (model.workspace.path as NSString).appendingPathComponent(path)
+            let absolute = Self.absolutePath(path, worktree: model.workspace.path)
             exists = await Task.detached(priority: .userInitiated) {
                 !path.isEmpty && FileManager.default.fileExists(atPath: absolute)
             }.value
@@ -129,10 +129,18 @@ struct ReviewPaneView: View {
             // An image, a PDF, a video. `FilePreview` reads a file as text and would say there is
             // nothing to show, which for the screenshot somebody just attached is both wrong and
             // the whole reason they clicked.
-            FileMediaView(worktree: model.workspace.path, path: tab.path)
+            FileMediaView(
+                worktree: Self.isAbsolute(tab.path) ? "/" : model.workspace.path,
+                path: Self.isAbsolute(tab.path) ? String(tab.path.dropFirst()) : tab.path
+            )
                 .id(tab.path)
         } else if isPresent {
-            FilePreview(model: model, path: tab.path)
+            FilePreview(
+                model: model,
+                path: tab.path,
+                absolutePathOverride: Self.isAbsolute(tab.path) ? tab.path : nil,
+                canEditInBloom: !Self.isAbsolute(tab.path)
+            )
                 .id(tab.path)
         } else {
             // A file the agent deleted, or one that was reverted and then removed. Said plainly
@@ -143,6 +151,14 @@ struct ReviewPaneView: View {
                 message: "It is no longer in this worktree. Pick another file in the inspector."
             )
         }
+    }
+
+    private static func isAbsolute(_ path: String) -> Bool {
+        (path as NSString).isAbsolutePath
+    }
+
+    private static func absolutePath(_ path: String, worktree: String) -> String {
+        isAbsolute(path) ? path : (worktree as NSString).appendingPathComponent(path)
     }
 
 }
