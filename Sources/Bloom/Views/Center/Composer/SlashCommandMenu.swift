@@ -61,7 +61,10 @@ struct SlashCommandMenu: View {
         .frame(width: panelWidth)
     }
 
-    private static let maxWidth: CGFloat = 620
+    // A completion list is a menu, not another pane. Keeping it close to the measure of the
+    // agent-settings popover makes the name and description read as one compact choice and stops
+    // short descriptions leaving a broad strip of empty material behind them.
+    private static let maxWidth: CGFloat = 440
 
     private var panelWidth: CGFloat {
         min(Self.maxWidth, max(160, availableWidth - Metrics.gutter * 2))

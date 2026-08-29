@@ -137,29 +137,19 @@ struct ComposerPrompt<Footer: View>: View {
             }
 
             if let name = draft.name {
-                SlashCommandChip(
-                    name: name,
-                    command: named,
-                    onRemove: removeCommand,
-                    onHover: { isCommandPreviewed = $0 }
-                )
-            }
+                HStack(alignment: .top, spacing: Metrics.spacingSmall) {
+                    SlashCommandChip(
+                        name: name,
+                        command: named,
+                        onRemove: removeCommand,
+                        onHover: { isCommandPreviewed = $0 }
+                    )
 
-            ComposerEditor(
-                text: promptBody,
-                caret: $caret,
-                isFocused: $isFocused,
-                height: editorHeight,
-                onContentHeightChange: onContentHeightChange,
-                onKey: handle(key:),
-                onBackspaceAtStart: backspaceCommand,
-                onAttach: attach(sources:replacing:),
-                attachmentPaths: attachments.map(\.path),
-                onOpenAttachment: open(path:),
-                onHoverAttachment: { hoveredPath = $0 },
-                handle: editor,
-                placeholder: placeholder
-            )
+                    promptEditor(attachments: attachments)
+                }
+            } else {
+                promptEditor(attachments: attachments)
+            }
 
             footer(ComposerPromptActions(attach: attachFiles, insert: insert(quickPrompt:)))
         }
@@ -258,6 +248,27 @@ struct ComposerPrompt<Footer: View>: View {
             // the token entirely, makes the menu available again.
             if old.kind != new.kind { isMenuDismissed = false }
         }
+    }
+
+    /// The command is a prefix of the prompt rather than a separate row. Keeping the editor in
+    /// one helper lets the chipped and ordinary forms share exactly the same text behaviour while
+    /// the chipped form can place it immediately after the command.
+    private func promptEditor(attachments: [PromptAttachment]) -> some View {
+        ComposerEditor(
+            text: promptBody,
+            caret: $caret,
+            isFocused: $isFocused,
+            height: editorHeight,
+            onContentHeightChange: onContentHeightChange,
+            onKey: handle(key:),
+            onBackspaceAtStart: backspaceCommand,
+            onAttach: attach(sources:replacing:),
+            attachmentPaths: attachments.map(\.path),
+            onOpenAttachment: open(path:),
+            onHoverAttachment: { hoveredPath = $0 },
+            handle: editor,
+            placeholder: placeholder
+        )
     }
 
     /// Files that were attached before a file was a word in the draft.
