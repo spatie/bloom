@@ -2,13 +2,10 @@ import SwiftUI
 import AppKit
 import BloomCore
 
-/// The `/command` the draft leads with, drawn as a chip above the text.
+/// The `/command` the draft leads with, drawn as a chip beside the text.
 ///
-/// A sibling of `AttachmentChip` and deliberately built to the same measurements: the same height,
-/// the same plate, the same icon slot that swaps for the close control under the pointer so the
-/// chip keeps the width it had, and the same hover delay before a card opens. The two sit in the
-/// same strip above the same box and they are the same kind of object, which is a thing the draft
-/// carries that is not a word of the prompt.
+/// It uses the inline file chip measurements for its height, padding and icon. This keeps both
+/// tokens on the same baseline when a command and an attachment share a sentence.
 ///
 /// What it is not is a second copy of an attachment. An attachment is a file the reader chose; this
 /// is a token of the prompt itself, and the text under the chip is still the literal `/name` the
@@ -28,11 +25,9 @@ struct SlashCommandChip: View {
     @State private var hoverTask: Task<Void, Never>?
 
     @Environment(\.openInRepoID) private var repoID
+    @Environment(\.fontScale) private var fontScale
+    @Environment(\.chatFont) private var chatFont
 
-    /// The same slot as `AttachmentChip`, so a row holding one of each does not have two rhythms
-    /// in it. Its constant rather than a copy of its value, for the reason `hoverDelay` below
-    /// gives about the wait.
-    private static let slot: CGFloat = AttachmentChip.slot
     /// And the same wait, which is `Motion.hoverCardDelay` rather than a number copied from that
     /// chip. It was copied, and then the shared constant moved and this one did not, which is the
     /// drift a promise in a comment cannot stop and a reference to the constant can.
@@ -43,11 +38,11 @@ struct SlashCommandChip: View {
     static let maxNameWidth: CGFloat = 340
 
     var body: some View {
-        HStack(spacing: Metrics.spacingSmall) {
+        HStack(spacing: ComposerInlineChipLayout.gap) {
             leading
 
             Text("/\(name)")
-                .font(Typo.codeSmall)
+                .font(Font(labelFont).monospaced())
                 .foregroundStyle(Palette.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -56,20 +51,20 @@ struct SlashCommandChip: View {
 
             trailing
         }
-        .padding(.horizontal, Metrics.spacing)
-        .frame(height: AttachmentChip.height)
+        .padding(.horizontal, ComposerInlineChipLayout.horizontalPadding)
+        .frame(height: chipHeight)
         // Hugs its name rather than reserving the cap. The cap is a limit on a long name, not a
         // width for every chip, and a chip padded out to it reads as an empty field.
         .fixedSize(horizontal: true, vertical: false)
         .background {
-            RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+            RoundedRectangle(cornerRadius: ComposerInlineChipLayout.cornerRadius)
                 .fill(isHovered ? Palette.hover : Palette.surfaceRaised)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+            RoundedRectangle(cornerRadius: ComposerInlineChipLayout.cornerRadius)
                 .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         }
-        .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+        .contentShape(RoundedRectangle(cornerRadius: ComposerInlineChipLayout.cornerRadius))
         .onHover(perform: hover(_:))
         .help(helpText)
         .contextMenu { menu }
@@ -100,12 +95,12 @@ struct SlashCommandChip: View {
             // The shared control rather than an `xmark.circle.fill` of its own, which cut its X
             // out of the disc so the X was the chip showing through. See `ChipRemoveMark`: this
             // chip is a sibling of `AttachmentChip` by design and was still missed by its fix.
-            ChipRemoveButton(diameter: Self.slot, label: "Remove /\(name)", action: onRemove)
+            ChipRemoveButton(diameter: iconSize, label: "Remove /\(name)", action: onRemove)
         } else {
             Image(systemName: glyph)
                 .resizable()
                 .scaledToFit()
-                .frame(width: Self.slot, height: Self.slot)
+                .frame(width: iconSize, height: iconSize)
                 .foregroundStyle(Palette.textSecondary)
                 .accessibilityHidden(true)
         }
@@ -124,7 +119,7 @@ struct SlashCommandChip: View {
                 Image(systemName: "arrow.up.forward.square")
                     .resizable()
                 .scaledToFit()
-                    .frame(width: Self.slot, height: Self.slot)
+                    .frame(width: iconSize, height: iconSize)
                     .foregroundStyle(isHovered ? Palette.textSecondary : .clear)
                     .contentShape(Rectangle())
             }
@@ -148,6 +143,22 @@ struct SlashCommandChip: View {
     // MARK: - Facts
 
     private var path: String? { command?.path }
+
+    private var lineFont: NSFont {
+        ComposerTextEditor.font(scale: fontScale, face: chatFont)
+    }
+
+    private var labelFont: NSFont {
+        ComposerInlineChipLayout.labelFont(for: lineFont)
+    }
+
+    private var iconSize: CGFloat {
+        ComposerInlineChipLayout.iconSize(for: lineFont)
+    }
+
+    private var chipHeight: CGFloat {
+        ComposerInlineChipLayout.height(for: lineFont)
+    }
 
     /// A skill and a command file are told apart, because "open" means a different kind of thing
     /// for each, and a built in gets the mark of something that lives in the CLI rather than a

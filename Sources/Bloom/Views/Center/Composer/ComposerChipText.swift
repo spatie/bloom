@@ -2,6 +2,25 @@ import AppKit
 import SwiftUI
 import BloomCore
 
+@MainActor
+enum ComposerInlineChipLayout {
+    static let horizontalPadding: CGFloat = 5
+    static let gap: CGFloat = 4
+    static let cornerRadius: CGFloat = 4
+
+    static func labelFont(for lineFont: NSFont) -> NSFont {
+        NSFont.systemFont(ofSize: max(lineFont.pointSize - 1, 9))
+    }
+
+    static func iconSize(for lineFont: NSFont) -> CGFloat {
+        ceil(labelFont(for: lineFont).pointSize) + 2
+    }
+
+    static func height(for lineFont: NSFont) -> CGFloat {
+        ceil(NSLayoutManager().defaultLineHeight(for: lineFont)) + 2
+    }
+}
+
 /// The two directions between a draft and what the text view holds: a path in the draft is one
 /// chip in the storage, and one chip in the storage is that path again.
 ///
@@ -321,18 +340,14 @@ final class AttachmentChipCell: NSTextAttachmentCell {
     private nonisolated let iconSize: CGFloat
     private nonisolated let nameWidth: CGFloat
 
-    /// Room either side of the contents, and between the icon and the name.
-    private static let padding: CGFloat = 5
-    private static let gap: CGFloat = 4
     /// As wide as a name gets before it is cut in the middle. Enough for
     /// `Pasted 2026-08-20 at 22.29.20.png` to stay recognisable.
     private static let maxNameWidth: CGFloat = 170
-    private static let cornerRadius: CGFloat = 4
 
     init(path: String, font: NSFont, ground: Ground = .composer) {
-        let nameFont = Self.nameFont(for: font)
+        let nameFont = ComposerInlineChipLayout.labelFont(for: font)
         let name = (path as NSString).lastPathComponent
-        let iconSize = ceil(nameFont.pointSize) + 2
+        let iconSize = ComposerInlineChipLayout.iconSize(for: font)
         let nameWidth = min(
             ceil((name as NSString).size(withAttributes: [.font: nameFont]).width),
             Self.maxNameWidth
@@ -340,7 +355,7 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         // Unrounded, because the plate is rounded up off it and the difference between the two is
         // what centres the plate below.
         let lineHeight = NSLayoutManager().defaultLineHeight(for: font)
-        let height = ceil(lineHeight) + 2
+        let height = ComposerInlineChipLayout.height(for: font)
 
         self.path = path
         self.lineFont = font
@@ -348,7 +363,12 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         self.iconSize = iconSize
         self.nameWidth = nameWidth
         self.chipSize = NSSize(
-            width: ceil(Self.padding * 2 + iconSize + Self.gap + nameWidth),
+            width: ceil(
+                ComposerInlineChipLayout.horizontalPadding * 2
+                    + iconSize
+                    + ComposerInlineChipLayout.gap
+                    + nameWidth
+            ),
             height: height
         )
         // Where the plate sits against the baseline of the line it is on. The cell is drawn from
@@ -365,18 +385,11 @@ final class AttachmentChipCell: NSTextAttachmentCell {
 
     var filename: String { (path as NSString).lastPathComponent }
 
-    /// The name, at the size the rest of the line is set at but a little smaller, which is what
-    /// keeps a chip from being the tallest thing on its line. Static, because init has to ask it
-    /// before there is a `self` to ask.
-    private static func nameFont(for lineFont: NSFont) -> NSFont {
-        NSFont.systemFont(ofSize: max(lineFont.pointSize - 1, 9))
-    }
-
     private var nameAttributes: [NSAttributedString.Key: Any] {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingMiddle
         return [
-            .font: Self.nameFont(for: lineFont),
+            .font: ComposerInlineChipLayout.labelFont(for: lineFont),
             .foregroundColor: ground.ink,
             .paragraphStyle: paragraph,
         ]
@@ -398,7 +411,11 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         withFrame cellFrame: NSRect, in controlView: NSView?, characterIndex: Int
     ) {
         let frame = cellFrame.insetBy(dx: 0, dy: 0.5)
-        let plate = NSBezierPath(roundedRect: frame, xRadius: Self.cornerRadius, yRadius: Self.cornerRadius)
+        let plate = NSBezierPath(
+            roundedRect: frame,
+            xRadius: ComposerInlineChipLayout.cornerRadius,
+            yRadius: ComposerInlineChipLayout.cornerRadius
+        )
 
         ground.plate.setFill()
         plate.fill()
@@ -408,7 +425,7 @@ final class AttachmentChipCell: NSTextAttachmentCell {
 
         let side = iconSize
         let iconRect = NSRect(
-            x: frame.minX + Self.padding,
+            x: frame.minX + ComposerInlineChipLayout.horizontalPadding,
             y: frame.midY - side / 2,
             width: side,
             height: side
@@ -426,7 +443,7 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         let name = NSAttributedString(string: filename, attributes: nameAttributes)
         let height = name.size().height
         let nameRect = NSRect(
-            x: iconRect.maxX + Self.gap,
+            x: iconRect.maxX + ComposerInlineChipLayout.gap,
             y: frame.midY - height / 2,
             width: nameWidth,
             height: height
@@ -486,7 +503,9 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         NSRect(
             x: frame.minX,
             y: frame.minY,
-            width: Self.padding + iconSize + Self.gap / 2,
+            width: ComposerInlineChipLayout.horizontalPadding
+                + iconSize
+                + ComposerInlineChipLayout.gap / 2,
             height: frame.height
         )
     }
