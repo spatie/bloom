@@ -26,13 +26,12 @@ struct ComposerSendButton: View {
     var canSend: Bool
     var onSend: @MainActor () -> Void
 
-    /// The bordered styles add four points of padding on every edge, so the glyph box has to be
-    /// that much smaller than the row for the finished circle to match the controls beside it.
-    /// Sizing the glyph at `rowHeight` instead is what made the send button eight points taller
-    /// than everything else in the footer.
+    /// The bordered styles add four points of padding on every edge. A sixteen point glyph box
+    /// produces a quiet twenty-four point circle, while the outer frame preserves the full footer
+    /// row as the click target.
     ///
     /// Not private, because `ComposerStopButton` sits next to it and has to be the same circle.
-    static let glyph = Metrics.rowHeight - Metrics.spacingSmall * 2
+    static let glyph = Metrics.rowHeight - Metrics.spacingSmall * 3
 
     /// A named action rather than a glyph, which only the create window uses. A round arrow is
     /// enough for a message going into a conversation the user is looking at; a control that is
@@ -61,6 +60,8 @@ struct ComposerSendButton: View {
         // Prominent, because sending is the action on offer and it is the only one here now.
         .buttonStyle(.borderedProminent)
         .buttonBorderShape(isNamed ? .capsule : .circle)
+        .frame(minHeight: Metrics.rowHeight)
+        .contentShape(Rectangle())
         // The system control accent keeps this primary action consistent with every native control.
         .tint(Palette.controlAccent)
         .disabled(!canSend)
