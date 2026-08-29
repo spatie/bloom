@@ -47,7 +47,7 @@ struct SlashCommandChip: View {
             leading
 
             Text("/\(name)")
-                .font(Font(labelFont).monospaced())
+                .font(Font(labelFont))
                 .foregroundStyle(Palette.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -123,9 +123,9 @@ struct SlashCommandChip: View {
             Button(action: open) {
                 Image(systemName: "arrow.up.forward.square")
                     .resizable()
-                .scaledToFit()
+                    .scaledToFit()
                     .frame(width: iconSize, height: iconSize)
-                    .foregroundStyle(isHovered ? Palette.textSecondary : .clear)
+                    .foregroundStyle(Palette.textSecondary)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
