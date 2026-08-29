@@ -11,6 +11,7 @@ struct ComposerMenuOverlay: View {
     /// What the room on the menu's side of the box allows, already decided by the composer's
     /// placement rule. See `MenuLayout.placement`.
     var maxHeight: CGFloat
+    var availableWidth: CGFloat
     var onPickCommand: @MainActor (SlashCommand) -> Void
     var onPickFile: @MainActor (FileMatch) -> Void
     var onHighlight: @MainActor (Int) -> Void
@@ -24,6 +25,7 @@ struct ComposerMenuOverlay: View {
                 isLoaded: commandsAreLoaded,
                 selectedIndex: selectedIndex,
                 maxHeight: maxHeight,
+                availableWidth: availableWidth,
                 onPick: onPickCommand,
                 onHighlight: onHighlight
             )

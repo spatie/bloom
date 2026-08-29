@@ -37,7 +37,7 @@ struct SlashCommandRow: View {
                         Text(command.detail)
                             .font(Typo.caption)
                             .foregroundStyle(detailColour)
-                            .lineLimit(1)
+                            .lineLimit(2)
                             .truncationMode(.tail)
                     }
                 }
@@ -101,7 +101,7 @@ struct SlashCommandRow: View {
     }
 
     private var detailColour: Color {
-        isEmphasized ? Palette.selectedEmphasizedText.opacity(0.72) : Palette.textTertiary
+        isEmphasized ? Palette.selectedEmphasizedText.opacity(0.82) : Palette.textSecondary
     }
 
     /// See `FileMentionRow`: the labels set their own colour, so they have to know when the row

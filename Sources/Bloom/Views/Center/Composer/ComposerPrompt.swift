@@ -220,6 +220,7 @@ struct ComposerPrompt<Footer: View>: View {
                 files: fileMatches,
                 selectedIndex: menuIndex,
                 maxHeight: placement.menuHeight,
+                availableWidth: boxWidth,
                 onPickCommand: pick(command:),
                 onPickFile: pick(file:),
                 onHighlight: { menuIndex = $0 }
