@@ -99,6 +99,17 @@ public struct CrewMessage: Sendable, Equatable, Codable {
         )
     }
 
+    /// The owner stopped it from its row in the sidebar, rather than the agent finishing.
+    ///
+    /// A fact like the other two, and a different sentence: see `Crew.stoppedByOwnerSentence`.
+    public static func stoppedByOwner(name: String) -> CrewMessage {
+        CrewMessage(
+            event: .stopped, sender: .bloom, from: name,
+            text: Crew.stoppedByOwnerSummary(name: name),
+            sent: Crew.stoppedByOwnerSentence(name: name)
+        )
+    }
+
     /// The same, for an agent that did not finish on purpose.
     public static func failed(name: String, reason: String) -> CrewMessage {
         let sentence = Crew.failedSentence(name: name, reason: reason)

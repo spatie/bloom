@@ -748,6 +748,40 @@ final class WorkspaceModel {
         )
     }
 
+    /// The owner stopping a subagent from its row in the sidebar.
+    ///
+    /// **The orchestrator has to be told, and that is the whole reason this is not just
+    /// `closeSession`.** An agent that is waiting on a crew member it can no longer reach is the
+    /// failure this design exists to prevent, and the owner reaching into the sidebar is the one
+    /// way a member can vanish without the agent above it doing anything. The sentence says who
+    /// did it as well as what happened, because "the person you work for took it away" and "it
+    /// finished" call for different next moves. See `Crew.stoppedByOwnerSentence`.
+    ///
+    /// Told before it is closed, so the report is enqueued while the row is still whole, and
+    /// through the same queue everything else uses so a busy orchestrator reads it when its own
+    /// turn ends rather than mid sentence.
+    func closeCrewMember(_ member: Session) async {
+        guard let store else { return }
+
+        if let parentID = member.parentSessionID,
+           let parent = try? await store.session(id: parentID), parent.archivedAt == nil {
+            _ = try? await store.enqueueDelivery(
+                Delivery(
+                    targetSessionID: parent.id,
+                    sourceWorkspaceID: workspace.id,
+                    kind: .report,
+                    crew: CrewMessage.stoppedByOwner(name: member.title)
+                )
+            )
+
+            let transcript = transcript(for: parent)
+            await transcript.refreshQueue()
+            await transcript.drain()
+        }
+
+        await closeSession(member)
+    }
+
     /// The one sentence every crew method says when the database never opened, so three refusals
     /// cannot describe one absence three ways.
     private static let crewWithoutStore =

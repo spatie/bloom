@@ -149,6 +149,24 @@ public enum Crew {
         return "Your subagent \"\(name)\" stopped without finishing. \(tail)"
     }
 
+    /// What an orchestrator is told when the owner stops one of its subagents by hand.
+    ///
+    /// **Said differently from an agent finishing on its own, and the difference is the point.**
+    /// An agent that stopped by itself has done what it was asked and the orchestrator may want
+    /// another; an agent the owner took away is a decision by the person the orchestrator is
+    /// working for, and starting a replacement would be undoing it. So the sentence says who did
+    /// it and says not to.
+    public static func stoppedByOwnerSentence(name: String) -> String {
+        "Your subagent \"\(name)\" was stopped by the owner, who was watching it. It is gone: "
+            + "its row and its name have been let go. Do not start another one in its place "
+            + "unless they ask for it. Carry on with your own work."
+    }
+
+    /// The one line the transcript draws for it.
+    public static func stoppedByOwnerSummary(name: String) -> String {
+        "\(name) stopped by you"
+    }
+
     /// The one line the transcript draws for a stop, as opposed to the paragraph the model is
     /// handed. See `CrewMessage`, which holds both: a person reading their own window wants to
     /// know that an agent finished, and does not want the instruction that was addressed to the

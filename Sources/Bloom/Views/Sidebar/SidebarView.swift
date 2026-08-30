@@ -67,6 +67,12 @@ struct SidebarView: View {
     /// sayings: two drops refused in the same project produce the same words, and a note keyed to
     /// the words would have the second one taken away on the first one's clock.
     @State private var reorderNote: ReorderNote?
+    /// The crew member whose Stop is waiting on an answer, and nil when nothing is being asked.
+    ///
+    /// Only ever set for one that is still working: stopping an agent that has already finished
+    /// takes nothing away, and a dialog in front of a row nobody was going to lose is a dialog
+    /// that teaches the reader to click through the next one.
+    @State private var stoppingCrew: PendingCrewStop?
 
     private struct ReorderNote: Equatable {
         var id = UUID()
@@ -145,6 +151,11 @@ struct SidebarView: View {
                     workspaceRow(workspace, projectName: projectName)
                 case .crew(let member, let workspaceID, _):
                     CrewSidebarRow(row: member)
+                        // The owner's own way to be finished with a subagent, which the agent
+                        // above it has in `agent_stop` and the person watching it did not.
+                        .contextMenu {
+                            Button("Stop Subagent") { askToStop(member, in: workspaceID) }
+                        }
                         // Always selectable, unlike the subagent row below it: a crew member is a
                         // conversation, so there is always something to open, whatever it is
                         // doing and whether or not it is still running.
@@ -216,6 +227,16 @@ struct SidebarView: View {
         // that. What was in reach was making the rhythm EVEN, which is what a project header's
         // own top padding is spent on. See `SidebarMetrics.headerLead`.
         .listStyle(.sidebar)
+        .confirmation($stoppingCrew) { pending in
+            Confirmation(
+                title: "Stop \(pending.name)?",
+                message: Self.crewStopMessage,
+                confirmLabel: "Stop",
+                cancelLabel: "Keep Working"
+            )
+        } onConfirm: { pending in
+            Task { await stop(pending) }
+        }
         // What puts the fold back.
         //
         // A `List` animates nothing on its own: rows arrive and leave in whatever transaction the
@@ -638,6 +659,59 @@ struct SidebarView: View {
     }
 
     // MARK: - Actions
+
+    /// What the question says, as one string rather than four concatenations inside a view
+    /// builder: the compiler timed out type-checking it in place, and the words are worth more
+    /// here than in an expression.
+    ///
+    /// Consequences rather than "are you sure": what is lost is the turn, what survives is the
+    /// work and the conversation, and the agent above it hears about it either way.
+    private static let crewStopMessage =
+        "It is working now, and the turn it is in the middle of is lost. Everything it has "
+        + "already written in the worktree stays exactly as it is, and its conversation stays "
+        + "here to read. The agent that started it is told."
+
+    /// One crew member the owner has asked to stop, held while the question is on screen.
+    ///
+    /// The workspace travels with it because the row that asked is gone by the time the answer
+    /// comes back: stopping is the one action here that removes the row it was started from.
+    struct PendingCrewStop: Equatable {
+        var sessionID: SessionID
+        var workspaceID: WorkspaceID
+        var name: String
+    }
+
+    /// Asks first only when there is something to lose.
+    ///
+    /// A member that has finished its turn is stopped on the spot: the row goes, the name is freed
+    /// and nothing that was running stops, so a dialog would be asking about nothing. One that is
+    /// working gets the question, because its turn dies with it.
+    private func askToStop(_ member: CrewRow, in workspaceID: WorkspaceID) {
+        let pending = PendingCrewStop(
+            sessionID: member.id, workspaceID: workspaceID, name: member.name
+        )
+
+        switch member.state {
+        case .running, .waiting: stoppingCrew = pending
+        case .idle, .failed, .cancelled: Task { await stop(pending) }
+        }
+    }
+
+    /// Stops it through the workspace's own door, which is what tells the agent above it.
+    ///
+    /// `WorkspaceModel.closeCrewMember` rather than an archive from here: an orchestrator left
+    /// waiting on a member that vanished is the failure the whole crew design is built to avoid,
+    /// and the owner reaching into the sidebar is the one way a member can go without the agent
+    /// above it having done anything.
+    private func stop(_ pending: PendingCrewStop) async {
+        // The model this launch already has, never a fresh one. Building a `WorkspaceModel` to
+        // close one of its chats would start the very machinery the close is about to tear down.
+        guard let model = app.existingModel(for: pending.workspaceID),
+              let member = model.sessions.first(where: { $0.id == pending.sessionID })
+        else { return }
+
+        await model.closeCrewMember(member)
+    }
 
     /// The create window is opened by `RootView`, so every entry point (the toolbar, the repo
     /// header's `+`, the menu bar command) goes through one notification and behaves identically:
