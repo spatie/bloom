@@ -249,6 +249,16 @@ public enum CrewToolTrouble: Error, Sendable, Equatable {
 /// end. One, and it is this; several, and it is `workspace_start`, which cuts a worktree and a
 /// branch of its own. `Crew`'s head argues that split at length.
 ///
+/// ## Why the description spends its opening paragraph on Claude Code's Task tool
+///
+/// Because a live test lost to it. Asked to "start a subagent called reader", the model called
+/// Task, because "subagent" is that tool's own word and it was already in the model's hands. The
+/// two are not alternatives: a Task subagent lives inside one turn, cannot be spoken to and is
+/// gone when the turn ends, while this one is a chat with a row in the sidebar that keeps its
+/// context, takes more work through `agent_say` and says when it has stopped. A feature a model
+/// never reaches for is invisible, so the description has to say when to reach for this one rather
+/// than assume the name carries it.
+///
 /// ## Why it is self-approved
 ///
 /// `BridgeToolApproval` holds the argument. The short of it is that an orchestrator that has to
@@ -266,8 +276,17 @@ public struct AgentStartTool: BridgeToolHandling {
     public let tool = BridgeTool(
         name: CrewToolName.start,
         description: """
-            Start a subagent: a second agent in the workspace you are already in, with a task of \
-            its own, which you can talk to and which reports back to you when it stops.
+            Start a subagent: a second agent, with a chat of its own, working in the workspace you \
+            are already in. You give it a task, you can talk to it whenever you like, and Bloom \
+            tells you when it has stopped and what it last said.
+
+            This is not the Task tool, and the difference is the whole reason to be here. A Task \
+            subagent lives inside one turn of yours, cannot be spoken to once it is running, and \
+            is gone when that turn ends. An agent started here gets its own chat and its own row \
+            in Bloom's sidebar, keeps its context from one turn to the next, takes more work from \
+            you at any time through agent_say, and is still there when this turn is over. Start \
+            one here when the work outlives a single turn, or when you will want to talk to the \
+            agent again. Use the Task tool for a one-shot read that has to answer inside this turn.
 
             It shares this worktree and this branch. Everything you and it do lands in one diff \
             and one pull request, which is the point of it: use it when a job splits into parts \
@@ -351,10 +370,19 @@ public struct AgentStartTool: BridgeToolHandling {
             )
         }
 
-        // Counted from the database rather than from anything held in memory, so two calls racing
-        // cannot both read the same stale number and both be allowed through. Names are every crew
-        // member in the workspace, running or not, because a stopped agent keeps its conversation
-        // and its row; the ceiling is counted over the live ones only. See `Crew.start`.
+        // Counted from the database rather than from anything held in memory, so the number
+        // survives a relaunch and cannot drift out of step with the rows the sidebar draws.
+        //
+        // It is not a lock and it is not meant to read as one. The count is taken here and the
+        // agent is started a hop away on the main actor, so this is check then act: one
+        // orchestrator's calls are serialised by the bridge, but two orchestrator chats in the
+        // same worktree are not, and that case is supported on purpose. Two of them racing can
+        // both be let through, which costs a fourth agent in the worktree and nothing worse, and
+        // that is not worth a locking scheme across the seam.
+        //
+        // Names are every crew member in the workspace, running or not, because a stopped agent
+        // keeps its conversation and its row; the ceiling is counted over the live ones only. See
+        // `Crew.start`.
         let refusalOrName = Crew.start(
             name: request.stringParam("name") ?? "",
             existing: Set(crew.map(\.title)),
@@ -421,11 +449,15 @@ public struct AgentSayTool: BridgeToolHandling {
     public let tool = BridgeTool(
         name: CrewToolName.say,
         description: """
-            Say something to another agent working in this workspace.
+            Say something to another agent working in this workspace: one of the subagents you \
+            started with agent_start, or, if you are yourself one, the agent that started you.
 
-            If you started subagents, 'to' is the name of the one you mean and is required. Use \
-            it to hand over something you have found, to change what an agent is doing, or to \
-            answer a question it asked you.
+            This is the thing a Task subagent cannot give you. An agent started with agent_start \
+            is a chat that is still there between your turns, so you can hand it what you have \
+            just found, change what it is doing, or answer a question it asked you, at any point \
+            in the job rather than only in the turn that started it.
+
+            If you started subagents, 'to' is the name of the one you mean and is required.
 
             If you are yourself a subagent, leave 'to' out: your message goes to the agent that \
             started you, which is the only agent you can talk to. Say what you have found and \
@@ -435,6 +467,10 @@ public struct AgentSayTool: BridgeToolHandling {
             The message lands in that agent's chat and starts a turn there, exactly as though the \
             owner had typed it, so write it as a message rather than as a report about one. It \
             returns once the message has been delivered, not once the agent has answered.
+
+            Speaking to an agent that has stopped sets it working again, so it takes one of the \
+            three running slots this workspace has. If all three are taken, stop one with \
+            agent_stop first, or wait for one to finish.
             """,
         inputSchema: .object([
             "type": .string("object"),
@@ -482,7 +518,11 @@ public struct AgentSayTool: BridgeToolHandling {
         } else {
             switch await talkingDown(named: named, caller: caller, store: store) {
             case .failure(let trouble): return .failure(trouble.sentence)
-            case .success(let member): target = member
+            case .success(let member):
+                if let refusal = await roomToWake(member, caller: caller, store: store) {
+                    return .failure(refusal)
+                }
+                target = member.title
             }
         }
 
@@ -521,6 +561,42 @@ public struct AgentSayTool: BridgeToolHandling {
         return .success(())
     }
 
+    /// Whether there is room for this message to set an agent working, or the sentence that says
+    /// there is not.
+    ///
+    /// **Speaking to a stopped agent is a start, so it is held to the same ceiling as one.** Its
+    /// own description says as much: `agent_say` puts a turn back on an idle member, which is
+    /// another writer in this worktree with another bill attached, exactly as `agent_start` would
+    /// be. Without this the ceiling was a formality, and the sequence that walked through it is in
+    /// the tests: start three, stop one, start a fourth, then say something to the stopped one, and
+    /// four agents are running in one worktree.
+    ///
+    /// Counted the way `agent_start` counts it, over every crew member in the workspace rather than
+    /// over this chat's own, because the limit is about the working tree and not about one chat.
+    /// A member that is already running is never refused: its turn is open and the message joins
+    /// it rather than opening a second one.
+    private func roomToWake(
+        _ member: Session,
+        caller: CrewCaller,
+        store: Store
+    ) async -> String? {
+        guard !CrewCensus.isRunning(member) else { return nil }
+
+        let crew: [Session]
+        do {
+            crew = try await store.crew(inWorkspace: caller.workspaceID)
+        } catch {
+            return CrewToolTrouble.unexplained(
+                tool: CrewToolName.say, error.readableMessage
+            ).sentence
+        }
+
+        let running = crew.filter(CrewCensus.isRunning).count
+        guard running >= Crew.ceiling else { return nil }
+
+        return Crew.sentence(for: .tooMany(running: running))
+    }
+
     /// An orchestrator must name one of its own, and `Store.crew(of:)` is what "its own" means.
     /// Every other agent in the workspace, including the crew of a chat beside it, resolves to
     /// nothing here.
@@ -528,7 +604,7 @@ public struct AgentSayTool: BridgeToolHandling {
         named: String?,
         caller: CrewCaller,
         store: Store
-    ) async -> Result<String, CrewToolTrouble> {
+    ) async -> Result<Session, CrewToolTrouble> {
         guard let named else { return .failure(.saidToNobody) }
 
         let crew: [Session]
@@ -540,7 +616,7 @@ public struct AgentSayTool: BridgeToolHandling {
 
         switch CrewLookup.find(named, among: crew) {
         case .found(let member):
-            return .success(member.title)
+            return .success(member)
         case .unknown:
             return .failure(
                 .unknownMember(tool: CrewToolName.say, given: named, known: crew.map(\.title))
@@ -571,9 +647,13 @@ public struct AgentListTool: BridgeToolHandling {
     public let tool = BridgeTool(
         name: CrewToolName.list,
         description: """
-            List the agents working in this workspace beside you: what each is called, whether it \
-            is running, and what it is doing. Call it before agent_say or agent_stop, because the \
-            name is how those two address an agent.
+            List the agents working in this workspace beside you: the ones started with \
+            agent_start, what each is called, whether it is running, and what it is doing. Call it \
+            before agent_say or agent_stop, because the name is how those two address an agent.
+
+            Task subagents are not on this list and cannot be. Everything here is a chat of its \
+            own that outlives the turn that started it, which is why there is something to name, \
+            to talk to and to stop.
 
             If you started subagents, it lists yours. If you are yourself a subagent, it lists the \
             whole crew, so you can see who else is in this worktree. Everyone in the list shares \
@@ -683,17 +763,17 @@ public struct AgentStopTool: BridgeToolHandling {
     public let tool = BridgeTool(
         name: CrewToolName.stop,
         description: """
-            Stop a subagent you started, by name. Use it when what it was given is no longer \
-            wanted, when it is working on something you have decided against, or when you need \
-            the slot, because three subagents may run in one workspace at once.
+            Stop a subagent you started with agent_start, by name. Use it when what it was given \
+            is no longer wanted, when it is working on something you have decided against, or when \
+            you need the slot, because three subagents may run in one workspace at once.
 
             'name' is required and is the name agent_list prints.
 
             It ends that agent's turn and leaves it idle. Its chat, its conversation and \
             everything it has already written in the worktree stay where they are: this stops an \
             agent, it does not undo its work, and the row stays in the sidebar for the owner to \
-            read. You can talk to a stopped agent again with agent_say, which starts it working \
-            once more.
+            read. Unlike a Task subagent, a stopped agent is still there to go back to: agent_say \
+            sets it working again, which takes one of the three running slots once more.
 
             Only the agent that started a subagent may stop it.
             """,

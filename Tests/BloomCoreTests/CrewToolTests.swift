@@ -213,6 +213,27 @@ struct CrewToolTests {
         #expect(AgentListTool().tool.description.contains("shares this branch and these files"))
     }
 
+    /// **A live test lost the whole feature to Claude Code's own Task tool.** Asked to "start a
+    /// subagent called reader", the model called Task, because "subagent" is that tool's word and
+    /// it was already in its hands. A feature a model never reaches for is invisible, so each of
+    /// the four has to say in its description, which is what the model is actually given, what this
+    /// one has that a Task subagent does not: a chat of its own that outlives the turn, keeps its
+    /// context, can be talked to again, and says when it has stopped.
+    @Test("the descriptions tell this apart from the Task tool a model already has")
+    func theDescriptionsNameTheTaskTool() {
+        let start = Starts().tool().tool.description
+        #expect(start.contains("Task tool"))
+        #expect(start.contains("its own chat"))
+        #expect(start.contains("outlives a single turn"))
+        #expect(start.contains("agent_say"))
+        // And what to use the Task tool for, because "never use it" is not what is meant.
+        #expect(start.contains("one-shot read"))
+
+        #expect(Says().tool().tool.description.contains("Task subagent"))
+        #expect(AgentListTool().tool.description.contains("Task subagents are not on this list"))
+        #expect(Stops().tool().tool.description.contains("Task subagent"))
+    }
+
     // MARK: - Starting one
 
     @Test("a start reaches the window with the caller's own session and workspace on it")
@@ -275,7 +296,10 @@ struct CrewToolTests {
     }
 
     /// Counted from the database rather than from anything held in memory, so a restart cannot
-    /// lose the count and two calls racing cannot both read the same stale number.
+    /// lose the count and it cannot drift from the rows the sidebar draws. It is a check followed
+    /// by an act rather than a lock, so two orchestrators in one worktree can still both be let
+    /// through; that costs a fourth agent and nothing worse, which is the trade `AgentStartTool`
+    /// argues.
     @Test("the ceiling is counted over the running members of the whole workspace")
     func ceilingRefusal() async throws {
         let fixture = try await self.fixture("crew-ceiling")
@@ -583,6 +607,84 @@ struct CrewToolTests {
         #expect(result.isError)
         #expect(result.text.contains("cannot be blank"))
         #expect(says.messages.isEmpty)
+    }
+
+    /// **The sequence that walked straight through the ceiling before `agent_say` counted.**
+    /// `CrewCensus` excludes a stopped member on purpose, so it holds no slot; but `agent_say` sets
+    /// a stopped member working again, which is a start in everything but name. Start three, stop
+    /// one, start a fourth into the slot that freed, then say something to the stopped one, and
+    /// four agents are running in one worktree. So the tool that wakes one counts exactly as
+    /// `agent_start` does, over the whole workspace.
+    @Test("saying something to a stopped agent is refused when the workspace is already full")
+    func wakingOneIsHeldToTheCeiling() async throws {
+        let fixture = try await self.fixture("crew-say-ceiling")
+        let stopped = try await member(fixture, "one", state: .running)
+        try await member(fixture, "two", state: .running)
+        try await member(fixture, "three", state: .running)
+
+        // Stopped, which by the census is a row rather than a running agent.
+        try await fixture.store.update(sessionID: stopped.id) { $0.state = .idle }
+
+        // So a fourth may be started, and the app's side of that start is what puts the row in.
+        let starts = Starts()
+        let started = await starts.tool().call(
+            request("agent_start", ["name": .string("four"), "task": .string("Go.")]),
+            as: fixture.identity, store: fixture.store
+        )
+        #expect(!started.isError)
+        try await member(fixture, "four", state: .running)
+
+        let says = Says()
+        let result = await says.tool().call(
+            request("agent_say", ["to": .string("one"), "message": .string("Carry on.")]),
+            as: fixture.identity, store: fixture.store
+        )
+
+        #expect(result.isError)
+        #expect(result.text == Crew.sentence(for: .tooMany(running: Crew.ceiling)))
+        #expect(result.text.contains("agent_stop"))
+        #expect(says.messages.isEmpty)
+    }
+
+    /// The other two arms of that rule, so the refusal cannot quietly become "no talking while the
+    /// workspace is busy". A message to an agent whose turn is already open joins that turn rather
+    /// than opening a second one, and waking a stopped agent while a slot is free is what
+    /// `agent_say` is for.
+    @Test("a full workspace still takes a message to a running agent, and a stopped one wakes when there is room")
+    func sayingIsRefusedOnlyWhenItWouldStartAFourth() async throws {
+        let fixture = try await self.fixture("crew-say-room")
+        let running = try await member(fixture, "one", state: .running)
+        try await member(fixture, "two", state: .running)
+        try await member(fixture, "three", state: .running)
+        try await member(fixture, "four", state: .cancelled)
+        let says = Says()
+
+        // A message to an agent whose turn is open joins that turn, however full the workspace is.
+        let toRunning = await says.tool().call(
+            request("agent_say", ["to": .string("one"), "message": .string("Also the parser.")]),
+            as: fixture.identity, store: fixture.store
+        )
+        #expect(!toRunning.isError)
+        #expect(says.targets == ["one"])
+
+        // The fourth is a row rather than a live agent, so waking it would put a fourth writer in
+        // the worktree, which is the thing the ceiling is about.
+        let toStopped = await says.tool().call(
+            request("agent_say", ["to": .string("four"), "message": .string("Try again.")]),
+            as: fixture.identity, store: fixture.store
+        )
+        #expect(toStopped.isError)
+        #expect(toStopped.text == Crew.sentence(for: .tooMany(running: Crew.ceiling)))
+
+        // One of the three stops, and the same call goes through.
+        try await fixture.store.update(sessionID: running.id) { $0.state = .idle }
+
+        let afterRoom = await says.tool().call(
+            request("agent_say", ["to": .string("four"), "message": .string("Try again.")]),
+            as: fixture.identity, store: fixture.store
+        )
+        #expect(!afterRoom.isError)
+        #expect(says.targets == ["one", "four"])
     }
 
     /// The name that crosses the seam is the name the row actually has, so the app side matches on

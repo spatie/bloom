@@ -138,7 +138,7 @@ places: the listing, the dispatch and the gate.
 | `terminal_send_key` | Send Enter, Control-C, Tab, Escape or an arrow key to a live terminal | ✓ | | |
 | `media_show` | Show an image or video from the workspace inline in its chat | ✓ | | |
 | `agent_start` | Start a subagent: a second agent in the caller's own worktree, on the same branch, with a task of its own | ✓ | | |
-| `agent_say` | Put a message in another agent's chat on this job. An orchestrator names which of its crew; a subagent names nobody and talks up | ✓ | | |
+| `agent_say` | Put a message in another agent's chat on this job. An orchestrator names which of its crew; a subagent names nobody and talks up. Waking a stopped one is held to the same ceiling as a start | ✓ | | |
 | `agent_list` | Who else is working in this worktree: each agent's name, whether it is running, and what it is doing | ✓ | | |
 | `agent_stop` | Stop a subagent the caller started. It ends a turn and undoes no work | ✓ | | |
 | `quick_prompt_list` | The owner's own quick prompts, whole, with the ids the other three take | ✓ | | ✓ |
@@ -278,6 +278,17 @@ because a model that picked the wrong one gets either a diff it cannot separate 
 asked for. `Crew`'s head argues the whole distinction, including why the code says crew where the
 app says subagent.
 
+**The other tool the descriptions have to be about is Claude Code's own Task tool**, and that is
+not a documentation nicety: a live test asked for "a subagent called reader" and the model called
+Task, because "subagent" is that tool's word and it was already in its hands. A feature a model
+never reaches for is invisible, however well it works. So all four descriptions open on the
+difference. A Task subagent lives inside one turn, cannot be spoken to and is gone when the turn
+ends; one of these gets its own chat and its own row in the sidebar, keeps its context between
+turns, takes more work at any time through `agent_say`, and says when it has stopped and what it
+last said. The rule given to the model is the useful half: `agent_start` when the work outlives a
+single turn or when it will want to talk to the agent again, the Task tool for a one-shot read that
+answers inside this turn.
+
 What holds the shape of a crew is three rules, and all three are in `Crew` and `CrewTools` rather
 than in the window.
 
@@ -287,13 +298,28 @@ crew member, and a crew member's `agent_start` is refused. That is the same argu
 step with it, and a flat crew has no cycle to deadlock in.
 
 **Three may run in one workspace at once**, counted from the database rather than from anything
-held in memory, so a restart cannot lose the count and two calls racing cannot both read the same
-stale number. Running means `running` or `waiting`: a process holding its turn open on a question
-is a live agent in the worktree with a bill attached, while a failed or cancelled one is a row.
-Counting the dead would hold a third of a workspace's allowance until it was archived, with nothing
-on screen to explain why. Names are counted separately and across the whole workspace, running or
-not, because a stopped agent keeps its conversation and its row and a second agent taking its name
-would make the transcript above it read as one agent.
+held in memory, so a restart cannot lose the count and it cannot drift out of step with the rows
+the sidebar draws. Running means `running` or `waiting`: a process holding its turn open on a
+question is a live agent in the worktree with a bill attached, while a failed or cancelled one is a
+row. Counting the dead would hold a third of a workspace's allowance until it was archived, with
+nothing on screen to explain why. Names are counted separately and across the whole workspace,
+running or not, because a stopped agent keeps its conversation and its row and a second agent
+taking its name would make the transcript above it read as one agent.
+
+That count is a check followed by an act rather than a lock, and it is worth being honest about
+which. The read happens in the handler and the agent is started a hop away on the main actor, so
+two orchestrator chats in one worktree calling at the same moment can both be let through. One
+orchestrator's own calls are serialised by the bridge, two of them are not, and that second case is
+supported on purpose. What the race costs is a fourth agent in the worktree and nothing worse,
+which does not pay for a locking scheme across the seam.
+
+**`agent_say` counts too, because waking a stopped agent is a start.** The census leaves a stopped
+member out on purpose, so it holds no slot; but a message to one puts a turn back on it. Without
+the same count in `agent_say` the ceiling was a formality: start three, stop one, start a fourth,
+then say something to the stopped one, and four agents are running on one branch. So a message to a
+member that is not currently running is refused with the same sentence `agent_start` gives when the
+workspace is full. A message to an agent whose turn is already open is never refused, because it
+joins that turn rather than opening a second one.
 
 **There is no sideways.** An orchestrator names which of its crew it is talking to; a crew member
 names nobody and talks up, because it has exactly one agent it can talk to. A crew member that does
@@ -305,8 +331,8 @@ for the same reason: only the chat that started a member may stop it.
 
 `agent_stop` is not on the destructive side of any of this. It ends a turn and leaves the chat, the
 conversation and every file the agent has already written exactly where they are, and `agent_say`
-starts the same agent again. What it costs is work in flight, not work done, which is what its
-description says so that a model does not call it expecting a revert.
+starts the same agent again when there is a slot for it. What it costs is work in flight, not work
+done, which is what its description says so that a model does not call it expecting a revert.
 
 A message from a crew member reaches its orchestrator inside `BridgeUntrustedText`, exactly as text
 read off a web page does and for the same reason: a subagent is a model that has been reading

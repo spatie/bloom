@@ -659,6 +659,18 @@ final class WorkspaceModel {
                         + "subagent you meant to say that to."
                 )
             }
+            // `session(id:)` answers for an archived row where `sessions(workspaceID:)` and
+            // `crew(of:)` do not, and `closeSession` archives a chat while leaving the crew it
+            // started running. Without this the message went into a chat the owner had closed:
+            // the drain below built that session a fresh transcript, minted it a bridge token and
+            // started a turn in a conversation that is in no tab strip, no session list and no
+            // sidebar row. An agent nobody can see, spending money.
+            guard parent.archivedAt == nil else {
+                return .refused(
+                    "The chat that started you has been closed, so there is nobody above you to "
+                        + "talk to any more. Finish what you can on your own and stop."
+                )
+            }
             target = parent
             body = Crew.message(from: caller.title, saying: text)
         }

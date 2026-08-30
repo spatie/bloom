@@ -219,6 +219,16 @@ final class TranscriptModel {
     /// turn starts, so it never outlives the turn it describes.
     private var wasStoppedByHand = false
 
+    /// Whether the chat above this one has already been told that this turn ended.
+    ///
+    /// A turn has two endings that report, `.error` and `.result`, and they are not alternatives:
+    /// `AgentRunner` yields `.error(.storage(...))` when a transcript write fails without ending
+    /// the turn, so the failure sentence went out and then the turn's own result went out behind
+    /// it. An orchestrator told twice that one agent stopped picks the work back up twice, on the
+    /// first sentence and then again on a second that says the same thing. Cleared where a turn
+    /// begins, so it never silences the next one.
+    private var hasReportedTurnEnded = false
+
     /// Bumped whenever something outside the list asks it to go back to the newest row. A counter
     /// rather than a flag, so two requests in a row are two requests, and the list has nothing to
     /// clear afterwards. See `jumpToLiveEnd`.
@@ -727,6 +737,7 @@ final class TranscriptModel {
         }
         turnStartedAt = Date()
         wasStoppedByHand = false
+        hasReportedTurnEnded = false
         // **The clearing rule.** The last turn's subagents go here, at the one place a turn
         // starts, and nowhere else. Clearing them when they finish is the option that reads well
         // in a screenshot and badly in use: three rows leaving one by one take everything below
@@ -1089,8 +1100,9 @@ final class TranscriptModel {
             // After the drain, and only if nothing moved: a crew member whose orchestrator said
             // something while it was busy has just started the next turn, and telling the
             // orchestrator it has stopped in the same breath would have it act on an answer that
-            // is about to be superseded. `drain` writes `isRunning` synchronously before it awaits
-            // the send, so this reads the turn that has just begun rather than the one that ended.
+            // is about to be superseded. `drain` is awaited to completion above, `runner.send` and
+            // all, and `deliver` sets `isRunning` before that send, so by this line the flag is
+            // already describing the turn that has just begun rather than the one that ended.
             if !isRunning {
                 await reportToOrchestrator(
                     Crew.stoppedSentence(name: session.title, lastMessage: result.summary)
@@ -1344,8 +1356,23 @@ final class TranscriptModel {
     /// `drain` every other queued message goes through.
     ///
     /// A chat nobody started returns on the first line, which is nearly every chat in the app.
+    ///
+    /// At most one report per turn, whichever ending gets here first. See `hasReportedTurnEnded`.
     private func reportToOrchestrator(_ sentence: String) async {
         guard let parentID = session.parentSessionID, let store, let workspace else { return }
+        guard !hasReportedTurnEnded else { return }
+
+        // Read before the enqueue, and dropped when the chat above has been closed. `session(id:)`
+        // answers for an archived row where `sessions(workspaceID:)` and `crew(of:)` do not, and
+        // `closeSession` archives a chat while leaving the crew it started running. A report
+        // enqueued against a closed chat did not sit there quietly: the drain below built that
+        // session a fresh transcript, minted it a bridge token and started a turn in a
+        // conversation that is in no tab strip, no session list and no sidebar row. An agent
+        // nobody can see, spending money.
+        guard let parent = try? await store.session(id: parentID),
+              parent.archivedAt == nil else { return }
+
+        hasReportedTurnEnded = true
         _ = try? await store.enqueueDelivery(
             Delivery(
                 targetSessionID: parentID,
@@ -1359,8 +1386,7 @@ final class TranscriptModel {
         // was made with, and handing a stale one to `model(for:)` pushes it back into the live
         // model, which is the bug `notifyFinished` below is written around. A crew member's
         // orchestrator is in this same worktree, so the model it needs is one that already exists.
-        guard let model = app.existingModel(for: workspace.id),
-              let parent = try? await store.session(id: parentID) else { return }
+        guard let model = app.existingModel(for: workspace.id) else { return }
         let transcript = model.transcript(for: parent)
         await transcript.refreshQueue()
         await transcript.drain()

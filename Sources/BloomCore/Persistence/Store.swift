@@ -1527,6 +1527,34 @@ public actor Store {
         ).map(Self.session(from:))
     }
 
+    /// Every crew member in the app at once, grouped by the worktree it is working in.
+    ///
+    /// **One statement rather than one per workspace, and that is the whole reason it exists.**
+    /// The sidebar's crew rows are refreshed from `store.changes(of: [.sessions])`, and the runner
+    /// rewrites a session row (state, tokens, cost, `updatedAt`) many times inside one turn. Asked
+    /// per workspace, a sidebar holding twenty of them made twenty round trips onto this actor for
+    /// every batch of those writes, competing with the writes of the agent that caused them. The
+    /// grouping is Swift's work because it is free there and a second query here is not.
+    ///
+    /// Same predicate as `crew(inWorkspace:)`, so the two cannot disagree about what a crew member
+    /// is. A row with no `workspace_id` cannot be one: `Crew` is about agents sharing a worktree.
+    public func crewByWorkspace() throws -> [WorkspaceID: [Session]] {
+        let members = try db.query(
+            """
+            SELECT * FROM sessions
+            WHERE parent_session_id IS NOT NULL AND archived_at IS NULL
+            ORDER BY created_at
+            """
+        ).map(Self.session(from:))
+
+        var grouped: [WorkspaceID: [Session]] = [:]
+        for member in members {
+            guard let workspaceID = member.workspaceID else { continue }
+            grouped[workspaceID, default: []].append(member)
+        }
+        return grouped
+    }
+
     /// The chats that belong to no worktree, oldest first.
     ///
     /// Ask Bloom's, and nothing else today. It is a separate method rather than a nil argument to
@@ -1749,6 +1777,14 @@ public actor Store {
     /// down as a rule. This asks that table which states `appRelaunched` moves and where it moves
     /// them, so the bulk pass and the machine cannot come to different conclusions about what an
     /// interrupted launch left behind.
+    ///
+    /// **A crew member caught by this leaves an orchestrator waiting for ever, so it is told.**
+    /// Quitting Bloom with a crew working and reopening it used to bring back a set of dead rows,
+    /// with no queued delivery and no news for the chat that started them: the orchestrator sat on
+    /// a report that could no longer arrive, which is exactly the failure the head of
+    /// `Crew.failedSentence` says the design exists to prevent. The reports are enqueued here
+    /// rather than by whatever opens a window, because a workspace nobody opens this launch has
+    /// the same problem and there is no window to notice it.
     public func resetRunningSessions() throws {
         var sources: [SessionState] = []
         var destination: SessionState?
@@ -1760,10 +1796,53 @@ public actor Store {
         guard let destination, !sources.isEmpty else { return }
 
         let placeholders = sources.map { _ in "?" }.joined(separator: ", ")
+        let stateValues = sources.map { SQLValue.text($0.rawValue) }
+
+        // Read before the write, because the write is what destroys the evidence: once these rows
+        // are idle, nothing on them says they were working when the app died.
+        //
+        // The join is what keeps an archived orchestrator out of it. A delivery addressed to a
+        // chat the owner has closed is a row nothing will ever drain, and the sentence is about an
+        // agent that chat can no longer see anyway. The member being unarchived is the same
+        // argument one row down: an archived crew member is gone from `crew(of:)` and from every
+        // list its orchestrator can read, so there is nothing there to report the death of.
+        let lost = try db.query(
+            """
+            SELECT member.title AS title,
+                   member.workspace_id AS workspace_id,
+                   member.parent_session_id AS parent_session_id
+            FROM sessions AS member
+            JOIN sessions AS parent ON parent.id = member.parent_session_id
+            WHERE member.state IN (\(placeholders))
+              AND member.archived_at IS NULL
+              AND parent.archived_at IS NULL
+            ORDER BY member.created_at
+            """,
+            stateValues
+        )
+
         try db.run(
             "UPDATE sessions SET state = ? WHERE state IN (\(placeholders))",
-            [.text(destination.rawValue)] + sources.map { SQLValue.text($0.rawValue) }
+            [.text(destination.rawValue)] + stateValues
         )
+
+        // After the reset and one at a time, so that a delivery this cannot write costs the
+        // orchestrator its news and nothing else. The reset is the half that keeps the ceiling in
+        // `Crew` from staying stuck at three dead agents, and losing that to a failed insert would
+        // be trading a waiting orchestrator for a workspace that can never start another agent.
+        for row in lost {
+            guard let parentID = row.string("parent_session_id") else { continue }
+            try? enqueueDelivery(Delivery(
+                targetSessionID: SessionID(parentID),
+                sourceWorkspaceID: row.string("workspace_id").map(WorkspaceID.init),
+                kind: .report,
+                body: Crew.failedSentence(
+                    name: row.string("title") ?? "",
+                    reason: "Bloom was restarted while it was working, so its turn was lost. "
+                        + "Nothing it had not already reported got through."
+                )
+            ))
+        }
     }
 
     // MARK: - Messages

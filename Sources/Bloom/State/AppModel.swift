@@ -1248,7 +1248,7 @@ final class AppModel {
     /// to draw, and `WorkspaceModel` is not there to ask. See `Crew`.
     ///
     /// Keyed by workspace and holding every crew member in it, whichever chat started them, which
-    /// is `Store.crew(inWorkspace:)`'s own question. The nesting says which worktree an agent is
+    /// is `Store.crewByWorkspace`'s own question. The nesting says which worktree an agent is
     /// working in, and that is a true thing to say about all of them; whose crew it is, is the
     /// bridge's business and not the pane's.
     private(set) var crewRows: [WorkspaceID: [CrewRow]] = [:]
@@ -1262,10 +1262,17 @@ final class AppModel {
     /// Re-reads every workspace's crew. Called on each write to the sessions table, and once at
     /// startup, by `startObservingSessions`.
     ///
-    /// One query per workspace, which is the price of not adding a statement to `Store` for this:
-    /// the feed is coalesced structurally by `StoreChangeHub`, so this runs once per batch of
-    /// writes rather than once per write, and each query is a point read of a small table. It is
-    /// worth watching if the sidebar ever holds hundreds of workspaces.
+    /// **One hop onto the store actor, not one per workspace.** This used to ask
+    /// `Store.crew(inWorkspace:)` for each row in the sidebar, and the feed it hangs off fires on
+    /// every write to the sessions table: the runner rewrites state, both token counts, the cost
+    /// and `updatedAt` many times inside a single turn, so a sidebar holding twenty workspaces
+    /// queued twenty round trips onto that actor per batch, against the same actor the running
+    /// agent was writing through. `Store.crewByWorkspace` answers for all of them in one
+    /// statement and the grouping is free here.
+    ///
+    /// Filtered back down to the workspaces on screen rather than mirrored whole, because a crew
+    /// member in an archived workspace is a row the sidebar has nowhere to draw, and putting it in
+    /// `crewRows` would make the equality check below disagree with what is visible.
     ///
     /// Each workspace's list is written only when it has actually moved, for the reason
     /// `recomputeAgentTurns` writes its two sets that way: an identical value assigned back is
@@ -1274,10 +1281,10 @@ final class AppModel {
     /// three fields the row draws and none of the ones that move like that.
     func refreshCrew() async {
         guard let store else { return }
+        let grouped = (try? await store.crewByWorkspace()) ?? [:]
         var fresh: [WorkspaceID: [CrewRow]] = [:]
         for workspace in workspaces {
-            guard let members = try? await store.crew(inWorkspace: workspace.id),
-                  !members.isEmpty else { continue }
+            guard let members = grouped[workspace.id], !members.isEmpty else { continue }
             fresh[workspace.id] = members.map(CrewRow.init)
         }
         if crewRows != fresh { crewRows = fresh }
