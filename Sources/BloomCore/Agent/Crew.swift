@@ -154,6 +154,6 @@ public enum Crew {
     /// than an instruction from the person the orchestrator is working for. See
     /// `BridgeUntrustedText`, whose head states the threat properly.
     public static func message(from name: String, saying text: String) -> String {
-        BridgeUntrustedText.wrap(text, from: "your subagent \"\(name)\"")
+        BridgeUntrustedText.wrapSaying(text, from: "your subagent \"\(name)\"")
     }
 }
