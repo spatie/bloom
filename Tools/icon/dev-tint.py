@@ -73,7 +73,7 @@ def walk(node):
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
+    if len(sys.argv) not in (2, 3):
         print(__doc__.strip().splitlines()[2].strip(), file=sys.stderr)
         return 2
 
