@@ -234,6 +234,25 @@ struct CrewToolTests {
         #expect(Stops().tool().tool.description.contains("Task subagent"))
     }
 
+    /// **Bloom sweeps nothing**, so a finished subagent leaves the owner's sidebar when the
+    /// orchestrator says so and never otherwise, and the descriptions are the only thing that can
+    /// tell it to. `Crew.tidyHint` is that sentence, written once and carried rather than said
+    /// again in other words, so this asserts the constant itself: two wordings of the same
+    /// instruction is how one of them ends up describing a tool that no longer behaves that way.
+    @Test("the descriptions say to finish with an agent, in Crew's one wording")
+    func theDescriptionsSayToFinishWithOne() {
+        #expect(Starts().tool().tool.description.contains(Crew.tidyHint))
+
+        // And agent_stop's own description is what happens when the hint is taken, so it has to
+        // name all three of the things a stop now does, not just the turn it ends.
+        let stop = Stops().tool().tool.description
+        #expect(stop.contains("ends that agent if it is still running"))
+        #expect(stop.contains("takes its row out of the owner's sidebar"))
+        #expect(stop.contains("frees its name"))
+        #expect(stop.contains("its conversation stays in Bloom for the owner to read"))
+        #expect(stop.contains("finish with an agent and not only how you interrupt one"))
+    }
+
     // MARK: - Starting one
 
     @Test("a start reaches the window with the caller's own session and workspace on it")
@@ -756,6 +775,9 @@ struct CrewToolTests {
         #expect(crew.first?["is_you"]?.boolValue == true)
         #expect(crew.last?["is_you"]?.boolValue == false)
         #expect(result.text.contains("same branch"))
+        // "docs" has finished, but a subagent's own agent_stop is refused and it is itself in this
+        // list, so it is never told to tidy the crew up.
+        #expect(!result.text.contains(Crew.tidyHint))
     }
 
     @Test("an empty crew answers with a note saying how one begins")
@@ -786,6 +808,25 @@ struct CrewToolTests {
 
         #expect(json(result, "running")?.intValue == Crew.ceiling)
         #expect(result.text.contains("agent_start will be refused"))
+        // Every one of them is running, so there is nothing to tidy and nothing is said about it.
+        #expect(!result.text.contains(Crew.tidyHint))
+    }
+
+    /// The count is the point of this line. A fixed sentence in every answer is one a model reads
+    /// past, and it is the number that says the tidying is about somebody in particular.
+    @Test("a crew with finished members is counted and told to finish with them")
+    func listingCountsWhatThereIsToTidy() async throws {
+        let fixture = try await self.fixture("crew-list-finished")
+        try await member(fixture, "one", state: .running)
+        try await member(fixture, "two")
+        try await member(fixture, "three", state: .failed)
+
+        let result = await AgentListTool().call(
+            request("agent_list"), as: fixture.identity, store: fixture.store
+        )
+
+        #expect(result.text.contains("3 subagents: 1 running, 2 finished"))
+        #expect(result.text.contains(Crew.tidyHint))
     }
 
     private func json(_ result: BridgeToolResult, _ key: String) -> JSONValue? {

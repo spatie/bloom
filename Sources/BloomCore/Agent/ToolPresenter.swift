@@ -21,12 +21,22 @@ public enum ToolPresenter {
     /// literally is. `ToolLiteral` is asked once here rather than per case, so the presenter cannot
     /// answer differently from the permission panel below it, which reads the same type.
     ///
+    /// A case that answered the question itself keeps its answer, and exactly one family does:
+    /// the crew tools below, whose argument is a name an agent invented and which `ToolLiteral`
+    /// has no way to recognise, because all it knows about an MCP call is whether some field looks
+    /// like a path. Overwriting there cleared an answer the specific case had already given. It
+    /// cannot drift from a permission panel either way, because all four are in
+    /// `BridgeToolApproval.selfApproved` and never reach one. Every other case sets no literal, so
+    /// nothing else changes.
+    ///
     /// `worktree` is the workspace this call ran in, and the only thing it decides is which
     /// leading `cd` a shell row may hide. Empty hides nothing, which is what every caller with no
     /// workspace to hand wants.
     public static func present(name: String, input: JSONValue, worktree: String = "") -> ToolPresentation {
         var presentation = shape(name: name, input: input, worktree: worktree)
-        presentation.literal = ToolLiteral.of(name: name, input: input)
+        if presentation.literal == nil {
+            presentation.literal = ToolLiteral.of(name: name, input: input)
+        }
         return presentation
     }
 
@@ -289,6 +299,97 @@ public enum ToolPresenter {
         )
     }
 
+    /// Bloom's own four: an agent putting a second agent in the worktree it is already in, and
+    /// talking to it. `Crew` argues the feature and `CrewTools` holds the wire contract.
+    ///
+    /// They are answered here rather than by the generic MCP row, which drew "Bloom: agent
+    /// start" behind a puzzle piece. That names the transport and the extension where every other
+    /// row in this file names the thing that happened, and what happened is that a second writer
+    /// appeared in this worktree, which is the single most consequential line an agent can put in
+    /// a transcript.
+    ///
+    /// The tints are the ones the `Task` rows above already carry, because a reader meets the two
+    /// families in the same list and they mean the same things: an agent that is now running is
+    /// worth watching, listing is a read, and stopping one ends a turn. The names come from
+    /// `CrewToolName` rather than being written out again, for the reason that type gives: a name
+    /// that is right in three places and wrong in the fourth is a tool nobody can find.
+    ///
+    /// Nil for every other tool on the bridge, which then falls through to the generic row.
+    private static func crew(tool: String, input: JSONValue) -> ToolPresentation? {
+        switch tool {
+        case CrewToolName.start:
+            return crewRow(
+                glyph: "person.badge.plus",
+                label: "Start subagent",
+                name: input["name"]?.stringValue ?? "",
+                tint: .warning
+            )
+
+        case CrewToolName.say:
+            // Empty when a subagent is talking upwards, because that call names nobody: it has
+            // exactly one agent it can reach and `agent_say` refuses a `to` from it. The name of
+            // the agent above is not in the call, and inventing one here would be the row saying
+            // something the agent did not.
+            return crewRow(
+                glyph: "bubble.left.and.bubble.right",
+                label: "Say to",
+                name: input["to"]?.stringValue ?? "",
+                tint: .warning
+            )
+
+        case CrewToolName.list:
+            return ToolPresentation(
+                glyph: "person.3",
+                label: "List subagents",
+                // `agent_list` takes no arguments, so this is nearly always empty and the row is
+                // the label alone. It is read rather than assumed absent because a count is the
+                // one thing a future argument on it would carry, and a number is not a literal:
+                // it stays in the proportional face, as `TodoWrite`'s count does.
+                detail: crewCount(input),
+                tint: .neutral
+            )
+
+        case CrewToolName.stop:
+            return crewRow(
+                glyph: "stop.circle",
+                label: "Stop subagent",
+                name: input["name"]?.stringValue ?? "",
+                tint: .negative
+            )
+
+        default:
+            return nil
+        }
+    }
+
+    /// A crew row whose detail is an agent's name.
+    ///
+    /// The name is the literal as well as the detail, which is what sets it in the monospace face.
+    /// `ToolLiteral` cannot reach this conclusion from the outside: to it an MCP call is a bag of
+    /// fields to look for a path in, and this one holds no path. The reason a name belongs in mono
+    /// is the reason a shell id does. It is an address rather than a word: `read-the-cascade` is
+    /// the exact string `agent_say` and `agent_stop` have to be given back, character for
+    /// character, and a column of them only lines up in a face whose characters do.
+    private static func crewRow(
+        glyph: String, label: String, name: String, tint: ToolTint
+    ) -> ToolPresentation {
+        let detail = oneLine(name, limit: Crew.nameLimit)
+        return ToolPresentation(
+            glyph: glyph,
+            label: label,
+            detail: detail,
+            tint: tint,
+            literal: detail.isEmpty ? nil : detail
+        )
+    }
+
+    /// The count on a crew listing, or nothing. Formatted rather than interpolated, so a thousands
+    /// separator is the reader's own, which is the rule `Counted` exists to keep.
+    private static func crewCount(_ input: JSONValue) -> String {
+        guard let count = input["count"]?.intValue ?? input["limit"]?.intValue else { return "" }
+        return count.formatted()
+    }
+
     private static func sendMessage(_ input: JSONValue) -> ToolPresentation {
         ToolPresentation(
             glyph: "paperplane",
@@ -403,6 +504,11 @@ public enum ToolPresenter {
     private static func mcp(name: String, input: JSONValue) -> ToolPresentation {
         let parts = name.dropFirst("mcp__".count).components(separatedBy: "__")
         let server = parts.first ?? name
+        // Two spellings of the same tail. `bare` is the name the server registered, which is what
+        // a lookup has to match; `tool` is that name read as English. They are separate because
+        // the double underscore is a separator here and a word break inside a segment, and one
+        // string cannot be both.
+        let bare = parts.dropFirst().joined(separator: "__")
         let tool = parts.dropFirst().joined(separator: " ").replacing("_", with: " ")
         // Bloom's own bridge, said as Bloom.
         //
@@ -418,6 +524,12 @@ public enum ToolPresenter {
         // reader is already in. Both are a presentation problem and this is the presentation, so
         // this is where it is answered rather than by moving the name the wire depends on.
         let isBloom = server == BridgeRegistration.serverName
+
+        // The four crew tools are named for what happened rather than for the app they went
+        // through, so they leave here before the generic row is built. See `crew`, which sits with
+        // the other subagent rows because that is what it is about.
+        if isBloom, let row = crew(tool: bare, input: input) { return row }
+
         let label = tool.isEmpty
             ? (isBloom ? "Bloom" : server)
             : "\(isBloom ? "Bloom" : server): \(tool)"

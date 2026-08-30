@@ -340,8 +340,12 @@ public actor AgentRunner {
 
     // MARK: Sending
 
-    /// Write one user turn. Starts the process on first use.
-    public func send(_ text: String) async throws {
+    /// Write one turn. Starts the process on first use.
+    ///
+    /// `recording` is the row to write down in place of the user row, for a turn another agent
+    /// asked for: see `SessionRunner.send(_:recording:)` for why what goes out and what is drawn
+    /// are not the same string.
+    public func send(_ text: String, recording: Data? = nil) async throws {
         // The two settings reads come first, and that ordering is the whole of the fix.
         //
         // They were between the wait and the start, and each is a store round trip, so there were
@@ -359,7 +363,14 @@ public actor AgentRunner {
         let line = try Self.encodeTurn(text)
         handle.current?.writeLine(line)
 
-        await persist(kind: .user, payload: Data(line.utf8))
+        // One row, whichever it is. The crew payload carries what a person reads and what the
+        // model was handed, so writing the user row beside it would put the envelope back on
+        // screen, which is the whole of what this argument exists to stop.
+        if let recording {
+            await persist(kind: .crew, payload: recording)
+        } else {
+            await persist(kind: .user, payload: Data(line.utf8))
+        }
 
         session.apply(.turnStarted)
         await save(session)

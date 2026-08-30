@@ -749,7 +749,11 @@ final class TranscriptModel {
         statusLabel = "Starting"
 
         do {
-            try await runner.send(delivery.body)
+            // `sent` rather than `body`, and the payload beside it. They are the same string for
+            // anything the owner typed and two different strings for a crew message: what the
+            // model is handed is the envelope, and what the transcript draws is the words. See
+            // `Delivery.sent` and `SessionRunner.send(_:recording:)`.
+            try await runner.send(delivery.sent, recording: delivery.crewPayload)
             // The runner writes the user row as part of the send, and until this line nothing read
             // it back: the transcript only pulled rows on an agent event, so the owner's own
             // message did not appear until the answer did. Reading it here is what retires the
@@ -1072,7 +1076,7 @@ final class TranscriptModel {
             // orchestrator waiting on a crew member that died looks exactly like one waiting on a
             // crew member that is still thinking. See `Crew.failedSentence`.
             await reportToOrchestrator(
-                Crew.failedSentence(name: session.title, reason: failure.message)
+                CrewMessage.failed(name: session.title, reason: failure.message)
             )
 
         case .result(let result):
@@ -1105,7 +1109,7 @@ final class TranscriptModel {
             // already describing the turn that has just begun rather than the one that ended.
             if !isRunning {
                 await reportToOrchestrator(
-                    Crew.stoppedSentence(name: session.title, lastMessage: result.summary)
+                    CrewMessage.stopped(name: session.title, lastMessage: result.summary)
                 )
             }
 
@@ -1358,7 +1362,12 @@ final class TranscriptModel {
     /// A chat nobody started returns on the first line, which is nearly every chat in the app.
     ///
     /// At most one report per turn, whichever ending gets here first. See `hasReportedTurnEnded`.
-    private func reportToOrchestrator(_ sentence: String) async {
+    ///
+    /// A `CrewMessage` rather than a sentence, because the two readers want different lengths of
+    /// it: the orchestrator is handed the paragraph with the agent's last words and the hint about
+    /// tidying up, and the owner's window draws the one line saying the agent stopped. Handing one
+    /// string to both is what put an instruction addressed to a model in the owner's own bubble.
+    private func reportToOrchestrator(_ message: CrewMessage) async {
         guard let parentID = session.parentSessionID, let store, let workspace else { return }
         guard !hasReportedTurnEnded else { return }
 
@@ -1378,7 +1387,7 @@ final class TranscriptModel {
                 targetSessionID: parentID,
                 sourceWorkspaceID: workspace.id,
                 kind: .report,
-                body: sentence
+                crew: message
             )
         )
 

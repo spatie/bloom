@@ -130,10 +130,12 @@ public enum Crew {
     public static func stoppedSentence(name: String, lastMessage: String?) -> String {
         guard let last = lastMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
               !last.isEmpty else {
-            return "Your subagent \"\(name)\" has stopped. It said nothing before it did."
+            return "Your subagent \"\(name)\" has stopped. It said nothing before it did.\n\n"
+                + tidyHint
         }
 
         return "Your subagent \"\(name)\" has stopped. The last thing it said to you:\n\n\(last)"
+            + "\n\n" + tidyHint
     }
 
     /// The same line for an agent that did not finish on purpose.
@@ -146,6 +148,33 @@ public enum Crew {
 
         return "Your subagent \"\(name)\" stopped without finishing. \(tail)"
     }
+
+    /// The one line the transcript draws for a stop, as opposed to the paragraph the model is
+    /// handed. See `CrewMessage`, which holds both: a person reading their own window wants to
+    /// know that an agent finished, and does not want the instruction that was addressed to the
+    /// orchestrator.
+    public static func stoppedSummary(name: String) -> String {
+        "\(name) stopped"
+    }
+
+    /// The same for a failure, which keeps its reason because that is the whole of the news.
+    public static func failedSummary(name: String, reason: String) -> String {
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "\(name) stopped without finishing" : "\(name) failed. \(trimmed)"
+    }
+
+    /// What the wake tells an orchestrator to do with an agent it is finished with.
+    ///
+    /// **A hint rather than a rule, and this is the whole cleanup design.** Bloom sweeps nothing:
+    /// a timer that takes an agent away can always take away the one you were about to talk to,
+    /// and every argument about how long it should wait is unwinnable. So the tool says what to
+    /// do, in the three places a model reads: here, in `agent_list`'s answer, and in
+    /// `agent_start`'s description. A model that forgets costs a row in the sidebar and nothing
+    /// else, because a finished agent holds no slot.
+    public static let tidyHint =
+        "If you have no more work for it, call agent_stop on it now: that ends it and takes its "
+        + "row out of the sidebar. If you will send it more work, leave it alone, because it "
+        + "keeps everything it has read."
 
     /// How a message from a subagent is put in front of the orchestrator.
     ///

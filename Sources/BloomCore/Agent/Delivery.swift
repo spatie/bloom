@@ -50,7 +50,21 @@ public struct Delivery: Identifiable, Sendable, Hashable {
     public var kind: Kind
     /// Reports only: done, blocked or failed. Nil for everything else.
     public var verdict: String?
+    /// What a person reads. For a crew message that is the agent's own words, without the
+    /// envelope: see `crewPayload`.
     public var body: String
+    /// The `CrewMessage` this delivery is, encoded, or nil for a sentence the owner typed.
+    ///
+    /// **The two halves have to travel together or the bug comes back.** A message from one agent
+    /// to another is wrapped for the model and read by a person, and those are two different
+    /// strings. A delivery that carried only one of them left the drain choosing between handing
+    /// the model an unwrapped sentence and drawing the envelope in the owner's own bubble, which
+    /// is what it did.
+    ///
+    /// Bytes rather than a `CrewMessage`, for two reasons. A `Delivery` is `Hashable` and a
+    /// `CrewMessage` is not, and these are the exact bytes the `messages` row is written with, so
+    /// the queue and the transcript cannot disagree about what was said.
+    public var crewPayload: Data?
     public var createdAt: Date
     /// Nil while it is still waiting. Set at the moment it goes.
     public var deliveredAt: Date?
@@ -69,6 +83,7 @@ public struct Delivery: Identifiable, Sendable, Hashable {
         kind: Kind = .owner,
         verdict: String? = nil,
         body: String,
+        crewPayload: Data? = nil,
         createdAt: Date = Date(),
         deliveredAt: Date? = nil,
         deliveredSeq: Int? = nil
@@ -79,10 +94,50 @@ public struct Delivery: Identifiable, Sendable, Hashable {
         self.kind = kind
         self.verdict = verdict
         self.body = body
+        self.crewPayload = crewPayload
         self.createdAt = createdAt
         self.deliveredAt = deliveredAt
         self.deliveredSeq = deliveredSeq
     }
+
+    /// A delivery of something one agent said to another, or of Bloom's word about one of them.
+    ///
+    /// The only way to build one, so that `body` cannot be given the envelope by a caller that
+    /// meant the words. Every crew message in the app goes through here.
+    ///
+    /// An encoding failure leaves `crewPayload` nil, which costs the header on the row and sends
+    /// the readable half rather than losing the sentence. It cannot realistically happen: the
+    /// payload is five strings and two enums with `String` raw values.
+    public init(
+        id: DeliveryID = .new(),
+        targetSessionID: SessionID,
+        sourceWorkspaceID: WorkspaceID? = nil,
+        kind: Kind,
+        verdict: String? = nil,
+        crew message: CrewMessage,
+        createdAt: Date = Date()
+    ) {
+        self.init(
+            id: id,
+            targetSessionID: targetSessionID,
+            sourceWorkspaceID: sourceWorkspaceID,
+            kind: kind,
+            verdict: verdict,
+            body: message.text,
+            crewPayload: try? message.payload(),
+            createdAt: createdAt
+        )
+    }
+
+    /// The message this is, for a caller that has to read one half of it. Nil for the owner's own.
+    public var crewMessage: CrewMessage? { crewPayload.flatMap(CrewMessage.decode) }
+
+    /// What the agent is actually handed, which is the envelope for anything another agent said
+    /// and the body itself for everything else.
+    ///
+    /// The drain asks this rather than reaching for `body`, which is the whole of the fix: one
+    /// place decides which of the two renderings goes to the model.
+    public var sent: String { crewMessage?.sent ?? body }
 
     public var isPending: Bool { deliveredAt == nil }
 

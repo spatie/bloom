@@ -312,6 +312,8 @@ public struct AgentStartTool: BridgeToolHandling {
             when it stops and what it last said, so do not sit and wait for it: say what you \
             started and get on with your own work.
 
+            \(Crew.tidyHint)
+
             Three subagents may run in one workspace at once. This costs real money and puts a \
             second writer in your working tree, so start one because the work genuinely divides. \
             A subagent cannot start subagents of its own.
@@ -468,9 +470,12 @@ public struct AgentSayTool: BridgeToolHandling {
             owner had typed it, so write it as a message rather than as a report about one. It \
             returns once the message has been delivered, not once the agent has answered.
 
-            Speaking to an agent that has stopped sets it working again, so it takes one of the \
-            three running slots this workspace has. If all three are taken, stop one with \
+            Speaking to an agent whose turn has ended sets it working again, so it takes one of \
+            the three running slots this workspace has. If all three are taken, stop one with \
             agent_stop first, or wait for one to finish.
+
+            An agent you have called agent_stop on is finished with, and its name is gone: it \
+            cannot be spoken to, and agent_start is what starts another one.
             """,
         inputSchema: .object([
             "type": .string("object"),
@@ -736,6 +741,27 @@ public struct AgentListTool: BridgeToolHandling {
                 + "only talk upwards: agent_say with no 'to' reaches the agent that started you."
             : "Everyone here is editing the same files on the same branch as you. \(room) Talk to "
                 + "one with agent_say, and stop one with agent_stop."
+                + tidying(crew: crew, running: running)
+    }
+
+    /// The tally of what is finished and the reminder to let it go, or nothing at all.
+    ///
+    /// **Counted rather than said unconditionally**, because a sentence that is in every answer is
+    /// a sentence a model stops reading, and there is nothing to tidy until something has stopped.
+    /// Bloom sweeps no finished agent away itself, for the reason `Crew.tidyHint` gives, so this
+    /// answer is one of the three places the orchestrator is told to. The hint is that constant
+    /// rather than a second wording of it; what is added here is the count, which is what tells an
+    /// orchestrator that the tidying is about somebody in particular.
+    ///
+    /// Orchestrators only. A crew member's `agent_stop` is refused, and it is itself in this list,
+    /// so telling it to stop the finished ones would be telling it to do a thing it cannot.
+    private static func tidying(crew: [Session], running: Int) -> String {
+        let finished = crew.count - running
+        guard finished > 0 else { return "" }
+
+        let total = crew.count == 1 ? "1 subagent" : "\(crew.count) subagents"
+        return " \(total): \(running) running, \(finished) finished. A finished one keeps its "
+            + "name and its row in the sidebar until you say you are done with it. " + Crew.tidyHint
     }
 }
 
@@ -747,10 +773,17 @@ public struct AgentListTool: BridgeToolHandling {
 /// conversation asked to end. A crew member is refused outright: it started nothing, so there is
 /// nothing it could be naming that is its to stop.
 ///
-/// It is not destructive in the sense `BridgeToolApproval` reserves that word for. The chat, its
-/// conversation and everything the agent wrote in the worktree stay exactly where they are, which
+/// It is not destructive in the sense `BridgeToolApproval` reserves that word for. Everything the
+/// agent wrote in the worktree stays exactly where it is and its conversation stays readable, which
 /// is why the description says so out loud: a model that read this as "undo that agent's work"
 /// would call it expecting a revert.
+///
+/// **It is how an orchestrator finishes with an agent, not only how it interrupts one**, and the
+/// description has to carry that because nothing else can. Bloom sweeps no finished agent away on
+/// a timer, for the reason `Crew.tidyHint` gives, so the row and the name are let go here or not
+/// at all. The two other places a model is told so use that constant word for word rather than a
+/// second wording of it: the line put in an orchestrator's chat when a subagent stops, and
+/// `agent_start`'s description.
 public struct AgentStopTool: BridgeToolHandling {
     private let stop: CrewStopping
 
@@ -763,17 +796,21 @@ public struct AgentStopTool: BridgeToolHandling {
     public let tool = BridgeTool(
         name: CrewToolName.stop,
         description: """
-            Stop a subagent you started with agent_start, by name. Use it when what it was given \
-            is no longer wanted, when it is working on something you have decided against, or when \
+            Finish with a subagent you started with agent_start, by name. Call it when the agent \
+            has done what you started it for, when what it was given is no longer wanted, or when \
             you need the slot, because three subagents may run in one workspace at once.
 
             'name' is required and is the name agent_list prints.
 
-            It ends that agent's turn and leaves it idle. Its chat, its conversation and \
-            everything it has already written in the worktree stay where they are: this stops an \
-            agent, it does not undo its work, and the row stays in the sidebar for the owner to \
-            read. Unlike a Task subagent, a stopped agent is still there to go back to: agent_say \
-            sets it working again, which takes one of the three running slots once more.
+            It ends that agent if it is still running, takes its row out of the owner's sidebar, \
+            and frees its name for another subagent to use. Nothing it did is undone: everything \
+            it wrote in the worktree stays exactly as it left it, and its conversation stays in \
+            Bloom for the owner to read.
+
+            This is how you finish with an agent and not only how you interrupt one. A Task \
+            subagent ends itself when your turn ends; one of these does not, so an agent you have \
+            no more work for keeps its name and sits in the owner's sidebar until you say you are \
+            done with it.
 
             Only the agent that started a subagent may stop it.
             """,

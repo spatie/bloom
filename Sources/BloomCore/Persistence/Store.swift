@@ -881,6 +881,32 @@ public actor Store {
                     "CREATE INDEX IF NOT EXISTS sessions_parent ON sessions(parent_session_id);"
                 )
             },
+
+            // What one agent said to another, in both of its renderings. See `CrewMessage`.
+            //
+            // **The column is here because `body` alone could not be both.** A crew message is
+            // wrapped for the model and read by a person, and the queue used to hold the wrapped
+            // one: whatever the drain did with it, one of the two readers got the wrong string,
+            // and the one that did was the owner, who saw the envelope drawn as though he had
+            // typed it.
+            //
+            // The whole payload rather than a second `sent` column, because it is the same JSON
+            // the `messages` row is written with, and one document that both readers decode
+            // cannot drift the way two columns filled in by two writers can.
+            //
+            // NULL is the owner's own message, which is every row that existed when this ran and
+            // most rows that will ever exist, so there is no default to invent and nothing to
+            // backfill. Guarded on the column's absence for the reason every step above is:
+            // `ADD COLUMN` has no `IF NOT EXISTS`, and the store's own tests rewind
+            // `user_version` and replay the list over a shape that already has it.
+            { db in
+                let names = Set(
+                    try db.query("PRAGMA table_info(deliveries);").compactMap { $0.string("name") }
+                )
+                if !names.contains("crew_payload") {
+                    try db.execute("ALTER TABLE deliveries ADD COLUMN crew_payload BLOB;")
+                }
+            },
         ]
 
         let current = Int(db.userVersion)
@@ -1836,7 +1862,11 @@ public actor Store {
                 targetSessionID: SessionID(parentID),
                 sourceWorkspaceID: row.string("workspace_id").map(WorkspaceID.init),
                 kind: .report,
-                body: Crew.failedSentence(
+                // A crew message rather than a plain body, like every other thing one agent is
+                // told about another: the orchestrator is handed the sentence and its own window
+                // draws the one line, instead of the paragraph appearing as though the owner had
+                // typed it. See `CrewMessage`.
+                crew: CrewMessage.failed(
                     name: row.string("title") ?? "",
                     reason: "Bloom was restarted while it was working, so its turn was lost. "
                         + "Nothing it had not already reported got through."
@@ -2344,9 +2374,9 @@ public actor Store {
         try db.run(
             """
             INSERT INTO deliveries
-                (id, target_session_id, source_workspace_id, kind, verdict, body, created_at,
-                 delivered_at, delivered_seq)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, target_session_id, source_workspace_id, kind, verdict, body, crew_payload,
+                 created_at, delivered_at, delivered_seq)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 .text(delivery.id),
@@ -2355,6 +2385,7 @@ public actor Store {
                 .text(delivery.kind.rawValue),
                 delivery.verdict.map { .text($0) } ?? .null,
                 .text(delivery.body),
+                delivery.crewPayload.map { .blob($0) } ?? .null,
                 .double(delivery.createdAt.timeIntervalSince1970),
                 delivery.deliveredAt.map { .double($0.timeIntervalSince1970) } ?? .null,
                 delivery.deliveredSeq.map { .int(Int64($0)) } ?? .null,
@@ -2904,6 +2935,7 @@ public actor Store {
             kind: Delivery.Kind(rawValue: row.string("kind") ?? "") ?? .owner,
             verdict: row.string("verdict"),
             body: row.string("body") ?? "",
+            crewPayload: row.data("crew_payload"),
             createdAt: row.date("created_at") ?? Date(),
             deliveredAt: row.date("delivered_at"),
             deliveredSeq: row.int("delivered_seq").map(Int.init)

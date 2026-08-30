@@ -114,10 +114,16 @@ struct CrewStoreTests {
         #expect(pending.count == 2)
         #expect(pending.allSatisfy { $0.kind == .report })
         #expect(pending.allSatisfy { $0.sourceWorkspaceID == workspace.id })
-        #expect(pending.allSatisfy { $0.body.contains("restarted") })
-        #expect(pending.contains { $0.body.contains("\"tests\"") })
-        #expect(pending.contains { $0.body.contains("\"docs\"") })
-        #expect(pending.allSatisfy { !$0.body.contains("\"quiet\"") })
+        // `sent` rather than `body`: this is news about an agent, so it is a crew message, and the
+        // sentence the orchestrator is handed is the long half of it. The short half is what the
+        // owner's own window draws, and it names the agent without the paragraph.
+        #expect(pending.allSatisfy { $0.sent.contains("restarted") })
+        #expect(pending.contains { $0.sent.contains("\"tests\"") })
+        #expect(pending.contains { $0.sent.contains("\"docs\"") })
+        #expect(pending.allSatisfy { !$0.sent.contains("\"quiet\"") })
+        #expect(pending.allSatisfy { $0.crewMessage?.event == .failed })
+        #expect(pending.contains { $0.body == "tests failed. Bloom was restarted while it was "
+            + "working, so its turn was lost. Nothing it had not already reported got through." })
 
         // The reset itself still happened, which is the half that keeps the ceiling in `Crew` from
         // staying stuck on agents that are not running.

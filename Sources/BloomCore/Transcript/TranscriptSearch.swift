@@ -284,6 +284,9 @@ public enum TranscriptSearch {
         case .toolUse: "Tool call"
         case .toolResult: "Tool output"
         case .error: "Error"
+        // One word for all four crew events, because a search result cannot say which of them a
+        // row is without decoding it, and every one of them is a message the owner did not type.
+        case .crew: "Message"
         case .result, .system, .notice, .permissionAsk: "Transcript"
         }
     }

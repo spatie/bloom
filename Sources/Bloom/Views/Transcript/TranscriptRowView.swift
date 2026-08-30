@@ -115,6 +115,15 @@ struct TranscriptRowView: View, Equatable {
                 )
             }
 
+        case .crew:
+            // Decoded here rather than through `TranscriptEventCache`, which parses the agent
+            // stream's own JSON and has no reading for this payload. A crew row is written once
+            // and is a sentence rather than a turn's worth of blocks, so there is nothing here for
+            // that cache to save.
+            if let message = CrewMessage.decode(row.payload), !message.text.isEmpty {
+                CrewMessageRowView(message: message)
+            }
+
         case .assistantText:
             if let text = assistantText, !text.isEmpty {
                 ProseRowView(text: text)

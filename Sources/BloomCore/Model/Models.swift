@@ -521,6 +521,16 @@ public enum MessageKind: String, Sendable, Codable {
     case error
     case system
     case notice
+    /// Something an agent said to another agent, or Bloom's own word about one of them. The
+    /// payload is a `CrewMessage`.
+    ///
+    /// **This kind exists because `.user` was a lie on these rows.** A subagent's message is
+    /// wrapped for the model in the untrusted envelope, and the row that carried it was written
+    /// with exactly the bytes that went out, in the bucket that means "the owner typed this". Six
+    /// lines explaining to a model what untrusted content is appeared in the owner's own bubble.
+    /// A row of this kind holds both renderings, so the window draws what a person reads and the
+    /// model still got what it was handed.
+    case crew
 }
 
 public struct Message: Identifiable, Sendable, Hashable {

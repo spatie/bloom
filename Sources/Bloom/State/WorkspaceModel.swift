@@ -591,12 +591,17 @@ final class WorkspaceModel {
         // The brief joins the queue rather than being sent, exactly as a workspace's opening
         // prompt does, so there is one ordered route into every conversation in the app. See
         // `enqueueOpening` and the head of `Delivery`.
+        //
+        // As a crew message rather than a plain body, so the first row of this agent's chat says
+        // who set the task rather than reading as though the owner typed it. `CrewMessage.brief`
+        // is the one that is deliberately not wrapped: it is the instruction this agent exists to
+        // follow, and fencing it off would leave it with no task at all.
         _ = try? await store.enqueueDelivery(
             Delivery(
                 targetSessionID: stored.id,
                 sourceWorkspaceID: workspace.id,
                 kind: .message,
-                body: order.task
+                crew: CrewMessage.brief(from: parent.title, task: order.task)
             )
         )
 
@@ -624,18 +629,25 @@ final class WorkspaceModel {
     /// talking up, because a crew member has exactly one place to talk and naming it would be a
     /// second way to say the same thing. See `CrewSaying`.
     ///
-    /// **Upward is wrapped in the untrusted envelope and downward is not**, and the asymmetry is
-    /// the point. What a subagent says back is a model reporting on files it has been reading,
-    /// which is data; what an orchestrator says down is the instruction the subagent exists to
-    /// follow, and is no different in kind from the brief it was started with. See
-    /// `Crew.message(from:saying:)` and `BridgeUntrustedText`.
+    /// **Both directions are wrapped, and each names who is speaking.** What a subagent says back
+    /// is a model reporting on files it has been reading, which is data; what an orchestrator says
+    /// down is another model's words too, and the agent reading them is entitled to know they came
+    /// from the chat above it rather than from the person it works for. Only the brief a subagent
+    /// is started with is unwrapped, because that one is its task. `CrewMessage.said` holds both
+    /// wordings and `BridgeUntrustedText` states the threat.
     func sayToCrew(
         _ text: String, to name: String?, from callerID: SessionID
     ) async -> CrewSayOutcome {
         guard let store else { return .refused(Self.crewWithoutStore) }
+        // Read once, at the top, because both directions need the caller's own row now: the
+        // message is headed with the name of the agent that sent it, whichever way it is going,
+        // so an agent is told which chat is talking to it rather than merely that one is.
+        guard let caller = try? await store.session(id: callerID) else {
+            return .refused("The chat that said that is not in Bloom any more.")
+        }
 
         let target: Session
-        let body: String
+        let message: CrewMessage
         if let name {
             // `crew(of:)` and not `crew(inWorkspace:)`, which is what keeps an orchestrator to its
             // own crew: two chats in one worktree may each have a subagent, and neither of them
@@ -646,13 +658,9 @@ final class WorkspaceModel {
             case .unknown: return .refused(Self.noCrewMember(name, among: crew.map(\.title)))
             case .ambiguous: return .refused(Self.ambiguousCrewMember(name))
             }
-            body = text
+            message = CrewMessage.said(from: caller.title, text: text, sender: .orchestrator)
         } else {
-            // Read here rather than at the top, because only this arm needs the caller's own row:
-            // the arm above asks the database whose crew it is, which answers the same question
-            // without a second query.
-            guard let caller = try? await store.session(id: callerID),
-                  let parentID = caller.parentSessionID,
+            guard let parentID = caller.parentSessionID,
                   let parent = try? await store.session(id: parentID) else {
                 return .refused(
                     "No agent started this chat, so there is nobody above it to talk to. Name the "
@@ -672,7 +680,7 @@ final class WorkspaceModel {
                 )
             }
             target = parent
-            body = Crew.message(from: caller.title, saying: text)
+            message = CrewMessage.said(from: caller.title, text: text, sender: .subagent)
         }
 
         _ = try? await store.enqueueDelivery(
@@ -680,7 +688,7 @@ final class WorkspaceModel {
                 targetSessionID: target.id,
                 sourceWorkspaceID: workspace.id,
                 kind: .message,
-                body: body
+                crew: message
             )
         )
 
@@ -702,13 +710,21 @@ final class WorkspaceModel {
         )
     }
 
-    /// Stops a crew member, and leaves its conversation exactly where it is.
+    /// Stops a crew member: the agent ends, its row leaves the sidebar, and its conversation
+    /// stays where it is.
     ///
-    /// `terminateNow` rather than `closeSession`: the row, its transcript and its name all stay,
-    /// so both the orchestrator and the owner can still read what the agent did before it was
-    /// stopped. The name staying taken is deliberate too, and `Crew.start` counts a stopped
-    /// member among `existing` for the same reason: a second agent under a stopped one's name
-    /// would make the transcript above it read as one agent.
+    /// **Archived, never deleted.** agent_stop means "I am finished with this one", which is three
+    /// things at once: the process ends, the row goes out of the sidebar, and the bridge token it
+    /// was minted stops being a key into this app. What it must not mean is that the conversation
+    /// goes: an orchestrator's account of what its crew did is often the only record of an hour's
+    /// work, and the owner reads it after the fact. `closeSession` is exactly that act and it is
+    /// what the owner's own close button does, so a stopped subagent and a closed chat leave the
+    /// same shape behind rather than two.
+    ///
+    /// The name comes free again with the row, because `Store.crew(of:)` excludes an archived one
+    /// and that read is what `AgentStartTool` weighs a new name against. That is the point rather
+    /// than a side effect: an orchestrator that has finished with "tests" and wants a fresh one
+    /// should not have to invent "tests-2".
     func stopCrewMember(named name: String, startedBy callerID: SessionID) async -> CrewStopOutcome {
         guard let store else { return .refused(Self.crewWithoutStore) }
         let crew = (try? await store.crew(of: callerID)) ?? []
@@ -719,19 +735,16 @@ final class WorkspaceModel {
         case .ambiguous: return .refused(Self.ambiguousCrewMember(name))
         }
 
-        // Only a transcript this launch actually built. A member with no transcript has no process
-        // behind it in this app, and building one in order to kill it would start the very pump
-        // this is trying to end.
-        guard let transcript = existingTranscript(for: member.id) else {
-            return .stopped(
-                "Subagent \"\(member.title)\" was not running, so there was nothing to stop. Its "
-                    + "chat is still here to read."
-            )
-        }
-        transcript.terminateNow()
+        // `closeSession` and not a `terminateNow` beside an archive of our own. It tears the
+        // transcript down (which terminates the runner and stops the event pump), writes the one
+        // column, retires the bridge registration and reloads the strip, in that order. A member
+        // this launch never built a transcript for has no process to end and the rest still
+        // applies, which is why there is no early return for it.
+        await closeSession(member)
+
         return .stopped(
-            "Stopped subagent \"\(member.title)\". Its conversation is still here, and its name "
-                + "stays taken in this workspace."
+            "Stopped subagent \"\(member.title)\" and closed its chat. Its conversation is still "
+                + "here to read, and the name is free to use again."
         )
     }
 

@@ -140,7 +140,7 @@ places: the listing, the dispatch and the gate.
 | `agent_start` | Start a subagent: a second agent in the caller's own worktree, on the same branch, with a task of its own | ✓ | | |
 | `agent_say` | Put a message in another agent's chat on this job. An orchestrator names which of its crew; a subagent names nobody and talks up. Waking a stopped one is held to the same ceiling as a start | ✓ | | |
 | `agent_list` | Who else is working in this worktree: each agent's name, whether it is running, and what it is doing | ✓ | | |
-| `agent_stop` | Stop a subagent the caller started. It ends a turn and undoes no work | ✓ | | |
+| `agent_stop` | Finish with a subagent the caller started: it ends the agent if it is still running, takes its row out of the sidebar and frees its name, and undoes no work | ✓ | | |
 | `quick_prompt_list` | The owner's own quick prompts, whole, with the ids the other three take | ✓ | | ✓ |
 | `quick_prompt_create` | Write a new quick prompt into that library | ✓ | | ✓ |
 | `quick_prompt_update` | Change one, field by field, leaving the fields it does not name alone | | | ✓ |
@@ -303,8 +303,9 @@ the sidebar draws. Running means `running` or `waiting`: a process holding its t
 question is a live agent in the worktree with a bill attached, while a failed or cancelled one is a
 row. Counting the dead would hold a third of a workspace's allowance until it was archived, with
 nothing on screen to explain why. Names are counted separately and across the whole workspace,
-running or not, because a stopped agent keeps its conversation and its row and a second agent
-taking its name would make the transcript above it read as one agent.
+running or not, because an agent that has finished keeps its conversation and its row until the
+orchestrator says it is done with it, and a second agent taking its name would make the transcript
+above it read as one agent. `agent_stop` is what gives a name back.
 
 That count is a check followed by an act rather than a lock, and it is worth being honest about
 which. The read happens in the handler and the agent is started a hop away on the main actor, so
@@ -329,10 +330,22 @@ another chat in the same worktree started resolves to nothing, because "its own 
 is, and there is no ring of agents to deadlock on one another. `agent_stop` follows the same rule
 for the same reason: only the chat that started a member may stop it.
 
-`agent_stop` is not on the destructive side of any of this. It ends a turn and leaves the chat, the
-conversation and every file the agent has already written exactly where they are, and `agent_say`
-starts the same agent again when there is a slot for it. What it costs is work in flight, not work
-done, which is what its description says so that a model does not call it expecting a revert.
+`agent_stop` is not on the destructive side of any of this, and it is how an orchestrator finishes
+with an agent rather than only how it interrupts one. It ends the agent if it is still running,
+takes its row out of the owner's sidebar and gives its name back for another subagent to use, and
+leaves every file that agent wrote and every word it said exactly where they are: the conversation
+stays readable. What it costs is work in flight, not work done, which is what its description says
+so that a model does not call it expecting a revert.
+
+**Nothing sweeps a finished subagent away, and that is the decision rather than the thing nobody
+got round to.** A timer that clears a row can always clear the agent the orchestrator was about to
+send more work to, and there is no length of wait that is right for both cases, so Bloom sweeps
+nothing and the tools say what to do instead. `Crew.tidyHint` is that sentence, written once and
+carried into the three places a model reads: the line put in an orchestrator's chat when one of its
+subagents stops, `agent_start`'s description, and `agent_list`'s answer, which prefaces it with the
+count of how many of the crew have finished so the instruction is about somebody in particular
+rather than a line in every answer. An orchestrator that ignores it costs a row in the sidebar and
+nothing else, because a finished agent holds no running slot.
 
 A message from a crew member reaches its orchestrator inside `BridgeUntrustedText`, exactly as text
 read off a web page does and for the same reason: a subagent is a model that has been reading
@@ -638,7 +651,8 @@ which worktree that is, and there is no argument on any of them that could name 
 Against the paragraphs above about what is deliberately off this list: none of the four destroys
 anything. `agent_start` adds a chat to the sidebar in front of the reader, which is the visibility
 a pane has. `agent_say` puts a message in a chat the owner can read and answer. `agent_list` reads.
-`agent_stop` ends a turn and leaves the conversation and every file the agent wrote where they are.
+`agent_stop` ends a turn the caller started itself and takes that agent's row off the sidebar,
+leaving the conversation and every file the agent wrote where they are.
 And what a person would otherwise be weighing has already been decided in the core, before the
 window is asked for anything: the depth limit, the ceiling of three and the name rule are all in
 `Crew`, which is the same argument `workspace_start` is on this list under.
