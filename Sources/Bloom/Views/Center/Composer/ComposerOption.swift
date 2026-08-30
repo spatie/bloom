@@ -14,10 +14,14 @@ struct ComposerOption: Identifiable, Hashable {
     /// footnote under the whole menu, which is what the owner could not read before choosing.
     var detail: String?
 
+    /// Most capable first, which here means most expensive first: see `ClaudeModelRank`, whose
+    /// head carries the prices this order is read off. The order is not left to this literal.
+    /// `ranked` sorts it, so a model pinned in a settings file lands among these rather than
+    /// under them.
     static let models = [
+        ComposerOption(id: "fable", label: "Fable 5"),
         ComposerOption(id: "opus", label: "Opus 5"),
         ComposerOption(id: "sonnet", label: "Sonnet 5"),
-        ComposerOption(id: "fable", label: "Fable 5"),
         ComposerOption(id: "haiku", label: "Haiku 4.5"),
     ]
 
@@ -61,6 +65,15 @@ struct ComposerOption: Identifiable, Hashable {
         if let match = options.first(where: { $0.id == id }) { return match.label }
         guard !id.isEmpty else { return options.first?.label ?? id }
         return titleCased(id)
+    }
+
+    /// Model rows in the order `ClaudeModelRank` puts them, keeping each row's label.
+    ///
+    /// Only for a model menu. `adding` is also what fills the effort and output style menus, and
+    /// those are a scale and a set of names respectively, neither of which a model's price ranks.
+    static func ranked(_ options: [ComposerOption]) -> [ComposerOption] {
+        let byID = Dictionary(options.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return ClaudeModelRank.ordered(options.map(\.id)).compactMap { byID[$0] }
     }
 
     /// `ModelLabel.readable` in the core, where it can be tested. See its head for why it moved.

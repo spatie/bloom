@@ -12,7 +12,7 @@ struct ComposerModelSection: Identifiable, Equatable {
 
 /// What the composer's model and effort menus offer, per backend.
 ///
-/// Claude Code's three are a list in the source, because the CLI has nothing to ask. **Codex's are
+/// Claude Code's four are a list in the source, because the CLI has nothing to ask. **Codex's are
 /// fetched**, because `model/list` is a real call that answers without an account, because each
 /// model brings its own set of reasoning efforts (six for `gpt-5.6-sol`, four for `gpt-5.5`), and
 /// because a list written down goes stale between releases: Conductor's hardcoded one still names
@@ -83,6 +83,12 @@ final class ComposerModelCatalog {
             // would be a one-way door out of the model actually in force.
             if backend == owner {
                 options = ComposerOption.adding([current], to: options)
+            }
+            // After the pinned id is in, not before: `adding` puts whatever the chat is set to at
+            // the end of the list, which is how `claude-opus-5[1m]` came to be drawn under Haiku.
+            // Codex's list arrives ranked by `CodexModelRank`, so only this one needs sorting.
+            if backend == .claudeCode {
+                options = ComposerOption.ranked(options)
             }
             guard !options.isEmpty else { return nil }
             return ComposerModelSection(kind: backend, options: options)
