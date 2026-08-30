@@ -92,7 +92,9 @@ struct FileHeaderBar: View {
         HStack(spacing: InspectorLayout.gap) {
             revertButton
             layoutPicker
-            whitespaceToggle
+            if mode == .diff {
+                whitespaceToggle
+            }
             copyButton
             shareButton
             modePicker
@@ -108,7 +110,9 @@ struct FileHeaderBar: View {
                     Text("Side by side").tag(true)
                 }
                 .pickerStyle(.inline)
-                Toggle("Ignore whitespace", isOn: $ignoresWhitespace)
+                if mode == .diff {
+                    Toggle("Ignore whitespace", isOn: $ignoresWhitespace)
+                }
                 Divider()
                 Button(copyTitle, action: copy)
                 // A `Text` label rather than a title string, because the `.labelStyle(.iconOnly)`
@@ -185,7 +189,6 @@ struct FileHeaderBar: View {
         .labelStyle(.iconOnly)
         .toggleStyle(.button)
         .inspectorBarControl()
-        .disabled(mode == .edit)
         .help(
             ignoresWhitespace
                 ? "Show whitespace-only changes again"
