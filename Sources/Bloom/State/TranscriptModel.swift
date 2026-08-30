@@ -54,6 +54,20 @@ struct TranscriptRow: Identifiable, Hashable {
 @MainActor
 @Observable
 final class TranscriptModel {
+    private struct RunnerPreferences: Equatable {
+        var model: String
+        var effort: String
+        var permissionMode: String
+        var agentKind: String
+
+        init(session: Session) {
+            model = session.model
+            effort = session.effort
+            permissionMode = session.permissionMode.rawValue
+            agentKind = session.agentKind.rawValue
+        }
+    }
+
     var session: Session
     /// The workspace as it was when this model was made, or nil for a chat that is in none.
     ///
@@ -217,6 +231,9 @@ final class TranscriptModel {
 
     private var runner: (any SessionRunner)?
     private var pumpTask: Task<Void, Never>?
+    /// Preferences are captured when a runner is created. Comparing them at delivery time avoids
+    /// reusing a process after the picker changed, even when persistence is still catching up.
+    private var runnerPreferences: RunnerPreferences?
     private var indexByRefID: [String: Int] = [:]
     /// The one read of this session's history, held so that it happens once however many callers
     /// ask for it.
@@ -887,6 +904,14 @@ final class TranscriptModel {
     /// somewhere other than here.
     private func ensureRunner() -> (any SessionRunner)? {
         guard let store else { return nil }
+        let preferences = RunnerPreferences(session: session)
+        if runner != nil, runnerPreferences != preferences {
+            runner?.terminateNow()
+            pumpTask?.cancel()
+            pumpTask = nil
+            runner = nil
+            runnerPreferences = nil
+        }
         // Two registrations, because there are two identities. A chat in a worktree gets a token
         // minted for that workspace and the role its origin says; Ask Bloom gets the owner's own,
         // which is the same door the owner's terminal comes in through and the reason every owner
@@ -900,6 +925,7 @@ final class TranscriptModel {
             bridge: bridge
         )
         self.runner = runner
+        runnerPreferences = preferences
         if pumpTask == nil { startPump(on: runner) }
         return runner
     }

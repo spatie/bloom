@@ -2,7 +2,10 @@ import Foundation
 
 // MARK: - Model
 
-/// One model the signed-in Codex account may use, as `model/list` describes it.
+/// One model Codex advertises through `model/list`.
+///
+/// This catalog is not an entitlement check. A model can appear here while the signed-in account
+/// cannot use it.
 ///
 /// **The efforts belong to the model, not to Bloom.** Claude Code takes the same five levels for
 /// every model, so one flat list is right there. Codex does not: measured against codex-cli
