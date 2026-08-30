@@ -744,7 +744,17 @@ struct TranscriptListView: View {
                     $0.combine(isLast)
                 },
                 content: {
-                    AnyView(
+                    // A message an agent wrote, waiting its turn in the same queue. It is drawn as
+                    // itself rather than as the owner's pending bubble: they did not write it,
+                    // Edit and Discard mean nothing on it, and drawing it in their bubble is the
+                    // bug `CrewMessageRowView` exists to end, in the one state that was missed.
+                    if let crew = delivery.crewMessage {
+                        return AnyView(
+                            CrewMessageRowView(message: crew, isWaiting: true)
+                                .padding(.horizontal, TranscriptLayout.inset)
+                        )
+                    }
+                    return AnyView(
                         PendingTurnRowView(
                             delivery: delivery,
                             home: transcript.home,

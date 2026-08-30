@@ -14,6 +14,14 @@ import SwiftUI
 enum TranscriptLayout {
     /// The gap between two things that belong to each other, such as a label and its counter.
     static let tight = Metrics.spacingTight
+
+    /// How far down a row is drawn while it is still in the queue rather than in the transcript.
+    ///
+    /// The owner's own pending bubble says "not sent yet" by being outlined instead of filled,
+    /// which a row with no fill cannot borrow. This is the same sentence in the one language a
+    /// plain row has, and it is a step rather than a fade: far enough to read as waiting at a
+    /// glance, near enough that the words are still the point.
+    static let waitingOpacity = 0.55
     /// The horizontal inset a row keeps, and the general gap between pieces.
     ///
     /// Deliberately `spacing` and not `Metrics.inset`: a transcript row already carries a glyph

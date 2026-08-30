@@ -23,6 +23,18 @@ import BloomCore
 struct CrewMessageRowView: View {
     var message: CrewMessage
 
+    /// Whether this one is still in the queue rather than in the transcript.
+    ///
+    /// **A queued crew message used to be drawn as the owner's own pending bubble**, complete with
+    /// Edit and Discard, because the queue draws one row for every delivery and nothing in it knew
+    /// an agent could write one. So a report from a subagent sat at the foot of the pane looking
+    /// like a sentence the owner had typed and not yet sent, which is the same lie this whole file
+    /// exists to stop, in the one state nobody thought to check.
+    ///
+    /// Drawn as itself, dimmed, because that is what waiting looks like everywhere else in this
+    /// transcript.
+    var isWaiting = false
+
     /// Local, and deliberately not the row's own expansion state. The transcript's disclosure
     /// opens a row's evidence and is driven from the list; this opens a second thing inside an
     /// already open row, and giving the two one flag would make a keyboard toggle upstream reveal
@@ -30,6 +42,10 @@ struct CrewMessageRowView: View {
     @State private var showsEnvelope = false
 
     var body: some View {
+        content.opacity(isWaiting ? TranscriptLayout.waitingOpacity : 1)
+    }
+
+    @ViewBuilder private var content: some View {
         switch message.event {
         case .said, .brief: spoken
         case .stopped, .failed: fact
