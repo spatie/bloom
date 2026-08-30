@@ -1057,6 +1057,12 @@ final class TranscriptModel {
             if let workspaceNow {
                 NotificationService.shared.agentFailed(workspace: workspaceNow, message: failure.message)
             }
+            // Both endings report, and this is the one that would otherwise be silent: an
+            // orchestrator waiting on a crew member that died looks exactly like one waiting on a
+            // crew member that is still thinking. See `Crew.failedSentence`.
+            await reportToOrchestrator(
+                Crew.failedSentence(name: session.title, reason: failure.message)
+            )
 
         case .result(let result):
             // A turn that recovered leaves its sentence on the row that closes it; one that failed
@@ -1080,6 +1086,16 @@ final class TranscriptModel {
             // owner stopped is not: they stepped in, and a message they queued minutes ago going
             // out into the silence they just made is the opposite of what Stop is for.
             if !wasStoppedByHand { await drain() }
+            // After the drain, and only if nothing moved: a crew member whose orchestrator said
+            // something while it was busy has just started the next turn, and telling the
+            // orchestrator it has stopped in the same breath would have it act on an answer that
+            // is about to be superseded. `drain` writes `isRunning` synchronously before it awaits
+            // the send, so this reads the turn that has just begun rather than the one that ended.
+            if !isRunning {
+                await reportToOrchestrator(
+                    Crew.stoppedSentence(name: session.title, lastMessage: result.summary)
+                )
+            }
 
         case .permissionAsk:
             // The row goes in where the call would have been, and the composer stops looking like
@@ -1311,6 +1327,43 @@ final class TranscriptModel {
     /// `StreamingTailView`.
     var isStreaming: Bool {
         !streamingText.isEmpty || !streamingThinking.isEmpty || streamingToolName != nil
+    }
+
+    /// Tells the chat that started this one that it has stopped, and lets that chat's queue move.
+    ///
+    /// **This is the whole point of the crew design, which is why it hangs off the end of a turn
+    /// rather than off a tool an orchestrator has to remember to call.** An orchestrator that has
+    /// to ask either polls or forgets, so the end of a crew member's turn is an event Bloom
+    /// delivers, carrying what the agent last said rather than a handle to go and fetch it. The
+    /// head of `Crew` argues it at length, and the two sentences are written there so that the
+    /// promise is one a test can read.
+    ///
+    /// It enqueues and only then drains, rather than sending. The orchestrator is very often mid
+    /// turn at this moment, because a turn of its own is usually what started this agent, and
+    /// `DeliveryHold` is what decides: a held report goes when that turn ends, through the same
+    /// `drain` every other queued message goes through.
+    ///
+    /// A chat nobody started returns on the first line, which is nearly every chat in the app.
+    private func reportToOrchestrator(_ sentence: String) async {
+        guard let parentID = session.parentSessionID, let store, let workspace else { return }
+        _ = try? await store.enqueueDelivery(
+            Delivery(
+                targetSessionID: parentID,
+                sourceWorkspaceID: workspace.id,
+                kind: .report,
+                body: sentence
+            )
+        )
+
+        // `existingModel` rather than `model(for:)`: `workspace` here is the snapshot this model
+        // was made with, and handing a stale one to `model(for:)` pushes it back into the live
+        // model, which is the bug `notifyFinished` below is written around. A crew member's
+        // orchestrator is in this same worktree, so the model it needs is one that already exists.
+        guard let model = app.existingModel(for: workspace.id),
+              let parent = try? await store.session(id: parentID) else { return }
+        let transcript = model.transcript(for: parent)
+        await transcript.refreshQueue()
+        await transcript.drain()
     }
 
     private func notifyFinished(result: AgentResult) async {

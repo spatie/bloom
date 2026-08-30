@@ -4,12 +4,13 @@ import BloomCore
 /// Every row that can appear under a project, stacked at the pane's real width with a rule down
 /// the column their names are supposed to share.
 ///
-/// It exists because the claim this layout makes is a claim about **one column across five row
+/// It exists because the claim this layout makes is a claim about **one column across six row
 /// types**, and no single file shows it: the header is `RepoHeaderRow`, the ordinary row is
 /// `WorkspaceRow` under `SidebarWorkspaceRow`'s indent, the empty line is `SidebarEmptyNoticeRow`,
-/// the row a worktree is being cut behind is `PendingWorkspaceRow`, and a subagent's is
-/// `SubagentSidebarRow`. Each was moved once and each could drift alone. A picture with a rule on
-/// it is the only thing that catches the fifth one being three points out.
+/// the row a worktree is being cut behind is `PendingWorkspaceRow`, a crew member's is
+/// `CrewSidebarRow` and a subagent's is `SubagentSidebarRow`. Each was moved once and each could
+/// drift alone. A picture with a rule on it is the only thing that catches the sixth one being
+/// three points out.
 ///
 /// The rule is drawn at `SidebarMetrics.nameColumn`, which is derived from the header's own
 /// `HStack` rather than measured, so the page cannot flatter the layout: if the tile changes size
@@ -53,6 +54,7 @@ struct SidebarIndentGallery: View {
                     header(count: 3)
                     workspace(name: "sidebar name column", unread: true)
                     workspace(name: "checks that go quiet", changed: true)
+                    crew
                     subagent
                     PendingWorkspaceRow(pending: PendingWorkspace(
                         id: WorkspaceID("pending"), repoID: Self.repo.id, name: "one door out"
@@ -142,6 +144,21 @@ struct SidebarIndentGallery: View {
             onArchive: { _ in }
         )
         .padding(.leading, SidebarMetrics.rowIndent)
+        .frame(height: 32)
+    }
+
+    /// A crew member between turns, so the page draws its ring rather than the pulsing dot an
+    /// offscreen render cannot photograph. It shares the subagent's indent, which is the whole
+    /// reason it is on this page: the two rows are drawn by different files and each could drift
+    /// alone.
+    private var crew: some View {
+        CrewSidebarRow(row: CrewRow(Session(
+            workspaceID: WorkspaceID("w1"),
+            parentSessionID: SessionID("s0"),
+            title: "cascade-read",
+            createdAt: Self.now,
+            updatedAt: Self.now
+        )))
         .frame(height: 32)
     }
 

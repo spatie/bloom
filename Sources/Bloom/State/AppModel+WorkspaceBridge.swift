@@ -114,6 +114,21 @@ extension AppModel {
                 guard let self else { return .refused("Bloom is still starting up.") }
                 return await self.revealForBridge(reveal)
             },
+            // The three crew verbs. Every rule about them is in `Crew` and in the tools, which is
+            // where a test can read it; what crosses here is the one thing the core cannot do,
+            // which is make a chat in this window run a CLI. See `CrewSeam`.
+            AgentStartTool { [weak self] order, sessionID, workspaceID in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return await self.startCrewForBridge(order, from: sessionID, in: workspaceID)
+            },
+            AgentSayTool { [weak self] name, text, sessionID, workspaceID in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return await self.sayToCrewForBridge(name, saying: text, from: sessionID, in: workspaceID)
+            },
+            AgentStopTool { [weak self] name, sessionID, workspaceID in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return await self.stopCrewForBridge(name, from: sessionID, in: workspaceID)
+            },
         ])
     }
 
@@ -284,6 +299,50 @@ extension AppModel {
         }
 
         return controls
+    }
+
+    // MARK: - Crew
+
+    /// A crew member runs in the caller's own worktree and nowhere else, so a workspace archived
+    /// out from under a running turn is a real answer here rather than a guard for tidiness,
+    /// exactly as it is for the pane tools. `paneTarget` resolves it, and only the sentence is
+    /// this family's own: the pane one talks about panes, and a model told the wrong noun learns
+    /// the wrong thing.
+    static let noWorkspaceForCrew =
+        "That workspace is not open in Bloom any more, so there is no worktree to run a subagent in."
+
+    /// `agent_start`, handed to the model that can actually spawn a CLI.
+    ///
+    /// The same seam `workspace_start` crosses and for the same reason: everything that makes a
+    /// chat run lives on the main actor in `WorkspaceModel`, and a bridge handler runs off it on a
+    /// background task per connection. Nothing is decided here. `AgentStartTool` has already put
+    /// the name through `Crew.normalisedName` and weighed both the ceiling and the name against
+    /// the rows; `startCrewMember` re-checks the one rule a second door must never skip, which is
+    /// that a crew member may not start a crew member.
+    private func startCrewForBridge(
+        _ order: CrewOrder, from sessionID: SessionID, in workspaceID: WorkspaceID
+    ) async -> CrewStartOutcome {
+        guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForCrew) }
+        return await model.startCrewMember(order, reportingTo: sessionID)
+    }
+
+    /// `agent_say`, in whichever direction the caller is talking. `name` is nil when a crew member
+    /// is talking up, which is the one place it has to talk. See `CrewSaying`.
+    private func sayToCrewForBridge(
+        _ name: String?, saying text: String, from sessionID: SessionID, in workspaceID: WorkspaceID
+    ) async -> CrewSayOutcome {
+        guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForCrew) }
+        return await model.sayToCrew(text, to: name, from: sessionID)
+    }
+
+    /// `agent_stop`. Only the chat that started a crew member may stop it, and that is enforced by
+    /// the lookup rather than by a comparison here: `Store.crew(of:)` answers with one chat's own
+    /// crew, so a name belonging to somebody else's simply is not found.
+    private func stopCrewForBridge(
+        _ name: String, from sessionID: SessionID, in workspaceID: WorkspaceID
+    ) async -> CrewStopOutcome {
+        guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForCrew) }
+        return await model.stopCrewMember(named: name, startedBy: sessionID)
     }
 
     // MARK: - Panes

@@ -316,6 +316,59 @@ struct SidebarReorderTests {
         #expect(SidebarReorder.destination(rows: rows, from: [2], to: 0) == .project(id: RepoID("beta"), to: 0))
     }
 
+    // MARK: - Crew members among the rows
+
+    /// Two workspaces with a crew member and a subagent drawn under the first of them, which is
+    /// the pane an orchestrator running in `a1` produces.
+    ///
+    ///     0  Alpha
+    ///     1    a1
+    ///     2      cascade-read   (crew)
+    ///     3      Explore        (subagent)
+    ///     4    a2
+    private var crewPane: [SidebarReorder.Row] {
+        [
+            .project(RepoID("alpha")),
+            .workspace(id: WorkspaceID("a1"), projectID: RepoID("alpha")),
+            .crew(projectID: RepoID("alpha")),
+            .subagent(projectID: RepoID("alpha")),
+            .workspace(id: WorkspaceID("a2"), projectID: RepoID("alpha")),
+        ]
+    }
+
+    /// A crew member is where it is because of the worktree it shares, so there is no order for a
+    /// drag to write and nothing to pick it up with.
+    @Test("A crew member's row is never something to pick up")
+    func crewIsNotDragged() {
+        #expect(SidebarReorder.destination(rows: crewPane, from: [2], to: 1) == .nothing)
+    }
+
+    /// The one that a case counted in some places and not others would break. The offsets are 4
+    /// and 1 in the drawn run and 1 and 0 among the project's workspaces: counting rows rather
+    /// than workspaces would say 3, which `move(visible:all:from:to:)` reads as an offset off the
+    /// end of a two row project.
+    @Test("A drag over a crew member counts workspaces and not rows")
+    func crewRowsAreCountedLikeSubagents() {
+        #expect(SidebarReorder.destination(rows: crewPane, from: [4], to: 1) == .workspace(
+            projectID: RepoID("alpha"), from: IndexSet(integer: 1), to: 0, landedOutside: false
+        ))
+    }
+
+    /// The insertion line under the last workspace's crew is the end of the project rather than
+    /// outside it, so this must not report `landedOutside` and raise the "Kept in" note.
+    @Test("A drop below the last workspace's crew is inside the project")
+    func aDropBelowTheCrewIsInsideTheProject() {
+        let rows: [SidebarReorder.Row] = [
+            .project(RepoID("alpha")),
+            .workspace(id: WorkspaceID("a1"), projectID: RepoID("alpha")),
+            .workspace(id: WorkspaceID("a2"), projectID: RepoID("alpha")),
+            .crew(projectID: RepoID("alpha")),
+        ]
+        #expect(SidebarReorder.destination(rows: rows, from: [1], to: 4) == .workspace(
+            projectID: RepoID("alpha"), from: IndexSet(integer: 0), to: 2, landedOutside: false
+        ))
+    }
+
     @Test("Offsets that are not in the pane are refused")
     func flatOffsetsOutOfRange() {
         #expect(SidebarReorder.destination(rows: pane, from: [9], to: 0) == .nothing)

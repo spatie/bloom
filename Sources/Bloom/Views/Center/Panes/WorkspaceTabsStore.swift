@@ -178,7 +178,10 @@ final class WorkspaceTabsStore {
     /// has dragged it into. `TabSet` states the first rule and `StripOrder` the second, and this is
     /// the only place either is asked, so a tab is in the strip once or not at all.
     func entries(in model: WorkspaceModel) -> [PaneContent] {
-        let sessions = model.sessions.map(\.id)
+        // `TabSet.tabbable` and never `sessions.map(\.id)`: a workspace's chats include the crew
+        // members an agent started in it, and those are sidebar rows rather than tabs. See
+        // `TabSet.tabbable`, which is where that rule is argued.
+        let sessions = TabSet.tabbable(model.sessions)
         let tools = CenterTabStore.shared.tabs(for: model.workspace.id).map(\.id)
         return StripOrder.entries(
             sessions: sessions,
@@ -198,7 +201,7 @@ final class WorkspaceTabsStore {
         let workspaceID = model.workspace.id
         guard let order = StripOrder.rewritten(
             drawn,
-            sessions: model.sessions.map(\.id),
+            sessions: TabSet.tabbable(model.sessions),
             tools: CenterTabStore.shared.tabs(for: workspaceID).map(\.id),
             stored: stripOrders[workspaceID] ?? []
         ) else { return }

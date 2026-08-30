@@ -53,12 +53,37 @@ public enum SidebarSelection: Hashable, Sendable {
     /// `rememberSelection` therefore stores the parent, which is what should reopen: the subagent
     /// is gone by the next launch by construction. See `SubagentRoster`.
     case subagent(WorkspaceID, SubagentID)
+    /// One crew member of a workspace, open for reading and for talking to.
+    ///
+    /// **Not the case above, and the two must never be merged.** A `.subagent` is a child of one
+    /// turn, drawn from the live stream, gone by the next launch. A crew member is a `Session` row
+    /// whose `parentSessionID` names the chat that started it: it lives in the same worktree, it
+    /// outlives the turn that asked for it, it can be talked to, and it is still there tomorrow.
+    /// `Crew`'s head argues that difference in full and says why the word here is not "subagent".
+    ///
+    /// **It carries its workspace, and `workspaceID` returns it**, for exactly the reason
+    /// `.subagent` does: a crew member shares the worktree it was started in, so the terminal, the
+    /// diff, the inspector, the toolbar and the Workspace menu are all still about the parent
+    /// while you read one. What narrows is the centre column, which shows that agent's own
+    /// conversation instead of the workspace's tabs.
+    ///
+    /// `rememberSelection` therefore stores the parent, which is what should reopen. That is a
+    /// weaker claim here than it is for `.subagent`, whose row cannot survive a relaunch at all,
+    /// and it is still the right one: a window that reopened inside a crew member's chat would
+    /// start you somewhere no person put you.
+    case crew(WorkspaceID, SessionID)
 
     public var workspaceID: WorkspaceID? {
         switch self {
-        case .workspace(let id), .subagent(let id, _): id
+        case .workspace(let id), .subagent(let id, _), .crew(let id, _): id
         default: nil
         }
+    }
+
+    /// The crew member being read, when one is. Only the centre column asks.
+    public var crewSessionID: SessionID? {
+        if case .crew(_, let id) = self { return id }
+        return nil
     }
 
     /// The subagent being read, when one is. Only the centre column asks.

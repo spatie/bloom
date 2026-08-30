@@ -355,6 +355,16 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     /// workspace: the `workspaces` table's invariant is that a row in it is a real directory on
     /// disk, and the diff poll, the archive path and every git call believe it.
     public var workspaceID: WorkspaceID?
+    /// The chat that started this one, when another agent did.
+    ///
+    /// **A chat with a parent is a crew member**, which the app calls a subagent: an agent the
+    /// chat above it started in the same worktree, on the same branch, so that everything the two
+    /// of them do lands in one diff. It is not a `child` in the bridge's sense, which is a
+    /// workspace of its own with a branch and a pull request of its own. See `Crew`, whose head
+    /// argues the difference and says why the word here is not "subagent".
+    ///
+    /// Nil for every chat the owner made, which is nearly all of them.
+    public var parentSessionID: SessionID?
     public var title: String
     public var agentSessionID: String?
     public var model: String
@@ -408,6 +418,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     init(
         id: SessionID = .new(),
         workspaceID: WorkspaceID?,
+        parentSessionID: SessionID? = nil,
         title: String = PaneNaming.chat,
         agentSessionID: String? = nil,
         model: String = AppDefaults.fallbackModel,
@@ -427,6 +438,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     ) {
         self.id = id
         self.workspaceID = workspaceID
+        self.parentSessionID = parentSessionID
         self.title = title
         self.agentSessionID = agentSessionID
         self.model = model
@@ -452,6 +464,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     public init(
         id: SessionID = .new(),
         workspaceID: WorkspaceID?,
+        parentSessionID: SessionID? = nil,
         title: String = PaneNaming.chat,
         agentSessionID: String? = nil,
         model: String = AppDefaults.fallbackModel,
@@ -470,6 +483,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         self.init(
             id: id,
             workspaceID: workspaceID,
+            parentSessionID: parentSessionID,
             title: title,
             agentSessionID: agentSessionID,
             model: model,

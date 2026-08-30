@@ -866,6 +866,21 @@ public actor Store {
                     throw StoreTrouble.rebuildLostRows(table: "messages", before: before, after: after)
                 }
             },
+
+            // The chat that started this one, for a crew member. See `Session.parentSessionID`
+            // and `Crew`. Guarded on the column's absence rather than run blind, because the
+            // store's own tests rewind `user_version` and replay every migration over a shape
+            // that already has it.
+            { db in
+                let columns = try db.query("PRAGMA table_info(sessions);")
+                let names = Set(columns.compactMap { $0.string("name") })
+                if !names.contains("parent_session_id") {
+                    try db.execute("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT;")
+                }
+                try db.execute(
+                    "CREATE INDEX IF NOT EXISTS sessions_parent ON sessions(parent_session_id);"
+                )
+            },
         ]
 
         let current = Int(db.userVersion)
@@ -1488,6 +1503,30 @@ public actor Store {
         ).map(Self.session(from:))
     }
 
+    /// The chats one chat started, oldest first. A crew, in `Crew`'s words.
+    ///
+    /// Separate from `sessions(workspaceID:)` rather than a filter over it, because the two
+    /// answer different questions and the tab strip asks the first one: a crew member is drawn in
+    /// the sidebar under its workspace, not as a tab beside the chat that started it.
+    public func crew(of parentID: SessionID) throws -> [Session] {
+        try db.query(
+            "SELECT * FROM sessions WHERE parent_session_id = ? AND archived_at IS NULL ORDER BY created_at",
+            [.text(parentID)]
+        ).map(Self.session(from:))
+    }
+
+    /// Every crew member in one workspace, whichever chat started them.
+    ///
+    /// What the sidebar draws under a workspace row, and what the ceiling in `Crew` is counted
+    /// against: three running agents in one worktree is three writers in one working tree,
+    /// whether or not one chat asked for all of them.
+    public func crew(inWorkspace workspaceID: WorkspaceID) throws -> [Session] {
+        try db.query(
+            "SELECT * FROM sessions WHERE workspace_id = ? AND parent_session_id IS NOT NULL AND archived_at IS NULL ORDER BY created_at",
+            [.text(workspaceID)]
+        ).map(Self.session(from:))
+    }
+
     /// The chats that belong to no worktree, oldest first.
     ///
     /// Ask Bloom's, and nothing else today. It is a separate method rather than a nil argument to
@@ -1556,10 +1595,10 @@ public actor Store {
         try db.run(
             """
             INSERT INTO sessions (
-                id, workspace_id, title, agent_session_id, model, effort, agent_kind,
-                permission_mode, state, sort_order, created_at, updated_at, archived_at,
-                last_read_seq, input_tokens, output_tokens, cost_usd, context_tokens
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, workspace_id, parent_session_id, title, agent_session_id, model, effort,
+                agent_kind, permission_mode, state, sort_order, created_at, updated_at,
+                archived_at, last_read_seq, input_tokens, output_tokens, cost_usd, context_tokens
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 agent_session_id = excluded.agent_session_id,
@@ -1578,7 +1617,9 @@ public actor Store {
                 context_tokens = excluded.context_tokens
             """,
             [
-                .text(session.id), .text(session.workspaceID), .text(session.title),
+                .text(session.id), .text(session.workspaceID),
+                session.parentSessionID.map { .text($0) } ?? .null,
+                .text(session.title),
                 session.agentSessionID.map { .text($0) } ?? .null,
                 .text(session.model), .text(session.effort), .text(session.agentKind.rawValue),
                 .text(session.permissionMode.rawValue),
@@ -2828,6 +2869,9 @@ public actor Store {
             id: SessionID(row.string("id") ?? newID()),
             // A null here is a chat with no worktree, which is Ask Bloom. See `Session.workspaceID`.
             workspaceID: row.string("workspace_id").map(WorkspaceID.init),
+            // A row written before the column existed has no parent, which is what it was: a chat
+            // the owner made.
+            parentSessionID: row.string("parent_session_id").map(SessionID.init),
             title: row.string("title") ?? "Session",
             agentSessionID: row.string("agent_session_id"),
             model: row.string("model") ?? "opus",

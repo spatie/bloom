@@ -43,6 +43,36 @@ struct TabSetTests {
         #expect(entries == [.chat(one), .tool("t2")])
     }
 
+    /// A crew member is a `Session` row like any other, so `Store.sessions(workspaceID:)` hands it
+    /// back with the rest and the strip would grow a tab per agent an orchestrator started. It is
+    /// drawn in the sidebar, nested under the workspace it shares a worktree with, and nowhere
+    /// else. See `Crew` and `SidebarSelection.crew`.
+    @Test("a chat another agent started is not a tab")
+    func crewIsNotATab() {
+        let sessions = [
+            Session(workspaceID: WorkspaceID("w1"), title: "Chat"),
+            Session(workspaceID: WorkspaceID("w1"), parentSessionID: SessionID("s1"), title: "tests"),
+        ]
+
+        let tabbable = TabSet.tabbable(sessions)
+
+        #expect(tabbable == [sessions[0].id])
+        #expect(TabSet.entries(sessions: tabbable, tools: []) == [.chat(sessions[0].id)])
+    }
+
+    /// The order the caller handed over is the order it gets back, minus the crew: this filters
+    /// and never sorts, exactly as `entries` does.
+    @Test("filtering the crew out never reorders what is left")
+    func tabbableKeepsOrder() {
+        let first = Session(workspaceID: WorkspaceID("w1"), title: "Chat")
+        let member = Session(
+            workspaceID: WorkspaceID("w1"), parentSessionID: SessionID("s1"), title: "tests"
+        )
+        let last = Session(workspaceID: WorkspaceID("w1"), title: "Chat 2")
+
+        #expect(TabSet.tabbable([last, member, first]) == [last.id, first.id])
+    }
+
     @Test("filtering never reorders what is left")
     func filteringKeepsOrder() {
         let entries = TabSet.entries(

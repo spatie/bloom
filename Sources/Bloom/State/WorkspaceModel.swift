@@ -530,6 +530,224 @@ final class WorkspaceModel {
         transcript(for: session)
     }
 
+    // MARK: - Crew
+
+    /// Starts a crew member in this worktree, for the chat that asked for one.
+    ///
+    /// A crew member is an ordinary `Session` row with `parentSessionID` set, and that one column
+    /// is the whole of what makes it one. It shares this workspace's worktree and its branch, so
+    /// everything an orchestrator and its crew do lands in a single diff. `Crew`'s head argues why
+    /// that is a different thing from `workspace_start`, which is what a caller expecting several
+    /// pull requests wants instead.
+    ///
+    /// **The name goes straight into `title`.** `PaneNaming.nextTitle` is what a chat the owner
+    /// opened gets, and it would turn "cascade-read" into "Chat 3": this name is the address the
+    /// other two crew tools take, so it has to be the one the orchestrator chose.
+    ///
+    /// **The nesting rule is checked here as well as in the tool, and only the nesting rule.**
+    /// This method is a second door into the same act, and a door that trusted its caller to have
+    /// checked would be one refactor away from a ring of agents in one worktree. The ceiling and
+    /// the name's uniqueness stay `AgentStartTool`'s alone, weighed there against the same rows a
+    /// moment earlier: which sessions count as running is `CrewCensus`, which the app target
+    /// cannot see, and a second opinion about that would be worse than one. The name goes back
+    /// through `Crew.normalisedName` because that is the same pure function the tool used, so the
+    /// two cannot come out with different strings.
+    func startCrewMember(
+        _ order: CrewOrder, reportingTo parentID: SessionID
+    ) async -> CrewStartOutcome {
+        guard let store else { return .refused(Self.crewWithoutStore) }
+        guard let parent = try? await store.session(id: parentID) else {
+            return .refused("The chat that asked for this subagent is not in Bloom any more.")
+        }
+        guard parent.parentSessionID == nil else {
+            return .refused(Crew.sentence(for: .notAnOrchestrator))
+        }
+        guard let name = Crew.normalisedName(order.name) else {
+            return .refused(Crew.sentence(for: .noName))
+        }
+
+        // Whatever the orchestrator is itself on, unless the order named otherwise, which is the
+        // same inheritance `startWorkspaceForBridge` spells out: an agent splitting up its own
+        // work wants help from the thing it already trusts. The backend and the permission mode
+        // come across for a second reason as well, that a crew member is meant to be able to do
+        // what the chat above it can do without a person being asked twice for the same grant.
+        let member = Session(
+            workspaceID: workspace.id,
+            parentSessionID: parentID,
+            title: name,
+            model: order.model ?? parent.model,
+            effort: order.effort ?? parent.effort,
+            agentKind: parent.agentKind,
+            permissionMode: parent.permissionMode,
+            sortOrder: sessions.count
+        )
+        // `upsert` is right here and nowhere else on this path: the row is being created, out of a
+        // value built three lines up, which is the one shape the head of `Store.upsert(_ session:)`
+        // allows it in.
+        guard let stored = try? await store.upsert(member) else {
+            return .refused("Bloom could not open a chat for that subagent.")
+        }
+
+        // The brief joins the queue rather than being sent, exactly as a workspace's opening
+        // prompt does, so there is one ordered route into every conversation in the app. See
+        // `enqueueOpening` and the head of `Delivery`.
+        _ = try? await store.enqueueDelivery(
+            Delivery(
+                targetSessionID: stored.id,
+                sourceWorkspaceID: workspace.id,
+                kind: .message,
+                body: order.task
+            )
+        )
+
+        // `activeSessionID` is deliberately left alone, which is the rule `select: false` holds
+        // for a workspace the bridge starts: an agent appearing while somebody is typing in
+        // another chat must not take the centre column away from them.
+        await reloadSessions()
+
+        // The part that actually spawns a CLI. Without the drain the row and its queued brief
+        // would sit there until a person opened the chat and said something, which is a subagent
+        // that was started and never ran.
+        let transcript = transcript(for: stored)
+        await transcript.refreshQueue()
+        await transcript.drain()
+
+        return .started(
+            "Started subagent \"\(name)\" in this workspace. Talk to it with agent_say, and Bloom "
+                + "will tell you here when it stops, with the last thing it said."
+        )
+    }
+
+    /// Says something into another agent's chat, in whichever direction the caller is talking.
+    ///
+    /// `name` is a crew member when an orchestrator is talking down and nil when a crew member is
+    /// talking up, because a crew member has exactly one place to talk and naming it would be a
+    /// second way to say the same thing. See `CrewSaying`.
+    ///
+    /// **Upward is wrapped in the untrusted envelope and downward is not**, and the asymmetry is
+    /// the point. What a subagent says back is a model reporting on files it has been reading,
+    /// which is data; what an orchestrator says down is the instruction the subagent exists to
+    /// follow, and is no different in kind from the brief it was started with. See
+    /// `Crew.message(from:saying:)` and `BridgeUntrustedText`.
+    func sayToCrew(
+        _ text: String, to name: String?, from callerID: SessionID
+    ) async -> CrewSayOutcome {
+        guard let store else { return .refused(Self.crewWithoutStore) }
+
+        let target: Session
+        let body: String
+        if let name {
+            // `crew(of:)` and not `crew(inWorkspace:)`, which is what keeps an orchestrator to its
+            // own crew: two chats in one worktree may each have a subagent, and neither of them
+            // may talk into the other's.
+            let crew = (try? await store.crew(of: callerID)) ?? []
+            switch CrewLookup.find(name, among: crew) {
+            case .found(let member): target = member
+            case .unknown: return .refused(Self.noCrewMember(name, among: crew.map(\.title)))
+            case .ambiguous: return .refused(Self.ambiguousCrewMember(name))
+            }
+            body = text
+        } else {
+            // Read here rather than at the top, because only this arm needs the caller's own row:
+            // the arm above asks the database whose crew it is, which answers the same question
+            // without a second query.
+            guard let caller = try? await store.session(id: callerID),
+                  let parentID = caller.parentSessionID,
+                  let parent = try? await store.session(id: parentID) else {
+                return .refused(
+                    "No agent started this chat, so there is nobody above it to talk to. Name the "
+                        + "subagent you meant to say that to."
+                )
+            }
+            target = parent
+            body = Crew.message(from: caller.title, saying: text)
+        }
+
+        _ = try? await store.enqueueDelivery(
+            Delivery(
+                targetSessionID: target.id,
+                sourceWorkspaceID: workspace.id,
+                kind: .message,
+                body: body
+            )
+        )
+
+        // Enqueued first and drained after, never sent: the chat being spoken to is very often mid
+        // turn, and `DeliveryHold` is what decides whether this goes now or when that turn ends.
+        let transcript = transcript(for: target)
+        await transcript.refreshQueue()
+        await transcript.drain()
+
+        if name == nil {
+            return .delivered(
+                "Passed that to the agent that started you. If it is mid turn it will read it when "
+                    + "that turn ends."
+            )
+        }
+        return .delivered(
+            "Passed that to subagent \"\(target.title)\". If it is mid turn it will read it when "
+                + "that turn ends, and Bloom will tell you here when it stops."
+        )
+    }
+
+    /// Stops a crew member, and leaves its conversation exactly where it is.
+    ///
+    /// `terminateNow` rather than `closeSession`: the row, its transcript and its name all stay,
+    /// so both the orchestrator and the owner can still read what the agent did before it was
+    /// stopped. The name staying taken is deliberate too, and `Crew.start` counts a stopped
+    /// member among `existing` for the same reason: a second agent under a stopped one's name
+    /// would make the transcript above it read as one agent.
+    func stopCrewMember(named name: String, startedBy callerID: SessionID) async -> CrewStopOutcome {
+        guard let store else { return .refused(Self.crewWithoutStore) }
+        let crew = (try? await store.crew(of: callerID)) ?? []
+        let member: Session
+        switch CrewLookup.find(name, among: crew) {
+        case .found(let found): member = found
+        case .unknown: return .refused(Self.noCrewMember(name, among: crew.map(\.title)))
+        case .ambiguous: return .refused(Self.ambiguousCrewMember(name))
+        }
+
+        // Only a transcript this launch actually built. A member with no transcript has no process
+        // behind it in this app, and building one in order to kill it would start the very pump
+        // this is trying to end.
+        guard let transcript = existingTranscript(for: member.id) else {
+            return .stopped(
+                "Subagent \"\(member.title)\" was not running, so there was nothing to stop. Its "
+                    + "chat is still here to read."
+            )
+        }
+        transcript.terminateNow()
+        return .stopped(
+            "Stopped subagent \"\(member.title)\". Its conversation is still here, and its name "
+                + "stays taken in this workspace."
+        )
+    }
+
+    /// The one sentence every crew method says when the database never opened, so three refusals
+    /// cannot describe one absence three ways.
+    private static let crewWithoutStore =
+        "Bloom's database is not open, so it cannot run a subagent right now."
+
+    /// Two members whose names differ only in case. Refused rather than resolved to whichever was
+    /// started first, which is `CrewLookup`'s own rule: acting on the agent the caller did not name
+    /// is the one outcome these three methods must not have.
+    private static func ambiguousCrewMember(_ name: String) -> String {
+        "Two of your subagents are called \"\(name)\", differing only in case, so Bloom will not "
+            + "guess which you meant. Stop one of them, or say it again with the exact name "
+            + "agent_list prints."
+    }
+
+    /// A name that answers to nothing, said with what does answer, because a model told only "no"
+    /// tries the same name again.
+    private static func noCrewMember(_ name: String, among known: [String]) -> String {
+        guard !known.isEmpty else {
+            return "You have no subagents, so there is no \"\(name)\" here. Start one with "
+                + "agent_start."
+        }
+        let list = known.map { "\"\($0)\"" }.joined(separator: ", ")
+        return "You have no subagent called \"\(name)\". Yours are: \(list)."
+    }
+
     /// Whether any chat here has an agent mid turn.
     ///
     /// The rule is `AgentTurns`, which is the same rule `isRunning(_ session:)` above answers
