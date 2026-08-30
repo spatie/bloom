@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Recolours a copy of the layered icon document so the dev build is unmistakable.
 
-    python3 Tools/icon/dev-tint.py <path to a copy of Bloom.icon>/icon.json
+    python3 Tools/icon/dev-tint.py <path to a copy of Bloom.icon>/icon.json [turn]
+
+`turn` is the fraction of the colour wheel to rotate by, and it defaults to half.
+A third identity wants a different one: two builds a quarter turn apart are told
+apart at a glance, two that both took the half turn are the same icon twice.
 
 Rewrites that file in place. It is only ever pointed at the detached worktree
 Tools/dev-build.sh builds from, never at Resources/Bloom.icon in the tree.
@@ -33,7 +37,8 @@ import json
 import sys
 
 # Half a turn. See the docstring: the biggest available difference, deliberately.
-HUE_TURN = 0.5
+# Overridable, because there is more than one second identity now.
+HUE_TURN = float(sys.argv[2]) if len(sys.argv) > 2 else 0.5
 
 # Enough to carry the rotated hue at Dock size without posterising the gradients.
 SATURATION_GAIN = 1.35
