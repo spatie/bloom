@@ -1832,7 +1832,7 @@ public actor Store {
         // be trading a waiting orchestrator for a workspace that can never start another agent.
         for row in lost {
             guard let parentID = row.string("parent_session_id") else { continue }
-            try? enqueueDelivery(Delivery(
+            _ = try? enqueueDelivery(Delivery(
                 targetSessionID: SessionID(parentID),
                 sourceWorkspaceID: row.string("workspace_id").map(WorkspaceID.init),
                 kind: .report,

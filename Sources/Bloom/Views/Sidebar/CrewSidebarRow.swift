@@ -38,11 +38,13 @@ struct CrewSidebarRow: View {
             CrewMarkGlyph(state: row.state, isOnSelection: isOnSelection)
         }
         .labelStyle(SidebarRowLabelStyle())
-        // The same step in as a subagent's row, and for the same reason: the workspace rows share
-        // the project's name column, so this indent is the only thing in the pane saying the agent
-        // is inside that worktree. `SidebarIndentGallery` is where the two are checked against one
-        // rule rather than against each other.
-        .padding(.leading, SidebarMetrics.rowIndent + SidebarMetrics.subagentIndent)
+        // The mark starts where the workspace's NAME starts, which is what makes the nesting
+        // read. The owner asked for it off a capture of the first arrangement, where the mark sat
+        // between the workspace's mark and its name: a third column, close enough to both to look
+        // like neither, and the row read as a sibling of the workspace rather than as something
+        // under it. On the name column it is unambiguous, because the only thing above it in that
+        // column is the name of the thing it belongs to.
+        .padding(.leading, SidebarMetrics.crewIndent)
         // The dot is the fact a sighted reader gets for free and a screen reader gets not at all,
         // and here it is the ONLY thing carrying the state: the row deliberately has no word on it.
         .accessibilityElement(children: .combine)
