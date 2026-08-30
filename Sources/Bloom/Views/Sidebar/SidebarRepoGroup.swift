@@ -60,6 +60,14 @@ enum SidebarPaneRow: Identifiable {
     /// The project's name travels with the row, because a flat pane cannot say which project a row
     /// is under and so the row has to say it itself. See `SidebarWorkspaceRow`.
     case workspace(Workspace, projectName: String)
+    /// One crew member of the workspace above it: an agent another agent started in the same
+    /// worktree. Carries its workspace so the row knows what selecting it selects, and its project
+    /// so the reordering can count it.
+    ///
+    /// Its own case beside `subagent` rather than a second kind of one, on `Crew`'s argument: the
+    /// two have different lifetimes, different selections and different rows, and one case
+    /// carrying both would make every reader of either ask which it had.
+    case crew(CrewRow, workspaceID: WorkspaceID, repoID: RepoID)
     /// One subagent of the turn running in the workspace above it. Carries its workspace so the
     /// row knows what selecting it selects, and its project so the reordering can count it.
     case subagent(SubagentRow, workspaceID: WorkspaceID, repoID: RepoID)
@@ -73,6 +81,9 @@ enum SidebarPaneRow: Identifiable {
         switch self {
         case .project(let group): "project:" + group.id.rawValue
         case .workspace(let workspace, _): "workspace:" + workspace.id.rawValue
+        // Not scoped by workspace, unlike the subagent below it: a crew member is a row in the
+        // sessions table and its id is Bloom's own, unique across the app.
+        case .crew(let row, _, _): "crew:" + row.id.rawValue
         // Scoped by workspace, because `task_id` is the CLI's and two workspaces running at once
         // are two CLIs with two id spaces.
         case .subagent(let row, let workspaceID, _):
@@ -90,6 +101,7 @@ enum SidebarPaneRow: Identifiable {
         switch self {
         case .project(let group): .project(group.id)
         case .workspace(let workspace, _): .workspace(id: workspace.id, projectID: workspace.repoID)
+        case .crew(_, _, let repoID): .crew(projectID: repoID)
         case .subagent(_, _, let repoID): .subagent(projectID: repoID)
         case .pending(let pending): .pending(projectID: pending.repoID)
         case .notice(let repoID): .notice(projectID: repoID)
@@ -102,6 +114,10 @@ enum SidebarPaneRow: Identifiable {
     /// change of the rows rather than of a section's state, and is why a collapsed project can
     /// still be dragged: it is one row that carries everything under it.
     ///
+    /// - Parameter crew: the agents another agent started in each workspace, oldest first. A
+    ///   closure for the same reason `subagents` is: a crew member's state moves while it works,
+    ///   and the groups are rebuilt only when the workspaces, the projects or the filter move. See
+    ///   `AppModel.crewRows`.
     /// - Parameter subagents: the children to draw under each workspace, in the order they were
     ///   spawned. A closure rather than a field on the group, because a subagent's row changes
     ///   about once a second while one is running and the groups are rebuilt only when the
@@ -114,6 +130,7 @@ enum SidebarPaneRow: Identifiable {
     ///   See `PendingWorkspace`.
     static func rows(
         _ groups: [SidebarRepoGroup],
+        crew: (WorkspaceID) -> [CrewRow] = { _ in [] },
         subagents: (WorkspaceID) -> [SubagentRow] = { _ in [] },
         pending: (RepoID) -> [PendingWorkspace] = { _ in [] }
     ) -> [SidebarPaneRow] {
@@ -130,6 +147,14 @@ enum SidebarPaneRow: Identifiable {
             } else {
                 for workspace in group.workspaces {
                     rows.append(.workspace(workspace, projectName: group.repo.name))
+                    // Above the turn's subagents, and the order is the lifetimes. A crew member
+                    // stays until somebody archives the workspace; a subagent row is drawn from a
+                    // stream and is gone minutes later. Rows that come and go belong at the
+                    // bottom of the block, where their arriving and leaving does not push the
+                    // rows somebody is aiming at.
+                    rows.append(contentsOf: crew(workspace.id).map {
+                        .crew($0, workspaceID: workspace.id, repoID: group.id)
+                    })
                     // Directly after their workspace and in spawn order, which is what makes the
                     // reading right even though depth past one is drawn at the same indent. See
                     // `SubagentRow.rows`.

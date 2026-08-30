@@ -12,6 +12,23 @@ import Foundation
 /// was a switcher for one pane, so clicking a tab rewrote whatever the pane the user was standing
 /// in happened to hold.
 public enum TabSet {
+    /// Which of a workspace's chats earn a tab at all, which is every chat a person opened and no
+    /// crew member.
+    ///
+    /// **A crew member is drawn in the sidebar, under the workspace it shares a worktree with, and
+    /// nowhere else.** It is an ordinary `Session` row, so `Store.sessions(workspaceID:)` hands it
+    /// back with the rest and the strip would otherwise grow a tab per agent an orchestrator
+    /// started. That is the wrong place for it twice over: the strip is what the person at the
+    /// keyboard arranged, and a fan-out of three would push their own conversations off the end of
+    /// it. The nesting under a workspace row is what says an agent belongs to that worktree; a tab
+    /// says nothing about who started what. See `Crew` and `SidebarSelection.crew`.
+    ///
+    /// Taken here rather than left to each caller, because "a chat with a parent is not a tab" is
+    /// the same rule as "conversations first and tools after them" and both belong in one file.
+    public static func tabbable(_ sessions: [Session]) -> [SessionID] {
+        sessions.filter { $0.parentSessionID == nil }.map(\.id)
+    }
+
     /// The strip, left to right.
     ///
     /// Two runs, conversations and then tools. Worth keeping exactly as it was: the conversations

@@ -55,6 +55,10 @@ public enum TranscriptSearchText {
         "finish_reason", "finishReason", "api_error_status", "apiErrorStatus",
         "fast_mode_state", "fastModeState",
         "fast_mode_disabled_reason", "fastModeDisabledReason",
+        // A crew row's `sent` is its `text` inside the envelope the model was handed, so indexing
+        // it would file the envelope's boilerplate under every message one agent ever sent
+        // another. The words are in `text`, which is indexed. See `CrewMessage`.
+        "sent",
     ]
 
     /// The kinds worth indexing, and why the rest are not.
@@ -68,9 +72,10 @@ public enum TranscriptSearchText {
     /// `result`, `system` and `notice` rows are token counts, costs and lifecycle chatter with no
     /// words in them. `permissionAsk` is a second copy of a tool call that is already indexed from
     /// its own row, and indexing it again would put the same workspace in the list twice.
+    /// `crew` is prose somebody read in their own window, so it is indexed like the rest of it.
     public static func isIndexed(_ kind: MessageKind) -> Bool {
         switch kind {
-        case .user, .assistantText, .thinking, .toolUse, .toolResult, .error: true
+        case .user, .assistantText, .thinking, .toolUse, .toolResult, .error, .crew: true
         case .result, .system, .notice, .permissionAsk: false
         }
     }

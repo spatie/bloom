@@ -11,6 +11,7 @@ import Testing
 struct SidebarSelectionTests {
     private let workspace = WorkspaceID("w1")
     private let subagent = SubagentID("s1")
+    private let crewMember = SessionID("c1")
 
     /// A subagent selection IS a workspace selection. The terminal, the diff, the composer, the
     /// toolbar and the Workspace menu all hang off `workspaceID`, and every one of them is still
@@ -39,6 +40,7 @@ struct SidebarSelectionTests {
         #expect(SidebarSelection.home.workspaceID == nil)
         #expect(SidebarSelection.home.archivedWorkspaceID == nil)
         #expect(SidebarSelection.home.subagentID == nil)
+        #expect(SidebarSelection.home.crewSessionID == nil)
     }
 
     /// Everything that hangs off `workspaceID` gets the right answer for a conversation with no
@@ -66,6 +68,31 @@ struct SidebarSelectionTests {
                 != SidebarSelection.archived(workspace).hashValue
         )
         #expect(Set<SidebarSelection>([.workspace(workspace), .archived(workspace)]).count == 2)
+    }
+
+    /// The same claim the subagent test above makes, and it has to be made twice because these are
+    /// two different things: a crew member is a stored chat that outlives the turn that started
+    /// it, and the terminal, the diff, the inspector and the composer are all still about the
+    /// worktree it shares while you read one. See `Crew`.
+    @Test("a crew member carries its workspace")
+    func aCrewMemberIsAWorkspaceSelection() {
+        #expect(SidebarSelection.crew(workspace, crewMember).workspaceID == workspace)
+        #expect(SidebarSelection.crew(workspace, crewMember).crewSessionID == crewMember)
+        #expect(SidebarSelection.workspace(workspace).crewSessionID == nil)
+        // Neither kind of child answers for the other, which is what stops the centre column
+        // drawing a transcript for one while the pane has the other selected.
+        #expect(SidebarSelection.crew(workspace, crewMember).subagentID == nil)
+        #expect(SidebarSelection.subagent(workspace, subagent).crewSessionID == nil)
+    }
+
+    @Test("two crew members of one workspace are different selections")
+    func crewDoNotCollide() {
+        let other = SessionID("c2")
+        #expect(SidebarSelection.crew(workspace, crewMember) != .crew(workspace, other))
+        #expect(SidebarSelection.crew(workspace, crewMember) != .workspace(workspace))
+        #expect(Set<SidebarSelection>([
+            .crew(workspace, crewMember), .crew(workspace, other), .workspace(workspace)
+        ]).count == 3)
     }
 
     @Test("two subagents of one workspace are different selections")

@@ -99,6 +99,24 @@ enum SidebarMetrics {
     /// in.
     static let subagentIndent: CGFloat = caretGutter
 
+    /// Where a crew member's row begins, which is where its workspace's name begins.
+    ///
+    /// Not `rowIndent + subagentIndent`, which is what it was and what the owner sent back. A
+    /// subagent of a turn steps one gutter in from the workspace row, which puts its mark between
+    /// the workspace's mark and the workspace's name: a third column, five points from one and a
+    /// tile from the other, reading as neither. A crew member instead starts its mark on
+    /// `nameColumn`, so the column above its mark holds exactly one thing, the name of the
+    /// workspace it is working in.
+    ///
+    /// Half the mark's box back off `nameColumn`, so the mark is CENTRED on that column rather
+    /// than starting at it. `SidebarRowLabelStyle` centres a row's mark in a `markColumn` wide
+    /// box, so an indent of `nameColumn` on the nose puts the dot half a tile right of the letter
+    /// it is meant to hang under, which is the same near miss in the other direction.
+    ///
+    /// Derived from `nameColumn` rather than measured, for the reason that constant gives: resize
+    /// the project tile and the whole ladder moves together.
+    static let crewIndent: CGFloat = nameColumn - markColumn / 2
+
     /// The click target of a control that lives on a workspace row, such as the archive button
     /// that is revealed under the pointer.
     ///

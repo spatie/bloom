@@ -85,9 +85,12 @@ struct BridgeServerTests {
         // tools) needs a seam into the window and is added by `AppModel.bridgeToolbox()`, which
         // there is none of here. The two quick prompt tools are on this list because a quick
         // prompt is a row in the store and nothing else, and `workspace_rename` is on it because
-        // a workspace's name is one column of one row.
+        // a workspace's name is one column of one row. `agent_list` is on it for the same reason
+        // again: a crew is rows in `sessions` joined by `parent_session_id`, so listing one
+        // reaches nothing but the store, while starting, saying and stopping all need the window.
         #expect(names == [
-            "quick_prompt_create", "quick_prompt_list", "whoami", "workspace_rename",
+            "agent_list", "quick_prompt_create", "quick_prompt_list", "whoami",
+            "workspace_rename",
         ])
 
         let called = try await caller.call(

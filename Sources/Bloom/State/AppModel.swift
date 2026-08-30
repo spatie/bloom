@@ -514,6 +514,7 @@ final class AppModel {
 
     func reload() async {
         guard let store else { return }
+        let known = Set(workspaces.map(\.id))
         do {
             // Both lists are read before either is published, because the `await` between two
             // assignments is a suspension point the sidebar renders in. Publishing the projects
@@ -561,6 +562,12 @@ final class AppModel {
                     existing.workspace = workspace
                 }
             }
+            // A list that has gained or lost a row may have gained or lost a crew with it, and
+            // nothing writes to the sessions table when it happens: a workspace restored from the
+            // archive brings the crew members stored under it back into the pane. Only when the
+            // membership actually moved, because this method runs after every write anything
+            // makes and `refreshCrew` is a query per workspace. See `refreshCrew`.
+            if Set(workspaces.map(\.id)) != known { await refreshCrew() }
         } catch {
             alert = BloomAlert(
                 title: "Could not read workspaces",
@@ -697,9 +704,13 @@ final class AppModel {
         sessionObservationTask?.cancel()
         sessionObservationTask = Task { [weak self] in
             await self?.refreshAgentTurns()
+            // The sidebar's crew rows are sessions, so this is the feed that says when one is
+            // started, renamed or stopped. See `refreshCrew`.
+            await self?.refreshCrew()
             for await _ in store.changes(of: [.sessions]) {
                 guard let self else { return }
                 await self.refreshAgentTurns()
+                await self.refreshCrew()
             }
         }
     }
@@ -1120,6 +1131,10 @@ final class AppModel {
         stopHidingFromSidebar(id)
         workspaceModels[id] = nil
         storedActivity.removeAll { $0.workspaceID == id }
+        // The crew rows go for the same reason the activity rows above do: `ON DELETE CASCADE`
+        // has taken this workspace's sessions with it, and rows read before that would keep
+        // drawing agents under a workspace that is not there until the next session write.
+        crewRows[id] = nil
         recomputeAgentTurns()
     }
 
@@ -1216,6 +1231,74 @@ final class AppModel {
     /// How many of this turn's subagents failed. Asked by the workspace row.
     func subagentFailures(of workspaceID: WorkspaceID) -> Int {
         subagentFailures[workspaceID] ?? 0
+    }
+
+    // MARK: - Crew
+
+    /// The crew members under each workspace, for the sidebar to draw.
+    ///
+    /// An observable mirror written from one place, exactly like `subagentRows` above and for
+    /// exactly the same reason: `workspaceModels` is `@ObservationIgnored`, so a sidebar that
+    /// walked it would register a dependency on nothing and would only redraw when the diff stat
+    /// poll happened to reassign `workspaces`.
+    ///
+    /// **Read from the store rather than from the models**, which is the one place this differs
+    /// from its sibling. A crew member is a `Session` row that outlives the turn that made it and
+    /// the launch it was made in, so a workspace nobody has opened this launch still has its crew
+    /// to draw, and `WorkspaceModel` is not there to ask. See `Crew`.
+    ///
+    /// Keyed by workspace and holding every crew member in it, whichever chat started them, which
+    /// is `Store.crewByWorkspace`'s own question. The nesting says which worktree an agent is
+    /// working in, and that is a true thing to say about all of them; whose crew it is, is the
+    /// bridge's business and not the pane's.
+    private(set) var crewRows: [WorkspaceID: [CrewRow]] = [:]
+
+    /// The crew under one workspace, without forcing a `WorkspaceModel` into existence. Asked by
+    /// the sidebar for every visible workspace on every redraw.
+    func crew(of workspaceID: WorkspaceID) -> [CrewRow] {
+        crewRows[workspaceID] ?? []
+    }
+
+    /// Re-reads every workspace's crew. Called on each write to the sessions table, and once at
+    /// startup, by `startObservingSessions`.
+    ///
+    /// **One hop onto the store actor, not one per workspace.** This used to ask
+    /// `Store.crew(inWorkspace:)` for each row in the sidebar, and the feed it hangs off fires on
+    /// every write to the sessions table: the runner rewrites state, both token counts, the cost
+    /// and `updatedAt` many times inside a single turn, so a sidebar holding twenty workspaces
+    /// queued twenty round trips onto that actor per batch, against the same actor the running
+    /// agent was writing through. `Store.crewByWorkspace` answers for all of them in one
+    /// statement and the grouping is free here.
+    ///
+    /// Filtered back down to the workspaces on screen rather than mirrored whole, because a crew
+    /// member in an archived workspace is a row the sidebar has nowhere to draw, and putting it in
+    /// `crewRows` would make the equality check below disagree with what is visible.
+    ///
+    /// Each workspace's list is written only when it has actually moved, for the reason
+    /// `recomputeAgentTurns` writes its two sets that way: an identical value assigned back is
+    /// still a mutation to the Observation runtime, and this runs on every session write, which
+    /// includes the token counts a running agent rewrites throughout a turn. `CrewRow` holds the
+    /// three fields the row draws and none of the ones that move like that.
+    func refreshCrew() async {
+        guard let store else { return }
+        let grouped = (try? await store.crewByWorkspace()) ?? [:]
+        var fresh: [WorkspaceID: [CrewRow]] = [:]
+        for workspace in workspaces {
+            guard let members = grouped[workspace.id], !members.isEmpty else { continue }
+            fresh[workspace.id] = members.map(CrewRow.init)
+        }
+        if crewRows != fresh { crewRows = fresh }
+
+        // **What the selection does when the crew member it is reading goes.** It falls back to
+        // the parent workspace, which is where every other pane in the window was already
+        // pointing: see `SidebarSelection.crew`, whose `workspaceID` is the parent precisely so
+        // that reading a crew member narrows the centre column and nothing else. The moment this
+        // catches is the workspace being archived under a chat somebody had open, which would
+        // otherwise leave the column drawing a conversation with no row in the pane.
+        if let sessionID = selection.crewSessionID, let workspaceID = selection.workspaceID,
+           !crew(of: workspaceID).contains(where: { $0.id == sessionID }) {
+            selection = .workspace(workspaceID)
+        }
     }
 
     /// How many workspaces are waiting on the user, for the sidebar's status bar, the Dock badge

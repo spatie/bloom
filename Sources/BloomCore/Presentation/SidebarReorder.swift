@@ -179,6 +179,13 @@ extension SidebarReorder {
         /// offset and never moves, but unlike the notice it appears BETWEEN workspace rows, which
         /// is why `destination` counts ranks rather than subtracting a lower bound.
         case subagent(projectID: RepoID)
+        /// A crew member drawn under the workspace it shares a worktree with. See `Crew`, and
+        /// `SidebarSelection.crew` for why it is not the case above.
+        ///
+        /// Counted exactly where `subagent` is counted, and that is the whole of what this case
+        /// has to do here: it is drawn BETWEEN workspace rows, so a pane that did not count it
+        /// would land a dragged row one place too high per crew member above it.
+        case crew(projectID: RepoID)
         /// A workspace whose worktree is still being cut. See `PendingWorkspace`.
         ///
         /// It takes an offset and never moves, like the two above. It cannot be dragged, because
@@ -191,12 +198,12 @@ extension SidebarReorder {
         /// Whether this row hangs off the end of `projectID`'s workspace rows rather than being
         /// one of them, so `workspaceRun` knows to reach over it.
         ///
-        /// A project header, a notice or another project's row all stop the run; these two do not,
-        /// because they are drawn inside the block and a drop below them is still a drop in this
-        /// project.
+        /// A project header, a notice or another project's row all stop the run; these three do
+        /// not, because they are drawn inside the block and a drop below them is still a drop in
+        /// this project.
         func trails(_ projectID: RepoID) -> Bool {
             switch self {
-            case .subagent(let owner), .pending(let owner): owner == projectID
+            case .subagent(let owner), .crew(let owner), .pending(let owner): owner == projectID
             case .project, .workspace, .notice: false
             }
         }
@@ -252,7 +259,7 @@ extension SidebarReorder {
         guard let grabbed = from.min() else { return .nothing }
 
         switch rows[grabbed] {
-        case .notice, .subagent, .pending:
+        case .notice, .subagent, .crew, .pending:
             return .nothing
 
         case .project(let id):
@@ -330,8 +337,8 @@ extension SidebarReorder {
     /// The flat offsets one project's block occupies, as a range whose bounds are the first and
     /// last places a row of that project can be dropped at.
     ///
-    /// The upper bound reaches past the last workspace row over any subagents drawn under it, and
-    /// over a pending row drawn after them. Those rows are part of the project's block, so a drop
+    /// The upper bound reaches past the last workspace row over any crew members and subagents
+    /// drawn under it, and over a pending row drawn after them. Those rows are part of the project's block, so a drop
     /// below them is a drop at the end of the project rather than outside it, and clamping to the
     /// workspace row itself would have reported `landedOutside` and shown the "Kept in" note for a
     /// drag that landed exactly where the insertion line said it would.

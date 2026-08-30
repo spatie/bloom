@@ -125,6 +125,31 @@ public enum BridgeToolApproval {
         // that act on one.
         "pane_list",
         "browser_read",
+        // The four crew tools, and they stand or fall together, because a crew that can be
+        // assembled and not spoken to is worse than no crew at all. An orchestrator that has to
+        // stop and ask the owner before it can talk to agents it started itself is an
+        // orchestrator that hangs on an unattended turn, which is the failure this whole file is
+        // about; and the agent waiting at the other end of the unanswered ask is a second bill
+        // running while nothing happens. None of the four reaches outside the workspace the
+        // caller is already in: they read and write the `sessions` rows of one worktree, the
+        // caller's own token says which worktree that is, and there is no argument on any of them
+        // that could name another.
+        //
+        // Weighed against the paragraph above about what is deliberately off this list: none of
+        // them destroys anything. `agent_start` adds a chat to the sidebar in front of the
+        // reader, which is the visibility a pane has. `agent_say` puts a message in a chat the
+        // owner can read and answer. `agent_list` reads. `agent_stop` ends a turn and leaves the
+        // conversation and every file the agent wrote exactly where they are, so what it costs is
+        // work in flight rather than work done, and `agent_say` starts the same agent again.
+        //
+        // What holds the ceiling, the depth limit and the name rule is `Crew`, enforced in the
+        // handler before the window is asked for anything, which is the same argument
+        // `workspace_start` is on this list under: there is nothing here for a person to weigh
+        // that Bloom has not already decided.
+        "agent_start",
+        "agent_say",
+        "agent_list",
+        "agent_stop",
         // A presentation request, scoped to an image or movie that resolves inside the caller's
         // own worktree. It changes no file and sends nothing away. The row it adds is the visible
         // record and the file remains under the same agent permission that created or read it.

@@ -158,7 +158,9 @@ public enum TranscriptFold {
         var isActivity: Bool {
             switch kind {
             case .toolUse, .thinking, .permissionAsk, .notice, .system, .error: !drawsNothing
-            case .assistantText, .user, .toolResult, .result: false
+            // A crew row is somebody talking, so it is a boundary like the other two are. Folding
+            // it into a group of grey working rows would hide the message that started the work.
+            case .assistantText, .user, .toolResult, .result, .crew: false
             }
         }
 
@@ -352,9 +354,10 @@ public enum TranscriptFold {
 
         for offset in start..<count {
             let fact = facts[facts.index(facts.startIndex, offsetBy: offset)]
-            // A user's message and the footer settle everything above them. Neither belongs to an
-            // activity group.
-            if fact.kind == .user || fact.kind == .result {
+            // A message and the footer settle everything above them. Neither belongs to an
+            // activity group, and a crew row is a message: it is what another agent said to start
+            // this turn, in the place a user row sits when a person started it.
+            if fact.kind == .user || fact.kind == .crew || fact.kind == .result {
                 close(hasAnswer: false)
                 resume = offset + 1
                 continue

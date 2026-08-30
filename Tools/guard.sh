@@ -45,6 +45,16 @@ BLOOM_DEV_DB_DIR="$HOME/Library/Application Support/Bloom Dev"
 BLOOM_DEV_DB="$BLOOM_DEV_DB_DIR/bloom.sqlite"
 BLOOM_DEV_BUNDLE_ID="be.spatie.bloom.dev"
 
+# The third identity, for trying a feature out beside the other two. Same
+# separation as the dev copy and for the same reasons: its own container, its own
+# preferences domain, its own tmux socket, its own URL scheme. It exists because
+# a feature that changes what a workspace IS wants a copy of its own to be wrong
+# in, without taking the dev copy's data with it.
+BLOOM_SUB_APP="$HOME/Applications/Bloom Subagents.app"
+BLOOM_SUB_DB_DIR="$HOME/Library/Application Support/Bloom Subagents"
+BLOOM_SUB_DB="$BLOOM_SUB_DB_DIR/bloom.sqlite"
+BLOOM_SUB_BUNDLE_ID="be.spatie.bloom.subagents"
+
 # Where a detached dev copy's worktrees are said to be. See Tools/dev-db.sh for
 # why the copied rows are pointed here rather than left on the real ones.
 #

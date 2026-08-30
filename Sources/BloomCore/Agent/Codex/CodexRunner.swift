@@ -106,17 +106,27 @@ public actor CodexRunner: SessionRunner {
 
     public var persistenceFailureCount: Int { persistenceFailures }
 
-    /// Write one user turn. Connects, and starts or resumes the thread, on first use.
+    /// Write one turn. Connects, and starts or resumes the thread, on first use.
+    ///
+    /// `recording` is the row to write down in place of the user row, for a turn another agent
+    /// asked for: see `SessionRunner.send(_:recording:)` for why what goes out and what is drawn
+    /// are not the same string.
     ///
     /// Model, effort, approval policy and sandbox all travel **with the turn** rather than with
     /// the process, which is what makes changing a composer chip mid chat take effect on the next
     /// turn without restarting anything. Claude Code cannot do that: its equivalents are argv.
-    public func send(_ text: String) async throws {
+    public func send(_ text: String, recording: Data? = nil) async throws {
         let client = try await connected()
         let threadID = try await openThread(on: client)
 
         cancelled = false
-        await persist(kind: .user, payload: Self.userPayload(text))
+        // One row, whichever it is, for the reason `AgentRunner.send` gives: the crew payload
+        // already holds both renderings, and a user row beside it is the envelope back on screen.
+        if let recording {
+            await persist(kind: .crew, payload: recording)
+        } else {
+            await persist(kind: .user, payload: Self.userPayload(text))
+        }
 
         let turn = try await client.startTurn(
             threadID: threadID,

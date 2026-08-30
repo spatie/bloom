@@ -2,7 +2,7 @@ import Foundation
 
 /// Every tool the bridge serves, and the only place a new one is added.
 ///
-/// A list of handlers rather than a switch. There are thirty-two of them now, and a switch
+/// A list of handlers rather than a switch. There are thirty-six of them now, and a switch
 /// would put each in three places: the listing, the dispatch and the role gate. Here a tool is one
 /// type, and it carries its own gate. See `docs/BRIDGE.md` for the whole surface and who may reach
 /// it.
@@ -37,8 +37,8 @@ public struct BridgeToolbox: Sendable {
     /// the Merge button takes, moving the selection is the window's own, and a pane is a thing the
     /// window owns; see `WorkspaceStarting`, `WorkspaceMergeRequesting`, `Revealing`,
     /// `PaneOpening`, `PaneSplitting`, `PaneClosing`, `PaneRenaming`, `PaneListing`,
-    /// `BrowserPaneCommanding`, `MediaShowing`, `WorkspaceTabListing` and
-    /// `WorkspaceTabSelecting`.
+    /// `BrowserPaneCommanding`, `MediaShowing`, `WorkspaceTabListing`,
+    /// `WorkspaceTabSelecting`, `CrewStarting`, `CrewSaying` and `CrewStopping`.
     /// Four of those are the ones that read: a `WKWebView` is as much a part of the UI graph as a
     /// tab strip is, so seeing a pane crosses the same line as opening one, and which tab a
     /// workspace is in is held nowhere but in memory on the main actor.
@@ -60,6 +60,12 @@ public struct BridgeToolbox: Sendable {
         QuickPromptCreateTool(),
         QuickPromptUpdateTool(),
         QuickPromptDeleteTool(),
+        // The one of the four crew tools that only reads. A crew is rows in `sessions` joined by
+        // `parent_session_id`, so listing one reaches nothing but the store. The other three are
+        // bound in `AppModel.bridgeToolbox()`, because starting a chat, sending a turn into one
+        // and stopping one all happen in the main-actor graph that owns the runners: see
+        // `CrewStarting`, `CrewSaying` and `CrewStopping` in `CrewSeam`.
+        AgentListTool(),
     ])
 
     /// The tools a caller may see. Sorted by name so `tools/list` is stable between calls, which
