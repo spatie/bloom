@@ -299,7 +299,6 @@ public struct WorkspaceListTool: BridgeToolHandling {
         // the same words.
         let hold = DeliveryHold.of(
             isRunningSetup: workspace.setupState == .running,
-            didSetupFail: workspace.setupState == .failed,
             isTurnRunning: session.state == .running,
             isAwaitingQuestion: session.state == .waiting
         )

@@ -183,7 +183,7 @@ public enum WorkspaceMergeTrouble: Sendable, Equatable {
 
     /// Why nothing was sent into a workspace that is busy, and whether waiting is the answer.
     ///
-    /// The four holds are `DeliveryHold`'s, asked rather than re-derived, so this tool and the
+    /// The three holds are `DeliveryHold`'s, asked rather than re-derived, so this tool and the
     /// bubble in the transcript agree about what a workspace is waiting for. What is not shared is
     /// the wording: `DeliveryHold.sentence` is written for somebody looking at a queue they can
     /// see, and every one of them promises the message will go later. This tool has no queue to
@@ -198,13 +198,6 @@ public enum WorkspaceMergeTrouble: Sendable, Equatable {
                 still running and nothing may be said to an agent in a worktree that is still \
                 being built. A request sent now would sit in a queue rather than start a turn. \
                 Wait, and ask again once workspace_list reports its setup_state as done.
-                """
-        case .setupFailed:
-            return """
-                Bloom will not ask for a merge in '\(workspace)' because its setup script failed, \
-                so no agent was ever started there and a request sent now would sit in a queue. \
-                Retrying will not help. The failure is the owner's to look at; workspace_list \
-                reports the state.
                 """
         case .question:
             return """

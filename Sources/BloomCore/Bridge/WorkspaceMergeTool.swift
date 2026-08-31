@@ -354,15 +354,14 @@ public struct WorkspaceMergeTool: BridgeToolHandling {
     private func hold(on workspace: Workspace, store: Store) async throws -> DeliveryHold? {
         let sessions = try await store.sessions(workspaceID: workspace.id)
         let isRunningSetup = workspace.setupState == .running
-        let didSetupFail = workspace.setupState == .failed
 
-        // A workspace with no chat at all is asked about anyway, because the setup states hold a
-        // message on their own and belong to the workspace rather than to any chat. It is not
-        // otherwise held: `requestMerge` opens a chat, exactly as the button does for a workspace
-        // whose agent was never started.
+        // A workspace with no chat at all is asked about anyway, because a setup script that is
+        // still running holds a message on its own and belongs to the workspace rather than to
+        // any chat. It is not otherwise held: `requestMerge` opens a chat, exactly as the button
+        // does for a workspace whose agent was never started, and a setup script that FAILED is
+        // no longer a hold at all. See `DeliveryHold`.
         var held = DeliveryHold.of(
             isRunningSetup: isRunningSetup,
-            didSetupFail: didSetupFail,
             isTurnRunning: false,
             isAwaitingQuestion: false
         )
@@ -370,7 +369,6 @@ public struct WorkspaceMergeTool: BridgeToolHandling {
         for session in sessions where held == .none {
             held = DeliveryHold.of(
                 isRunningSetup: isRunningSetup,
-                didSetupFail: didSetupFail,
                 isTurnRunning: session.state == .running,
                 isAwaitingQuestion: session.state == .waiting
             )

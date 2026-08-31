@@ -588,7 +588,6 @@ final class TranscriptModel {
         let model = workspace.flatMap { app.existingModel(for: $0.id) }
         return DeliveryHold.of(
             isRunningSetup: model?.isRunningSetup ?? false,
-            didSetupFail: (model?.workspace ?? workspace)?.setupState == .failed,
             isTurnRunning: isRunning,
             isAwaitingQuestion: isAwaitingPermission
         )

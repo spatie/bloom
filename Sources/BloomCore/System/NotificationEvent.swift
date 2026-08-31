@@ -47,7 +47,7 @@ public enum NotificationEvent: String, CaseIterable, Sendable, Hashable, Codable
         case .turnFinished: "The agent finished its turn."
         case .needsInput: "The agent needs something from you before it can carry on."
         case .agentFailed: "The agent stopped without finishing the turn."
-        case .setupFailed: "The setup script failed, so the agent was not started."
+        case .setupFailed: "The setup script failed. The agent was started anyway."
         case .checksFinished: "The checks finished."
         }
     }

@@ -7,7 +7,7 @@ struct DeliveryHoldTests {
     @Test("a running setup script holds everything behind it")
     func setupWins() {
         let hold = DeliveryHold.of(
-            isRunningSetup: true, didSetupFail: false, isTurnRunning: true, isAwaitingQuestion: true
+            isRunningSetup: true, isTurnRunning: true, isAwaitingQuestion: true
         )
         #expect(hold == .setup)
         #expect(!hold.allowsDelivery)
@@ -18,7 +18,7 @@ struct DeliveryHoldTests {
         // The turn is still marked running while the agent waits on an answer, so the more useful
         // of the two true answers is the one that tells the reader what to do.
         let hold = DeliveryHold.of(
-            isRunningSetup: false, didSetupFail: false, isTurnRunning: true, isAwaitingQuestion: true
+            isRunningSetup: false, isTurnRunning: true, isAwaitingQuestion: true
         )
         #expect(hold == .question)
     }
@@ -26,25 +26,28 @@ struct DeliveryHoldTests {
     @Test("a running turn holds the queue")
     func turnHolds() {
         let hold = DeliveryHold.of(
-            isRunningSetup: false, didSetupFail: false, isTurnRunning: true, isAwaitingQuestion: false
+            isRunningSetup: false, isTurnRunning: true, isAwaitingQuestion: false
         )
         #expect(hold == .turn)
         #expect(!hold.allowsDelivery)
     }
 
-    @Test("a failed setup does not launch an agent into a worktree that was never built")
-    func failedSetupHolds() {
+    @Test("a setup script that failed holds nothing, so the queue still moves")
+    func failedSetupDoesNotHold() {
+        // The workspace is not asked about its setup failure at all any more: what failed is said
+        // in the red setup row, the alert, the notification and the sidebar, and none of those is
+        // a reason to leave a chat that cannot be spoken to. See `DeliveryHold`.
         let hold = DeliveryHold.of(
-            isRunningSetup: false, didSetupFail: true, isTurnRunning: false, isAwaitingQuestion: false
+            isRunningSetup: false, isTurnRunning: false, isAwaitingQuestion: false
         )
-        #expect(hold == .setupFailed)
-        #expect(!hold.allowsDelivery)
+        #expect(hold == .none)
+        #expect(hold.allowsDelivery)
     }
 
     @Test("an idle session lets the queue move")
     func idleDelivers() {
         let hold = DeliveryHold.of(
-            isRunningSetup: false, didSetupFail: false, isTurnRunning: false, isAwaitingQuestion: false
+            isRunningSetup: false, isTurnRunning: false, isAwaitingQuestion: false
         )
         #expect(hold == .none)
         #expect(hold.allowsDelivery)

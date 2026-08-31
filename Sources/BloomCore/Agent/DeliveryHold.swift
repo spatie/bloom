@@ -7,6 +7,20 @@ import Foundation
 /// deciding whether to wait or to press Stop, and the app already made the first of those two
 /// promises out loud ("It goes as soon as setup finishes") in a place that could not keep it.
 ///
+/// **A setup script that FAILED holds nothing, and that is the second promise this type had to
+/// stop breaking.** There used to be a `setupFailed` case. It refused every delivery, while the
+/// bubble under the message read "Setup failed, so this has not gone. It goes with your next
+/// message", and the next message did not move it either: the hold is read again on the next
+/// drain, a failed `setup_state` does not change by being typed at, and so the queue sat there
+/// until somebody ran setup again and it happened to succeed. The rule behind it was that an
+/// agent must not be launched into a worktree whose dependencies are not installed. That is the
+/// owner's call rather than Bloom's, and the owner's answer is no: a script fails for reasons
+/// that have nothing to do with the task (`createdb` not on the PATH the script ran with, valet
+/// declining to ask for a password), and a workspace that answers nothing at all is worse than
+/// one whose agent is told what went wrong and can install the missing thing itself. The failure
+/// is still said in four other places, none of which this changes: the red setup row with its
+/// log, the alert, the notification, and `WorkspaceStatus.setupFailed` in the sidebar.
+///
 /// Here rather than in the view for the usual reason: the precedence between these is a decision,
 /// the drain reads the same answer the bubble does, and the test target cannot see a view. The
 /// sentences are here too, so the promise the transcript makes is pinned by the suite rather than
@@ -20,10 +34,6 @@ public enum DeliveryHold: Equatable, Sendable, CaseIterable {
     case question
     /// The agent is mid turn.
     case turn
-    /// The setup script failed, so no turn was ever started here. The queue is not lost, it is
-    /// simply not going anywhere on its own: an agent must not be launched into a worktree whose
-    /// dependencies are not installed just because a timer said so.
-    case setupFailed
     /// Nothing in the session is holding it.
     ///
     /// That is not the same as "it is about to go". The queue moves on an event (setup finishing,
@@ -41,14 +51,12 @@ public enum DeliveryHold: Equatable, Sendable, CaseIterable {
     /// question above the composer.
     public static func of(
         isRunningSetup: Bool,
-        didSetupFail: Bool,
         isTurnRunning: Bool,
         isAwaitingQuestion: Bool
     ) -> DeliveryHold {
         if isRunningSetup { return .setup }
         if isAwaitingQuestion { return .question }
         if isTurnRunning { return .turn }
-        if didSetupFail { return .setupFailed }
         return .none
     }
 
@@ -63,16 +71,14 @@ public enum DeliveryHold: Equatable, Sendable, CaseIterable {
     ///
     /// **Nothing holding it says nothing.** It said "Goes with your next message", which is the
     /// ordinary way a queued message behaves and the only thing it could have been waiting for;
-    /// the four sentences above are worth reading because each names a specific thing to wait on,
-    /// and a fifth explaining that there is nothing to wait on made the other four look like
-    /// decoration. `setupFailed` still says it, because there the reader is being told why
-    /// something did NOT go.
+    /// the three sentences above are worth reading because each names a specific thing to wait on,
+    /// and a fourth explaining that there is nothing to wait on made the other three look like
+    /// decoration.
     public var sentence: String? {
         switch self {
         case .setup: "Goes as soon as setup finishes."
         case .question: "Goes once you have answered the question above."
         case .turn: "Goes when this turn ends."
-        case .setupFailed: "Setup failed, so this has not gone. It goes with your next message."
         case .none: nil
         }
     }

@@ -1007,7 +1007,12 @@ final class WorkspaceModel {
                     message: SetupFailure.instruction
                 )
                 NotificationService.shared.setupFailed(workspace: workspace)
-                return
+                // And then on, rather than back: the agent starts and the opening prompt goes.
+                // This used to return, which left the workspace silent for good, because the
+                // queue moves on an event and a failed setup produces no further events. The
+                // argument for stopping was that dependencies might be missing; the answer is
+                // that the agent is the one thing in the worktree that can read the log and
+                // install them. See `DeliveryHold`, where the matching hold was taken out.
             }
         }
 
