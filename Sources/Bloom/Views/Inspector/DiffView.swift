@@ -549,7 +549,48 @@ struct DiffView: View {
                 Hairline(axis: .vertical)
                 side(pair.right, document: document, numbers: .new, width: half)
             }
+
+        case let .lineRun(lines):
+            run(lines.map(Optional.some), document: document, numbers: .both, width: width)
+
+        case let .pairRun(pairs):
+            // Each half is its own block, so a selection runs down one pane rather than zigzagging
+            // between them. That is what every side by side diff on the web does too, and the
+            // alternative is a copied fragment interleaving two versions of the same file.
+            HStack(spacing: 0) {
+                let half = (width - Metrics.hairline) / 2
+                run(pairs.map(\.left), document: document, numbers: .old, width: half)
+                Hairline(axis: .vertical)
+                run(pairs.map(\.right), document: document, numbers: .new, width: half)
+            }
         }
+    }
+
+    /// A stretch of consecutive lines, drawn as one block of selectable text. One helper for both
+    /// layouts, taking optionals because a side by side row can have nothing opposite it.
+    private func run(
+        _ lines: [DiffLine?],
+        document: DiffDocument,
+        numbers: DiffLineView.Numbers,
+        width: CGFloat
+    ) -> some View {
+        DiffRunView(
+            lines: lines.map { line in
+                DiffRunLine(
+                    line: line,
+                    carry: line.flatMap { document.carries[$0.index] } ?? LexState(),
+                    emphasis: line.flatMap { document.emphasis[$0.index] } ?? [],
+                    isCommented: isCommented(line, numbers: numbers)
+                )
+            },
+            language: document.language,
+            numbers: numbers,
+            width: width,
+            onComment: { beginDraft(at: $0) }
+        )
+        // For the reason given at the per line call sites above, and up to four hundred times as
+        // much of it: one of these stands in for a whole run of rows.
+        .equatable()
     }
 
     private func side(
@@ -814,7 +855,11 @@ struct DiffView: View {
         var spots = Set(placements.compactMap(\.spot))
         if let draftSpot { spots.insert(draftSpot) }
         commentedSpots = spots
-        rows = isSideBySide ? splitRows(document) : unifiedRows(document)
+        // Grouped after the two builders have finished, never inside them: consecutive lines
+        // become one block of selectable text, because a `Text` per line cannot be selected
+        // across two of them. `DiffRow.grouped` says why it is a post pass, `DiffRunGrouping`
+        // says where a run stops.
+        rows = DiffRow.grouped(isSideBySide ? splitRows(document) : unifiedRows(document))
 
         // The editor follows its line, and a rebuild can take that line off the screen: a reload
         // after the agent edits, or a whitespace refold dropping the expanded run the line sat

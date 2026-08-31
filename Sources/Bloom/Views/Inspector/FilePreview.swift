@@ -237,8 +237,8 @@ struct FilePreview: View {
             )
             ScrollView([.vertical, .horizontal]) {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(lines.indices, id: \.self) { index in
-                        row(at: index, width: width)
+                    ForEach(runs, id: \.lowerBound) { range in
+                        run(range, width: width)
                     }
                     if isTruncated {
                         Text("Showing the first \(Self.lineLimit.formatted()) lines")
@@ -255,23 +255,54 @@ struct FilePreview: View {
         }
     }
 
-    /// No tint behind the numbers, for the reason `DiffLineView.gutter` gives: a grey column
-    /// against the ground the code sits on draws a hard vertical edge down the left of the file,
-    /// and a hard edge reads as a boundary between two things rather than as the margin of one.
-    /// It also has to match, because Diff, Preview and Edit are three views of one file and this
-    /// pane is the one you land in by clicking a file that has not changed.
-    private func row(at index: Int, width: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            Text("\(index + 1)")
-                .font(Typo.codeTiny)
-                .monospacedDigit()
-                .foregroundStyle(Palette.textTertiary)
-                .frame(width: CodeMetrics.numberWidth, alignment: .trailing)
-                .padding(.trailing, CodeMetrics.gutterPadding)
-            CodeText(
-                line: lines[index],
-                language: language,
-                carry: index < carries.count ? carries[index] : LexState()
+    /// The file in blocks, so a selection can run across lines.
+    ///
+    /// **A file was a `Text` per line and could not be selected across two of them**, which is the
+    /// same report the diff got on 0.20.0 and the same answer: sibling `Text`s are separate
+    /// selection scopes on this system. Nothing here needs the diff's machinery, since a file that
+    /// has not changed has no washes, no markers and no comment buttons, so it is a column of
+    /// numbers beside one `CodeRunText`.
+    ///
+    /// Blocks rather than the whole file, through the same rule the diff groups by, because a run
+    /// is one item in a lazy stack however many lines it holds and this pane will show five
+    /// thousand of them.
+    private var runs: [Range<Int>] {
+        DiffRunGrouping.chunks(count: lines.count, isLine: { _ in true }).map { chunk in
+            switch chunk {
+            case let .single(index): index..<(index + 1)
+            case let .run(range): range
+            }
+        }
+    }
+
+    /// No tint behind the numbers, for the reason `DiffGutter` gives: a grey column against the
+    /// ground the code sits on draws a hard vertical edge down the left of the file, and a hard
+    /// edge reads as a boundary between two things rather than as the margin of one. It also has
+    /// to match, because Diff, Preview and Edit are three views of one file and this pane is the
+    /// one you land in by clicking a file that has not changed.
+    private func run(_ range: Range<Int>, width: CGFloat) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                ForEach(range, id: \.self) { index in
+                    Text("\(index + 1)")
+                        .font(Typo.codeTiny)
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.textTertiary)
+                        .frame(width: CodeMetrics.numberWidth, alignment: .trailing)
+                        .padding(.trailing, CodeMetrics.gutterPadding)
+                        // One fixed height cell per line, which is what the block of text beside
+                        // this column is tuned to match. See `CodeMetrics.rowSpacing`.
+                        .frame(height: CodeMetrics.rowHeight)
+                }
+            }
+            CodeRunText(
+                lines: range.map { index in
+                    CodeRunLine(
+                        text: lines[index],
+                        carry: index < carries.count ? carries[index] : LexState()
+                    )
+                },
+                language: language
             )
             // The diff pays for this with its marker column. Without it here the first character
             // of every line sits against the gutter's edge, and the width computed above already
@@ -279,7 +310,11 @@ struct FilePreview: View {
             .padding(.leading, CodeMetrics.textInset)
             Spacer(minLength: 0)
         }
-        .frame(width: width, height: CodeMetrics.rowHeight, alignment: .leading)
+        .frame(
+            width: width,
+            height: CodeMetrics.rowHeight * CGFloat(range.count),
+            alignment: .leading
+        )
     }
 
     private func load() async {
