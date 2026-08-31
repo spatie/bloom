@@ -5,6 +5,13 @@ import BloomCore
 ///
 /// The same view serves both layouts. Unified asks for both number columns, side by side asks for
 /// one and is given an explicit width so the two panes stay aligned even when a line is empty.
+///
+/// **Most rows are no longer drawn by this.** A `Text` per line cannot be selected across two of
+/// them, so consecutive lines are grouped into a `DiffRunView` and drawn as one text object; see
+/// `DiffRunGrouping` for what stops a run. What is left here is every row a run may not swallow:
+/// a lone line between two comment bands, the line above an expander, the last line of a hunk.
+/// The two must look identical, which is why the gutter, the marker and the `+` are shared views
+/// rather than a copy each.
 struct DiffLineView: View, Equatable {
     /// A row redraws when what it holds changes, and not because the closure beside it is a new
     /// closure. `onComment` is written at the call site as `{ beginDraft(at: $0) }`, so it is a
@@ -29,12 +36,9 @@ struct DiffLineView: View, Equatable {
             && lhs.isCommented == rhs.isCommented
     }
 
-    /// Which gutters this row shows. Side by side shows one, unified shows both.
-    enum Numbers {
-        case both
-        case old
-        case new
-    }
+    /// Which gutters this row shows. The enum moved to `DiffGutter` when the run view came to
+    /// need it too; this keeps `DiffLineView.Numbers` naming the same type it always did.
+    typealias Numbers = DiffGutter.Numbers
 
     var line: DiffLine?
     var language: Language
@@ -52,27 +56,24 @@ struct DiffLineView: View, Equatable {
     var onComment: ((ReviewSpot) -> Void)?
 
     @State private var isHovered = false
-    @FocusState private var isPlusFocused: Bool
 
     var body: some View {
         HStack(spacing: 0) {
-            gutter
+            DiffGutter(line: line, numbers: numbers)
             content
         }
         .frame(width: width, height: CodeMetrics.rowHeight, alignment: .leading)
-        // One element per line, said as a sentence. Left as it was drawn, VoiceOver read a row as
-        // four unrelated fragments, "128", "129", "+", and then the code, and whether a line was
-        // added or removed reached the reader only as a background wash and a one-character
-        // marker that is a bare space on a context line. A colour is not a label.
+        // One element per line, said as a sentence. The wording, and why a colour is not a label,
+        // are on `DiffGutter.speech`.
         //
         // Collapsed HERE, before the comment button's overlay, and not at the foot of the body.
         // `children: .ignore` swallows every descendant of whatever it is applied to, so applied
         // after the overlay it removed the button from the accessibility tree, measured by the
-        // button vanishing from the AX hierarchy, and the claim in `commentButton`'s comment that
-        // a keyboard and VoiceOver can reach it was quietly false. In this order the row is one
-        // spoken sentence and the button is its sibling, which is both true and reachable.
+        // button vanishing from the AX hierarchy, and the claim in `DiffCommentButton`'s comment
+        // that a keyboard and VoiceOver can reach it was quietly false. In this order the row is
+        // one spoken sentence and the button is its sibling, which is both true and reachable.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabel)
+        .accessibilityLabel(DiffGutter.speech(for: line))
         .accessibilityHidden(line == nil)
         .overlay(alignment: .leading) { commentButton }
         // The whole row is the hover target, and it has to be said, because a view's hit region
@@ -100,7 +101,7 @@ struct DiffLineView: View, Equatable {
         // an unchanged line still paints nothing, so only the lines that were already coloured
         // are affected, and they now meet. Behind the content rather than over it, so the word
         // level emphasis inside `CodeText` still sits on top and is neither moved nor clipped.
-        .background(background)
+        .background(DiffWash.background(of: line))
         // The same action the `+` in the gutter carries, on the right click as well.
         //
         // A control that only appears under the pointer is a control most people never learn is
@@ -120,104 +121,19 @@ struct DiffLineView: View, Equatable {
         }
     }
 
-    /// What this line is, where it is, and what it says, in that order.
-    private var accessibilityLabel: String {
-        guard let line else { return "" }
-        if line.kind == .noNewline { return "No newline at end of file" }
-
-        let number = line.newNumber ?? line.oldNumber
-        let place = number.map { " \($0)" } ?? ""
-        let state = switch line.kind {
-        case .addition: "Added line\(place)"
-        case .deletion: "Removed line\(place)"
-        default: "Line\(place)"
-        }
-
-        let text = line.text.trimmingCharacters(in: .whitespaces)
-        return text.isEmpty ? "\(state), empty" : "\(state), \(text)"
-    }
-
     // MARK: - Commenting
 
     /// The spot a comment left on this row would anchor to, filtered to the side this view is
-    /// drawing. In side by side a context line appears in both panes; only the new-side pane
-    /// offers it, so one line never grows two buttons meaning the same thing.
+    /// drawing. The rule is `DiffCommentSpot`, shared with the run view.
     private var offeredSpot: ReviewSpot? {
-        guard onComment != nil, let spot = line?.reviewSpot else { return nil }
-        switch numbers {
-        case .both: return spot
-        case .old: return spot.side == .old ? spot : nil
-        case .new: return spot.side == .new ? spot : nil
-        }
+        DiffCommentSpot.offered(for: line, numbers: numbers, enabled: onComment != nil)
     }
 
-    /// The `+` in the gutter, sitting over the line number the way Conductor draws it.
-    ///
-    /// Always in the hierarchy and hidden by drawing in clear rather than built on hover or
-    /// faded with `.opacity`, so it is reachable by Tab under Full Keyboard Access and readable
-    /// by VoiceOver: a control that only exists while a pointer floats over it is a control a
-    /// keyboard can never reach. Not `.opacity(0)`, on the button or on its label, because
-    /// either took the element out of the accessibility tree entirely, measured by it vanishing
-    /// from the AX hierarchy, which silently broke the sentence before this one. Clear colours
-    /// draw the same nothing while the button keeps its hit region and its element, which is
-    /// also what makes the hover reveal feel instant.
     @ViewBuilder
     private var commentButton: some View {
-        if let spot = offeredSpot {
-            let shown = isHovered || isPlusFocused
-            Button {
-                onComment?(spot)
-            } label: {
-                Image(systemName: "plus")
-                    .font(Typo.micro)
-                    .fontWeight(.bold)
-                    .foregroundStyle(shown ? Palette.selectedEmphasizedText : .clear)
-                    .frame(width: 16, height: 16)
-                    .background(
-                        shown ? Palette.controlAccent : .clear,
-                        in: RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                    )
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .focused($isPlusFocused)
-            .padding(.leading, Metrics.spacingTight)
-            .help("Comment on this line")
-            .accessibilityLabel("Comment on line \(spot.line)")
+        if let spot = offeredSpot, let onComment {
+            DiffCommentButton(spot: spot, isRowHovered: isHovered, onComment: onComment)
         }
-    }
-
-    // MARK: - Gutter
-
-    @ViewBuilder
-    private var gutter: some View {
-        HStack(spacing: 0) {
-            switch numbers {
-            case .both:
-                number(line?.oldNumber)
-                number(line?.newNumber)
-            case .old:
-                number(line?.oldNumber)
-            case .new:
-                number(line?.newNumber)
-            }
-        }
-        // No tint of its own. A grey column against the white the code sits on put a hard vertical
-        // edge down the left of every diff, and a hard edge is read as a boundary between two
-        // things rather than as the margin of one. The row's wash runs under this and under the
-        // code alike, which leaves the numbers to be told apart by being dimmed and monospaced,
-        // and that is what separates a ruler from content anyway.
-    }
-
-    /// Right aligned, dimmed and monospaced, so a column of numbers reads as a ruler rather than
-    /// as content competing with the code beside it.
-    private func number(_ value: Int?) -> some View {
-        Text(value.map(String.init) ?? "")
-            .font(Typo.codeTiny)
-            .monospacedDigit()
-            .foregroundStyle(Palette.textTertiary)
-            .frame(width: CodeMetrics.numberWidth, alignment: .trailing)
-            .padding(.trailing, CodeMetrics.gutterPadding)
     }
 
     // MARK: - Content
@@ -228,7 +144,7 @@ struct DiffLineView: View, Equatable {
             switch line.kind {
             case .noNewline:
                 HStack(spacing: 0) {
-                    marker
+                    DiffMarker(line: line)
                     Text("No newline at end of file")
                         .font(Typo.codeTiny)
                         .foregroundStyle(Palette.textTertiary)
@@ -241,9 +157,9 @@ struct DiffLineView: View, Equatable {
                 // it paints over the row tint underneath rather than replacing it. Both are needed:
                 // the tint says the line changed, the emphasis says which part of it did.
                 HStack(spacing: 0) {
-                    marker
+                    DiffMarker(line: line)
                     CodeText(line: line.text, language: language, carry: carry)
-                        .emphasizing(emphasis, color: emphasisColor)
+                        .emphasizing(emphasis, color: DiffWash.emphasis(of: line))
                     Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -256,24 +172,16 @@ struct DiffLineView: View, Equatable {
                 .frame(maxWidth: .infinity)
         }
     }
+}
 
-    private var marker: some View {
-        Text(markerText)
-            .font(Typo.codeTiny)
-            .foregroundStyle(Palette.textTertiary)
-            .frame(width: CodeMetrics.markerWidth, alignment: .center)
-    }
-
-    private var markerText: String {
-        switch line?.kind {
-        case .addition: "+"
-        case .deletion: "-"
-        case .noNewline: "\\"
-        default: " "
-        }
-    }
-
-    private var background: Color {
+/// What a diff line is painted with.
+///
+/// Two colours, asked for by the per line rows and by the run rows, which paint them in different
+/// places: `DiffLineView` as the row's own background, `DiffRunView` as a layer behind a column of
+/// lines. One answer, so a run and the lone line under it cannot come out different greens.
+enum DiffWash {
+    /// The wash that says the line changed.
+    static func background(of line: DiffLine?) -> Color {
         switch line?.kind {
         case .addition: Palette.diffAddBackground
         case .deletion: Palette.diffDeleteBackground
@@ -281,7 +189,8 @@ struct DiffLineView: View, Equatable {
         }
     }
 
-    private var emphasisColor: Color {
+    /// The stronger tint that says WHICH PART of it changed, painted on the glyph runs on top.
+    static func emphasis(of line: DiffLine?) -> Color {
         switch line?.kind {
         case .addition: Palette.diffAddEmphasis
         case .deletion: Palette.diffDeleteEmphasis

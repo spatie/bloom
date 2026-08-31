@@ -176,6 +176,54 @@ public actor Store {
         { try $0.execute(statements) }
     }
 
+    /// Columns the code in this build cannot run without, added to any database that is missing
+    /// one whatever its version number says.
+    ///
+    /// **The version stamp is a fast path, not the truth, and this is the incident that proved
+    /// it.** The owner's database read `user_version = 22` with `deliveries.crew_payload` present
+    /// and `sessions.parent_session_id` absent, so every query naming that column failed and the
+    /// app could not open the database at all. `migrate` had nothing to do: 22 is the length of
+    /// the list, so it returned before running a step.
+    ///
+    /// How a database gets into that state is the hazard of numbering migrations by position. Two
+    /// branches each append a step, both get the same number, and a database that ran one of them
+    /// is stamped as having run the other. Merging the branches cannot repair it, because the
+    /// stamp is already past both. Nothing about that is unusual enough to design against with a
+    /// second numbering scheme; what is worth doing is asking the schema rather than the stamp
+    /// before trusting it.
+    ///
+    /// So this runs on every open, costs one `PRAGMA table_info` per table named here, and adds
+    /// only what is genuinely missing. It is deliberately a short list: the columns whose absence
+    /// stops the app dead rather than every column the schema has. A migration is still where a
+    /// change is written; this is the belt under it.
+    private nonisolated static func repairSchema(_ db: SQLiteDatabase) throws {
+        let required: [(table: String, column: String, add: String, index: String?)] = [
+            (
+                "sessions", "parent_session_id",
+                "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT;",
+                "CREATE INDEX IF NOT EXISTS sessions_parent ON sessions(parent_session_id);"
+            ),
+            (
+                "deliveries", "crew_payload",
+                "ALTER TABLE deliveries ADD COLUMN crew_payload BLOB;",
+                nil
+            ),
+        ]
+
+        for wanted in required {
+            let columns = try db.query("PRAGMA table_info(\(wanted.table));")
+            let names = Set(columns.compactMap { $0.string("name") })
+            // An empty answer is a table this database does not have, which is not this method's
+            // business: a missing table is a migration that has not run yet, and this runs before
+            // they do. An ALTER against it would fail rather than repair anything, and it did:
+            // the first version of this method put a bare `CREATE INDEX` under the loop and a
+            // brand new database could not be opened at all.
+            guard !names.isEmpty, !names.contains(wanted.column) else { continue }
+            try db.execute(wanted.add)
+            if let index = wanted.index { try db.execute(index) }
+        }
+    }
+
     private nonisolated static func migrate(_ db: SQLiteDatabase) throws {
         let migrations: [Migration] = [
             sql("""
@@ -910,6 +958,12 @@ public actor Store {
         ]
 
         let current = Int(db.userVersion)
+
+        // Before the version is trusted, and whatever it says. See `repairSchema`: a database
+        // stamped as fully migrated with a column missing is a real state that a real machine
+        // reached, and every query naming that column failed until it was put back.
+        try repairSchema(db)
+
         guard current < migrations.count else { return }
 
         // Off for the run, and back on after it, which is SQLite's own instruction for a schema
