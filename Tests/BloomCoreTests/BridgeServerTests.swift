@@ -288,6 +288,16 @@ struct BridgeServerTests {
     func droppedServerIsReleased() async throws {
         let store = try makeTestStore("bridge-release")
         let socketPath = NSTemporaryDirectory() + "bloom-drop-\(UUID().uuidString.prefix(8)).sock"
+        // A socket file is one per test and nothing else removes it: a successor unlinks the path
+        // it is about to bind, and these names are unique, so every run left one behind. The `.d`
+        // beside it is the config directory the server derives from the same path, and it is left
+        // the same way. See `BridgeServer.configDirectory`.
+        defer {
+            try? FileManager.default.removeItem(atPath: socketPath)
+            try? FileManager.default.removeItem(
+                atPath: (socketPath as NSString).deletingPathExtension + ".d"
+            )
+        }
 
         weak var released: BridgeServer?
         do {
@@ -310,6 +320,16 @@ struct BridgeServerTests {
     func retiringASessionRemovesItsConfig() async throws {
         let store = try makeTestStore("bridge-retire")
         let socketPath = NSTemporaryDirectory() + "bloom-retire-\(UUID().uuidString.prefix(8)).sock"
+        // A socket file is one per test and nothing else removes it: a successor unlinks the path
+        // it is about to bind, and these names are unique, so every run left one behind. The `.d`
+        // beside it is the config directory the server derives from the same path, and it is left
+        // the same way. See `BridgeServer.configDirectory`.
+        defer {
+            try? FileManager.default.removeItem(atPath: socketPath)
+            try? FileManager.default.removeItem(
+                atPath: (socketPath as NSString).deletingPathExtension + ".d"
+            )
+        }
         let server = BridgeServer(store: store, socketPath: socketPath)
         defer { server.stop() }
         try server.start()
@@ -342,6 +362,16 @@ struct BridgeServerTests {
     func startingSweepsTheDirectory() async throws {
         let store = try makeTestStore("bridge-sweep")
         let socketPath = NSTemporaryDirectory() + "bloom-sweep-\(UUID().uuidString.prefix(8)).sock"
+        // A socket file is one per test and nothing else removes it: a successor unlinks the path
+        // it is about to bind, and these names are unique, so every run left one behind. The `.d`
+        // beside it is the config directory the server derives from the same path, and it is left
+        // the same way. See `BridgeServer.configDirectory`.
+        defer {
+            try? FileManager.default.removeItem(atPath: socketPath)
+            try? FileManager.default.removeItem(
+                atPath: (socketPath as NSString).deletingPathExtension + ".d"
+            )
+        }
         let server = BridgeServer(store: store, socketPath: socketPath)
         defer { server.stop() }
 

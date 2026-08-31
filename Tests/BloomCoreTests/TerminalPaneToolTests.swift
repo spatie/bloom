@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import BloomCore
 
-@Suite("Controlling a terminal pane")
+@Suite("Controlling a terminal pane", .scratchDirectory)
 struct TerminalPaneToolTests {
     private var identity: BridgeIdentity {
         BridgeIdentity(sessionID: SessionID("s"), workspaceID: WorkspaceID("w"), role: .parent)

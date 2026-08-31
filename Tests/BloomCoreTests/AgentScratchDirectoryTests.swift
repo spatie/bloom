@@ -8,10 +8,11 @@ import Foundation
 /// nothing could see it: three of them a default argument nobody reads, spending a subprocess
 /// rooted at everything the user owns on every launch. Three things have to stay true of the
 /// replacement: it is a folder Bloom made, there is nothing in it, and it is nowhere under `~`.
-@Suite("Where an agent stands with no workspace")
+@Suite("Where an agent stands with no workspace", .scratchDirectory)
 struct AgentScratchDirectoryTests {
+    /// In the running test's own directory, so what this makes goes when the test ends.
     private func temporaryBase() -> String {
-        let base = NSTemporaryDirectory() + "bloom-scratch-test-\(UUID().uuidString)"
+        let base = TestScratch.unique("agent-scratch")
         try? FileManager.default.createDirectory(atPath: base, withIntermediateDirectories: true)
         return base
     }

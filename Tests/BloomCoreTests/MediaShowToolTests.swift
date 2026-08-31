@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import BloomCore
 
-@Suite("Showing workspace media inline")
+@Suite("Showing workspace media inline", .scratchDirectory)
 struct MediaShowToolTests {
     private var identity: BridgeIdentity {
         BridgeIdentity(sessionID: SessionID("s"), workspaceID: WorkspaceID("w"), role: .parent)

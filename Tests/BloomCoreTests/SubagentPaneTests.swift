@@ -194,10 +194,12 @@ import Foundation
 
 // MARK: - Reading two different files
 
-@Suite struct SubagentOutputReadingTests {
+@Suite(.scratchDirectory) struct SubagentOutputReadingTests {
+    /// In the running test's own directory, which is removed when it ends. It used to be a fresh
+    /// directory under `NSTemporaryDirectory()` that nothing removed, and there were 1,007 of them
+    /// on the machine this was found on. See `TestScratch`.
     private func write(_ text: String, _ name: String = "out") throws -> String {
-        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("bloom-subagent-\(UUID().uuidString)")
+        let dir = URL(fileURLWithPath: TestScratch.unique("subagent"))
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(name)
         try text.write(to: url, atomically: true, encoding: .utf8)

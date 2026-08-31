@@ -83,7 +83,7 @@ private func eventually(
 
 // MARK: - Tests
 
-@Suite struct CodexRunnerTests {
+@Suite(.scratchDirectory) struct CodexRunnerTests {
     @Test func startsAThreadOnTheFirstTurnAndStoresItsID() async throws {
         let store = try makeTestStore("codex-runner-start")
         let (session, _) = try await makeCodexSession(store)
@@ -505,7 +505,7 @@ private func eventually(
 
 // MARK: - The column
 
-@Suite struct SessionAgentKindTests {
+@Suite(.scratchDirectory) struct SessionAgentKindTests {
     /// Every chat that existed before the column did was a Claude Code chat, and the default has
     /// to say so rather than leaving a value nothing can read.
     @Test func aChatDefaultsToClaudeCode() async throws {

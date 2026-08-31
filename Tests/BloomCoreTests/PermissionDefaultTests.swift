@@ -13,7 +13,7 @@ import Foundation
 /// The last two say out loud what the default actually grants on each backend, because a constant
 /// naming a mode is not a description of what that mode permits, and this is the one change in
 /// Bloom where the difference is the whole point.
-@Suite("The default permission mode")
+@Suite("The default permission mode", .scratchDirectory)
 struct PermissionDefaultTests {
     @Test("a brand new session may act without asking")
     func fallbackIsFullAccess() {
