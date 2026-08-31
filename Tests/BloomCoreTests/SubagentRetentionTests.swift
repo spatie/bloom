@@ -191,10 +191,25 @@ import Foundation
     }
 
     @Test func nothingIsScheduledWhenNothingIsOnAClock() {
-        #expect(SubagentRetention.nextChange(SubagentRoster([subagent("1")]), now: Self.start) == nil)
         let failed = SubagentRoster([subagent("1", state: .failed, finishedAt: Self.start)])
         #expect(SubagentRetention.nextChange(failed, now: Self.start) == nil)
         #expect(SubagentRetention.nextChange(SubagentRoster(), now: Self.start) == nil)
+    }
+
+    /// The other change no line announces: a working row's readout counts seconds, and the ticks
+    /// that were meant to move it do not always arrive. So a roster with anything running is
+    /// always on a clock, at the second the readout is written in.
+    @Test func aWorkingRowIsAskedForAgainASecondLater() {
+        let running = SubagentRoster([subagent("1")])
+        #expect(SubagentRetention.nextChange(running, now: Self.start) == Self.start.addingTimeInterval(1))
+
+        // And it never delays a hold that runs out sooner.
+        let mixed = SubagentRoster([
+            subagent("1"),
+            subagent("2", state: .completed, finishedAt: Self.start.addingTimeInterval(-2)),
+        ])
+        #expect(SubagentRetention.nextChange(mixed, now: Self.start)
+            == Self.start.addingTimeInterval(SubagentRetention.lingerSeconds - 2))
     }
 
     @Test func anOpenedRowIsNotOnAClockEither() {

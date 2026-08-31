@@ -97,6 +97,29 @@ public struct SubagentTranscript: Sendable, Hashable {
         return SubagentTranscript(entries: Array(entries.suffix(entryLimit)), droppedEntries: dropped)
     }
 
+    /// The same reading, taken off Bloom's own stored rows rather than off the CLI's file.
+    ///
+    /// **Why there is a second source at all.** `output_file` is named on `task_notification`,
+    /// which is the line that ENDS a subagent, so for the whole of the run there is no path to
+    /// read and the pane had nothing to say. Bloom is not blind for that period: every line the
+    /// subagent produces arrives on the parent's own stream carrying `parent_tool_use_id`, and
+    /// those rows are already stored, already drawn nested behind a hairline in the transcript,
+    /// and already keyed by the `tool_use_id` the subagent carries.
+    ///
+    /// It is `parse` and not a parser of its own, because a stream-json `assistant` or `user`
+    /// line and a line of Claude Code's transcript file are the same object: a `type` and a
+    /// `message` whose `content` is a string or the usual array of blocks. The extra keys a
+    /// stream line carries (`parent_tool_use_id`, `session_id`) are ignored by the reader, as
+    /// every key it does not know is.
+    ///
+    /// The file stays the honest source once there is one: it is what the CLI wrote for this
+    /// task, and this is what Bloom happened to see while it was being written.
+    ///
+    /// - Parameter streamLines: the stored payloads of the nested rows, in the order they arrived.
+    public static func live(streamLines: [Data]) -> SubagentTranscript {
+        parse(streamLines.map { String(decoding: $0, as: UTF8.self) }.joined(separator: "\n"))
+    }
+
     /// What a background command printed, as the one entry it is.
     ///
     /// No parsing, because there is nothing to parse: it is the bytes a program wrote to a

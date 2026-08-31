@@ -70,7 +70,7 @@ public enum SubagentRetention: Sendable {
             guard keeps(subagent, now: now, opened: opened, failuresKept: &failuresKept) else {
                 return nil
             }
-            return SubagentRow(subagent)
+            return SubagentRow(subagent, now: now)
         }
     }
 
@@ -95,12 +95,25 @@ public enum SubagentRetention: Sendable {
     ) -> Date? {
         var failuresKept = 0
         var earliest: Date?
+        var isAnyoneWorking = false
         for subagent in roster.subagents {
             guard keeps(subagent, now: now, opened: opened, failuresKept: &failuresKept) else {
                 continue
             }
+            if subagent.state == .running { isAnyoneWorking = true }
             guard let expiry = expiry(of: subagent, opened: opened) else { continue }
             earliest = min(earliest ?? expiry, expiry)
+        }
+        // **A running row moves on its own too, and that is the second thing no line announces.**
+        // The readout counts seconds off `SubagentRow.detail`, and `tool_progress` was supposed
+        // to be what made it move; a fan-out arrived with no ticks at all and the readout stood
+        // still, so a caller that only recomputed on a line drew a row that had been "working"
+        // for four minutes without saying so. One second, because that is the unit the readout is
+        // in and there is no point waking sooner. The caller's own equality check is what keeps
+        // this cheap: a tick that changes nothing the row says writes nothing.
+        if isAnyoneWorking {
+            let tick = now.addingTimeInterval(1)
+            earliest = min(earliest ?? tick, tick)
         }
         return earliest
     }

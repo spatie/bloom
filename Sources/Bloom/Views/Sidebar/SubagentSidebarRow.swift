@@ -67,16 +67,26 @@ struct SubagentSidebarRow: View {
 
 /// The mark at the leading edge of a subagent's row.
 ///
-/// The running case is `WorkspaceRunningGlyph`, the same mark the workspace above it draws and on
-/// the same clock, because `BusyPulse` is what keeps every lit row in the column pulsing together.
-/// A second moving figure with a phase of its own would be the one thing this pane cannot have.
+/// **All four differ in SHAPE before they differ in colour**, which is the rule the whole column
+/// is drawn to: a tick, a cross, a dash and an ellipsis are told apart by somebody who cannot tell
+/// the red one from the green one.
 ///
-/// The three endings differ in SHAPE before they differ in colour, which is the rule the whole
-/// column is drawn to: a tick, a cross and a dash are told apart by someone who cannot tell the
-/// red one from the green one.
+/// The working one used to be `WorkspaceRunningGlyph`, the pulsing disc the workspace row draws,
+/// and it was the one mark in this pane that broke the rule. That file says so itself: the unread
+/// mark in the same column is `circle.fill`, so the two were told apart by size, by hue and by
+/// whether they moved, and in a still they were one dot. The report was a person looking at seven
+/// working subagents and reading a blue dot as a badge: "so i think it is not busy, but it is
+/// busy". An ellipsis is what every other surface uses for "going on", it is nothing like a
+/// badge, and it sits in the same box at the same weight as the tick and the cross beside it.
+///
+/// It still breathes, and on the window's own heartbeat: `BreathingMark` rides `BusyPulse`, which
+/// is what keeps every lit mark in the window on one clock. A second moving figure with a phase of
+/// its own would be the one thing this pane cannot have.
 struct SubagentMarkGlyph: View {
     var mark: SubagentRow.Mark
     var isOnSelection = false
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         content
@@ -87,25 +97,30 @@ struct SubagentMarkGlyph: View {
     private var content: some View {
         switch mark {
         case .working:
-            WorkspaceRunningGlyph(isOnSelection: isOnSelection)
+            BreathingMark(isMoving: !reduceMotion) { symbol }
         default:
-            Image(systemName: Self.symbol(for: mark))
-                .font(Typo.micro)
-                // Pinned for the reason `WorkspaceStatusGlyph` pins it, and pinned here as well
-                // because these rows ride the same `SidebarRowLabelStyle`: without it a subagent's
-                // tick came out WIDER than the workspace's above it, which reads as the child
-                // outranking its parent. A rung down in type is the step this row is meant to be.
-                .imageScale(.medium)
-                .foregroundStyle(isOnSelection ? Palette.textInverted : Self.tint(for: mark))
-                // The shapes are distinct and the tints are distinct, and neither reaches
-                // VoiceOver: it read the subagent's name and never said the thing had failed.
-                .accessibilityLabel(mark.word)
+            symbol
         }
+    }
+
+    private var symbol: some View {
+        Image(systemName: Self.symbol(for: mark))
+            .font(Typo.micro)
+            // Pinned for the reason `WorkspaceStatusGlyph` pins it, and pinned here as well
+            // because these rows ride the same `SidebarRowLabelStyle`: without it a subagent's
+            // tick came out WIDER than the workspace's above it, which reads as the child
+            // outranking its parent. A rung down in type is the step this row is meant to be.
+            .imageScale(.medium)
+            .foregroundStyle(isOnSelection ? Palette.textInverted : Self.tint(for: mark))
+            // The shapes are distinct and the tints are distinct, and neither reaches
+            // VoiceOver: it read the subagent's name and never said the thing had failed.
+            .accessibilityLabel(mark.word)
     }
 
     static func symbol(for mark: SubagentRow.Mark) -> String {
         switch mark {
-        case .working: ""
+        // Not a disc. See the head of this type.
+        case .working: "ellipsis"
         case .done: "checkmark"
         case .failed: "xmark"
         // Not a cross. Nothing went wrong: the turn ended and took its children with it, and a
@@ -120,7 +135,10 @@ struct SubagentMarkGlyph: View {
         // the workspace column already draws a passing check in.
         case .done: Palette.positive
         case .failed: Palette.negative
-        case .working, .stopped: Palette.textTertiary
+        // The colour the whole window paints work in progress, which is what keeps this mark in
+        // the family it left when it stopped being a disc.
+        case .working: Palette.running
+        case .stopped: Palette.textTertiary
         }
     }
 }

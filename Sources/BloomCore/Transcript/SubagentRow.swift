@@ -11,7 +11,8 @@ public struct SubagentRow: Sendable, Hashable, Identifiable {
     /// a subagent has four states and a workspace has more, and the day somebody adds a fifth to
     /// one of them is the day a shared enum starts drawing the wrong thing in the other pane.
     public enum Mark: Sendable, Hashable {
-        /// The breathing rings the workspace row already uses.
+        /// Still going. An ellipsis that breathes, told apart from the three endings by its shape
+        /// like every other mark in the column. See `SubagentMarkGlyph`.
         case working
         case done
         case failed
@@ -20,7 +21,7 @@ public struct SubagentRow: Sendable, Hashable, Identifiable {
 
         /// The outcome in a word, for a reader getting it from neither the shape nor the tint.
         ///
-        /// The three marks are genuinely distinct shapes, which is the hard half done, but the
+        /// The four marks are genuinely distinct shapes, which is the hard half done, but the
         /// glyph carried no label and the row's text says only the subagent's name. So VoiceOver
         /// read out a name and never once said the thing failed.
         public var word: String {
@@ -86,11 +87,12 @@ public struct SubagentRow: Sendable, Hashable, Identifiable {
     /// one, so this is a decision about the shape rather than about data anybody has seen: if
     /// deep fan-out turns out to be common, the answer is a count on the parent row rather than
     /// another indent.
-    public static func rows(_ roster: SubagentRoster) -> [SubagentRow] {
-        roster.subagents.map(SubagentRow.init)
+    /// - Parameter now: what the running rows count their seconds against. See `detail(of:now:)`.
+    public static func rows(_ roster: SubagentRoster, now: Date = Date()) -> [SubagentRow] {
+        roster.subagents.map { SubagentRow($0, now: now) }
     }
 
-    public init(_ subagent: Subagent) {
+    public init(_ subagent: Subagent, now: Date = Date()) {
         id = subagent.id
         title = Self.title(of: subagent)
         mark = switch subagent.state {
@@ -99,11 +101,20 @@ public struct SubagentRow: Sendable, Hashable, Identifiable {
         case .failed: .failed
         case .stopped: .stopped
         }
-        detail = Self.detail(of: subagent)
-        // A row whose file the CLI never named has nothing to open, and a row that cannot be
-        // opened must not take the selection: a centre pane that goes blank on a click is worse
-        // than a click that does nothing.
-        opensOutput = subagent.hasOutput
+        detail = Self.detail(of: subagent, now: now)
+        // **An agent's row always opens**, whether or not the CLI has named a file yet, because
+        // the file is named on the line that ENDS a subagent and a running one is the case
+        // somebody most wants to look inside. The gate used to be `hasOutput`, which meant a
+        // subagent could not be clicked until it had finished, and it made
+        // `SubagentPane.refreshSeconds` unreachable: nothing could open the pane a live re-read
+        // was written for. There is something to show from the first frame either way, because
+        // `task_started` carries the whole prompt, and the pane falls back to the nested rows
+        // Bloom itself stored when there is no file. See `SubagentTranscript.live(streamLines:)`.
+        //
+        // A background command keeps the old gate. Its brief is lifted out of the parent's Bash
+        // call and its output is plain stdout that only `output_file` holds, so with no file
+        // there genuinely is nothing to draw.
+        opensOutput = subagent.kind == .agent || subagent.hasOutput
         spokenValue = Self.spoken(subagent, detail: detail)
     }
 
@@ -117,11 +128,16 @@ public struct SubagentRow: Sendable, Hashable, Identifiable {
         return type.isEmpty ? "Subagent" : type
     }
 
-    static func detail(of subagent: Subagent) -> Detail {
+    /// **The seconds are Bloom's own count, raised by the CLI's when the CLI is counting.**
+    /// `elapsedSeconds` moves only on `tool_progress`, and a fan-out of seven subagents arrived
+    /// with no tick at all, so the readout was empty and `duration(0)` is the empty string: a
+    /// running row said nothing and did not move. Bloom knows when `task_started` landed, which
+    /// is a worse measure of the work and a perfect measure of the row, so it is the floor.
+    static func detail(of subagent: Subagent, now: Date = Date()) -> Detail {
         switch subagent.state {
         case .running:
             if let retry = subagent.retry { return .retrying(retry) }
-            return .elapsed(seconds: subagent.elapsedSeconds)
+            return .elapsed(seconds: subagent.secondsElapsed(at: now))
         case .completed, .failed, .stopped:
             let summary = shorten(subagent.summary)
             return summary.isEmpty ? .none : .summary(summary)

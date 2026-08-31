@@ -249,6 +249,36 @@ import Foundation
         }
     }
 
+    /// The whole of a running subagent's pane. The CLI names its file on the line that ENDS the
+    /// task, so until then the read above can only fail; the lines the subagent produced came past
+    /// on the parent's own stream and Bloom stored every one of them.
+    @Test func aRunningSubagentIsReadFromTheStreamBloomAlreadyStored() {
+        let lines = [
+            #"{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"role":"assistant","content":[{"type":"text","text":"Reading the diff"}]}}"#,
+            #"{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"/a/b.php"}}]}}"#,
+            #"{"type":"user","parent_tool_use_id":"toolu_1","message":{"role":"user","content":[{"type":"tool_result","content":"<?php"}]}}"#,
+        ].map { Data($0.utf8) }
+
+        let live = SubagentTranscript.live(streamLines: lines)
+        #expect(live.entries.map(\.kind) == [.text, .tool, .toolResult])
+        #expect(live.entries[0].body == "Reading the diff")
+        #expect(live.entries[1].title == "Read")
+        #expect(live.entries[2].body == "<?php")
+
+        #expect(SubagentTranscript.live(streamLines: []).isEmpty)
+    }
+
+    /// A subagent that has not spoken yet has not failed to write anything, and the reasons in
+    /// `SubagentOutput.Failure` are worded for one that has stopped.
+    @Test func aWorkingSubagentWithNothingToShowIsNotDescribedAsAFailure() {
+        #expect(SubagentPane.nothingToShow(.noFile, kind: .agent, isRunning: true)
+            == "It has not said anything yet.")
+        #expect(SubagentPane.nothingToShow(.noFile, kind: .command, isRunning: true)
+            == "It has not printed anything yet.")
+        #expect(SubagentPane.nothingToShow(.noFile, kind: .agent, isRunning: false)
+            == SubagentOutput.Failure.noFile.sentence(.agent))
+    }
+
     @Test func aFileThatIsNotThereIsASentenceRatherThanAThrow() {
         #expect(SubagentOutput.read(path: "/no/such/file", kind: .command) == .failure(.missing))
         #expect(SubagentOutput.read(path: "", kind: .command) == .failure(.noFile))
