@@ -60,7 +60,11 @@ struct ReviewPaneView: View {
     var body: some View {
         VStack(spacing: 0) {
             content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Pinned to the top, not centred, which is what an unaligned fill means and what
+                // a reader reported on 0.20.0: a file with a handful of lines in it floated in
+                // the middle of a tall pane with a band of empty above it. Every one of the views
+                // this holds reads top down, and the empty states inside them centre themselves.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             // The same composer the conversation shows, bound to the same transcript, so the
             // chips a review has accumulated are visible from the diff they were written on and

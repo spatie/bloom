@@ -90,7 +90,9 @@ struct FilePreview: View {
                     content
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Top, for the reason `ReviewPaneView` gives where it holds this view: an unaligned
+            // fill centres, and a short file centred in a tall pane reads as a layout accident.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .background(Palette.surface)
         .background { shortcut }
