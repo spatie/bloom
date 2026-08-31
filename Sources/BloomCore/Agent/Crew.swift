@@ -27,11 +27,14 @@ import Foundation
 public enum Crew {
     /// How many subagents may be running in one workspace at once.
     ///
-    /// Three, on the same reasoning as the eight running children a parent may have and the six
+    /// Ten, on the same reasoning as the eight running children a parent may have and the six
     /// starts in fifteen minutes the owner's own client gets: not a safety limit, a number that
-    /// makes somebody notice at three rather than at thirty. Three agents on one branch is
-    /// already three bills and three writers in one working tree.
-    public static let ceiling = 3
+    /// makes somebody notice at ten rather than at thirty. It was three, which is what a person
+    /// splitting work by hand reaches for, and it turned out to be the wrong shape for the thing
+    /// people actually ask for: "use a crew of five" met a refusal and an orchestrator that
+    /// queued the last two behind slots, which is a worse answer than ten bills. Ten agents on
+    /// one branch is still ten writers in one working tree, and the tools say so.
+    public static let ceiling = 10
 
     /// The longest a name may be. A sidebar row is about twenty characters wide at the width the
     /// column opens at, and a name that is ellipsised in every drawing of it is not an address

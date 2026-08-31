@@ -55,6 +55,18 @@ struct CrewToolTests {
         ))
     }
 
+    /// Fills the workspace with running crew members up to `Crew.ceiling`, because every test
+    /// below is about the limit rather than about a particular number of agents. Returns them in
+    /// the order they were made, so a test can stop one and say which.
+    @discardableResult
+    private func fillToCeiling(_ fixture: Fixture) async throws -> [Session] {
+        var members: [Session] = []
+        for slot in 1...Crew.ceiling {
+            members.append(try await member(fixture, "slot-\(slot)", state: .running))
+        }
+        return members
+    }
+
     private func request(
         _ tool: String, _ arguments: [String: JSONValue] = [:]
     ) -> MCPRequest {
@@ -208,7 +220,7 @@ struct CrewToolTests {
         #expect(start.contains("shares this worktree and this branch"))
         #expect(start.contains("one diff"))
         #expect(start.contains("workspace_start"))
-        #expect(start.contains("\(Crew.ceiling)") || start.contains("Three"))
+        #expect(start.contains("\(Crew.ceiling)"))
 
         #expect(AgentListTool().tool.description.contains("shares this branch and these files"))
     }
@@ -322,13 +334,13 @@ struct CrewToolTests {
     @Test("the ceiling is counted over the running members of the whole workspace")
     func ceilingRefusal() async throws {
         let fixture = try await self.fixture("crew-ceiling")
-        try await member(fixture, "one", state: .running)
-        try await member(fixture, "two", state: .running)
-        try await member(fixture, "three", state: .waiting)
+        let filled = try await fillToCeiling(fixture)
+        // One of them is stopped on a question, which counts: it is a live agent with a bill.
+        try await fixture.store.update(sessionID: filled[0].id) { $0.state = .waiting }
         let starts = Starts()
 
         let result = await starts.tool().call(
-            request("agent_start", ["name": .string("four"), "task": .string("Go.")]),
+            request("agent_start", ["name": .string("one-too-many"), "task": .string("Go.")]),
             as: fixture.identity, store: fixture.store
         )
 
@@ -340,8 +352,8 @@ struct CrewToolTests {
 
     /// **`waiting` counts and the two terminal states do not.** A process holding its turn open on
     /// a question is a live agent in the worktree with a bill attached, which is what the ceiling
-    /// is about. An agent that died counted as running would hold a third of a workspace's
-    /// allowance until the workspace was archived, and three of them would lock the worktree out
+    /// is about. An agent that died counted as running would hold a slot of a workspace's
+    /// allowance until the workspace was archived, and enough of them would lock the worktree out
     /// of ever starting another with nothing on screen to explain why.
     @Test("a stopped, failed or cancelled member does not hold a slot")
     func theDeadDoNotCount() async throws {
@@ -630,32 +642,31 @@ struct CrewToolTests {
 
     /// **The sequence that walked straight through the ceiling before `agent_say` counted.**
     /// `CrewCensus` excludes a stopped member on purpose, so it holds no slot; but `agent_say` sets
-    /// a stopped member working again, which is a start in everything but name. Start three, stop
-    /// one, start a fourth into the slot that freed, then say something to the stopped one, and
-    /// four agents are running in one worktree. So the tool that wakes one counts exactly as
+    /// a stopped member working again, which is a start in everything but name. Fill the workspace,
+    /// stop one, start a replacement into the slot that freed, then say something to the stopped
+    /// one, and there is one more agent running in the worktree than the ceiling allows. So the tool that wakes one counts exactly as
     /// `agent_start` does, over the whole workspace.
     @Test("saying something to a stopped agent is refused when the workspace is already full")
     func wakingOneIsHeldToTheCeiling() async throws {
         let fixture = try await self.fixture("crew-say-ceiling")
-        let stopped = try await member(fixture, "one", state: .running)
-        try await member(fixture, "two", state: .running)
-        try await member(fixture, "three", state: .running)
+        let filled = try await fillToCeiling(fixture)
+        let stopped = filled[0]
 
         // Stopped, which by the census is a row rather than a running agent.
         try await fixture.store.update(sessionID: stopped.id) { $0.state = .idle }
 
-        // So a fourth may be started, and the app's side of that start is what puts the row in.
+        // So a replacement may be started, and the app's side of that start is what puts the row in.
         let starts = Starts()
         let started = await starts.tool().call(
-            request("agent_start", ["name": .string("four"), "task": .string("Go.")]),
+            request("agent_start", ["name": .string("replacement"), "task": .string("Go.")]),
             as: fixture.identity, store: fixture.store
         )
         #expect(!started.isError)
-        try await member(fixture, "four", state: .running)
+        try await member(fixture, "replacement", state: .running)
 
         let says = Says()
         let result = await says.tool().call(
-            request("agent_say", ["to": .string("one"), "message": .string("Carry on.")]),
+            request("agent_say", ["to": .string(stopped.title), "message": .string("Carry on.")]),
             as: fixture.identity, store: fixture.store
         )
 
@@ -672,38 +683,37 @@ struct CrewToolTests {
     @Test("a full workspace still takes a message to a running agent, and a stopped one wakes when there is room")
     func sayingIsRefusedOnlyWhenItWouldStartAFourth() async throws {
         let fixture = try await self.fixture("crew-say-room")
-        let running = try await member(fixture, "one", state: .running)
-        try await member(fixture, "two", state: .running)
-        try await member(fixture, "three", state: .running)
-        try await member(fixture, "four", state: .cancelled)
+        let filled = try await fillToCeiling(fixture)
+        let running = filled[0]
+        try await member(fixture, "spare", state: .cancelled)
         let says = Says()
 
         // A message to an agent whose turn is open joins that turn, however full the workspace is.
         let toRunning = await says.tool().call(
-            request("agent_say", ["to": .string("one"), "message": .string("Also the parser.")]),
+            request("agent_say", ["to": .string(running.title), "message": .string("Also the parser.")]),
             as: fixture.identity, store: fixture.store
         )
         #expect(!toRunning.isError)
-        #expect(says.targets == ["one"])
+        #expect(says.targets == [running.title])
 
-        // The fourth is a row rather than a live agent, so waking it would put a fourth writer in
-        // the worktree, which is the thing the ceiling is about.
+        // The spare is a row rather than a live agent, so waking it would put one more writer in
+        // the worktree than the ceiling allows, which is the thing the ceiling is about.
         let toStopped = await says.tool().call(
-            request("agent_say", ["to": .string("four"), "message": .string("Try again.")]),
+            request("agent_say", ["to": .string("spare"), "message": .string("Try again.")]),
             as: fixture.identity, store: fixture.store
         )
         #expect(toStopped.isError)
         #expect(toStopped.text == Crew.sentence(for: .tooMany(running: Crew.ceiling)))
 
-        // One of the three stops, and the same call goes through.
+        // One of the running ones stops, and the same call goes through.
         try await fixture.store.update(sessionID: running.id) { $0.state = .idle }
 
         let afterRoom = await says.tool().call(
-            request("agent_say", ["to": .string("four"), "message": .string("Try again.")]),
+            request("agent_say", ["to": .string("spare"), "message": .string("Try again.")]),
             as: fixture.identity, store: fixture.store
         )
         #expect(!afterRoom.isError)
-        #expect(says.targets == ["one", "four"])
+        #expect(says.targets == [running.title, "spare"])
     }
 
     /// The name that crosses the seam is the name the row actually has, so the app side matches on
@@ -798,9 +808,7 @@ struct CrewToolTests {
     @Test("a full workspace says the next start will be refused")
     func listingSaysWhenTheSlotsAreGone() async throws {
         let fixture = try await self.fixture("crew-list-full")
-        for name in ["one", "two", "three"] {
-            try await member(fixture, name, state: .running)
-        }
+        try await fillToCeiling(fixture)
 
         let result = await AgentListTool().call(
             request("agent_list"), as: fixture.identity, store: fixture.store

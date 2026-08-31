@@ -42,8 +42,8 @@ enum CrewToolName {
 /// Which crew members count against `Crew.ceiling`, and which are just rows.
 ///
 /// **Not "anything that is not idle", which is the obvious reading and the wrong one.** `failed`
-/// and `cancelled` are terminal: an agent that died counted as running would hold a third of a
-/// workspace's allowance until the workspace was archived, and three of them would lock a
+/// and `cancelled` are terminal: an agent that died counted as running would hold a slot of a
+/// workspace's allowance until the workspace was archived, and enough of them would lock a
 /// worktree out of ever starting another with nothing on screen to explain why. `waiting` counts,
 /// because a process holding its turn open on a question is a live agent in the worktree with a
 /// bill attached, which is exactly what the ceiling is about.
@@ -314,9 +314,10 @@ public struct AgentStartTool: BridgeToolHandling {
 
             \(Crew.tidyHint)
 
-            Three subagents may run in one workspace at once. This costs real money and puts a \
-            second writer in your working tree, so start one because the work genuinely divides. \
-            A subagent cannot start subagents of its own.
+            Up to \(Crew.ceiling) subagents may run in one workspace at once. Each costs real \
+            money and puts another writer in your working tree, so start one because the work \
+            genuinely divides rather than because there is a slot free. A subagent cannot start \
+            subagents of its own.
             """,
         inputSchema: .object([
             "type": .string("object"),
@@ -471,8 +472,8 @@ public struct AgentSayTool: BridgeToolHandling {
             returns once the message has been delivered, not once the agent has answered.
 
             Speaking to an agent whose turn has ended sets it working again, so it takes one of \
-            the three running slots this workspace has. If all three are taken, stop one with \
-            agent_stop first, or wait for one to finish.
+            the \(Crew.ceiling) running slots this workspace has. If they are all taken, stop one \
+            with agent_stop first, or wait for one to finish.
 
             An agent you have called agent_stop on is finished with, and its name is gone: it \
             cannot be spoken to, and agent_start is what starts another one.
