@@ -726,8 +726,13 @@ struct BridgeToolApprovalTests {
         #expect(BridgeToolApproval.toolPrefix == "mcp__\(BridgeRegistration.serverName)__")
     }
 
-    @Test("the transcript is told who let it through")
-    func theNoteSaysWhy() {
-        #expect(BridgeToolApproval.note.contains("Bloom's own tool"))
+    /// The list is what says who let these through, and it is read here rather than at runtime:
+    /// a self-approved ask is answered before it is stored, so it leaves no row in the transcript
+    /// to carry a note. See `AgentRunner.handle(_:)`.
+    @Test("every self-approved name is one of the bridge's own tools")
+    func selfApprovedAreOurs() {
+        for name in BridgeToolApproval.selfApproved {
+            #expect(BridgeToolApproval.isSelfApproved(toolName: BridgeToolApproval.toolPrefix + name))
+        }
     }
 }

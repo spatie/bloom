@@ -179,10 +179,13 @@ public enum BridgeToolApproval {
         return selfApproved.contains(String(toolName.dropFirst(toolPrefix.count)))
     }
 
-    /// The note the transcript shows on a question Bloom answered for itself.
-    ///
-    /// A settled row rather than no row at all: the call still happened, and a reader scrolling
-    /// back should find out that it did and who let it through. "Allowed automatically" with no
-    /// reason is the thing that makes people distrust an app's permission model.
-    public static let note = "Bloom's own tool, allowed without asking. See BridgeToolApproval."
+    /// **A self-approved ask leaves no row in the transcript**, and that is a change from what
+    /// this file used to say. The argument for a settled row was that a reader scrolling back
+    /// should find out the call happened and who let it through. The first half of that is
+    /// already true without a row: the tool call itself is drawn, with its name and its result,
+    /// exactly as every other call is. What the row added was a second entry per call saying
+    /// Bloom had allowed Bloom, and a turn that opens a pane, splits it, renames a tab and lists
+    /// its crew produced four of them between the reader and the work. The list above is what
+    /// says who let these through, and it is the thing to read rather than a row repeated at
+    /// runtime. See `AgentRunner.handle(_:)`, which answers before it stores.
 }

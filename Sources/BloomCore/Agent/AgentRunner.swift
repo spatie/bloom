@@ -666,20 +666,25 @@ public actor AgentRunner {
     /// A question has arrived. Either a rule the user already granted answers it, or it goes on
     /// the pile and the session stops being a session that is working.
     private func handle(_ ask: PermissionAsk) async {
+        // Bloom's own bridge tools answer themselves, and they do it before anything is stored or
+        // put on the pile, so no row is drawn at all. See `BridgeToolApproval` for why this is
+        // not a shortcut round consent, and for why the row it used to leave behind has gone: a
+        // settled question saying Bloom allowed Bloom is a second row about a call the transcript
+        // already draws, and an agent that opens four panes and lists its crew left the reader
+        // scrolling past five of them to find what it actually did.
+        //
+        // Nothing can race this one. It is never on screen, so no person can answer it, and it is
+        // never in `pending`, so `denyPendingAsks` has nothing to deny.
+        if BridgeToolApproval.isSelfApproved(toolName: ask.toolName) {
+            await write(answerTo: ask, decision: .allow(scope: .once))
+            return
+        }
+
         pending.add(ask)
         do {
             try await store.appendPermissionAsk(sessionID: session.id, ask: ask)
         } catch {
             await report("could not store a permission question", error)
-        }
-
-        // Bloom's own bridge tools answer themselves. Checked before the grant lookup because it
-        // needs no lookup: there is nothing stored to match and nothing for a person to weigh.
-        // See `BridgeToolApproval` for why this is not a shortcut round consent.
-        if BridgeToolApproval.isSelfApproved(toolName: ask.toolName), let claimed = pending.take(ask.requestID) {
-            await write(answerTo: claimed, decision: .allow(scope: .once))
-            await close(claimed, as: PermissionAskOutcome.auto, note: BridgeToolApproval.note)
-            return
         }
 
         // Both awaits below are suspension points on this actor, and the question is already on
