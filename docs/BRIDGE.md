@@ -110,7 +110,7 @@ places: the listing, the dispatch and the gate.
 | Tool | What it does | parent | child | owner |
 | --- | --- | :---: | :---: | :---: |
 | `whoami` | What this connection is: the workspace and its branch, the worktree path, the project, and whether the workspace was created by the owner or by another agent. From the owner's own client, which copy of Bloom was reached and how much it is holding | ✓ | ✓ | ✓ |
-| `project_list` | Every project in the sidebar: name, path, default branch, live workspace count, whether it is still where Bloom recorded it, whether it is hidden | | | ✓ |
+| `project_list` | Every project in the sidebar: name, path, default branch, how many workspaces it has, how many of those have an agent mid turn and how many have one stopped on a question, whether it is still where Bloom recorded it, whether it is hidden | | | ✓ |
 | `project_add` | Register a git repository that **already exists** as a project | | | ✓ |
 | `project_hide` | Take a project out of the sidebar. A view preference and nothing more | | | ✓ |
 | `project_unhide` | Put it back, in the place it already had | | | ✓ |
@@ -159,6 +159,27 @@ A refusal is a result with `isError` set and never a JSON-RPC error frame. A JSO
 transport failure the CLI may retry or surface as a broken server; an errored result is text the
 model reads and can act on. "You are not allowed to do that" is something to tell the model, not
 something to tell the transport.
+
+### A workspace existing and an agent running in it are two numbers
+
+`project_list` used to report one number per project, counting workspaces whose state was not
+`archived`, under the key `workspaces_running`, described as "how many workspaces it has running"
+and listed here as a "live workspace count". Three names for a count of workspaces that merely
+exist. An agent read it, told the owner that four projects had a workspace running, then called
+`workspace_list`, found `agent_running: false` on every row, and reported the two tools as
+contradicting each other. They never had. Both read the same table through the same
+`state = 'active'` predicate; only the name was wrong, and the name is what a model acts on.
+
+So `project_list` now reports `workspaces`, `agents_running` and `awaiting_permission` per
+project, and both tools answer from one `BridgeWorkspaceCensus`: one read of the workspaces and
+one of `Store.sessionActivity`, with the two turn questions put to `AgentTurns`, which is the same
+rule the sidebar mark asks. A project's `workspaces` is therefore exactly how many rows
+`workspace_list` prints for it, and its `agents_running` exactly how many of those are marked
+`agent_running`. Two tools deriving that separately is two rules to drift.
+
+One number kept its old sense deliberately: `WorkspaceStartAllowance.running`, the ceiling of
+eight on a parent agent's children, counts workspaces that are not archived and says so in its own
+doc comment. That is a brake on worktrees held open, not on turns in flight.
 
 ### The twenty-four that need the app, and the twelve that do not
 

@@ -57,6 +57,13 @@ public struct WorkspaceListTool: BridgeToolHandling {
             read the diff, the log and the files in it with your own tools rather than asking \
             Bloom for them.
 
+            agent_running is about right now, and a workspace with nothing running is still a \
+            workspace: most of them sit idle most of the time, waiting to be read and merged. \
+            project_list counts these same rows, so its workspaces for a project is how many \
+            appear here for it and its agents_running is how many of those are marked \
+            agent_running. If the two ever look as though they disagree, one of them is being \
+            read as the other's number.
+
             By default it reads Bloom's database and nothing else, and at that price GitHub is \
             not consulted at all: there is no pull request, no checks, and the status can never \
             say merged, closed, draft or anything about checks. A default call has not looked, so \
@@ -122,14 +129,15 @@ public struct WorkspaceListTool: BridgeToolHandling {
                 project = found
             }
 
-            let workspaces: [Workspace]
-            if let project {
-                workspaces = try await store.workspaces(
-                    repoID: project.id, includeArchived: includeArchived
-                )
-            } else {
-                workspaces = try await store.workspaces(includeArchived: includeArchived)
-            }
+            // The same reading `project_list` counts, so a project's `workspaces` there is how
+            // many rows appear here for it and its `agents_running` is how many of those are
+            // marked `agent_running`. Two tools deriving that separately is what let one say four
+            // projects had a workspace running while this one said none of them did. See
+            // `BridgeWorkspaceCensus`.
+            let census = try await BridgeWorkspaceCensus.read(from: store)
+            let workspaces = census.listing(
+                repoID: project?.id, includeArchived: includeArchived
+            )
 
             let names = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, $0) })
             var rows: [JSONValue] = []
@@ -137,6 +145,7 @@ public struct WorkspaceListTool: BridgeToolHandling {
                 rows.append(await row(
                     for: workspace,
                     project: names[workspace.repoID],
+                    census: census,
                     includeGitHub: includeGitHub,
                     store: store
                 ))
@@ -206,15 +215,20 @@ public struct WorkspaceListTool: BridgeToolHandling {
     private func row(
         for workspace: Workspace,
         project: Repo?,
+        census: BridgeWorkspaceCensus,
         includeGitHub: Bool,
         store: Store
     ) async -> JSONValue {
         let sessions = (try? await store.sessions(workspaceID: workspace.id)) ?? []
+        // Both answers come from the census rather than from the session rows just read, so this
+        // row and the number `project_list` prints for its project are the same reading of the
+        // same table. The census asks `AgentTurns`, which is the rule the sidebar mark asks too.
+        //
         // The session state column, not a live process, and that is the honest source: the runner
         // writes it on every change, and `Store.resetRunningSessions` clears it at launch so a row
         // left `running` by a crash cannot claim an agent that is long gone.
-        let isRunning = sessions.contains { $0.state == .running }
-        let isAwaiting = sessions.contains { $0.state == .waiting }
+        let isRunning = census.isRunning(workspace.id)
+        let isAwaiting = census.isAwaitingPermission(workspace.id)
 
         let pullRequest = includeGitHub
             ? await self.pullRequest(for: workspace, store: store)

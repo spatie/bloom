@@ -240,10 +240,87 @@ struct ProjectListToolTests {
 
         #expect(result.text.contains("\"name\" : \"flare\""))
         #expect(result.text.contains("\"default_branch\" : \"main\""))
-        // One running, because the limit and the reading are both about what is live.
-        #expect(result.text.contains("\"workspaces_running\" : 1"))
+        // One workspace, and nothing running in it. This assertion used to read
+        // `"workspaces_running" : 1` over the very same fixture, which is the bug written down:
+        // there is no session here at all, so nothing was ever running. See
+        // `BridgeWorkspaceCensus`.
+        #expect(result.text.contains("\"workspaces\" : 1"))
+        #expect(result.text.contains("\"agents_running\" : 0"))
+        #expect(result.text.contains("\"awaiting_permission\" : 0"))
+        #expect(!result.text.contains("workspaces_running"))
         // The folder was never made, which is exactly the case this field exists to report.
         #expect(result.text.contains("\"on_disk\" : false"))
+    }
+
+    /// The disagreement this pair was reported for: an agent told four projects had a workspace
+    /// running, then read `workspace_list`, found nothing running anywhere, and reported the two
+    /// tools as contradicting each other. Both read the same table; only the name was wrong.
+    ///
+    /// Asserted across both tools in one test rather than in each tool's own suite, because the
+    /// property is a relation between them and a test that only ever calls one cannot see it.
+    @Test("its counts are the rows workspace_list prints, for every project at once")
+    func agreesWithWorkspaceList() async throws {
+        let store = try makeTestStore("list-agrees")
+        let quiet = try await store.upsert(
+            Repo(name: "quiet", path: "/tmp/quiet", defaultBranch: "main")
+        )
+        let busy = try await store.upsert(
+            Repo(name: "busy", path: "/tmp/busy", defaultBranch: "main")
+        )
+        // Two idle workspaces, which exist and are running nothing.
+        for index in 1...2 {
+            _ = try await store.upsert(Workspace(
+                repoID: quiet.id, name: "idle \(index)", branch: "b\(index)",
+                path: "/tmp/quiet/\(index)", baseBranch: "main"
+            ))
+        }
+        // One with an agent mid turn, one archived, which is counted nowhere.
+        let working = try await store.upsert(Workspace(
+            repoID: busy.id, name: "working", branch: "b3", path: "/tmp/busy/3", baseBranch: "main"
+        ))
+        var turn = Session(workspaceID: working.id, title: "First chat")
+        turn.apply(.turnStarted)
+        _ = try await store.upsert(turn)
+        _ = try await store.upsert(Workspace(
+            repoID: busy.id, name: "finished", branch: "b4", path: "/tmp/busy/4",
+            baseBranch: "main", state: .archived
+        ))
+
+        let projects = try #require(
+            JSONValue.parse(
+                await ProjectListTool().call(request, as: .owner, store: store).text
+            )?["projects"]?.arrayValue
+        )
+
+        for row in projects {
+            let name = try #require(row["name"]?.stringValue)
+            let listing = await WorkspaceListTool().call(
+                MCPRequest(
+                    id: .number(2),
+                    method: "workspace_list",
+                    params: .object(["project": .string(name)])
+                ),
+                as: .owner,
+                store: store
+            )
+            let workspaces = try #require(JSONValue.parse(listing.text)?["workspaces"]?.arrayValue)
+
+            #expect(row["workspaces"]?.intValue == workspaces.count)
+            #expect(
+                row["agents_running"]?.intValue
+                    == workspaces.count { $0["agent_running"]?.boolValue == true }
+            )
+        }
+
+        let quietRow = try #require(projects.first { $0["name"]?.stringValue == "quiet" })
+        let busyRow = try #require(projects.first { $0["name"]?.stringValue == "busy" })
+        // Two workspaces and nothing running in either, which is the reading the old key made
+        // unsayable.
+        #expect(quietRow["workspaces"]?.intValue == 2)
+        #expect(quietRow["agents_running"]?.intValue == 0)
+        // One workspace, not two: the archived one is counted in neither number.
+        #expect(busyRow["workspaces"]?.intValue == 1)
+        #expect(busyRow["agents_running"]?.intValue == 1)
     }
 }
 
