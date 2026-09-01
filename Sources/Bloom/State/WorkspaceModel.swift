@@ -1850,12 +1850,16 @@ final class WorkspaceModel {
     /// already said the branch does not apply to its base, so the only thing that press could
     /// produce was the agent running `gh pr merge` and reading the refusal back out.
     ///
-    /// The same route as the other three buttons in the strip, with two differences that are both
-    /// about what this turn does NOT do. Bloom adds no rules of its own under the template,
-    /// because nothing here acts on a server and the project's conventions for resolving a
-    /// conflict are already in front of the agent; and there is no confirmation in front of it,
-    /// for the reason written out at `PullRequestSummary.fixConflictsButton`. A project that has
-    /// more to say still gets it attached, by the same call the merge turn goes through.
+    /// The same route as the other three buttons in the strip, with one difference: there is no
+    /// confirmation in front of it, for the reason written out at
+    /// `PullRequestSummary.fixConflictsButton`.
+    ///
+    /// The turn is composed in two passes, and the order they run in is the order the agent reads
+    /// them in. `ConflictInstructions` puts Bloom's own steps in a file and names it, which is what
+    /// keeps this bubble to two sentences instead of the eight paragraphs it used to be; then
+    /// `turn(_:for:)` adds the project's own words after that and says they win. A project that has
+    /// nothing to say still gets Bloom's file, which is the difference from Merge, where Bloom's
+    /// words are in the message and only the project's are ever attached.
     ///
     /// Returns nil on success, or the sentence to put in front of the user.
     func requestFixConflicts(
@@ -1876,7 +1880,13 @@ final class WorkspaceModel {
         )
         let render = context.render(template: overrides.template(for: .fixConflicts))
 
-        let text = await turn(render.text, for: .fixConflicts)
+        let path = workspace.path
+        let rendered = render.text
+        // Off the main actor: it writes a file into the worktree, and this runs on a button press.
+        let asked = await Task.detached(priority: .userInitiated) {
+            ConflictInstructions.asking(rendered, in: path)
+        }.value
+        let text = await turn(asked, for: .fixConflicts)
         activeSessionID = session.id
         await transcript(for: session).submit(text)
         return nil

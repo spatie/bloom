@@ -333,18 +333,21 @@ public enum PromptRegistry {
     /// to run `gh pr merge` on something GitHub had already refused to merge. The state has one
     /// remedy, a person resolving the conflict, and the button now offers that instead.
     ///
-    /// Every step is in this template, where the merge prompt keeps its own in a constant no
-    /// override can reach. That is the difference between the two rather than an omission.
-    /// Merging is policy about a server: which flags are allowed, what to do when GitHub refuses,
-    /// when the branch is deleted, and getting one of those wrong changes somebody else's
-    /// repository. Resolving a conflict is ordinary work in this worktree, of the kind every
-    /// other turn asks for, so somebody who wants it worded differently is welcome to reword it.
+    /// **The steps used to be here, all eight paragraphs of them, and they are a file now.** They
+    /// are `ConflictInstructions`, written into the shielded scratch folder and named in the
+    /// sentence this template renders, which is the arrangement Create pull request has had all
+    /// along. The bubble was the argument: beside a pull request turn that reads as one sentence
+    /// and a path, this one was a wall of text, and a wall of text in a transcript is not read.
+    /// `ConflictInstructions` says why this turn went to a file while merging went the other way.
     ///
-    /// A project that has more to say about conflicts than this says it once, for everybody, in
-    /// `.bloom/conflict-instructions.md` or in the project settings window, and Bloom attaches it.
-    /// See `ProjectInstructions`.
+    /// What is left here is the record, and that is what decides where the cut goes. A transcript
+    /// read months later has to say what was asked without opening anything, and the file it names
+    /// may well be gone by then, because the scratch folder goes when the worktree does. So the
+    /// message keeps the facts and the outcome: which pull request, which two branches, that the
+    /// resolution is pushed, and that the pull request is not merged. How it is done is the part
+    /// that can live in a file.
     ///
-    /// **The template pushes the resolution, and it used to stop short of that.** The argument for
+    /// **The turn pushes the resolution, and it used to stop short of that.** The argument for
     /// stopping was that a resolved worktree is the state the strip's Commit and push button is
     /// for, so the next press could be the reader's. What that produced in practice was a turn
     /// that reported success on a pull request GitHub still refused to merge, because a conflict
@@ -354,20 +357,20 @@ public enum PromptRegistry {
     /// standing is not finished.
     ///
     /// It still merges nothing. Pushing is what makes the resolution real; merging is a decision
-    /// about whether the work is good, and that one stays with the reader.
+    /// about whether the work is good, and that one stays with the reader. That sentence is in
+    /// this template rather than only in the file, because it is the one limit on the turn that a
+    /// person reading the transcript afterwards has to be able to see.
     ///
-    /// The push is conditional on the agent being sure, and that is not a hedge. Bringing a base
-    /// branch in is the one ordinary operation that regularly needs a person: two changes that
-    /// genuinely disagree, a test that now fails for a reason neither branch expected, a rebase
-    /// that rewrote history somebody else may have pulled. An agent that pushes a resolution it
-    /// does not believe in has made the problem harder to see, so the template tells it to stop
-    /// and say so instead.
+    /// A project that has more to say about conflicts than the file does says it once, for
+    /// everybody, in `.bloom/conflict-instructions.md` or in the project settings window, and
+    /// Bloom attaches that after Bloom's own and says it wins. See `ProjectInstructions`.
     static let fixConflicts = PromptDefinition(
         id: .fixConflicts,
         title: "Fix merge conflicts",
         summary: """
-        Sent when you press Fix merge conflicts. It resolves against the base branch here and \
-        pushes the result; it never merges the pull request.
+        Sent when you press Fix merge conflicts, with Bloom's own steps attached as a file. It \
+        resolves against the base branch here and pushes the result; it never merges the pull \
+        request.
         """,
         variables: [
             PromptVariable(name: FixConflicts.workspace, summary: "The workspace's name."),
@@ -383,33 +386,11 @@ public enum PromptRegistry {
         ],
         defaultTemplate: """
         Pull request #{{number}} conflicts with {{base_branch}}, so GitHub will not merge it as it \
-        stands. Resolve that here, in this worktree, on {{branch}}.
+        stands. Resolve that here, in this worktree, on {{branch}}: bring {{base_branch}} into this \
+        branch, work through the conflicts, commit, and push {{branch}}, so the conflict is gone \
+        for everybody rather than only here.
 
-        Fetch {{base_branch}} first, so you are working against what is on the server rather than \
-        a stale copy of it, then bring it into this branch the way this project brings it in: \
-        merge it unless the project's own conventions say to rebase onto it. It goes into this \
-        branch and never the other way round.
-
-        Work through every conflicted file. Keep what this branch changed and what \
-        {{base_branch}} changed, and where the two genuinely disagree, read enough of the code \
-        around them to work out which is right instead of taking a side. Follow this project's \
-        conventions, and run whatever it uses to check itself before you call anything resolved.
-
-        Commit the resolution, with a message worded the way this project words one.
-
-        Then push it. A conflict resolved only in this worktree is still a conflict to everybody \
-        else, and pull request #{{number}} goes on refusing to merge until the branch on the \
-        server carries the resolution. If bringing {{base_branch}} in rewrote this branch's \
-        commits, which a rebase does, the push needs `--force-with-lease`, and it may only ever go \
-        to {{branch}}, never to {{base_branch}} and never to any other branch.
-
-        Do not push if you are not sure. Genuine uncertainty about what a resolution should be, a \
-        check that fails for a reason neither branch explains, or anything you had to guess at: \
-        leave the commit here, say what you are unsure about, and let a person look. A resolution \
-        nobody believes in is worse on the server than in a worktree.
-
-        Do not merge the pull request whatever happens. Finish by saying which files conflicted, \
-        what you decided in each of them, whether you pushed, and anything you are not sure about.
+        Do not merge the pull request.
         """
     )
 

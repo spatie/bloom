@@ -188,11 +188,13 @@ struct ProjectInstructionsTests {
         #expect(MergeTurn.split("Please merge these two arrays.") == nil)
     }
 
-    /// The asymmetry between the two, asserted rather than left to be rediscovered. Everything the
-    /// conflict turn asks for is in its template, where somebody may reword it; the merge rules
-    /// are not, because a reworded template must not be able to delete the paragraph about
-    /// `--admin`.
-    @Test("resolving a conflict adds no rules of Bloom's own")
+    /// The asymmetry between the two, asserted rather than left to be rediscovered. The merge
+    /// rules are in the message, because a reworded template must not be able to delete the
+    /// paragraph about `--admin` and because a reader watching a server being changed should not
+    /// have to open a file. The conflict steps are a file, `ConflictInstructions`, added before
+    /// this call rather than by it, so what this type puts in a conflict turn is the project's
+    /// words and nothing else.
+    @Test("resolving a conflict adds no rules of Bloom's own here")
     func conflictsAddNothingOfBloomsOwn() {
         #expect(ProjectInstructions.canonical(for: .fixConflicts) == nil)
         #expect(ProjectInstructions.turn("Fix #42.", for: .fixConflicts, adding: .nothing)

@@ -7,8 +7,13 @@ import Foundation
 /// "follow the instructions in that file". That round trip earned nothing: those words are the
 /// same on every press, in every repository, and a reader watching the transcript had to open an
 /// invisible file to find out what the agent had been told about a command that changes a server.
-/// They are in the message now. A project's own words are the only part that varies, so they are
-/// the only part still worth attaching.
+/// They are in the message now, and a project's own words are the only thing this type attaches to
+/// a merge.
+///
+/// Fix merge conflicts went the other way, and `ConflictInstructions` argues why: its steps are
+/// long, they act on nothing but this worktree, and inline they made a bubble nobody read. So that
+/// turn arrives here already carrying a file of Bloom's, and what this type adds goes after it and
+/// outranks it.
 ///
 /// **Two places a project can say it, and the file wins.**
 ///
@@ -171,12 +176,18 @@ public enum ProjectInstructions {
 
     /// Bloom's own steps, which no override can edit away.
     ///
-    /// Merge has them and resolving a conflict does not, and the asymmetry is the same one that
-    /// put merging behind a confirmation and left the fix without one. Merging is the one
+    /// Merge has them here and resolving a conflict does not, and the asymmetry is the same one
+    /// that put merging behind a confirmation and left the fix without one. Merging is the one
     /// destructive, off-machine thing this app offers, so which `gh` flags are forbidden and what
-    /// to do when GitHub refuses are held where a prompt override cannot lose them. Resolving a
-    /// conflict is ordinary work in this worktree, and everything it needs is in the template,
-    /// where somebody who wants it worded differently is welcome to reword it.
+    /// to do when GitHub refuses are held in the message, where a prompt override cannot lose them
+    /// and where the reader can see them without opening anything.
+    ///
+    /// Resolving a conflict has steps of Bloom's own too, and they are not nil because there are
+    /// none: they are `ConflictInstructions`, a file in the worktree that the message names,
+    /// because nothing in that turn acts on a server and eight paragraphs of mechanics in a chat
+    /// bubble is what stopped anybody reading them. They are added before this call rather than
+    /// inside it, by `WorkspaceModel.requestFixConflicts`, because the path they are at is a fact
+    /// about one worktree and everything in this switch is a constant.
     public static func canonical(for subject: Subject) -> String? {
         switch subject {
         case .merge: MergeInstructions.canonical

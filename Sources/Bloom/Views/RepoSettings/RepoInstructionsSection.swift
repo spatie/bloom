@@ -7,8 +7,10 @@ import BloomCore
 /// Bloom's own words are not here and cannot be edited here, which is the whole shape of the pane.
 /// The steps for merging are a constant in the app: they are the same in every repository, they
 /// are what stops an agent reaching for `--admin` when GitHub says no, and a field that could
-/// empty them would be a field that could turn the guard off by being left blank. What varies is
-/// the sentence a particular project wants adding, and that is the only thing typed here.
+/// empty them would be a field that could turn the guard off by being left blank. The steps for
+/// resolving a conflict are a file Bloom attaches, `ConflictInstructions`, and they are not
+/// editable here either. What varies is the sentence a particular project wants adding, and that
+/// is the only thing typed here.
 ///
 /// Empty is the ordinary answer, and the one every project starts on. The turn then carries
 /// nothing at all: no attachment, no file named, no paragraph about instructions that do not

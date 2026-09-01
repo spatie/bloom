@@ -73,10 +73,12 @@ public struct RepoSettings: Sendable, Hashable {
     public var branchPrefix: String?
     public var deleteBranchOnArchive: Bool = false
     /// What this project adds to the turn Bloom sends when someone presses Merge, and the one it
-    /// sends for Fix merge conflicts. Bloom's own words are not here and never were: they are in
-    /// the message it composes. These are the project's, and they are attached to the turn only
-    /// when there are any. See `ProjectInstructions`, which also says why the same words written
-    /// into `.bloom/merge-instructions.md` beat these.
+    /// sends for Fix merge conflicts. Bloom's own words are not here and never were: for merging
+    /// they are in the message it composes, and for conflicts they are the file
+    /// `ConflictInstructions` writes. These are the project's, they go after Bloom's, they win
+    /// where the two disagree, and they are attached only when there are any. See
+    /// `ProjectInstructions`, which also says why the same words written into
+    /// `.bloom/merge-instructions.md` beat these.
     public var mergeInstructions: String?
     public var conflictInstructions: String?
     /// Set by a file inside the repository. Ranks ABOVE the app-level defaults, because pinning
