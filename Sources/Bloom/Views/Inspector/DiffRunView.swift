@@ -56,11 +56,18 @@ struct DiffRunView: View, Equatable {
     /// because every line box in here is exactly `CodeMetrics.rowHeight` tall, which is the same
     /// invariant the gutter depends on.
     ///
+    /// **It is filled by `DiffRowHover` rather than by `.onContinuousHover`, and that is a fix
+    /// rather than a preference.** The paragraph that used to be here said hover was the one
+    /// thing a selectable `Text` might swallow over its glyphs. It does: the moved events stop at
+    /// the text, the container heard one phase at the boundary and nothing after it, and the `+`
+    /// never appeared on any row of any run. Since two consecutive lines are a run, that was
+    /// nearly every row in every diff. The tracking area cannot be intercepted and takes no
+    /// clicks, so the code underneath is still selectable.
+    ///
     /// It reveals the `+` and decides nothing else. A `+` drawn on the wrong line would be
     /// visible and would still comment on the line it is drawn beside, because the button takes
-    /// its spot from its own row rather than from this. That is deliberate: hover is the one
-    /// thing in here a selectable `Text` might swallow over its glyphs, so nothing that could act
-    /// on the wrong line is allowed to depend on it.
+    /// its spot from its own row rather than from this. That is deliberate: nothing that could
+    /// act on the wrong line is allowed to depend on where a pointer is thought to be.
     @State private var hovered: Int?
 
     /// The same argument as `DiffLineView.==`, which is where it is written out: the closure is a
@@ -95,11 +102,9 @@ struct DiffRunView: View, Equatable {
         // For `DiffLineView`'s reason: most of a diff row draws nothing, and without a shape the
         // pointer finds the run only along the band of pixels the glyphs cover.
         .contentShape(Rectangle())
-        .onContinuousHover(coordinateSpace: .local) { phase in
-            switch phase {
-            case let .active(point): hovered = row(at: point.y)
-            case .ended: hovered = nil
-            }
+        // Over everything, including the code, and hit testable by nothing. See `DiffRowHover`.
+        .overlay {
+            DiffRowHover(rowHeight: CodeMetrics.rowHeight, rowCount: lines.count) { hovered = $0 }
         }
     }
 
@@ -168,12 +173,6 @@ struct DiffRunView: View, Equatable {
     /// than a measurement for the same reason the sheet's width is.
     private var columnsWidth: CGFloat {
         DiffGutter.width(for: numbers) + CodeMetrics.markerWidth
-    }
-
-    private func row(at y: CGFloat) -> Int? {
-        guard y >= 0 else { return nil }
-        let index = Int(y / CodeMetrics.rowHeight)
-        return lines.indices.contains(index) ? index : nil
     }
 
     // MARK: - Commenting
