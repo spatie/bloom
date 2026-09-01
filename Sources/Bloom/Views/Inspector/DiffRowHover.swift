@@ -3,19 +3,20 @@ import AppKit
 
 /// Which row of a run the pointer is over, told by AppKit rather than by SwiftUI.
 ///
-/// **This is the fix for "we don't see the + anymore on hover to add the comment".** A run draws
-/// its code as one selectable `Text` laid over the per line chrome, and `DiffRunView` asked
-/// `.onContinuousHover` on the container which row the pointer was on. That modifier needs a
-/// stream of moved events, and a selectable `Text` is backed by text machinery that takes the
-/// moves over its own glyphs: the pointer entered the run, got one phase at the boundary, and
-/// then nothing more while it was over the code, which is where a reader's pointer spends all of
-/// its time. So the `+` stayed hidden on every row of every run, and since `DiffRunGrouping` puts
-/// any two consecutive lines in a run, that is nearly every row in a diff. `DiffRunView`'s own
-/// note had already flagged this as the thing to doubt, and it turned out to be right.
+/// **This is part of the fix for "we don't see the + anymore on hover to add the comment".** A run
+/// draws its code as one selectable `Text` laid over the per line chrome, and `DiffRunView` used
+/// to ask `.onContinuousHover` on the container which row the pointer was on. It reports the row
+/// from a point rather than from a hit, which is what a run needs, and the rows the per line path
+/// draws were never affected, which is why this looked like it had gone everywhere at once.
 ///
-/// `.onHover` was never affected and still is not, which is why the per line rows kept working
-/// and made this look like it had gone everywhere at once. It answers "inside or outside" from
-/// the pointer's position against a frame; it does not need the moves.
+/// The paragraph that used to be here said a selectable `Text` swallowed the moved events over
+/// its own glyphs and that this was why the `+` never appeared. **That was wrong, and it is
+/// written down because it cost a day.** A standalone reproduction of this exact layout, one
+/// selectable multi line `Text` over per line chrome in a lazy scroll view, reported every row
+/// continuously through `.onContinuousHover` on the container. What was actually broken was two
+/// other things, both fixed and both written up where they live: the tracking rect below, and the
+/// row rebuild in `DiffRunView.Row`. A tracking area is still the better instrument here, because
+/// it cannot be intercepted by whatever the code layer does next, but it was not the diagnosis.
 ///
 /// **A tracking area cannot be intercepted, and this view takes no clicks.** `mouseEntered`,
 /// `mouseMoved` and `mouseExited` are dispatched by the window to the tracking area's OWNER from
@@ -71,19 +72,37 @@ struct DiffRowHover: NSViewRepresentable {
         /// Invisible to every gesture. See the head of this file: the tracking area still reports.
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+        /// **The rect is this view's own bounds, and `.inVisibleRect` is the thing that must not
+        /// come back.** That option tells AppKit to keep the area in step with `visibleRect`, and
+        /// a view SwiftUI hosts does not have one: measured here, a run 449.5 by 126 points
+        /// reported a visible rect of `CGRect.infinite`. Every run in the diff therefore had a
+        /// tracking area the size of everything, all of them overlapping, and a pointer that
+        /// enters an area it never leaves is told once and never again. That is the whole of "the
+        /// `+` appears on one line and stays there": one `mouseEntered` on arrival at the diff,
+        /// no exits, no crossings, for the rest of the file.
+        ///
+        /// Rebuilt from `setFrameSize` below, because giving up `.inVisibleRect` gives up the
+        /// self-updating that went with it.
         override func updateTrackingAreas() {
             super.updateTrackingAreas()
             for area in trackingAreas where area.owner === self {
                 removeTrackingArea(area)
             }
-            // `.inVisibleRect` keeps the area right through a resize and a scroll without this
-            // view being asked to rebuild it, and `.mouseMoved` is what makes the moves arrive at
-            // all rather than only the crossings.
+            // `.mouseMoved` is what carries the row to row crossings inside one run. The
+            // enter and exit pair alone only says which run.
             addTrackingArea(NSTrackingArea(
-                rect: .zero,
-                options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                rect: bounds,
+                options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow],
                 owner: self
             ))
+        }
+
+        /// The sheet is as wide as the file's longest line and the pane it sits in is resizable,
+        /// so the run's frame moves under a hand that has not. With the rect fixed to `bounds`
+        /// rather than tracking the visible rect, this is what keeps the two the same rectangle.
+        override func setFrameSize(_ newSize: NSSize) {
+            super.setFrameSize(newSize)
+            updateTrackingAreas()
         }
 
         override func mouseEntered(with event: NSEvent) {

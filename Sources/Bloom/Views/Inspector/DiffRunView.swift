@@ -84,8 +84,8 @@ struct DiffRunView: View, Equatable {
     var body: some View {
         ZStack(alignment: .topLeading) {
             VStack(spacing: 0) {
-                ForEach(lines.indices, id: \.self) { index in
-                    chrome(at: index)
+                ForEach(rows) { row in
+                    chrome(row)
                 }
             }
             HStack(spacing: 0) {
@@ -110,10 +110,31 @@ struct DiffRunView: View, Equatable {
 
     // MARK: - Per line chrome
 
+    /// One row of the run as the loop below sees it, with the hover IN THE DATA.
+    ///
+    /// **That is the fix for "the + still does not follow the pointer", and it was measured.**
+    /// The loop used to be `ForEach(lines.indices)` reading `hovered` inside the closure. On a
+    /// crossing, `body` ran with the new value, and the rows did not: logging every body pass and
+    /// every overlay evaluation gave 123 state writes against 2 rebuilds of a row. Nothing in the
+    /// `ForEach`'s data had changed, so SwiftUI kept the children it already had, and the one
+    /// thing that HAD changed was a value read inside the closure where the diff cannot see it.
+    /// Carried as a stored property of the element, a hovered row is a changed element, and the
+    /// row is rebuilt because it genuinely differs.
+    private struct Row: Identifiable, Equatable {
+        /// The line's offset into `lines`, which is also its identity within the run.
+        var id: Int
+        var entry: DiffRunLine
+        var isHovered: Bool
+    }
+
+    private var rows: [Row] {
+        lines.indices.map { Row(id: $0, entry: lines[$0], isHovered: hovered == $0) }
+    }
+
     /// Everything about one line that is not its code: the washes, the numbers, the marker, the
     /// spoken sentence and the `+`. Full width, and drawn under the code layer.
-    private func chrome(at index: Int) -> some View {
-        let entry = lines[index]
+    private func chrome(_ row: Row) -> some View {
+        let entry = row.entry
         return HStack(spacing: 0) {
             DiffGutter(line: entry.line, numbers: numbers)
             DiffMarker(line: entry.line)
@@ -127,7 +148,7 @@ struct DiffRunView: View, Equatable {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(DiffGutter.speech(for: entry.line))
         .accessibilityHidden(entry.line == nil)
-        .overlay(alignment: .leading) { commentButton(at: index) }
+        .overlay(alignment: .leading) { commentButton(row) }
         // The same action the `+` carries, on the right click as well, and for the reason written
         // out on `DiffLineView`.
         //
@@ -139,7 +160,7 @@ struct DiffRunView: View, Equatable {
         // answer is whatever row the click actually landed on, which is exactly what the per line
         // path has always done, or nothing, which is also what the per line path does.
         .contextMenu {
-            if let spot = spot(at: index) {
+            if let spot = spot(of: entry) {
                 Button("Comment on This Line") { onComment?(spot) }
             }
         }
@@ -160,9 +181,9 @@ struct DiffRunView: View, Equatable {
     }
 
     @ViewBuilder
-    private func commentButton(at index: Int) -> some View {
-        if let onComment, let spot = spot(at: index) {
-            DiffCommentButton(spot: spot, isRowHovered: hovered == index, onComment: onComment)
+    private func commentButton(_ row: Row) -> some View {
+        if let onComment, let spot = spot(of: row.entry) {
+            DiffCommentButton(spot: spot, isRowHovered: row.isHovered, onComment: onComment)
         }
     }
 
@@ -177,10 +198,8 @@ struct DiffRunView: View, Equatable {
 
     // MARK: - Commenting
 
-    private func spot(at index: Int) -> ReviewSpot? {
-        DiffCommentSpot.offered(
-            for: lines[index].line, numbers: numbers, enabled: onComment != nil
-        )
+    private func spot(of entry: DiffRunLine) -> ReviewSpot? {
+        DiffCommentSpot.offered(for: entry.line, numbers: numbers, enabled: onComment != nil)
     }
 
     // MARK: - Code
