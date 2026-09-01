@@ -374,6 +374,7 @@ public struct AppDefaults: Sendable, Hashable {
         public static let planMode = "defaults.planMode"
         public static let fastMode = "defaults.fastMode"
         public static let outputStyle = "defaults.outputStyle"
+        public static let codexContextWindow = "defaults.codex.contextWindow"
     }
 
     /// The built-in fallbacks, which `Session`'s own initialiser now reads rather than restates.
@@ -402,6 +403,11 @@ public struct AppDefaults: Sendable, Hashable {
     /// the ones it ships with, and anybody can add another by writing a file in
     /// `~/.claude/output-styles`. See `OutputStyleIndex`.
     public var outputStyle: String
+    /// How large a new Codex chat tells its server the context window is, in tokens, or
+    /// `CodexContextWindow.modelDefault` for Codex's own catalogue. Named for its backend, because
+    /// unlike every other value here it means nothing on the other one: Claude Code's long window
+    /// is a model variant and is picked in the model menu. See `CodexContextWindow`.
+    public var codexContextWindow: Int
 
     /// Nil when the user has never chosen one in Settings. `model` always holds a usable value,
     /// so it cannot answer "did they pick this, or is it just the fallback?", and that question is
@@ -417,7 +423,8 @@ public struct AppDefaults: Sendable, Hashable {
         permissionMode: PermissionMode = AppDefaults.fallbackPermissionMode,
         planMode: Bool = false,
         fastMode: Bool = false,
-        outputStyle: String = OutputStyle.defaultName
+        outputStyle: String = OutputStyle.defaultName,
+        codexContextWindow: Int = CodexContextWindow.modelDefault
     ) {
         self.model = model
         self.effort = effort
@@ -427,6 +434,7 @@ public struct AppDefaults: Sendable, Hashable {
         self.planMode = planMode
         self.fastMode = fastMode
         self.outputStyle = outputStyle
+        self.codexContextWindow = codexContextWindow
     }
 
     /// A missing row means "never chosen", so every read falls back rather than failing.
@@ -450,6 +458,7 @@ public struct AppDefaults: Sendable, Hashable {
         defaults.planMode = await value(Key.planMode) == "1"
         defaults.fastMode = await value(Key.fastMode) == "1"
         defaults.outputStyle = await value(Key.outputStyle) ?? OutputStyle.defaultName
+        defaults.codexContextWindow = CodexContextWindow.normalised(await value(Key.codexContextWindow))
         return defaults
     }
 
@@ -466,6 +475,12 @@ public struct AppDefaults: Sendable, Hashable {
         // comparing strings, and this is what keeps that question cheap to answer.
         try? await store.setSetting(
             Key.outputStyle, OutputStyle.isDefault(outputStyle) ? nil : outputStyle
+        )
+        // Nil rather than "0", for the reason the line above gives: "never chosen" and "chosen
+        // and then set back" have to read the same, and `CodexContextWindow.stored` is the one
+        // place that rule is written.
+        try? await store.setSetting(
+            Key.codexContextWindow, CodexContextWindow.stored(codexContextWindow)
         )
     }
 }

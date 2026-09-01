@@ -925,7 +925,8 @@ struct CreateWorkspaceView: View {
         controls = ComposerControls(
             defaults: ComposerDefaults.resolve(repo: context.settings, app: appDefaults),
             isFastMode: appDefaults.fastMode,
-            outputStyle: appDefaults.outputStyle
+            outputStyle: appDefaults.outputStyle,
+            codexContextWindow: appDefaults.codexContextWindow
         )
 
         baseBranch = WorkspaceStartContext.resolvedBaseBranch(

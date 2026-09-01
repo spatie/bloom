@@ -118,10 +118,14 @@ final class AskModel {
             let outputStyle = (try? await store.setting(
                 ComposerControls.outputStyleKey(sessionID: current.id)
             )) ?? OutputStyle.defaultName
+            let contextWindow = CodexContextWindow.normalised(try? await store.setting(
+                ComposerControls.contextWindowKey(sessionID: current.id)
+            ))
             carriedControls = ComposerControls(
                 session: current,
                 isFastMode: isFastMode,
-                outputStyle: outputStyle
+                outputStyle: outputStyle,
+                codexContextWindow: contextWindow
             )
         }
 

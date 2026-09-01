@@ -45,6 +45,10 @@ public struct ComposerControls: Equatable, Sendable {
     /// How the agent is asked to write, by name. `OutputStyle.defaultName` for "leave it alone",
     /// which is what a session is until somebody picks something else.
     public var outputStyle: String
+    /// How large a Codex chat tells its server the model's context window is, in tokens, or
+    /// `CodexContextWindow.modelDefault` for whatever Codex's own catalogue says. Ignored on
+    /// every other backend, which is why the picker is not drawn there. See `CodexContextWindow`.
+    public var codexContextWindow: Int
     /// Whether this chat has a worktree behind it. False is Ask Bloom, and it is here rather than
     /// left to the view because it changes what the permission menu has to say. See
     /// `permissionModeNote`.
@@ -57,6 +61,7 @@ public struct ComposerControls: Equatable, Sendable {
         permissionMode: PermissionMode = AppDefaults.fallbackPermissionMode,
         isFastMode: Bool = false,
         outputStyle: String = OutputStyle.defaultName,
+        codexContextWindow: Int = CodexContextWindow.modelDefault,
         hasWorktree: Bool = true
     ) {
         self.model = model
@@ -68,10 +73,16 @@ public struct ComposerControls: Equatable, Sendable {
         self.permissionMode = permissionMode.nearest(on: agentKind)
         self.isFastMode = isFastMode
         self.outputStyle = outputStyle
+        self.codexContextWindow = codexContextWindow
         self.hasWorktree = hasWorktree
     }
 
-    public init(session: Session, isFastMode: Bool, outputStyle: String) {
+    public init(
+        session: Session,
+        isFastMode: Bool,
+        outputStyle: String,
+        codexContextWindow: Int = CodexContextWindow.modelDefault
+    ) {
         self.init(
             model: session.model,
             effort: session.effort,
@@ -79,6 +90,7 @@ public struct ComposerControls: Equatable, Sendable {
             permissionMode: session.permissionMode,
             isFastMode: isFastMode,
             outputStyle: outputStyle,
+            codexContextWindow: codexContextWindow,
             // Read off the row rather than passed in, so the one caller that has a chat with no
             // worktree cannot forget to say so.
             hasWorktree: session.workspaceID != nil
@@ -144,19 +156,35 @@ public struct ComposerControls: Equatable, Sendable {
         agentKind == .claudeCode
     }
 
+    /// Whether this backend can be told how big its context window is.
+    ///
+    /// Only Codex, and for the same reason the output style is only Claude Code's: the two config
+    /// keys behind it are Codex's own, and Claude Code's equivalent is not a setting at all but a
+    /// model variant, `claude-opus-5[1m]`, which the model picker already offers. Drawing the row
+    /// on a Claude Code chat would be a control that changes nothing. See `CodexContextWindow`.
+    public var offersContextWindow: Bool {
+        agentKind == .codex
+    }
+
     /// What a session that does not exist yet should start out as, by the rules in
     /// `ComposerDefaults` plus the one thing those rules do not cover.
-    public init(defaults: ComposerDefaults, isFastMode: Bool, outputStyle: String) {
+    public init(
+        defaults: ComposerDefaults,
+        isFastMode: Bool,
+        outputStyle: String,
+        codexContextWindow: Int = CodexContextWindow.modelDefault
+    ) {
         self.init(
             model: defaults.model,
             effort: defaults.effort,
             permissionMode: defaults.permissionMode,
             isFastMode: isFastMode,
-            outputStyle: outputStyle
+            outputStyle: outputStyle,
+            codexContextWindow: codexContextWindow
         )
     }
 
-    // MARK: - The two that are not columns
+    // MARK: - The three that are not columns
 
     /// Fast mode has no column on `Session`, so it lives in the store's key value table. Per
     /// session, and it survives a relaunch, which is all it promises.
@@ -170,6 +198,14 @@ public struct ComposerControls: Equatable, Sendable {
         "session.\(sessionID).outputStyle"
     }
 
+    /// The context window has no column either. `CodexRunner.refreshContextWindow` reads it back,
+    /// and it is the one of the three that cannot simply be picked up on the next turn: it is a
+    /// launch argument of a process that outlives every turn, so the runner reconnects when it
+    /// changes. See `CodexContextWindow`.
+    public static func contextWindowKey(sessionID: SessionID) -> String {
+        "session.\(sessionID).codexContextWindow"
+    }
+
     /// Records that a session has had its opening values settled, so `ComposerView.prepare` never
     /// re-applies the app-wide defaults over choices somebody has already made. It was written
     /// only by the composer's own first open; the create window writes it too, because a model
@@ -180,11 +216,11 @@ public struct ComposerControls: Equatable, Sendable {
     }
 
     /// Writes the parts of these choices that a `Session` row cannot hold, and marks the session
-    /// settled. The other three go on the row itself, wherever it is being written.
+    /// settled. The other four go on the row itself, wherever it is being written.
     ///
-    /// Both of these store nil for their off state rather than a word for it, so a session that
-    /// was never asked and one that was asked and said no read back the same. `AgentRunner` treats
-    /// them the same too, which is what keeps the two ends from disagreeing.
+    /// All three store nil for their off state rather than a word for it, so a session that was
+    /// never asked and one that was asked and said no read back the same. `AgentRunner` and
+    /// `CodexRunner` treat them the same too, which is what keeps the two ends from disagreeing.
     public func store(sessionID: SessionID, in store: Store) async {
         try? await store.setSetting(
             Self.fastModeKey(sessionID: sessionID), isFastMode ? "1" : nil
@@ -192,6 +228,10 @@ public struct ComposerControls: Equatable, Sendable {
         try? await store.setSetting(
             Self.outputStyleKey(sessionID: sessionID),
             OutputStyle.isDefault(outputStyle) ? nil : outputStyle
+        )
+        try? await store.setSetting(
+            Self.contextWindowKey(sessionID: sessionID),
+            CodexContextWindow.stored(codexContextWindow)
         )
         try? await store.setSetting(Self.defaultsAppliedKey(sessionID: sessionID), "1")
     }

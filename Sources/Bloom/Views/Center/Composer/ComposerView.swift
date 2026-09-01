@@ -60,6 +60,10 @@ struct ComposerView: View {
     /// The style name this session is on, mirrored out of the store the way fast mode is. Neither
     /// has a column on `Session`, so neither can be read off the row the footer is drawn from.
     @State private var outputStyle = OutputStyle.defaultName
+    /// Codex's context window for this chat, in tokens, or `CodexContextWindow.modelDefault`.
+    /// Held here beside fast mode and the output style for the reason those two are: it is not a
+    /// column on `Session`, so the composer is where the chat's copy of it lives.
+    @State private var codexContextWindow = CodexContextWindow.modelDefault
     @State private var draftSaveTask: Task<Void, Never>?
 
     var body: some View {
@@ -206,7 +210,8 @@ struct ComposerView: View {
         ComposerControls(
             session: transcript.session,
             isFastMode: isFastMode,
-            outputStyle: outputStyle
+            outputStyle: outputStyle,
+            codexContextWindow: codexContextWindow
         )
     }
 
@@ -275,6 +280,18 @@ struct ComposerView: View {
                 // The default is stored as no row at all, so a session that was set back to it
                 // reads the same as one that was never asked. See `AgentRunner.refreshOutputStyle`.
                 let value = OutputStyle.isDefault(new.outputStyle) ? nil : new.outputStyle
+                Task { try? await store.setSetting(key, value) }
+            }
+        }
+
+        if new.codexContextWindow != codexContextWindow {
+            codexContextWindow = new.codexContextWindow
+            if let store = app.store {
+                let key = ComposerControls.contextWindowKey(sessionID: transcript.session.id)
+                // Nil for the model's own window, so a chat set back to it reads the same as one
+                // nobody ever asked. `CodexRunner.applyContextWindowChange` reads it on the next
+                // turn and reconnects if the running server was launched with something else.
+                let value = CodexContextWindow.stored(new.codexContextWindow)
                 Task { try? await store.setSetting(key, value) }
             }
         }
@@ -539,6 +556,9 @@ struct ComposerView: View {
         let storedStyle = (try? await store.setting(
             ComposerControls.outputStyleKey(sessionID: sessionID)
         )) ?? OutputStyle.defaultName
+        let storedContextWindow = CodexContextWindow.normalised(try? await store.setting(
+            ComposerControls.contextWindowKey(sessionID: sessionID)
+        ))
         // Checked before every write of the pane's state from here down. The pane is reused
         // across sessions, and an actor call does not stop for cancellation, so a switch made
         // while this task was reading used to let the OLD session's answers resume and land on
@@ -546,6 +566,7 @@ struct ComposerView: View {
         guard !Task.isCancelled else { return }
         isFastMode = storedFastMode
         outputStyle = storedStyle
+        codexContextWindow = storedContextWindow
 
         // The marker is what separates "never opened" from "opened and left alone", which the
         // column values cannot express: a session created with the built-in defaults looks exactly
@@ -597,6 +618,18 @@ struct ComposerView: View {
             try? await store.setSetting(
                 ComposerControls.outputStyleKey(sessionID: sessionID),
                 OutputStyle.isDefault(appDefaults.outputStyle) ? nil : appDefaults.outputStyle
+            )
+            guard !Task.isCancelled else { return }
+        }
+
+        // Same shape again, and the app-wide default is the only layer it has: a repository's
+        // settings file carries no key for it, and inventing one would be a second place to look
+        // for a value the Settings screen already owns.
+        if appDefaults.codexContextWindow != codexContextWindow {
+            codexContextWindow = appDefaults.codexContextWindow
+            try? await store.setSetting(
+                ComposerControls.contextWindowKey(sessionID: sessionID),
+                CodexContextWindow.stored(appDefaults.codexContextWindow)
             )
             guard !Task.isCancelled else { return }
         }

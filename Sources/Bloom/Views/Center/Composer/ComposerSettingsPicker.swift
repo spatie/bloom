@@ -18,6 +18,7 @@ struct ComposerSettingsPicker: View {
     var onOutputStyle: @MainActor (String) -> Void
     var onPermissionMode: @MainActor (String) -> Void
     var onFastMode: @MainActor (Bool) -> Void
+    var onContextWindow: @MainActor (Int) -> Void
 
     @State private var isOpen = false
 
@@ -47,7 +48,8 @@ struct ComposerSettingsPicker: View {
                 onEffort: onEffort,
                 onOutputStyle: onOutputStyle,
                 onPermissionMode: onPermissionMode,
-                onFastMode: onFastMode
+                onFastMode: onFastMode,
+                onContextWindow: onContextWindow
             )
             .environment(\.fontScale, 1)
         }
@@ -76,6 +78,7 @@ private struct ComposerSettingsPanel: View {
     var onOutputStyle: @MainActor (String) -> Void
     var onPermissionMode: @MainActor (String) -> Void
     var onFastMode: @MainActor (Bool) -> Void
+    var onContextWindow: @MainActor (Int) -> Void
 
     private static let width: CGFloat = 300
 
@@ -105,6 +108,14 @@ private struct ComposerSettingsPanel: View {
                         options: permissionModes,
                         onSelect: onPermissionMode
                     )
+                }
+
+                // Last, and only on the backend that has one. It is the coarsest of the five and
+                // the one changed least often, and it is the only one that costs a reconnect when
+                // it changes, which is `CodexRunner.applyContextWindowChange`'s business rather
+                // than something this row explains.
+                if controls.offersContextWindow {
+                    settingRow("Context window") { contextWindowPicker }
                 }
             }
             .padding(Metrics.gutter)
@@ -176,6 +187,24 @@ private struct ComposerSettingsPanel: View {
         .labelsHidden()
         .pickerStyle(.menu)
         .controlSize(.small)
+    }
+
+    private var contextWindowPicker: some View {
+        Picker("Context window", selection: contextWindowBinding) {
+            ForEach(CodexContextWindow.options(including: controls.codexContextWindow), id: \.self) { tokens in
+                Text(CodexContextWindow.label(for: tokens)).tag(tokens)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .controlSize(.small)
+    }
+
+    private var contextWindowBinding: Binding<Int> {
+        Binding(
+            get: { controls.codexContextWindow },
+            set: { tokens in MainActor.assumeIsolated { onContextWindow(tokens) } }
+        )
     }
 
     private var modelBinding: Binding<String> {

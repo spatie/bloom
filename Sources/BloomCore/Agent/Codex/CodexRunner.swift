@@ -29,6 +29,10 @@ public actor CodexRunner: SessionRunner {
     private var cancelled = false
     private var cachedRepoID: RepoID?
 
+    /// How large this chat's server was told the context window is, and therefore what the live
+    /// connection was launched with. See `applyContextWindowChange`.
+    private var contextWindow = CodexContextWindow.modelDefault
+
     /// The items seen this turn, by id.
     ///
     /// An approval request carries only an item id: the diff or the command is on the
@@ -116,6 +120,7 @@ public actor CodexRunner: SessionRunner {
     /// the process, which is what makes changing a composer chip mid chat take effect on the next
     /// turn without restarting anything. Claude Code cannot do that: its equivalents are argv.
     public func send(_ text: String, recording: Data? = nil) async throws {
+        await applyContextWindowChange()
         let client = try await connected()
         let threadID = try await openThread(on: client)
 
@@ -256,6 +261,16 @@ public actor CodexRunner: SessionRunner {
         // and can be closed while it is mid turn. `SessionLifecycle` refuses a stop on a session
         // with no turn open, so the one that did not happen writes nothing.
         if session.apply(.cancelled).moves { await save(session) }
+        await dropConnection()
+    }
+
+    /// Kill the server and forget everything that belonged to it, leaving the chat resumable.
+    ///
+    /// Split out of `shutdown` because `applyContextWindowChange` needs exactly this and none of
+    /// what surrounds it: nothing is being stopped there, so there are no questions to file and
+    /// no cancellation to record, and writing either would say a turn had been interrupted when
+    /// none was running.
+    private func dropConnection() async {
         await client?.stop()
         client = nil
         // The thread belonged to the process that has just been killed. Held on to, the next
@@ -269,6 +284,32 @@ public actor CodexRunner: SessionRunner {
         handle.end()
     }
 
+    /// Pick up a context window chosen since this server started, by starting another one.
+    ///
+    /// **The one composer setting that cannot travel with the turn.** Model, effort, approval
+    /// policy and sandbox are all arguments of `turn/start`, which is what makes changing a chip
+    /// mid chat take effect on the next message with nothing restarted. `model_context_window`
+    /// and `model_auto_compact_token_limit` are `-c` overrides read when `codex app-server`
+    /// starts, so a chat left on the old connection would go on running at the old window while
+    /// the picker said otherwise, which is the failure this whole setting exists to fix.
+    ///
+    /// The chat survives it: the thread id is on the session row, so the next `openThread` is a
+    /// `thread/resume` rather than a new conversation. What does not survive is anything that
+    /// lived only inside the process, which is the grants somebody gave with "allow for this
+    /// session"; the same cost `terminateNow` pays, and the reason this reconnects only when the
+    /// value has actually changed rather than on every turn.
+    private func applyContextWindowChange() async {
+        let stored = try? await store.setting(
+            ComposerControls.contextWindowKey(sessionID: session.id)
+        )
+        let wanted = CodexContextWindow.normalised(stored)
+        guard wanted != contextWindow else { return }
+        contextWindow = wanted
+        guard client != nil else { return }
+        connection.current?.terminateNow()
+        await dropConnection()
+    }
+
     // MARK: - Connecting
 
     private func connected() async throws -> CodexClient {
@@ -278,7 +319,8 @@ public actor CodexRunner: SessionRunner {
             cwd: workspacePath,
             clientName: "Bloom",
             clientVersion: Self.clientVersion,
-            bridge: bridge
+            bridge: bridge,
+            contextWindow: contextWindow
         ))
         self.client = client
         connection.attach(client)

@@ -555,6 +555,70 @@ private func eventually(
         #expect(stored.inputTokens == 42)
     }
 
+    // MARK: - The context window
+
+    /// The one composer setting that cannot travel with the turn: it is a `-c` override read when
+    /// `codex app-server` starts, so a chat set to it before its first turn has to be launched
+    /// with it. See `CodexContextWindow`.
+    @Test func launchesTheServerWithTheWindowTheChatIsSetTo() async throws {
+        let store = try makeTestStore("codex-runner-window")
+        let (session, _) = try await makeCodexSession(store)
+        try await store.setSetting(
+            ComposerControls.contextWindowKey(sessionID: session.id), "1000000"
+        )
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+
+        try await runner.send("hello")
+
+        let arguments = box.process.launch.arguments
+        #expect(arguments.contains("model_context_window=1000000"))
+        #expect(arguments.contains("model_auto_compact_token_limit=900000"))
+    }
+
+    /// **The bug this exists to stop:** every other chip takes effect on the next turn, so a
+    /// window changed mid chat looked like it had too, while the long-lived server went on running
+    /// on the size it was started with. Changing it starts another server, and the thread id on
+    /// the row is what makes that a resume rather than a new conversation.
+    @Test func startsAnotherServerWhenTheWindowChangesMidChat() async throws {
+        let store = try makeTestStore("codex-runner-window-change")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+
+        try await runner.send("first")
+        #expect(box.processes.count == 1)
+        #expect(!box.process.launch.arguments.contains("model_context_window=500000"))
+
+        try await store.setSetting(
+            ComposerControls.contextWindowKey(sessionID: session.id), "500000"
+        )
+        try await runner.send("second")
+
+        #expect(box.processes.count == 2)
+        #expect(box.process.launch.arguments.contains("model_context_window=500000"))
+        // The conversation goes with it. Anything else would make a picker press a way to lose
+        // the chat that is on screen.
+        #expect(box.process.sentMethods.contains("thread/resume"))
+    }
+
+    /// A reconnect costs the grants that live only inside the server, so it happens when the value
+    /// has actually changed and not on every turn.
+    @Test func leavesTheServerAloneWhenTheWindowHasNotChanged() async throws {
+        let store = try makeTestStore("codex-runner-window-same")
+        let (session, _) = try await makeCodexSession(store)
+        try await store.setSetting(
+            ComposerControls.contextWindowKey(sessionID: session.id), "500000"
+        )
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+
+        try await runner.send("first")
+        try await runner.send("second")
+
+        #expect(box.processes.count == 1)
+    }
+
     /// Every migration step has to survive being replayed over a database that already has it
     /// applied, because `ADD COLUMN` has no `IF NOT EXISTS` and rewinding `user_version` is how an
     /// old schema is reproduced. A step that threw here would take the whole transaction with it

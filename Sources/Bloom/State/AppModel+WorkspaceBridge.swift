@@ -218,7 +218,18 @@ extension AppModel {
         // the owner's own client, which has nothing to inherit and gets Bloom's defaults.
         var controls = ComposerControls()
         if let sessionID = identity.sessionID, let session = try await store.session(id: sessionID) {
-            controls = ComposerControls(session: session, isFastMode: false, outputStyle: OutputStyle.defaultName)
+            // The context window comes with it, because on Codex it is part of what "the thing it
+            // already trusts" means: an agent running on a widened window that starts a helper on
+            // the catalogue's own would be handing the harder half of its job to the smaller one.
+            let contextWindow = CodexContextWindow.normalised(try await store.setting(
+                ComposerControls.contextWindowKey(sessionID: sessionID)
+            ))
+            controls = ComposerControls(
+                session: session,
+                isFastMode: false,
+                outputStyle: OutputStyle.defaultName,
+                codexContextWindow: contextWindow
+            )
         }
         controls = try await workspaceControls(for: order, inheriting: controls)
 

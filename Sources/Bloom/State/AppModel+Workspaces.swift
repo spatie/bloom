@@ -323,7 +323,8 @@ extension AppModel {
             model: resolved.model,
             effort: resolved.effort,
             permissionMode: resolved.permissionMode,
-            isFastMode: appDefaults.fastMode
+            isFastMode: appDefaults.fastMode,
+            codexContextWindow: appDefaults.codexContextWindow
         )
     }
 
@@ -527,7 +528,7 @@ extension AppModel {
         )
     }
 
-    /// The four settings the archived chat was being had under, plus the two that have no column.
+    /// The four settings the archived chat was being had under, plus the three that have no column.
     ///
     /// Read off the plan and the archived session rather than resolved from the project, because
     /// this chat is not new. It is the same conversation, and the only reason it is being handed
@@ -542,7 +543,15 @@ extension AppModel {
         let outputStyle = (try? await store.setting(
             ComposerControls.outputStyleKey(sessionID: session.id)
         )) ?? OutputStyle.defaultName
-        return ComposerControls(session: session, isFastMode: isFastMode, outputStyle: outputStyle)
+        let contextWindow = CodexContextWindow.normalised(try? await store.setting(
+            ComposerControls.contextWindowKey(sessionID: session.id)
+        ))
+        return ComposerControls(
+            session: session,
+            isFastMode: isFastMode,
+            outputStyle: outputStyle,
+            codexContextWindow: contextWindow
+        )
     }
 
     /// The archived chat the plan was made from, found by the thread it is resuming.

@@ -80,6 +80,23 @@ struct ModelSettingsView: View {
                 Toggle("Start new sessions in plan mode", isOn: $defaults.planMode)
 
                 Toggle("Start new sessions in fast mode", isOn: $defaults.fastMode)
+
+                // Codex only, and this one says so, unlike the output style above it. The output
+                // style sits under a model list that is already Claude Code's, so the section
+                // reads as that backend's throughout; this row is the only Codex setting on the
+                // screen, and a "Context window" with no backend on it would read as a claim about
+                // the model list above.
+                Picker(selection: $defaults.codexContextWindow) {
+                    ForEach(
+                        CodexContextWindow.options(including: defaults.codexContextWindow),
+                        id: \.self
+                    ) { tokens in
+                        Text(CodexContextWindow.label(for: tokens)).tag(tokens)
+                    }
+                } label: {
+                    Text("Codex context window")
+                    Text("How large a new Codex session is told the model's window is")
+                }
             } footer: {
                 // A footer rather than a section of its own. A group holding nothing but a
                 // sentence draws a card around the sentence, which makes an aside look like a

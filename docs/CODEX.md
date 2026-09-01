@@ -543,6 +543,38 @@ A chat with **no** messages yet simply changes backend, because there is nothing
 Same workspace, same worktree, same branch: a fork is cheap, and it is much less surprising than
 what the earlier framing implied (a new workspace).
 
+## 9a. The context window, which is the one setting that is not a turn argument
+
+Codex sizes its window from its own model catalogue, and the catalogue's figure is well under what
+the model will take. The way past it is two `-c` overrides, which is what a Codex user types by
+hand:
+
+    codex -c model_context_window=1000000 -c model_auto_compact_token_limit=900000
+
+Both keys, never one. `model_context_window` alone leaves auto-compaction firing at the old limit,
+so the chat compacts at a fraction of a window it has just been told is much larger.
+`model_auto_compact_token_limit` alone pushes compaction past the window and the turn fails on the
+model's own limit. `CodexContextWindow` holds the pair and the 90% fraction between them, and it is
+what the picker, the Settings screen and `CodexClient.launch` all read.
+
+**It cannot travel with the turn, and everything else in the composer can.** Model, effort,
+approval policy and sandbox are arguments of `turn/start`, which is why changing a chip mid chat
+takes effect on the next message with nothing restarted. These two are read when `codex app-server`
+starts. So `CodexRunner.applyContextWindowChange` re-reads the chat's setting before every turn and,
+if the live server was launched with something else, kills it and connects again; the thread id on
+the session row makes the next `openThread` a `thread/resume`, so the conversation survives. What
+does not survive is anything that lived only inside the process, which is the grants somebody gave
+with "allow for this session", and that is why the reconnect happens on a change rather than on
+every turn.
+
+It is per chat and it has no column: `session.<id>.codexContextWindow` in the settings table,
+beside fast mode and the output style, for the reason those two are there. `defaults.codex.contextWindow`
+is the app-wide default a new chat inherits, and the repository's settings file has no say, because
+it has no key for one.
+
+`model/list` does not report a window, so the sizes offered are a list rather than something read
+off the catalogue: the model's own, 500K and 1M.
+
 ---
 
 ## 10. Usage and cost
