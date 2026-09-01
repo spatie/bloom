@@ -133,9 +133,10 @@ struct CrewMarkGlyph: View {
     static func symbol(for state: SessionState) -> String {
         switch state {
         case .running: ""
-        // The same filled hand the workspace rows, the menu bar strip and the opened ask row use,
-        // so the four places this is reported say it with one mark.
-        case .waiting: "hand.raised.fill"
+        // The mark the workspace rows above it use, which is a question rather than a raised hand:
+        // this row is read in the same column at the same size and must not say the same state in
+        // a second shape. See `WorkspaceStatusGlyph.symbol(for:)`, which carries the argument.
+        case .waiting: "questionmark.circle.fill"
         case .failed: "xmark"
         // Not a cross. Nothing went wrong: somebody stopped the agent, and a cross beside a row
         // nobody's code broke costs ten minutes.
@@ -149,9 +150,11 @@ struct CrewMarkGlyph: View {
 
     static func tint(for state: SessionState) -> Color {
         switch state {
-        // The caution colour a workspace's raised hand already takes, and not the alarm red:
-        // nothing has gone wrong, something is being asked.
-        case .waiting: Palette.warning
+        // The red a workspace's question mark takes, for the reason written out on
+        // `WorkspaceStatusGlyph.tint(for:)`: an agent stopped on a question is the one state in
+        // this column where work has halted until the owner acts, and it was quieter than the
+        // states that are merely bad news.
+        case .waiting: Palette.negative
         case .failed: Palette.negative
         case .running, .cancelled, .idle: Palette.textTertiary
         }
