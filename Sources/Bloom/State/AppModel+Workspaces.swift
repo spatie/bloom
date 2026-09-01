@@ -1,16 +1,19 @@
 import BloomCore
 
-/// Making a workspace, starting one, and carrying one on after its pull request is merged.
+/// Making a workspace, starting one, and the two ways a finished one is carried on.
 ///
 /// The first half is the ordinary route in: `createWorkspace` cuts the worktree,
 /// `startWorkspace` is the same thing said by an agent through the bridge, and `adopt` is what
 /// the app has to do once either of them has produced a workspace.
 ///
-/// The second half exists because a merged workspace used to be a dead end. Continuing keeps the
-/// installed dependencies, the copied `.env`, the dev servers on their ports and above all the
-/// agent's session, and changes only the thing that is genuinely finished, which is the branch.
-/// The decision itself is `ContinuationGate` in BloomCore and is the only thing allowed to say
-/// yes; what is here is the app work either side of it.
+/// The second half exists because a workspace whose work has landed used to be a dead end, and
+/// there are two shapes of that. `continueAfterMerge` is the one where the worktree is still on
+/// disk: the branch is finished, everything else about the directory is worth keeping, so a new
+/// branch is cut under the same worktree and the same session. `carryOn` is the one where the
+/// worktree is not: the workspace was archived and its branch has gone from this Mac and from the
+/// remote, so a new worktree has to be cut somewhere else and only the conversation can come
+/// across. The decisions are `ContinuationGate` and `CarryOnGate` in BloomCore, and they are the
+/// only things allowed to say yes; what is here is the app work either side of them.
 
 extension AppModel {
     /// Creates the worktree, selects it, kicks off setup, and sends the first prompt once setup
@@ -90,7 +93,10 @@ extension AppModel {
         name: String? = nil,
         /// An existing pull request or branch to open instead of cutting a branch. See
         /// `WorkspaceCheckout`.
-        checkout: WorkspaceCheckout? = nil
+        checkout: WorkspaceCheckout? = nil,
+        /// A thread on the chosen backend for the new chat to pick up. Only `carryOn` passes one.
+        /// See `WorkspaceStartRequest.resuming`.
+        resuming: String? = nil
     ) async throws -> Workspace {
         guard let manager else { throw AppNotReady.stillStartingUp }
         isCreatingWorkspace = true
@@ -232,6 +238,7 @@ extension AppModel {
             checkout: checkout,
             controls: effectiveControls,
             opensSession: opensWith == .chat,
+            resuming: resuming,
             // The app runs setup itself, through `WorkspaceModel`, so the output streams into the
             // transcript, a failure raises the one sentence every route says about a failed setup,
             // and an archive can cancel it. See `adopt`.
@@ -432,6 +439,120 @@ extension AppModel {
 
         await adopt(continuation, pullRequest: pullRequest)
         return .continued(continuation)
+    }
+
+    /// What pressing Carry On in an archived workspace does.
+    ///
+    /// The archived workspace is not touched. Nothing is unarchived, nothing is written to its
+    /// row, and its transcript is still there to read afterwards: a new workspace is cut beside
+    /// it and the conversation is picked up in that one. Two rows saying they are the same piece
+    /// of work is the honest description of what happened, and it is why the new workspace keeps
+    /// the old one's name rather than being given a fresh codename.
+    ///
+    /// The chat carries across for real. `plan.agentSessionID` is written onto the new chat as
+    /// its `agentSessionID`, so its very first turn goes out with `--resume`, and the agent
+    /// answers holding the whole of the conversation rather than a summary of it. What does not
+    /// come across is Bloom's own transcript, whose rows belong to the chat they were written
+    /// for, and the opening turn is worded to say so out loud. See `ArchivedCarryOn`.
+    ///
+    /// It goes through `startWorkspace` like every other route in, with three of its decisions
+    /// stated rather than derived: the branch and the base, which `CarryOnGate` worked out, and
+    /// the name, which is the archived workspace's. Passing a name is also what stops the namer
+    /// asking a model to invent one out of a handover message that describes no task.
+    func carryOn(_ workspace: Workspace, plan: CarryOnPlan) async {
+        guard let repo = repo(for: workspace) else {
+            alert = BloomAlert(
+                title: "Could not carry \(workspace.name) on",
+                message: "Its project is no longer in Bloom, so there is no repository to cut a "
+                    + "worktree from. Add the project again and try once more."
+            )
+            return
+        }
+        guard !carryingOn.contains(workspace.id) else { return }
+
+        carryingOn.insert(workspace.id)
+        defer { carryingOn.remove(workspace.id) }
+
+        let handover = ArchivedCarryOn(workspace: workspace, project: repo.name, plan: plan)
+        let template = PromptOverrides().template(for: .carryOnArchived)
+
+        do {
+            let started = try await startWorkspace(
+                in: repo,
+                prompt: handover.render(template: template).text,
+                baseBranch: plan.baseBranch,
+                branch: plan.branch,
+                // The archived chat's own model, effort, backend and permission mode, so the
+                // conversation resumes under the settings it was being had under rather than
+                // under whatever the Settings screen says today. A resumed Claude Code thread
+                // handed to Codex would be an id that backend has never heard of.
+                controls: await carryOnControls(plan: plan, workspace: workspace),
+                name: workspace.name,
+                resuming: plan.agentSessionID
+            )
+            Log.archive.info(
+                "carried \(workspace.name, privacy: .public) on as \(started.branch, privacy: .public)"
+            )
+        } catch {
+            Log.archive.error(
+                "could not carry \(workspace.name, privacy: .public) on: \(error.readableMessage, privacy: .public)"
+            )
+            let trouble = await WorkspaceTrouble.creating(
+                error,
+                project: repo.name,
+                projectPath: repo.path,
+                baseBranch: plan.baseBranch
+            )
+            alert = BloomAlert(
+                title: "Could not carry \(workspace.name) on", message: trouble.sentence
+            )
+        }
+    }
+
+    /// Whether the archive screen may offer Carry On, and where it would cut.
+    ///
+    /// Asked here rather than in the view for the reason every git call is: listing the
+    /// repository's branches is a subprocess. The network half of the answer is not asked again,
+    /// it is handed in, because the screen has already paid for it once. See
+    /// `WorkspaceManager.carryOnFacts`.
+    func carryOnDecision(
+        for workspace: Workspace, session: Session?, source: RestoreSource?
+    ) async -> CarryOnDecision {
+        guard let manager else { return .refuse(.stillLooking) }
+        guard let repo = repo(for: workspace) else { return .refuse(.projectGone) }
+        return CarryOnGate.decide(
+            await manager.carryOnFacts(
+                workspace: workspace, repo: repo, session: session, source: source
+            )
+        )
+    }
+
+    /// The four settings the archived chat was being had under, plus the two that have no column.
+    ///
+    /// Read off the plan and the archived session rather than resolved from the project, because
+    /// this chat is not new. It is the same conversation, and the only reason it is being handed
+    /// a `ComposerControls` at all is that a workspace start is where those get written.
+    private func carryOnControls(plan: CarryOnPlan, workspace: Workspace) async -> ComposerControls {
+        guard let store, let session = await archivedSession(plan: plan, workspace: workspace) else {
+            return ComposerControls(agentKind: plan.agentKind)
+        }
+        let isFastMode = (try? await store.setting(
+            ComposerControls.fastModeKey(sessionID: session.id)
+        )) == "1"
+        let outputStyle = (try? await store.setting(
+            ComposerControls.outputStyleKey(sessionID: session.id)
+        )) ?? OutputStyle.defaultName
+        return ComposerControls(session: session, isFastMode: isFastMode, outputStyle: outputStyle)
+    }
+
+    /// The archived chat the plan was made from, found by the thread it is resuming.
+    ///
+    /// By the thread rather than by an id passed down, because that is the one fact the plan and
+    /// the row are guaranteed to agree on: the gate would not have produced a plan without it.
+    private func archivedSession(plan: CarryOnPlan, workspace: Workspace) async -> Session? {
+        guard let store else { return nil }
+        let sessions = (try? await store.sessions(workspaceID: workspace.id)) ?? []
+        return sessions.first { $0.agentSessionID == plan.agentSessionID }
     }
 
     /// Both catches above, so the two sentences cannot drift apart.

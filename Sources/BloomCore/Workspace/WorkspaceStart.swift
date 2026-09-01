@@ -49,6 +49,20 @@ public struct WorkspaceStartRequest: Sendable {
     /// message to. It is not a mode: the workspace can gain a chat later from the `+` menu like
     /// any other. See `WorkspaceStartMode`.
     public var opensSession: Bool
+    /// A thread on the chosen backend for the new chat to pick up instead of starting a fresh
+    /// one, or nil for every ordinary route in.
+    ///
+    /// It is written straight onto the session row as `agentSessionID`, which is the same column
+    /// a chat's own runner fills in after its first turn, so the first turn here goes out with
+    /// `--resume` (or `thread/resume`) exactly as a second turn in any other chat would. Both
+    /// backends resolve a thread by id rather than by directory, which is what makes a
+    /// conversation survive the worktree it was had in: see `ArchivedCarryOn`, whose head records
+    /// how that was measured.
+    ///
+    /// Only `AppModel.carryOn` passes one. Nothing validates it here, because the one thing that
+    /// could go wrong, an id the CLI cannot find, is the CLI's answer to give and not this
+    /// layer's to guess at.
+    public var resuming: String?
     /// Whether `start` runs the setup script itself, and waits for it.
     ///
     /// False for the app, which runs it through `WorkspaceModel` so the output streams into the
@@ -69,6 +83,7 @@ public struct WorkspaceStartRequest: Sendable {
         checkout: WorkspaceCheckout? = nil,
         controls: ComposerControls? = nil,
         opensSession: Bool = true,
+        resuming: String? = nil,
         runsSetup: Bool = false
     ) {
         self.id = id
@@ -81,6 +96,7 @@ public struct WorkspaceStartRequest: Sendable {
         self.checkout = checkout
         self.controls = controls
         self.opensSession = opensSession
+        self.resuming = resuming
         self.runsSetup = runsSetup
     }
 }
@@ -202,6 +218,9 @@ extension WorkspaceManager {
                 // names, a real one in the sidebar and a fragment of a prompt in the strip. See
                 // `PaneNaming`.
                 title: PaneNaming.chat,
+                // Nil for every route but Carry On, which hands over the archived chat's thread
+                // so the first turn resumes that conversation rather than opening a new one.
+                agentSessionID: request.resuming,
                 model: controls?.model ?? AppDefaults.fallbackModel,
                 effort: controls?.effort ?? AppDefaults.fallbackEffort,
                 // A request chooses a backend for the first chat and for no other. Every chat

@@ -1393,6 +1393,16 @@ final class AppModel {
     /// seams for an insert and a remove would be more code saying less than the property does.
     var restoring: Set<WorkspaceID> = []
 
+    /// Workspaces whose Carry On is in flight, on the same terms as `restoring` and for the same
+    /// reason: cutting a worktree takes seconds, and a button that can be pressed again in that
+    /// time cuts two.
+    ///
+    /// A separate set rather than a shared one because the two are separate offers. They are
+    /// never on screen together, but a workspace that is being carried on has not left the
+    /// archived list, and reusing `restoring` would make the archive screen say a restore was
+    /// running when none is.
+    var carryingOn: Set<WorkspaceID> = []
+
     /// What the sidebar's drag ends in.
     ///
     /// The two numbers are `onMove`'s, which index the rows as they are DRAWN, so `visible` has to

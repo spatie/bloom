@@ -10,6 +10,7 @@ public enum PromptID: String, Sendable, Hashable, CaseIterable, Codable {
     case mergePullRequest
     case fixConflicts
     case continueAfterMerge
+    case carryOnArchived
     case review
     case nameWorkspace
 }
@@ -62,7 +63,7 @@ public struct PromptDefinition: Sendable, Hashable, Identifiable {
 public enum PromptRegistry {
     public static let all: [PromptDefinition] = [
         createPullRequest, pushLocalWork, mergePullRequest, fixConflicts, continueAfterMerge,
-        review, nameWorkspace,
+        carryOnArchived, review, nameWorkspace,
     ]
 
     public static func definition(for id: PromptID) -> PromptDefinition {
@@ -125,6 +126,19 @@ public enum PromptRegistry {
         public static let previousBranch = "previous_branch"
         public static let baseBranch = "base_branch"
         public static let pullRequest = "pull_request"
+    }
+
+    /// The names the carry-on prompt may use.
+    public enum CarryOnArchived {
+        public static let workspace = "workspace"
+        public static let project = "project"
+        /// The branch the archive was on, and that no longer exists anywhere.
+        public static let previousBranch = "previous_branch"
+        /// The directory the archive was in, which was removed with it. The agent is holding
+        /// paths under it, so it is named rather than left to be discovered.
+        public static let previousPath = "previous_path"
+        public static let branch = "branch"
+        public static let baseBranch = "base_branch"
     }
 
     /// The names the workspace-naming prompt may use.
@@ -396,6 +410,71 @@ public enum PromptRegistry {
 
         Do not merge the pull request whatever happens. Finish by saying which files conflicted, \
         what you decided in each of them, whether you pushed, and anything you are not sure about.
+        """
+    )
+
+    /// Sent into the first chat of the workspace Carry On makes, once its worktree exists.
+    ///
+    /// The chat it lands in is resuming the archived workspace's thread, so the agent reading it
+    /// has the whole of that conversation and is not being briefed by a stranger. What it does
+    /// not have is the worktree: the directory was deleted by the archive and the branch is gone
+    /// from this Mac and from the remote, which is why Restore could not be offered. Every path
+    /// the agent is holding is therefore stale, and that is the one fact this template exists to
+    /// state.
+    ///
+    /// It asks for one line about where the two of them got to, and that request is for the
+    /// reader rather than for the agent. Bloom's transcript rows belong to the chat they were
+    /// written for, so the new workspace's conversation is empty on screen while the agent's
+    /// context is full, and a chat that opens with the agent saying what it is carrying is what
+    /// closes that gap honestly. The archived workspace is still there to read in full.
+    ///
+    /// Like `continueAfterMerge`, it must tell the agent not to start anything. Carry On is a
+    /// press on a button, not a brief.
+    static let carryOnArchived = PromptDefinition(
+        id: .carryOnArchived,
+        title: "Carry on from an archive",
+        summary: """
+        Sent when you press Carry On in an archived workspace, into a new worktree, resuming that \
+        workspace's conversation. It only says what moved.
+        """,
+        variables: [
+            PromptVariable(
+                name: CarryOnArchived.workspace,
+                summary: "The archived workspace's name, which the new one keeps."
+            ),
+            PromptVariable(name: CarryOnArchived.project, summary: "The project it belongs to."),
+            PromptVariable(
+                name: CarryOnArchived.previousBranch,
+                summary: "The branch the archived workspace was on, which no longer exists."
+            ),
+            PromptVariable(
+                name: CarryOnArchived.previousPath,
+                summary: "The worktree the archive removed."
+            ),
+            PromptVariable(
+                name: CarryOnArchived.branch,
+                summary: "The branch the new worktree is on."
+            ),
+            PromptVariable(
+                name: CarryOnArchived.baseBranch,
+                summary: "The branch the new one was cut from."
+            ),
+        ],
+        defaultTemplate: """
+        We are carrying on somewhere else. The workspace this conversation was in, \
+        {{workspace}}, has been archived: its worktree at {{previous_path}} was deleted, and \
+        {{previous_branch}} is gone from this Mac and from the remote, so there was nothing left \
+        to rebuild it from.
+
+        You are in a new worktree now, on a fresh branch {{branch}} cut from an up \
+        to date {{base_branch}} in {{project}}. Everything we said to each other is still yours, \
+        and none of the files are: every path you remember is stale, so read anything here before \
+        you rely on it, and expect work that landed on {{base_branch}} to already be underneath \
+        you.
+
+        Do not redo what the old branch held, and do not start anything new yet. Say in one or \
+        two lines where we had got to and what was left, which is the only record of it this \
+        chat has, then wait for what I ask next.
         """
     )
 
