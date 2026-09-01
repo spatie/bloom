@@ -59,7 +59,13 @@ struct ComposerSendButton: View {
         }
         // Prominent, because sending is the action on offer and it is the only one here now.
         .buttonStyle(.borderedProminent)
-        .buttonBorderShape(isNamed ? .capsule : .circle)
+        // **A rounded rectangle rather than a capsule, and the same radius every other named
+        // button in the window takes.** The capsule was the only one of its kind in the app: the
+        // Merge button, Create pull request and the rest all go through
+        // `.roundedRectangle(radius: Metrics.corner)`, so a pill in the create window read as a
+        // control borrowed from somewhere else. The round variant beside it stays a circle,
+        // because a glyph in a circle is a different family and every footer already draws it.
+        .buttonBorderShape(isNamed ? .roundedRectangle(radius: Metrics.corner) : .circle)
         .frame(minHeight: Metrics.rowHeight)
         .contentShape(Rectangle())
         // The system control accent keeps this primary action consistent with every native control.
