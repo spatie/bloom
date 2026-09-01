@@ -87,16 +87,17 @@ struct TranscriptRowView: View, Equatable {
             // and both branches below need it: the second used to reach it through `userTurn`, so
             // an ordinary bubble built the same string twice per pass.
             let typed = userText
-            let merge = MergeTurn.split(typed)
-            let visible = merge?.message ?? typed
             // A review turn first: its message is mostly scaffolding the reader never typed, so
             // it renders as the typed words plus a chip per comment. `split` is strict and
             // returns nil for everything else, which falls through to the ordinary bubble.
-            if let review = ReviewTurn.split(visible) {
+            //
+            // Nothing is taken out for the instructions Bloom appends. They stay in the text and
+            // the bubble draws each of them as a chip where it sits: see `SentTurn`, and the row
+            // this used to hand a separate string to.
+            if let review = ReviewTurn.split(typed) {
                 UserTurnRowView(
                     text: review.message,
                     reviewChips: review.chips,
-                    instructions: merge?.instructions,
                     home: home
                 )
             } else {
@@ -106,11 +107,10 @@ struct TranscriptRowView: View, Equatable {
                 // returns the text untouched at the first thing that is not exactly the shape the
                 // composer writes, so a message that merely talks about attached files is never
                 // edited.
-                let turn = AttachmentTrailer.split(visible)
+                let turn = AttachmentTrailer.split(typed)
                 UserTurnRowView(
                     text: turn.body,
                     attachments: turn.paths,
-                    instructions: merge?.instructions,
                     home: home
                 )
             }

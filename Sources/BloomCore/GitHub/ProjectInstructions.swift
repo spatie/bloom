@@ -213,10 +213,20 @@ public enum ProjectInstructions {
                 + "\(AttachmentDraft.token(for: path)) as well, and where they disagree with "
                 + "anything above, they win."
         case .inline(let text):
-            return "\(preamble(for: subject)) They could not be written to a file in this "
-                + "worktree, so they are below. Where they disagree with anything above, they "
-                + "win.\n\n\(text)"
+            return "\(inlineLead(for: subject))\n\n\(text)"
         }
+    }
+
+    /// The sentence that goes in front of a project's own words when they could not be written to
+    /// a file.
+    ///
+    /// Its own function because it is read from two ends. This composes the turn with it, and
+    /// `SentTurn` recognises it in a turn that has already gone, so that the words after it can be
+    /// drawn as the same chip a project's own FILE gets and hovered for the same card. Two spellings
+    /// of one sentence would be a chip that stopped appearing the day somebody reworded this.
+    public static func inlineLead(for subject: Subject) -> String {
+        "\(preamble(for: subject)) They could not be written to a file in this worktree, so they "
+            + "are below. Where they disagree with anything above, they win."
     }
 
     private static func preamble(for subject: Subject) -> String {

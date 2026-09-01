@@ -23,7 +23,7 @@ public enum UserTurnPrompt {
     }
 
     public static func summary(of text: String, limit: Int = summaryLimit) -> String? {
-        let presented = MergeTurn.split(text)?.message ?? text
+        let presented = SentTurn.withoutInstructions(text)
         let visible: String
         if let review = ReviewTurn.split(presented) {
             visible = if review.message.isEmpty {

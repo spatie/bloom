@@ -177,15 +177,21 @@ struct ProjectInstructionsTests {
             adding: ProjectInstructions.resolve(.merge, in: worktree, stated: nil)
         )
 
-        let presented = try #require(MergeTurn.split(turn))
+        let blocks = SentTurn.segments(in: turn).compactMap { segment -> InjectedInstruction? in
+            guard case .instructions(let block) = segment else { return nil }
+            return block
+        }
 
-        #expect(presented.message == "Merge #42.")
-        #expect(presented.instructions == MergeInstructions.canonical)
+        #expect(SentTurn.withoutInstructions(turn) == "Merge #42.")
+        #expect(blocks == [
+            InjectedInstruction(title: SentTurn.mergeTitle, body: MergeInstructions.canonical),
+        ])
     }
 
     @Test("ordinary user text is never mistaken for a merge request")
     func ordinaryTextDoesNotBecomeMergeContext() {
-        #expect(MergeTurn.split("Please merge these two arrays.") == nil)
+        let text = "Please merge these two arrays."
+        #expect(SentTurn.segments(in: text) == [.text(text)])
     }
 
     /// The asymmetry between the two, asserted rather than left to be rediscovered. The merge

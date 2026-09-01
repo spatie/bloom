@@ -46,15 +46,19 @@ struct TranscriptLinkActions: Sendable, Equatable {
     /// A file chip drawn inside the run was clicked. Empty by default, and set by the one row that
     /// draws chips, because opening a file needs a workspace and the list's shared actions have
     /// none: see `UserTurnRowView`.
+    ///
+    /// A file, because a chip standing for words Bloom injected has nowhere to go: the words are in
+    /// the message the reader is looking at. It still hovers, which is the whole of what a reader
+    /// wants from one.
     var openFile: @MainActor @Sendable (String) -> Void = { _ in }
-    /// The pointer moved onto a file chip inside the run, or off one. Set by the same row and for
-    /// the same reason: the card needs the workspace to know which worktree the path is under.
+    /// The pointer moved onto a chip inside the run, or off one. Set by the same row and for the
+    /// same reason: the card needs the workspace to know which worktree a path is under.
     var hoverFile: @MainActor @Sendable (FileChipHover?) -> Void = { _ in }
 
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.identity == rhs.identity }
 }
 
-/// The file chip the pointer is on, and where it is.
+/// The chip the pointer is on, and where it is.
 ///
 /// **Reported the moment the pointer arrives, with no wait of its own**, which is the opposite of
 /// how the composer's chips do it and is deliberate. `ComposerTextView` waits `Motion.hoverCardDelay`
@@ -64,7 +68,10 @@ struct TranscriptLinkActions: Sendable, Equatable {
 /// measuring on the arrival and waits the same delay before publishing, so the frame is settled by
 /// the time it is used and nothing is measured behind a bubble nobody is pointing at.
 struct FileChipHover: Equatable, Sendable {
-    var path: String
+    /// What the chip stands for: a file, or the words Bloom put in the message. One value rather
+    /// than a path and an optional body beside it, because the row that receives this has one
+    /// decision to make and it is which card to raise.
+    var subject: InlineChip
     /// In the text view's own coordinates, which are top left origin because a text view is
     /// flipped. That is the space SwiftUI measures in too, so the row adds its own origin and
     /// nothing here has to reason about AppKit's y axis.
@@ -310,11 +317,15 @@ final class LinkTextView: NSTextView {
         let point = convert(event.locationInWindow, from: nil)
         hover(linkRange(at: point))
         let chip = fileChip(at: point)
-        // A chip is a door like a link is, and a text view left to itself shows an I-beam over
+        // A file chip is a door like a link is, and a text view left to itself shows an I-beam over
         // the whole run: the pointer is what says the difference before the click does. The link
         // ranges get theirs from `linkTextAttributes`, which AppKit merges over them; an
         // attachment is not a link and gets nothing, so it is set here.
-        if chip != nil { NSCursor.pointingHand.set() }
+        //
+        // Only where there is somewhere to go. A chip standing for instructions Bloom put in the
+        // message opens nothing, because the words are already in the turn under the pointer, and
+        // a hand over it would promise a click that does not answer.
+        if chip?.subject.path != nil { NSCursor.pointingHand.set() }
         hoverChip(chip)
     }
 
@@ -328,11 +339,13 @@ final class LinkTextView: NSTextView {
     /// short line reports the last character on it, so without the bounds test a click in the
     /// white space beside a one-line turn would open its file.
     override func mouseDown(with event: NSEvent) {
-        guard let chip = fileChip(at: convert(event.locationInWindow, from: nil)) else {
+        guard let chip = fileChip(at: convert(event.locationInWindow, from: nil)),
+              let path = chip.subject.path
+        else {
             super.mouseDown(with: event)
             return
         }
-        actions.openFile(chip.path)
+        actions.openFile(path)
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -356,8 +369,8 @@ final class LinkTextView: NSTextView {
 
     /// Tells the row which chip the pointer is on, once per arrival and once per departure.
     ///
-    /// The whole value is compared rather than the path alone, so a sentence naming the same file
-    /// twice moves its card from one pill to the other instead of leaving it on the first.
+    /// The whole value is compared rather than the subject alone, so a sentence naming the same
+    /// file twice moves its card from one pill to the other instead of leaving it on the first.
     private func hoverChip(_ chip: FileChipHover?) {
         guard chip != hoveredChip else { return }
         hoveredChip = chip
@@ -388,11 +401,11 @@ final class LinkTextView: NSTextView {
         return range
     }
 
-    /// The file chip under a point, and where that chip is, or nothing. See `linkRange(at:)`, whose
-    /// two tests this shares: the character index, and the glyph rectangle that says the pointer is
+    /// The chip under a point, and where that chip is, or nothing. See `linkRange(at:)`, whose two
+    /// tests this shares: the character index, and the glyph rectangle that says the pointer is
     /// really on it.
     ///
-    /// The rectangle is returned as well as the path because it is the same rectangle, already
+    /// The rectangle is returned as well as the subject because it is the same rectangle, already
     /// measured: the hit test cannot be done without it, and the card has to be anchored to
     /// something. It is put back into the view's coordinates with `textContainerOrigin`, which is
     /// zero here (the inset and the fragment padding are both set to nothing in `makeNSView`) and
@@ -411,12 +424,10 @@ final class LinkTextView: NSTextView {
         let bounds = layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container)
         guard bounds.contains(point) else { return nil }
 
-        guard let path = storage.attribute(
-            ComposerChipText.pathKey, at: index, effectiveRange: nil
-        ) as? String else { return nil }
+        guard let subject = ComposerChipText.subject(of: storage, at: index) else { return nil }
 
         let origin = textContainerOrigin
-        return FileChipHover(path: path, frame: bounds.offsetBy(dx: origin.x, dy: origin.y))
+        return FileChipHover(subject: subject, frame: bounds.offsetBy(dx: origin.x, dy: origin.y))
     }
 
     private func link(at point: CGPoint) -> URL? {

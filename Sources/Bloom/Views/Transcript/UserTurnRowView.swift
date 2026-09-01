@@ -21,6 +21,13 @@ import BloomCore
 /// text and always will, but the reader already knows what they attached and a scratch path under
 /// `.bloom/attachments` tells them nothing they did not know. See `AttachmentTrailer` for the one
 /// place that format is written and read.
+///
+/// Instructions Bloom appended to a turn it composed itself are drawn the same way, as a chip
+/// where the block sits, and hovering one shows the words the agent was given. They used to be a
+/// button under the bubble with a popover behind a click, next to a pull request's instructions
+/// which were a pill in the sentence with a card on hover: one thing, drawn twice, and only one of
+/// the two answered the pointer. See `SentTurn` for the cut and `InlineChip` for the chip that
+/// takes either a file or a body.
 struct UserTurnRowView: View {
     var text: String
     /// The files this turn carried, worktree relative, in the order they were attached.
@@ -29,9 +36,6 @@ struct UserTurnRowView: View {
     /// bubble then shows `text` as the typed message and one chip per comment, the way the
     /// composer showed them a moment before the send.
     var reviewChips: [ReviewTurnRecord.Chip] = []
-    /// Fixed context Bloom added to an automatic turn. It stays available without pretending the
-    /// user typed several pages of operational policy into the conversation.
-    var instructions: String?
     /// Which worktree those paths are relative to, and which review the chips open into.
     var home: TranscriptHome
 
@@ -46,7 +50,6 @@ struct UserTurnRowView: View {
     @Environment(\.fontScale) private var fontScale
     @Environment(\.chatFont) private var chatFont
     @Environment(\.chatLineHeight) private var chatLineHeight
-    @Environment(\.colorScheme) private var windowColorScheme
     /// Where a hovered chip says it is, so the card is drawn over the scroll view rather than
     /// inside a bubble that would clip it. See `TranscriptHoverOverlay`.
     @Environment(\.transcriptHoverHost) private var hoverHost
@@ -78,7 +81,6 @@ struct UserTurnRowView: View {
     /// pointer crossing from one chip to the next raises the second before the first is told it
     /// was left.
     @State private var published: TranscriptHoverCard?
-    @State private var showsInstructions = false
 
     /// How much of the pane a user turn always leaves empty on its left, so it reads as one side of
     /// a conversation even when it is short.
@@ -151,7 +153,7 @@ struct UserTurnRowView: View {
                 withdraw()
                 return
             }
-            let wanted = card(for: chip.path)
+            let wanted = card(for: chip.subject)
             hoverTask = Task {
                 try? await Task.sleep(for: Motion.hoverCardDelay)
                 // Zero only if the probe has not been laid out yet, which would put the card in
@@ -214,21 +216,6 @@ struct UserTurnRowView: View {
                 ReviewTurnChips(chips: reviewChips, home: home)
             }
 
-            if let instructions {
-                Button {
-                    showsInstructions.toggle()
-                } label: {
-                    Chip(text: "Merge instructions", systemImage: "doc.text")
-                }
-                .buttonStyle(.plain)
-                .help("Show the instructions Bloom sent with this merge request")
-                .accessibilityHint("Shows the complete merge instructions")
-                .popover(isPresented: $showsInstructions, arrowEdge: .bottom) {
-                    MergeInstructionsPopover(instructions: instructions)
-                        .environment(\.colorScheme, windowColorScheme)
-                }
-            }
-
             if !attachments.isEmpty {
                 // The composer's own flow layout, so a turn carrying eight files wraps them the
                 // same way the box did rather than pushing the bubble off the pane.
@@ -288,17 +275,28 @@ struct UserTurnRowView: View {
         }
     }
 
-    /// What the card is asked for. `FileChipTarget` is the rule, in the core, and it is the same
-    /// call a tool row's chip makes: a path inside the worktree is shown relative to it, and one
-    /// outside keeps the absolute path it arrived with and is resolved against nothing.
+    /// What the card is asked for.
+    ///
+    /// For a file, `FileChipTarget` is the rule, in the core, and it is the same call a tool row's
+    /// chip makes: a path inside the worktree is shown relative to it, and one outside keeps the
+    /// absolute path it arrived with and is resolved against nothing.
     ///
     /// A file that has since been deleted still gets a card, and the card says so: `AttachmentPreview`
     /// draws "it is gone" for a path with nothing behind it. That is deliberately the same answer a
     /// tool row gives, and it is the honest one here, because a sent turn is a record of what was
     /// asked rather than a picker. See `AttachmentChip.verifiesOnDisk`.
-    private func card(for path: String) -> TranscriptHoverCard {
-        let target = FileChipTarget.resolve(path, in: home.worktree)
-        return .file(attachment: .sent(path: target.path), worktree: target.worktree)
+    ///
+    /// For a block Bloom put in the message there is nothing to resolve and nothing to ask the disk:
+    /// the words are in the turn this bubble is drawn from, so a transcript read back out of the
+    /// database answers exactly as one still on screen does. See `InstructionsCard`.
+    private func card(for subject: InlineChip) -> TranscriptHoverCard {
+        switch subject {
+        case .file(let path):
+            let target = FileChipTarget.resolve(path, in: home.worktree)
+            return .file(attachment: .sent(path: target.path), worktree: target.worktree)
+        case .instructions(let block):
+            return .instructions(title: block.title, body: block.body)
+        }
     }
 
     /// The same card the composer showed while the file was being attached, drawn over the
@@ -313,7 +311,7 @@ struct UserTurnRowView: View {
             withdraw()
             return
         }
-        publish(card(for: path), at: frame)
+        publish(card(for: .file(path: path)), at: frame)
     }
 
     private func publish(_ card: TranscriptHoverCard, at frame: CGRect) {
@@ -330,26 +328,6 @@ struct UserTurnRowView: View {
         defer { published = nil }
         guard let published, hoverHost?.request?.card == published else { return }
         hoverHost?.request = nil
-    }
-}
-
-private struct MergeInstructionsPopover: View {
-    let instructions: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.spacingWide) {
-            Text("Merge instructions")
-                .font(Typo.title)
-
-            ScrollView {
-                Text(.init(instructions))
-                    .font(Typo.body)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(Metrics.pane)
-        .frame(width: 440, height: 360)
     }
 }
 

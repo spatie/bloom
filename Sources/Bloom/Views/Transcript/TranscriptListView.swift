@@ -672,24 +672,20 @@ struct TranscriptListView: View {
             },
             content: {
                 guard let sending else { return AnyView(EmptyView()) }
-                let merge = MergeTurn.split(sending.body)
-                let visible = merge?.message ?? sending.body
-                let review = ReviewTurn.split(visible)
-                let turn = AttachmentTrailer.split(visible)
+                let review = ReviewTurn.split(sending.body)
+                let turn = AttachmentTrailer.split(sending.body)
                 return AnyView(
                     Group {
                         if let review {
                             UserTurnRowView(
                                 text: review.message,
                                 reviewChips: review.chips,
-                                instructions: merge?.instructions,
                                 home: transcript.home
                             )
                         } else {
                             UserTurnRowView(
                                 text: turn.body,
                                 attachments: turn.paths,
-                                instructions: merge?.instructions,
                                 home: transcript.home
                             )
                         }

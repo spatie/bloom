@@ -292,9 +292,12 @@ extension ComposerTextView {
 
         let index = layout.characterIndexForGlyph(at: glyph)
         guard index < (string as NSString).length else { return nil }
-        guard let path = textStorage?.attribute(
-            ComposerChipText.pathKey, at: index, effectiveRange: nil
-        ) as? String else { return nil }
+        // A file and nothing else. The composer only ever holds files: a chip standing for words
+        // Bloom injected is added when a turn is composed, which is after this box has let go of
+        // it. See `InlineChip`.
+        guard let storage = textStorage,
+              let path = ComposerChipText.subject(of: storage, at: index)?.path
+        else { return nil }
         return HoveredChip(path: path, index: index)
     }
 

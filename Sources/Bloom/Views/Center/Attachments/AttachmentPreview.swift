@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import BloomCore
 import QuickLookThumbnailing
 import UniformTypeIdentifiers
 
@@ -232,40 +233,19 @@ struct SourceLines: View {
 /// are its statics, and this runs on a detached task: the limits below would be main actor state
 /// read from a background thread.
 enum SourceHead {
-    /// How many lines of a text file are shown, and how wide a line may be before it is cut.
-    ///
-    /// Both are about the card rather than about the file: past this it stops being a glance and
-    /// starts being a reader, and the file is one click away in a review tab. Twenty four lines at
-    /// the code rung fit inside the card's own height cap with room to spare.
-    static let lines = 24
-    static let columns = 160
-
     /// Past this, a file is an attachment rather than something to print. Half a megabyte of one
     /// line JSON has nothing to show and reading it is not free.
     static let byteLimit = 512 * 1024
 
     /// The first lines of a file, or nil for anything that is not UTF-8 after all.
+    ///
+    /// How many lines that is, and how long one may be, is `TextHead` in the core: the card over a
+    /// chip that stands for words rather than for a file cuts them with the same two numbers, and
+    /// the two cards sit in the same popover.
     static func read(_ path: String) -> (lines: [String], truncated: Bool)? {
         guard let data = FileManager.default.contents(atPath: path),
               let text = String(data: data, encoding: .utf8)
         else { return nil }
-
-        // A file with no newline at the end must not gain a blank last line, and a file that is
-        // nothing but whitespace has nothing to show.
-        var all = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        while let last = all.last, last.trimmingCharacters(in: .whitespaces).isEmpty {
-            all.removeLast()
-        }
-        guard !all.isEmpty else { return nil }
-
-        let truncated = all.count > lines
-        let head = all.prefix(lines).map { line -> String in
-            // Tabs drawn at their own width make one long line as wide as the screen.
-            let expanded = line.replacingOccurrences(of: "\t", with: "    ")
-            return expanded.count > columns
-                ? String(expanded.prefix(columns)) + "\u{2026}"
-                : expanded
-        }
-        return (head, truncated)
+        return TextHead.head(of: text)
     }
 }

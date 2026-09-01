@@ -134,6 +134,11 @@ struct TranscriptHoverOverlay: View {
             AttachmentCard(
                 attachment: attachment, worktree: worktree, availableWidth: availableWidth
             )
+        case .instructions(_, let body):
+            // The title is the chip's, and the chip is what the pointer is on: repeating it as a
+            // heading inside the card would say it twice, where the file card beside this one says
+            // it none. It is in the identity above so two blocks cannot share a measurement.
+            InstructionsCard(text: body, availableWidth: availableWidth)
         case .row(let title, let detail, let isCode):
             ToolRowCard(
                 title: title, detail: detail, isCode: isCode, availableWidth: availableWidth

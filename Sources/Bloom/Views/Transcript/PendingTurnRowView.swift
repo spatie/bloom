@@ -100,7 +100,7 @@ struct PendingTurnRowView: View {
                 withdraw()
                 return
             }
-            let wanted = card(for: chip.path)
+            let wanted = card(for: chip.subject)
             hoverTask = Task {
                 try? await Task.sleep(for: Motion.hoverCardDelay)
                 guard !Task.isCancelled, textFrame != .zero else { return }
@@ -183,9 +183,16 @@ struct PendingTurnRowView: View {
         FileReview.open(path: path, in: model)
     }
 
-    private func card(for path: String) -> TranscriptHoverCard {
-        let target = FileChipTarget.resolve(path, in: home.worktree)
-        return .file(attachment: .sent(path: target.path), worktree: target.worktree)
+    /// `UserTurnRowView.card(for:)`, for the same chips before the turn has gone. A queued merge
+    /// request carries the same block a sent one does, and it reads the same way here.
+    private func card(for subject: InlineChip) -> TranscriptHoverCard {
+        switch subject {
+        case .file(let path):
+            let target = FileChipTarget.resolve(path, in: home.worktree)
+            return .file(attachment: .sent(path: target.path), worktree: target.worktree)
+        case .instructions(let block):
+            return .instructions(title: block.title, body: block.body)
+        }
     }
 
     @ViewBuilder
@@ -203,7 +210,7 @@ struct PendingTurnRowView: View {
             withdraw()
             return
         }
-        publish(card(for: path), at: frame)
+        publish(card(for: .file(path: path)), at: frame)
     }
 
     private func publish(_ card: TranscriptHoverCard, at frame: CGRect) {

@@ -438,7 +438,7 @@ final class ComposerEditorHandle {
             if index > 0 {
                 written.append(NSAttributedString(string: " ", attributes: plain))
             }
-            written.append(ComposerChipText.chip(for: path, font: font))
+            written.append(ComposerChipText.chip(for: .file(path: path), font: font))
         }
         written.append(NSAttributedString(string: trail, attributes: plain))
 
