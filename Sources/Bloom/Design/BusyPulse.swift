@@ -133,7 +133,19 @@ struct BusyPulseDriver: ViewModifier {
         // an id is what brings the heartbeat up and takes it down again. There is no poll here and
         // no second flag: the last agent finishing is the same event everything else in the window
         // hears.
-        let wanted = !app.runningWorkspaceIDs.isEmpty && !reduceMotion
+        //
+        // **Ask Bloom is in no workspace, and it was in neither half of this.** `AskModel` holds
+        // its own transcript outside `workspaceModels`, and a stored `SessionActivity` carries a
+        // workspace id, so `runningWorkspaceIDs` is empty for the whole of an Ask turn. The
+        // heartbeat therefore never started, and every busy mark in the window was drawn resting:
+        // the dot beside "Waiting for model" sat still, and so did the rule `AskView` puts on its
+        // own top edge, whose comment claims the clock stays shared. It does now.
+        //
+        // `askStatus` rather than `app.ask.isRunning`, because that accessor builds the model and
+        // a view body may not. `runningAgentCount` reaches for Ask through the same door and for
+        // the same reason, and says so: it is in no workspace, so nothing else here counts it.
+        let isAskRunning = app.askStatus == .running
+        let wanted = (!app.runningWorkspaceIDs.isEmpty || isAskRunning) && !reduceMotion
 
         return content.onChange(of: wanted, initial: true) { _, on in
             BusyPulse.shared.setTicking(on)
