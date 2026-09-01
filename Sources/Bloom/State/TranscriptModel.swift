@@ -219,6 +219,17 @@ final class TranscriptModel {
     /// turn starts, so it never outlives the turn it describes.
     private var wasStoppedByHand = false
 
+    /// The queued message a Steer has picked, waiting for the turn it stopped to finish dying.
+    ///
+    /// **Held rather than sent on the button press, for the reason `drain` is called from the
+    /// result rather than from `stop`.** A cancelled turn still emits its own result, and that
+    /// event is where a turn actually ends: it clears the streaming tail, files the run and sets
+    /// `isRunning` false. A send racing it would start the steered turn and then have the dying
+    /// turn's result switch it off again, leaving a composer that says nothing is running over an
+    /// agent that is. So Steer books the message here and the one place that decides what happens
+    /// when a turn ends sends it. Cleared there, and wherever the chat stops expecting a result.
+    private var steering: Delivery?
+
     /// Whether the chat above this one has already been told that this turn ended.
     ///
     /// A turn has two endings that report, `.error` and `.result`, and they are not alternatives:
@@ -703,6 +714,88 @@ final class TranscriptModel {
         await saveDraft()
     }
 
+    /// Empties the queue back into the composer, because the owner stopped the turn it was
+    /// waiting behind.
+    ///
+    /// Which messages travel, in what order, and what becomes of a draft already in the box are
+    /// all `PendingMessageReturn`'s: the rule is a decision, and the suite cannot see a view.
+    ///
+    /// Called from `stop` and from nowhere else. Not from the result the cancellation produces:
+    /// the words should be back in the box on the frame the button was pressed rather than
+    /// whenever the CLI gets round to closing the turn, and doing it in both places would only be
+    /// a second run finding an empty queue.
+    private func returnQueueToComposer() async {
+        guard let store else { return }
+        await refreshQueue()
+        let wanted = PendingMessageReturn.returning(from: pendingDeliveries)
+        guard !wanted.isEmpty else { return }
+
+        // One cancel each, and only what really left the queue reaches the box. A message that
+        // went in the instant between the Stop and this line is a turn the agent is already
+        // running, and putting its words in the composer would be offering to send it twice.
+        // `Store.cancelDelivery` answering false is what tells the two apart, which is the race
+        // `PendingMessageDiscard.alreadySentSentence` names. It needs no sentence here: nothing
+        // was promised, and the message is on screen as an ordinary bubble that has gone.
+        var returned: [Delivery] = []
+        for delivery in wanted {
+            let left = (try? await store.cancelDelivery(id: delivery.id)) ?? false
+            guard left else { continue }
+            returned.append(delivery)
+        }
+        await refreshQueue()
+        guard !returned.isEmpty else { return }
+
+        // The draft is read after the cancels rather than before, the way `editPending` reads it:
+        // the words go in front of whatever the box holds by the time they arrive rather than in
+        // front of what it held a round trip ago.
+        draft = PendingMessageReturn.draft(taking: returned, into: draft)
+        composerFocusRequests += 1
+        await saveDraft()
+    }
+
+    /// Whether this queued message may be sent in place of the turn that is running.
+    func canSteer(_ delivery: Delivery) -> Bool {
+        DeliverySteer.canSteer(delivery, hold: deliveryHold)
+    }
+
+    /// Stops the turn that is running and sends this queued message into the space it makes.
+    ///
+    /// Everything else in the queue is left untouched, in the table, so what is still waiting
+    /// waits in the order it was asked for and this one is simply no longer part of it. See
+    /// `DeliverySteer.queue(after:from:)`.
+    func steer(_ delivery: Delivery) async {
+        guard canSteer(delivery) else { return }
+        // Booked rather than sent. See `steering` for why a send here would race the result of
+        // the turn this is about to cancel.
+        steering = delivery
+        cancelTurn()
+    }
+
+    /// Hands over the message a Steer picked, once the turn it stopped has ended.
+    ///
+    /// `drain`'s body with one line different, and that line is the whole feature: the message is
+    /// the one that was pressed rather than the front of the queue. It goes through the same
+    /// retire-then-deliver order for the same reason, which is that a delivery still marked
+    /// pending while its turn is starting is drawn twice.
+    private func sendSteered(_ delivery: Delivery) async {
+        guard let store else { return }
+        // A turn was started while this one was dying, which takes the owner typing into the
+        // composer inside that second: `submit` drains, and the drain does not know a Steer is
+        // booked. Two sends into one runner is the one outcome to avoid, and the cost of avoiding
+        // it is nothing, since the message keeps its place and goes when this new turn ends.
+        guard !isRunning else { return }
+
+        await refreshQueue()
+        // Deleted, or drained by something else, while the turn was dying. Nothing to say: the row
+        // it was pressed on has gone, which is the whole of what happened.
+        guard pendingDeliveries.contains(where: { $0.id == delivery.id }) else { return }
+
+        sending = delivery
+        try? await store.markDelivered(id: delivery.id)
+        await refreshQueue()
+        await deliver(delivery)
+    }
+
     /// Closes the question when the message it is about is no longer waiting.
     ///
     /// Called from `refreshQueue`, which is the one place this object learns the queue has moved.
@@ -853,6 +946,30 @@ final class TranscriptModel {
     /// turn still emits its own result, and that event is what writes the final state back into the
     /// session row. Tearing the pump down here used to strand the session until the next launch.
     func stop() {
+        cancelTurn()
+
+        // **And the queue comes back with it.** Not draining after a Stop was right about the
+        // messages not going and wrong about what became of them: they sat under the transcript
+        // for the rest of the launch, under a sentence that had promised they would go when this
+        // turn ended. They go back to the composer instead, where they can be read, changed and
+        // sent again, and where nothing is promising anything on their behalf. See
+        // `PendingMessageReturn`.
+        //
+        // A task rather than an await, because Stop has to look instant: cancelling the turn is
+        // the thing the hand asked for, and it must not wait on two round trips to a SQLite actor
+        // that a diff refresh can be sitting in front of.
+        Task { await returnQueueToComposer() }
+    }
+
+    /// Cancelling the running turn, and saying nothing about what happens next.
+    ///
+    /// The callers want opposite things from the queue, so one method meant one of them was
+    /// wrong. Stop hands the waiting messages back to the composer, and Steer sends one of them
+    /// in the space it just made; quitting, archiving and closing a chat have to leave the queue
+    /// exactly where it is, because a queued message survives a relaunch on purpose and coming
+    /// back as a draft in a chat nobody has open is not surviving. The shared half is here and
+    /// each caller says what it wants after it.
+    private func cancelTurn() {
         // Remembered so the result this cancellation is about to produce does not look like a turn
         // that finished, and therefore does not let the queue move. See `wasStoppedByHand`.
         wasStoppedByHand = true
@@ -870,7 +987,12 @@ final class TranscriptModel {
     /// the same method. So a Codex chat's server was never signalled by anything, which is the
     /// orphaned-children bug this app already fixed once on the Claude Code side.
     func terminateNow() {
-        stop()
+        // `cancelTurn` rather than `stop`, and this is the reason the two are separate: Stop's
+        // other half empties the queue into a composer that is going away with this chat.
+        cancelTurn()
+        // A Steer waits on the result of the turn it stopped, and nothing is coming back from a
+        // process about to be signalled. The message stays queued, which is where it was.
+        steering = nil
         runner?.terminateNow()
     }
 
@@ -1054,6 +1176,11 @@ final class TranscriptModel {
             // The waiting row goes without leaving a note. The error row about to be drawn is
             // already the account of this outage, and two surfaces explaining one failure is
             // exactly the clutter the waiting row was written to avoid.
+            //
+            // A Steer booked against the turn that has just died goes with it, or it waits for a
+            // result that is never coming. The message it picked stays queued, where it can be
+            // pressed again once there is an agent to interrupt.
+            steering = nil
             abandonRetryRun()
             clearStreaming()
             await appendLatestMessages()
@@ -1098,8 +1225,17 @@ final class TranscriptModel {
             await notifyFinished(result: result)
             // A turn that ended by itself is the moment the next queued message is due. A turn the
             // owner stopped is not: they stepped in, and a message they queued minutes ago going
-            // out into the silence they just made is the opposite of what Stop is for.
-            if !wasStoppedByHand { await drain() }
+            // out into the silence they just made is the opposite of what Stop is for. Unless the
+            // silence was made for one particular message, which is what Steer is: the turn was
+            // stopped in order to say this, so this is what goes, and the rest of the queue waits
+            // as it was. Stop's own answer is not here at all, because it has already run: the
+            // queue was handed back to the composer on the frame the button was pressed.
+            if let steered = steering {
+                steering = nil
+                await sendSteered(steered)
+            } else if !wasStoppedByHand {
+                await drain()
+            }
             // After the drain, and only if nothing moved: a crew member whose orchestrator said
             // something while it was busy has just started the next turn, and telling the
             // orchestrator it has stopped in the same breath would have it act on an answer that

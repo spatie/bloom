@@ -736,12 +736,18 @@ struct TranscriptListView: View {
             let isLast = delivery.id == transcript.waitingDeliveries.last?.id
             // One sentence for the queue, at the foot of it. See `PendingTurnRowView.caption`.
             let hold = isLast ? transcript.deliveryHold : nil
+            // In the key as well as in the row, because a cell whose key has not moved is left
+            // exactly as it is: a Steer button offered against a turn that has since ended would
+            // sit there until something else rebuilt the cell. It changes when the turn starts and
+            // when it ends, which is also when the sentence and Try Again below it change.
+            let canSteer = transcript.canSteer(delivery)
             out.append(TranscriptTableEntry(
                 id: .pending(delivery.id),
                 contentKey: TranscriptContentKey {
                     $0.combine("pending")
                     $0.combine(delivery.id)
                     $0.combine(isLast)
+                    $0.combine(canSteer)
                 },
                 content: {
                     // A message an agent wrote, waiting its turn in the same queue. It is drawn as
@@ -761,6 +767,8 @@ struct TranscriptListView: View {
                             hold: hold,
                             canRetry: transcript.canRetry(delivery),
                             onRetry: { Task { await transcript.retryPending() } },
+                            canSteer: canSteer,
+                            onSteer: { Task { await transcript.steer(delivery) } },
                             onEdit: { Task { await transcript.editPending(delivery) } },
                             onDelete: { transcript.askToDiscard(delivery) }
                         )

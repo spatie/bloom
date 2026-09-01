@@ -37,6 +37,12 @@ struct PendingTurnRowView: View {
     var canRetry = false
     /// Attempts this queued message again without adding a duplicate to the queue.
     var onRetry: @MainActor () -> Void = {}
+    /// Whether this one may be sent in place of the turn that is running. `DeliverySteer` is
+    /// where that is decided; the row is only told the answer.
+    var canSteer = false
+    /// Stops the running turn and sends this message into the space it makes. No question first,
+    /// for Edit's reason and one more: what it interrupts is on screen above it, still writing.
+    var onSteer: @MainActor () -> Void = {}
     /// Takes this one out of the queue and puts its words back in the composer. No question first:
     /// nothing is lost, so a dialog would only be in the way. See `PendingMessageEdit`.
     var onEdit: @MainActor () -> Void
@@ -244,6 +250,13 @@ struct PendingTurnRowView: View {
     /// tell which two of them are pressable. A pencil and a bin are the two most legible glyphs in
     /// the system for exactly these, and each keeps the sentence it had as its tooltip and its
     /// accessibility label, so nothing is lost to somebody who cannot read a glyph.
+    ///
+    /// **Steer leads the marks, and its place is decided by the one thing that moves.** It is the
+    /// only one of the three that comes and goes, since it is offered exactly while there is a
+    /// turn to interrupt, and this row is packed against the trailing edge. Leading, it appears
+    /// and disappears without the pencil and the bin moving under the hand that was reaching for
+    /// them; trailing, every turn ending would shuffle both of them along. The pair keeps the
+    /// order and the argument it already had.
     @ViewBuilder
     private var caption: some View {
         HStack(spacing: Metrics.gutter) {
@@ -260,8 +273,20 @@ struct PendingTurnRowView: View {
                     .help("Try to send this message again.")
             }
 
-            // First, because it is the safer of the two and the one wanted more often. Offered
-            // only for a message the composer could actually be handed back as text, which is
+            // A turn arrow rather than a stop sign or a paper plane. The button is neither of its
+            // two halves on its own, and a glyph for either one would name the half it is not:
+            // what it means is "this way instead", which is the word on its label.
+            if canSteer {
+                action(
+                    "arrow.turn.up.right",
+                    label: "Steer",
+                    help: "Stops the turn that is running and sends this message now.",
+                    run: onSteer
+                )
+            }
+
+            // First of the pair, because it is the safer of the two and the one wanted more
+            // often. Offered only for a message the composer could be handed back as text, which is
             // `PendingMessageEdit.canEdit`: a disabled button with no explanation says less than
             // no button at all.
             if PendingMessageEdit.canEdit(delivery) {
