@@ -238,15 +238,19 @@ final class AppModel {
 
     /// The mark the Ask Bloom row wears, or nil when it has nothing to say.
     ///
-    /// It reads `storedAsk` rather than `ask`, and that is the point: the sidebar draws this row on
-    /// every pass, and asking whether the conversation is busy must not be what brings it into
-    /// existence. Nil until it has been opened this launch, which is exactly right, because a chat
-    /// that has never been opened is not doing anything.
-    var askStatus: WorkspaceStatus? {
-        guard let storedAsk else { return nil }
-        if storedAsk.isAwaitingPermission { return .awaitingPermission }
-        return storedAsk.isRunning ? .running : nil
-    }
+    /// **A stored mirror rather than a computed property, and it is the bug `waitingWorkspaceIDs`
+    /// already carries the note about, one property along.** It used to guard on `storedAsk`,
+    /// which is `@ObservationIgnored`, so a body that read it before Ask had ever been opened
+    /// registered a dependency on nothing at all: there was no property to notify, and nothing
+    /// invalidated the reader when a turn later started. The sidebar row got away with it, because
+    /// it is redrawn constantly for other reasons. `BusyPulseDriver` did not: in a window with no
+    /// workspace running, nothing else moved, so its body never ran again and the heartbeat never
+    /// started. The report was the rule on Ask Bloom's own pane sitting still through a whole
+    /// turn, which is exactly what a still `BusyPulse` draws.
+    ///
+    /// Rebuilt by `recomputeAgentTurns`, beside the two sets, because it is the same question
+    /// asked of the one conversation that is in no workspace and therefore in neither of them.
+    private(set) var askStatus: WorkspaceStatus?
 
     /// Workspaces whose row has already left the sidebar while their archive is still running.
     ///
@@ -1082,6 +1086,18 @@ final class AppModel {
         let waiting = AgentTurns.workspaces(.awaitingPermission, stored: storedActivity, live: live)
         if runningWorkspaceIDs != running { runningWorkspaceIDs = running }
         if waitingWorkspaceIDs != waiting { waitingWorkspaceIDs = waiting }
+
+        // Ask Bloom is in neither set, because a `SessionActivity` carries a workspace id and
+        // `AskModel` holds its transcript outside `workspaceModels`. It is read here rather than
+        // in a view for the reason above, and `storedAsk` rather than `ask`, so that asking
+        // whether the conversation is busy is never what brings it into existence.
+        let ask: WorkspaceStatus? = if let storedAsk {
+            storedAsk.isAwaitingPermission ? .awaitingPermission
+                : (storedAsk.isRunning ? .running : nil)
+        } else {
+            nil
+        }
+        if askStatus != ask { askStatus = ask }
     }
 
     /// Workspaces whose agent has stopped and is waiting on a person.
