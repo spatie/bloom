@@ -19,7 +19,7 @@ struct ComposerOption: Identifiable, Hashable {
     /// `ranked` sorts it, so a model pinned in a settings file lands among these rather than
     /// under them.
     static let models = [
-        ComposerOption(id: "fable", label: "Fable 5"),
+        ComposerOption(id: "fable", label: "Fable 5.1"),
         ComposerOption(id: "opus", label: "Opus 5"),
         ComposerOption(id: "sonnet", label: "Sonnet 5"),
         ComposerOption(id: "haiku", label: "Haiku 4.5"),

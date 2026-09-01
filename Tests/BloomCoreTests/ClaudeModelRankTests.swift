@@ -79,4 +79,14 @@ struct ClaudeModelRankTests {
     func empty() {
         #expect(ClaudeModelRank.ordered([]).isEmpty)
     }
+
+    /// The bare family name is the CLI's own word for the current model of that family, so it
+    /// stays above every id that names a version, and a newer point release sits above an older
+    /// one. `fable` is Fable 5.1 today and was Fable 5 last week, which is the whole reason the
+    /// menu offers the alias rather than a version.
+    @Test func aPointReleaseSitsUnderTheAliasAndOverTheReleaseBeforeIt() {
+        let ordered = ClaudeModelRank.ordered(["claude-fable-5", "opus", "claude-fable-5-1", "fable"])
+
+        #expect(ordered == ["fable", "claude-fable-5-1", "claude-fable-5", "opus"])
+    }
 }

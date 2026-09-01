@@ -17,6 +17,7 @@ struct ModelLabelTests {
     func singleVersionPart() {
         #expect(ModelLabel.readable("claude-opus-5") == "Opus 5")
         #expect(ModelLabel.readable("claude-fable-5") == "Fable 5")
+        #expect(ModelLabel.readable("claude-fable-5-1") == "Fable 5.1")
     }
 
     /// A context window is not a version part, and "5.1m" would read as a version this model does
