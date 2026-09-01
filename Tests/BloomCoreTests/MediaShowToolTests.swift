@@ -84,8 +84,26 @@ struct MediaShowToolTests {
         #expect(WorkspaceMedia.resolve(path: "shot.png", in: root.path)?.kind == .image)
         #expect(WorkspaceMedia.resolve(path: "demo.mp4", in: root.path)?.kind == .video)
         #expect(WorkspaceMedia.resolve(path: "notes.txt", in: root.path) == nil)
-        #expect(WorkspaceMedia.resolve(path: outside.path, in: root.path) == nil)
-        #expect(WorkspaceMedia.resolve(path: "../\(outside.lastPathComponent)", in: root.path) == nil)
+
+        // A file inside the worktree is named by its path in it, and one outside by its own name:
+        // the whole of a temp path says nothing a reader wants under a picture.
+        #expect(WorkspaceMedia.resolve(path: "shot.png", in: root.path)?.relativePath == "shot.png")
+
+        // Outside the worktree is shown, which is the rule that changed. A screenshot written to
+        // a temporary folder is the ordinary case, and refusing it made the tool useless in
+        // exactly the moment somebody says "show me that". See `WorkspaceMedia.resolve`.
+        #expect(WorkspaceMedia.resolve(path: outside.path, in: root.path)?.kind == .image)
+        #expect(WorkspaceMedia.resolve(path: outside.path, in: root.path)?.relativePath
+            == outside.lastPathComponent)
+        #expect(WorkspaceMedia.resolve(path: "../\(outside.lastPathComponent)", in: root.path)?.kind
+            == .image)
+
+        // What still bounds it: the file has to be there, and it has to be a picture or a film.
+        #expect(WorkspaceMedia.resolve(path: "/no/such/shot.png", in: root.path) == nil)
+        #expect(WorkspaceMedia.resolve(path: root.path, in: root.path) == nil)
+        #expect(WorkspaceMedia.resolve(path: "", in: root.path) == nil)
+        #expect(WorkspaceMedia.resolve(path: "shot.png", in: "") == nil)
+
         #expect(WorkspaceMedia.resolveImageView(path: outside.path, in: root.path)?.kind == .image)
     }
 

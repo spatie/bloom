@@ -21,12 +21,31 @@ public struct WorkspaceMedia: Sendable, Hashable {
         self.kind = kind
     }
 
-    /// Resolves a file without letting `..` or a symlink turn an inline preview into a view of a
-    /// file outside the workspace. The same check runs when the tool is called and when the row is
-    /// drawn, so changing a symlink after the call does not widen what the transcript may open.
+    /// Resolves a file to show inline, wherever the agent put it.
+    ///
+    /// **It used to refuse anything outside the worktree, and that is the rule this dropped.** A
+    /// relative path is still resolved against the worktree, because that is what a relative path
+    /// means here, but an absolute one is taken as given. The case that killed the old rule is the
+    /// ordinary one: an agent takes a screenshot with a browser tool, which writes it to a temp
+    /// file, the owner says "show me that in the chat", and the tool could only refuse. The tool
+    /// had become one that worked for files an agent had made in the repository and for nothing
+    /// else, which is not what somebody asking to see a screenshot means.
+    ///
+    /// What it is still held to is what actually bounds it: the file has to exist, it has to be a
+    /// file rather than a directory, and its type has to conform to `image` or `movie`. So the
+    /// widening is "an agent may show the owner a picture from anywhere on their disk" rather
+    /// than any widening of what an agent can READ: nothing here hands bytes back to the caller,
+    /// it puts a row in the owner's own window. `resolveImageView` below already worked this way
+    /// for Codex's native viewer, on this same argument, and having two answers to one question
+    /// four lines apart was the other half of the problem.
+    ///
+    /// The same check runs when the tool is called and when the row is drawn, so changing a
+    /// symlink after the call cannot widen what the transcript opens.
     public static func resolve(path: String, in worktree: String) -> WorkspaceMedia? {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !worktree.isEmpty else { return nil }
+        guard !trimmed.isEmpty else { return nil }
+        // A relative path with no worktree to hang it on names nothing.
+        guard trimmed.hasPrefix("/") || !worktree.isEmpty else { return nil }
 
         let root = URL(filePath: worktree, directoryHint: .isDirectory)
             .resolvingSymlinksInPath().standardizedFileURL
@@ -34,8 +53,6 @@ public struct WorkspaceMedia: Sendable, Hashable {
             ? URL(filePath: trimmed)
             : root.appending(path: trimmed)
         let file = candidate.resolvingSymlinksInPath().standardizedFileURL
-        let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
-        guard file.path.hasPrefix(prefix) else { return nil }
 
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory),
@@ -52,9 +69,16 @@ public struct WorkspaceMedia: Sendable, Hashable {
             return nil
         }
 
+        return WorkspaceMedia(url: file, relativePath: display(of: file, under: root), kind: kind)
+    }
+
+    /// What the row calls the file: its path inside the worktree when it is in one, and its own
+    /// name when it is not. A temp file's whole path says nothing a reader wants in a caption.
+    private static func display(of file: URL, under root: URL) -> String {
+        let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        guard !root.path.isEmpty, file.path.hasPrefix(prefix) else { return file.lastPathComponent }
         let relative = String(file.path.dropFirst(prefix.count))
-        guard !relative.isEmpty else { return nil }
-        return WorkspaceMedia(url: file, relativePath: relative, kind: kind)
+        return relative.isEmpty ? file.lastPathComponent : relative
     }
 
     /// Resolves an image Codex has explicitly asked its host to view.
@@ -172,13 +196,20 @@ public struct MediaShowTool: BridgeToolHandling {
     public let tool = BridgeTool(
         name: MediaShowToolName.show,
         description: """
-            Show a local image or video inline in this workspace's chat. Use it when visual output \
-            is useful to the person, such as a screenshot, mockup, generated image, animation or \
-            screen recording. The file must already exist inside this workspace. Bloom supports \
-            image and movie formats macOS recognises. It does not upload or copy the file.
+            Show a local image or video inline in this workspace's chat, where the person can see \
+            it without opening anything. Use it whenever what you have to say is a picture: a \
+            screenshot you just took, a mockup, a generated image, a chart, an animation, a screen \
+            recording. Reach for it in particular when you are asked to SHOW something, or when \
+            you have just written an image somewhere and are about to describe it in words \
+            instead. Reading an image file tells YOU what is in it; this is what puts it in front \
+            of the person you are working for.
 
-            'path' is workspace-relative or an absolute path inside the workspace. 'caption' is \
-            optional and should be one short sentence that adds context not obvious from the media.
+            The file only has to exist and be an image or a movie in a format macOS recognises. \
+            It does not have to be inside the workspace: a screenshot in a temporary folder is \
+            the ordinary case and works. Nothing is uploaded or copied.
+
+            'path' is workspace-relative or absolute. 'caption' is optional and should be one \
+            short sentence that adds context not obvious from the media.
             """,
         inputSchema: .object([
             "type": .string("object"),
