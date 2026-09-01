@@ -170,20 +170,8 @@ final class WorkspaceModel {
     /// stops applying by itself the moment the worktree moves on. The reasoning for holding it in
     /// memory rather than on the row is on the type.
     var continued: ContinuedBranch?
-    /// How many times a turn started by Create pull request has ended with no pull request.
-    ///
-    /// The button cannot itself fail. It succeeds the moment the turn is handed to the agent, and
-    /// everything that decides whether a pull request exists happens minutes later and somewhere
-    /// else. A run whose shell calls were denied ended with the strip quietly back at "No pull
-    /// request yet", no error and no toast, and the only trace of it a hundred rows up the
-    /// transcript. Somebody who presses a button is owed the answer to it where they pressed it.
-    ///
-    /// A count rather than a flag, because two attempts that both come to nothing are two things
-    /// to be told and a flag set twice is one. `PullRequestBar` watches it.
-    private(set) var pullRequestShortfalls = 0
-
-    /// Whether the turn now in flight was started by that button, so the count above is only ever
-    /// bumped for a turn somebody did ask for a pull request in.
+    /// Whether the turn now in flight was started by Create pull request, so that the refresh
+    /// after it is waited on rather than fired and forgotten. See `onTurnFinished`.
     private var isExpectingPullRequest = false
     /// What this worktree is holding that the remote has not got, refreshed alongside the changed
     /// file list. Nil until the first refresh has answered, which is what stops the strip from
@@ -2014,9 +2002,6 @@ final class WorkspaceModel {
         }
         isExpectingPullRequest = false
         await refreshPullRequest()
-        if pullRequest == nil {
-            pullRequestShortfalls += 1
-        }
     }
 }
 
