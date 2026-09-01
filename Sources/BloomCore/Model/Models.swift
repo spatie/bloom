@@ -181,6 +181,32 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
     /// `WorkspaceManager.ensurePort`, and it is deliberately lazy: probing sixty-odd sockets for
     /// a workspace nothing will ever bind is work nobody asked for.
     public var port: Int
+    /// The pull request this workspace is about, once anything has found out which one that is.
+    ///
+    /// **A number outlives a branch and a branch name does not, and that asymmetry is the whole
+    /// reason this column exists.** Every lookup Bloom had went through `gh pr view <branch>`,
+    /// which resolves the name against the repository's live refs. Squash, merge, delete the
+    /// branch on both sides, and that question stops having an answer: gh says "no pull requests
+    /// found for branch", the unnamed fallback is refused too because the worktree is standing on
+    /// `main` by then, and the freshest thing the app can say about pull request #222 is the
+    /// snapshot it took before the merge. It stayed on screen as open and ready to merge, with a
+    /// live Squash and merge button over work GitHub had already landed.
+    ///
+    /// `Git.checkedOutPullRequest` reads the same fact out of `branch.<name>.merge`, and its own
+    /// doc comment says that needs no column of Bloom's. That holds right up until the branch is
+    /// deleted, which deletes its config with it: measured on the workspace in the report, where
+    /// `git config --get-regexp '^branch\.'` no longer mentions the branch at all. The event that
+    /// makes the number necessary is the event that destroys git's copy of it.
+    ///
+    /// Nil means nobody has found out yet, which is every row written before this column and every
+    /// workspace whose branch has never had a pull request. Written by `PullRequestNumber.record`
+    /// as soon as a lookup answers, at creation for a workspace opened on a pull request, and
+    /// cleared by `continueOnNewBranch`, where the worktree moves to a fresh branch and the merged
+    /// pull request stops being this workspace's.
+    ///
+    /// Not on the public initialiser, for the reason `state` is not: outside the module there is
+    /// nothing that legitimately knows this at the moment a workspace is created.
+    public var pullRequestNumber: Int?
 
     /// A workspace as it is at rest: the three lifecycle columns spelled out.
     ///
@@ -219,7 +245,8 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
         pinned: Bool = false,
         colour: String? = nil,
         origin: WorkspaceOrigin = .user,
-        port: Int = 0
+        port: Int = 0,
+        pullRequestNumber: Int? = nil
     ) {
         self.id = id
         self.repoID = repoID
@@ -242,6 +269,7 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
         self.colour = colour
         self.origin = origin
         self.port = port
+        self.pullRequestNumber = pullRequestNumber
     }
 
     /// A brand new workspace, which is the only kind anybody outside the module has any business

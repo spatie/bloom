@@ -216,7 +216,9 @@ public struct WorkspaceListTool: BridgeToolHandling {
         let isRunning = sessions.contains { $0.state == .running }
         let isAwaiting = sessions.contains { $0.state == .waiting }
 
-        let pullRequest = includeGitHub ? await self.pullRequest(for: workspace) : nil
+        let pullRequest = includeGitHub
+            ? await self.pullRequest(for: workspace, store: store)
+            : nil
         let status = WorkspaceStatus.resolve(
             workspace: workspace,
             isRunning: isRunning,
@@ -337,9 +339,15 @@ public struct WorkspaceListTool: BridgeToolHandling {
     /// Nil for every reason at once: gh missing, signed out, no pull request for the branch, or a
     /// worktree that has been archived away. None of those is worth failing the whole listing
     /// over, so the workspace falls back to what Bloom's own database can say about it.
-    private func pullRequest(for workspace: Workspace) async -> PullRequest? {
+    private func pullRequest(for workspace: Workspace, store: Store) async -> PullRequest? {
         guard FileManager.default.fileExists(atPath: workspace.path) else { return nil }
-        return try? await GitHub.pullRequest(for: workspace, maxAge: .seconds(60))
+        let found = try? await GitHub.pullRequest(for: workspace, maxAge: .seconds(60))
+        // Every lookup writes the number down, this one included. A listing an agent asked for is
+        // as good a moment as a poll to learn which pull request a workspace is about, and the
+        // column is what keeps the answer findable once the branch is deleted. See
+        // `Workspace.pullRequestNumber`.
+        await PullRequestNumber.record(found, for: workspace, in: store)
+        return found
     }
 
     /// The pull request block, which is `PullRequestStatus` read out loud.

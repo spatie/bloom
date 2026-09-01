@@ -1679,6 +1679,10 @@ final class WorkspaceModel {
         // The deliberate clear is `WorkspacePullRequests.forget`, which `adopt` calls when a
         // merge moves the worktree to a fresh branch.
         if let fresh, pullRequest != fresh { pullRequest = fresh }
+        // The number, written where a deleted branch cannot take it. This is the path the band
+        // polls on, so it is the one that fills the column in for a workspace whose pull request
+        // an agent opened rather than the create sheet. See `Workspace.pullRequestNumber`.
+        await PullRequestNumber.record(fresh, for: asked, in: store)
         isLoadingPullRequest = false
         SwitchTrace.mark("pullRequest.loaded", workspace: workspace.id)
     }

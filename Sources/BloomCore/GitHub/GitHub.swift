@@ -77,6 +77,12 @@ private struct PullRequestPayload: Decodable {
     let closedAt: String?
 }
 
+/// The two fields choosing between several pull requests on one head name needs.
+private struct HeadPayload: Decodable {
+    let number: Int?
+    let closedAt: String?
+}
+
 private struct CheckPayload: Decodable {
     let typeName: String?
     let name: String?
@@ -109,9 +115,22 @@ struct PullRequestSnapshot: Sendable {
 }
 
 private actor GitHubCache {
+    /// What was asked, rather than which branch was asked about.
+    ///
+    /// The key used to be the branch alone, and it cannot stay that way now that a pull request
+    /// can also be looked up by number: a branch that has been merged and deleted caches a nil
+    /// under its own name, and the number's answer must not be filed under a name gh no longer
+    /// resolves. Keeping them apart also keeps the two honest, because they are different
+    /// questions with different answers: "what is open on this branch" changes when somebody
+    /// pushes, "what is #222" is settled forever the moment it merges.
+    enum Lookup: Hashable, Sendable {
+        case branch(String)
+        case number(Int)
+    }
+
     struct Key: Hashable, Sendable {
         let worktree: String
-        let branch: String
+        let lookup: Lookup
     }
 
     struct Entry: Sendable {
@@ -362,7 +381,7 @@ public enum GitHub {
             throw GitHubError("refusing to look up '\(branch)': not a valid branch name")
         }
 
-        let key = GitHubCache.Key(worktree: worktree, branch: branch)
+        let key = GitHubCache.Key(worktree: worktree, lookup: .branch(branch))
         if let cached = await cache.value(for: key, maxAge: maxAge) { return cached }
 
         let result = try await Shell.run(
@@ -385,6 +404,97 @@ public enum GitHub {
         let snapshot = try decodeSnapshot(from: Data(result.stdout.utf8))
         await cache.store(snapshot, for: key)
         return snapshot
+    }
+
+    /// One pull request, asked for by number.
+    ///
+    /// **This is the route that survives the branch.** `gh pr view <branch>` resolves the name
+    /// against the repository's refs, so a squash-and-delete takes the question away with the
+    /// branch: measured in the workspace from the report, `gh pr view sentry-worker-src-blob`
+    /// answers "no pull requests found for branch", the unnamed fallback answers "no pull
+    /// requests found for branch main" because the worktree is standing on the base by then, and
+    /// `gh pr view 222` answers `{"state":"MERGED"}` without hesitating. A number is not a ref.
+    ///
+    /// gh reads its positional argument with the same parser it uses for flags, which is why the
+    /// branch route above validates the name first. A number needs the same care and gets it from
+    /// the guard below: a positive `Int` renders as digits with no leading `-`, so there is no
+    /// value of `number` that reaches gh as a flag. Zero is a real value to guard against rather
+    /// than a hypothetical, because `decodeSnapshot` reads a missing `number` as 0 and that 0 can
+    /// be written down.
+    ///
+    /// Nothing here throws. The branch route has already run and did not throw by the time this is
+    /// reached, so gh is working and a refusal means this repository has no such pull request,
+    /// which is an answer rather than a failure. Cached as nil so a wrong number is asked about
+    /// once rather than on every poll.
+    static func snapshot(
+        forNumber number: Int,
+        worktree: String,
+        maxAge: Duration
+    ) async -> PullRequestSnapshot? {
+        guard number > 0 else { return nil }
+
+        let key = GitHubCache.Key(worktree: worktree, lookup: .number(number))
+        if let cached = await cache.value(for: key, maxAge: maxAge) { return cached }
+
+        guard let result = try? await Shell.run(
+            "gh", ["pr", "view", String(number), "--json", fields],
+            cwd: worktree,
+            timeout: .seconds(20)
+        ), result.ok, let snapshot = try? decodeSnapshot(from: Data(result.stdout.utf8)) else {
+            await cache.store(nil, for: key)
+            return nil
+        }
+
+        await cache.store(snapshot, for: key)
+        return snapshot
+    }
+
+    /// The pull requests whose head branch WAS this one, newest first.
+    ///
+    /// `gh pr list --head` filters on the head ref recorded on the pull request, which is history
+    /// and stays readable after the branch itself is deleted, where `gh pr view <branch>` needs a
+    /// ref that still resolves. It is how a workspace whose number was never written down finds
+    /// its merged pull request again, which is every row that predates
+    /// `Workspace.pullRequestNumber`.
+    ///
+    /// **The answer is a list, and that is not a formality.** Head names are reused: in the very
+    /// repository the report came from, `--head patch-2 --state all` answers with three pull
+    /// requests from three different people, one closed and two merged years apart. Picking one is
+    /// `PullRequestOwnership.choose`, and it is the same question, with the same hazard, that
+    /// `PullRequestOwnership` was written for. The recorded number is preferred over this route
+    /// wherever there is one, because a number cannot be ambiguous and a name always can.
+    ///
+    /// Only the fields that choosing needs. The chosen number then goes through
+    /// `snapshot(forNumber:)`, so there is one place a full payload is decoded, and so the strip
+    /// reads `mergeable` from `gh pr view`, which answers it, rather than from `gh pr list`, which
+    /// returns `UNKNOWN`.
+    ///
+    /// The bare branch name, never a fork-qualified one: `--head weshooper:patch-2` answers with
+    /// an empty list where `--head patch-2` finds the fork's pull request.
+    static func pullRequestsWithHead(
+        _ branch: String, worktree: String
+    ) async -> [PullRequestHeadMatch] {
+        guard Git.isValidBranchName(branch) else { return [] }
+        guard let result = try? await Shell.run(
+            "gh",
+            [
+                "pr", "list", "--head", branch, "--state", "all", "--limit", "20",
+                "--json", "number,closedAt",
+            ],
+            cwd: worktree,
+            timeout: .seconds(20)
+        ), result.ok else { return [] }
+
+        guard let payloads = try? JSONDecoder().decode(
+            [HeadPayload].self, from: Data(result.stdout.utf8)
+        ) else { return [] }
+
+        return payloads
+            .compactMap { payload in
+                guard let number = payload.number, number > 0 else { return nil }
+                return PullRequestHeadMatch(number: number, closedAt: parseDate(payload.closedAt))
+            }
+            .sorted { $0.number > $1.number }
     }
 
     /// The pull request of the branch this worktree is actually on, asked without naming it.

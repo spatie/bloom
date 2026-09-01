@@ -955,6 +955,34 @@ public actor Store {
                     try db.execute("ALTER TABLE deliveries ADD COLUMN crew_payload BLOB;")
                 }
             },
+
+            // The pull request a workspace is about, by number.
+            //
+            // Every lookup went through `gh pr view <branch>`, and a branch that has been merged
+            // and deleted is a name GitHub will not resolve: the workspace in the report showed
+            // pull request #222 as open and ready to merge, with a live Squash and merge button,
+            // for the rest of the launch. A number survives the branch; the name does not, and
+            // neither does `branch.<name>.merge`, which git deletes along with the branch.
+            //
+            // NULL rather than 0, and no backfill. NULL is "nobody has found out yet", which is
+            // what every row that existed when this ran genuinely is, and the first lookup that
+            // answers writes the number down. There is nothing to backfill it from here: the
+            // answer lives on GitHub, and asking for sixty workspaces at launch is sixty `gh`
+            // processes for a column that fills itself in on the next poll.
+            //
+            // Real code rather than SQL for the reason every step above it is: `ADD COLUMN` has no
+            // `IF NOT EXISTS`, and the store's own tests rewind `user_version` and replay the list
+            // over a shape that already has the column.
+            { db in
+                let names = Set(
+                    try db.query("PRAGMA table_info(workspaces);").compactMap { $0.string("name") }
+                )
+                if !names.contains("pull_request_number") {
+                    try db.execute(
+                        "ALTER TABLE workspaces ADD COLUMN pull_request_number INTEGER;"
+                    )
+                }
+            },
         ]
 
         let current = Int(db.userVersion)
@@ -1137,8 +1165,8 @@ public actor Store {
                 id, repo_id, name, branch, path, base_branch, state, setup_state, setup_log,
                 sort_order, created_at, last_activity_at, archived_at,
                 additions, deletions, changed_files, unread, pinned, colour,
-                parent_workspace_id, spawn_tool_use_id, port
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                parent_workspace_id, spawn_tool_use_id, port, pull_request_number
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 branch = excluded.branch,
@@ -1158,7 +1186,8 @@ public actor Store {
                 colour = excluded.colour,
                 parent_workspace_id = excluded.parent_workspace_id,
                 spawn_tool_use_id = excluded.spawn_tool_use_id,
-                port = excluded.port
+                port = excluded.port,
+                pull_request_number = excluded.pull_request_number
             """,
             [
                 .text(workspace.id), .text(workspace.repoID), .text(workspace.name),
@@ -1175,6 +1204,7 @@ public actor Store {
                 workspace.origin.parentWorkspaceID.map { .text($0) } ?? .null,
                 workspace.origin.spawnToolUseID.map { .text($0) } ?? .null,
                 .int(Int64(workspace.port)),
+                workspace.pullRequestNumber.map { .int(Int64($0)) } ?? .null,
             ]
         )
         return workspace
@@ -1438,6 +1468,35 @@ public actor Store {
         try db.run(
             "UPDATE workspaces SET additions = ?, deletions = ?, changed_files = ? WHERE id = ?",
             [.int(Int64(additions)), .int(Int64(deletions)), .int(Int64(files)), .text(workspaceID)]
+        )
+    }
+
+    /// Writes the pull request this workspace is about, and only when it has actually changed.
+    ///
+    /// The same shape and the same reason as `updateDiffStat` above it: this runs behind a poll,
+    /// most polls answer the number that is already there, and SQLite does not care that the value
+    /// is identical. The row would be rewritten, the WAL would grow and the update hook would
+    /// fire, so every workspace with a pull request would announce a change every couple of
+    /// minutes and everything listening would reload for it.
+    ///
+    /// One named column rather than a whole `Workspace`, for the reason in this file's head: the
+    /// value the caller is holding was read before a `gh` round trip, and a lookup can take
+    /// seconds. The read and the write are both inside the actor with nothing suspending between
+    /// them.
+    ///
+    /// Clearing it is not here. That happens exactly once, in `continueOnNewBranch`, in the same
+    /// `update` that moves the branch, because the two are one change: the pull request stops
+    /// being this workspace's because the branch did.
+    public func recordPullRequestNumber(_ number: Int, workspaceID: WorkspaceID) throws {
+        guard number > 0 else { return }
+        guard let current = try db.query(
+            "SELECT pull_request_number FROM workspaces WHERE id = ?", [.text(workspaceID)]
+        ).first else { return }
+        if current.int("pull_request_number").map(Int.init) == number { return }
+
+        try db.run(
+            "UPDATE workspaces SET pull_request_number = ? WHERE id = ?",
+            [.int(Int64(number)), .text(workspaceID)]
         )
     }
 
@@ -2975,7 +3034,8 @@ public actor Store {
                 parentWorkspaceID: row.string("parent_workspace_id"),
                 spawnToolUseID: row.string("spawn_tool_use_id")
             ),
-            port: Int(row.int("port") ?? 0)
+            port: Int(row.int("port") ?? 0),
+            pullRequestNumber: row.int("pull_request_number").map(Int.init)
         )
     }
 

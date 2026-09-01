@@ -207,7 +207,7 @@ struct WorkspaceRow: View {
         .task(id: PullRequestQuestion(
             workspace: workspace.id, branch: workspace.branch, hasDiff: workspace.hasDiff
         )) {
-            await WorkspacePullRequests.shared.track(workspace)
+            await WorkspacePullRequests.shared.track(workspace, store: app.store)
         }
         // The list inverts the row's text for us, but a label that carries its own colour, such as
         // the green plus count, has to be told. This is the same signal the inspector's lists send.

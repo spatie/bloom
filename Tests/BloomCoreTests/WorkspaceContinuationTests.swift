@@ -273,6 +273,28 @@ struct WorkspaceContinuationTests {
         #expect(stored?.name == workspace.name)
     }
 
+    @Test("the merged pull request's number comes off the row with the branch it belonged to")
+    func forgetsTheMergedPullRequestNumber() async throws {
+        let (origin, repo, _, manager, workspace) = try await makeMergedWorkspace()
+        defer { repo.cleanUp(); origin.cleanUp() }
+
+        // The state a merged workspace is in: the number written down so the pull request is
+        // still findable after GitHub has deleted the branch. See `Workspace.pullRequestNumber`.
+        try await manager.store.recordPullRequestNumber(370, workspaceID: workspace.id)
+
+        let continuation = try await manager.continueOnNewBranch(
+            workspace: workspace, branch: "dark-mode-next"
+        )
+
+        // Left on the row it would be looked up by number on the next poll, found merged, and
+        // drawn over a branch with nothing on it yet: the same purple strip and the same dead
+        // Squash and merge button, arriving from the other direction.
+        #expect(continuation.workspace.pullRequestNumber == nil)
+        #expect(try await manager.store.workspace(id: workspace.id)?.pullRequestNumber == nil)
+        // And the branch still moved, in the same write.
+        #expect(try await manager.store.workspace(id: workspace.id)?.branch == "dark-mode-next")
+    }
+
     @Test("uncommitted work comes along rather than being stashed or thrown away")
     func carriesUncommittedWork() async throws {
         let (origin, repo, _, manager, workspace) = try await makeMergedWorkspace()

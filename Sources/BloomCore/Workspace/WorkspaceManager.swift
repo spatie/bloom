@@ -335,7 +335,13 @@ public struct WorkspaceManager: Sendable {
             baseBranch: checkout.baseBranch(default: repo.defaultBranch),
             setupState: settings.setupScript == nil ? .skipped : .pending,
             sortOrder: try await store.nextWorkspaceSortOrder(repoID: repo.id),
-            origin: origin
+            origin: origin,
+            // Written now rather than waited for. A review workspace knows its pull request before
+            // anything has been checked out, and it is the workspace most likely to outlive its
+            // branch: merging one is what deletes the head. Left to a poll, the number would be
+            // recorded only if the app happened to look before the merge. See
+            // `Workspace.pullRequestNumber`.
+            pullRequestNumber: checkout.pullRequestNumber
         )
         return try await store.upsert(workspace)
     }

@@ -123,6 +123,18 @@ public extension WorkspaceCheckout {
         }
     }
 
+    /// The pull request this workspace is a review of, for the row to write down.
+    ///
+    /// A branch has none, and that is not the same as not knowing yet: nothing about opening a
+    /// branch says anything about a pull request, so the column stays nil and the first lookup
+    /// that finds one fills it in.
+    var pullRequestNumber: Int? {
+        switch self {
+        case .pullRequest(let request): request.number
+        case .branch: nil
+        }
+    }
+
     /// What the sidebar row is called.
     ///
     /// The number goes first because that is how a review is referred to out loud, and because a

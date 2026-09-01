@@ -462,8 +462,18 @@ public extension WorkspaceManager {
 
         try await Git.checkoutNewBranch(branch, at: resolved.revision, in: workspace.path)
 
-        // The branch alone: `git checkout -b` ran between the read and here.
-        let updated = try await store.update(workspaceID: workspace.id) { $0.branch = branch }
+        // The branch and the pull request it belonged to, and nothing else: `git checkout -b` ran
+        // between the read and here.
+        //
+        // The number goes because the merged pull request was the OLD branch's. Left on the row it
+        // would be looked up by number on the next poll, found merged, and drawn over a branch
+        // with nothing on it yet, which is the same purple strip and the same dead Squash and
+        // merge button the column was added to fix, arriving from the other direction. This is the
+        // persisted half of `WorkspacePullRequests.forget`, which the app calls for the cache.
+        let updated = try await store.update(workspaceID: workspace.id) {
+            $0.branch = branch
+            $0.pullRequestNumber = nil
+        }
         guard let saved = updated else { throw WorkspaceError.workspaceGone(workspace.name) }
         return WorkspaceContinuation(
             workspace: saved,
