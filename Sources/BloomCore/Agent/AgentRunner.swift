@@ -506,13 +506,29 @@ public actor AgentRunner {
 
         switch event {
         case .initialized(let info):
+            // **An `init` line is the CLI saying a turn has begun, and not every turn is one
+            // Bloom sent.** The CLI runs a background task's completion notification as a turn of
+            // its own, mid process, without reading anything from stdin. `StrayResult` is the
+            // other half of that story and only covers the empty ones; the ones that do real work
+            // are what this is about. Measured from the owner's own database: after a turn ended
+            // at 22:24 the CLI started five more of its own, each announced by an `init` and each
+            // closed by a real `result` with prose in it, while `sessions.state` sat at `idle`
+            // from the first of them onwards. The workspace was working for twenty minutes with
+            // no activity mark on its tab and a Send button where Stop belonged.
+            //
+            // Nothing is guessed here: the state machine already knows what this line can mean.
+            // `turnStarted` is `unchanged` from `running`, which is what a turn Bloom sent is by
+            // the time its own `init` arrives, so the ordinary path writes nothing extra. It is
+            // refused from `waiting`, which is what keeps a raised hand raised.
+            var moved = session.apply(.turnStarted).moves
             if !info.sessionID.isEmpty, session.agentSessionID != info.sessionID {
                 session = session.with {
                     $0.agentSessionID = info.sessionID
                     $0.updatedAt = Date()
                 }
-                await save(session)
+                moved = true
             }
+            if moved { await save(session) }
 
         case .assistantText(let block), .thinking(let block):
             guard block.parentToolUseID == nil, block.usage.contextUsedTokens > 0 else { break }

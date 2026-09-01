@@ -913,6 +913,23 @@ final class TranscriptModel {
     ///
     /// Idempotent, so a path that stops an already stopped turn writes nothing and invalidates
     /// nobody.
+    /// The turn bookkeeping `deliver` does, for a turn that arrived without one.
+    ///
+    /// Everything here is about the turn rather than about the message, which is why this is the
+    /// part `deliver` and an `init` line have in common and the queue, the draft and the crew
+    /// payload are not. Guarded by `isRunning` at the call site so a turn Bloom sent, whose `init`
+    /// lands a moment after `deliver` has already done all of this, does not have its subagent
+    /// rows cleared a second time.
+    private func noteTheAgentStartedItsOwnTurn() {
+        turnStartedAt = Date()
+        // Not this turn, whatever the last one was. A Stop the owner pressed belongs to the turn
+        // it stopped, and leaving it set would make the next result skip the queue drain.
+        wasStoppedByHand = false
+        hasReportedTurnEnded = false
+        subagents.turnStarted()
+        setRunning(true)
+    }
+
     private func setRunning(_ value: Bool) {
         // A turn that has ended cannot still be waiting on a question, and there are six places
         // that end one: a stale terminal state read back from the row, a send that threw, Stop,
@@ -1129,6 +1146,14 @@ final class TranscriptModel {
     private func handle(_ event: AgentEvent) async {
         switch event {
         case .initialized:
+            // **A turn Bloom did not send starts here and nowhere else.** The CLI runs a
+            // background task's completion notification as a turn of its own, and it announces
+            // each one with an `init` exactly as it announces the ones Bloom asks for. Until this
+            // line the pane learned a turn had begun only from `deliver`, so a chat working its
+            // way through five self-started turns drew no activity mark on its tab, no busy
+            // sidebar row, and a Send button in place of Stop. `AgentRunner.ingest` moves the
+            // stored state on the same event, for the same reason and with the same argument.
+            if !isRunning { noteTheAgentStartedItsOwnTurn() }
             // The runner persists the agent session id itself. Read it back rather than writing
             // our own copy, which would be a second writer racing the runner on the same row.
             await refreshSession()
