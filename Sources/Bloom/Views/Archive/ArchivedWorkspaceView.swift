@@ -53,7 +53,7 @@ struct ArchivedWorkspaceView: View {
     /// so a transcript does not change size or line height when it is read from here instead of
     /// from there.
     @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.standard
-    @AppStorage(ChatFont.defaultsKey) private var chatFont = ChatFont.standard
+    @AppStorage(ChatFont.defaultsKey) private var chatFontID = ChatFont.standardID
     @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.standard
 
     private var workspace: Workspace { model.workspace }
@@ -69,7 +69,7 @@ struct ArchivedWorkspaceView: View {
             TranscriptView(transcript: model.activeTranscript)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .environment(\.fontScale, textSize.scale)
-                .environment(\.chatFont, chatFont)
+                .environment(\.chatFont, ChatFont(rawValue: chatFontID))
                 .environment(\.chatLineHeight, lineHeight)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

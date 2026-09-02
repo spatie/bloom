@@ -315,6 +315,7 @@ id_type_allowed_names=(
 # should only ever get shorter.
 id_type_allowed_lines=(
   'Sources/BloomCore/Presentation/HomeList.swift'                  # a date bucket key, not a row
+  'Sources/BloomCore/Presentation/ChatFontCatalogue.swift'         # a font family, which macOS names and this only stores
   'Sources/BloomCore/Persistence/Settings.swift'                  # a run script named in settings
   'Sources/BloomCore/Agent/Codex/CodexModelCatalog.swift'         # a model name the CLI offers
   'Sources/BloomCore/System/EditorCatalog.swift'             # an application, by bundle id
