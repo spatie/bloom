@@ -150,6 +150,29 @@ struct TitleBarStrip: View {
 
     private var inspector: InspectorGeometry { .shared }
 
+    /// What the inspector's toggle keeps on its trailing side, which is the window's own edge
+    /// whenever the inspector is closed.
+    ///
+    /// The owner's report was that the button "staat ook precies te dicht tegen de window border",
+    /// and it was: a title bar accessory laid out `.trailing` is flush with the window, measured
+    /// rather than assumed. In an offscreen 1440 point window an accessory asked for 32 points and
+    /// one asked for 412 both came back at `maxX` 1440, a gap of zero. The toggle is a 32 point
+    /// slot with its glyph centred and its hover plate inset by `Metrics.spacingTight`, so the
+    /// plate stopped two points short of the window border and the glyph about eight, hard against
+    /// the rounded corner.
+    ///
+    /// Ten, because that is what the platform gives the last item in a toolbar. Same window, same
+    /// pass, a trailing `NSToolbarItem` holding a 32 point view came back at x=1398: `maxX` 1430
+    /// in a 1440 point window. So the toggle now stops where the sidebar toggle at the other end
+    /// of the bar would stop, rather than at a number chosen for looking about right.
+    ///
+    /// It is on the toggle rather than on the strip, and it is constant rather than conditional,
+    /// for the same reason: `PullRequestBar` is the heading of the pane below it and has to end
+    /// exactly where that pane ends, so the gap goes between the two and the accessory is asked
+    /// for these ten points on top of the pane's width in every state. Conditional on the band
+    /// being there, it would arrive as a ten point jump halfway through the inspector's slide.
+    static let trailingInset: CGFloat = 10
+
     var body: some View {
         HStack(spacing: 0) {
             if inspector.hasWorkspace {
@@ -159,6 +182,9 @@ struct TitleBarStrip: View {
                 ) {
                     app.isInspectorVisible.toggle()
                 }
+                // See `trailingInset`. On the toggle rather than on the strip, because the band
+                // beside it has to keep the window's edge.
+                .padding(.trailing, Self.trailingInset)
             }
 
             if let model = shown, inspector.isVisible {
@@ -367,7 +393,10 @@ final class TitleBarStripController: NSTitlebarAccessoryViewController {
     /// slide.
     private func resize(sliding: Bool) {
         let geometry = InspectorGeometry.shared
-        let toggleWidth = geometry.hasWorkspace ? Metrics.barHeight : 0
+        // The slot the toggle is drawn in plus the clearance it keeps on its trailing side, which
+        // the accessory has to be asked for or the band would give it up. See
+        // `TitleBarStrip.trailingInset`.
+        let toggleWidth = geometry.hasWorkspace ? Metrics.barHeight + TitleBarStrip.trailingInset : 0
         let target = max(geometry.width + toggleWidth, 1)
         // A view with no window has no display to take a link from, and a slide whose clock never
         // ticks is an accessory stuck at the width it set off from. Nothing can be watching such a
