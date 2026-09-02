@@ -54,10 +54,22 @@ struct WindowPaneToggle: View {
                 // says anything about its own state, and it is the same two-step the tab strip
                 // uses for a selected tab against an unselected one.
                 .foregroundStyle(isVisible ? Palette.textPrimary : Palette.textSecondary)
+                // **Inside the label, and that is the whole of the bug.** Both of these were on
+                // the Button rather than on what the Button draws, which reads as though it sizes
+                // the control and does not: a `.plain` Button takes its clicks inside its LABEL,
+                // and a frame wrapped round the finished Button only centres a glyph-sized button
+                // in a 32 point box. A `contentShape` out there sets the hit shape of the box,
+                // which is not a thing anybody can press.
+                //
+                // So the target was the glyph, about fourteen points across in a slot more than
+                // twice that, and the miss was reported by two people on the same afternoon:
+                // "often when I click on the hide sidebar icon in the top right corner nothing is
+                // happening", and "unless you click on the area where the icon is, it doesn't seem
+                // to work". It was both ends of the title bar because both ends are this view.
+                .frame(width: Metrics.barHeight, height: Metrics.barHeight)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .frame(width: Metrics.barHeight, height: Metrics.barHeight)
-        .contentShape(Rectangle())
         .onHoverChange { isHovered = $0 }
         // **The plate is inset inside the slot rather than filling it**, and the two points are
         // measured rather than chosen. `fee6766` read the bottom panel's two controls off a two
