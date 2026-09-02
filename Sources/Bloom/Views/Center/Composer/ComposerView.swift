@@ -595,8 +595,11 @@ struct ComposerView: View {
             repo: repoSettings,
             app: appDefaults,
             hasWorktree: transcript.workspace != nil,
-            // The chat's own backend, so "start in plan mode" cannot write Plan onto a Codex row.
-            backend: transcript.session.agentKind
+            // Where a model nothing recognises leaves the chat: on the backend it is already on.
+            // Everything else is decided by the model, including the permission mode, so "start in
+            // plan mode" still cannot write Plan onto a Codex row.
+            running: transcript.session.agentKind,
+            codexModels: ComposerModelCatalog.shared.codexModels
         )
 
         if appDefaults.fastMode != isFastMode {
@@ -637,10 +640,16 @@ struct ComposerView: View {
         let session = transcript.session
         if session.model != resolved.model
             || session.effort != resolved.effort
+            || session.agentKind != resolved.backend
             || session.permissionMode != resolved.permissionMode {
+            // The backend moves with the model, and it can only move here: this runs once, before
+            // the chat has said anything, so there is no transcript in the old backend's
+            // vocabulary and no thread on its server to strand. A chat that has spoken forks
+            // instead, which is `BackendChange` and is the footer's problem rather than this one.
             sessionEditor.apply {
                 $0.model = resolved.model
                 $0.effort = resolved.effort
+                $0.agentKind = resolved.backend
                 $0.permissionMode = resolved.permissionMode
             }
         }

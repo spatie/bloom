@@ -177,6 +177,10 @@ public struct ComposerControls: Equatable, Sendable {
         self.init(
             model: defaults.model,
             effort: defaults.effort,
+            // The backend comes with the model, so a Codex model set as the default opens a Codex
+            // chat. It used to be left at `.claudeCode` here and in `AppModel.resolvedControls`,
+            // which is what made the Models screen a Claude Code screen however it was set.
+            agentKind: defaults.backend,
             permissionMode: defaults.permissionMode,
             isFastMode: isFastMode,
             outputStyle: outputStyle,

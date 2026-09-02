@@ -150,21 +150,21 @@ struct PermissionVocabularyTests {
         #expect(controls.availablePermissionModes.contains(.plan))
     }
 
-    /// "Start in plan mode" is an app-wide switch set long before any backend is chosen, and it
-    /// was writing Plan onto whatever session was being opened.
+    /// "Start in plan mode" is an app-wide switch set above the model rows rather than inside a
+    /// chat, and it was writing Plan onto whatever session was being opened.
+    ///
+    /// Which backend that session is on used to be handed in by the caller. It is read off the
+    /// default model now, which is the same question asked where it can actually be answered: see
+    /// `DefaultBackend`, and `DefaultBackendTests` for the rest of that rule.
     @Test("the app-wide plan default does not reach a Codex chat")
     func theDefaultLandsOnAModeTheBackendHas() {
-        var defaults = AppDefaults()
-        defaults.planMode = true
+        var claude = AppDefaults()
+        claude.planMode = true
+        #expect(ComposerDefaults.resolve(repo: RepoSettings(), app: claude).permissionMode == .plan)
 
-        #expect(
-            ComposerDefaults.resolve(repo: RepoSettings(), app: defaults, backend: .claudeCode)
-                .permissionMode == .plan
-        )
-        #expect(
-            ComposerDefaults.resolve(repo: RepoSettings(), app: defaults, backend: .codex)
-                .permissionMode == .auto
-        )
+        var codex = AppDefaults(model: "gpt-5.6-sol", backend: .codex)
+        codex.planMode = true
+        #expect(ComposerDefaults.resolve(repo: RepoSettings(), app: codex).permissionMode == .auto)
     }
 
     /// The wire slugs are older than the labels over them and are grouped by on a chart, so the

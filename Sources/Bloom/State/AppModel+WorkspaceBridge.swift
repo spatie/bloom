@@ -265,7 +265,18 @@ extension AppModel {
     ) async throws -> ComposerControls {
         var controls = inherited
         let inheritedAgent = controls.agentKind
-        let agent = order.agent ?? inheritedAgent
+        // A caller that names a model and no agent has named an agent, because a model id says
+        // which CLI runs it. This used to be free: everything inherited Claude Code, so
+        // `workspace_start(model: "opus")` could only mean Claude Code. It stopped being free the
+        // moment the Models screen could make Codex the default, which would have turned that
+        // same call into "opus is not a Codex model". No list is fetched to answer it: the four
+        // families `ClaudeModelRank` knows are what the old reading covered, and anything else
+        // stays on the backend that was inherited. See `DefaultBackend`.
+        let agent = order.agent
+            ?? order.model.map {
+                DefaultBackend.kind(ofModel: $0, running: inheritedAgent, codexModels: [])
+            }
+            ?? inheritedAgent
         controls.agentKind = agent
 
         switch agent {

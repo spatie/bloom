@@ -923,7 +923,14 @@ struct CreateWorkspaceView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         isNamingAvailable = context.isNamingAvailable
         controls = ComposerControls(
-            defaults: ComposerDefaults.resolve(repo: context.settings, app: appDefaults),
+            // The Codex list only sharpens the effort here, and the sheet's own footer is what
+            // fetches it: a window opened before that call returns still gets the backend the
+            // Models screen recorded, because that is stored rather than looked up.
+            defaults: ComposerDefaults.resolve(
+                repo: context.settings,
+                app: appDefaults,
+                codexModels: ComposerModelCatalog.shared.codexModels
+            ),
             isFastMode: appDefaults.fastMode,
             outputStyle: appDefaults.outputStyle,
             codexContextWindow: appDefaults.codexContextWindow

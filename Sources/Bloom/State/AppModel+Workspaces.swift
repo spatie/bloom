@@ -312,16 +312,25 @@ extension AppModel {
         let repoSettings = await Task.detached(priority: .userInitiated) {
             SettingsLoader.load(repo: repo.path)
         }.value
-        let resolved = ComposerDefaults.resolve(repo: repoSettings, app: appDefaults)
+        // The Codex list as this window last fetched it, which may well be empty here: nothing
+        // waits for a fetch to start a workspace. Empty costs only the effort fallback, because
+        // the backend the Models screen recorded is read without any list at all. See
+        // `DefaultBackend`.
+        let resolved = ComposerDefaults.resolve(
+            repo: repoSettings,
+            app: appDefaults,
+            codexModels: ComposerModelCatalog.shared.codexModels
+        )
 
-        // The backend is left at its default rather than derived from the model. Nothing in the
-        // tree maps one to the other: the composer takes it from the picker press, because
-        // choosing a model out of the Codex section IS choosing Codex, and there is no rule that
-        // reads it back off the name. Guessing here would be inventing that rule where the
-        // consequence of getting it wrong is a chat on a backend nobody chose.
+        // The backend comes from the model now. It used to be left at its default here, with a
+        // note saying nothing in the tree mapped one to the other, and that was true: the composer
+        // took it from the picker press and no rule read it back off a name. `DefaultBackend` is
+        // that rule, and the Models screen records the backend beside the model so the common case
+        // needs no list to look an id up in.
         return ComposerControls(
             model: resolved.model,
             effort: resolved.effort,
+            agentKind: resolved.backend,
             permissionMode: resolved.permissionMode,
             isFastMode: appDefaults.fastMode,
             codexContextWindow: appDefaults.codexContextWindow

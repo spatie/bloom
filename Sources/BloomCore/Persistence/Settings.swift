@@ -368,8 +368,14 @@ public struct AppDefaults: Sendable, Hashable {
     public enum Key {
         public static let model = "defaults.model"
         public static let effort = "defaults.effort"
+        /// Which CLI the model above belongs to. Written beside the model rather than worked out
+        /// from it, because Codex's model list is fetched and a machine that is offline, or that
+        /// has no Codex installed, must still open a new chat on the backend the owner chose.
+        /// See `DefaultBackend`.
+        public static let backend = "defaults.backend"
         public static let reviewModel = "defaults.review.model"
         public static let reviewEffort = "defaults.review.effort"
+        public static let reviewBackend = "defaults.review.backend"
         public static let permissionMode = "defaults.permissionMode"
         public static let planMode = "defaults.planMode"
         public static let fastMode = "defaults.fastMode"
@@ -381,6 +387,10 @@ public struct AppDefaults: Sendable, Hashable {
     /// Nothing else may invent a second set of hard-coded defaults.
     public static let fallbackModel = "opus"
     public static let fallbackEffort = "high"
+    /// What a copy of Bloom with no row for `defaults.backend` runs on, which is every copy that
+    /// was configured before the key existed: the only models the screen could offer then were
+    /// Claude Code's, so a stored value with no backend beside it has exactly one honest reading.
+    public static let fallbackBackend = AgentKind.claudeCode
     /// Full access, because that is what the owner asked a new session to start on: a session
     /// that stops to ask before its first command is a session somebody has to sit and watch,
     /// and Bloom exists to run several at once.
@@ -392,8 +402,17 @@ public struct AppDefaults: Sendable, Hashable {
 
     public var model: String
     public var effort: String
+    /// Which CLI a new chat opens on, which is the backend `model` belongs to. Not a picker of
+    /// its own anywhere: choosing a model out of the Codex section of the menu is choosing Codex,
+    /// here exactly as in the composer. See `DefaultBackend` for how a model that came from a
+    /// settings file rather than from this screen is placed.
+    public var backend: AgentKind
     public var reviewModel: String
     public var reviewEffort: String
+    /// The review model's own backend. Reviewing is not tied to what a new chat runs on: an owner
+    /// who works in Codex can still want the review done by Claude Code, and one picker per row is
+    /// what lets them say so.
+    public var reviewBackend: AgentKind
     public var permissionMode: PermissionMode
     public var planMode: Bool
     public var fastMode: Bool
@@ -418,8 +437,10 @@ public struct AppDefaults: Sendable, Hashable {
     public init(
         model: String = AppDefaults.fallbackModel,
         effort: String = AppDefaults.fallbackEffort,
+        backend: AgentKind = AppDefaults.fallbackBackend,
         reviewModel: String = AppDefaults.fallbackModel,
         reviewEffort: String = AppDefaults.fallbackEffort,
+        reviewBackend: AgentKind = AppDefaults.fallbackBackend,
         permissionMode: PermissionMode = AppDefaults.fallbackPermissionMode,
         planMode: Bool = false,
         fastMode: Bool = false,
@@ -428,8 +449,10 @@ public struct AppDefaults: Sendable, Hashable {
     ) {
         self.model = model
         self.effort = effort
+        self.backend = backend
         self.reviewModel = reviewModel
         self.reviewEffort = reviewEffort
+        self.reviewBackend = reviewBackend
         self.permissionMode = permissionMode
         self.planMode = planMode
         self.fastMode = fastMode
@@ -450,8 +473,15 @@ public struct AppDefaults: Sendable, Hashable {
         defaults.storedEffort = await value(Key.effort)
         defaults.model = defaults.storedModel ?? fallbackModel
         defaults.effort = defaults.storedEffort ?? fallbackEffort
+        // A row nothing wrote means Claude Code, which is what every model this screen could
+        // offer before the key existed was. Nothing is migrated, because nothing needs to be.
+        defaults.backend = await value(Key.backend).flatMap(AgentKind.init) ?? fallbackBackend
         defaults.reviewModel = await value(Key.reviewModel) ?? defaults.model
         defaults.reviewEffort = await value(Key.reviewEffort) ?? defaults.effort
+        // The review row falls back to the default row for its backend as well as for its model,
+        // so the pair a copy of Bloom was already carrying stays one coherent choice.
+        defaults.reviewBackend = await value(Key.reviewBackend).flatMap(AgentKind.init)
+            ?? defaults.backend
         if let raw = await value(Key.permissionMode), let mode = PermissionMode(rawValue: raw) {
             defaults.permissionMode = mode
         }
@@ -465,8 +495,10 @@ public struct AppDefaults: Sendable, Hashable {
     public func save(to store: Store) async {
         try? await store.setSetting(Key.model, model)
         try? await store.setSetting(Key.effort, effort)
+        try? await store.setSetting(Key.backend, backend.rawValue)
         try? await store.setSetting(Key.reviewModel, reviewModel)
         try? await store.setSetting(Key.reviewEffort, reviewEffort)
+        try? await store.setSetting(Key.reviewBackend, reviewBackend.rawValue)
         try? await store.setSetting(Key.permissionMode, permissionMode.rawValue)
         try? await store.setSetting(Key.planMode, planMode ? "1" : "0")
         try? await store.setSetting(Key.fastMode, fastMode ? "1" : "0")

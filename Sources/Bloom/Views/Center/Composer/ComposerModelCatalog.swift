@@ -105,13 +105,13 @@ final class ComposerModelCatalog {
 
     /// Which backend a model id belongs to, so choosing one out of another section is understood
     /// as choosing that backend.
+    ///
+    /// The rule itself is `DefaultBackend`, in the core, because Settings, Models now asks the
+    /// same question of a stored default and two answers to "whose model is this" is exactly the
+    /// drift this file exists to avoid. An id nothing recognises belongs to whoever is running
+    /// now, which is what keeps a pinned id from silently moving a chat to the other backend.
     func backend(ofModel id: String, current: AgentKind) -> AgentKind {
-        for kind in AgentKind.allCases where kind.canRunWorkspaces {
-            if options(for: kind).contains(where: { $0.id == id }) { return kind }
-        }
-        // An id nothing recognises belongs to whoever is running now, which is what keeps a pinned
-        // id from silently moving a chat to the other backend.
-        return current
+        DefaultBackend.kind(ofModel: id, running: current, codexModels: codexModels)
     }
 
     /// The efforts one model takes.
@@ -136,9 +136,6 @@ final class ComposerModelCatalog {
     /// The effort to keep when the model changes underneath it, which is the model's own default
     /// rather than Bloom's `high`: `gpt-5.6-sol` defaults to `low` and `gpt-5.5` to `medium`.
     func resolvedEffort(_ wanted: String, for kind: AgentKind, model: String) -> String {
-        guard kind == .codex, let found = codexModels.first(where: { $0.id == model }) else {
-            return wanted
-        }
-        return found.resolvedEffort(preferring: wanted)
+        DefaultBackend.effort(wanted, on: kind, model: model, codexModels: codexModels)
     }
 }

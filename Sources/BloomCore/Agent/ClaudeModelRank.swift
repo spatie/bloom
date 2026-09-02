@@ -52,6 +52,17 @@ public enum ClaudeModelRank {
             .map(\.element)
     }
 
+    /// Whether an id names one of the families above, which is how a model id says it belongs
+    /// to Claude Code rather than to Codex.
+    ///
+    /// Read off the ranking rather than off a second list of names, because a second list is a
+    /// second thing to update: `claude-opus-5[1m]` and `opus-5-1m` are both Opus and neither is in
+    /// the picker's four rows, while `gpt-5.6-sol` names no family at all. `DefaultBackend` is
+    /// what asks, and what it decides is which CLI a new chat opens on.
+    public static func recognises(_ id: String) -> Bool {
+        key(id).family < families.count
+    }
+
     struct Key {
         var family: Int
         var namesVersion: Bool
