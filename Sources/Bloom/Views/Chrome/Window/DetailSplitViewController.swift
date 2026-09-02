@@ -145,6 +145,13 @@ final class DetailSplitViewController: NSSplitViewController {
 
     private static let autosaveName = "bloom.detail.split"
 
+    /// What the detail column was showing when `update` last ran, or nil before the first one.
+    ///
+    /// Kept only so that "the pane is being swapped" can be told from "the inspector is being
+    /// toggled over the same pane", which is the difference `InspectorTransition` turns into an
+    /// answer. Read its head: one of those two crashes and the other does not.
+    private var lastContent: SidebarSelection?
+
     init(detail: AnyView, inspector: AnyView) {
         detailHost = PaneViewController(rootView: detail, name: "detail")
         inspectorHost = PaneViewController(rootView: inspector, name: "inspector")
@@ -250,9 +257,24 @@ final class DetailSplitViewController: NSSplitViewController {
         InspectorGeometry.shared.setInspectorWidth(width, sliding: sliding)
     }
 
-    func update(detail: AnyView, inspector: AnyView, isInspectorPresented: Bool, animated: Bool) {
+    func update(
+        detail: AnyView,
+        inspector: AnyView,
+        isInspectorPresented: Bool,
+        animated: Bool,
+        content: SidebarSelection
+    ) {
         detailHost.rootView = detail
         inspectorHost.rootView = inspector
+
+        // Read before the assignment below, because what matters is whether the two lines above
+        // have just handed SwiftUI a different pane to draw. See `InspectorTransition`, which is
+        // where the crash this answers is written down.
+        let contentIsChanging = lastContent != nil && lastContent != content
+        lastContent = content
+        let animated = InspectorTransition.isAnimated(
+            motionAllowed: animated, contentIsChanging: contentIsChanging
+        )
 
         let shouldCollapse = !isInspectorPresented
         guard inspectorItem.isCollapsed != shouldCollapse else { return }
@@ -385,7 +407,11 @@ struct DetailSplitView: NSViewControllerRepresentable {
             detail: detail,
             inspector: inspector,
             isInspectorPresented: isInspectorPresented,
-            animated: animated
+            animated: animated,
+            // What the detail column is showing, so the controller can tell a pane swap from an
+            // inspector toggle. `detail` is an `AnyView` and answers nothing about identity, which
+            // is why the selection is handed over beside it rather than derived from it.
+            content: app.selection
         )
     }
 
