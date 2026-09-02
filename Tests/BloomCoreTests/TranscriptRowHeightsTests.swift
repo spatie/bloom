@@ -555,6 +555,110 @@ struct TranscriptRowHeightsTests {
         #expect(heights.estimate == 150)
     }
 
+    // MARK: - The estimate belongs to the conversation on screen
+
+    /// **The reader's report: "switching between workspaces sometimes renders the conversation
+    /// wrongly, with gigantic gaps."**
+    ///
+    /// A pane that had been reading prose settles the estimate at 400. Every row of the tool-heavy
+    /// workspace it is pointed at next is a row nobody has measured, so every one of them was laid
+    /// out at 400 against a true 24: on the fifteen inked rows of one screen that is 5,640 points
+    /// of blank.
+    @Test("the conversation being left does not say how tall the arriving one's rows are")
+    func theEstimateDoesNotCrossAWorkspaceSwitch() {
+        var heights = TranscriptRowHeights()
+        heights.showing(SessionID("prose"))
+        heights.reset(width: 800, scale: 1, leading: 1.7)
+        for row in 0..<2_000 { heights.note(400, for: key("prose.\(row)")) }
+        #expect(heights.estimate == 400)
+
+        let switched = heights.showing(SessionID("tools"))
+        #expect(switched)
+        #expect(heights.assumed(for: key("tools.0")) == TranscriptRowHeights.assumedRowHeight)
+    }
+
+    /// And it settles on what this conversation is really made of, which is the half the old
+    /// number could not do: `resettleDrift` only takes the mean again once the sample has doubled,
+    /// and the sample was the two thousand rows of the conversation being left.
+    @Test("the estimate settles again for the conversation arriving")
+    func theEstimateSettlesForEachConversation() {
+        var heights = TranscriptRowHeights()
+        heights.showing(SessionID("prose"))
+        heights.reset(width: 800, scale: 1, leading: 1.7)
+        for row in 0..<2_000 { heights.note(400, for: key("prose.\(row)")) }
+        heights.showing(SessionID("tools"))
+        for row in 0..<TranscriptRowHeights.settleAfter {
+            heights.note(24, for: key("tools.\(row)"))
+        }
+        #expect(heights.estimate == 24)
+        #expect(heights.assumed(for: key("tools.never.drawn")) == 24)
+    }
+
+    /// The heights themselves are what makes coming back to a conversation free, so a switch keeps
+    /// every one of them. See the header: this is the whole reason the cache outlives the
+    /// conversation it was filled for.
+    @Test("a switch keeps every height that was measured")
+    func aSwitchKeepsTheHeights() {
+        var heights = TranscriptRowHeights()
+        heights.showing(SessionID("one"))
+        heights.reset(width: 800, scale: 1, leading: 1.7)
+        heights.note(120, for: key("one.row.7"))
+        heights.showing(SessionID("two"))
+        #expect(heights.height(for: key("one.row.7")) == 120)
+        let back = heights.showing(SessionID("one"))
+        #expect(back)
+        #expect(heights.height(for: key("one.row.7")) == 120)
+    }
+
+    /// **A returning reader's rows are the only evidence that visit has**, and they are all
+    /// measured already. Each reports the height it draws at, which is no news to the cache, so a
+    /// sample counted after the news test would be a sample of nothing at all and the conversation
+    /// would estimate from a constant for the whole visit.
+    @Test("rows the cache already knows still form the estimate")
+    func aReturningConversationFormsItsOwnEstimate() {
+        var heights = TranscriptRowHeights()
+        heights.showing(SessionID("one"))
+        heights.reset(width: 800, scale: 1, leading: 1.7)
+        for row in 0..<TranscriptRowHeights.settleAfter {
+            heights.note(300, for: key("one.\(row)"))
+        }
+        heights.showing(SessionID("two"))
+        let back = heights.showing(SessionID("one"))
+        #expect(back)
+        #expect(heights.estimate == TranscriptRowHeights.assumedRowHeight)
+        // The screen the reader lands on, reporting what it has always been.
+        for row in 0..<TranscriptRowHeights.settleAfter {
+            heights.note(300, for: key("one.\(row)"))
+        }
+        #expect(heights.estimate == 300)
+    }
+
+    /// One contribution per row, not one per report. The streaming tail says itself on every frame
+    /// of a turn, and a sample that counted each of those would be a mean of one row.
+    @Test("a row that reports twice is in the sample once")
+    func aRowIsSampledOnce() {
+        var heights = TranscriptRowHeights()
+        heights.showing(SessionID("one"))
+        heights.reset(width: 800, scale: 1, leading: 1.7)
+        heights.note(100, for: key("row.1"))
+        for step in 1...20 { heights.note(Double(100 + step * 10), for: key("tail")) }
+        // The tail's last word and one other row: 300 and 100.
+        #expect(heights.estimate == 200)
+    }
+
+    @Test("saying the same conversation again changes nothing")
+    func sayingTheSameConversationIsIdempotent() {
+        var heights = TranscriptRowHeights()
+        heights.showing(SessionID("one"))
+        heights.reset(width: 800, scale: 1, leading: 1.7)
+        for row in 0..<TranscriptRowHeights.settleAfter {
+            heights.note(300, for: key("one.\(row)"))
+        }
+        let again = heights.showing(SessionID("one"))
+        #expect(!again)
+        #expect(heights.estimate == 300)
+    }
+
     // MARK: - The bound
 
     /// A pane keeps the heights of every conversation it draws, and one pane visits a great many.

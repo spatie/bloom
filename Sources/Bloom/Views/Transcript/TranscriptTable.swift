@@ -634,8 +634,8 @@ struct TranscriptTable: NSViewRepresentable {
             let identifier = NSUserInterfaceItemIdentifier("bloom.transcript.cell")
             let cell = tableView.makeView(withIdentifier: identifier, owner: self)
                 as? TranscriptTableCell ?? TranscriptTableCell(identifier: identifier)
-            cell.onHeightChange = { [weak self] id, height in
-                self?.noted(height: height, for: id)
+            cell.onHeightChange = { [weak self] id, key, height in
+                self?.noted(height: height, of: key, for: id)
             }
             // **Every row in the visible rect gets one of these, and this is where a row's SwiftUI
             // graph is actually built.** It is outside the pane's own layout pass, so
@@ -734,13 +734,29 @@ struct TranscriptTable: NSViewRepresentable {
 
         /// **What the row turned out to be when it was drawn, which outranks anything measured off
         /// screen.** See `TranscriptRowHeights.note`.
-        private func noted(height: CGFloat, for entryID: TranscriptEntryID) {
+        ///
+        /// **A report carries the content it was measured for, and it used to carry only the id.**
+        /// An entry id is an ordinal within one conversation, so `.row(37)` in the workspace being
+        /// left and `.row(37)` in the one arriving are the same value, and a report landing after
+        /// the switch was filed under whatever the ARRIVING row's key is. Nothing would ever take
+        /// that number again: `measureExactly` skips a key the cache knows, the screen census sees
+        /// the table and the cache agreeing, and the repair confirms it rather than measuring. The
+        /// row is then drawn at another conversation's height until its key moves.
+        ///
+        /// Reasoned from the id rather than photographed, unlike the estimate this shipped beside.
+        /// The guard costs one comparison and closes the class: a height is about the content it
+        /// was taken from, so a report whose content has been replaced is not evidence about what
+        /// is there now.
+        private func noted(
+            height: CGFloat, of contentKey: TranscriptContentKey, for entryID: TranscriptEntryID
+        ) {
             // The tail goes on growing inside its frozen cell while a pane is dragged, and a
             // height taken from it would be filed against the entry list this pass is not
             // applying. It is remeasured when the hold lets go, with everything on screen.
             guard !isHeld else { return }
-            guard let row = index[entryID], entries.indices.contains(row) else { return }
-            guard heights.note(height, for: entries[row].contentKey) else { return }
+            guard let row = index[entryID], entries.indices.contains(row),
+                  entries[row].contentKey == contentKey else { return }
+            guard heights.note(height, for: contentKey) else { return }
             // **News to the cache is not always news to the table.** A row the table is already
             // drawing at this height needs no `noteHeightOfRows`, and the whole of a correction's
             // cost is that call: it moves the document's total and makes AppKit lay out every row
@@ -1671,6 +1687,11 @@ struct TranscriptTable: NSViewRepresentable {
             // Nothing in the reuse pool belongs to this conversation, whatever key it says it
             // holds. See `cellGeneration`.
             cellGeneration += 1
+            // **And nothing the conversation being left measured says how tall this one's rows
+            // are.** The heights themselves stay, which is what makes coming back free; the mean
+            // taken from them does not. See `TranscriptRowHeights.showing`, which carries the
+            // eight screens of blank a prose conversation left behind it.
+            heights.showing(session)
             view.hold(.nothing)
         }
 
@@ -1933,7 +1954,9 @@ final class TranscriptTableCell: NSView {
     /// built here is always behind and is always applied. See `Coordinator.cellGeneration`.
     private var appliedGeneration: Int?
     private var unclip: Task<Void, Never>?
-    var onHeightChange: (@MainActor (TranscriptEntryID, CGFloat) -> Void)?
+    /// The content a height was measured for goes back with it, because an entry id alone does
+    /// not say which conversation it belongs to. See `Coordinator.noted`.
+    var onHeightChange: (@MainActor (TranscriptEntryID, TranscriptContentKey, CGFloat) -> Void)?
 
     init(identifier: NSUserInterfaceItemIdentifier) {
         host = NSHostingView(rootView: TranscriptCellRoot())
@@ -1986,12 +2009,15 @@ final class TranscriptTableCell: NSView {
         appliedKey = entry.contentKey
         appliedGeneration = generation
         let id = entry.id
+        // Captured beside the id, so a height that arrives late says what it was measured for
+        // rather than only which row reported it. See `Coordinator.noted`.
+        let key = entry.contentKey
         // One concrete root type, whatever the row is. See `TranscriptCellRoot`.
         host.rootView = TranscriptCellRoot(
             content: entry.content(),
             id: id,
             environment: environment,
-            report: { [weak self] height in self?.onHeightChange?(id, height) }
+            report: { [weak self] height in self?.onHeightChange?(id, key, height) }
         )
         return true
     }
