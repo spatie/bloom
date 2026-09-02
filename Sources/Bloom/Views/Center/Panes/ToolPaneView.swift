@@ -9,6 +9,10 @@ import BloomCore
 struct ToolPaneView: View {
     @Bindable var model: WorkspaceModel
     var tab: CenterTab
+    /// What every pane of the tab holding this one is showing, this pane included. Only the review
+    /// reads it, and only to ask whether the conversation it would send to is already on screen.
+    /// See `ReviewComposer`.
+    var siblings: [PaneContent] = []
     /// Splits the centre pane this tab is filling, opening `kind` in the half that opens. Handed
     /// down rather than reached for, because only the pane above knows which pane it is, and a
     /// terminal's contextual menu now offers the same three kinds the centre pane's own menu does.
@@ -77,7 +81,7 @@ struct ToolPaneView: View {
         // replaced, and rebuilding it on every file would throw away the scroll position of the
         // list it is drawn from. `ReviewPaneView` keys its own content on the path instead.
         case .review:
-            ReviewPaneView(model: model, tab: tab)
+            ReviewPaneView(model: model, tab: tab, siblings: siblings)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
         // Keyed on the workspace rather than on the tab, because this one view is reused as the

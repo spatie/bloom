@@ -16,6 +16,9 @@ import BloomCore
 struct ReviewPaneView: View {
     @Bindable var model: WorkspaceModel
     var tab: CenterTab
+    /// What every pane of the tab this one is in is showing, this pane included, which is the one
+    /// fact the composer below turns on. See `ReviewComposer`.
+    var siblings: [PaneContent] = []
 
     /// The changed file this review is pointed at, if the agent did touch it. Nil is not a
     /// failure: the worktree tree opens files nobody changed, and a file can stop being changed
@@ -71,7 +74,13 @@ struct ReviewPaneView: View {
             // Return sends from here. It used to live only in the chat pane, which meant placing
             // comments on this screen and then leaving it to send them. A second composer view
             // was considered and rejected: one draft, one send path, nothing to keep in step.
-            if let transcript = composerTranscript {
+            //
+            // One draft is exactly why it is not always drawn. Split a tab so the conversation
+            // sits beside the file and both composers were on screen at once, bound to the same
+            // draft, so typing into this one put the same words in the one under the chat. The
+            // rule is `ReviewComposer`, in the core: this box is for when the conversation it
+            // sends to is not already on screen in this tab.
+            if drawsComposer, let transcript = composerTranscript {
                 ComposerView(
                     transcript: transcript,
                     model: model,
@@ -110,6 +119,13 @@ struct ReviewPaneView: View {
     /// nothing to send to and no composer is drawn.
     private var composerTranscript: TranscriptModel? {
         model.activeSession.flatMap { model.existingTranscript(for: $0.id) }
+    }
+
+    /// Whether this pane draws that composer at all. The rule and the reasoning are
+    /// `ReviewComposer`; the two facts it needs are which conversation a turn from here would join
+    /// and what the panes of this tab are showing.
+    private var drawsComposer: Bool {
+        ReviewComposer.isDrawn(destination: model.activeSession?.id, panes: siblings)
     }
 
     @ViewBuilder

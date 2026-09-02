@@ -45,6 +45,17 @@ struct CenterPaneView: View {
         tab.map { tabs.content(of: pane, in: $0) }
     }
 
+    /// What every pane of this tab is showing, this one included, and empty when there is no tab
+    /// to be in. A tab nobody has split is one entry.
+    ///
+    /// Only the review reads it, to decide whether the conversation it would send to is already on
+    /// screen and therefore whether it draws a composer of its own. See `ReviewComposer`. It costs
+    /// no dependency this body did not already have: `showing` reads the same arrangement.
+    private var paneContents: [PaneContent] {
+        guard let tab else { return [] }
+        return tabs.layout(of: tab).panes.map { tabs.content(of: $0, in: tab) }
+    }
+
     /// What a pane with nothing to draw is waiting for.
     ///
     /// Two of them, and they are two different moments of the same switch. Which one the user
@@ -172,6 +183,7 @@ struct CenterPaneView: View {
                 .first(where: { $0.id == tabID }) {
                 ToolPaneView(
                     model: model, tab: tab,
+                    siblings: paneContents,
                     splitColumn: { split($0, opening: $1) },
                     paneMenu: hostedMenu
                 )
