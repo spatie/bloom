@@ -533,6 +533,43 @@ struct ComposerView: View {
 
     // MARK: - First open
 
+    /// Puts a chat back on a model that is a model, if it is holding something that is not.
+    ///
+    /// Every time a chat is opened, and deliberately not only on the first open: the value this
+    /// corrects was written by a version that had no rule for it, and a chat carrying one is a
+    /// chat that cannot run. `codex:gpt-5.6-sol` was found on a real session row, put there
+    /// verbatim from a settings file's `models.default`; nothing recognised it, so it was parked
+    /// on whatever backend was running, the menu drew it as a fifth row inside the Claude Code
+    /// section reading "Codex:gpt 5.6 Sol", and the CLI, handed a model that does not exist, ran
+    /// on its own default. See `ModelIdentifier`, whose head is the whole report.
+    ///
+    /// The backend only moves for a chat that has never opened a thread. One that has keeps it,
+    /// for the reason `BackendChange` forks rather than changes: its rows are in one CLI's
+    /// vocabulary and its `agentSessionID` names a thread on that CLI's server. Its id is still
+    /// corrected, which is what puts it back in the right section of the menu, and the move is
+    /// then offered as the fork it is.
+    private func repairModel() {
+        let session = transcript.session
+        let hasSpoken = !(session.agentSessionID ?? "").isEmpty
+        guard let repair = ModelIdentifier.correction(
+            model: session.model,
+            on: session.agentKind,
+            hasSpoken: hasSpoken,
+            codexModels: ComposerModelCatalog.shared.codexModels
+        ) else { return }
+
+        sessionEditor.apply {
+            $0.model = repair.model
+            if let kind = repair.kind, kind != $0.agentKind {
+                $0.agentKind = kind
+                // A mode the new backend has no row for cannot survive the move, which is the
+                // invariant `ComposerControls` holds and this write goes around. See
+                // `PermissionMode.nearest(on:)`.
+                $0.permissionMode = $0.permissionMode.nearest(on: kind)
+            }
+        }
+    }
+
     /// Settle what a new session starts out as, and read back the two values that are not columns.
     /// All of it is only interesting once, hence the `task(id:)`. The precedence rules live in
     /// `ComposerDefaults`.
@@ -547,6 +584,8 @@ struct ComposerView: View {
         }
         isFocused = true
         caret = (transcript.draft as NSString).length
+
+        repairModel()
 
         guard let store = app.store else { return }
         let sessionID = transcript.session.id

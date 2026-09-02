@@ -86,7 +86,10 @@ public struct ComposerDefaults: Equatable {
             codexModels: codexModels
         )
         return ComposerDefaults(
-            model: model,
+            // `resolved.model` rather than the string the file held. A settings file has to name a
+            // model for either CLI in one key, so it can write the backend in front of it, and
+            // `codex:gpt-5.6-sol` is not an id anything can be handed. See `ModelIdentifier`.
+            model: resolved.model,
             effort: resolved.effort,
             // "Start in plan mode" is the more specific instruction of the two, so it beats the
             // permission mode picker when both are set rather than the two fighting over one column.

@@ -142,6 +142,85 @@ struct DefaultBackendTests {
         #expect(inACodexChat.backend == .codex)
     }
 
+    // MARK: - A model that names its own backend
+
+    /// The reported bug, at the layer it entered by. A settings file has one key for a model and
+    /// two CLIs to name one for, so it can write the backend in front of the id, and
+    /// `codex:gpt-5.6-sol` is what a real one held. Read as an opaque id it matched nothing, so
+    /// the last question parked a Codex model on Claude Code and the chat ran on Claude Code's
+    /// own default. See `ModelIdentifier`.
+    @Test("a settings file naming the backend in front of the model opens that backend")
+    func aNamespacedRepoModelOpensItsOwnBackend() {
+        var repo = RepoSettings()
+        repo.defaultModel = "codex:gpt-5.6-sol"
+
+        let resolved = ComposerDefaults.resolve(
+            repo: repo,
+            app: AppDefaults(),
+            codexModels: Self.codexModels
+        )
+        #expect(resolved.model == "gpt-5.6-sol")
+        #expect(resolved.backend == .codex)
+    }
+
+    /// And it does so with nothing fetched, which is the property the whole ordering exists for:
+    /// a machine that is offline, or has no Codex on it, must still open the chat where the file
+    /// said rather than somewhere a missing list left it.
+    @Test("it opens that backend before any list has answered")
+    func aNamespacedModelNeedsNoList() {
+        var repo = RepoSettings()
+        repo.defaultModel = "codex:gpt-5.6-sol"
+
+        let resolved = ComposerDefaults.resolve(repo: repo, app: AppDefaults())
+        #expect(resolved.model == "gpt-5.6-sol")
+        #expect(resolved.backend == .codex)
+    }
+
+    /// A machine-wide `~/.conductor/settings.toml` is the other file that can hold one, and it
+    /// sits below the Settings screen rather than above it, so this only applies when the screen
+    /// has never been used.
+    @Test("the machine-wide file is read the same way")
+    func aNamespacedHomeModel() {
+        var repo = RepoSettings()
+        repo.homeDefaultModel = "codex:gpt-5.5"
+
+        let resolved = ComposerDefaults.resolve(
+            repo: repo,
+            app: AppDefaults(),
+            codexModels: Self.codexModels
+        )
+        #expect(resolved.model == "gpt-5.5")
+        #expect(resolved.backend == .codex)
+    }
+
+    /// A string that states its backend beats one merely recorded beside it. The recorded value
+    /// is what the screen last wrote, and it can be older than the file: an id saying `codex:` is
+    /// stating the answer rather than implying it.
+    @Test("the name in front of the model beats the backend stored beside it")
+    func theNamespaceBeatsTheRecordedBackend() {
+        let stale = AppDefaults(model: "codex:gpt-5.6-sol", backend: .claudeCode)
+        let resolved = ComposerDefaults.resolve(
+            repo: RepoSettings(),
+            app: stale,
+            codexModels: Self.codexModels
+        )
+        #expect(resolved.model == "gpt-5.6-sol")
+        #expect(resolved.backend == .codex)
+    }
+
+    /// The menu asks the same question of the same string, which is what makes the fault
+    /// recoverable: the stuck chat's model lands in the Codex section, where picking another
+    /// Codex model is an ordinary change in place rather than a move between backends.
+    @Test("the model menu places it in the same section")
+    func theMenuPlacesItTheSameWay() {
+        #expect(DefaultBackend.kind(
+            ofModel: "codex:gpt-5.6-sol", running: .claudeCode, codexModels: Self.codexModels
+        ) == .codex)
+        #expect(DefaultBackend.kind(
+            ofModel: "claude:opus", running: .codex, codexModels: Self.codexModels
+        ) == .claudeCode)
+    }
+
     /// `ClaudeModelRank` is what answers "is this one of ours", and it answers for the ids the
     /// menu does not list as well as for the four it does.
     @Test("the four families are recognised, including the variants no menu row carries")
