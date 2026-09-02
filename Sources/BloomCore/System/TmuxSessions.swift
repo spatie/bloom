@@ -203,6 +203,29 @@ public enum TmuxSessions {
         return sessions.filter { workspaceID(ofSessionName: $0) == owner }
     }
 
+    /// `list-panes -a -F '#{pane_pid} #{session_name}'` output, as session name to shell pid.
+    ///
+    /// The pid comes first and the name takes the rest of the line, which is the way round that
+    /// cannot be misread: a pid is digits and cannot contain a space, while a session name is only
+    /// ours by convention and a name with a space in it would otherwise take the pid with it.
+    ///
+    /// It answers the one thing a session name cannot: what a restored pane is running. The shell
+    /// of a tmux-backed pane is a child of the server rather than of Bloom, so this is the only
+    /// route from a pane to the pid whose children `ProcessTable` reads.
+    public static func parsePanePIDs(_ output: String) -> [String: Int32] {
+        var pids: [String: Int32] = [:]
+        for line in output.split(separator: "\n") {
+            let fields = line.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+            guard fields.count == 2, let pid = Int32(fields[0]) else { continue }
+            let session = fields[1].trimmingCharacters(in: .whitespaces)
+            // The first pane of a session wins. Bloom's own sessions hold exactly one, and a
+            // second would be one a person made by hand inside a pane, which is theirs.
+            guard !session.isEmpty, pids[session] == nil else { continue }
+            pids[session] = pid
+        }
+        return pids
+    }
+
     /// `list-sessions -F '#{session_name}'` output. An empty result is also what tmux prints to
     /// stderr when no server is running, so the caller can ignore the exit status entirely.
     public static func parseSessionList(_ output: String) -> [String] {
@@ -305,6 +328,13 @@ public struct TmuxCommand: Sendable, Equatable {
 
     public var listSessions: [String] {
         arguments(["list-sessions", "-F", "#{session_name}"])
+    }
+
+    /// Every pane on our socket with the pid of the shell inside it. `-a` because the question is
+    /// asked of the whole server at once: one spawn answers for every restored pane rather than one
+    /// per pane per poll.
+    public var listPanes: [String] {
+        arguments(["list-panes", "-a", "-F", "#{pane_pid} #{session_name}"])
     }
 
     /// Re-applies the configuration to a server that was already running when Bloom launched,

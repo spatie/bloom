@@ -340,3 +340,48 @@ struct TmuxCommandTests {
         #expect(text.contains("set -g set-clipboard on"))
     }
 }
+
+@Suite("tmux pane pids")
+struct TmuxPanePIDTests {
+    private let command = TmuxCommand(
+        executable: "/opt/homebrew/bin/tmux",
+        socketName: "bloom-deadbeef",
+        configPath: "/cfg/tmux.conf"
+    )
+
+    @Test("The whole server is asked at once, pid first")
+    func arguments() {
+        #expect(command.listPanes == [
+            "-L", "bloom-deadbeef", "-f", "/cfg/tmux.conf", "-u",
+            "list-panes", "-a", "-F", "#{pane_pid} #{session_name}",
+        ])
+    }
+
+    @Test("A pane line reads back as its session and the pid of the shell in it")
+    func parsing() {
+        let pids = TmuxSessions.parsePanePIDs("""
+            40123 bloom_ws_one
+            40200 bloom_ws_two
+            """)
+        #expect(pids == ["bloom_ws_one": 40123, "bloom_ws_two": 40200])
+    }
+
+    // The pid leads so it cannot be lost: a name is only ours by convention, and a name with a
+    // space in it read the other way round would take the pid with it.
+    @Test("A session name with a space in it keeps its pid")
+    func spacedName() {
+        #expect(TmuxSessions.parsePanePIDs("77 my session") == ["my session": 77])
+    }
+
+    @Test("Anything that is not a pid and a name is skipped")
+    func rubbish() {
+        #expect(TmuxSessions.parsePanePIDs("") == [:])
+        #expect(TmuxSessions.parsePanePIDs("no server running\nbloom_a_b\n") == [:])
+        #expect(TmuxSessions.parsePanePIDs("40123") == [:])
+    }
+
+    @Test("The first pane of a session wins, because ours hold exactly one")
+    func firstPane() {
+        #expect(TmuxSessions.parsePanePIDs("40123 bloom_a_b\n40124 bloom_a_b") == ["bloom_a_b": 40123])
+    }
+}
