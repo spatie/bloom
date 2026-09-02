@@ -61,7 +61,7 @@ tokens, so they are opt-in:
 BLOOM_LIVE=1 ./Tools/test-core.sh LiveAgent
 ```
 
-`./Tools/master.sh` builds a commit into `~/Applications/Bloom.app`, which is the copy to use
+`./Tools/master.sh` builds a commit into `/Applications/Bloom.app`, which is the copy to use
 while agents are editing the tree. `./Tools/release.sh` is the signed and notarised one; see
 `RELEASING.md`.
 

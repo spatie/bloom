@@ -6,7 +6,7 @@
 #   source "$(dirname "$0")/guard.sh"
 #
 # Bloom is now developed inside Bloom. That makes `Tools/master.sh` genuinely
-# dangerous: it removes `~/Applications/Bloom.app` and replaces the bundle, then
+# dangerous: it removes `/Applications/Bloom.app` and replaces the bundle, then
 # kills the process running from it. Run from a session that copy is hosting,
 # it ends the agent mid sentence and takes the app the owner is using with it,
 # and the `rm -rf` lands on a bundle whose executable is still mapped.
@@ -31,7 +31,17 @@
 
 # Where the owner's real install and real data live. Nothing in this repository
 # may write any of these three except the app itself.
-BLOOM_REAL_APP="$HOME/Applications/Bloom.app"
+#
+# `/Applications`, not `~/Applications`, and that is the owner's own arrangement
+# rather than a default: every other app on his Mac is in the system folder and
+# the per-user one held nothing but this. It was `$HOME/Applications` here, so
+# `master.sh` installed to a path he does not use and this guard protected a
+# bundle nobody was running, which is the worst of both: a second Bloom under
+# the same bundle id, on the same database, with LaunchServices free to hand a
+# `bloom://` link to whichever it liked. The three dev identities below stay in
+# `~/Applications` on purpose: they are installed by agents rather than by him,
+# and keeping them out of the folder he actually opens is the point of them.
+BLOOM_REAL_APP="/Applications/Bloom.app"
 BLOOM_REAL_DB_DIR="$HOME/Library/Application Support/Bloom"
 BLOOM_REAL_DB="$BLOOM_REAL_DB_DIR/bloom.sqlite"
 BLOOM_REAL_BUNDLE_ID="be.spatie.bloom"
@@ -85,7 +95,7 @@ print("bloom-%08x" % h)
 # The pid of the nearest ancestor running the given executable, or nothing.
 #
 # `ps -o comm=` answers with the absolute path of the executable, so a copy at
-# ~/Applications/Bloom.app is told apart from ~/Applications/Bloom Dev.app and
+# /Applications/Bloom.app is told apart from ~/Applications/Bloom Dev.app and
 # from a debug build in .build without any name matching.
 bloom_hosting_pid() {
   local target="$1" pid=$$ exe parent

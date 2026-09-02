@@ -43,7 +43,7 @@ Everything real is a script in `Tools/`; the `Makefile` is the index.
     make build      compile every target    make test       the BloomCore suite
     make swiftlint  Tools/swiftlint.sh
     make app        assemble a debug .app   make run        release .app, launched
-    make master     install ~/Applications/Bloom.app  (see the guard below)
+    make master     install /Applications/Bloom.app   (see the guard below)
     make dev        install ~/Applications/Bloom Dev.app
     make dev-db     copy the real database into the dev copy
     make release    sign, notarise and staple a zip and a disk image into dist/
@@ -310,7 +310,7 @@ which has twice turned out to be the owner's own screen.
 Bloom is developed in Bloom. The app you are running inside is the owner's, holding his real
 projects, and he is using it right now.
 
-**Never touch any of these.** `~/Applications/Bloom.app`. `~/Library/Application Support/Bloom/`.
+**Never touch any of these.** `/Applications/Bloom.app`. `~/Library/Application Support/Bloom/`.
 The `be.spatie.bloom` UserDefaults domain. Not to test something, not briefly.
 
 **`make dev` is how you get a build you can run.** It installs `~/Applications/Bloom Dev.app`: its
@@ -339,7 +339,7 @@ the copied workspace rows at a root that does not exist, so the dev copy can sho
 and cannot delete a real worktree. `--keep-paths` opts out and says why you should not.
 
 **`make master` will refuse if you are inside the app it would replace**, because that script
-removes `~/Applications/Bloom.app` and kills the process running from it. `Tools/guard.sh` finds the
+removes `/Applications/Bloom.app` and kills the process running from it. `Tools/guard.sh` finds the
 app either as a real ancestor of this shell or, for a terminal pane whose tmux server has reparented
 away, by the socket name derived from the database path. Do not work around it. Build `make dev`
 instead.

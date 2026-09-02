@@ -13,7 +13,7 @@
 # database is open, in WAL mode, in a process the owner is typing into, and a
 # file swapped underneath a live connection is a corrupt database rather than an
 # old one. If that direction is ever wanted it belongs in its own script, whose
-# first act is to refuse while any process is running from ~/Applications/Bloom.app.
+# first act is to refuse while any process is running from /Applications/Bloom.app.
 #
 # THE REAL DATABASE IS NEVER OPENED, ONLY COPIED.
 #

@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Builds a copy of Bloom for the owner to actually use, and installs it to
-# ~/Applications/Bloom.app.
+# /Applications/Bloom.app.
 #
 #   ./Tools/master.sh              build HEAD, install, relaunch
 #   ./Tools/master.sh <ref>        build that commit or branch instead
