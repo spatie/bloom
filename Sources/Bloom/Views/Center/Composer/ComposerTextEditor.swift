@@ -237,9 +237,20 @@ struct ComposerTextEditor: NSViewRepresentable {
             place(caretAt: caret, in: textView, coordinator: context.coordinator)
         }
 
-        if isFocused, textView.window?.firstResponder !== textView {
+        // Not a bare `isFocused` test any more. See `ComposerFocus`, which is where the reason is
+        // written down: the binding is one turn behind the view whenever the view has just
+        // resigned, and re-asserting on that stale value took the keyboard back off a browser page
+        // the reader had clicked into, so Cmd+C reached a composer with nothing selected.
+        let holdsKeyboard = textView.window?.firstResponder === textView
+        if ComposerFocus.shouldTakeKeyboard(
+            wantsFocus: isFocused,
+            holdsKeyboard: holdsKeyboard,
+            isReportingChange: context.coordinator.isReportingFocus
+        ) {
             textView.window?.makeFirstResponder(textView)
-        } else if !isFocused, textView.window?.firstResponder === textView {
+        } else if ComposerFocus.shouldGiveUpKeyboard(
+            wantsFocus: isFocused, holdsKeyboard: holdsKeyboard
+        ) {
             textView.window?.makeFirstResponder(nil)
         }
 
@@ -315,12 +326,27 @@ struct ComposerTextEditor: NSViewRepresentable {
             return NSRange(location: start, length: max(end - start, 0))
         }
 
+        /// Set while a focus change the VIEW reported is still on its way into the binding, which
+        /// is the one turn of the main actor `focusChanged` defers by. `updateNSView` runs inside
+        /// that turn and must not act on a binding the view has already contradicted; see
+        /// `ComposerFocus` for what happened when it did.
+        ///
+        /// `lastReportedCaret`'s twin. Both exist because this view and its bindings speak to each
+        /// other in both directions and neither can tell an instruction from an echo without being
+        /// told which of them spoke last.
+        var isReportingFocus = false
+
         /// Deferred by one turn of the main actor: the responder change can land in the middle of a
         /// SwiftUI update, and writing state there is how a view ends up fighting itself.
         func focusChanged(to focused: Bool) {
             guard parent.isFocused != focused else { return }
+            isReportingFocus = true
             Task { [weak self] in
-                guard let self, self.parent.isFocused != focused else { return }
+                guard let self else { return }
+                // Cleared however this ends, including the early return below. A flag left
+                // standing would be a composer that could never take the keyboard again.
+                defer { self.isReportingFocus = false }
+                guard self.parent.isFocused != focused else { return }
                 self.parent.isFocused = focused
             }
         }
