@@ -180,7 +180,24 @@ struct TabItemView: View {
         // strip sits directly under a unified toolbar. The selected tab's fill was therefore drawn
         // up through the whole toolbar inset, a block of it floating above the strip. The `View`
         // overload paints the tab's own bounds and nothing else.
-        .background { background }
+        //
+        // **And it takes no clicks.** The owner could drag any tab along the strip except the one
+        // he was in, and the reordering hangs off `.draggable`, which `SessionTabsView` applies to
+        // the whole tab: the press has to reach the TAB for a drag to begin, where a press the
+        // framework resolves onto a subview reaches that subview, which has no drag on it. The
+        // ancestor's tap gestures below are `simultaneous` and hear it either way, which is why
+        // the selected tab still selected and still renamed while refusing to be picked up.
+        //
+        // Which subview is the one the selected tab has and the others do not was reached by
+        // elimination rather than by measurement, and it is worth saying so. A selected tab and an
+        // unselected one differ in the ink they wear, in one accessibility trait, and here. Every
+        // tab draws a plate under the pointer while it is hovered, and a hovered tab drags, so the
+        // plate is not it; what is left is the `matchedGeometryEffect` this branch hangs off the
+        // plate, which is a geometry effect standing between the pointer and the tab.
+        //
+        // Either way a fill and an outline are decoration, and no press has ever been meant for
+        // them: selecting, renaming and closing are all on the row or on the cross above it.
+        .background { background.allowsHitTesting(false) }
         .contentShape(Rectangle())
         // A single click selects and a double click renames, which is one gesture with two
         // meanings rather than a button, so it cannot be expressed as one.
