@@ -150,7 +150,11 @@ extension AppModel {
             isLoading: session.isLoading,
             canGoBack: session.canGoBack,
             canGoForward: session.canGoForward,
-            isLive: true
+            isLive: true,
+            // The pane already draws this. Reporting it is what stops a model reading Bloom's own
+            // error card as a page that loaded and turned out to be empty. See
+            // `BrowserPaneReport.failure`.
+            failure: session.failure
         )
     }
 
@@ -227,10 +231,19 @@ extension AppModel {
             return .told(
                 "Pointed browser \(report.number) at \(url). It is loading now: browser_read says "
                     + "when it has arrived, and browser_text or browser_screenshot show what it "
-                    + "found."
+                    + "found. If it does not arrive, browser_read carries the reason: a pane that "
+                    + "failed to load draws Bloom's own message rather than a page."
             )
 
         case .screenshot:
+            // Before the picture, because the picture is Bloom's error card and a card is a
+            // rectangle with a triangle on it as far as a model is concerned.
+            if let trouble = report.trouble {
+                return .told(
+                    trouble + " There is nothing of the page to photograph. browser_read carries "
+                        + "the same fact, and browser_reload tries again."
+                )
+            }
             guard session.webView.bounds.width > 0 else {
                 return .refused(
                     "Browser \(report.number) is not on screen at the moment, and a picture of a "
@@ -266,6 +279,14 @@ extension AppModel {
             }
 
         case .text:
+            // Same reason as the picture above, and worse here: the failed pane answers with the
+            // empty string, which reads as a page that loaded and said nothing.
+            if let trouble = report.trouble {
+                return .told(
+                    trouble + " There is no page text to read. browser_read carries the same fact, "
+                        + "and browser_reload tries again."
+                )
+            }
             do {
                 let (text, cut) = BrowserPageText.trim(try await session.text())
                 let wrapped = BridgeUntrustedText.wrap(text, from: report.address)
