@@ -33,6 +33,12 @@ public actor CodexRunner: SessionRunner {
     /// connection was launched with. See `applyContextWindowChange`.
     private var contextWindow = CodexContextWindow.modelDefault
 
+    /// The model id this chat's row means, which is not always the string it holds: a row written
+    /// from a settings file can carry the backend in front of the id, and `codex:gpt-5.6-sol` is
+    /// not something the server accepts. `ModelAlias.cliValue` is the same guard on the other
+    /// backend, and `ModelIdentifier`'s head is the bug both were added for.
+    private var wireModel: String { ModelIdentifier.resolve(session.model).model }
+
     /// The items seen this turn, by id.
     ///
     /// An approval request carries only an item id: the diff or the command is on the
@@ -81,7 +87,7 @@ public actor CodexRunner: SessionRunner {
         self.bridge = bridge
         self.makeClient = makeClient
         self.translation = CodexTranslation(context: CodexTranslation.Context(
-            model: session.model,
+            model: ModelIdentifier.resolve(session.model).model,
             cwd: workspacePath,
             permissionMode: session.permissionMode.rawValue
         ))
@@ -136,7 +142,7 @@ public actor CodexRunner: SessionRunner {
         let turn = try await client.startTurn(
             threadID: threadID,
             input: [.text(text)],
-            model: session.model,
+            model: wireModel,
             effort: session.effort,
             approvalPolicy: Self.approvalPolicy(for: session.permissionMode),
             sandboxPolicy: Self.sandboxPolicy(for: session.permissionMode, writableRoot: workspacePath),
@@ -351,7 +357,7 @@ public actor CodexRunner: SessionRunner {
         } else {
             handle = try await client.startThread(
                 cwd: workspacePath,
-                model: session.model,
+                model: wireModel,
                 approvalPolicy: Self.approvalPolicy(for: session.permissionMode),
                 sandbox: sandbox,
                 approvalsReviewer: Self.approvalsReviewer(for: session.permissionMode)

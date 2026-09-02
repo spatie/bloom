@@ -13,8 +13,13 @@ import Foundation
 /// every new chat opened on Claude Code whatever the screen said. `AppModel.resolvedControls`
 /// carried a comment saying so, and that comment now points here.
 ///
-/// Three questions, in this order, and the order is the design:
+/// Four questions, in this order, and the order is the design:
 ///
+/// 0. **Does the id name its own backend?** `codex:gpt-5.6-sol` says which CLI it is for, and a
+///    string that states the backend beats one that merely has a backend recorded beside it. It
+///    is asked first because it needs nothing either, and because everything below it was wrong
+///    about that id: nothing recognised it, so it fell all the way to question 3 and parked a
+///    Codex model on Claude Code. `ModelIdentifier` is that reading, and its head is the bug.
 /// 1. **Is this the model Settings recorded?** Then it is the backend Settings recorded beside it.
 ///    First, because it is the only question that needs nothing: Codex's model list is fetched, so
 ///    a rule that had to look an id up would answer "Claude Code" on a machine that is offline,
@@ -34,13 +39,18 @@ import Foundation
 /// migration: there is no value to rewrite.
 public struct DefaultBackend: Equatable, Sendable {
     public var kind: AgentKind
+    /// Not always the model that was asked for either, and for a reason that is not a preference:
+    /// a value naming its own backend, or naming a fetched model by the label it is drawn with,
+    /// is not an id any CLI takes. `ModelIdentifier` reads it back into one.
+    public var model: String
     /// Not always the effort that was asked for. Codex's levels belong to the model rather than
     /// to Bloom, so a stored `max` reaching `gpt-5.5`, which stops at `xhigh`, becomes that
     /// model's own default rather than a value the server refuses.
     public var effort: String
 
-    public init(kind: AgentKind, effort: String) {
+    public init(kind: AgentKind, model: String, effort: String) {
         self.kind = kind
+        self.model = model
         self.effort = effort
     }
 
@@ -58,16 +68,23 @@ public struct DefaultBackend: Equatable, Sendable {
         running: AgentKind = .claudeCode,
         codexModels: [CodexModel] = []
     ) -> DefaultBackend {
-        let kind = model == app.model
-            ? app.backend
-            : self.kind(ofModel: model, running: running, codexModels: codexModels)
+        let identity = ModelIdentifier.resolve(model, codexModels: codexModels)
+        let kind: AgentKind
+        if identity.namesBackend, let named = identity.kind {
+            kind = named
+        } else if model == app.model {
+            kind = app.backend
+        } else {
+            kind = identity.kind ?? running
+        }
         return DefaultBackend(
             kind: kind,
-            effort: self.effort(effort, on: kind, model: model, codexModels: codexModels)
+            model: identity.model,
+            effort: self.effort(effort, on: kind, model: identity.model, codexModels: codexModels)
         )
     }
 
-    /// Questions 2 and 3 on their own, for a model that nobody recorded a backend for: the one
+    /// Questions 0, 2 and 3 on their own, for a model that nobody recorded a backend for: the one
     /// picked out of a menu, or one a settings file states.
     ///
     /// `ComposerModelCatalog.backend(ofModel:current:)` is this function with the app's own list
@@ -77,9 +94,7 @@ public struct DefaultBackend: Equatable, Sendable {
         running: AgentKind,
         codexModels: [CodexModel]
     ) -> AgentKind {
-        if codexModels.contains(where: { $0.id == model }) { return .codex }
-        if ClaudeModelRank.recognises(model) { return .claudeCode }
-        return running
+        ModelIdentifier.resolve(model, codexModels: codexModels).kind ?? running
     }
 
     /// The effort a model actually takes, which on Codex is the model's business and not ours.

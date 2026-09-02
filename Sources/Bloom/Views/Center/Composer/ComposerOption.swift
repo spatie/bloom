@@ -47,6 +47,15 @@ struct ComposerOption: Identifiable, Hashable {
     ///
     /// So whatever the app has been set to is on the list, and it stays on the list. It goes after
     /// the named ones, because those are the ones almost every reader wants.
+    ///
+    /// **This row was blamed for a bug it only reported, and it keeps its job.** A settings file
+    /// pinned `codex:gpt-5.6-sol`, nothing recognised it, and it was drawn here as a fifth Claude
+    /// Code model reading "Codex:gpt 5.6 Sol". Deleting the row would have hidden the broken value
+    /// while leaving the chat running on it, which is precisely the one-way door above: the id
+    /// would have been in force and off every control that could change it. The fix is upstream,
+    /// where an id that names its own backend is now read rather than stored whole
+    /// (`ModelIdentifier`), so a row like that no longer appears and, if an old one does, it
+    /// appears in the section it belongs to and can be pressed away.
     static func adding(_ extras: [String], to options: [ComposerOption]) -> [ComposerOption] {
         var known = Set(options.map(\.id))
         var result = options
