@@ -389,6 +389,21 @@ struct TranscriptListView: View {
         )
     }
 
+    /// The runs to draw with, which are the ones held in state unless a rescan can be adopted
+    /// without moving anything into the tail. See `TranscriptFold.mayAdopt`.
+    ///
+    /// The rescan is skipped entirely on a pass where no row has arrived, which is nearly every
+    /// pass: a scroll, a hover and a selection all rebuild the entries and none of them changes
+    /// what is folded. `Folds.scannedRows` is what answers that, and it is on the value rather
+    /// than beside it so the two cannot drift.
+    private static func foldsForThisPass(
+        rows: [TranscriptRow], stored: TranscriptFold.Folds, drawn: Range<Int>
+    ) -> TranscriptFold.Folds {
+        guard stored.scannedRows != rows.count else { return stored }
+        let fresh = rescan(rows, extending: stored)
+        return TranscriptFold.mayAdopt(fresh, over: stored, drawn: drawn) ? fresh : stored
+    }
+
     /// Whether nothing this row says can change again, which is what lets a fold hide it while the
     /// turn is still running. See rule 1 in `TranscriptFold`.
     ///
@@ -476,7 +491,6 @@ struct TranscriptListView: View {
         // The fold's three inputs, read once for the pass for the reason the eight above are: each
         // is a property of an `@Observable` or a set this body copies, and reading one inside a
         // per-row closure records an observation edge per row.
-        let folds = self.folds
         let unfolded = self.unfolded
         let revealed = revealedSeqs
         let sessionID = transcript.session.id
@@ -485,6 +499,11 @@ struct TranscriptListView: View {
         // walked.
         let drawnRows = visibleRows
         let drawnRange = drawnRows.startIndex..<drawnRows.endIndex
+        // The runs, brought up to date on this pass when doing so takes rows out of the tail and
+        // puts none in. Everything else waits for the pass below, which is what keeps an arrival
+        // and a fold from landing as one edit. See `TranscriptFold.mayAdopt`, which is the rule,
+        // and the `onChange` at the foot of `body`, which is the pass.
+        let folds = Self.foldsForThisPass(rows: rows, stored: self.folds, drawn: drawnRange)
         let lastVisibleSeq = drawnRows.last(where: { !TranscriptNoise.isHidden($0) })?.seq
         // The turn the loop below is inside, so a fold's own line is emitted once, and the first
         // row of that turn's working which is NOT hidden. Every row before it is skipped.

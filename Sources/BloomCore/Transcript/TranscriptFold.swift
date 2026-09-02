@@ -81,6 +81,47 @@ public enum TranscriptFold {
         return result
     }
 
+    /// Whether folds scanned on the same pass the rows arrived may be drawn on that pass, rather
+    /// than waiting for the one `TranscriptListView` gives them.
+    ///
+    /// **The jar this answers.** The runs are refreshed one pass behind the row that changed them,
+    /// which is what keeps each event a single-shape edit: an arrival is a `.grew` on its own and a
+    /// fold closing is a `.shrank` on its own, and `TranscriptEntryChange` can only call a pass
+    /// that does both `.rebuilt`. The cost of that split is a frame: the moment a call's result
+    /// lands, the call is settled and still drawn, and it folds away on the pass after. On a tool
+    /// that takes tens of milliseconds the reader sees the row appear and then jump into the
+    /// count, which was reported as jarring and is.
+    ///
+    /// So the split is kept for the passes that need it and dropped for the ones that do not. The
+    /// only pass this says yes to is one where **nothing becomes newly exposed**: rows leave the
+    /// tail and none arrive in it, which is a removal by itself whichever pass it happens on. The
+    /// case it still refuses is the batched one, where a result and the next call land together:
+    /// there the old tail row goes and a new one takes its place, a middle of the same length with
+    /// different ids, which is exactly `.rebuilt`.
+    ///
+    /// - Parameter drawn: the window of rows the list is handing to the table. A fresh fold whose
+    ///   working runs past it cannot be adopted, and this is not a detail: `hides` refuses to fold
+    ///   a working the window stops inside, so adopting one would UNFOLD the turn for a pass. The
+    ///   window grows on the same event, one pass behind, exactly as these do.
+    public static func mayAdopt(_ fresh: Folds, over stale: Folds, drawn: Range<Int>) -> Bool {
+        // A turn's first fold appearing is an insertion in the middle of the list, which is the
+        // one shape `Folds` documents as a reload. It is left to the pass that already handles it.
+        guard fresh.all.count == stale.all.count,
+              let new = fresh.all.last, let old = stale.all.last,
+              new.firstSeq == old.firstSeq,
+              new.span.upperBound <= drawn.upperBound else { return false }
+
+        return lastExposedSeq(new) <= lastExposedSeq(old)
+    }
+
+    /// The sequence number of the last row this working leaves on screen, or `Int.min` for one
+    /// that leaves none. Rows are only ever appended, so a working that exposes a higher sequence
+    /// number than it did is a working that has gained an exposed row.
+    private static func lastExposedSeq(_ work: Work) -> Int {
+        guard work.ready < work.rows.count, let last = work.rows.last else { return .min }
+        return last.seq
+    }
+
     /// How many rows at the front of this turn's work are hidden right now, or nought for a fold
     /// that is not folded.
     ///
