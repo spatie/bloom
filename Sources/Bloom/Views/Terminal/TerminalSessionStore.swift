@@ -31,6 +31,15 @@ final class TerminalSessionStore {
     /// walking back through tabs that may already be gone.
     private var paneOwner: [String: WorkspaceID] = [:]
 
+    /// The tmux session a pane's shell is held in, for the panes that have one. Written when the
+    /// shell is forked rather than worked out again later: the decision was taken there, against a
+    /// snapshot that has moved on since, and asking twice is how the two answers come apart.
+    private var paneSession: [String: String] = [:]
+
+    /// What each pane was running, so a pane whose process did not survive the last quit can offer
+    /// it back. Nothing here ever starts a command; see `TerminalCommandRecall`.
+    let recall = TerminalCommandRecall()
+
     private init() {}
 
     // MARK: - Terminals
@@ -42,6 +51,9 @@ final class TerminalSessionStore {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         pendingCommands[paneID] = trimmed
+        // The text as it was asked for, which is the one worth offering back later. `ps` would
+        // answer with the interpreter and the script it resolved to.
+        recall.remember(trimmed, sentTo: paneID)
     }
 
     /// Stops one split pane. The shell's whole process group goes, not just the shell: a pty child
@@ -55,6 +67,11 @@ final class TerminalSessionStore {
             let persistence = self.persistence
             Task { await persistence?.kill(workspaceID: workspaceID, paneIDs: [id]) }
         }
+        paneSession[id] = nil
+        // A pane id is a fresh uuid and is never handed out again, so its remembered command is
+        // unreachable the moment the pane goes and would sit in the settings table for the life of
+        // the database.
+        recall.forget(panes: [id], store: repoStore)
         closedPanes.insert(id)
         guard let view = terminals[id] else { return }
         defer { terminals[id] = nil }
@@ -161,6 +178,10 @@ final class TerminalSessionStore {
             return false
         }
         view.send(txt: text + (submit ? "\r" : ""))
+        // Only a submitted line is a command. Bytes without a return are a keystroke into whatever
+        // is already running, an answer to a prompt as often as not, and remembering those would
+        // offer back half a sentence.
+        if submit { recall.remember(text, sentTo: paneID) }
         return true
     }
 
@@ -170,6 +191,23 @@ final class TerminalSessionStore {
         }
         view.send(key.bytes)
         return true
+    }
+
+    /// The Start button under a pane's remembered command.
+    ///
+    /// Typed and submitted rather than exec'd, which is what the run script and `terminal_start`
+    /// already do: the command lands in the shell's history, so the usual Ctrl+C, Up, Return
+    /// restarts it afterwards, and when it exits the pane is still a shell. The pty is long past
+    /// the startup beat `type` waits out, because a person has read a strip and pressed a button
+    /// since it was forked.
+    func startRemembered(_ command: String, inPane pane: String) {
+        guard write(command, submit: true, paneID: pane) else { return }
+        recall.accepted(inPane: pane)
+    }
+
+    /// The cross beside it, which is the only way a remembered command is deliberately forgotten.
+    func dismissRemembered(inPane pane: String) {
+        recall.dismiss(inPane: pane, store: repoStore)
     }
 
     /// The live shell for a tab, forked on first use and reused forever after.
@@ -207,8 +245,10 @@ final class TerminalSessionStore {
         // and an unsplit tab is its own single pane.
         paneOwner[tab.id.rawValue] = workspace.id
         let start = FolderTerminal.launchDirectory(requested: directory, root: workspace.path)
-        if let persistence, let command = persistence.command,
-           let session = persistence.decision(workspaceID: workspace.id, paneID: tab.id.rawValue).session {
+        let decision = persistence?.decision(workspaceID: workspace.id, paneID: tab.id.rawValue)
+            ?? .inProcess
+        if let command = persistence?.command, let session = decision.session {
+            paneSession[tab.id.rawValue] = session
             view.start(TerminalLaunch.tmux(
                 command: command, session: session, directory: start, extra: extra
             ))
@@ -218,7 +258,21 @@ final class TerminalSessionStore {
 
         terminals[tab.id.rawValue] = view
         if let command = pendingCommands.removeValue(forKey: tab.id.rawValue) { type(command, into: view) }
+        offerLastCommand(inPane: tab.id.rawValue, decision: decision)
         return view
+    }
+
+    /// Asks whether this pane has a command left over from a previous launch, and lets the strip
+    /// draw it if it has. Nothing is started here; the answer is drawn and waits to be pressed.
+    private func offerLastCommand(inPane pane: String, decision: TerminalStartDecision) {
+        guard let store = repoStore else { return }
+        let persistence = self.persistence
+        let session = decision.session
+        Task { [recall] in
+            await recall.considerOffer(
+                inPane: pane, session: session, persistence: persistence, store: store
+            )
+        }
     }
 
     /// Types a command into a shell that has just been forked.
@@ -247,10 +301,51 @@ final class TerminalSessionStore {
 
     private var didSweepOrphans = false
 
+    /// The command recorder's poll. Cancelled on the way out, after one last pass.
+    private var recordTask: Task<Void, Never>?
+
     func useStore(_ store: Store?) {
         if repoStore == nil { repoStore = store }
         ensurePersistence()
         sweepOrphanedSessions()
+        startRecordingCommands()
+    }
+
+    /// The slow poll that writes down what each pane is running.
+    ///
+    /// Recording only at quit would be enough for a quit and useless for everything else: Bloom is
+    /// developed in Bloom and gets killed, force quit and crashed, and those are precisely the
+    /// launches where a shell was lost with something worth restarting in it. Thirty seconds is
+    /// chosen against what it costs rather than against what it buys, because what it buys is
+    /// unbounded: one `ps` for every pane at once, and only when a pane has a live shell.
+    private func startRecordingCommands() {
+        guard recordTask == nil, repoStore != nil else { return }
+        recordTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard !Task.isCancelled else { return }
+                await self?.recordCommands()
+            }
+        }
+    }
+
+    /// One pass of the recorder, also run on the way out so a deliberate quit records the truth
+    /// rather than whatever the last poll happened to catch.
+    func recordCommands() async {
+        guard let store = repoStore else { return }
+        await recall.record(panes: livePanes(), persistence: persistence, store: store)
+    }
+
+    /// The panes with a shell alive in them right now. A pane whose shell has ended is running
+    /// nothing by definition, and its pid may have been handed out to somebody else since.
+    private func livePanes() -> [TerminalCommandRecall.Pane] {
+        terminals.compactMap { pane, view in
+            guard view.process?.running == true, !view.hasExited,
+                  let pid = view.process?.shellPid, pid > 0 else { return nil }
+            return TerminalCommandRecall.Pane(
+                pane: pane, shell: pid, session: paneSession[pane]
+            )
+        }
     }
 
     /// Which panes still have a shell waiting for them, or nil when tmux could not be asked.
@@ -353,11 +448,14 @@ final class TerminalSessionStore {
         var views: [BloomTerminalView] = []
         for tab in tabs {
             // Every pane of the tab, which for a tab nobody split is the tab's own shell.
-            for pane in TerminalSplitStore.shared.panes(of: tab) {
+            let panes = TerminalSplitStore.shared.panes(of: tab)
+            for pane in panes {
                 if let view = terminals[pane] { views.append(view) }
                 terminals[pane] = nil
                 paneOwner[pane] = nil
+                paneSession[pane] = nil
             }
+            recall.forget(panes: panes, store: repoStore)
             TerminalSplitStore.shared.discard(ownerID: tab)
         }
 
@@ -373,9 +471,16 @@ final class TerminalSessionStore {
     /// process group detaches rather than terminates. The shell and everything the user started in
     /// it stay alive for the next launch to pick back up.
     func shutdownAll() async {
+        // Before anything is signalled, because this is the last moment the machine can still be
+        // asked what these shells are running. Afterwards there is nothing left to read.
+        recordTask?.cancel()
+        recordTask = nil
+        await recordCommands()
+
         let views = Array(terminals.values)
         terminals.removeAll()
         paneOwner.removeAll()
+        paneSession.removeAll()
         pendingCommands.removeAll()
         await stop(views)
     }
