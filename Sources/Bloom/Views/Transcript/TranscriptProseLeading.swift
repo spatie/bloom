@@ -55,6 +55,29 @@ extension TranscriptLayout {
         ))
     }
 
+    /// The gap a markdown list puts between one item and the next.
+    ///
+    /// Here rather than in `MarkdownView` because it needs the line box of the font the items are
+    /// actually set in, and `lineBox(of:)` above is the one place that measures one and holds the
+    /// answer. The rule it applies is `ListLeading` in the core, which says why the gap is the
+    /// item's own leading rather than a constant off the spacing scale.
+    ///
+    /// The list ratio, not the prose one, for the reason `MarkdownView.listLineSpacing` uses it:
+    /// the wrapped lines inside an item are already led by it, and this has to be that same
+    /// number or the two disagree about the same list.
+    @MainActor
+    static func listItemGap(
+        _ rung: ScaledFont, scale: CGFloat, face: ChatFont, lineHeight: ChatLineHeight, tight: Bool
+    ) -> CGFloat {
+        let font = rung.resolvedNSFont(scale: scale, face: face)
+        return CGFloat(ListLeading.betweenItems(
+            tight: tight,
+            lineHeight: Double(lineBox(of: font)),
+            pointSize: Double(font.pointSize),
+            ratio: lineHeight.listRatio
+        ))
+    }
+
     /// Extra leading for a block of code that wraps, which is the permission panel's command.
     ///
     /// A separate decision from prose and it stays one: the argument for it is that a wrapped
