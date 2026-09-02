@@ -43,7 +43,7 @@ struct ChatPaneView: View {
     /// toolbar are chrome and keep the size macOS gives them.
     @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.standard
     /// And the face, scoped to exactly the same subtree for exactly the same reason.
-    @AppStorage(ChatFont.defaultsKey) private var chatFont = ChatFont.standard
+    @AppStorage(ChatFont.defaultsKey) private var chatFontID = ChatFont.standardID
     /// And the line height, which is the third thing the appearance pane moves about the
     /// conversation and is scoped with the other two.
     @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.standard
@@ -87,7 +87,7 @@ struct ChatPaneView: View {
         }
         .background(Palette.windowBackground)
         .environment(\.fontScale, textSize.scale)
-        .environment(\.chatFont, chatFont)
+        .environment(\.chatFont, ChatFont(rawValue: chatFontID))
         .environment(\.chatLineHeight, lineHeight)
     }
 }

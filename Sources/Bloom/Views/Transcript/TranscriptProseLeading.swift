@@ -119,8 +119,11 @@ extension TranscriptLayout {
     /// dictionary lookup is not. Keyed on the font, so a change of size or face misses.
     ///
     /// It needs no bound and cannot grow into one. What can be put in it is the rungs of `Typo`
-    /// crossed with the five steps of `ChatTextSize` and the four faces of `ChatFont`, which is
-    /// under two hundred entries and is reached in the first minute of reading a conversation.
+    /// crossed with the five steps of `ChatTextSize` and the faces actually read in, which is
+    /// under fifty entries per face and is reached in the first minute of reading a conversation.
+    /// The font picker offers every family on the Mac now rather than four, and that does not
+    /// change this: a conversation is set in one face at a time, and trying another adds its own
+    /// few dozen rather than a font book's worth.
     /// The line height does not multiply that: it changes what is added to a line box, never
     /// which font resolves, so it is not part of this key and must not become one.
     @MainActor

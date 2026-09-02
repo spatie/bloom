@@ -25,7 +25,7 @@ struct AskView: View {
     @State private var room = ComposerRoom()
 
     @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.standard
-    @AppStorage(ChatFont.defaultsKey) private var chatFont = ChatFont.standard
+    @AppStorage(ChatFont.defaultsKey) private var chatFontID = ChatFont.standardID
     @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.standard
 
     var body: some View {
@@ -75,7 +75,7 @@ struct AskView: View {
                 .frame(height: BusyCrest.thickness)
         }
         .environment(\.fontScale, textSize.scale)
-        .environment(\.chatFont, chatFont)
+        .environment(\.chatFont, ChatFont(rawValue: chatFontID))
         .environment(\.chatLineHeight, lineHeight)
         // Not in a body: `open()` writes observed state and can create a session row.
         .task { await app.ask.open() }

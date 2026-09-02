@@ -22,7 +22,9 @@ import BloomCore
 ///
 ///     Bloom --snapshot-gallery <dir> --gallery prose-leading
 ///
-/// Change `ChatFont.standard` in the page below to look at the same thing in another face.
+/// Change `ChatFont.standard` in the page below to look at the same thing in another face. Any
+/// family installed here works: `ChatFont(rawValue: "Palatino")`, and a name that is not installed
+/// draws in San Francisco rather than in nothing.
 struct ProseLeadingGallery: View {
     /// A paragraph with a filename in it, which is the shape of most transcript prose: sentences
     /// wrapped around something set in the mono face. Deliberately no link in it, because

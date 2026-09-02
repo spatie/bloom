@@ -57,7 +57,7 @@ struct ReviewPaneView: View {
     /// change as the reader moved between the conversation and the review, which reads as a bug
     /// rather than a setting.
     @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.standard
-    @AppStorage(ChatFont.defaultsKey) private var chatFont = ChatFont.standard
+    @AppStorage(ChatFont.defaultsKey) private var chatFontID = ChatFont.standardID
     @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.standard
 
     var body: some View {
@@ -88,7 +88,7 @@ struct ReviewPaneView: View {
                     destinationLabel: "Messages are sent to Chat"
                 )
                     .environment(\.fontScale, textSize.scale)
-                    .environment(\.chatFont, chatFont)
+                    .environment(\.chatFont, ChatFont(rawValue: chatFontID))
                     .environment(\.chatLineHeight, lineHeight)
             }
         }
