@@ -190,6 +190,14 @@ private struct MarkdownBlockView: View {
         )
     }
 
+    /// The same rhythm `listLineSpacing` sets an item's own lines in, applied between the items.
+    /// See `ListLeading`, which holds why the two are one number.
+    private func listItemGap(tight: Bool) -> CGFloat {
+        TranscriptLayout.listItemGap(
+            Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight, tight: tight
+        )
+    }
+
     @ViewBuilder
     var body: some View {
         switch block {
@@ -296,9 +304,7 @@ private struct MarkdownBlockView: View {
     }
 
     private func list(items: [[MarkdownBlock]], start: Int?, tight: Bool) -> some View {
-        // A tight list at zero read as one paragraph with dots in it, and a loose one at four was
-        // tighter than the gap between the marker and its own text.
-        VStack(alignment: .leading, spacing: tight ? Metrics.spacingTight : Metrics.spacing) {
+        VStack(alignment: .leading, spacing: listItemGap(tight: tight)) {
             ForEach(items.indices, id: \.self) { offset in
                 // Baseline, not top: this is the alignment the task list beside it already used,
                 // and top alignment sat the marker a fraction above the line it marks.
@@ -314,7 +320,9 @@ private struct MarkdownBlockView: View {
     }
 
     private func taskList(_ items: [(checked: Bool, inline: [MarkdownInline])]) -> some View {
-        VStack(alignment: .leading, spacing: Metrics.spacingTight) {
+        // Tight, always: a task list carries no blank-line flag out of the parser, and it is
+        // written as a checklist rather than as a run of paragraphs.
+        VStack(alignment: .leading, spacing: listItemGap(tight: true)) {
             ForEach(items.indices, id: \.self) { index in
                 let item = items[index]
                 HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
