@@ -104,4 +104,17 @@ struct TranscriptMotionTests {
     func settleUnderReduceMotion() {
         #expect(TranscriptMotion.arrival(reduceMotion: true) == nil)
     }
+
+    /// The three that do not fade each earned it with a measurement; everything else fades because
+    /// it genuinely turns up. That used to be a `default`, so a kind added to `MessageKind` was
+    /// given the fade without anybody deciding, which is how `.crew` got its answer. The switch is
+    /// written out on both sides now and this pins the split, over `allCases` rather than over a
+    /// handful of kinds, so a new one has to be argued for here as well as compiled.
+    @Test("exactly the three rows that are already on screen refuse to fade")
+    func onlyTheEchoedKindsRefuseTheFade() {
+        let still = MessageKind.allCases.filter { !TranscriptMotion.fadesOnArrival($0) }
+        #expect(Set(still) == [.assistantText, .thinking, .user])
+        #expect(still.count + MessageKind.allCases.count(where: TranscriptMotion.fadesOnArrival)
+            == MessageKind.allCases.count)
+    }
 }

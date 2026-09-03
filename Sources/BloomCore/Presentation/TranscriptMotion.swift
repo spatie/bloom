@@ -40,10 +40,16 @@ public enum TranscriptMotion {
     /// exists to remove.
     ///
     /// Everything else genuinely arrives.
+    ///
+    /// **The second list is written out rather than left to a `default`.** The three above are
+    /// exceptions earned by a measurement each, so a kind added to `MessageKind` and not thought
+    /// about here is a kind given the fade by accident. `.crew` reached this by falling through
+    /// when it was added, and it is right, which is the point: it should be right because somebody
+    /// said so, not because the `default` said so first.
     public static func fadesOnArrival(_ kind: MessageKind) -> Bool {
         switch kind {
         case .assistantText, .thinking, .user: false
-        default: true
+        case .toolUse, .toolResult, .permissionAsk, .result, .error, .system, .notice, .crew: true
         }
     }
 
