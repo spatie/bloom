@@ -72,6 +72,30 @@ public enum Postcard {
     ]
 
     /// The address as it goes on a card.
+    /// The paragraphs with the wall linked where it is named, as Markdown.
+    ///
+    /// **The link was a line of its own under the two paragraphs and it should not have been.** A
+    /// row reading "The postcard wall" beside a bare URL is a second way of saying something the
+    /// prose has already said, and it left the window ending on a lonely link rather than on the
+    /// sentence that earns it. Naming the wall in the sentence and making those words the link is
+    /// what a reader expects of prose, and it costs the window a row.
+    ///
+    /// Markdown rather than a hand-built `AttributedString`, because `Text` takes it directly and
+    /// the plain strings above stay exactly as they were for anything that cannot draw a link: the
+    /// welcome step's spoken label, and the test that pins the wording.
+    public static var linkedParagraphs: [String] {
+        paragraphs.map { paragraph in
+            paragraph.replacingOccurrences(
+                of: wallPhrase, with: "[\(wallPhrase)](\(wall.absoluteString))"
+            )
+        }
+    }
+
+    /// The words in the prose that become the link. Written down once so the paragraph and the
+    /// substitution cannot drift apart, and asserted by a test: a phrase that stops matching would
+    /// silently leave the paragraph unlinked rather than fail.
+    public static let wallPhrase = "our virtual postcard wall"
+
     public static var address: String { addressLines.joined(separator: "\n") }
 
     /// The same address written as a sentence, which is how the contact page prints it and the

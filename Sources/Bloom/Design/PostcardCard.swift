@@ -170,12 +170,26 @@ struct PostcardCard: View {
             .padding(.horizontal, inset * 0.8)
     }
 
-    /// The right half: the stamp and its postmark at the top, the address at the foot.
+    /// How much of the card's height is left under the last line of the address.
+    ///
+    /// The block was hung off the foot of the column with nothing under it, so "Belgium" finished
+    /// a few points from the edge of the card. Reported as the address needing to be higher, and
+    /// it did: a card somebody has written leaves a margin under the last line, and type that runs
+    /// to the edge reads as type that ran out of room rather than as an address that was placed.
+    ///
+    /// A fixed measure rather than a second flexible spacer. Two of those would centre the block
+    /// between the stamp and the foot, which is higher up than a card is ever addressed and leaves
+    /// the stamp looking stranded in a corner of its own.
+    private static let addressFoot: CGFloat = 0.12
+
+    /// The right half: the stamp and its postmark at the top, the address below it and clear of
+    /// the foot. See `addressFoot`.
     private var addressSide: some View {
         VStack(alignment: .leading, spacing: 0) {
             franking
             Spacer(minLength: Metrics.spacing)
             address
+                .padding(.bottom, height * Self.addressFoot)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

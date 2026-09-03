@@ -175,20 +175,24 @@ struct PostcardView: View {
                 // The gap between the two is the list's own, so they read as two thoughts in the
                 // window's rhythm rather than as one paragraph that broke. Same as `AboutView`.
                 VStack(alignment: .leading, spacing: Metrics.inset) {
-                    ForEach(Postcard.paragraphs, id: \.self) { paragraph in
-                        Text(paragraph)
+                    // `linkedParagraphs` rather than `paragraphs`: the wall is named in the second
+                    // sentence and those words carry the link, which is what took the lonely link
+                    // row off the foot of this window. See `Postcard.linkedParagraphs`.
+                    //
+                    // `Text(.init(_:))` is what reads the Markdown: a `Text` handed a `String`
+                    // draws the brackets, a `Text` handed a `LocalizedStringKey` renders the link.
+                    ForEach(Postcard.linkedParagraphs, id: \.self) { paragraph in
+                        Text(.init(paragraph))
                             .font(Typo.body)
                             .foregroundStyle(Palette.textSecondary)
+                            .tint(Palette.link)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: Metrics.inset) {
-                PostcardOffer()
-                PostcardWallLink()
-            }
+            PostcardOffer()
         }
         .padding(Metrics.pane)
         .frame(maxWidth: .infinity, alignment: .leading)

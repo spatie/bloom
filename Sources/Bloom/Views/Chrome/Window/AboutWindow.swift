@@ -78,6 +78,10 @@ enum AboutWindow {
 /// in `Maker` and `BuildIdentity`, because a string typed into this file is a string nothing in
 /// `Tests/BloomCoreTests` can hold still.
 private struct AboutView: View {
+    /// Handed to the stamp rather than read by it, so a panel that is being redrawn rather than
+    /// opened can hold it still without asking about the system setting twice.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     /// Wide enough that the product summaries set beside their marks without an orphaned line,
     /// and no wider: the window is a column of centred things and a short list, and surplus width
     /// reads as a dialog that forgot its content. 360 was the width before the makers section
@@ -231,15 +235,25 @@ private struct AboutView: View {
             }
             .padding(.top, Metrics.spacingWide + Metrics.spacingSmall)
 
-            postcard
-                .padding(.top, Metrics.inset + Metrics.spacingSmall)
-
             VStack(spacing: Metrics.inset) {
                 ForEach(Maker.products, id: \.host) { product in
                     productRow(product)
                 }
             }
             .padding(.top, Metrics.pane - Metrics.spacingSmall)
+
+            // **Under the products rather than over them, which is a change from where this
+            // started.** It sat directly beneath the identity paragraphs, on the argument that the
+            // second of those ends on "free for anyone who wants it" and this finishes that
+            // thought. True of the sentence and wrong on the page: it split the makers section in
+            // half, so the three products read as a list that had been pushed down the panel by an
+            // aside rather than as the thing the paragraph above them was introducing.
+            //
+            // Last is also where an ask belongs. Everything above it is Bloom saying who made it;
+            // this is the one part that wants something back, and a panel that asks before it has
+            // finished introducing itself asks too early.
+            postcard
+                .padding(.top, Metrics.pane - Metrics.spacingSmall)
         }
         .frame(maxWidth: .infinity)
         .padding(Metrics.pane)
@@ -248,10 +262,14 @@ private struct AboutView: View {
 
     /// What Bloom asks for in return, in one sentence and one way through to the rest of it.
     ///
-    /// Directly under the identity paragraphs, because the second of them ends on "free for anyone
-    /// who wants it" and this is the sentence that finishes that thought. Above the products
-    /// rather than below them: the list of what else Spatie makes is a reference, and a reader who
-    /// has reached it has stopped reading about Bloom.
+    /// Last in the panel. See the note at the call site for why it moved out from under the
+    /// identity paragraphs, which is that it was cutting the makers section in two.
+    ///
+    /// **A stamp rather than a card.** The postcard window and the welcome step both draw the card
+    /// itself, and this panel must not: it is one sentence and a way through, and a second postcard
+    /// three inches from the first is the same object said twice. What it carries instead is the
+    /// smallest part of one. It presses on when the panel appears, the way a stamp is pressed, and
+    /// then rests. See `PostcardStamp`.
     ///
     /// One line and a way on, not a second copy of the postcard window. The address, the card and
     /// the wall are all one press away, and an About window that carried a postal address in it
@@ -264,6 +282,8 @@ private struct AboutView: View {
     /// it never appears without that sentence over it.
     private var postcard: some View {
         VStack(spacing: Metrics.spacing) {
+            PostcardStamp(plays: !reduceMotion)
+
             Text(Postcard.summary)
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textSecondary)

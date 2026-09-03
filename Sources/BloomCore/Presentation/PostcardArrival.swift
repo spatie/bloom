@@ -168,6 +168,40 @@ public enum PostcardArrival {
     ///
     /// Zero when Reduce Motion is on, which is the honest answer rather than a courtesy: there is
     /// nothing to wait for.
+    /// A stamp being pressed on, for the About panel, which draws no card.
+    ///
+    /// **A different gesture from the card's, and it has to be.** A card is set down: it travels,
+    /// it tilts, and its shadow contracts as it approaches the paper. A stamp is pressed: it does
+    /// not travel at all, it arrives slightly too large and settles onto the surface, which is what
+    /// a thumb does to a stamp. Reusing `settle` here would have put a card's descent on an object
+    /// that is already lying on the card.
+    ///
+    /// Nil under Reduce Motion for the same reason `settle` is nil: a caller handed a shortened
+    /// animation can honour half of it, and a caller handed nothing cannot.
+    public static func press(reduceMotion: Bool) -> Press? {
+        guard !reduceMotion else { return nil }
+        return Press()
+    }
+
+    /// The stamp's arrival. No offset and no angle: what changes is scale and ink.
+    public struct Press: Equatable, Sendable {
+        /// Larger than its rest size, so it comes down onto the panel rather than growing into it.
+        /// A tenth, which is the same overshoot the card starts at, so the two readings of "an
+        /// object arriving" agree across the app.
+        public var startScale: Double = 1.10
+        public var startOpacity: Double = 0
+        /// Shorter than the card's. A press is one movement and a card's descent is a journey, and
+        /// a stamp that took the card's time would read as slow rather than as deliberate.
+        public var seconds: Double = 0.32
+        /// After the panel's own text has arrived, so the stamp is a thing that lands on a page
+        /// rather than part of the page appearing.
+        public var delay: Double = 0.18
+
+        public init() {}
+
+        public var endsAfter: Double { delay + seconds }
+    }
+
     public static func seconds(reduceMotion: Bool) -> Double {
         settle(reduceMotion: reduceMotion)?.endsAfter ?? 0
     }

@@ -147,3 +147,58 @@ struct PostcardArrivalTests {
         #expect(PostcardArrival.seconds(reduceMotion: false) == settle.endsAfter)
     }
 }
+
+@Suite("The stamp's press")
+struct PostcardPressTests {
+    /// Reduce Motion answers with nothing rather than with a shorter press, so a caller cannot
+    /// honour half of it. Same rule as `settle`.
+    @Test func reducedMotionPressesNothing() {
+        #expect(PostcardArrival.press(reduceMotion: true) == nil)
+        #expect(PostcardArrival.press(reduceMotion: false) != nil)
+    }
+
+    /// It arrives large and fades in, which is a thumb pressing a stamp down rather than a card
+    /// travelling across the page: no offset and no angle are offered at all.
+    @Test func comesDownRatherThanAcross() throws {
+        let press = try #require(PostcardArrival.press(reduceMotion: false))
+
+        #expect(press.startScale > 1)
+        #expect(press.startOpacity == 0)
+    }
+
+    /// Shorter than the card's descent, and over quickly enough that nobody waits for it. The card
+    /// is a journey and this is one movement.
+    @Test func isShorterThanTheCardsDescent() throws {
+        let press = try #require(PostcardArrival.press(reduceMotion: false))
+        let settle = try #require(PostcardArrival.settle(reduceMotion: false))
+
+        #expect(press.seconds < settle.seconds)
+        #expect(press.endsAfter < 1)
+    }
+}
+
+@Suite("The wall in the prose")
+struct PostcardWallLinkTests {
+    /// The substitution is silent when it misses: a phrase that stopped matching would leave the
+    /// paragraph unlinked rather than fail, and nobody would notice until the window shipped
+    /// without a way to the wall.
+    @Test func theLinkedPhraseIsActuallyInTheProse() {
+        #expect(Postcard.paragraphs.contains { $0.contains(Postcard.wallPhrase) })
+    }
+
+    /// Exactly one paragraph gains a link, and the address of it is the wall.
+    @Test func exactlyOneParagraphCarriesTheWall() {
+        let linked = Postcard.linkedParagraphs.filter { $0.contains(Postcard.wall.absoluteString) }
+
+        #expect(linked.count == 1)
+        #expect(linked.first?.contains("[\(Postcard.wallPhrase)](") == true)
+    }
+
+    /// The plain wording is untouched, because the welcome step's spoken label and the wording
+    /// test both read it and neither wants Markdown in it.
+    @Test func thePlainParagraphsKeepNoMarkup() {
+        for paragraph in Postcard.paragraphs {
+            #expect(!paragraph.contains("]("))
+        }
+    }
+}
