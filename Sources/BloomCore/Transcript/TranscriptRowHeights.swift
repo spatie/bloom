@@ -41,7 +41,7 @@ import Foundation
 /// too tall by the whole mean, three or four times between every pair of tool calls. Worse, each
 /// of them is then corrected the moment it is drawn, and correcting a row near the top of a long
 /// list moves every row below it. `TranscriptRowInk` is how a caller knows before anything is
-/// drawn; `assumed(for:drawsNothing:)` is where the answer goes in.
+/// drawn; `assumed(for:shape:drawsNothing:)` is where the answer goes in.
 ///
 /// ## It outlives the conversation it was filled for
 ///
@@ -71,6 +71,29 @@ import Foundation
 /// So `showing(_:)` says which conversation the pane is pointed at, and a change of it starts the
 /// estimate again while keeping every measured height. What the sample is formed from is the rows
 /// measured since, which is `sampled`.
+///
+/// ## And ONE estimate cannot serve a conversation either
+///
+/// **That fix was necessary and it was not sufficient, which is the reader's second report: still
+/// white gaps between output when he scrolls UP.** Scrolling back is the window growing at the
+/// TOP, so the rows arriving are rows nobody has measured, and the number they are drawn at was
+/// settled from the screen the pane ARRIVED on, which is the live end: the newest answer, which is
+/// the longest prose in the session, next to a turn footer. A screen of tool calls and folded runs
+/// from an hour ago is then a screen of one line rows each given a paragraph's height, and a cell
+/// draws from its top down, so the difference is blank under every one of them.
+///
+/// A conversation does not have one row height. It has a handful of clusters, and which cluster a
+/// row is in is known from the row before anything is drawn: see `TranscriptRowShape`. So the mean
+/// is kept per shape as well as over the whole conversation, and an unmeasured row is told its own
+/// shape's number as soon as there is one. `settleShapeAfter` is how much evidence "one" takes,
+/// and it is deliberately small, because rows of one shape cluster: three folds say more about the
+/// fourth fold than twenty-four paragraphs do.
+///
+/// What this cannot do is remove the gap. A row nobody has measured is a guess whatever it is
+/// grouped with, and prose is genuinely unpredictable: two answers in the same conversation differ
+/// by a factor of ten. It narrows the guess to the spread WITHIN a kind of row from the spread
+/// ACROSS all of them, and for the shapes a reader meets most of when scrolling back, which are
+/// the near-constant ones, that is most of the way to exact.
 ///
 /// ## A live resize does not remeasure, on purpose
 ///
@@ -189,6 +212,27 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// count of the rows in it.
     public static let resettleDrift = 0.25
 
+    /// How many drawn rows OF ONE SHAPE it takes before that shape answers for itself.
+    ///
+    /// **Three, and the smallness is the whole point of it.** `settleAfter` is a screenful,
+    /// because a mean over every kind of row at once needs a screenful before it means anything.
+    /// A shape is a group of rows whose heights cluster, so it does not: a fold's line is the same
+    /// height every time it is drawn, a turn footer nearly so, and a collapsed tool card within a
+    /// line or two. Three of them says more about the fourth than a screenful of another shape
+    /// does, which is the number those rows are drawn at today.
+    ///
+    /// And it has to be small to arrive in time. The rows a reader scrolling back meets are the
+    /// ones the arrival screen saw least of: one screen at the live end holds a great deal of the
+    /// newest answer and perhaps three folds. A threshold of a screenful per shape would leave
+    /// every shape but prose falling back to the conversation's own mean, which is the number that
+    /// left the gaps.
+    ///
+    /// Small, and then held under the same rule the whole-conversation number is held under: see
+    /// `settleIfItIsTime`. An unlucky three is not permanent, and the sample has to double before
+    /// it can be taken again, so a shape re-forms its number a handful of times over a session
+    /// rather than on every row.
+    public static let settleShapeAfter = 3
+
     /// Whether a row is the height it drew at.
     ///
     /// The same half point `note` files a measurement under, so the check that a drawn row is the
@@ -218,25 +262,88 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// **The rows the estimate is formed from: the ones measured since the pane was pointed at
     /// this conversation.**
     ///
-    /// A set rather than a count, because `note` has to know whether a number arriving is a
-    /// row joining the sample or a row already in it saying itself again, and the two are
-    /// arithmetic in opposite directions. `heights` cannot answer that question after
+    /// A record of each row rather than a count, because `note` has to know whether a number
+    /// arriving is a row joining the sample or a row already in it saying itself again, and the
+    /// two are arithmetic in opposite directions. `heights` cannot answer that question after
     /// `showing(_:)`: a key it already knows can be a row of the conversation being arrived at,
     /// measured on the last visit, and subtracting a contribution that was never added is how a
     /// mean goes negative.
-    private var sampled: Set<TranscriptContentKey> = []
-    /// The sum of the sampled heights, kept in step on every write so the mean below costs
-    /// nothing to ask.
-    private var total: Double = 0
-    /// How many of the sampled rows are more than nothing, which is what `estimate` divides by.
-    /// See it for why a mean over the rows that drew nothing was the wrong number.
-    private var inked = 0
-    /// The estimate once it has stopped moving, or nothing while it is still being formed. See
-    /// `settleAfter`, which carries what a drifting one costs.
-    private var settled: Double?
-    /// How many drawn rows the settled number was formed from, so it is only taken again once
-    /// there are twice as many. See `resettleDrift`.
-    private var settledFrom = 0
+    ///
+    /// What it records is the shape, where it used to be a set with no value at all, because a row
+    /// coming out again has to come out of the mean it went into and this is the only thing that
+    /// says which one that was.
+    private var sampled: [TranscriptContentKey: TranscriptRowShape] = [:]
+    /// The mean over every measured row of this conversation, whatever shape it was. What a row
+    /// whose own shape has not been seen enough of is still told.
+    private var overall = Running()
+    /// The same arithmetic again, kept per shape. See the header, and `TranscriptRowShape`.
+    private var shapes: [TranscriptRowShape: Running] = [:]
+
+    /// One running mean, and the settle over it.
+    ///
+    /// Its own type because there are now several of these, one for the conversation and one per
+    /// shape, and they are the same three decisions each time: what the mean is, when it stops
+    /// moving, and when it is worth taking again.
+    private struct Running: Equatable, Sendable {
+        /// The sum of the sampled heights, kept in step on every write so the mean costs nothing
+        /// to ask.
+        var total: Double = 0
+        /// How many of the sampled rows are more than nothing, which is what the mean divides by.
+        /// See `estimate` for why a mean over the rows that drew nothing was the wrong number.
+        var inked = 0
+        /// The estimate once it has stopped moving, or nothing while it is still being formed. See
+        /// `settleAfter`, which carries what a drifting one costs.
+        var settled: Double?
+        /// How many drawn rows the settled number was formed from, so it is only taken again once
+        /// there are twice as many. See `resettleDrift`.
+        var settledFrom = 0
+
+        /// What this says a row is worth, or nothing if it has nothing to say yet.
+        var estimate: Double? {
+            if let settled { return settled }
+            return inked == 0 ? nil : total / Double(inked)
+        }
+
+        /// Takes a measurement in, and the one it replaces out.
+        ///
+        /// The second and later times a row says itself, which is the streaming tail on every
+        /// frame of a turn and any row corrected after it was drawn, what it said before comes out
+        /// again: the sample is one contribution per row, not one per report.
+        mutating func absorb(_ height: Double, replacing previous: Double, settlingAfter: Int) {
+            total += height - previous
+            if previous > 0 { inked -= 1 }
+            if height > 0 { inked += 1 }
+            settleIfItIsTime(settlingAfter: settlingAfter)
+        }
+
+        /// Takes a measurement back out, for a row that is moving to another shape's sample.
+        mutating func release(_ height: Double) {
+            total -= height
+            if height > 0 { inked -= 1 }
+        }
+
+        /// Takes the estimate, if there is enough to take it from and it is worth taking again.
+        ///
+        /// Once at `settlingAfter`, and after that only when the sample has doubled AND the
+        /// running mean disagrees with what is held by more than `resettleDrift`. Both of those,
+        /// so that a good first sample settles the number for the whole session and a bad one is
+        /// not permanent.
+        private mutating func settleIfItIsTime(settlingAfter: Int) {
+            guard inked >= settlingAfter else { return }
+            let running = total / Double(inked)
+            guard let settled else { return take(running) }
+            guard inked >= settledFrom * 2 else { return }
+            guard abs(running - settled) > settled * TranscriptRowHeights.resettleDrift else {
+                return
+            }
+            take(running)
+        }
+
+        private mutating func take(_ estimate: Double) {
+            settled = estimate
+            settledFrom = inked
+        }
+    }
 
     public init() {}
 
@@ -264,10 +371,8 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         heights.removeAll()
         stale.removeAll()
         sampled.removeAll()
-        total = 0
-        inked = 0
-        settled = nil
-        settledFrom = 0
+        overall = Running()
+        shapes.removeAll()
         return true
     }
 
@@ -286,10 +391,8 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         guard self.conversation != conversation else { return false }
         self.conversation = conversation
         sampled.removeAll()
-        total = 0
-        inked = 0
-        settled = nil
-        settledFrom = 0
+        overall = Running()
+        shapes.removeAll()
         return true
     }
 
@@ -399,9 +502,13 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         heights[contentKey] == 0
     }
 
-    /// What an unmeasured row that draws SOMETHING is worth: the mean of the rows of THIS
-    /// conversation that have been measured here and drew something, or `assumedRowHeight` before
-    /// there is one. See `showing(_:)` for why the conversation is in that sentence.
+    /// The mean over the rows of THIS conversation that have been measured here and drew
+    /// something, or `assumedRowHeight` before there is one. See `showing(_:)` for why the
+    /// conversation is in that sentence.
+    ///
+    /// **It is the fallback rather than the answer now.** What an unmeasured row is actually told
+    /// is `estimate(for:)`, which is this number only while the row's own kind has too little
+    /// evidence to speak for itself.
     ///
     /// A mean rather than a median, because it is kept as a running total and a median would mean
     /// holding the numbers sorted for an answer that is corrected the moment the row is drawn.
@@ -409,7 +516,7 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// **The rows that drew nothing are deliberately not in it, and they used to be.** Most of a
     /// session is stream events that draw no view at all, so a mean over every measurement is a
     /// mean over thousands of noughts: it came out several times too small for the rows it is
-    /// actually asked about. Those rows are answered by `assumed(for:drawsNothing:)` without
+    /// actually asked about. Those rows are answered by `assumed(for:shape:drawsNothing:)` without
     /// consulting this at all, so including them made the one number this still answers worse for
     /// no one's benefit.
     ///
@@ -417,8 +524,31 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// is the right answer to "how tall is a row I know nothing about" and the wrong answer to
     /// "how tall is this document", and the second question is the one a reader feels.
     public var estimate: Double {
-        if let settled { return settled }
-        return inked == 0 ? Self.assumedRowHeight : total / Double(inked)
+        overall.estimate ?? Self.assumedRowHeight
+    }
+
+    /// **What an unmeasured row OF THIS SHAPE is worth**, which is the answer a reader scrolling
+    /// back sees and the whole of the second fix.
+    ///
+    /// The shape's own mean once `settleShapeAfter` rows of it have been drawn, and the
+    /// conversation's mean until then. Falling back rather than waiting, because a shape with no
+    /// evidence yet is exactly the state the old single number was always in, so the fallback can
+    /// only be as wrong as today and the shape can only be better: the two clusters a shape
+    /// separates are separated by more than the noise inside either of them.
+    ///
+    /// See `TranscriptRowShape` for why a fold's line is the case that settles this: the same
+    /// height every time it is drawn, one per turn all the way back through the conversation, and
+    /// under one conversation-wide mean every one of them was given a paragraph's height.
+    ///
+    /// What it is worth, on a harness that walks a reader up a 350 row conversation one viewport
+    /// at a time and adds up how far every unmeasured row is from its truth: 24,972 points of
+    /// blank with one number, 9,387 with one per shape. It narrows the gap rather than removing
+    /// it, and it cannot do better than that, because an answer nobody has drawn is a guess.
+    public func estimate(for shape: TranscriptRowShape) -> Double {
+        guard shape != .other, let running = shapes[shape],
+              running.inked >= Self.settleShapeAfter, let answer = running.estimate
+        else { return estimate }
+        return answer
     }
 
     /// **The number to tell a table**: what is known, what is known to be nothing, or what is
@@ -428,9 +558,13 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// dictionary lookup each. See the header for why a table is answered rather than made to
     /// wait, and `TranscriptRowInk` for how a caller knows a row will draw nothing before anything
     /// has drawn it.
-    public func assumed(for contentKey: TranscriptContentKey, drawsNothing: Bool = false) -> Double {
+    public func assumed(
+        for contentKey: TranscriptContentKey,
+        shape: TranscriptRowShape = .other,
+        drawsNothing: Bool = false
+    ) -> Double {
         if let known = heights[contentKey] { return known }
-        return drawsNothing ? 0 : estimate
+        return drawsNothing ? 0 : estimate(for: shape)
     }
 
     /// Remembers a height, and says whether it is news.
@@ -446,8 +580,15 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     ///
     /// False for a height that has not moved by half a point, which is what keeps a row that
     /// reports its size on every layout pass from telling the table to relayout on every one.
+    ///
+    /// The shape is what the caller believes this row is, and it decides which running mean the
+    /// measurement joins. It defaults to `.other` so that a caller with nothing to say does not
+    /// have to invent something: an unclassified row still forms the conversation's own mean,
+    /// which is what every row was told before there were shapes at all.
     @discardableResult
-    public mutating func note(_ height: Double, for contentKey: TranscriptContentKey) -> Bool {
+    public mutating func note(
+        _ height: Double, for contentKey: TranscriptContentKey, shape: TranscriptRowShape = .other
+    ) -> Bool {
         guard measure != nil else { return false }
         // Before the news test below, so a row that turns out to be exactly as tall as it was at
         // the old width still stops being owed a measurement.
@@ -461,45 +602,39 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         // the cache and is the only evidence this conversation has offered about how tall its rows
         // are. Counted here, the sample fills on a return as it does on a first visit; counted
         // after the test, a conversation the pane already knows would estimate from nothing.
-        sample(rounded, for: contentKey)
+        sample(rounded, for: contentKey, shape: shape)
         guard !Self.isSameHeight(known ?? -1, rounded) else { return false }
         heights[contentKey] = rounded
         return true
     }
 
-    /// Puts a measurement into the sample the estimate is formed from, once per row.
+    /// Puts a measurement into the two samples the estimates are formed from, once per row.
     ///
-    /// The second and later times a row says itself, which is the streaming tail on every frame of
-    /// a turn and any row corrected after it was drawn, what it said before comes out again: the
-    /// sample is one contribution per row, not one per report.
-    private mutating func sample(_ height: Double, for contentKey: TranscriptContentKey) {
-        let previous = sampled.insert(contentKey).inserted ? 0 : (heights[contentKey] ?? 0)
-        total += height - previous
-        if previous > 0 { inked -= 1 }
-        if height > 0 { inked += 1 }
-        settleIfItIsTime()
-    }
-
-    /// Takes the estimate, if there is enough to take it from and it is worth taking again.
+    /// Two, because there is the conversation's own mean and there is this row's shape's, and a
+    /// row contributes to both. What it replaces comes out of both as well: see
+    /// `Running.absorb(_:replacing:settlingAfter:)`.
     ///
-    /// Once at `settleAfter`, and after that only when the sample has doubled AND the running mean
-    /// disagrees with what is held by more than `resettleDrift`. Both of those, so that a good
-    /// first screenful settles the number for the whole session and a bad one is not permanent.
-    private mutating func settleIfItIsTime() {
-        guard inked >= Self.settleAfter else { return }
-        let running = total / Double(inked)
-        guard let settled else {
-            take(running)
-            return
-        }
-        guard inked >= settledFrom * 2 else { return }
-        guard abs(running - settled) > settled * Self.resettleDrift else { return }
-        take(running)
-    }
-
-    private mutating func take(_ estimate: Double) {
-        settled = estimate
-        settledFrom = inked
+    /// A row that arrives under a different shape from the one it was filed under is taken out of
+    /// the old shape's sample first. It should not happen, because a shape is read off a row's
+    /// kind and the kind is part of the content key, and it is handled anyway rather than left as
+    /// a mean quietly counting a row twice.
+    private mutating func sample(
+        _ height: Double, for contentKey: TranscriptContentKey, shape: TranscriptRowShape
+    ) {
+        let before = sampled.updateValue(shape, forKey: contentKey)
+        let previous = before == nil ? 0 : (heights[contentKey] ?? 0)
+        if let before, before != shape { shapes[before, default: Running()].release(previous) }
+        overall.absorb(height, replacing: previous, settlingAfter: Self.settleAfter)
+        // **`.other` keeps no sample of its own, and that is what it means.** It is the shape for a
+        // row nothing has classified, so the honest answer for one is the conversation's own mean:
+        // a bucket for them would be a second whole-conversation mean settling on another schedule,
+        // and the four entries in it are measured before anything else anyway.
+        guard shape != .other else { return }
+        shapes[shape, default: Running()].absorb(
+            height,
+            replacing: before == shape ? previous : 0,
+            settlingAfter: Self.settleShapeAfter
+        )
     }
 
     /// Rounded up to a whole point, and never below nothing.
@@ -517,9 +652,7 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         heights.removeAll()
         stale.removeAll()
         sampled.removeAll()
-        total = 0
-        inked = 0
-        settled = nil
-        settledFrom = 0
+        overall = Running()
+        shapes.removeAll()
     }
 }

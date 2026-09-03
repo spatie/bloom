@@ -814,4 +814,180 @@ struct TranscriptRowHeightsTests {
         let invalidated = heights.reset(width: 800, scale: 1, leading: 1.7)
         #expect(!invalidated)
     }
+
+    // MARK: - One estimate per KIND of row, not one per conversation
+
+    /// **The reader's second report, written down: "still white gaps between output when I scroll
+    /// up".** Scrolling back grows the window at the TOP, so the rows arriving are rows nobody has
+    /// measured, and the number they were drawn at had settled from the screen the pane ARRIVED
+    /// on, which is the live end and is the longest prose in the session. A screen of folded runs
+    /// from an hour ago was then a screen of one line rows each given a paragraph's height, and a
+    /// cell draws from its top down, so the difference is blank under every one of them.
+    @Test("a head grow tells a fold what a fold is, not what the newest answer was")
+    func aHeadGrowIsToldItsOwnShape() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 831, scale: 1, leading: 1.7)
+        heights.showing(SessionID("chat"))
+        // The arrival: three folds and a screenful of the answer the pane opened on.
+        for fold in 0..<3 { heights.note(28, for: key("fold.\(fold)"), shape: .fold) }
+        for row in 0..<TranscriptRowHeights.settleAfter {
+            heights.note(800, for: key("answer.\(row)"), shape: .answer)
+        }
+        #expect(heights.estimate == 703.5)
+        // The head grow: twelve folds nobody has measured, each of them truly 28 points.
+        var blank = 0.0
+        for fold in 3..<15 {
+            blank += heights.assumed(for: key("fold.\(fold)"), shape: .fold) - 28
+        }
+        #expect(blank == 0)
+        // What the same twelve rows were told before there were shapes. Eight thousand points of
+        // blank, which is eight screens of it on a pane a thousand points tall.
+        var wasBlank = 0.0
+        for fold in 3..<15 {
+            wasBlank += heights.assumed(for: key("fold.\(fold)")) - 28
+        }
+        #expect(wasBlank == 8_106)
+    }
+
+    /// A shape with too little evidence is not a shape yet, and the honest answer for one is the
+    /// number every row was told before there were shapes at all. Falling back rather than waiting
+    /// for evidence: the fallback can only be as wrong as the old behaviour was.
+    @Test("a shape nobody has measured enough of falls back to the conversation")
+    func tooLittleOfAShapeFallsBack() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 831, scale: 1, leading: 1.7)
+        for row in 0..<10 { heights.note(200, for: key("answer.\(row)"), shape: .answer) }
+        // Two is not enough to speak for a kind of row. See `settleShapeAfter`.
+        heights.note(28, for: key("fold.1"), shape: .fold)
+        heights.note(28, for: key("fold.2"), shape: .fold)
+        // Ten answers and two folds, which is the conversation's own mean and not a fold's.
+        #expect(heights.estimate(for: .fold) == 2_056.0 / 12)
+        // The third is.
+        heights.note(28, for: key("fold.3"), shape: .fold)
+        #expect(heights.estimate(for: .fold) == 28)
+    }
+
+    /// The whole-conversation mean is still formed, and still from every row, because it is what a
+    /// shape with nothing to say falls back to.
+    @Test("a shape's rows still form the conversation's own mean")
+    func shapesStillFeedTheWholeConversation() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 831, scale: 1, leading: 1.7)
+        heights.note(100, for: key("a"), shape: .tool)
+        heights.note(300, for: key("b"), shape: .answer)
+        #expect(heights.estimate == 200)
+    }
+
+    /// **`.other` keeps no sample of its own**, because it is the shape for a row nothing has
+    /// classified. A bucket for those would be a second whole-conversation mean settling on
+    /// another schedule.
+    @Test("an unclassified row is answered by the conversation's own mean")
+    func otherIsTheConversation() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 831, scale: 1, leading: 1.7)
+        for row in 0..<10 { heights.note(40, for: key("tool.\(row)"), shape: .tool) }
+        heights.note(900, for: key("tail"), shape: .other)
+        #expect(heights.estimate(for: .other) == heights.estimate)
+        // And the unclassified row is in the conversation's mean like any other.
+        #expect(heights.estimate == 1_300.0 / 11)
+    }
+
+    /// A shape's number holds still for the reason the conversation's does: a table caches every
+    /// height it is told, so a drifting estimate turns each wholesale re-ask into one jump.
+    @Test("a shape's estimate settles and then holds still")
+    func aShapeSettlesAndHolds() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 831, scale: 1, leading: 1.7)
+        for row in 0..<TranscriptRowHeights.settleShapeAfter {
+            heights.note(30, for: key("tool.\(row)"), shape: .tool)
+        }
+        #expect(heights.estimate(for: .tool) == 30)
+        // Two more, which is five drawn tool rows against the three it settled from. Not doubled,
+        // so it holds however wrong it now is.
+        heights.note(300, for: key("tool.wide.1"), shape: .tool)
+        heights.note(300, for: key("tool.wide.2"), shape: .tool)
+        #expect(heights.estimate(for: .tool) == 30)
+    }
+
+    /// An unlucky three is not permanent, which is what makes three a safe number to settle on.
+    @Test("a shape's estimate is taken again once its sample has doubled and it is far out")
+    func aShapeResettles() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 831, scale: 1, leading: 1.7)
+        for row in 0..<3 { heights.note(300, for: key("tool.\(row)"), shape: .tool) }
+        #expect(heights.estimate(for: .tool) == 300)
+        for row in 3..<6 { heights.note(30, for: key("tool.\(row)"), shape: .tool) }
+        // Six against the three it settled from, and half the sample says thirty.
+        #expect(heights.estimate(for: .tool) == 165)
+    }
+
+    /// A shape that is nearly right must not move, for the same reason the conversation's number
+    /// must not: a wholesale re-ask cashes in whatever drift there has been.
+    @Test("a shape that is nearly right is left alone")
+    func aShapeDoesNotResettleForSmallDrift() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 831, scale: 1, leading: 1.7)
+        for row in 0..<3 { heights.note(100, for: key("fold.\(row)"), shape: .fold) }
+        for row in 3..<40 { heights.note(105, for: key("fold.\(row)"), shape: .fold) }
+        #expect(heights.estimate(for: .fold) == 100)
+    }
+
+    /// The rows that drew nothing are not what forms a shape either, for the reason they are not
+    /// what forms the conversation's number: they are answered rather than estimated.
+    @Test("rows that drew nothing do not form a shape's estimate")
+    func noughtsDoNotFormAShape() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 831, scale: 1, leading: 1.7)
+        for row in 0..<50 { heights.note(0, for: key("blank.\(row)"), shape: .tool) }
+        for row in 0..<3 { heights.note(40, for: key("tool.\(row)"), shape: .tool) }
+        #expect(heights.estimate(for: .tool) == 40)
+    }
+
+    /// A row corrected after it was drawn is one contribution to its shape, not two. The streaming
+    /// tail says itself on every frame of a turn, so this is the ordinary case rather than a
+    /// corner of one.
+    @Test("a row measured again does not count twice in its shape")
+    func aShapeFollowsAnOverwrite() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 831, scale: 1, leading: 1.7)
+        for row in 0..<2 { heights.note(40, for: key("tool.\(row)"), shape: .tool) }
+        heights.note(100, for: key("tool.0"), shape: .tool)
+        heights.note(40, for: key("tool.2"), shape: .tool)
+        // 100, 40 and 40, rather than 40, 40, 100 and 40.
+        #expect(heights.estimate(for: .tool) == 60)
+    }
+
+    /// A measured height belongs to a row and is kept for ever; every estimate formed from them
+    /// belongs to the conversation and is not. The shapes go with the conversation's own number.
+    @Test("pointing the pane elsewhere starts every shape again")
+    func showingStartsEveryShapeAgain() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 831, scale: 1, leading: 1.7)
+        heights.showing(SessionID("prose"))
+        for row in 0..<3 { heights.note(900, for: key("answer.\(row)"), shape: .answer) }
+        #expect(heights.estimate(for: .answer) == 900)
+        heights.showing(SessionID("tools"))
+        #expect(heights.estimate(for: .answer) == TranscriptRowHeights.assumedRowHeight)
+    }
+
+    /// A resize keeps its numbers as estimates, so it keeps the shapes they make up. Emptying them
+    /// would leave every row above the reader on `assumedRowHeight` for the length of a drag.
+    @Test("a resize keeps the shapes as well as the heights")
+    func shapesSurviveAResize() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 831, scale: 1, leading: 1.7)
+        for row in 0..<3 { heights.note(30, for: key("tool.\(row)"), shape: .tool) }
+        heights.rewidth(to: 600)
+        #expect(heights.estimate(for: .tool) == 30)
+    }
+
+    /// A text size change is not an estimate of anything, at any grouping.
+    @Test("emptying the cache empties every shape")
+    func forgettingEmptiesTheShapes() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 831, scale: 1, leading: 1.7)
+        for row in 0..<3 { heights.note(30, for: key("tool.\(row)"), shape: .tool) }
+        heights.forget()
+        #expect(heights.estimate(for: .tool) == TranscriptRowHeights.assumedRowHeight)
+    }
 }
