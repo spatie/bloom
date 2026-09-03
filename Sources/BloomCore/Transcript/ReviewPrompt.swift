@@ -96,7 +96,14 @@ public enum ReviewPayload {
 
         let remaining = all.count - shown.count
         if remaining > 0 {
-            blocks.append("...and \(remaining) more comment\(remaining == 1 ? "" : "s") not shown.")
+            // `Counted.word` rather than `Counted.of`, which is the one place the difference
+            // matters: `ReviewTurn.isTruncationTail` reads this line back and requires the count to
+            // be nothing but digits, and `of` writes a number with the reader's own thousands
+            // separator in it. The noun is the half that was being got wrong by hand; the number
+            // stays exactly as strict as the parser needs.
+            blocks.append(
+                "...and \(remaining) \(Counted.word(remaining, "more comment")) not shown."
+            )
         }
         return blocks.joined(separator: "\n\n")
     }

@@ -27,7 +27,7 @@ public enum UserTurnPrompt {
         let visible: String
         if let review = ReviewTurn.split(presented) {
             visible = if review.message.isEmpty {
-                "\(review.chips.count) review comment\(review.chips.count == 1 ? "" : "s")"
+                Counted.of(review.chips.count, "review comment")
             } else {
                 review.message
             }
