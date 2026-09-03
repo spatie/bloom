@@ -1,109 +1,128 @@
 # Bloom
 
-A native macOS app for running coding agents in parallel, each in its own git worktree.
+An agent development environment, native to the Mac.
 
-It is a rebuild of [Conductor](https://conductor.build) in Swift, so it can be changed to taste.
-Conductor itself is a Tauri app: Rust with a WebKit view. Bloom is SwiftUI with two dependencies
-(SwiftTerm for the embedded terminal, Sparkle for updates) and everything else on the system
-frameworks.
+[![Tests](https://github.com/spatie/bloom/actions/workflows/test.yml/badge.svg)](https://github.com/spatie/bloom/actions/workflows/test.yml)
+[![Latest release](https://img.shields.io/github/v/release/spatie/bloom?style=flat-square)](https://github.com/spatie/bloom/releases)
 
-## What it does
+[![Bloom](art/overview.png)](https://runbloom.app)
 
-- Add a git repository as a project.
-- Describe a task. Bloom creates a branch, a worktree under `~/bloom/workspaces.noindex`, copies
-  your `.env` files, runs your setup script, and starts an agent in it. The name ends `.noindex`
-  because a dozen worktrees of the same project are a dozen copies of its `vendor` and `.build`
-  folders, and that suffix is the only thing measured to keep Spotlight out of them. An
-  installation that already has a `~/bloom/workspaces` keeps it: nothing is ever renamed on disk,
-  because a worktree's path is recorded in the database, in the worktree, and in git's own admin
-  files, and moving it strands work that exists nowhere else. Making the `.noindex` folder by hand
-  is how an existing installation opts in for its next worktree.
-- Watch the agent work in a dense transcript: one line per tool call, expandable.
-- See what changed, as a syntax-highlighted diff against the merge base.
-- Open a terminal in the worktree, run your dev server, check the pull request, merge it.
-- Do all of that for a dozen tasks at once without them treading on each other.
+Bloom runs coding agents in git worktrees. One window holds a sidebar of projects and the
+workspaces under them, the agent's conversation in the centre, and what it changed on the right. A
+workspace is a real worktree on disk with a branch of its own, so a dozen tasks can run at once
+without treading on each other.
 
-## Requirements
+Describe a task and Bloom cuts the branch, cuts the worktree, copies the files you named across,
+runs your setup script and starts an agent in it. You read the transcript while it works, review
+the diff against the merge base, open a terminal standing in the worktree, and open and merge the
+pull request from the same window.
 
-- macOS 26 or later
-- Xcode 26 or a Swift 6 toolchain
-- `claude` (Claude Code) or `codex` on your PATH. Either can drive a chat, and a chat picks one,
-  so a single worktree can hold chats on both
-- `git`, and `gh` if you want the pull request features
+It is written in Swift on the system frameworks, with two dependencies: SwiftTerm for the terminal
+panes and Sparkle for updates. There is no account to create. Bloom drives the agent CLIs already
+installed on your Mac.
 
-## Building
+## Support us
 
-Every script lives in `Tools/`. `make` on its own lists what there is to run, and each target is
-a one line call into that directory, so anything with an argument is run directly instead.
+We invest a lot of resources into creating [best in class open source packages](https://spatie.be/open-source).
+You can support us by [buying one of our paid products](https://spatie.be/open-source/support-us).
 
-```sh
-make run     # release build, assembled into .build/release/Bloom.app, launched
-make app     # debug build, which is what you want while changing things
-make test    # the core suite, no app target needed
-make lint    # the house rules no off the shelf linter knows about
+Bloom is postcardware. It is free to use, and we highly appreciate you sending us a postcard from
+your hometown, mentioning what you are building with it. You'll find our address on
+[our contact page](https://spatie.be/about-us). We publish all received postcards on
+[our virtual postcard wall](https://spatie.be/open-source/postcards).
+
+## Installation
+
+Bloom needs macOS 26 or later.
+
+Download the disk image from [runbloom.app/download](https://runbloom.app/download), or from the
+[releases page](https://github.com/spatie/bloom/releases), and drag Bloom into your Applications
+folder. Every release is signed, notarised and stapled, then published to a Sparkle appcast, so an
+installed copy offers you each new version as it lands.
+
+Bloom ships no agent of its own. It runs the CLIs you have installed:
+
+- `claude` ([Claude Code](https://claude.com/claude-code)) or `codex`
+  ([Codex](https://developers.openai.com/codex/cli)), at least one of the two on your `PATH`. Each
+  chat picks one, so a single workspace can hold chats on both.
+- `git`.
+- `gh` ([GitHub CLI](https://cli.github.com)), for the pull request and checks features.
+
+Cursor (`cursor-agent`) and OpenCode (`opencode`) are detected and reported on the Agents settings
+screen, but neither has a backend in Bloom, so neither is offered where a chat is started.
+
+### Building from source
+
+You need Xcode 26, or a Swift 6.2 toolchain.
+
+```bash
+git clone https://github.com/spatie/bloom.git
+cd bloom
+make app
 ```
 
-The suite can be narrowed, which `make` does not wrap:
-
-```sh
-./Tools/test-core.sh DiffParser   # one suite
-```
+`make` on its own lists every target. `make app` assembles a debug `Bloom.app` into SwiftPM's build
+directory, which is what you want while changing things, and `make run` builds a release copy and
+launches it.
 
 There is no `.xcodeproj`, on purpose. Open `Package.swift` in Xcode and you get the targets, the
 schemes, the debugger and the previews; `CLAUDE.md` has the section explaining what a checked-in
 project file would and would not add.
 
-There is also a small set of live tests that drive the real `claude` binary end to end: a full
-turn with tool use, session resume across two runner instances, and cancellation. They spend
-tokens, so they are opt-in:
+## Usage
 
-```sh
-BLOOM_LIVE=1 ./Tools/test-core.sh LiveAgent
-```
+**Projects and workspaces.** Add a git repository as a project. Each task you describe becomes a
+workspace: a branch, a worktree cut under `~/bloom/workspaces.noindex`, and an agent started in it.
+The `.noindex` suffix keeps Spotlight out of them, which is what a dozen worktrees of one project
+need once each of them holds its own copy of `vendor` and `.build`. A workspace can also be started
+on an existing branch, or on a GitHub pull request, to review one rather than write one.
 
-`./Tools/master.sh` builds a commit into `/Applications/Bloom.app`, which is the copy to use
-while agents are editing the tree. `./Tools/release.sh` is the signed and notarised one; see
-`RELEASING.md`.
+**Panes.** A workspace holds tabs, and a tab can be split. A pane is a chat, a terminal standing in
+the worktree, or a browser, so the dev server the setup script started can be read beside the
+conversation that is changing it.
 
-## It reads your existing Conductor config
+**Review and ship.** The inspector lists the files the workspace changed and shows a
+syntax-highlighted diff against the merge base, with inline comments and an editor on the same
+file. When `gh` is installed it also carries the pull request: open it, watch its checks, merge it.
 
-Bloom reads `.conductor/settings.toml` from a repository as-is, so a project already set up for
-Conductor works with no changes. It layers settings files in this order, later winning:
+**Ask Bloom.** A conversation that belongs to no workspace, for the questions that are about your
+projects rather than about one branch.
 
-```
-~/.conductor/settings.toml
-~/.bloom/settings.toml
-<repo>/.conductor/settings.toml
-<repo>/.bloom/settings.toml
-<repo>/.conductor/settings.local.toml
-<repo>/.bloom/settings.local.toml
-```
+**Quick prompts.** A library of prompts you reuse, available in any workspace.
 
-Setup and run scripts get both `CONDUCTOR_*` and `BLOOM_*` environment variables, with the same
-meanings, so a script written for Conductor runs unchanged:
+**Subagents.** An agent can start a second agent in the same worktree on the same branch, hand it a
+task, message it and stop it again. Both show in the sidebar under the workspace they belong to.
+
+### Per-repository settings
+
+A repository configures itself through `.bloom/settings.toml`, layered under
+`~/.bloom/settings.toml` and over it by `.bloom/settings.local.toml`, with the later file winning.
+Everything in there is also editable from the repository's settings screen, which writes back to
+the file the value came from.
+
+The keys are `scripts.setup`, `scripts.archive`, `scripts.run` (a string, or a table of named
+scripts with a `command`), `scripts.run_mode`, `file_include_globs` (`[".env*"]` by default),
+`git.branch_prefix`, `git.branch_prefix_type`, `git.delete_branch_on_archive`, `models.default` and
+`models.claude.default_thinking_level`. A key ending in `_file` (`scripts.setup_file`,
+`scripts.archive_file`) names an executable file in the repository instead of an inline command.
+
+Every script Bloom runs is handed these variables on top of your own shell environment:
 
 | Variable | Meaning |
 | --- | --- |
-| `*_IS_LOCAL` | Always `1`. There is no cloud mode. |
-| `*_WORKSPACE_NAME` | The branch name with slashes replaced by dashes |
-| `*_WORKSPACE_ID` | The workspace's internal id |
-| `*_WORKSPACE_PATH` | The worktree directory |
-| `*_PROJECT_NAME` | The project's folder name, cleaned down to letters, digits and underscores. Bloom's own; Conductor has no equivalent. Use it to keep a name unique across projects, since `*_WORKSPACE_NAME` only is inside one |
-| `*_ROOT_PATH` | The main checkout |
-| `*_DEFAULT_BRANCH` | The repo's default branch |
-| `*_PORT` | The first of ten ports allocated to this workspace |
+| `BLOOM_IS_LOCAL` | Always `1`. There is no cloud mode |
+| `BLOOM_WORKSPACE_NAME` | The branch name with slashes replaced by dashes |
+| `BLOOM_WORKSPACE_ID` | The workspace's internal id |
+| `BLOOM_WORKSPACE_PATH` | The worktree directory |
+| `BLOOM_PROJECT_NAME` | The project's folder name, cleaned down to letters, digits and underscores |
+| `BLOOM_ROOT_PATH` | The main checkout |
+| `BLOOM_DEFAULT_BRANCH` | The repository's default branch |
+| `BLOOM_PORT` | The first of ten ports allocated to this workspace |
 
-Supported settings keys: `scripts.setup`, `scripts.archive`, `scripts.run` (a string, or a table
-of named scripts with a `command`), `scripts.run_mode`, `files_to_copy`, `git.branch_prefix`,
-`git.branch_prefix_type`, `git.delete_branch_on_archive`, `models.default` and
-`models.claude.default_thinking_level`. A key ending in `_file` (`scripts.setup_file`,
-`scripts.archive_file`) names an executable file relative to the repository instead of an inline
-command.
-
-### A database per worktree
+#### A database per worktree
 
 `scripts.setup` and `scripts.archive` are a pair, and together they are the whole answer to what a
-worktree does about its database. Setup makes one; archive drops it. Nothing else has to reap
+worktree does about its database. Setup makes one, archive drops it. Nothing else has to reap
 anything, because Bloom will not remove the worktree unless the archive script succeeded.
 
 ```toml
@@ -112,7 +131,7 @@ setup_file = ".bloom/setup.sh"
 archive_file = ".bloom/archive.sh"
 ```
 
-```sh
+```bash
 #!/usr/bin/env bash
 # .bloom/setup.sh, committed and chmod +x. Without the shebang and the executable bit, the file's
 # contents are run through zsh instead, which is fine too.
@@ -136,7 +155,7 @@ php artisan migrate --force
 php artisan db:seed --force
 ```
 
-```sh
+```bash
 #!/usr/bin/env bash
 # .bloom/archive.sh
 set -euo pipefail
@@ -149,66 +168,106 @@ database="${database:0:64}"
 mysql -u root -e "DROP DATABASE IF EXISTS \`$database\`"
 ```
 
-`$BLOOM_PORT` is the same number in both, and it is the same number after a restart, so the
-archive script can also bring down whatever the setup script started on it (`docker compose down
--v`, or killing what is listening). It gets ten minutes to do so.
+`$BLOOM_PORT` is the same number in both, and it is the same number after a restart, so the archive
+script can also bring down whatever the setup script started on it (`docker compose down -v`, or
+killing what is listening). It gets ten minutes to do so.
 
-## Deep links
+### The bridge
 
-```sh
+An agent working in a workspace can call back into the app over MCP, through a stdio shim shipped
+inside Bloom's own bundle. Thirty-six tools: opening and closing panes, driving a browser pane,
+running and reading a terminal, showing an image in the chat, starting and messaging subagents,
+starting and renaming workspaces, and reading the projects and workspaces Bloom holds. Each tool
+carries its own gate, and which caller may reach which is the subject of `docs/BRIDGE.md`. A
+workspace agent is scoped to its own worktree implicitly, so nothing it calls takes a workspace id.
+
+You can register the same bridge in a client of your own, from Settings, and ask Bloom about your
+projects from a terminal.
+
+### Deep links
+
+```bash
 open "bloom://prompt=<urlencoded>&path=<urlencoded repo root>"
 ```
 
-Same shape as Conductor's, so existing scripts keep working.
+The path has to be a repository Bloom already has as a project. The link creates a workspace there
+and starts an agent on the prompt.
 
-## How it is put together
+## Documentation
 
+Each of the documents under `docs/` was written by measuring something rather than by remembering
+it, so they answer "has this already been worked out" rather than touring the code.
+
+- [`docs/PROTOCOL.md`](docs/PROTOCOL.md) documents Claude Code's stream-json protocol as verified
+  against the real CLI, with a captured session in `Tests/fixtures/`.
+- [`docs/CODEX.md`](docs/CODEX.md) is the same for Codex's JSON-RPC app-server, plus the decisions
+  that shaped the Codex backend and the work still outstanding on it.
+- [`docs/AGENTS-INTEGRATION.md`](docs/AGENTS-INTEGRATION.md) is what the four agent CLIs put on
+  disk, read off a real machine, and the rule that none of it may be rendered.
+- [`docs/BRIDGE.md`](docs/BRIDGE.md) is the bridge the other way round: what an agent can ask Bloom
+  to do, and which callers may ask for what.
+- [`docs/MENUS.md`](docs/MENUS.md) is the menu bar and the keyboard shortcuts.
+- [`docs/PLAN.md`](docs/PLAN.md) is the build order this was written to, kept for the bug reports
+  in it: what broke, why, and what now stops it.
+
+[`CLAUDE.md`](CLAUDE.md) is the house style: where a file goes, what belongs in the core rather than
+in a view, and why the linters say what they say. [`RELEASING.md`](RELEASING.md) covers signing,
+notarising and the appcast.
+
+## Testing
+
+`Sources/BloomCore` holds everything that is not a view, and the suite runs against that alone, in
+a mirrored package with no app target:
+
+```bash
+make test
 ```
-Sources/BloomCore/     No SwiftUI. Everything testable lives here, grouped by subject.
-  Agent/                 Running one: the runners, the events, the quotas, the turns
-  Agent/Codex/           The Codex app-server protocol, which is its own vocabulary
-  Bridge/                The unix socket and the MCP tools an agent calls back in with
-  Git/                   Worktrees, branches, diffs, branch naming, diff parsing
-  GitHub/                gh, pull requests, checks
-  Workspace/             Creating, starting, archiving, restoring, a project's settings
-  Transcript/            What a turn is made of: rows, tools, subagents, attachments
-  Persistence/           Store, SQLite, the settings file, the old app's leftovers
-  Model/                 The row types, the typed ids, the lifecycle rules over them
-  Presentation/          Decisions the window needs that hold no UI framework
-  Ocean/                 The chart
-  System/                This Mac: the shell, notifications, updates, other applications
-  Support/               Small things with no subject of their own
 
-Sources/Bloom/         SwiftUI.
-  Design/                Every colour, font and metric, defined once, and the galleries
-  State/                 AppModel, WorkspaceModel, TranscriptModel
-  Intents/               App Intents, Shortcuts and the Services menu
-  System/                The app target's half of talking to this Mac
-  Views/                 One directory per region of the window
+One suite at a time, which is what you want most of the time:
 
-Sources/bloom-bridge/  The MCP stdio shim an agent CLI launches. Three lines; everything
-                       worth testing is BridgeShim, in the core, where the suite reaches it.
+```bash
+./Tools/test-core.sh DiffParser
 ```
 
-## The documents under `docs/`
+A green suite does not mean the app compiles, because the mirror has no app target, so compile
+everything before committing:
 
-Each of these was written by measuring something rather than by remembering it, so they are the
-answer to "has this already been worked out" rather than a tour of the code.
+```bash
+make build
+```
 
-- `docs/PROTOCOL.md` documents the `claude` stream-json protocol as verified against the real
-  CLI, with a captured session in `Tests/fixtures/`. Read it before touching anything agent
-  related.
-- `docs/CODEX.md` is the same for Codex's JSON-RPC app-server, plus the decisions that shaped
-  the Codex backend and the work still outstanding on it.
-- `docs/AGENTS-INTEGRATION.md` is what the four agent CLIs actually put on disk, read off a real
-  machine, the rule that none of it may be rendered, and what `claude mcp add` accepts when
-  registering Bloom in a client you started yourself.
-- `docs/BRIDGE.md` is the MCP bridge the other way round: what an agent can ask Bloom to do, which
-  callers may ask for what, and which of those questions Bloom answers for itself.
-- `docs/PLAN.md` is the build order this was written to, kept for the bug reports in it: what
-  broke, why, and what now stops it.
+Two linters, and both have to pass. `make lint` is the conventions no off the shelf tool knows,
+and `make swiftlint` is the half every Swift codebase shares:
 
-## What it deliberately does not do
+```bash
+make lint
+make swiftlint
+```
 
-No cloud workspaces, no accounts, no teams, no HTTP API, no checkpointing. Those are most of
-Conductor's remaining surface area and none of them matter for one person on one machine.
+There is also a small set of live tests that drive the real `claude` binary end to end: a full turn
+with tool use, session resume across two runner instances, and cancellation. They spend tokens, so
+they are opt-in:
+
+```bash
+BLOOM_LIVE=1 ./Tools/test-core.sh LiveAgent
+```
+
+## Changelog
+
+Every release, with what changed in it, is on
+[runbloom.app/changelog](https://runbloom.app/changelog) and on the
+[releases page](https://github.com/spatie/bloom/releases).
+
+## Contributing
+
+Please see [CONTRIBUTING](https://github.com/spatie/.github/blob/main/CONTRIBUTING.md) for details.
+
+## Security
+
+If you discover any security related issues, please email [security@spatie.be](mailto:security@spatie.be)
+instead of using the issue tracker.
+
+## Credits
+
+- [Freek Van der Herten](https://github.com/freekmurze)
+- [All Contributors](../../contributors)
