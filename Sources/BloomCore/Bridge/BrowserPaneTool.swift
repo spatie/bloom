@@ -45,7 +45,7 @@ enum BrowserPaneRun {
         }
 
         let browser: Int?
-        switch BrowserPaneChoice.parse(request.param("browser"), tool: tool) {
+        switch PaneNumberArgument.browser.parse(request.param("browser")) {
         case .failure(let refusal): return .failure(refusal.sentence)
         case .success(let number): browser = number
         }

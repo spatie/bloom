@@ -88,31 +88,9 @@ public enum TerminalPaneToolName {
     public static let key = "terminal_send_key"
 }
 
+/// Which of the reader's terminals a call meant. The reading of the number itself is
+/// `PaneNumberArgument.terminal`, beside the browser's and the tab's.
 public enum TerminalPaneChoice {
-    public static func parse(_ raw: JSONValue?, tool: String) -> Result<Int?, PaneRefusal> {
-        switch raw {
-        case .none, .null:
-            return .success(nil)
-        case .integer(let number) where number >= 1:
-            return .success(number)
-        case .integer(let number):
-            return .failure(
-                PaneRefusal(
-                    "'terminal' is the number pane_list gives a terminal, counting from 1. "
-                        + "\(number) is not one of them."
-                )
-            )
-        default:
-            return .failure(
-                PaneRefusal(
-                    "'terminal' is a whole number, as pane_list prints it. Leave it out when "
-                        + "only one terminal is open, and call pane_list first when there is more "
-                        + "than one."
-                )
-            )
-        }
-    }
-
     public static func choose(
         number: Int?, among terminals: [TerminalPaneReport], tool: String
     ) -> Result<TerminalPaneReport, PaneRefusal> {

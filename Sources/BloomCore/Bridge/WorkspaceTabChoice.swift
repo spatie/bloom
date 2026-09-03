@@ -24,9 +24,8 @@ public enum WorkspaceTabChoice: Sendable, Equatable {
     /// call that passes both has not decided which it trusts, and picking one for it is how a
     /// model learns that the argument it thought it was using is being ignored.
     ///
-    /// A float is refused rather than rounded, for the reason `BrowserPaneChoice.parse` gives: a
-    /// caller passing 1.5 has computed something rather than counted, and rounding would act on a
-    /// tab it did not choose.
+    /// The number itself is read by `PaneNumberArgument.tab`, which is where the rule the browser
+    /// and terminal families follow lives, including why a float is refused rather than rounded.
     public static func parse(
         number rawNumber: JSONValue?, title rawTitle: JSONValue?
     ) -> Result<WorkspaceTabChoice, PaneRefusal> {
@@ -47,26 +46,9 @@ public enum WorkspaceTabChoice: Sendable, Equatable {
         }
 
         let number: Int?
-        switch rawNumber {
-        case .none, .null:
-            number = nil
-        case .integer(let value):
-            guard value >= 1 else {
-                return .failure(
-                    PaneRefusal(
-                        "'tab' is a tab's place in the strip, counting from 1. \(value) is not "
-                            + "one of them."
-                    )
-                )
-            }
-            number = value
-        default:
-            return .failure(
-                PaneRefusal(
-                    "'tab' is a whole number, as workspace_tabs prints it. Call workspace_tabs "
-                        + "first and pass one of the numbers it gives."
-                )
-            )
+        switch PaneNumberArgument.tab.parse(rawNumber) {
+        case .failure(let refusal): return .failure(refusal)
+        case .success(let value): number = value
         }
 
         switch (number, title) {

@@ -18,7 +18,7 @@ enum TerminalPaneRun {
         }
 
         let terminal: Int?
-        switch TerminalPaneChoice.parse(request.param("terminal"), tool: tool) {
+        switch PaneNumberArgument.terminal.parse(request.param("terminal")) {
         case .failure(let refusal): return .failure(refusal.sentence)
         case .success(let number): terminal = number
         }

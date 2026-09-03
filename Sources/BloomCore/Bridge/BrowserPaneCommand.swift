@@ -114,48 +114,13 @@ public enum BrowserPaneAnswer: Sendable, Equatable {
 public typealias BrowserPaneCommanding =
     @Sendable (BrowserPaneCommand, WorkspaceID) async -> BrowserPaneAnswer
 
-/// How a caller names one of the reader's browsers.
+/// Which of the reader's browsers a call meant.
 ///
-/// **A number from `pane_list` and nothing else.** The alternatives were considered and are all
-/// worse. A tab id is a uuid, which a model cannot read, cannot repeat to a person and can carry
-/// in from somewhere stale. A name is the page's own title most of the time, so it changes under
-/// the caller as the page navigates and two tabs on one site share it. A kind, which is what
-/// `pane_close` and `pane_rename` take, works only while there is one of the thing, and browsers
-/// are the pane a reader has several of.
-///
-/// So: 1, 2, 3, left to right in the strip, exactly as `pane_list` prints them. It is a handle
-/// that lives as long as the listing that produced it, which is stated in every tool description
-/// rather than pretended away.
+/// The reading of the number itself is `PaneNumberArgument.browser`, whose head argues why a
+/// number is the handle and why a float is refused rather than rounded. That rule was written out
+/// here, in `TerminalPaneChoice` and in `WorkspaceTabChoice`, three times over. What is left here
+/// is the half that is genuinely this family's: which of the browsers a number names.
 public enum BrowserPaneChoice {
-    /// Reads the `browser` argument: an integer, or nothing.
-    ///
-    /// A float is refused rather than rounded. A model that passes 1.5 has not counted along the
-    /// strip, it has computed something, and rounding would act on a pane it did not choose.
-    public static func parse(_ raw: JSONValue?, tool: String) -> Result<Int?, PaneRefusal> {
-        switch raw {
-        case .none, .null:
-            return .success(nil)
-        case .integer(let number):
-            guard number >= 1 else {
-                return .failure(
-                    PaneRefusal(
-                        "'browser' is the number pane_list gives a browser, counting from 1. "
-                            + "\(number) is not one of them."
-                    )
-                )
-            }
-            return .success(number)
-        default:
-            return .failure(
-                PaneRefusal(
-                    "'browser' is a whole number, as pane_list prints it. Leave it out when there "
-                        + "is only one browser open, and call pane_list first when there is more "
-                        + "than one."
-                )
-            )
-        }
-    }
-
     /// Picks the pane a call meant out of the ones the workspace has, or says why it could not.
     ///
     /// **Omitting the number is only allowed when there is one browser.** The tempting default was
