@@ -46,7 +46,7 @@ struct BridgeUserRegistrationRepairTests {
     private func config(_ servers: [String: Any]) throws -> Data {
         try JSONSerialization.data(withJSONObject: [
             "numStartups": 412,
-            "oauthAccount": ["emailAddress": "technical@spatie.be"],
+            "oauthAccount": ["emailAddress": "you@example.com"],
             "projects": ["/Users/freek/dev/code/bloom": ["allowedTools": [String]()]],
             "mcpServers": servers,
         ])
@@ -107,7 +107,7 @@ struct BridgeUserRegistrationRepairTests {
         }
         let root = try #require(try JSONSerialization.jsonObject(with: rewritten) as? [String: Any])
         #expect(root["numStartups"] as? Int == 412)
-        #expect((root["oauthAccount"] as? [String: Any])?["emailAddress"] as? String == "technical@spatie.be")
+        #expect((root["oauthAccount"] as? [String: Any])?["emailAddress"] as? String == "you@example.com")
         #expect((root["projects"] as? [String: Any])?.count == 1)
         let neighbour = try command(in: rewritten, serverNamed: "figma")
         #expect(neighbour == "/opt/homebrew/bin/figma-mcp")
