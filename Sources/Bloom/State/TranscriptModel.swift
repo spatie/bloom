@@ -1409,7 +1409,16 @@ final class TranscriptModel {
         ) ?? []
         guard !fresh.isEmpty else { return }
         let appendedFrom = rows.count
-        for message in fresh {
+        // **Filtered against the cursor again, having already been queried against it.** The read
+        // above is a suspension point, so two calls can both ask for everything after `n` and both
+        // come back with the same rows: the cursor only moves in the loop below, which neither of
+        // them has reached. Appending twice would put two rows carrying one id under a `ForEach`,
+        // which is the shape SwiftUI answers by drawing one of them and losing the other.
+        //
+        // The pump is serial, so two event handlers cannot be the pair. What can is the pump and a
+        // `drain` the reader started, and that window is narrow rather than closed. A comparison
+        // per row is cheaper than the reasoning needed to prove it never happens.
+        for message in fresh where message.seq > highestSeenMessageSeq {
             // Before folding, because a tool result changes an old row rather than appending one.
             // The cursor belongs to stored messages, not to their presentation.
             highestSeenMessageSeq = max(highestSeenMessageSeq, message.seq)
@@ -1530,6 +1539,18 @@ final class TranscriptModel {
     private func reportToOrchestrator(_ message: CrewMessage) async {
         guard let parentID = session.parentSessionID, let store, let workspace else { return }
         guard !hasReportedTurnEnded else { return }
+        // **Claimed here rather than after the read below, and the difference is the promise this
+        // method makes.** The doc says at most one report per turn, whichever ending gets here
+        // first, and with the flag set after the `await` that held only because the event pump is
+        // serial: two callers arriving together would both pass the guard, both wait on the store,
+        // and both enqueue, telling an orchestrator twice that one agent stopped. `Crew`'s own
+        // head says what that costs, which is an orchestrator picking the work back up twice.
+        //
+        // Claiming before the suspension costs nothing on the path that goes on to return: the
+        // three guards above have already established that there is a parent to report to, and a
+        // report abandoned because that parent turned out to be closed is a report that must not
+        // be tried again anyway.
+        hasReportedTurnEnded = true
 
         // Read before the enqueue, and dropped when the chat above has been closed. `session(id:)`
         // answers for an archived row where `sessions(workspaceID:)` and `crew(of:)` do not, and
@@ -1541,7 +1562,6 @@ final class TranscriptModel {
         guard let parent = try? await store.session(id: parentID),
               parent.archivedAt == nil else { return }
 
-        hasReportedTurnEnded = true
         _ = try? await store.enqueueDelivery(
             Delivery(
                 targetSessionID: parentID,
