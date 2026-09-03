@@ -316,6 +316,40 @@ struct WorkspaceStatusTests {
         #expect(text.contains("asked to merge it, in the chat"))
     }
 
+    /// `describesPullRequest` is what sends `summary` and `detail` off to a pull request for the
+    /// number the reader is hovering to see, so a state on the wrong side of it loses that number
+    /// silently. It used to answer `false` through a `default`, which meant a case added to the
+    /// GitHub block and forgotten here compiled and was simply wrong; both halves are written out
+    /// now, and this pins the classification against what the two resolvers actually produce
+    /// rather than against a copy of the list.
+    @Test("every state is classified, and nothing a bare worktree produces reaches for GitHub")
+    func pullRequestStatesArePartitioned() throws {
+        let fromWorktree: Set<WorkspaceStatus> = [
+            WorkspaceStatus.resolve(
+                workspace: workspace(setup: .running), isRunning: false, pullRequest: nil
+            ),
+            WorkspaceStatus.resolve(
+                workspace: workspace(), isRunning: false, pullRequest: nil,
+                isAwaitingPermission: true
+            ),
+            WorkspaceStatus.resolve(workspace: workspace(), isRunning: true, pullRequest: nil),
+            WorkspaceStatus.resolve(
+                workspace: workspace(setup: .failed), isRunning: false, pullRequest: nil
+            ),
+            WorkspaceStatus.resolve(
+                workspace: workspace(unread: true), isRunning: false, pullRequest: nil
+            ),
+            WorkspaceStatus.ofBranch(workspace: workspace(additions: 3), pullRequest: nil),
+            WorkspaceStatus.ofBranch(workspace: workspace(), pullRequest: nil),
+        ]
+        #expect(fromWorktree.count == 7, "each of the seven is a different state")
+        #expect(fromWorktree.allSatisfy { !$0.describesPullRequest })
+
+        let fromGitHub = Set(WorkspaceStatus.allCases.filter(\.describesPullRequest))
+        #expect(fromWorktree.union(fromGitHub) == Set(WorkspaceStatus.allCases))
+        #expect(fromWorktree.isDisjoint(with: fromGitHub))
+    }
+
     // MARK: - Fixtures
 
     private func decode(_ json: String) throws -> PullRequest {
