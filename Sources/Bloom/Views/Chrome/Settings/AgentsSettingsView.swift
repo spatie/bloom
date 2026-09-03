@@ -341,14 +341,7 @@ struct AgentsSettingsView: View {
     }
 
     private func loadOverrides() async -> [AgentKind: String] {
-        guard let store = app.store else { return [:] }
-        var found: [AgentKind: String] = [:]
-        for kind in AgentKind.allCases {
-            guard let value = try? await store.setting(Self.overrideKey(kind)) else { continue }
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { found[kind] = trimmed }
-        }
-        return found
+        await AgentCatalog.executablePathOverrides(in: app.store)
     }
 
     /// Committing on submit and on focus loss rather than on every keystroke keeps a half-typed
@@ -369,7 +362,7 @@ struct AgentsSettingsView: View {
         Task {
             if let store = app.store {
                 do {
-                    try await store.setSetting(Self.overrideKey(kind), value)
+                    try await store.setSetting(AgentCatalog.executablePathSettingKey(kind), value)
                     saveFailure = nil
                 } catch {
                     saveFailure = "The executable path for \(kind.label) could not be stored."
@@ -384,10 +377,6 @@ struct AgentsSettingsView: View {
             self.catalog = catalog
             await read(from: catalog)
         }
-    }
-
-    private static func overrideKey(_ kind: AgentKind) -> String {
-        "agent.\(kind.rawValue).executablePath"
     }
 }
 

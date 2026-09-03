@@ -37,29 +37,7 @@ public struct ShellError: Error, CustomStringConvertible {
 public enum Shell {
     /// Directories added to PATH for spawned processes, because GUI apps launched from Finder
     /// inherit a minimal PATH that lacks Homebrew, mise, fnm, and friends.
-    public static let extraPaths: [String] = {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return [
-            "/opt/homebrew/bin",
-            "/opt/homebrew/sbin",
-            "/usr/local/bin",
-            "/usr/bin",
-            "/bin",
-            "/usr/sbin",
-            "/sbin",
-            "\(home)/.local/bin",
-            // Node installs put binaries wherever the user's package manager decided. `codex`
-            // lives in .npm-packages/bin on this machine, and a Finder launch would otherwise
-            // report it as not installed while a terminal launch found it.
-            "\(home)/.npm-packages/bin",
-            "\(home)/.volta/bin",
-            "\(home)/.yarn/bin",
-            "\(home)/.bun/bin",
-            "\(home)/.cargo/bin",
-            "\(home)/.composer/vendor/bin",
-            "\(home)/bin",
-        ]
-    }()
+    public static let extraPaths = ExecutableSearchPath.additionalDirectories()
 
     /// How many subprocesses this process has started since launch.
     ///

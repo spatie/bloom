@@ -142,15 +142,7 @@ final class InstallPingService {
     /// unusual is seen as present rather than missing. Empty when the store is not open yet, which
     /// only costs the accuracy of a custom path on the first ping after a launch.
     private func executablePathOverrides() async -> [AgentKind: String] {
-        guard let store = app?.store else { return [:] }
-
-        var found: [AgentKind: String] = [:]
-        for kind in AgentKind.allCases {
-            guard let value = try? await store.setting(AgentCatalog.executablePathSettingKey(kind)) else { continue }
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { found[kind] = trimmed }
-        }
-        return found
+        await AgentCatalog.executablePathOverrides(in: app?.store)
     }
 
     /// What the server said, or that it said nothing. Every outcome is silent to the user.

@@ -206,6 +206,31 @@ public actor AgentCatalog {
         "agent.\(kind.rawValue).executablePath"
     }
 
+    /// The custom executable paths stored by the Agents pane.
+    ///
+    /// One reader for every consumer. The pane, onboarding, install ping and runner used to read
+    /// this table independently, and onboarding read a different persistence system altogether.
+    public static func executablePathOverrides(in store: Store?) async -> [AgentKind: String] {
+        guard let store else { return [:] }
+
+        var found: [AgentKind: String] = [:]
+        for kind in AgentKind.allCases {
+            guard let value = try? await store.setting(executablePathSettingKey(kind)) else { continue }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { found[kind] = trimmed }
+        }
+        return found
+    }
+
+    /// The command a runner should launch for this agent.
+    ///
+    /// An explicit path wins even when it is currently missing. Falling back would make the
+    /// settings pane show one binary while a session silently launched another one from PATH.
+    public static func executable(for kind: AgentKind, override: String?) -> String {
+        let trimmed = override?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? kind.executableName : expandingTilde(trimmed)
+    }
+
     /// Which agent CLIs are present on this machine, by executable lookup alone.
     ///
     /// Deliberately much less than `detect`. No `--version` subprocess, no config file opened and

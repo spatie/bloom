@@ -86,6 +86,8 @@ public actor AgentRunner {
     /// is where the footer writes it. Re-read at the top of every turn, so toggling it takes
     /// effect on the next thing sent rather than on the next launch of the app.
     private var isFastMode = false
+    /// The executable selected in Settings, or the ordinary command name when none was selected.
+    private var configuredExecutable = AgentKind.claudeCode.executableName
     /// Which output style the composer's picker is on for this session, or nil for the default.
     ///
     /// Kept beside fast mode and read the same way, because it is the same kind of thing: a
@@ -295,7 +297,7 @@ public actor AgentRunner {
     /// only exists after the first run and a restart has to resume rather than begin again.
     public func launch() -> AgentLaunch {
         AgentLaunch(
-            executable: Self.executable,
+            executable: configuredExecutable,
             arguments: Self.argv(
                 session: session,
                 resume: session.agentSessionID,
@@ -348,10 +350,10 @@ public actor AgentRunner {
     /// asked for: see `SessionRunner.send(_:recording:)` for why what goes out and what is drawn
     /// are not the same string.
     public func send(_ text: String, recording: Data? = nil) async throws {
-        // The two settings reads come first, and that ordering is the whole of the fix.
+        // The settings reads come first, and that ordering is the whole of the fix.
         //
         // They were between the wait and the start, and each is a store round trip, so there were
-        // two suspensions in a window that must have none. `cancelNow()` is nonisolated, on
+        // suspensions in a window that must have none. `cancelNow()` is nonisolated, on
         // purpose, so it does not queue behind this actor: a Stop landing in that gap signals the
         // running process, `start()` then finds `handle.current` still non-nil because the child
         // has not exited yet, short-circuits, and the turn below is written into a process that
@@ -359,6 +361,7 @@ public actor AgentRunner {
         // nothing is lost by asking first.
         await refreshFastMode()
         await refreshOutputStyle()
+        await refreshExecutable()
         try await waitForCancelledRunToExit()
         start()
 
@@ -399,6 +402,11 @@ public actor AgentRunner {
     private func refreshOutputStyle() async {
         let stored = try? await store.setting(ComposerControls.outputStyleKey(sessionID: session.id))
         outputStyle = OutputStyle.isDefault(stored) ? nil : stored
+    }
+
+    private func refreshExecutable() async {
+        let stored = try? await store.setting(AgentCatalog.executablePathSettingKey(.claudeCode))
+        configuredExecutable = AgentCatalog.executable(for: .claudeCode, override: stored)
     }
 
     static func encodeTurn(_ text: String) throws -> String {

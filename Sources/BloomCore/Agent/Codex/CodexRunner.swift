@@ -320,7 +320,9 @@ public actor CodexRunner: SessionRunner {
     private func connected() async throws -> CodexClient {
         if let client { return client }
 
+        let stored = try? await store.setting(AgentCatalog.executablePathSettingKey(.codex))
         let client = makeClient(CodexClient.Configuration(
+            executable: AgentCatalog.executable(for: .codex, override: stored),
             cwd: workspacePath,
             clientName: "Bloom",
             clientVersion: Self.clientVersion,

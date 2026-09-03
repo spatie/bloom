@@ -101,6 +101,21 @@ private func eventually(
         #expect(stored?.state == .running)
     }
 
+    @Test func startsTheStoredCodexExecutable() async throws {
+        let store = try makeTestStore("codex-runner-executable")
+        let (session, _) = try await makeCodexSession(store)
+        try await store.setSetting(
+            AgentCatalog.executablePathSettingKey(.codex),
+            "/tmp/tools/codex"
+        )
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+
+        try await runner.send("hello")
+
+        #expect(box.process.launch.executable == "/tmp/tools/codex")
+    }
+
     /// A chat that has spoken before resumes rather than starting a second conversation.
     @Test func resumesAThreadItAlreadyHas() async throws {
         let store = try makeTestStore("codex-runner-resume")
