@@ -41,6 +41,10 @@ struct TranscriptTableEntry: Identifiable {
     /// claim about them would buy nothing and could be wrong about the streaming tail, which is the
     /// one entry that changes height without anything saying so.
     var drawsNothing = false
+    /// Which cluster of row heights this entry belongs to, which is what an unmeasured one is
+    /// drawn at until somebody looks at it. See `TranscriptRowShape`, which carries the white gaps
+    /// a single conversation-wide mean left on the way up.
+    var shape: TranscriptRowShape = .other
     /// Built on demand: when the row is measured, and when it is drawn. Nothing is built for a row
     /// that is neither, which is what keeps the pass that assembles these cheap.
     let content: @MainActor () -> AnyView
@@ -682,7 +686,9 @@ struct TranscriptTable: NSViewRepresentable {
         /// months on the strength of how plausible it sounds.
         private func height(of entry: TranscriptTableEntry) -> CGFloat {
             guard heights.isReady else { return Self.hair }
-            return CGFloat(heights.assumed(for: entry.contentKey, drawsNothing: entry.drawsNothing))
+            return CGFloat(heights.assumed(
+                for: entry.contentKey, shape: entry.shape, drawsNothing: entry.drawsNothing
+            ))
         }
 
         /// The one thing a row is hosted in to be measured, kept rather than built per row. See
@@ -756,7 +762,7 @@ struct TranscriptTable: NSViewRepresentable {
             guard !isHeld else { return }
             guard let row = index[entryID], entries.indices.contains(row),
                   entries[row].contentKey == contentKey else { return }
-            guard heights.note(height, for: contentKey) else { return }
+            guard heights.note(height, for: contentKey, shape: entries[row].shape) else { return }
             // **News to the cache is not always news to the table.** A row the table is already
             // drawing at this height needs no `noteHeightOfRows`, and the whole of a correction's
             // cost is that call: it moves the document's total and makes AppKit lay out every row
@@ -937,7 +943,9 @@ struct TranscriptTable: NSViewRepresentable {
         private func owedHeight(of entry: TranscriptTableEntry) -> Double {
             max(
                 Double(Self.hair),
-                heights.assumed(for: entry.contentKey, drawsNothing: entry.drawsNothing)
+                heights.assumed(
+                    for: entry.contentKey, shape: entry.shape, drawsNothing: entry.drawsNothing
+                )
             )
         }
 
@@ -1533,9 +1541,10 @@ struct TranscriptTable: NSViewRepresentable {
                 guard !entry.id.redrawsItself else { continue }
                 let key = entry.contentKey
                 guard heights.height(for: key) == nil || heights.isStale(key) else { continue }
-                if heights.note(measure(entry, at: CGFloat(sizing.width)), for: key) {
-                    moved.insert(row)
-                }
+                let taken = heights.note(
+                    measure(entry, at: CGFloat(sizing.width)), for: key, shape: entry.shape
+                )
+                if taken { moved.insert(row) }
                 // Between rows rather than after all of them, so the cost of being interrupted is
                 // one row rather than sixty.
                 await Task.yield()
@@ -1779,9 +1788,12 @@ struct TranscriptTable: NSViewRepresentable {
                 guard heights.needsMeasuring(
                     entry.contentKey, redrawsItself: entry.id.redrawsItself
                 ) else { continue }
-                if heights.note(measure(entry, at: CGFloat(sizing.width)), for: entry.contentKey) {
-                    moved.insert(row)
-                }
+                let taken = heights.note(
+                    measure(entry, at: CGFloat(sizing.width)),
+                    for: entry.contentKey,
+                    shape: entry.shape
+                )
+                if taken { moved.insert(row) }
             }
             return moved
         }

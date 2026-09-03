@@ -535,7 +535,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
 // MARK: - Message
 
 /// The coarse bucket a transcript row falls into. The detail lives in the stored JSON payload.
-public enum MessageKind: String, Sendable, Codable {
+public enum MessageKind: String, Sendable, Codable, CaseIterable {
     case user
     case assistantText
     case thinking

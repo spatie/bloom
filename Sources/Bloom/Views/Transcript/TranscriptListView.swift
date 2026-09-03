@@ -619,10 +619,14 @@ struct TranscriptListView: View {
             // What this row is worth before anybody draws it. Sixty per cent of a session draws
             // nothing, and the mean is a bad answer for every one of them: see `TranscriptRowInk`.
             let blank = TranscriptRowInk.drawsNothing(kind: row.kind, payload: row.payload)
+            // Which cluster of heights this row is in, which is what every row above the reader is
+            // drawn at until it is looked at. Free, and from the kind alone, for the reason the
+            // line above is here rather than inside the closure. See `TranscriptRowShape`.
+            let shape = TranscriptRowShape.of(kind: row.kind)
 
             if row.kind == .result {
                 out.append(TranscriptTableEntry(
-                    id: .row(row.seq), contentKey: key, drawsNothing: blank,
+                    id: .row(row.seq), contentKey: key, drawsNothing: blank, shape: shape,
                     content: {
                         AnyView(
                             // No top padding: the rule inside the footer carries its own air. A
@@ -650,7 +654,7 @@ struct TranscriptListView: View {
                 ))
             } else {
                 out.append(TranscriptTableEntry(
-                    id: .row(row.seq), contentKey: key, drawsNothing: blank,
+                    id: .row(row.seq), contentKey: key, drawsNothing: blank, shape: shape,
                     content: {
                         AnyView(
                             TranscriptRowView(
@@ -833,6 +837,11 @@ struct TranscriptListView: View {
             // the table can give it no view at all rather than build one to find out. See
             // `TranscriptRowInk`, which is the estimate this is the certain version of.
             drawsNothing: !shows,
+            // **The shape this whole scheme was worth building for.** A fold's line is one line of
+            // text with the same padding every time, and there is one above nearly every turn, so
+            // it is both the most predictable row in a conversation and the one a reader scrolling
+            // back meets most of. See `TranscriptRowShape`.
+            shape: .fold,
             content: {
                 guard shows else { return AnyView(EmptyView()) }
                 return AnyView(
