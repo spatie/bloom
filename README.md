@@ -3,7 +3,7 @@
 An agent development environment, native to the Mac.
 
 [![Tests](https://github.com/spatie/bloom/actions/workflows/test.yml/badge.svg)](https://github.com/spatie/bloom/actions/workflows/test.yml)
-[![Latest release](https://img.shields.io/github/v/release/spatie/bloom?style=flat-square)](https://github.com/spatie/bloom/releases)
+[![Latest release](https://img.shields.io/badge/dynamic/xml?url=https%3A%2F%2Fdownloads.runbloom.app%2Fappcast.xml&query=%2F%2Fitem%5B1%5D%2Ftitle&label=release&style=flat-square)](https://github.com/spatie/bloom/releases)
 
 [![Bloom](art/overview.png)](https://runbloom.app)
 
