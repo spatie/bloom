@@ -100,14 +100,15 @@ public actor AgentRunner {
     /// which is the one moment the actor is least available and the one moment a pending ask
     /// absolutely has to be answered.
     private let pending = PendingAsks()
-    private var cachedRepoID: RepoID?
+
+    /// What this project has already approved, and the one place either runner asks it.
+    /// See `SessionGrants`, which this and `CodexRunner` used to hold four copies of between them.
+    private let grants: SessionGrants
     private var alive = false
     private var cancelled = false
-    /// Whether this run has already been stopped because its transcript was deleted underneath it.
-    /// See `stopBecauseTheTranscriptWentAway`.
-    private var transcriptWentAway = false
-    private var persistenceFailures = 0
-    private var lastFailure: String?
+    /// What the store has refused, and whether the transcript has gone. One type for both
+    /// runners: see `PersistenceTrouble`, which they held a copy of each.
+    private var trouble = PersistenceTrouble()
 
     /// What the model was last handed, from the newest `assistant` event of this turn.
     ///
@@ -153,6 +154,7 @@ public actor AgentRunner {
         self.mcpConfigPath = mcpConfigPath
         self.shutdownBudget = shutdownBudget
         self.makeProcess = makeProcess
+        self.grants = SessionGrants(store: store, workspaceID: session.workspaceID)
     }
 
     /// The default factory. Separate so an injected one can replace it wholesale.
@@ -315,10 +317,10 @@ public actor AgentRunner {
     /// The last thing that could not be written to disk, kept for as long as the runner lives.
     /// A transcript that only exists on screen is worth saying out loud, and an `.error` event
     /// scrolls away.
-    public var lastPersistenceFailure: String? { lastFailure }
+    public var lastPersistenceFailure: String? { trouble.lastSentence }
 
     /// How many rows never made it to the store.
-    public var persistenceFailureCount: Int { persistenceFailures }
+    public var persistenceFailureCount: Int { trouble.failures }
 
     /// Whether this run has been stopped. For the suite: what a write refused because its
     /// workspace was deleted has to do, beyond keeping quiet, is stop the agent.
@@ -648,28 +650,21 @@ public actor AgentRunner {
         Self.log.error("\(what, privacy: .public): \(error.readableMessage, privacy: .public)")
 
         let standing = await TranscriptStanding.of(sessionID: session.id, in: store)
-        guard let trouble = WorkspaceTrouble.recording(
+        switch trouble.record(WorkspaceTrouble.recording(
             transcript: standing, complaint: TranscriptStanding.complaint(about: error)
-        ) else {
-            stopBecauseTheTranscriptWentAway()
-            return
+        )) {
+        case .tell(let sentence):
+            sink.yield(.error(.storage(message: sentence)))
+        case .stop:
+            // The workspace this session belonged to has been removed, so there is nowhere for the
+            // write to go. Kill the process, because an agent still working in a worktree nobody is
+            // recording is the part that would be a fault, and say nothing: the owner's own gesture
+            // removed the transcript.
+            Self.log.info("the transcript for \(self.session.id.rawValue, privacy: .public) has been removed, so this run is being stopped without a word")
+            cancel()
+        case .alreadyStopped:
+            break
         }
-
-        persistenceFailures += 1
-        lastFailure = trouble.sentence
-        sink.yield(.error(.storage(message: trouble.sentence)))
-    }
-
-    /// The workspace this session belonged to has been removed. Stop the process and say nothing.
-    ///
-    /// Once, and guarded, because everything already in flight when the rows went will fail the
-    /// same way on its way through: the turn's remaining lines, the session save that cancelling
-    /// provokes, and any question still open. One cancel is enough for all of them.
-    private func stopBecauseTheTranscriptWentAway() {
-        guard !transcriptWentAway else { return }
-        transcriptWentAway = true
-        Self.log.info("the transcript for \(self.session.id.rawValue, privacy: .public) has been removed, so this run is being stopped without a word")
-        cancel()
     }
 
     private static let log = Logger(
@@ -709,16 +704,16 @@ public actor AgentRunner {
         // there first takes the ask out of the pile, and the loser does nothing. Without it the
         // CLI receives two `control_response` lines for one request id and logs the second as a
         // mismatch. Found by running the real thing.
-        let grants = await matchingGrants(for: ask)
+        let matched = await grants.matching(ask)
 
-        if let grants, let claimed = pending.take(ask.requestID) {
-            await autoAllow(claimed, using: grants)
+        if let matched, let claimed = pending.take(ask.requestID) {
+            await autoAllow(claimed, using: matched)
             return
         }
 
         // Answered by a person while the lookup was running. Nothing left to do, and in particular
         // the session must not now be marked as waiting for a question that is already settled.
-        guard grants == nil, pending.contains(ask.requestID) else { return }
+        guard matched == nil, pending.contains(ask.requestID) else { return }
 
         // Nothing answers it, so somebody has to. This is the state that has to be visible from
         // outside the workspace: a process that is alive, costing nothing, and doing nothing.
@@ -726,28 +721,14 @@ public actor AgentRunner {
         await save(session)
     }
 
-    /// The project's granted rules, or nil when nothing there covers this ask.
-    ///
-    /// Read from the store on every ask rather than cached. That is what makes revoking a rule
-    /// take effect on the next question instead of on the next launch, and asks are rare enough
-    /// that one query each is not worth a cache that could go stale in the wrong direction.
-    private func matchingGrants(for ask: PermissionAsk) async -> [PermissionGrant]? {
-        guard ask.canWiden, let repoID = await repoID() else { return nil }
-        guard let grants = try? await store.permissionGrants(repoID: repoID) else { return nil }
-        return PermissionGrantIndex.match(ask: ask, grants: grants)
-    }
-
     /// Answer without troubling anybody, and say in the transcript that that is what happened.
     /// The ask must already have been claimed out of `pending` by the caller.
-    private func autoAllow(_ ask: PermissionAsk, using grants: [PermissionGrant]) async {
+    private func autoAllow(_ ask: PermissionAsk, using matched: [PermissionGrant]) async {
         // The wire form of project scope: the CLI is told to stop asking for the rest of this
         // session, and nothing is written to any settings file.
         await write(answerTo: ask, decision: .allow(scope: .project))
-        await close(ask, as: PermissionAskOutcome.auto, note: PermissionGrantIndex.note(for: grants))
-
-        for grant in grants {
-            try? await store.recordPermissionGrantUse(id: grant.id)
-        }
+        await close(ask, as: PermissionAskOutcome.auto, note: PermissionGrantIndex.note(for: matched))
+        await grants.recordUse(of: matched)
     }
 
     /// Answer one question, as a person. The turn resumes on the other side of this line.
@@ -763,12 +744,8 @@ public actor AgentRunner {
 
         // Granting is Bloom's own bookkeeping and happens after the CLI has been unblocked, so a
         // database that refuses the write cannot leave an agent hanging on a question that was
-        // already answered.
-        if let repoID = await repoID() {
-            for grant in PermissionGrant.all(granting: decision, from: ask, repoID: repoID) {
-                _ = try? await store.upsert(grant)
-            }
-        }
+        // already answered. See `SessionGrants.record`.
+        await grants.record(decision, from: ask)
     }
 
     /// Put the answer on stdin, and let the session go back to running if nothing else is waiting.
@@ -797,18 +774,6 @@ public actor AgentRunner {
             decision: decision,
             note: note
         )))
-    }
-
-    /// What this session's workspace belongs to. Looked up rather than held, because a runner
-    /// outlives any particular view and the answer never changes.
-    private func repoID() async -> RepoID? {
-        if let cachedRepoID { return cachedRepoID }
-        // Nil for a chat with no worktree, which is Ask Bloom: there is no project behind it, so
-        // there is no project scope to grant in it either. See `PermissionScopeOffer`.
-        guard let workspaceID = session.workspaceID,
-              let workspace = try? await store.workspace(id: workspaceID) else { return nil }
-        cachedRepoID = workspace.repoID
-        return cachedRepoID
     }
 
     /// Everything still waiting, so a view can draw the questions without asking the database.
