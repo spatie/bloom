@@ -104,4 +104,27 @@ struct WorkspaceMenuSubjectTests {
         #expect(subject.archivedID == live)
         #expect(subject.id == live)
     }
+
+    /// **The one thing neither test above could say.** They walk `allCases` and assert an answer
+    /// per item, so they pass for an item nobody has thought about: `allows` used to switch over
+    /// the subject and test the action by inequality, so a new case was allowed on every live
+    /// workspace and refused on every archived one and the suite went green. It switches over the
+    /// action now, so a new case is a build error, and this is the sentence that says why the
+    /// enum's `CaseIterable` is worth having: every item is answered for by BOTH subjects, and
+    /// exactly two of them are answered the same way by both.
+    @Test("every item in the menu is classified for both kinds of workspace")
+    func everyActionIsClassified() {
+        let live = WorkspaceMenuSubject.live(self.live)
+        let archived = WorkspaceMenuSubject.archived(self.live)
+
+        let bothAllow = WorkspaceMenuAction.allCases
+            .filter { live.allows($0) && archived.allows($0) }
+        #expect(bothAllow == [.copyBranchName, .copyName])
+
+        // Nothing is refused by both: an item in this menu that neither kind of workspace can be
+        // asked to do is an item that should not be in the menu.
+        let neitherAllows = WorkspaceMenuAction.allCases
+            .filter { !live.allows($0) && !archived.allows($0) }
+        #expect(neitherAllows.isEmpty)
+    }
 }

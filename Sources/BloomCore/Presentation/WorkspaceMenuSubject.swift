@@ -72,21 +72,33 @@ public enum WorkspaceMenuSubject: Hashable, Sendable {
     /// menu that reads one must not disagree about what an archived workspace can be asked to do.
     /// The archived answers are `HomeRowMenu`'s, which has drawn exactly this menu for archived
     /// rows since before the menu bar could reach them.
+    ///
+    /// **Switched over the ACTION, which is the half a new case is added to.** It used to switch
+    /// over the subject and then test the action by inequality (`action != .restore`) and by a
+    /// chain of equalities, so `WorkspaceMenuAction` being `CaseIterable` bought nothing: an item
+    /// added to that enum was silently allowed on every live workspace and silently refused on
+    /// every archived one, with nothing to compile against. Written this way round, a new item has
+    /// to be classified here or the build fails, which is the one place that has to be told.
     public func allows(_ action: WorkspaceMenuAction) -> Bool {
-        switch self {
-        case .live:
-            action != .restore
-        case .archived:
-            // Reading a name or a branch name is what still means something once the worktree is
-            // gone. Opening an editor or a Finder window on a path that is not there is not, and
-            // neither is archiving what is already archived. Renaming is left out because Home's
-            // own menu leaves it out: an archived row is a record rather than a workspace.
-            //
-            // Pin, the unread mark and the colour are all about a ROW IN A LIST, and the sidebar
-            // never lists an archived workspace at all. The unread mark has the same answer for a
-            // second reason of its own, written out on `WorkspaceUnreadMark.action(for:)`: an
-            // archived row's `unread` is a flag nothing draws and the user has no way to answer.
-            action == .restore || action == .copyBranchName || action == .copyName
+        switch action {
+        // Reading a name or a branch name is what still means something once the worktree is gone,
+        // so these two are the only items both subjects answer to.
+        case .copyBranchName, .copyName:
+            true
+
+        case .restore:
+            archivedID != nil
+
+        // Opening an editor or a Finder window on a path that is not there means nothing, and
+        // neither does archiving what is already archived. Renaming is left out because Home's own
+        // menu leaves it out: an archived row is a record rather than a workspace.
+        //
+        // Pin, the unread mark and the colour are all about a ROW IN A LIST, and the sidebar never
+        // lists an archived workspace at all. The unread mark has the same answer for a second
+        // reason of its own, written out on `WorkspaceUnreadMark.action(for:)`: an archived row's
+        // `unread` is a flag nothing draws and the user has no way to answer.
+        case .archive, .openInEditor, .revealInFinder, .rename, .pin, .unreadMark, .colour:
+            liveID != nil
         }
     }
 }
