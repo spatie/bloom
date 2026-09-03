@@ -13,9 +13,12 @@ import Foundation
 /// user scope `claude mcp add --scope user` writes into, and the only things compared are a path
 /// and two values Bloom itself minted.
 ///
-/// **It never writes.** Bloom does not edit a person's own configuration file, which is the whole
-/// reason this feature is a command to copy rather than a write, and reading it to decide whether
-/// to offer that command does not change that.
+/// **It never writes.** Bloom does not compose a person's own configuration file, which is the
+/// whole reason this feature is a command to copy rather than a write, and reading it to decide
+/// whether to offer that command does not change that. The one exception is next door in
+/// `BridgeUserRegistrationRepair`, which puts the shim path back when the bundle has moved out
+/// from under an entry this app minted, and which says at length why that is repairing Bloom's own
+/// record rather than editing somebody's setup.
 public enum BridgeUserRegistration {
     /// What the user scope says about this copy of Bloom.
     ///
