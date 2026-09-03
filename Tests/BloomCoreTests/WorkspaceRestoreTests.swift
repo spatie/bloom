@@ -250,6 +250,23 @@ struct WorkspaceRestoreTests {
         #expect(WorktreePath.free(preferred: "/w/x") { $0 == "/w/x" } == "/w/x-2")
     }
 
+    /// The other half of the same rule, and the one that used to be written twice inside
+    /// `WorkspaceManager`: once where a branch is invented and once where a pull request or the
+    /// branch picker hands one over.
+    @Test("a worktree goes in one flat folder per project, whatever slashes the branch carries")
+    func preferredPathIsFlatUnderTheProject() {
+        let root = URL(fileURLWithPath: "/w")
+        #expect(
+            WorktreePath.preferred(branch: "dark-mode", project: "bloom", under: root)
+                == "/w/bloom/dark-mode"
+        )
+        // Nested, and the directory would be too, under a name no row records.
+        #expect(
+            WorktreePath.preferred(branch: "freek/dark/mode", project: "bloom", under: root)
+                == "/w/bloom/freek-dark-mode"
+        )
+    }
+
     // MARK: - What restoring does not claim
 
     @Test("uncommitted work is not restored, because nothing kept a copy of it")

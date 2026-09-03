@@ -78,6 +78,28 @@ public enum RestoreSource: Sendable, Equatable {
 /// somebody, even if only to a `git worktree remove` that failed half way, and a restore that
 /// deleted it would be the archive's mistake made twice.
 public enum WorktreePath {
+    /// Where a worktree for this branch wants to go, before anything asks whether that name is
+    /// taken.
+    ///
+    /// Here because there were two copies of it, both inside `WorkspaceManager`: one in `cut`,
+    /// which invents a branch, and one in `open`, which is handed one by a pull request or by the
+    /// branch picker. Four identical lines twice over in one file is a directory rule written
+    /// twice, and the two halves are exactly the pair that must not disagree, because the second
+    /// one already reaches `git worktree add` by a different route.
+    ///
+    /// The slashes go because a branch name may carry them and a directory named after one would
+    /// nest: `freek/dark-mode` would put the worktree in a `freek` folder beside the flat ones,
+    /// under a name no row records. The path in the row is absolute and is the only way an
+    /// existing workspace is ever opened, so this rule applies to new worktrees and to rebuilt
+    /// ones and to nothing else.
+    public static func preferred(branch: String, project: String, under root: URL) -> String {
+        let directoryName = branch.replacingOccurrences(of: "/", with: "-")
+        return root
+            .appendingPathComponent(project, isDirectory: true)
+            .appendingPathComponent(directoryName)
+            .path
+    }
+
     /// Pure. `isOccupied` is a closure rather than a set so the caller can ask the disk, which is
     /// the only authority on this, without this rule having to know that it did.
     public static func free(preferred: String, isOccupied: (String) -> Bool) -> String {
