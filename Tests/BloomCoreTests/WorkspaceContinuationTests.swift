@@ -308,7 +308,6 @@ struct WorkspaceContinuationTests {
             workspace: workspace, branch: "dark-mode-next"
         )
 
-        #expect(continuation.carriedUncommittedWork)
         #expect(worktree.read("scratch.md") == "half an idea for the next thing\n")
         #expect(worktree.read("README.md") == "hello\nedited after the merge\n")
     }
@@ -327,7 +326,6 @@ struct WorkspaceContinuationTests {
         )
 
         #expect(continuation.base == .cachedRemote)
-        #expect(continuation.base.warning != nil)
         #expect(try await Git.currentBranch(of: workspace.path) == "carry-on")
     }
 
@@ -345,7 +343,6 @@ struct WorkspaceContinuationTests {
         )
 
         #expect(continuation.base == .localBranch)
-        #expect(continuation.base.warning != nil)
         #expect(try await Git.currentBranch(of: workspace.path) == "do-a-thing-2")
         // The revision really is the local base branch's tip.
         let main = await Git.revision(of: "refs/heads/main", in: repo.path)
@@ -447,8 +444,7 @@ struct ContinuationPromptTests {
             previousBranch: "dark-mode-toggle",
             branch: "dark-mode-toggle-2",
             revision: "abc123",
-            base: .fetched,
-            carriedUncommittedWork: false
+            base: .fetched
         )
     }
 
@@ -472,26 +468,6 @@ struct ContinuationPromptTests {
         #expect(template.contains("do not start anything new yet"))
     }
 
-    @Test("the sentence the inspector shows names the branch and the base")
-    func sentence() {
-        #expect(continuation.sentence.contains("dark-mode-toggle-2"))
-        #expect(continuation.sentence.contains("main"))
-        #expect(continuation.sentence.contains("uncommitted") == false)
-    }
-
-    @Test("carried work is said out loud")
-    func carried() {
-        var carried = continuation
-        carried.carriedUncommittedWork = true
-        #expect(carried.sentence.contains("uncommitted"))
-    }
-
-    @Test("only a fetched base is silent about where it came from")
-    func warnings() {
-        #expect(ContinuationBase.fetched.warning == nil)
-        #expect(ContinuationBase.cachedRemote.warning != nil)
-        #expect(ContinuationBase.localBranch.warning != nil)
-    }
 }
 
 @Suite("Which branch the merged pull request is for")
@@ -616,8 +592,7 @@ struct ContinuedBranchTests {
             previousBranch: "dark-mode-toggle",
             branch: "dark-mode-toggle-2",
             revision: "abc123",
-            base: .fetched,
-            carriedUncommittedWork: false
+            base: .fetched
         )
         #expect(ContinuedBranch(continuation, pullRequest: 381) == continued)
     }

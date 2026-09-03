@@ -245,23 +245,14 @@ public enum ContinuationBase: String, Sendable, Hashable {
     /// There is no remote-tracking ref at all, so the local base branch was used. A repository
     /// with no remote, which is a perfectly ordinary thing for Bloom to be pointed at.
     case localBranch
-
-    /// One line for the notice, or nothing when there is nothing to warn about.
-    public var warning: String? {
-        switch self {
-        case .fetched:
-            nil
-        case .cachedRemote:
-            "Bloom could not reach the remote, so the new branch starts from the last copy of the "
-                + "base branch on this disk. Anything merged since then is not underneath it."
-        case .localBranch:
-            "There is no remote-tracking copy of the base branch here, so the new branch starts "
-                + "from the local one."
-        }
-    }
 }
 
-/// What continuing actually did, for the sentence the inspector shows afterwards.
+/// What continuing actually did.
+///
+/// It used to carry the sentence the inspector showed afterwards, a green banner over the file
+/// list saying which branch the worktree was on and what it was cut from. The owner asked for it
+/// to go: "remove this, we don't need that." What it reported is on screen anyway, in the strip's
+/// own branch name and in `ContinuedBranch.line`, so the banner was a third telling.
 public struct WorkspaceContinuation: Sendable, Hashable {
     /// The workspace row as it now stands, with its new branch.
     public var workspace: Workspace
@@ -272,36 +263,19 @@ public struct WorkspaceContinuation: Sendable, Hashable {
     /// The commit it was cut at.
     public var revision: String
     public var base: ContinuationBase
-    /// Work that was sitting in the worktree uncommitted and came along to the new branch.
-    ///
-    /// Nothing is stashed, reset or thrown away: `git checkout -b` carries the working tree over
-    /// as it stands, and git refuses outright rather than clobbering anything it cannot. So this
-    /// is only ever reported, never acted on.
-    public var carriedUncommittedWork: Bool
 
     public init(
         workspace: Workspace,
         previousBranch: String,
         branch: String,
         revision: String,
-        base: ContinuationBase,
-        carriedUncommittedWork: Bool
+        base: ContinuationBase
     ) {
         self.workspace = workspace
         self.previousBranch = previousBranch
         self.branch = branch
         self.revision = revision
         self.base = base
-        self.carriedUncommittedWork = carriedUncommittedWork
-    }
-
-    /// The one line the inspector shows when it worked.
-    public var sentence: String {
-        var text = "\(workspace.name) is on \(branch) now, cut from \(baseDescription)."
-        if carriedUncommittedWork {
-            text += " Everything that was uncommitted came with it."
-        }
-        return text
     }
 
     /// What the `continueAfterMerge` prompt is rendered against.
@@ -320,14 +294,6 @@ public struct WorkspaceContinuation: Sendable, Hashable {
 
     public func render(template: String, pullRequest: Int) -> PromptRender {
         PromptTemplate.render(template, values: promptValues(pullRequest: pullRequest))
-    }
-
-    private var baseDescription: String {
-        switch base {
-        case .fetched: "an up to date \(workspace.baseBranch)"
-        case .cachedRemote: "the last fetched \(workspace.baseBranch)"
-        case .localBranch: "the local \(workspace.baseBranch)"
-        }
     }
 }
 
@@ -449,7 +415,6 @@ public extension WorkspaceManager {
         workspace: Workspace,
         branch: String
     ) async throws -> WorkspaceContinuation {
-        let local = try? await Git.localWork(worktree: workspace.path)
         // The branch actually being left, read off the worktree rather than taken from the row,
         // for the reason `ContinuationFacts.mergedBranch` gives at length: the row is where Bloom
         // put this worktree and an agent that cuts a branch of its own does not update it. The
@@ -480,8 +445,7 @@ public extension WorkspaceManager {
             previousBranch: leaving,
             branch: branch,
             revision: resolved.revision,
-            base: resolved.base,
-            carriedUncommittedWork: local?.hasUncommitted ?? false
+            base: resolved.base
         )
     }
 }
