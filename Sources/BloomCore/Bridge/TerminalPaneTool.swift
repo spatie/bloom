@@ -1,7 +1,8 @@
 import Foundation
 
 enum TerminalPaneRun {
-    static let roles: Set<BridgeRole> = [.parent]
+    /// The gate the whole workspace-scoped family shares, argued once in `BridgeWorkspaceScope`.
+    static let roles = BridgeWorkspaceScope.roles
 
     static func perform(
         _ request: MCPRequest,
@@ -12,13 +13,12 @@ enum TerminalPaneRun {
     ) async -> BridgeToolResult {
         guard let workspaceID = identity.workspaceID else {
             return .failure(
-                "\(tool) acts on a terminal in the workspace you are in, and this connection is "
-                    + "not speaking for one."
+                BridgeWorkspaceScope.refusal(tool: tool, doing: "acts on a terminal in")
             )
         }
 
         let terminal: Int?
-        switch TerminalPaneChoice.parse(request.param("terminal"), tool: tool) {
+        switch PaneNumberArgument.terminal.parse(request.param("terminal")) {
         case .failure(let refusal): return .failure(refusal.sentence)
         case .success(let number): terminal = number
         }
@@ -99,7 +99,11 @@ public struct TerminalStartTool: BridgeToolHandling {
         _ request: MCPRequest, as identity: BridgeIdentity, store: Store
     ) async -> BridgeToolResult {
         guard let workspaceID = identity.workspaceID else {
-            return .failure("terminal_start only starts a terminal in the workspace you are in.")
+            return .failure(
+                BridgeWorkspaceScope.refusal(
+                    tool: TerminalPaneToolName.start, doing: "starts a terminal in"
+                )
+            )
         }
         let command = request.stringParam("command")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !command.isEmpty else {

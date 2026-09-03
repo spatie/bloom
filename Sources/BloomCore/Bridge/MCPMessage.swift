@@ -22,6 +22,15 @@ public struct MCPRequest: Sendable, Hashable {
     /// notification is a protocol error the client is entitled to log or close the connection over.
     public var isNotification: Bool { id == nil || id == .null }
 
+    /// The id to answer against, or nil when this frame must be answered with silence.
+    ///
+    /// Here rather than at the one call site because the rule above was written twice: this
+    /// property said what a notification is and `BridgeDispatch` re-derived it, so a frame shape
+    /// added to one spelling would have been missed by the other. A dispatch needs the unwrapped
+    /// id, which is why it could not simply ask `isNotification`, and this is that question and
+    /// that answer in a single reading.
+    public var replyID: JSONValue? { isNotification ? nil : id }
+
     public static func decode(_ line: String) -> MCPRequest? {
         guard let data = line.data(using: .utf8),
               let value = try? JSONDecoder().decode(JSONValue.self, from: data),

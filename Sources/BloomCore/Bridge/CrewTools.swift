@@ -159,10 +159,9 @@ public enum CrewToolTrouble: Error, Sendable, Equatable {
     public var sentence: String {
         switch self {
         case .notInAWorkspace(let tool):
-            return """
-                \(tool) is about the agents working in the workspace you are in, and this \
-                connection is not speaking for one.
-                """
+            return BridgeWorkspaceScope.refusal(
+                tool: tool, doing: "is about the agents working in"
+            )
 
         case .callerHasGone(let tool):
             return """

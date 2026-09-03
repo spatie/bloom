@@ -74,15 +74,19 @@ struct BrowserPaneToolTests {
         #expect(refusal.sentence.contains("pane_list"))
     }
 
+    /// The reading itself is `PaneNumberArgument.browser` now, shared with the terminal and tab
+    /// families. Asserted through it here all the same: what this suite is about is what
+    /// `browser_read` does with a `browser` argument, and the answer has to stay the same however
+    /// many types it passes through on the way. `PaneNumberArgumentTests` holds the rule.
     @Test("the browser argument is a whole number counting from one")
     func theArgumentIsAWholeNumber() {
-        #expect((try? BrowserPaneChoice.parse(nil, tool: "browser_read").get()) == .some(nil))
-        #expect((try? BrowserPaneChoice.parse(.null, tool: "browser_read").get()) == .some(nil))
-        #expect((try? BrowserPaneChoice.parse(.integer(2), tool: "browser_read").get()) == 2)
+        let browser = PaneNumberArgument.browser
+        #expect((try? browser.parse(nil).get()) == .some(nil))
+        #expect((try? browser.parse(.null).get()) == .some(nil))
+        #expect((try? browser.parse(.integer(2)).get()) == 2)
 
         for bad in [JSONValue.integer(0), .integer(-1), .string("1"), .number(1.5), .bool(true)] {
-            guard case .failure(let refusal) = BrowserPaneChoice.parse(bad, tool: "browser_read")
-            else {
+            guard case .failure(let refusal) = browser.parse(bad) else {
                 Issue.record("\(bad) was not refused"); return
             }
             #expect(refusal.sentence.contains("'browser'"))

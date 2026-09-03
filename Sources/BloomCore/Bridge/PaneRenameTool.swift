@@ -52,18 +52,8 @@ public struct PaneRenameTool: BridgeToolHandling {
         self.rename = rename
     }
 
-    /// Not `.child`, matching the other three. A subagent renaming its parent's tabs is a strip
-    /// changing under the reader on behalf of something they did not address.
-    /// A parent and nothing else.
-    ///
-    /// Not `.owner`, although it was at first, and that was a listed tool that could never work.
-    /// This tool is scoped to the workspace the caller is standing in, and `BridgeIdentity.owner`
-    /// carries no `workspaceID` by definition: the role is the person reaching Bloom from a client
-    /// they started themselves, sitting in no workspace at all. Every call refused with "this
-    /// connection is not speaking for one", after being advertised in `tools/list` as though it
-    /// would work. `BridgeRole.owner` says as much in its own doc comment: not anything scoped to
-    /// a workspace, because it has none to be scoped to.
-    public let roles: Set<BridgeRole> = [.parent]
+    /// The gate the whole workspace-scoped family shares, argued once in `BridgeWorkspaceScope`.
+    public let roles = BridgeWorkspaceScope.roles
 
     public let tool = BridgeTool(
         name: "pane_rename",
@@ -130,8 +120,7 @@ public struct PaneRenameTool: BridgeToolHandling {
     ) async -> BridgeToolResult {
         guard let workspaceID = identity.workspaceID else {
             return .failure(
-                "pane_rename renames a pane in the workspace you are in, and this connection is "
-                    + "not speaking for one."
+                BridgeWorkspaceScope.refusal(tool: "pane_rename", doing: "renames a pane in")
             )
         }
 

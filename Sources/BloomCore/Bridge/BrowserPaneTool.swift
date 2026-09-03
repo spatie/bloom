@@ -26,20 +26,8 @@ import Foundation
 /// closure and the argument reading with them, which is a wider surface than the one thing being
 /// shared is worth.
 enum BrowserPaneRun {
-    /// A parent and nothing else, which is the whole of the pane family's gate, stated once for the
-    /// six tools below.
-    ///
-    /// Not `.child`, matching the other pane tools: a subagent reading or moving pages in its
-    /// parent's window is something happening to the reader on behalf of a thing they did not
-    /// address.
-    ///
-    /// Not `.owner`, and this is the mistake that was made once already and must not be made
-    /// again. Every tool here is scoped to the workspace the caller is standing in, and
-    /// `BridgeIdentity.owner` carries no `workspaceID` by definition. The four pane tools were
-    /// advertised to that role at
-    /// first, could only ever answer "this connection is not speaking for one", and had to be taken
-    /// away again. See `BridgeRole.owner`.
-    static let roles: Set<BridgeRole> = [.parent]
+    /// The gate the whole workspace-scoped family shares, argued once in `BridgeWorkspaceScope`.
+    static let roles = BridgeWorkspaceScope.roles
 
     /// Reads the `browser` argument, builds the command, hands it to the window and renders
     /// whatever comes back.
@@ -52,13 +40,12 @@ enum BrowserPaneRun {
     ) async -> BridgeToolResult {
         guard let workspaceID = identity.workspaceID else {
             return .failure(
-                "\(tool) acts on a browser pane in the workspace you are in, and this connection "
-                    + "is not speaking for one."
+                BridgeWorkspaceScope.refusal(tool: tool, doing: "acts on a browser pane in")
             )
         }
 
         let browser: Int?
-        switch BrowserPaneChoice.parse(request.param("browser"), tool: tool) {
+        switch PaneNumberArgument.browser.parse(request.param("browser")) {
         case .failure(let refusal): return .failure(refusal.sentence)
         case .success(let number): browser = number
         }

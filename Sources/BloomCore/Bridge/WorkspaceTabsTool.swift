@@ -44,11 +44,8 @@ public struct WorkspaceTabsTool: BridgeToolHandling {
         self.census = census
     }
 
-    /// A parent and nothing else. See `BrowserPaneRun.roles`, which argues the gate the whole pane
-    /// family shares, and `BridgeRole.owner` for why the odd role out cannot have any of them:
-    /// every tool here is scoped to the workspace the caller is standing in, and the owner's own
-    /// client stands in none.
-    public let roles = BrowserPaneRun.roles
+    /// The gate the whole workspace-scoped family shares, argued once in `BridgeWorkspaceScope`.
+    public let roles = BridgeWorkspaceScope.roles
 
     public let tool = BridgeTool(
         name: "workspace_tabs",
@@ -83,8 +80,7 @@ public struct WorkspaceTabsTool: BridgeToolHandling {
     ) async -> BridgeToolResult {
         guard let workspaceID = identity.workspaceID else {
             return .failure(
-                "workspace_tabs lists the tabs of the workspace you are in, and this connection "
-                    + "is not speaking for one."
+                BridgeWorkspaceScope.refusal(tool: "workspace_tabs", doing: "lists the tabs of")
             )
         }
         guard let census = await census(workspaceID) else {

@@ -72,10 +72,7 @@ public enum WorkspaceRenameTrouble: Error, Sendable, Equatable {
                 """
 
         case .notInAWorkspace:
-            return """
-                workspace_rename renames the workspace you are in, and this connection is not \
-                speaking for one.
-                """
+            return BridgeWorkspaceScope.refusal(tool: "workspace_rename", doing: "renames")
 
         case .gone:
             return """

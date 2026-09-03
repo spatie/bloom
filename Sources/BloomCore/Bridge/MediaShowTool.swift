@@ -192,7 +192,8 @@ public struct MediaShowTool: BridgeToolHandling {
 
     public init(_ show: @escaping MediaShowing) { self.show = show }
 
-    public let roles: Set<BridgeRole> = [.parent]
+    /// The gate the whole workspace-scoped family shares, argued once in `BridgeWorkspaceScope`.
+    public let roles = BridgeWorkspaceScope.roles
     public let tool = BridgeTool(
         name: MediaShowToolName.show,
         description: """
@@ -231,7 +232,9 @@ public struct MediaShowTool: BridgeToolHandling {
         _ request: MCPRequest, as identity: BridgeIdentity, store: Store
     ) async -> BridgeToolResult {
         guard let workspaceID = identity.workspaceID else {
-            return .failure("media_show only shows a file from the workspace you are in.")
+            return .failure(
+                BridgeWorkspaceScope.refusal(tool: MediaShowToolName.show, doing: "shows a file in")
+            )
         }
         let path = request.stringParam("path")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !path.isEmpty else { return .failure("media_show needs a non-empty 'path'.") }

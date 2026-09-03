@@ -44,7 +44,8 @@ public struct WorkspaceTabSelectTool: BridgeToolHandling {
         self.select = select
     }
 
-    public let roles = BrowserPaneRun.roles
+    /// The gate the whole workspace-scoped family shares, argued once in `BridgeWorkspaceScope`.
+    public let roles = BridgeWorkspaceScope.roles
 
     public let tool = BridgeTool(
         name: "workspace_tab_select",
@@ -93,8 +94,7 @@ public struct WorkspaceTabSelectTool: BridgeToolHandling {
     ) async -> BridgeToolResult {
         guard let workspaceID = identity.workspaceID else {
             return .failure(
-                "workspace_tab_select acts on the workspace you are in, and this connection is "
-                    + "not speaking for one."
+                BridgeWorkspaceScope.refusal(tool: "workspace_tab_select", doing: "acts on")
             )
         }
 

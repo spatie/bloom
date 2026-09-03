@@ -40,8 +40,9 @@ public struct BridgeDispatch: Sendable {
     public func respond(to request: MCPRequest) async -> MCPResponse? {
         // Answered before the id check, because a notification with a method we handle is still a
         // notification: `notifications/initialized` is the client saying it is ready and expects
-        // nothing back.
-        guard let id = request.id, id != .null else { return nil }
+        // nothing back. What counts as one is `MCPRequest.replyID` rather than a second reading of
+        // the id here, so the two cannot come to disagree.
+        guard let id = request.replyID else { return nil }
 
         switch request.method {
         case "initialize":
