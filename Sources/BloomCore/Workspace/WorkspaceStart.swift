@@ -238,9 +238,22 @@ extension WorkspaceManager {
 
         var setupSucceeded: Bool?
         if request.runsSetup {
-            // A machine with no free block left is not a reason to refuse to run setup. The script
-            // simply gets no port to bind, which it can decide for itself what to do about.
-            let port = (try? PortAllocator.allocate(taken: [])) ?? 0
+            // **`ensurePort`, which is the same door the app's own setup run goes through.**
+            //
+            // This used to call `PortAllocator.allocate(taken: [])` directly, which is the bug
+            // `ensurePort` was written to stop, arriving by a route that predates it. Two things
+            // went wrong at once. The number was never written to the row, so the archive script
+            // was later handed `stored?.port ?? workspace.port`, which is 0, and a teardown that
+            // wanted to stop whatever holds `$BLOOM_PORT` had nothing to look for while the setup
+            // script had just bound a real one. And `taken: []` weighs no other workspace's block,
+            // where `ensurePort` reads every live row: the allocator probes live binds, so a
+            // sibling workspace whose dev server happens to be down holds a block this would have
+            // handed out a second time.
+            //
+            // A machine with no free block left is still not a reason to refuse to run setup:
+            // `ensurePort` answers 0 for that, exactly as the line it replaces did, and the script
+            // decides for itself what to do about having no port.
+            let port = await ensurePort(for: workspace)
             setupSucceeded = await runSetup(
                 workspace: workspace, repo: request.repo, port: port
             ) { line in
