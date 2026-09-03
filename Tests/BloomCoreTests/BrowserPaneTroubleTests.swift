@@ -27,16 +27,24 @@ struct BrowserPaneTroubleTests {
     }
 
     /// The words are the pane's own, so the model and the person beside it read one account.
-    @Test func namesWhatWentWrongInTheSameWordsThePaneDraws() {
-        let failure = try? #require(
-            BrowserLoadFailure.of(domain: NSURLErrorDomain, code: NSURLErrorCannotConnectToHost, host: "there-there-6.test")
+    @Test func namesWhatWentWrongInTheSameWordsThePaneDraws() throws {
+        // `try` rather than `try?`, and the test throws. Written with `try?` these two lines
+        // compiled and asserted almost nothing: the macro's whole job is to stop the test where
+        // the value is missing, and wrapping it puts the optional straight back, which is what
+        // the nightly build was warning about on both of them.
+        let failure = try #require(
+            BrowserLoadFailure.of(
+                domain: NSURLErrorDomain,
+                code: NSURLErrorCannotConnectToHost,
+                host: "there-there-6.test"
+            )
         )
-        let trouble = try? #require(Self.report(failure: failure).trouble)
+        let trouble = try #require(Self.report(failure: failure).trouble)
 
-        #expect(trouble?.contains("Cannot connect") == true)
-        #expect(trouble?.contains("there-there-6.test") == true)
+        #expect(trouble.contains("Cannot connect"))
+        #expect(trouble.contains("there-there-6.test"))
         // The conclusion the agent got wrong, said out loud.
-        #expect(trouble?.contains("not the pane failing to draw") == true)
+        #expect(trouble.contains("not the pane failing to draw"))
     }
 
     /// A failure that is about the machine rather than about this page does not repeat an address
