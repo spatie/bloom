@@ -49,7 +49,8 @@ struct WelcomeView: View {
     /// Wide enough for `npm install -g @anthropic-ai/claude-code` to sit on one line in the mono
     /// face, which is the longest command this window can ever show, and no wider. A command that
     /// wrapped would be a command somebody copies wrong by hand.
-    private static let width: CGFloat = 520
+    static let contentWidth: CGFloat = 520
+    private static let width = contentWidth
     private static let markSize: CGFloat = 64
     /// The gutter the glyphs and the sounding line share.
     private static let gutter: CGFloat = 26
