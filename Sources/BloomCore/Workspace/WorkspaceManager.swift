@@ -201,13 +201,14 @@ public struct WorkspaceManager: Sendable {
         let stem = Git.branchStem(prompt: prompt, prefix: settings.branchPrefix, branch: branch)
         let finalBranch = Git.uniqueBranch(stem, taken: existingBranches)
 
-        let directoryName = finalBranch.replacingOccurrences(of: "/", with: "-")
-        let root = Self.workspacesRoot.appendingPathComponent(repo.name, isDirectory: true)
-        // The suffix rule lives in `WorktreePath` because restoring an archived workspace needs
-        // the same one: two places that each invent a free directory name are two places that can
-        // disagree about which names are free.
+        // Both halves of this live in `WorktreePath`, and for the same reason: two places that
+        // each derive a worktree's directory, or each invent a free name for it, are two places
+        // that can disagree. Restoring an archived workspace and opening an existing branch are
+        // the other two, and all three now ask the one rule.
         let worktreePath = WorktreePath.free(
-            preferred: root.appendingPathComponent(directoryName).path
+            preferred: WorktreePath.preferred(
+                branch: finalBranch, project: repo.name, under: Self.workspacesRoot
+            )
         ) { FileManager.default.fileExists(atPath: $0) }
 
         // `branchIsNew: true` rather than letting git check, because `uniqueBranch` above returns a
@@ -290,10 +291,10 @@ public struct WorkspaceManager: Sendable {
             throw BranchInUse(branch: branch, holder: holder)
         }
 
-        let directoryName = branch.replacingOccurrences(of: "/", with: "-")
-        let root = Self.workspacesRoot.appendingPathComponent(repo.name, isDirectory: true)
         let worktreePath = WorktreePath.free(
-            preferred: root.appendingPathComponent(directoryName).path
+            preferred: WorktreePath.preferred(
+                branch: branch, project: repo.name, under: Self.workspacesRoot
+            )
         ) { FileManager.default.fileExists(atPath: $0) }
 
         switch checkout {
@@ -378,9 +379,17 @@ public struct WorkspaceManager: Sendable {
         }
     }
 
+    /// What a `files_to_copy` pattern matches, asked of the one place that answers it.
+    ///
+    /// These three lines were here as well as in `FilesToCopyResolver`, whose doc calls itself a
+    /// deliberate mirror of this method. A mirror is the right shape for the walk, because the
+    /// preview runs on every keystroke and must not write anything, and it is the wrong shape for
+    /// the predicate: two `fnmatch` calls that have to agree about what `.env*` means are two
+    /// places a wildcard rule can be changed in. The behavioural test still runs the real copier
+    /// against a real folder and compares what landed with what the preview named, so the walk is
+    /// pinned the way it was; this half no longer needs pinning because there is only one of it.
     func matches(_ name: String, pattern: String) -> Bool {
-        guard pattern.contains("*") || pattern.contains("?") else { return name == pattern }
-        return fnmatch(pattern, name, 0) == 0
+        FilesToCopyResolver.matches(name, pattern: pattern)
     }
 
     // MARK: - Scripts

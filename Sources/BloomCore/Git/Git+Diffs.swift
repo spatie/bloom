@@ -403,6 +403,16 @@ extension Git {
 
     /// Commits on HEAD that `base` does not have. Throws rather than answering 0 when git cannot
     /// resolve the base, because 0 reads as "this branch is in sync".
+    ///
+    /// **There were two of these, asking git the same thing and disagreeing about failure.** The
+    /// other lived in `Git+Branches.swift`, swallowed a non-zero exit and answered 0, under a
+    /// comment saying that "git could not tell me" must not arrive disguised as a number, which is
+    /// precisely what a 0 there was. Its one caller is `branchRenameFacts`, whose own comment says
+    /// a count git refused to give is treated as one commit so the rename is refused rather than
+    /// performed on a repository nobody could ask a question of. That protection never fired: the
+    /// likeliest failure is a base branch that no longer resolves, and `try?` saw a clean 0 rather
+    /// than a throw. One implementation now, and it is the one whose contract the callers were
+    /// written against.
     public static func commitsAhead(worktree: String, base: String) async throws -> Int {
         try validate(ref: base, label: "base branch")
         let result = try await check(["rev-list", "--count", "\(base)..HEAD", "--"], in: worktree)

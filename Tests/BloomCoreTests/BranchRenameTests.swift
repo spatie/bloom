@@ -181,6 +181,32 @@ struct BranchRenameGitTests {
         #expect(BranchRenameGate.decide(facts).refusal == .hasCommits(1))
     }
 
+    /// The cautious fallback the facts-gathering comment promises, actually firing.
+    ///
+    /// A base branch that no longer resolves is the likeliest way the commit count fails, and it
+    /// used to come back as a clean 0 because the git call swallowed the non-zero exit. Nought
+    /// commits is what an untouched branch looks like, so a workspace whose base had been deleted
+    /// was renamed on the strength of an answer nobody had. One commit is the honest stand-in for
+    /// "git would not say", and it refuses.
+    @Test("a base branch git cannot resolve refuses the rename rather than allowing it", .tags(.subprocess))
+    func refusesWhenTheCountCannotBeRead() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        let manager = WorkspaceManager(store: try makeTestStore("unreadable-count"))
+        let registered = try await manager.addRepository(at: repo.path)
+        var workspace = try await manager.createWorkspace(
+            repo: registered, prompt: "Add a toggle to the settings screen"
+        )
+        workspace.baseBranch = "a-branch-that-is-not-here"
+
+        let facts = try await manager.branchRenameFacts(
+            workspace: workspace, desiredBranch: "dark-mode", hasPullRequest: false
+        )
+
+        #expect(facts.commitsAhead == 1)
+        #expect(BranchRenameGate.decide(facts).refusal == .hasCommits(1))
+    }
+
     @Test("a half finished merge is seen", .tags(.subprocess))
     func seesOperationInProgress() async throws {
         let repo = try await TempRepo()

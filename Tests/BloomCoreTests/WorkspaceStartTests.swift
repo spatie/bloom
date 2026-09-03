@@ -296,6 +296,36 @@ struct WorkspaceStartTests {
         #expect(stored.setupState == .succeeded)
     }
 
+    /// The number the setup script bound has to be the number the archive script is later handed,
+    /// which means it has to be on the row.
+    ///
+    /// This route allocated a block of its own and told nobody: the script wrote a real port into
+    /// a `.env` or a compose file and `workspaces.port` stayed 0, so `archive` read 0 out of the
+    /// row and a teardown looking for whatever holds `$BLOOM_PORT` had nothing to look for. See
+    /// `WorkspaceManager.ensurePort`, and `WorkspacePortTests` for the column's own rules.
+    @Test("the port the setup script is given is the port the row keeps")
+    func recordsThePortSetupWasGiven() async throws {
+        let (repo, registered, manager, store) = try await makeManager()
+        defer { repo.cleanUp() }
+
+        try repo.write(".conductor/settings.toml", """
+        [scripts]
+        setup = "echo port=$BLOOM_PORT"
+        """)
+
+        let lines = LineCollector()
+        let started = try await manager.start(
+            WorkspaceStartRequest(
+                repo: registered, prompt: "Needs a port", origin: .user, runsSetup: true
+            ),
+            setupOutput: { lines.append($0) }
+        )
+
+        let stored = try #require(try await store.workspace(id: started.workspace.id))
+        #expect(stored.port >= 3_100)
+        #expect(lines.joined.contains("port=\(stored.port)"))
+    }
+
     /// A failed setup is reported, not thrown. The worktree exists, the chat exists, and the
     /// caller has to be able to say both that the workspace is there and that its dependencies are
     /// not. Throwing would leave a real workspace behind an error that reads as if nothing

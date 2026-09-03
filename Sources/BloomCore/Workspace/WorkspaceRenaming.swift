@@ -41,7 +41,7 @@ extension WorkspaceManager {
         hasPullRequest: Bool
     ) async throws -> BranchRenameFacts {
         async let checkedOut = try? Git.currentBranch(of: workspace.path)
-        async let ahead = try? Git.commitsAhead(base: workspace.baseBranch, in: workspace.path)
+        async let ahead = try? Git.commitsAhead(worktree: workspace.path, base: workspace.baseBranch)
         async let upstream = try? Git.upstream(of: workspace.branch, in: workspace.path)
         async let remote = Git.hasRemoteCounterpart(workspace.branch, in: workspace.path)
         async let inProgress = Git.hasOperationInProgress(in: workspace.path)
