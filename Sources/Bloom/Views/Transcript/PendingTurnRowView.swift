@@ -241,29 +241,23 @@ struct PendingTurnRowView: View {
     /// stronger reason: it is the same view at two tints rather than a view appearing. The opacity
     /// it used to fade was there for exactly this and is gone with the fade.
     ///
-    /// **The two controls are last in the row and the row carries no trailing padding**, so their
-    /// right edge is the enclosing `VStack`'s trailing edge, which is the bubble's. Nothing here
+    /// **The control is last in the row and the row carries no trailing padding**, so its right
+    /// edge is the enclosing `VStack`'s trailing edge, which is the bubble's. Nothing here
     /// re-states the alignment: one container aligns both, and the two edges agree by
     /// construction. The bubble's outline is a `strokeBorder`, which draws inside the frame rather
     /// than astride it, so the frame edge really is the edge you can see.
     ///
     /// The sentence was last and the words Edit and Delete led the row, which put two pieces of
-    /// prose in one caption competing to be read first. The marks are the things you act on, so
-    /// they take the edge under the bubble's own corner; the sentence, when there is one, explains
+    /// prose in one caption competing to be read first. The mark is the thing you act on, so it
+    /// takes the edge under the bubble's own corner; the sentence, when there is one, explains
     /// from the left.
     ///
-    /// **Marks rather than the words.** "Edit" and "Delete" set in caption beside a sentence in
-    /// the same size and the same resting ink read as three pieces of prose, and the reader has to
-    /// tell which two of them are pressable. A pencil and a bin are the two most legible glyphs in
-    /// the system for exactly these, and each keeps the sentence it had as its tooltip and its
-    /// accessibility label, so nothing is lost to somebody who cannot read a glyph.
-    ///
-    /// **Steer leads the marks, and its place is decided by the one thing that moves.** It is the
-    /// only one of the three that comes and goes, since it is offered exactly while there is a
-    /// turn to interrupt, and this row is packed against the trailing edge. Leading, it appears
-    /// and disappears without the pencil and the bin moving under the hand that was reaching for
-    /// them; trailing, every turn ending would shuffle both of them along. The pair keeps the
-    /// order and the argument it already had.
+    /// **One mark rather than three.** The words became a pencil, a bin and a turn arrow, on the
+    /// grounds that three pieces of caption prose leave the reader working out which are
+    /// pressable. Three glyphs in a row solved that and bought a different complaint, which was
+    /// made: too much furniture under a message whose whole job is to say it is waiting. They are
+    /// behind one circled ellipsis now, and the words are back where a menu can carry them. See
+    /// `moreMenu`, which also answers the old argument about where Steer had to sit.
     @ViewBuilder
     private var caption: some View {
         HStack(spacing: Metrics.gutter) {
@@ -280,57 +274,63 @@ struct PendingTurnRowView: View {
                     .help("Try to send this message again.")
             }
 
-            // A turn arrow rather than a stop sign or a paper plane. The button is neither of its
-            // two halves on its own, and a glyph for either one would name the half it is not:
-            // what it means is "this way instead", which is the word on its label.
-            if canSteer {
-                action(
-                    "arrow.turn.up.right",
-                    label: "Steer",
-                    help: "Stops the turn that is running and sends this message now.",
-                    run: onSteer
-                )
-            }
-
-            // First of the pair, because it is the safer of the two and the one wanted more
-            // often. Offered only for a message the composer could be handed back as text, which is
-            // `PendingMessageEdit.canEdit`: a disabled button with no explanation says less than
-            // no button at all.
-            if PendingMessageEdit.canEdit(delivery) {
-                action(
-                    "pencil",
-                    label: "Edit",
-                    help: "Takes this message back into the composer to change it.",
-                    run: onEdit
-                )
-            }
-
-            action(
-                "trash",
-                label: "Delete",
-                help: "Takes this message back out of the queue. It is not sent.",
-                run: onDelete
-            )
+            moreMenu
         }
         .font(Typo.caption)
     }
 
-    /// Not `linkButton()`, and not `.link` with a tint of its own: measured on this SDK,
-    /// `.buttonStyle(.link)` paints the system link colour whatever `.tint` says, so the resting
-    /// state came out the same blue as the pointed-at one and the whole point of the two states
-    /// was lost. A plain button takes the colour it is given, and `.pointerStyle` puts back the
-    /// one thing the link style was buying.
-    private func action(
-        _ symbol: String, label: String, help: String, run: @escaping @MainActor () -> Void
-    ) -> some View {
-        Button(action: run) {
-            Image(systemName: symbol)
+    /// The three things you can do to a queued message, behind one mark.
+    ///
+    /// **They were three marks in a row and that was too much furniture for a queued message.**
+    /// A pencil, a bin and a turn arrow are each legible on their own, and side by side under a
+    /// bubble they are three targets and three decisions on a row whose whole job is to say that
+    /// a message is waiting. Reported as visually heavy, and it was.
+    ///
+    /// One circled ellipsis instead, which is the mark this app already uses for "more about this
+    /// row": `WorkspaceRow.moreMenu` in the sidebar. Read its notes before changing the styling
+    /// here, because both lines below were measured rather than chosen. `.menuStyle(.button)`
+    /// with `.buttonStyle(.plain)` is what makes a menu take the ink it is given; `.borderlessButton`
+    /// paints its own and ignores the colour wherever it is stated.
+    ///
+    /// **The words come back.** A glyph had to carry the whole meaning while these sat in a row,
+    /// so each one wore its sentence as a tooltip nobody sees until they hover. In a menu the item
+    /// is the word, which is what a reader wanted in the first place, and the sentence stays
+    /// beside it as the help.
+    ///
+    /// Steer's argument about position is answered rather than kept: it was placed first so that
+    /// a turn ending could not shuffle the pencil and the bin under a hand already reaching for
+    /// them. Nothing shuffles now. The mark is in the same place whether one item is offered or
+    /// three, and only the contents of the menu change.
+    private var moreMenu: some View {
+        Menu {
+            // A turn arrow rather than a stop sign or a paper plane: the action is neither of its
+            // two halves on its own, and what it means is "this way instead".
+            if canSteer {
+                Button("Steer", systemImage: "arrow.turn.up.right", action: onSteer)
+                    .help("Stops the turn that is running and sends this message now.")
+            }
+
+            // Offered only for a message the composer could be handed back as text, which is
+            // `PendingMessageEdit.canEdit`: a disabled item with no explanation says less than no
+            // item at all.
+            if PendingMessageEdit.canEdit(delivery) {
+                Button("Edit", systemImage: "pencil", action: onEdit)
+                    .help("Takes this message back into the composer to change it.")
+            }
+
+            Button("Delete", systemImage: "trash", action: onDelete)
+                .help("Takes this message back out of the queue. It is not sent.")
+        } label: {
+            Label("More for this message", systemImage: "ellipsis.circle")
+                .labelStyle(.iconOnly)
                 .imageScale(.medium)
         }
+        .menuStyle(.button)
         .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
         .foregroundStyle(isPointedAt ? Palette.link : Palette.textTertiary)
         .pointerStyle(.link)
-        .help(help)
-        .accessibilityLabel(label)
+        .help("Steer, edit or delete this queued message")
     }
 }
