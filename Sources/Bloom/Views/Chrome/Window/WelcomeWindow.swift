@@ -25,6 +25,10 @@ enum WelcomeWindow {
     private static var window: NSWindow?
     private static var inspection: SetupInspection?
     private static var registration: CommandLineRegistration?
+    /// Watches the one window for its close. Kept so the observer is registered once rather than
+    /// once per open: the window is built once and `isReleasedWhenClosed` is off, so it is closed
+    /// and shown again for the life of the process.
+    private static var closeWatch: NSObjectProtocol?
 
     /// The running state, handed over by `BloomAppDelegate` once the scene exists, and used for
     /// exactly one thing: the bridge the command line step offers to point a terminal at.
@@ -121,6 +125,15 @@ enum WelcomeWindow {
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
         window.center()
+        // Closing this window is how somebody says they have seen it. See
+        // `WelcomeLaunch.recordDismissal`, which is where the reasoning is.
+        closeWatch = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: window, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                WelcomeLaunch.recordDismissal(verdict: inspection?.truth.verdict)
+            }
+        }
         // Cmd+W and not Escape, unlike the About window it borrows its plinth from. The GitHub
         // step puts a real terminal in here, and Escape in a terminal is a key the program on the
         // other end is waiting for. See `WindowRoles`.
@@ -162,11 +175,26 @@ enum WelcomeLaunch {
         }
     }
 
-    /// Remembered only when somebody presses the primary button, not when the window is closed.
-    /// Closing a window is how you get it out of the way; it is not how you say you are done with
-    /// it, and a machine that is missing an agent should still be met by this window tomorrow.
+    /// Remembered when somebody presses the primary button on the last screen.
     static func recordCompletion() {
         UserDefaults.standard.set(true, forKey: OnboardingGate.completedKey)
+    }
+
+    /// Remembered when somebody simply closes the window, which is the report this exists for:
+    /// "I don't want this popup to pop out every time I open Bloom."
+    ///
+    /// The flag used to be written by `recordCompletion` alone, and that is only reached by
+    /// walking every screen to the end of the sequence. Anybody who read the checks, saw that
+    /// their Mac was all set and shut the window had written nothing, so the next launch was a
+    /// first run again, and the one after that. The rule for whether a close counts is
+    /// `OnboardingGate.completesOnDismissal`, in the core with its tests, and it is where the
+    /// argument for a blocked machine still being met tomorrow is written down.
+    ///
+    /// Help, Welcome is untouched by any of this: that menu item opens the window by name and
+    /// never asks the flag.
+    static func recordDismissal(verdict: SetupVerdict?) {
+        guard OnboardingGate.completesOnDismissal(verdict: verdict) else { return }
+        recordCompletion()
     }
 }
 

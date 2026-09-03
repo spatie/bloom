@@ -304,6 +304,27 @@ struct OnboardingGateTests {
     func neverOnAPartialAnswer() {
         #expect(OnboardingGate.trigger(hasCompletedBefore: true, verdict: .checking) == .none)
     }
+
+    @Test("closing the window on a working Mac is the last time it opens on its own")
+    func closingCounts() {
+        #expect(OnboardingGate.completesOnDismissal(verdict: .ready))
+        #expect(OnboardingGate.completesOnDismissal(verdict: .readyWithNotes))
+        #expect(OnboardingGate.completesOnDismissal(verdict: nil))
+        // Shut before the rows settled. It still counts: the probe on the next launch is what
+        // brings the window back if this machine turns out to be broken.
+        #expect(OnboardingGate.completesOnDismissal(verdict: .checking))
+    }
+
+    @Test("closing it on a broken Mac says nothing, so tomorrow still asks")
+    func closingABlockedMachineDoesNotCount() {
+        #expect(OnboardingGate.completesOnDismissal(verdict: .blocked) == false)
+    }
+
+    @Test("a close on a working Mac ends the launch openings it was still getting")
+    func closeThenQuiet() {
+        let completed = OnboardingGate.completesOnDismissal(verdict: .ready)
+        #expect(OnboardingGate.trigger(hasCompletedBefore: completed, verdict: .ready) == .none)
+    }
 }
 
 // MARK: - The account line
