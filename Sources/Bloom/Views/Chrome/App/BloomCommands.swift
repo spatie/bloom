@@ -112,6 +112,18 @@ struct BloomCommands: Commands {
             }
             .disabled(projectSettingsRepo == nil)
 
+            // Reached from the menu as well as from the toolbar glyph that appears while Ask Bloom
+            // is open. See the note beside this item in `MenuBarCatalogue`: the toolbar button is
+            // a control you have to be looking at Ask Bloom to see, so it could not answer
+            // somebody wondering whether the conversation can be started over at all.
+            //
+            // The same notification the toolbar posts, rather than a second route into `AskModel`:
+            // `RootView` owns the flag, because starting fresh archives the old conversation and
+            // that is a store write which must not happen twice.
+            MenuCommand(.newAskConversation) {
+                NotificationCenter.default.post(name: .bloomNewAskConversation, object: nil)
+            }
+
             MenuCommand(.newSession) {
                 guard let workspace = model.selectedModel else { return }
                 Task { await workspace.createSession() }

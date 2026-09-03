@@ -399,6 +399,12 @@ struct RootView: View {
         // where the post was already being received and because `openWindow` needs a view: the
         // window itself is `CreateWorkspaceWindow`, and it is keyed by project, so asking twice
         // for the same project brings the first one forward with its draft still in it.
+        // File, New Ask Bloom Conversation. It raises the same confirmation the toolbar's glyph
+        // raises rather than starting fresh outright: the act archives the conversation on screen,
+        // and a menu item that discards a conversation with no question asked is not one.
+        .onReceive(NotificationCenter.default.publisher(for: .bloomNewAskConversation)) { _ in
+            isStartingFreshAskConversation = true
+        }
         .onReceive(NotificationCenter.default.publisher(for: .bloomNewWorkspace)) { note in
             if note.userInfo?[Notification.bloomPullRequestKey] as? Bool == true {
                 CreateWorkspaceOpening.shared.askForPullRequest()
@@ -485,6 +491,10 @@ extension Notification.Name {
     /// has selected, and because the four have always behaved identically by going through one
     /// door. See `openCreateWindow`.
     static let bloomNewWorkspace = Notification.Name("bloom.newWorkspace")
+    /// File, New Ask Bloom Conversation. The same act the toolbar's glyph performs, posted rather
+    /// than called, because `RootView` owns the flag that raises it and starting fresh archives
+    /// the conversation it replaces: one writer, whichever control was pressed.
+    static let bloomNewAskConversation = Notification.Name("bloom.newAskConversation")
     /// Opens the window that starts a project. A notification for the same reason the create
     /// window is opened by one: the sidebar's `+`, Home's empty state, the toolbar and a
     /// `Commands` body can none of them reach `openWindow`, and this is where the receiver that

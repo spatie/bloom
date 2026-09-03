@@ -60,6 +60,16 @@ public enum MenuBarCatalogue {
 
         MenuBarItem(.newWorkspace, in: .file, "New Workspace…", key: .command("n"), availability: .needsProject),
         MenuBarItem(.newWorkspaceFromPullRequest, in: .file, "New Workspace from Pull Request…", availability: .needsProject),
+        // The conversation above every project, started again. It existed only as a toolbar button
+        // that appears while Ask Bloom is open, which is a control you have to already be looking
+        // at to find: the owner asked whether Bloom could clear an Ask conversation at all, and it
+        // could, by pressing a glyph a few inches from where he was reading. An item here is the
+        // answer to somebody looking for it in the place a Mac app keeps "start another one".
+        //
+        // No key equivalent. Cmd+N is New Workspace and this is the rarer of the two, so it takes
+        // the item without the shortcut, which is the same call `newWorkspaceFromPullRequest`
+        // makes directly above it.
+        MenuBarItem(.newAskConversation, in: .file, "New Ask Bloom Conversation", availability: .always),
         MenuBarItem(.projectSettings, in: .file, "Project Settings…", key: .init("comma", .command, .shift), availability: .needsProject),
         MenuBarItem(.newSession, in: .file, "New Session", key: .command("t"), availability: .needsWorkspace),
         MenuBarItem(.newTerminalTab, in: .file, "New Terminal Tab", key: .init("t", .command, .shift), availability: .needsWorkspace),
@@ -195,6 +205,7 @@ public enum MenuBarAction: String, CaseIterable, Sendable {
 
     case newWorkspace
     case newWorkspaceFromPullRequest
+    case newAskConversation
     case projectSettings
     case newSession
     case newTerminalTab
