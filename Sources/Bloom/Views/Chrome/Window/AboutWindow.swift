@@ -231,6 +231,9 @@ private struct AboutView: View {
             }
             .padding(.top, Metrics.spacingWide + Metrics.spacingSmall)
 
+            postcard
+                .padding(.top, Metrics.inset + Metrics.spacingSmall)
+
             VStack(spacing: Metrics.inset) {
                 ForEach(Maker.products, id: \.host) { product in
                     productRow(product)
@@ -241,6 +244,39 @@ private struct AboutView: View {
         .frame(maxWidth: .infinity)
         .padding(Metrics.pane)
         .background(Palette.surface)
+    }
+
+    /// What Bloom asks for in return, in one sentence and one way through to the rest of it.
+    ///
+    /// Directly under the identity paragraphs, because the second of them ends on "free for anyone
+    /// who wants it" and this is the sentence that finishes that thought. Above the products
+    /// rather than below them: the list of what else Spatie makes is a reference, and a reader who
+    /// has reached it has stopped reading about Bloom.
+    ///
+    /// One line and a way on, not a second copy of the postcard window. The address, the card and
+    /// the wall are all one press away, and an About window that carried a postal address in it
+    /// would be an About window with two subjects.
+    ///
+    /// The control is a `Button` rather than a `Link` because what it opens is a window of this
+    /// app's own, and it is drawn as this app draws a link because that is what it does: it takes
+    /// you somewhere else. Its words continue the sentence above rather than naming the screen the
+    /// way Help's item and the welcome step's button both do, and it can, because unlike those two
+    /// it never appears without that sentence over it.
+    private var postcard: some View {
+        VStack(spacing: Metrics.spacing) {
+            Text(Postcard.summary)
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textSecondary)
+                .multilineTextAlignment(.center)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Where to send one") { PostcardWindow.show() }
+                .buttonStyle(.plain)
+                .font(Typo.caption)
+                .foregroundStyle(Palette.link)
+                .underline()
+        }
     }
 
     /// One product: its mark, then the name carrying the weight, the address carrying the link,

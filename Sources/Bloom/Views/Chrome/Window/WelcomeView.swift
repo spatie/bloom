@@ -4,13 +4,14 @@ import BloomCore
 
 /// What the welcome window draws.
 ///
-/// Two steps and two offers, and the sequence is `OnboardingFlow` in the core rather than a set of
-/// booleans here, because which screen follows which, whether back is offered and whether the
+/// Two steps and three offers, and the sequence is `OnboardingFlow` in the core rather than a set
+/// of booleans here, because which screen follows which, whether back is offered and whether the
 /// third screen exists at all is the only part of a wizard that can be wrong, and a decision taken
 /// inside a view is a decision nothing can test. The greeting is `WelcomeGreeting`, the checks are
 /// the second step and are everything below, the third is `WelcomeCommandLine`, which is drawn
-/// only when `CommandLineRegistration` says there is something to offer, and the last is
-/// `WelcomePromptSubmission`, which is always there because nothing can make it empty.
+/// only when `CommandLineRegistration` says there is something to offer, the fourth is
+/// `WelcomePromptSubmission`, and the last is `WelcomePostcard`. Neither of the last two can be
+/// made empty by anything about this Mac, so neither is ever left out.
 ///
 /// Three bands, in the register the About window established: the brand's plinth with the water
 /// moving in it, the reading ground under a hairline, and a chrome strip at the foot with the
@@ -74,6 +75,8 @@ struct WelcomeView: View {
                 commandLineStep
             case .promptSubmission:
                 promptStep
+            case .postcard:
+                postcardStep
             }
         }
         .frame(width: Self.width)
@@ -139,16 +142,33 @@ struct WelcomeView: View {
         .transition(reduceMotion ? .identity : .opacity)
     }
 
-    /// The last screen, in the same three bands as the two before it.
+    /// The prompt, in the same three bands as the two before it.
     ///
     /// Its one control is the offer, so it is in the reading band rather than in the footer: the
-    /// footer's button still says "Start using Bloom" and still only leaves, which is what keeps
-    /// a screen somebody may walk straight past from reading as one they have to get through.
+    /// footer's button moves the sequence on and nothing else, which is what keeps a screen
+    /// somebody may walk straight past from reading as one they have to get through.
     private var promptStep: some View {
         VStack(spacing: 0) {
             plinth
             hairline
             WelcomePromptSubmission(onSubmit: submitAPrompt)
+            hairline
+            footer
+        }
+        .transition(reduceMotion ? .identity : .opacity)
+    }
+
+    /// The screen the sequence ends on, in the same three bands as the three before it.
+    ///
+    /// It has no control the footer needs to know about: the copy button and the link are the
+    /// screen's own, the footer's button says "Start using Bloom" and only leaves. The card is
+    /// told whether this is a first visit so that walking back and forward through the sequence
+    /// does not throw it onto the page again.
+    private var postcardStep: some View {
+        VStack(spacing: 0) {
+            plinth
+            hairline
+            WelcomePostcard(isFirstVisit: flow.isFirstVisit(to: .postcard))
             hairline
             footer
         }
@@ -688,8 +708,10 @@ struct WelcomeView: View {
     /// form would open on the window behind this one and the press would look like nothing
     /// happening. So the window goes first, and the screen's own caption says it will.
     ///
-    /// It finishes the sequence, and should: this is the last screen, and somebody who pressed the
-    /// one control on it has done more than the button beside it asks for.
+    /// It finishes the sequence, and should. There is a screen after this one and it is the
+    /// postcard, which asks for nothing: somebody who has just written us a prompt has done more
+    /// than either of the last two screens asks for, and holding them in a wizard afterwards to be
+    /// shown an address would be the app taking payment twice.
     private func submitAPrompt() {
         finish()
         FeedbackPresenter.shared.open(.prompt)

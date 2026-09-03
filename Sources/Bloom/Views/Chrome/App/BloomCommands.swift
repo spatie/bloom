@@ -565,6 +565,15 @@ struct BloomCommands: Commands {
             MenuCommand(.submitPrompt) {
                 FeedbackPresenter.shared.open(.prompt)
             }
+
+            // The third way, and the only one that goes on paper. Below the divider with the other
+            // two rather than above it with the docs, because this is the same question they
+            // answer, how do I reach these people, and a row about an address filed next to the
+            // manual would read as documentation about a feature. It is also where somebody looks
+            // after meeting the word once in the welcome sequence and wanting the address again.
+            MenuCommand(.postcardware) {
+                PostcardWindow.show()
+            }
         }
     }
 

@@ -38,6 +38,16 @@ enum Brand {
     /// Shallow `#9BE9DC`, the brighter of the two pools, and what a settled check is ticked in on
     /// the plinth. 13.3 to 1 on Abyss.
     static let shallow = Color(nsColor: NSColor(rgb: 0x9BE9DC))
+
+    /// Fathom `#123B57`, which is the top of the `depth` gradient, named because the postcard is
+    /// printed in it.
+    ///
+    /// It is the one colour in this file that is used as ink rather than as ground, and it works
+    /// as ink for the same reason it works as the top of the plinth: it is the ramp's dark blue
+    /// rather than a black, so a rule and a line of type set in it belong to the same picture as
+    /// the water behind them. Measured 10.8 to 1 on Foam, which is the paper the card is, so an
+    /// address at ten points on it clears AA several times over.
+    static let fathom = Color(nsColor: NSColor(rgb: 0x123B57))
 }
 
 /// The water in the plinth: two pools of light breathing against each other, a ribbon of light

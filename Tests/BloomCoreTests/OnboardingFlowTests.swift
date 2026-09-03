@@ -4,22 +4,42 @@ import Foundation
 
 @Suite("Onboarding flow")
 struct OnboardingFlowTests {
-    @Test("The sequence is a greeting, the checks, an offer that is usually not there, and a prompt")
+    @Test("A greeting, the checks, an offer that is usually not there, a prompt, and a postcard")
     func order() {
-        #expect(OnboardingStep.order == [.greeting, .checks, .commandLine, .promptSubmission])
+        #expect(
+            OnboardingStep.order
+                == [.greeting, .checks, .commandLine, .promptSubmission, .postcard]
+        )
         #expect(!OnboardingStep.greeting.isOptional)
         #expect(!OnboardingStep.checks.isOptional)
         #expect(OnboardingStep.commandLine.isOptional)
         // The one the owner asked for, and the reason it is not optional: nothing about a Mac can
         // make it empty, so there is no state in which leaving it out would be the honest answer.
         #expect(!OnboardingStep.promptSubmission.isOptional)
+        // The same argument, for an address. There is no configuration that could make it empty
+        // and no build that cannot show it.
+        #expect(!OnboardingStep.postcard.isOptional)
 
         let plain = OnboardingFlow(step: .greeting)
-        #expect(plain.steps == [.greeting, .checks, .promptSubmission])
+        #expect(plain.steps == [.greeting, .checks, .promptSubmission, .postcard])
         #expect(plain.next == .checks)
 
         let offered = OnboardingFlow(step: .greeting, offersCommandLine: true)
-        #expect(offered.steps == [.greeting, .checks, .commandLine, .promptSubmission])
+        #expect(
+            offered.steps == [.greeting, .checks, .commandLine, .promptSubmission, .postcard]
+        )
+    }
+
+    /// The owner's own argument for the position, kept as an assertion so a later step cannot be
+    /// appended past it without somebody deciding to: this is the only screen in the sequence that
+    /// asks for nothing, and a wizard that ends on a warm note ends better than one that ends on a
+    /// form.
+    @Test("The postcard is last, whether the command line offer is in the sequence or not")
+    func thePostcardIsLast() {
+        #expect(OnboardingStep.order.last == .postcard)
+        #expect(OnboardingFlow(step: .greeting).steps.last == .postcard)
+        #expect(OnboardingFlow(step: .greeting, offersCommandLine: true).steps.last == .postcard)
+        #expect(OnboardingFlow(step: .postcard).next == nil)
     }
 
     @Test("Without the command line offer the checks lead straight to the prompt")
@@ -31,8 +51,8 @@ struct OnboardingFlowTests {
         #expect(flow.step == .promptSubmission)
     }
 
-    @Test("With the offer the checks lead to it, and the prompt is still the end")
-    func endsAtThePrompt() {
+    @Test("With the offer the checks lead to it, and the postcard is still the end")
+    func endsAtThePostcard() {
         var flow = OnboardingFlow(step: .checks, offersCommandLine: true)
         #expect(flow.next == .commandLine)
         let moved = flow.advance()
@@ -42,6 +62,10 @@ struct OnboardingFlowTests {
         let movedAgain = flow.advance()
         #expect(movedAgain)
         #expect(flow.step == .promptSubmission)
+        #expect(flow.next == .postcard)
+        let movedOnce = flow.advance()
+        #expect(movedOnce)
+        #expect(flow.step == .postcard)
         #expect(flow.next == nil)
         let refused = flow.advance()
         #expect(!refused)
@@ -67,6 +91,9 @@ struct OnboardingFlowTests {
         #expect(
             OnboardingFlow(step: .promptSubmission, offersCommandLine: true).back == .commandLine
         )
+
+        // The last screen goes back to the one before it, whichever of them that is.
+        #expect(OnboardingFlow(step: .postcard).back == .promptSubmission)
     }
 
     @Test("The step somebody is standing on stays in the sequence when the offer is withdrawn")
@@ -97,12 +124,24 @@ struct OnboardingFlowTests {
             OnboardingFlow(step: .checks, offersCommandLine: true).forwardButtonTitle
                 == OnboardingStep.commandLine.arrivalButtonTitle
         )
-        #expect(OnboardingFlow(step: .promptSubmission).forwardButtonTitle == nil)
+        #expect(
+            OnboardingFlow(step: .promptSubmission).forwardButtonTitle
+                == OnboardingStep.postcard.arrivalButtonTitle
+        )
+        #expect(OnboardingFlow(step: .postcard).forwardButtonTitle == nil)
         // The command line screen is no longer last, so its button may no longer say so. This is
         // the assertion that fails if "One more thing" ever comes back to a step with a step
         // after it.
         #expect(OnboardingStep.commandLine.arrivalButtonTitle == "Use Bloom from your terminal")
         #expect(OnboardingStep.promptSubmission.arrivalButtonTitle == "Say what Bloom does next")
+        // Word for word the Help menu's own item for the same screen, without the title case and
+        // the ellipsis a menu row is set with. Two surfaces open one screen, and this is the
+        // assertion that fails if one of them is reworded on its own.
+        #expect(OnboardingStep.postcard.arrivalButtonTitle == "Send us a postcard")
+        #expect(
+            MenuBarCatalogue[.postcardware].title
+                == "Send Us a Postcard…"
+        )
     }
 
     @Test("A first run opens on the greeting, and every other reason opens on the checks")
@@ -121,9 +160,12 @@ struct OnboardingFlowTests {
         let movedAgain = flow.advance()
         #expect(movedAgain)
         #expect(flow.step == .promptSubmission)
+        let movedOnce = flow.advance()
+        #expect(movedOnce)
+        #expect(flow.step == .postcard)
         let refused = flow.advance()
         #expect(!refused)
-        #expect(flow.step == .promptSubmission)
+        #expect(flow.step == .postcard)
     }
 
     @Test("Going back walks to the greeting and then refuses")
@@ -193,10 +235,19 @@ struct OnboardingPrimaryTests {
     @Test("The last step's button leaves, whatever the verdict is doing behind it")
     func finishing() {
         for verdict in [SetupVerdict.checking, .ready, .readyWithNotes, .blocked] {
-            let primary = OnboardingPrimary(step: .promptSubmission, verdict: verdict, next: nil)
+            let primary = OnboardingPrimary(step: .postcard, verdict: verdict, next: nil)
             #expect(primary.action == .finish)
             #expect(primary.title == OnboardingPrimary.finishTitle)
         }
+    }
+
+    /// The screen that asks for nothing must not grow a button that does. Its footer moves the
+    /// sequence out and nothing else, whatever the copy button on the screen itself is doing.
+    @Test("The postcard step's own button only leaves")
+    func thePostcardOnlyLeaves() {
+        let primary = OnboardingPrimary(step: .postcard, verdict: .ready, next: nil)
+        #expect(primary.action == .finish)
+        #expect(primary.title == OnboardingPrimary.finishTitle)
     }
 
     @Test("Re-probing to blocked past the checks does not turn the way out into a re-check")
@@ -208,8 +259,13 @@ struct OnboardingPrimaryTests {
         )
         #expect(onOffer.action == .advance(.promptSubmission))
 
-        let onPrompt = OnboardingPrimary(step: .promptSubmission, verdict: .blocked, next: nil)
-        #expect(onPrompt.action == .finish)
-        #expect(onPrompt.title == OnboardingPrimary.finishTitle)
+        let onPrompt = OnboardingPrimary(
+            step: .promptSubmission, verdict: .blocked, next: .postcard
+        )
+        #expect(onPrompt.action == .advance(.postcard))
+
+        let onPostcard = OnboardingPrimary(step: .postcard, verdict: .blocked, next: nil)
+        #expect(onPostcard.action == .finish)
+        #expect(onPostcard.title == OnboardingPrimary.finishTitle)
     }
 }
