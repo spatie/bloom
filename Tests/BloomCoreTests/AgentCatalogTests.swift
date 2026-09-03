@@ -278,6 +278,31 @@ struct AgentCatalogTests {
         #expect(status.details.contains { $0.label == "Problem" })
     }
 
+    @Test("reads trimmed executable overrides from the shared settings table")
+    func readsStoredOverrides() async throws {
+        let store = try makeTestStore("agent-executable-overrides")
+        try await store.setSetting(
+            AgentCatalog.executablePathSettingKey(.codex),
+            "  /tmp/tools/codex  "
+        )
+        try await store.setSetting(
+            AgentCatalog.executablePathSettingKey(.claudeCode),
+            "   "
+        )
+
+        let overrides = await AgentCatalog.executablePathOverrides(in: store)
+
+        #expect(overrides == [.codex: "/tmp/tools/codex"])
+        #expect(await AgentCatalog.executablePathOverrides(in: nil).isEmpty)
+    }
+
+    @Test("an override is the runner command and an empty value keeps the ordinary name")
+    func resolvesRunnerExecutable() {
+        #expect(AgentCatalog.executable(for: .codex, override: " /tmp/tools/codex ") == "/tmp/tools/codex")
+        #expect(AgentCatalog.executable(for: .codex, override: nil) == "codex")
+        #expect(AgentCatalog.executable(for: .claudeCode, override: "   ") == "claude")
+    }
+
     @Test("returns one status per kind, in order, and caches until invalidated")
     func cachesStatuses() async {
         let missing = TestScratch.unique("bloom-no-such-agent")

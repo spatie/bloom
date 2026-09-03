@@ -764,6 +764,25 @@ struct AgentRunnerProcessTests {
         #expect(process.launch.arguments[index + 1] == #"{"outputStyle":"Concise"}"#)
     }
 
+    @Test("the stored executable reaches the process the runner spawns")
+    func spawnsWithTheStoredExecutable() async throws {
+        let store = try makeTestStore("agent-executable")
+        let session = try await makeSession(store)
+        try await store.setSetting(
+            AgentCatalog.executablePathSettingKey(.claudeCode),
+            "/tmp/tools/claude"
+        )
+
+        let recorder = ProcessRecorder()
+        let runner = AgentRunner(
+            workspacePath: "/tmp/w", session: session, store: store, makeProcess: recorder.factory
+        )
+
+        try await runner.send("hello")
+
+        #expect(try #require(recorder.last).launch.executable == "/tmp/tools/claude")
+    }
+
     /// The other half, and the one that matters more: a session nobody has set a style on spawns
     /// with no settings object at all, so a style the repository chose in its own
     /// `.claude/settings.json` is left standing.

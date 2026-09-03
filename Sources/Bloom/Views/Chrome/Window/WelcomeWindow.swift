@@ -71,7 +71,10 @@ enum WelcomeWindow {
     }
 
     private static func make(trigger: OnboardingTrigger) -> NSWindow {
-        let model = SetupInspection(rehearsal: SetupRehearsal.report)
+        let model = SetupInspection(
+            rehearsal: SetupRehearsal.report,
+            agentOverrides: { await waitForAgentOverrides() }
+        )
         inspection = model
 
         // Read through a closure rather than captured, because the socket is bound in
@@ -140,6 +143,26 @@ enum WelcomeWindow {
         WindowRoles.mark(window, as: .utility)
         return window
     }
+
+    /// Wait briefly for bootstrap to open the database, then read the paths the Agents pane wrote.
+    ///
+    /// A first run opens this window from `applicationDidFinishLaunching` while `AppModel.bootstrap`
+    /// is still opening the store from the scene's task. Reading once would reproduce the old
+    /// UserDefaults bug in another form: the custom path would work on a later visit and not on the
+    /// launch where it matters.
+    fileprivate static func waitForAgentOverrides(
+        timeout: Duration = .seconds(3)
+    ) async -> [AgentKind: String] {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if let store = app?.store {
+                return await AgentCatalog.executablePathOverrides(in: store)
+            }
+            try? await Task.sleep(for: .milliseconds(150))
+            if Task.isCancelled { return [:] }
+        }
+        return await AgentCatalog.executablePathOverrides(in: app?.store)
+    }
 }
 
 // MARK: - Whether it opens on its own
@@ -168,7 +191,8 @@ enum WelcomeLaunch {
         Task {
             // Nothing is drawn for this, so it can take as long as four CLIs take. If the machine
             // is fine, which it nearly always is, the user never learns this happened.
-            let report = await SetupProbe().report()
+            let overrides = await WelcomeWindow.waitForAgentOverrides()
+            let report = await SetupProbe(agentOverrides: overrides).report()
             guard OnboardingGate.trigger(hasCompletedBefore: true, verdict: report.verdict) == .blocked
             else { return }
             WelcomeWindow.show(trigger: .blocked, mayActivate: false)

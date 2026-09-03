@@ -58,9 +58,15 @@ final class SetupInspection {
     /// Detection results this window was handed rather than gathered. Debug builds only; see
     /// `SetupRehearsal`.
     private let rehearsal: SetupReport?
+    /// The same database-backed executable paths the Agents pane and the runners use.
+    private let agentOverrides: () async -> [AgentKind: String]
 
-    init(rehearsal: SetupReport? = nil) {
+    init(
+        rehearsal: SetupReport? = nil,
+        agentOverrides: @escaping () async -> [AgentKind: String] = { [:] }
+    ) {
         self.rehearsal = rehearsal
+        self.agentOverrides = agentOverrides
     }
 
     /// Looks again, from the top. Idempotent while a run is in flight, because the button that
@@ -122,7 +128,7 @@ final class SetupInspection {
         if let rehearsal {
             for check in rehearsal.checks { record(check) }
         } else {
-            let probe = SetupProbe(agentOverrides: Self.agentOverrides())
+            let probe = SetupProbe(agentOverrides: await agentOverrides())
             for await check in probe.run() {
                 if Task.isCancelled { return }
                 record(check)
@@ -162,17 +168,4 @@ final class SetupInspection {
         }
     }
 
-    /// The per-agent executable paths the Agents settings pane writes, read here so this window
-    /// looks for the same binary that pane was pointed at. Through the key `AgentCatalog` owns,
-    /// because two spellings of one key is how a wizard starts calling a working agent missing.
-    private static func agentOverrides() -> [AgentKind: String] {
-        var overrides: [AgentKind: String] = [:]
-        for kind in AgentKind.allCases {
-            let key = AgentCatalog.executablePathSettingKey(kind)
-            let value = UserDefaults.standard.string(forKey: key)?
-                .trimmingCharacters(in: .whitespaces) ?? ""
-            if !value.isEmpty { overrides[kind] = value }
-        }
-        return overrides
-    }
 }

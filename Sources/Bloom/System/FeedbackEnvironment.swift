@@ -159,15 +159,7 @@ enum FeedbackEnvironment {
     /// unusual is seen as present rather than missing. Read the same way `InstallPingService`
     /// reads them.
     static func executablePathOverrides(app: AppModel?) async -> [AgentKind: String] {
-        guard let store = app?.store else { return [:] }
-
-        var found: [AgentKind: String] = [:]
-        for kind in AgentKind.allCases {
-            guard let value = try? await store.setting(AgentCatalog.executablePathSettingKey(kind)) else { continue }
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { found[kind] = trimmed }
-        }
-        return found
+        await AgentCatalog.executablePathOverrides(in: app?.store)
     }
 
     /// What the agent CLI answers `--version` with, from memory if it was asked today.
