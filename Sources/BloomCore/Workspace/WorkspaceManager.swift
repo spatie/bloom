@@ -379,9 +379,17 @@ public struct WorkspaceManager: Sendable {
         }
     }
 
+    /// What a `files_to_copy` pattern matches, asked of the one place that answers it.
+    ///
+    /// These three lines were here as well as in `FilesToCopyResolver`, whose doc calls itself a
+    /// deliberate mirror of this method. A mirror is the right shape for the walk, because the
+    /// preview runs on every keystroke and must not write anything, and it is the wrong shape for
+    /// the predicate: two `fnmatch` calls that have to agree about what `.env*` means are two
+    /// places a wildcard rule can be changed in. The behavioural test still runs the real copier
+    /// against a real folder and compares what landed with what the preview named, so the walk is
+    /// pinned the way it was; this half no longer needs pinning because there is only one of it.
     func matches(_ name: String, pattern: String) -> Bool {
-        guard pattern.contains("*") || pattern.contains("?") else { return name == pattern }
-        return fnmatch(pattern, name, 0) == 0
+        FilesToCopyResolver.matches(name, pattern: pattern)
     }
 
     // MARK: - Scripts
