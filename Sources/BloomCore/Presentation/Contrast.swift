@@ -33,15 +33,40 @@ public enum Contrast {
     /// being read. AA's non-text contrast rule.
     public static let nonTextFloor = 3.0
 
+    /// The three channels of a colour, in the order they are written.
+    ///
+    /// `(colour >> 16) & 0xFF` and its two siblings were spelled out in both functions below. It is
+    /// the same unpack each time, and it is the sort of line every reader has to check character by
+    /// character.
+    static func channels(of colour: UInt32) -> (r: UInt32, g: UInt32, b: UInt32) {
+        ((colour >> 16) & 0xFF, (colour >> 8) & 0xFF, colour & 0xFF)
+    }
+
+    /// One channel taken off the sRGB transfer curve, which is what both questions below open with.
+    ///
+    /// **It was written twice, in `relativeLuminance` and in `lab`, with two different thresholds,
+    /// and neither said why.** WCAG 2.x prints the knee at 0.03928 and the sRGB standard prints it
+    /// at 0.04045, so each function carried the number its own standard states, which reads as a
+    /// bug in one of them and is not one.
+    ///
+    /// The two agree on every colour this can ever be asked about. A channel here is always an
+    /// integer 0 to 255, because a colour is `0xRRGGBB` and `composited` rounds before it returns,
+    /// and both knees fall between 10/255 = 0.0392 and 11/255 = 0.0431, so all 256 values land on
+    /// the same side of both. `ContrastTests` walks all 256 and asserts that rather than leaving it
+    /// as arithmetic in a comment, so the day somebody moves this number the suite says which
+    /// channel it moved.
+    ///
+    /// The sRGB number is the one kept, because that is the standard defining the curve; WCAG's is
+    /// a rounding of it that predates the correction.
+    private static func linear(_ channel: UInt32) -> Double {
+        let value = Double(channel) / 255
+        return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+    }
+
     /// WCAG relative luminance, 0 for black and 1 for white.
     public static func relativeLuminance(of colour: UInt32) -> Double {
-        func linear(_ channel: UInt32) -> Double {
-            let value = Double(channel) / 255
-            return value <= 0.03928 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
-        }
-        return 0.2126 * linear((colour >> 16) & 0xFF)
-            + 0.7152 * linear((colour >> 8) & 0xFF)
-            + 0.0722 * linear(colour & 0xFF)
+        let (r, g, b) = channels(of: colour)
+        return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
     }
 
     /// The ratio between two colours, from 1 (identical) to 21 (black on white).
@@ -59,13 +84,10 @@ public enum Contrast {
     /// A colour in CIELAB, which is where "how different do these look" is a question with an
     /// answer. D65, the white point sRGB is defined against.
     public static func lab(of colour: UInt32) -> (l: Double, a: Double, b: Double) {
-        func linear(_ channel: UInt32) -> Double {
-            let value = Double(channel) / 255
-            return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
-        }
-        let r = linear((colour >> 16) & 0xFF)
-        let g = linear((colour >> 8) & 0xFF)
-        let b = linear(colour & 0xFF)
+        let channels = channels(of: colour)
+        let r = linear(channels.r)
+        let g = linear(channels.g)
+        let b = linear(channels.b)
 
         let x = (r * 0.4124564 + g * 0.3575761 + b * 0.1804375) / 0.95047
         let y = r * 0.2126729 + g * 0.7151522 + b * 0.0721750
