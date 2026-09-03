@@ -160,6 +160,29 @@ struct DiffCommentButton: View {
     }
 }
 
+/// Which line a row offers to edit in place, filtered to the side it is drawing.
+///
+/// Only the new side, and the rule is `DiffLine.reviewSpot`'s rather than a second reading of the
+/// same line: an addition and a context line are the file as it is now, and a deletion is text
+/// that is not in the file at all, so there is nothing there to type into. Reusing that property
+/// is also what keeps the `+` and this menu item agreeing about which pane a line belongs to in
+/// the split layout, which is the disagreement `DiffCommentSpot` exists to prevent.
+///
+/// What the line then opens, which is the block of added lines around it or the context line
+/// alone, is `DiffEdit.region` in the core, where it is tested against a file on disk.
+enum DiffEditTarget {
+    static func offered(
+        for line: DiffLine?,
+        numbers: DiffGutter.Numbers,
+        enabled: Bool
+    ) -> Int? {
+        guard enabled, numbers != .old, let spot = line?.reviewSpot, spot.side == .new else {
+            return nil
+        }
+        return spot.line
+    }
+}
+
 /// Which spot a row offers to hang a comment on, filtered to the side it is drawing.
 ///
 /// In side by side a context line appears in both panes; only the new-side pane offers it, so one

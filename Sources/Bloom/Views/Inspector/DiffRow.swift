@@ -28,6 +28,10 @@ enum DiffRow: Identifiable {
     /// constant id is unique, and a draft that moves keeps its identity, which is the point:
     /// the half-typed text must survive the move.
     case commentEditor(ReviewSpot)
+    /// The lines being edited in place, under the last of them. One at a time per file, for the
+    /// same reason and with the same constant id as the comment editor above: the box has to keep
+    /// its identity through a rebuild, or the text in it is thrown away by a poll.
+    case lineEditor(DiffEditRegion)
 
     var id: String {
         switch self {
@@ -51,6 +55,7 @@ enum DiffRow: Identifiable {
                 + "-\(rows.first?.right?.index ?? .min)"
         case let .commentBand(placement): "band-\(placement.id)"
         case .commentEditor: "editor"
+        case .lineEditor: "line-editor"
         }
     }
 
