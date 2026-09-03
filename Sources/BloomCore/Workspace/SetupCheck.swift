@@ -449,4 +449,27 @@ public enum OnboardingGate {
         guard hasCompletedBefore else { return .firstRun }
         return verdict == .blocked ? .blocked : .none
     }
+
+    /// Whether closing the welcome window is enough to say it has been seen.
+    ///
+    /// **The report this answers: "I don't want this popup to pop out every time I open Bloom."**
+    /// The flag behind `hasCompletedBefore` was written in one place, the primary button on the
+    /// last screen of the sequence, so somebody who read the greeting, pressed on to the checks,
+    /// saw "You are all set" and shut the window had never written it. Every launch after that was
+    /// still a first run, and the window opened again. Nothing was re-opening it: it had simply
+    /// never been told.
+    ///
+    /// Closing it counts now, and the one thing the old rule was protecting is still protected by
+    /// `trigger` above: a machine that cannot start a workspace is met by this window on every
+    /// launch whatever this flag says, because that is what `.blocked` does. So the case worth
+    /// coming back for comes back on its own, and the case where there is nothing left to say
+    /// stops asking.
+    ///
+    /// A machine still being probed answers true as well. Somebody who shuts the window in the
+    /// second before the rows settle has dismissed it as deliberately as anybody else, and if that
+    /// machine turns out to be broken the next launch's probe opens the window for the reason
+    /// above rather than for this one.
+    public static func completesOnDismissal(verdict: SetupVerdict?) -> Bool {
+        verdict != .blocked
+    }
 }

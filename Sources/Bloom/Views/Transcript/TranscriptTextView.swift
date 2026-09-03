@@ -178,8 +178,10 @@ struct TranscriptTextView: NSViewRepresentable {
             view.textStorage?.setAttributedString(text)
         }
         view.linkColor = linkColor
-        // No underline at rest, and the pointing hand is set here rather than left to chance:
-        // this dictionary is what AppKit merges over every link range it lays out.
+        // No underline at rest. The pointing hand is asked for here and set for real in
+        // `LinkTextView.pointer`: this dictionary only reaches the screen through the cursor
+        // tracking `updateTrackingAreas` used to throw away, and one mechanism that has been
+        // broken once is not enough to hang a link's pointer on.
         view.linkTextAttributes = [
             .foregroundColor: linkColor,
             .cursor: NSCursor.pointingHand,
@@ -300,33 +302,73 @@ final class LinkTextView: NSTextView {
     /// move across the same pill.
     private var hoveredChip: FileChipHover?
 
+    /// What marks the one tracking area this view adds for itself, so the removal below can tell
+    /// it from the ones `NSTextView` installs.
+    private static let ownTrackingArea = "bloom.transcriptTextView.tracking"
+
+    /// **The bug this shape exists for: a link in an agent's message never showed the pointing
+    /// hand, and the prose around it never showed an I-beam either.**
+    ///
+    /// This used to remove every tracking area whose owner was this view, which reads as "mine"
+    /// and is not. Measured on macOS 26 with a plain `NSTextView` in a window:
+    /// `super.updateTrackingAreas()` installs two areas, both owned by the text view itself, with
+    /// options 552 and 551, and the second of those carries `.cursorUpdate`. That is how a text
+    /// view is told to update the pointer, and it is the only route by which
+    /// `linkTextAttributes[.cursor]` reaches the screen. Removing both and putting back one area
+    /// with `.mouseMoved` and no `.cursorUpdate` meant no cursor update ever arrived, so neither
+    /// the hand over a link nor the I-beam over the prose was ever set. The chip's hand at the
+    /// foot of `mouseMoved` was the one thing that got through, because it was set by hand.
+    ///
+    /// Only this view's own area is taken out now, named in its `userInfo` rather than guessed at
+    /// from the owner. The area is still added rather than left to AppKit's, because the hover
+    /// underline and the chip card depend on `mouseMoved` arriving and that is not a promise
+    /// `NSTextView`'s internals make. It comes out identical to AppKit's 551, so a move over this
+    /// view can be reported twice; `hover` and `hoverChip` both compare before acting, which is
+    /// what they were already doing for the repeated moves inside one pill.
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
-        for area in trackingAreas where area.owner === self {
+        for area in trackingAreas where area.userInfo?[Self.ownTrackingArea] != nil {
             removeTrackingArea(area)
         }
         addTrackingArea(NSTrackingArea(
             rect: .zero,
-            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self
+            options: [.mouseMoved, .mouseEnteredAndExited, .cursorUpdate, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: [Self.ownTrackingArea: true]
         ))
     }
 
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
         let point = convert(event.locationInWindow, from: nil)
-        hover(linkRange(at: point))
+        let link = linkRange(at: point)
         let chip = fileChip(at: point)
-        // A file chip is a door like a link is, and a text view left to itself shows an I-beam over
-        // the whole run: the pointer is what says the difference before the click does. The link
-        // ranges get theirs from `linkTextAttributes`, which AppKit merges over them; an
-        // attachment is not a link and gets nothing, so it is set here.
-        //
-        // Only where there is somewhere to go. A chip standing for instructions Bloom put in the
-        // message opens nothing, because the words are already in the turn under the pointer, and
-        // a hand over it would promise a click that does not answer.
-        if chip?.subject.path != nil { NSCursor.pointingHand.set() }
+        hover(link)
+        // After `super`, and on every move rather than only on the way in. A link is a range
+        // inside a run and not a view of its own, so crossing from prose onto it moves the pointer
+        // without leaving any tracking area: nothing else would ask again.
+        pointer(link: link != nil, chip: chip).set()
         hoverChip(chip)
+    }
+
+    /// The pointer on the way in, which `mouseMoved` alone would miss: a view scrolling under a
+    /// still pointer, or a window becoming key with the pointer already over a link.
+    ///
+    /// Not `super`, deliberately. The answer is this view's whole opinion of the pointer and it is
+    /// the same one a move a few points later would give.
+    override func cursorUpdate(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        pointer(link: linkRange(at: point) != nil, chip: fileChip(at: point)).set()
+    }
+
+    /// Which cursor a point in this run gets. The rule is `TranscriptPointer` in the core with its
+    /// tests, including the chip that opens nothing; the hit testing has to be here, because it is
+    /// a question for a layout manager.
+    private func pointer(link: Bool, chip: FileChipHover?) -> NSCursor {
+        switch TranscriptPointer.over(link: link, chipThatOpens: chip?.subject.path != nil) {
+        case .hand: NSCursor.pointingHand
+        case .text: NSCursor.iBeam
+        }
     }
 
     /// Opens the file under the pointer, and otherwise lets the text view do what it does.

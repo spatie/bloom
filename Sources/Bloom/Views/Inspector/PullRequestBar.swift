@@ -227,11 +227,14 @@ struct PullRequestBar: View {
 
     /// Cuts a fresh branch in this worktree and hands the session on to it.
     ///
-    /// Reported here rather than silently, in all three directions. A refusal names the condition
-    /// that stopped it, because Continue is the sort of button that looks broken when nothing
-    /// happens. A success says which branch and which base, because those are the two facts the
-    /// reader now has to hold, and it repeats the warning when the base could not be fetched: a
-    /// branch cut from a stale copy of main is a thing you want to know before you build on it.
+    /// Reported when it does not work, and silent when it does. A refusal names the condition that
+    /// stopped it, because Continue is the sort of button that looks broken when nothing happens.
+    ///
+    /// **Success used to raise a green banner over the file list**, naming the new branch and what
+    /// it was cut from, and the owner asked for it to go: "remove this, we don't need that." A
+    /// press that worked shows its work anyway. The strip is already drawing the new branch name a
+    /// row above, `ContinuedBranch.line` says underneath it where that branch came from, and the
+    /// turn the press sends is in the transcript.
     private func carryOn(after pullRequest: PullRequest) {
         isWorking = true
         report = nil
@@ -239,13 +242,8 @@ struct PullRequestBar: View {
         Task {
             defer { isWorking = false }
             switch await app.continueAfterMerge(model.workspace, pullRequest: pullRequest) {
-            case .continued(let continuation):
-                report = PullRequestNotice(
-                    tone: continuation.base == .fetched ? .info : .leftover,
-                    title: "Continuing on \(continuation.branch)",
-                    message: continuation.sentence,
-                    details: continuation.base.warning
-                )
+            case .continued:
+                break
             case .refused(let refusal):
                 report = PullRequestNotice(
                     tone: .info, title: "Nothing was changed", message: refusal.sentence

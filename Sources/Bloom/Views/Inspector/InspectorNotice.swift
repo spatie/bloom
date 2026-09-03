@@ -32,15 +32,12 @@ struct InspectorNotice: View {
     enum Tone {
         /// It worked, with something worth knowing.
         case info
-        /// It worked, and left something behind.
-        case leftover
         /// It did not work.
         case failure
 
         var color: Color {
             switch self {
             case .info: Palette.accent
-            case .leftover: Palette.warning
             case .failure: Palette.negative
             }
         }
@@ -48,7 +45,6 @@ struct InspectorNotice: View {
         var glyph: String {
             switch self {
             case .info: "info.circle.fill"
-            case .leftover: "exclamationmark.circle.fill"
             case .failure: "exclamationmark.triangle.fill"
             }
         }
