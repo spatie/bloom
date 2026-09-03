@@ -26,6 +26,8 @@ struct DiffLineView: View, Equatable {
     /// nil. It does not need to: whether the `+` is offered at all is decided by `offeredSpot`
     /// from `line` and `numbers`, both of which are compared, and the two call sites that ask for
     /// this comparison are the two halves of one diff and always hand it the same kind of closure.
+    /// `onEdit` is left out for the same reasons and answers to the same argument: whether the
+    /// menu offers an edit is decided by `editableLine` from `line` and `numbers`, both compared.
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.line == rhs.line
             && lhs.language == rhs.language
@@ -54,6 +56,9 @@ struct DiffLineView: View, Equatable {
     /// Opens the review comment editor at this line. Nil, the default, draws no `+` at all,
     /// which is what every caller that is not the review's own diff wants.
     var onComment: ((ReviewSpot) -> Void)?
+    /// Opens the in-place editor on the lines around this one, by its new-side number. Nil, the
+    /// default, offers nothing, which is what every caller outside the review's own diff wants.
+    var onEdit: ((Int) -> Void)?
 
     @State private var isHovered = false
 
@@ -114,9 +119,19 @@ struct DiffLineView: View, Equatable {
         // Attached to the row and not to the gutter, because the right click lands wherever the
         // pointer is and the code is most of the row. Absent, rather than greyed, on a row with no
         // spot to anchor to, which is what every caller outside the review's own diff gets.
+        //
+        // Editing the lines in place is the second item, and the right click is the whole of how
+        // it is reached. The gutter has room for one hover control and it belongs to the `+`,
+        // which is the older of the two and the one that starts the review; a second button
+        // beside it would have to be found before either could be used, and both would be
+        // narrower for it. What the item opens is `DiffEdit.region`, which may refuse, and the
+        // refusal is what the reader is shown.
         .contextMenu {
             if let spot = offeredSpot {
                 Button("Comment on This Line") { onComment?(spot) }
+            }
+            if let line = editableLine, let onEdit {
+                Button("Edit These Lines") { onEdit(line) }
             }
         }
     }
@@ -127,6 +142,12 @@ struct DiffLineView: View, Equatable {
     /// drawing. The rule is `DiffCommentSpot`, shared with the run view.
     private var offeredSpot: ReviewSpot? {
         DiffCommentSpot.offered(for: line, numbers: numbers, enabled: onComment != nil)
+    }
+
+    /// The new-side line an in-place edit begun on this row would open on. The rule is
+    /// `DiffEditTarget`, shared with the run view for the reason `DiffCommentSpot` is.
+    private var editableLine: Int? {
+        DiffEditTarget.offered(for: line, numbers: numbers, enabled: onEdit != nil)
     }
 
     @ViewBuilder

@@ -74,6 +74,16 @@ struct DiffView: View {
     /// Editing buffers outlive this view, so flipping back to the diff, walking to the next file
     /// or switching workspace cannot discard what the user typed.
     private let session = FileEditSession.shared
+    /// The same, for the box opened on a few lines inside the diff itself. A separate store
+    /// because it holds a different thing: `FileEditSession` has the whole file and this has a
+    /// region of it, its own baseline and the refusal that came back from the last save.
+    private let edits = DiffEditSession.shared
+    /// Why an in-place edit could not be opened, or nil. It is nearly always the agent having
+    /// rewritten the file since this diff was drawn, which is a sentence rather than a silence.
+    @State private var editProblem: String?
+    /// The in-place edit whose Cancel is waiting on an answer. On this view rather than on the
+    /// band, for the reason `discarding` gives.
+    @State private var discardingEdit: DiffEditRegion?
 
     /// Opens on the diff, unless there is unsaved text for this file, in which case it opens on
     /// the text. That case is not hypothetical: saving an untracked file, or the agent touching one
@@ -135,6 +145,31 @@ struct DiffView: View {
             case .diff:
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    // Both of these hang on the diff rather than on the view around it, and that
+                    // is not tidiness: a second `.alert` and a second `.sheet` on one view is one
+                    // presentation modifier of each kind too many, and which of the pair wins is
+                    // not something to find out in a build. The revert's alert and the review's
+                    // discard sheet own the outer view; these two are about the diff and live on
+                    // it. Not on the band either, which is a row in a lazy stack: scrolled away,
+                    // it would take its own sheet with it.
+                    .alert(
+                        "Cannot edit these lines",
+                        isPresented: $editProblem.isPresent(),
+                        presenting: editProblem
+                    ) { _ in
+                    } message: { problem in
+                        Text(problem)
+                    }
+                    .confirmation($discardingEdit) { _ in
+                        Confirmation(
+                            title: DiffEdit.Discard.title,
+                            message: DiffEdit.Discard.message,
+                            confirmLabel: DiffEdit.Discard.confirmLabel,
+                            cancelLabel: DiffEdit.Discard.cancelLabel
+                        )
+                    } onConfirm: { _ in
+                        closeEdit()
+                    }
             case .edit:
                 FileEditPane(model: model, path: file.path, session: session)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -319,6 +354,9 @@ struct DiffView: View {
     private func revert() {
         Task {
             session.discard(path: absolutePath)
+            // The file is about to be replaced or deleted outright, so a box open on the lines it
+            // used to have is a box that can only refuse.
+            edits.close(path: absolutePath)
             revertProblem = await FileRevert.revert(file: file, in: model.workspace)
             await model.refreshChanges()
         }
@@ -505,7 +543,8 @@ struct DiffView: View {
                 numbers: .both,
                 width: width,
                 isCommented: isCommented(line, numbers: .both),
-                onComment: { beginDraft(at: $0) }
+                onComment: { beginDraft(at: $0) },
+                onEdit: { beginEdit(at: $0) }
             )
             // Every pass over this diff rebuilds every row the stack has already realised, and a
             // long file realises hundreds. Comparing the row's own values first is what keeps a
@@ -538,6 +577,20 @@ struct DiffView: View {
                 width: width,
                 onCommit: commitDraft,
                 onCancel: cancelDraft
+            )
+
+        case let .lineEditor(region):
+            DiffEditBandView(
+                region: region,
+                // Read out of `typed` rather than off the editor, so a keystroke invalidates this
+                // one band instead of everything that had to ask where the box is. The same split
+                // `ReviewTextHost` makes, and for the same measured reason.
+                text: edits.binding(for: absolutePath),
+                language: document.language,
+                status: edits.editor(for: absolutePath)?.status ?? .editing,
+                width: width,
+                onSave: saveEdit,
+                onCancel: cancelEdit
             )
 
         case let .pair(pair):
@@ -586,7 +639,8 @@ struct DiffView: View {
             language: document.language,
             numbers: numbers,
             width: width,
-            onComment: { beginDraft(at: $0) }
+            onComment: { beginDraft(at: $0) },
+            onEdit: { beginEdit(at: $0) }
         )
         // For the reason given at the per line call sites above, and up to four hundred times as
         // much of it: one of these stands in for a whole run of rows.
@@ -607,7 +661,8 @@ struct DiffView: View {
             numbers: numbers,
             width: width,
             isCommented: isCommented(line, numbers: numbers),
-            onComment: { beginDraft(at: $0) }
+            onComment: { beginDraft(at: $0) },
+            onEdit: { beginEdit(at: $0) }
         )
         // For the reason given at the unified call site above, and twice as much of it: the split
         // layout builds two of these per row.
@@ -702,7 +757,76 @@ struct DiffView: View {
         }
     }
 
-    // MARK: Editing one in place
+    // MARK: - Editing the file in the diff
+
+    /// The lines being edited in place on this file, or nil. Held by the session rather than by
+    /// this view for the reason written out on `DiffEditSession`: everything that moves a diff
+    /// destroys this view, and none of it is the user saying they have finished typing.
+    private var editRegion: DiffEditRegion? { edits.editor(for: absolutePath)?.region }
+
+    /// Open a box on the lines around `line`, or say why not.
+    ///
+    /// The hunks come off the phase rather than off `source`, because they are what is on screen:
+    /// a whitespace refold changes which lines are printed, and the numbers in the gutter the
+    /// reader right clicked are these ones.
+    private func beginEdit(at line: Int) {
+        guard case let .ready(document) = phase else { return }
+
+        // Not while Edit mode is holding unsaved text for the same file. Two boxes over one file
+        // is two baselines, and whichever saved first would make the other one refuse: better to
+        // say so now than to let somebody type into the one that cannot land.
+        guard !session.isDirty(absolutePath) else {
+            editProblem = "\(file.filename) has unsaved changes open in Edit mode. "
+                + "Save or discard those first."
+            return
+        }
+
+        let hunks = document.file.hunks
+        let path = absolutePath
+        Task {
+            if let problem = await edits.begin(path: path, at: line, hunks: hunks) {
+                editProblem = problem
+            }
+            rebuild()
+        }
+    }
+
+    /// Write the box back and show what it did.
+    ///
+    /// Both refreshes are needed and they answer different questions. `refreshChanges` moves the
+    /// file's counts and the generation the patch cache is keyed on; `load` then fetches the new
+    /// patch. Without the second, an edit that swaps one line for another leaves every count where
+    /// it was, nothing re-keys this view's task, and the diff goes on showing the line the reader
+    /// has just replaced.
+    private func saveEdit() {
+        let path = absolutePath
+        Task {
+            let saved = await edits.save(path: path)
+            rebuild()
+            guard saved else { return }
+            await model.refreshChanges()
+            await load()
+        }
+    }
+
+    /// Cancel, which asks first when there is anything to lose. The same rule and the same reason
+    /// as the review editors above: there is no undo anywhere in the app that could bring typed
+    /// text back.
+    private func cancelEdit() {
+        guard let region = editRegion else { return }
+        guard DiffEdit.Discard.needed(closing: edits.text(for: absolutePath), of: region) else {
+            closeEdit()
+            return
+        }
+        discardingEdit = region
+    }
+
+    private func closeEdit() {
+        edits.close(path: absolutePath)
+        rebuild()
+    }
+
+    // MARK: Editing a comment in place
 
     /// The text of an open in-place edit, or nil for a band at rest. Through the model for the
     /// same reason the draft is (see `WorkspaceModel.reviewEdits`): this row is destroyed by
@@ -781,6 +905,11 @@ struct DiffView: View {
             if draftSpot == spot {
                 rows.append(.commentEditor(spot))
             }
+            // Under the LAST line of the region, so the box reads as continuing the lines above
+            // it rather than as covering them. New side only: those are the only lines a file has.
+            if let region = editRegion, spot.side == .new, spot.line == region.lastLine {
+                rows.append(.lineEditor(region))
+            }
         }
     }
 
@@ -806,8 +935,16 @@ struct DiffView: View {
     /// while comments or an open editor are pending on this one file, and the load path already
     /// reads the same file the same way.
     private func refreshWorktreeCopy() {
-        guard case .ready = phase, !fileComments.isEmpty || draftSpot != nil else { return }
-        let fresh = model.contents(of: file.path).map(ReviewCommentAnchor.split)
+        let isEditing = edits.isOpen(absolutePath)
+        guard case .ready = phase, !fileComments.isEmpty || draftSpot != nil || isEditing else {
+            return
+        }
+        let contents = model.contents(of: file.path)
+        // The one read serves both. An open box is told the file has moved on while it is still
+        // worth being told: at the save it would only be told too late to do anything except copy
+        // the text out. Advisory, and it disables nothing: `FileEditor.write` is what decides.
+        if isEditing { edits.recheck(path: absolutePath, contents: contents) }
+        let fresh = contents.map(ReviewCommentAnchor.split)
         guard fresh != fileLines else { return }
         fileLines = fresh
         rebuild()
@@ -870,6 +1007,18 @@ struct DiffView: View {
             if case .commentEditor = $0 { return true } else { return false }
         }) {
             rows.insert(.commentEditor(draftSpot), at: 0)
+        }
+
+        // The same rescue for the in-place editor, and it needs it more often than the comment
+        // does. The box is opened on lines the agent may rewrite a second later, and the reload
+        // that follows can print a hunk that no longer reaches the region's last line. Moved to
+        // the top it is out of place; dropped it takes somebody's typing with it, and the save is
+        // guarded by the file's own bytes rather than by where this row is drawn, so being out of
+        // place costs nothing but the look of it.
+        if let region = editRegion, !rows.contains(where: {
+            if case .lineEditor = $0 { return true } else { return false }
+        }) {
+            rows.insert(.lineEditor(region), at: 0)
         }
     }
 

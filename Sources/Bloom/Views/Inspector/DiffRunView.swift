@@ -48,6 +48,9 @@ struct DiffRunView: View, Equatable {
     var width: CGFloat
     /// Opens the review comment editor at a line. Nil, the default, draws no `+` at all.
     var onComment: ((ReviewSpot) -> Void)?
+    /// Opens the in-place editor on the lines around one, by its new-side number. Nil, the
+    /// default, offers nothing.
+    var onEdit: ((Int) -> Void)?
 
     /// Which line the pointer is over, as an offset into `lines`.
     ///
@@ -163,6 +166,12 @@ struct DiffRunView: View, Equatable {
             if let spot = spot(of: entry) {
                 Button("Comment on This Line") { onComment?(spot) }
             }
+            // On the row for the same safety reason, and it matters more here than for the
+            // comment: an edit opened against a line nobody pointed at would put a box of the
+            // wrong code in front of the reader.
+            if let line = editableLine(of: entry), let onEdit {
+                Button("Edit These Lines") { onEdit(line) }
+            }
         }
         // Over the diff wash, not instead of it: an addition under review stays an addition, and
         // the amber says "under discussion" on top of whatever the line already was.
@@ -200,6 +209,10 @@ struct DiffRunView: View, Equatable {
 
     private func spot(of entry: DiffRunLine) -> ReviewSpot? {
         DiffCommentSpot.offered(for: entry.line, numbers: numbers, enabled: onComment != nil)
+    }
+
+    private func editableLine(of entry: DiffRunLine) -> Int? {
+        DiffEditTarget.offered(for: entry.line, numbers: numbers, enabled: onEdit != nil)
     }
 
     // MARK: - Code
