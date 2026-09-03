@@ -172,9 +172,10 @@ public enum MenuBarSummary {
     ///
     /// Each workspace appears once, under the state the sidebar marks it with, because a row in
     /// two lists would contradict the single glyph beside it. `WorkspaceStatus` resolves waiting
-    /// ahead of running, so running drops the blocked ones; unread is `DockBadge.unreadCount`'s
-    /// own test written as a filter, which has to stay that way for the list to match the count,
-    /// and it needs no waiting term because a blocked agent is a running one.
+    /// ahead of running, so running drops the blocked ones; unread is `DockBadge.hasUnreadResult`,
+    /// called rather than restated, because the strip's number and the rows in the menu under it
+    /// are one judgement and a rule written twice is a rule that can disagree with itself about one
+    /// workspace. It needs no waiting term because a blocked agent is a running one.
     public static func sections(
         in workspaces: [Workspace],
         isRunning: (Workspace) -> Bool,
@@ -202,7 +203,7 @@ public enum MenuBarSummary {
             ))
         }
 
-        let unread = workspaces.filter { $0.unread && !isRunning($0) }
+        let unread = workspaces.filter { DockBadge.hasUnreadResult($0, isRunning: isRunning) }
         if !unread.isEmpty {
             sections.append(Section(
                 heading: unreadHeading,
