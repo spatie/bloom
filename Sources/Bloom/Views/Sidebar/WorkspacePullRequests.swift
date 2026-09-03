@@ -70,17 +70,30 @@ final class WorkspacePullRequests {
     }
 
     /// Keeps one workspace's answer fresh for as long as its row is on screen.
-    func track(_ workspace: Workspace) async {
+    ///
+    /// - Parameter store: where a number found here is written down, so a merged pull request
+    ///   whose branch has been deleted is still findable after a relaunch. See
+    ///   `Workspace.pullRequestNumber`. Nil before the database has opened, which costs nothing:
+    ///   the next poll records it.
+    func track(_ workspace: Workspace, store: Store?) async {
         while !Task.isCancelled {
-            await refresh(workspace)
+            await refresh(workspace, store: store)
             try? await Task.sleep(for: Self.refreshInterval)
         }
     }
 
-    private func refresh(_ workspace: Workspace) async {
+    private func refresh(_ workspace: Workspace, store: Store?) async {
         // A worktree identical to its base has nothing to open a pull request for. Skipping it
         // is what keeps a project full of fresh workspaces from launching a process per row.
-        guard workspace.hasDiff || pullRequests[workspace.id] != nil else { return }
+        //
+        // A recorded number is the third reason to ask, and without it a merged workspace was
+        // invisible to this poll for the whole of the next launch: the merge leaves the worktree
+        // on the base with nothing in the diff, so `hasDiff` is false, and a fresh launch has
+        // nothing in the cache yet. The row went back to a plain branch until somebody opened the
+        // workspace and the band asked on its own.
+        guard workspace.hasDiff
+            || workspace.pullRequestNumber != nil
+            || pullRequests[workspace.id] != nil else { return }
         guard await GitHubAvailability.shared.isReady() else { return }
 
         let id = workspace.id
@@ -94,6 +107,7 @@ final class WorkspacePullRequests {
             // answer is kept rather than making the mark flicker back to a plain branch whenever
             // the network is slow.
             guard let fresh else { return }
+            await PullRequestNumber.record(fresh, for: asked, in: store)
             // Writing an equal value still invalidates every row reading this dictionary, and a
             // poll that changed nothing is the common case.
             guard self.pullRequests[id] != fresh else { return }

@@ -176,6 +176,54 @@ public actor Store {
         { try $0.execute(statements) }
     }
 
+    /// Columns the code in this build cannot run without, added to any database that is missing
+    /// one whatever its version number says.
+    ///
+    /// **The version stamp is a fast path, not the truth, and this is the incident that proved
+    /// it.** The owner's database read `user_version = 22` with `deliveries.crew_payload` present
+    /// and `sessions.parent_session_id` absent, so every query naming that column failed and the
+    /// app could not open the database at all. `migrate` had nothing to do: 22 is the length of
+    /// the list, so it returned before running a step.
+    ///
+    /// How a database gets into that state is the hazard of numbering migrations by position. Two
+    /// branches each append a step, both get the same number, and a database that ran one of them
+    /// is stamped as having run the other. Merging the branches cannot repair it, because the
+    /// stamp is already past both. Nothing about that is unusual enough to design against with a
+    /// second numbering scheme; what is worth doing is asking the schema rather than the stamp
+    /// before trusting it.
+    ///
+    /// So this runs on every open, costs one `PRAGMA table_info` per table named here, and adds
+    /// only what is genuinely missing. It is deliberately a short list: the columns whose absence
+    /// stops the app dead rather than every column the schema has. A migration is still where a
+    /// change is written; this is the belt under it.
+    private nonisolated static func repairSchema(_ db: SQLiteDatabase) throws {
+        let required: [(table: String, column: String, add: String, index: String?)] = [
+            (
+                "sessions", "parent_session_id",
+                "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT;",
+                "CREATE INDEX IF NOT EXISTS sessions_parent ON sessions(parent_session_id);"
+            ),
+            (
+                "deliveries", "crew_payload",
+                "ALTER TABLE deliveries ADD COLUMN crew_payload BLOB;",
+                nil
+            ),
+        ]
+
+        for wanted in required {
+            let columns = try db.query("PRAGMA table_info(\(wanted.table));")
+            let names = Set(columns.compactMap { $0.string("name") })
+            // An empty answer is a table this database does not have, which is not this method's
+            // business: a missing table is a migration that has not run yet, and this runs before
+            // they do. An ALTER against it would fail rather than repair anything, and it did:
+            // the first version of this method put a bare `CREATE INDEX` under the loop and a
+            // brand new database could not be opened at all.
+            guard !names.isEmpty, !names.contains(wanted.column) else { continue }
+            try db.execute(wanted.add)
+            if let index = wanted.index { try db.execute(index) }
+        }
+    }
+
     private nonisolated static func migrate(_ db: SQLiteDatabase) throws {
         let migrations: [Migration] = [
             sql("""
@@ -866,9 +914,84 @@ public actor Store {
                     throw StoreTrouble.rebuildLostRows(table: "messages", before: before, after: after)
                 }
             },
+
+            // The chat that started this one, for a crew member. See `Session.parentSessionID`
+            // and `Crew`. Guarded on the column's absence rather than run blind, because the
+            // store's own tests rewind `user_version` and replay every migration over a shape
+            // that already has it.
+            { db in
+                let columns = try db.query("PRAGMA table_info(sessions);")
+                let names = Set(columns.compactMap { $0.string("name") })
+                if !names.contains("parent_session_id") {
+                    try db.execute("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT;")
+                }
+                try db.execute(
+                    "CREATE INDEX IF NOT EXISTS sessions_parent ON sessions(parent_session_id);"
+                )
+            },
+
+            // What one agent said to another, in both of its renderings. See `CrewMessage`.
+            //
+            // **The column is here because `body` alone could not be both.** A crew message is
+            // wrapped for the model and read by a person, and the queue used to hold the wrapped
+            // one: whatever the drain did with it, one of the two readers got the wrong string,
+            // and the one that did was the owner, who saw the envelope drawn as though he had
+            // typed it.
+            //
+            // The whole payload rather than a second `sent` column, because it is the same JSON
+            // the `messages` row is written with, and one document that both readers decode
+            // cannot drift the way two columns filled in by two writers can.
+            //
+            // NULL is the owner's own message, which is every row that existed when this ran and
+            // most rows that will ever exist, so there is no default to invent and nothing to
+            // backfill. Guarded on the column's absence for the reason every step above is:
+            // `ADD COLUMN` has no `IF NOT EXISTS`, and the store's own tests rewind
+            // `user_version` and replay the list over a shape that already has it.
+            { db in
+                let names = Set(
+                    try db.query("PRAGMA table_info(deliveries);").compactMap { $0.string("name") }
+                )
+                if !names.contains("crew_payload") {
+                    try db.execute("ALTER TABLE deliveries ADD COLUMN crew_payload BLOB;")
+                }
+            },
+
+            // The pull request a workspace is about, by number.
+            //
+            // Every lookup went through `gh pr view <branch>`, and a branch that has been merged
+            // and deleted is a name GitHub will not resolve: the workspace in the report showed
+            // pull request #222 as open and ready to merge, with a live Squash and merge button,
+            // for the rest of the launch. A number survives the branch; the name does not, and
+            // neither does `branch.<name>.merge`, which git deletes along with the branch.
+            //
+            // NULL rather than 0, and no backfill. NULL is "nobody has found out yet", which is
+            // what every row that existed when this ran genuinely is, and the first lookup that
+            // answers writes the number down. There is nothing to backfill it from here: the
+            // answer lives on GitHub, and asking for sixty workspaces at launch is sixty `gh`
+            // processes for a column that fills itself in on the next poll.
+            //
+            // Real code rather than SQL for the reason every step above it is: `ADD COLUMN` has no
+            // `IF NOT EXISTS`, and the store's own tests rewind `user_version` and replay the list
+            // over a shape that already has the column.
+            { db in
+                let names = Set(
+                    try db.query("PRAGMA table_info(workspaces);").compactMap { $0.string("name") }
+                )
+                if !names.contains("pull_request_number") {
+                    try db.execute(
+                        "ALTER TABLE workspaces ADD COLUMN pull_request_number INTEGER;"
+                    )
+                }
+            },
         ]
 
         let current = Int(db.userVersion)
+
+        // Before the version is trusted, and whatever it says. See `repairSchema`: a database
+        // stamped as fully migrated with a column missing is a real state that a real machine
+        // reached, and every query naming that column failed until it was put back.
+        try repairSchema(db)
+
         guard current < migrations.count else { return }
 
         // Off for the run, and back on after it, which is SQLite's own instruction for a schema
@@ -1042,8 +1165,8 @@ public actor Store {
                 id, repo_id, name, branch, path, base_branch, state, setup_state, setup_log,
                 sort_order, created_at, last_activity_at, archived_at,
                 additions, deletions, changed_files, unread, pinned, colour,
-                parent_workspace_id, spawn_tool_use_id, port
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                parent_workspace_id, spawn_tool_use_id, port, pull_request_number
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 branch = excluded.branch,
@@ -1063,7 +1186,8 @@ public actor Store {
                 colour = excluded.colour,
                 parent_workspace_id = excluded.parent_workspace_id,
                 spawn_tool_use_id = excluded.spawn_tool_use_id,
-                port = excluded.port
+                port = excluded.port,
+                pull_request_number = excluded.pull_request_number
             """,
             [
                 .text(workspace.id), .text(workspace.repoID), .text(workspace.name),
@@ -1080,6 +1204,7 @@ public actor Store {
                 workspace.origin.parentWorkspaceID.map { .text($0) } ?? .null,
                 workspace.origin.spawnToolUseID.map { .text($0) } ?? .null,
                 .int(Int64(workspace.port)),
+                workspace.pullRequestNumber.map { .int(Int64($0)) } ?? .null,
             ]
         )
         return workspace
@@ -1346,6 +1471,35 @@ public actor Store {
         )
     }
 
+    /// Writes the pull request this workspace is about, and only when it has actually changed.
+    ///
+    /// The same shape and the same reason as `updateDiffStat` above it: this runs behind a poll,
+    /// most polls answer the number that is already there, and SQLite does not care that the value
+    /// is identical. The row would be rewritten, the WAL would grow and the update hook would
+    /// fire, so every workspace with a pull request would announce a change every couple of
+    /// minutes and everything listening would reload for it.
+    ///
+    /// One named column rather than a whole `Workspace`, for the reason in this file's head: the
+    /// value the caller is holding was read before a `gh` round trip, and a lookup can take
+    /// seconds. The read and the write are both inside the actor with nothing suspending between
+    /// them.
+    ///
+    /// Clearing it is not here. That happens exactly once, in `continueOnNewBranch`, in the same
+    /// `update` that moves the branch, because the two are one change: the pull request stops
+    /// being this workspace's because the branch did.
+    public func recordPullRequestNumber(_ number: Int, workspaceID: WorkspaceID) throws {
+        guard number > 0 else { return }
+        guard let current = try db.query(
+            "SELECT pull_request_number FROM workspaces WHERE id = ?", [.text(workspaceID)]
+        ).first else { return }
+        if current.int("pull_request_number").map(Int.init) == number { return }
+
+        try db.run(
+            "UPDATE workspaces SET pull_request_number = ? WHERE id = ?",
+            [.int(Int64(number)), .text(workspaceID)]
+        )
+    }
+
     public func touch(workspaceID: WorkspaceID, unread: Bool? = nil) throws {
         if let unread {
             try db.run(
@@ -1488,6 +1642,58 @@ public actor Store {
         ).map(Self.session(from:))
     }
 
+    /// The chats one chat started, oldest first. A crew, in `Crew`'s words.
+    ///
+    /// Separate from `sessions(workspaceID:)` rather than a filter over it, because the two
+    /// answer different questions and the tab strip asks the first one: a crew member is drawn in
+    /// the sidebar under its workspace, not as a tab beside the chat that started it.
+    public func crew(of parentID: SessionID) throws -> [Session] {
+        try db.query(
+            "SELECT * FROM sessions WHERE parent_session_id = ? AND archived_at IS NULL ORDER BY created_at",
+            [.text(parentID)]
+        ).map(Self.session(from:))
+    }
+
+    /// Every crew member in one workspace, whichever chat started them.
+    ///
+    /// What the sidebar draws under a workspace row, and what the ceiling in `Crew` is counted
+    /// against: three running agents in one worktree is three writers in one working tree,
+    /// whether or not one chat asked for all of them.
+    public func crew(inWorkspace workspaceID: WorkspaceID) throws -> [Session] {
+        try db.query(
+            "SELECT * FROM sessions WHERE workspace_id = ? AND parent_session_id IS NOT NULL AND archived_at IS NULL ORDER BY created_at",
+            [.text(workspaceID)]
+        ).map(Self.session(from:))
+    }
+
+    /// Every crew member in the app at once, grouped by the worktree it is working in.
+    ///
+    /// **One statement rather than one per workspace, and that is the whole reason it exists.**
+    /// The sidebar's crew rows are refreshed from `store.changes(of: [.sessions])`, and the runner
+    /// rewrites a session row (state, tokens, cost, `updatedAt`) many times inside one turn. Asked
+    /// per workspace, a sidebar holding twenty of them made twenty round trips onto this actor for
+    /// every batch of those writes, competing with the writes of the agent that caused them. The
+    /// grouping is Swift's work because it is free there and a second query here is not.
+    ///
+    /// Same predicate as `crew(inWorkspace:)`, so the two cannot disagree about what a crew member
+    /// is. A row with no `workspace_id` cannot be one: `Crew` is about agents sharing a worktree.
+    public func crewByWorkspace() throws -> [WorkspaceID: [Session]] {
+        let members = try db.query(
+            """
+            SELECT * FROM sessions
+            WHERE parent_session_id IS NOT NULL AND archived_at IS NULL
+            ORDER BY created_at
+            """
+        ).map(Self.session(from:))
+
+        var grouped: [WorkspaceID: [Session]] = [:]
+        for member in members {
+            guard let workspaceID = member.workspaceID else { continue }
+            grouped[workspaceID, default: []].append(member)
+        }
+        return grouped
+    }
+
     /// The chats that belong to no worktree, oldest first.
     ///
     /// Ask Bloom's, and nothing else today. It is a separate method rather than a nil argument to
@@ -1556,10 +1762,10 @@ public actor Store {
         try db.run(
             """
             INSERT INTO sessions (
-                id, workspace_id, title, agent_session_id, model, effort, agent_kind,
-                permission_mode, state, sort_order, created_at, updated_at, archived_at,
-                last_read_seq, input_tokens, output_tokens, cost_usd, context_tokens
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, workspace_id, parent_session_id, title, agent_session_id, model, effort,
+                agent_kind, permission_mode, state, sort_order, created_at, updated_at,
+                archived_at, last_read_seq, input_tokens, output_tokens, cost_usd, context_tokens
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 agent_session_id = excluded.agent_session_id,
@@ -1578,7 +1784,9 @@ public actor Store {
                 context_tokens = excluded.context_tokens
             """,
             [
-                .text(session.id), .text(session.workspaceID), .text(session.title),
+                .text(session.id), .text(session.workspaceID),
+                session.parentSessionID.map { .text($0) } ?? .null,
+                .text(session.title),
                 session.agentSessionID.map { .text($0) } ?? .null,
                 .text(session.model), .text(session.effort), .text(session.agentKind.rawValue),
                 .text(session.permissionMode.rawValue),
@@ -1708,6 +1916,14 @@ public actor Store {
     /// down as a rule. This asks that table which states `appRelaunched` moves and where it moves
     /// them, so the bulk pass and the machine cannot come to different conclusions about what an
     /// interrupted launch left behind.
+    ///
+    /// **A crew member caught by this leaves an orchestrator waiting for ever, so it is told.**
+    /// Quitting Bloom with a crew working and reopening it used to bring back a set of dead rows,
+    /// with no queued delivery and no news for the chat that started them: the orchestrator sat on
+    /// a report that could no longer arrive, which is exactly the failure the head of
+    /// `Crew.failedSentence` says the design exists to prevent. The reports are enqueued here
+    /// rather than by whatever opens a window, because a workspace nobody opens this launch has
+    /// the same problem and there is no window to notice it.
     public func resetRunningSessions() throws {
         var sources: [SessionState] = []
         var destination: SessionState?
@@ -1719,10 +1935,57 @@ public actor Store {
         guard let destination, !sources.isEmpty else { return }
 
         let placeholders = sources.map { _ in "?" }.joined(separator: ", ")
+        let stateValues = sources.map { SQLValue.text($0.rawValue) }
+
+        // Read before the write, because the write is what destroys the evidence: once these rows
+        // are idle, nothing on them says they were working when the app died.
+        //
+        // The join is what keeps an archived orchestrator out of it. A delivery addressed to a
+        // chat the owner has closed is a row nothing will ever drain, and the sentence is about an
+        // agent that chat can no longer see anyway. The member being unarchived is the same
+        // argument one row down: an archived crew member is gone from `crew(of:)` and from every
+        // list its orchestrator can read, so there is nothing there to report the death of.
+        let lost = try db.query(
+            """
+            SELECT member.title AS title,
+                   member.workspace_id AS workspace_id,
+                   member.parent_session_id AS parent_session_id
+            FROM sessions AS member
+            JOIN sessions AS parent ON parent.id = member.parent_session_id
+            WHERE member.state IN (\(placeholders))
+              AND member.archived_at IS NULL
+              AND parent.archived_at IS NULL
+            ORDER BY member.created_at
+            """,
+            stateValues
+        )
+
         try db.run(
             "UPDATE sessions SET state = ? WHERE state IN (\(placeholders))",
-            [.text(destination.rawValue)] + sources.map { SQLValue.text($0.rawValue) }
+            [.text(destination.rawValue)] + stateValues
         )
+
+        // After the reset and one at a time, so that a delivery this cannot write costs the
+        // orchestrator its news and nothing else. The reset is the half that keeps the ceiling in
+        // `Crew` from staying stuck at three dead agents, and losing that to a failed insert would
+        // be trading a waiting orchestrator for a workspace that can never start another agent.
+        for row in lost {
+            guard let parentID = row.string("parent_session_id") else { continue }
+            _ = try? enqueueDelivery(Delivery(
+                targetSessionID: SessionID(parentID),
+                sourceWorkspaceID: row.string("workspace_id").map(WorkspaceID.init),
+                kind: .report,
+                // A crew message rather than a plain body, like every other thing one agent is
+                // told about another: the orchestrator is handed the sentence and its own window
+                // draws the one line, instead of the paragraph appearing as though the owner had
+                // typed it. See `CrewMessage`.
+                crew: CrewMessage.failed(
+                    name: row.string("title") ?? "",
+                    reason: "Bloom was restarted while it was working, so its turn was lost. "
+                        + "Nothing it had not already reported got through."
+                )
+            ))
+        }
     }
 
     // MARK: - Messages
@@ -2224,9 +2487,9 @@ public actor Store {
         try db.run(
             """
             INSERT INTO deliveries
-                (id, target_session_id, source_workspace_id, kind, verdict, body, created_at,
-                 delivered_at, delivered_seq)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, target_session_id, source_workspace_id, kind, verdict, body, crew_payload,
+                 created_at, delivered_at, delivered_seq)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 .text(delivery.id),
@@ -2235,6 +2498,7 @@ public actor Store {
                 .text(delivery.kind.rawValue),
                 delivery.verdict.map { .text($0) } ?? .null,
                 .text(delivery.body),
+                delivery.crewPayload.map { .blob($0) } ?? .null,
                 .double(delivery.createdAt.timeIntervalSince1970),
                 delivery.deliveredAt.map { .double($0.timeIntervalSince1970) } ?? .null,
                 delivery.deliveredSeq.map { .int(Int64($0)) } ?? .null,
@@ -2770,7 +3034,8 @@ public actor Store {
                 parentWorkspaceID: row.string("parent_workspace_id"),
                 spawnToolUseID: row.string("spawn_tool_use_id")
             ),
-            port: Int(row.int("port") ?? 0)
+            port: Int(row.int("port") ?? 0),
+            pullRequestNumber: row.int("pull_request_number").map(Int.init)
         )
     }
 
@@ -2784,6 +3049,7 @@ public actor Store {
             kind: Delivery.Kind(rawValue: row.string("kind") ?? "") ?? .owner,
             verdict: row.string("verdict"),
             body: row.string("body") ?? "",
+            crewPayload: row.data("crew_payload"),
             createdAt: row.date("created_at") ?? Date(),
             deliveredAt: row.date("delivered_at"),
             deliveredSeq: row.int("delivered_seq").map(Int.init)
@@ -2828,6 +3094,9 @@ public actor Store {
             id: SessionID(row.string("id") ?? newID()),
             // A null here is a chat with no worktree, which is Ask Bloom. See `Session.workspaceID`.
             workspaceID: row.string("workspace_id").map(WorkspaceID.init),
+            // A row written before the column existed has no parent, which is what it was: a chat
+            // the owner made.
+            parentSessionID: row.string("parent_session_id").map(SessionID.init),
             title: row.string("title") ?? "Session",
             agentSessionID: row.string("agent_session_id"),
             model: row.string("model") ?? "opus",

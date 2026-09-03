@@ -35,6 +35,24 @@ public enum SubagentPane: Sendable {
         subagent?.state == .running
     }
 
+    /// What the output section says when there is nothing to draw.
+    ///
+    /// A running subagent that has not spoken yet is not a failure to read anything, and it used
+    /// to be described as one: with no file named and no line of its own yet, the pane said "the
+    /// agent did not say where this subagent's output was written", which reads as something
+    /// having gone wrong to everybody except the person who wrote it. The reasons in
+    /// `SubagentOutput.Failure` are the right words once the subagent has stopped and they are
+    /// the wrong words while it is working.
+    public static func nothingToShow(
+        _ failure: SubagentOutput.Failure, kind: SubagentKind, isRunning: Bool
+    ) -> String {
+        guard isRunning else { return failure.sentence(kind) }
+        switch kind {
+        case .agent: return "It has not said anything yet."
+        case .command: return "It has not printed anything yet."
+        }
+    }
+
     // MARK: - What it is
 
     /// The line under the title: what it is, how deep it was spawned when that is worth saying,
@@ -43,7 +61,10 @@ public enum SubagentPane: Sendable {
     /// It used to open with `subagent_type` and fall back to the literal "subagent", which is why
     /// a background command, whose `task_started` carries no `subagent_type` at all, described
     /// itself as a subagent in the one place there was room to be accurate.
-    public static func subtitle(_ subagent: Subagent) -> String {
+    /// - Parameter now: what a running task's elapsed time is measured against. See
+    ///   `Subagent.secondsElapsed(at:)`, which the sidebar row reads too, so the pane and the row
+    ///   cannot disagree about how long the same subagent has been going.
+    public static func subtitle(_ subagent: Subagent, now: Date = Date()) -> String {
         var parts: [String] = []
         switch subagent.kind {
         case .command:
@@ -58,7 +79,7 @@ public enum SubagentPane: Sendable {
                 parts.append("spawned by a subagent, depth \(subagent.spawnDepth)")
             }
         }
-        let elapsed = SubagentRow.duration(subagent.elapsedSeconds)
+        let elapsed = SubagentRow.duration(subagent.secondsElapsed(at: now))
         if !elapsed.isEmpty { parts.append(elapsed) }
         return parts.joined(separator: " . ")
     }

@@ -39,6 +39,10 @@ public struct RepoSettingsDraft: Sendable, Hashable {
     public var runMode = "nonconcurrent"
     public var branchPrefix = ""
     public var deleteBranchOnArchive = false
+    /// What this project adds to the two turns Bloom composes about landing a branch. Empty for
+    /// most projects, which is the answer that sends a turn with nothing attached to it.
+    public var mergeInstructions = ""
+    public var conflictInstructions = ""
 
     public init() {}
 
@@ -52,6 +56,8 @@ public struct RepoSettingsDraft: Sendable, Hashable {
         runMode = settings.runMode
         branchPrefix = settings.branchPrefix ?? ""
         deleteBranchOnArchive = settings.deleteBranchOnArchive
+        mergeInstructions = settings.mergeInstructions ?? ""
+        conflictInstructions = settings.conflictInstructions ?? ""
     }
 
     /// The patterns, one per line. A blank line is not a pattern, and an empty field means "copy
@@ -127,6 +133,14 @@ public struct RepoSettingsDraft: Sendable, Hashable {
         }
         if deleteBranchOnArchive != settings.deleteBranchOnArchive {
             edits.append(.deleteBranchOnArchive(deleteBranchOnArchive))
+        }
+        let merge = mergeInstructions.trimmed
+        if merge != (settings.mergeInstructions ?? "").trimmed {
+            edits.append(.mergeInstructions(merge))
+        }
+        let conflicts = conflictInstructions.trimmed
+        if conflicts != (settings.conflictInstructions ?? "").trimmed {
+            edits.append(.conflictInstructions(conflicts))
         }
         return edits
     }

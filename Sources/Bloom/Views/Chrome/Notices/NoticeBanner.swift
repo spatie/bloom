@@ -37,6 +37,14 @@ struct NoticeBanner: View {
 
     private var lifetime: Duration? { notice.lifetime }
 
+    /// How wide the card is allowed to get.
+    ///
+    /// Off the spacing scale on purpose, because it is a measure rather than a gap: a banner holds
+    /// a sentence and a sentence has a comfortable line length, and this is the same order as the
+    /// transcript's own prose measure. Named because it was a bare 400 in a file where the two
+    /// shadows below it carry a paragraph each.
+    private static let cardWidth: CGFloat = 400
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: TranscriptLayout.cardInset) {
@@ -64,12 +72,12 @@ struct NoticeBanner: View {
 
             drain
         }
-        .frame(maxWidth: 400, alignment: .leading)
+        .frame(maxWidth: Self.cardWidth, alignment: .leading)
         .background(Palette.surfaceRaised)
         .clipShape(RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
-                .strokeBorder(Palette.border)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         )
         // Two shadows rather than one. The near one draws the edge, which is the whole of what
         // separates a white card from the white page under it in light; the far one is the depth,

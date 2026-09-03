@@ -133,6 +133,9 @@ final class ScriptedCodexProcess: AgentProcessing, @unchecked Sendable {
 final class ProcessBox: @unchecked Sendable {
     private let lock = NSLock()
     private var made: ScriptedCodexProcess?
+    /// Every process this box has handed out, in order. A reconnect is a second one, and asking
+    /// for `process` alone cannot tell "launched once" from "launched again with other arguments".
+    private var started: [ScriptedCodexProcess] = []
     private var replies: [String: JSONValue] = [:]
     private var failures: [String: (code: Int, message: String)] = [:]
     private var ignored: [String] = []
@@ -157,6 +160,7 @@ final class ProcessBox: @unchecked Sendable {
             let process = ScriptedCodexProcess(launch: launch)
             self.lock.lock()
             self.made = process
+            self.started.append(process)
             let replies = self.replies
             let failures = self.failures
             let ignored = self.ignored
@@ -174,5 +178,10 @@ final class ProcessBox: @unchecked Sendable {
     var process: ScriptedCodexProcess {
         lock.lock(); defer { lock.unlock() }
         return made!
+    }
+
+    var processes: [ScriptedCodexProcess] {
+        lock.lock(); defer { lock.unlock() }
+        return started
     }
 }

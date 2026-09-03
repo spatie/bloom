@@ -21,14 +21,16 @@ enum SettingsTab: String, Hashable, CaseIterable {
     /// shell survives a quit, live in Appearance. Somebody hunting for a terminal font size
     /// clicked Terminal and got `claude mcp add --scope user`.
     case commandLine
-    /// What the archived work costs and how to get the space back. It was a sidebar screen. See
-    /// `StorageSettingsView`.
-    case storage
+    // **There was a `storage` case and there is no pane for it any more.** It was a sidebar
+    // screen before it was a tab, and it is Home's Archived chip now: the same archived
+    // workspaces, with the size, the order and the totals that were the only things this window
+    // held and that list did not. A tab whose whole content is somewhere else is the second copy
+    // this app has spent its evenings removing.
     case about
 
     /// The tab's name in the row.
     ///
-    /// Here rather than at the twelve `Tab` call sites, so that `SettingsTabRow` measures the
+    /// Here rather than at every `Tab` call site, so that `SettingsTabRow` measures the
     /// words the window actually draws instead of a second copy of them.
     var title: String {
         switch self {
@@ -42,13 +44,12 @@ enum SettingsTab: String, Hashable, CaseIterable {
         case .approvals: "Approvals"
         case .tools: "Tools"
         case .commandLine: "Command Line"
-        case .storage: "Storage"
         case .about: "About"
         }
     }
 }
 
-/// How wide the window has to be before all twelve tabs are on it.
+/// How wide the window has to be before every tab is on it.
 ///
 /// A `Settings` scene's `TabView` is an `NSToolbar` in preference style, icon over label, and a
 /// toolbar with more items than fit does not wrap or scroll them: it folds the tail behind a `»`.
@@ -57,7 +58,7 @@ enum SettingsTab: String, Hashable, CaseIterable {
 /// hidden in an overflow menu nobody has a reason to look in.
 ///
 /// **Measured off the titles rather than written down as a number**, so renaming a pane or adding
-/// one moves the minimum with it, which is the failure that put the number 640 next to twelve
+/// one moves the minimum with it, which is the failure that put the number 640 next to a dozen
 /// tabs in the first place. The measuring itself is `TranscriptLabelWidth`'s trick and is memoised
 /// for the same reason: one CoreText run, and the answer cannot change while the app is running.
 ///

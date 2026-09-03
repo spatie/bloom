@@ -24,7 +24,9 @@ public enum StoppedTurn {
         for index in kinds.indices.reversed() {
             switch kinds[index] {
             case .result: return index
-            case .user: return nil
+            // `.crew` is a turn's opening row exactly as `.user` is: the runner writes one or the
+            // other, never both, depending on whether a person or another agent asked for it.
+            case .user, .crew: return nil
             default: continue
             }
         }

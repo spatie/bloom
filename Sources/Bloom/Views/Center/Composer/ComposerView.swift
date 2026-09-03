@@ -4,7 +4,7 @@ import BloomCore
 
 /// The prompt box at the bottom of the centre column.
 ///
-/// The surface itself is `ComposerPrompt`, which the create sheet uses too. What is left here is
+/// The surface itself is `ComposerPrompt`, which the create window uses too. What is left here is
 /// everything that is true of a conversation and of nothing else: the draft belongs to a
 /// transcript and is saved back to it, the divider above the box, the footer's values coming off
 /// a `Session` row, and the first-open defaults.
@@ -24,6 +24,7 @@ struct ComposerView: View {
     /// passes its own, because a conversation that cannot change a file should not open by
     /// inviting somebody to ask it to.
     var placeholder: String = ComposerEditor.chatPlaceholder
+    var destinationLabel: String?
 
     @Environment(AppModel.self) private var app
 
@@ -59,17 +60,35 @@ struct ComposerView: View {
     /// The style name this session is on, mirrored out of the store the way fast mode is. Neither
     /// has a column on `Session`, so neither can be read off the row the footer is drawn from.
     @State private var outputStyle = OutputStyle.defaultName
+    /// Codex's context window for this chat, in tokens, or `CodexContextWindow.modelDefault`.
+    /// Held here beside fast mode and the output style for the reason those two are: it is not a
+    /// column on `Session`, so the composer is where the chat's copy of it lives.
+    @State private var codexContextWindow = CodexContextWindow.modelDefault
     @State private var draftSaveTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
-            ComposerResizeHandle(
-                onDrag: resize(by:),
-                onDragEnd: endResize,
-                onReset: resetHeight
-            )
+            if let destinationLabel {
+                HStack(spacing: Metrics.spacingSmall) {
+                    Image(systemName: "bubble.left")
+                    Text(destinationLabel)
+                }
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textTertiary)
+                .padding(.horizontal, Metrics.gutter)
+                .frame(maxWidth: .infinity, minHeight: Metrics.rowHeight, alignment: .leading)
+                .background(Palette.surfaceSunken)
+                .overlay(alignment: .bottom) { Hairline() }
+            }
 
             composer
+                .overlay(alignment: .top) {
+                    ComposerResizeHandle(
+                        onDrag: resize(by:),
+                        onDragEnd: endResize,
+                        onReset: resetHeight
+                    )
+                }
         }
         .background(Palette.surface)
         // The chrome is whatever is left once the editor's share is taken off, so this settles on
@@ -104,7 +123,9 @@ struct ComposerView: View {
             editorHeight: editorHeight,
             onContentHeightChange: { contentHeight = $0 },
             onKey: handle(key:),
-            onOpenAttachment: open(attachment:)
+            onOpenAttachment: open(attachment:),
+            onOpenCommand: open(commandPath:),
+            fillsPanel: true
         ) { actions in
             ComposerFooterView(
                 controls: controls,
@@ -119,8 +140,6 @@ struct ComposerView: View {
                 onStop: transcript.stop
             )
         }
-        .padding(.horizontal, Metrics.gutter)
-        .padding(.bottom, Metrics.gutter)
         .task(id: transcript.session.id) { await prepare() }
         .onChange(of: transcript.draft) { _, _ in scheduleDraftSave() }
         // Something put words in the box for the owner to carry on writing, which today is Edit on
@@ -191,7 +210,8 @@ struct ComposerView: View {
         ComposerControls(
             session: transcript.session,
             isFastMode: isFastMode,
-            outputStyle: outputStyle
+            outputStyle: outputStyle,
+            codexContextWindow: codexContextWindow
         )
     }
 
@@ -264,6 +284,18 @@ struct ComposerView: View {
             }
         }
 
+        if new.codexContextWindow != codexContextWindow {
+            codexContextWindow = new.codexContextWindow
+            if let store = app.store {
+                let key = ComposerControls.contextWindowKey(sessionID: transcript.session.id)
+                // Nil for the model's own window, so a chat set back to it reads the same as one
+                // nobody ever asked. `CodexRunner.applyContextWindowChange` reads it on the next
+                // turn and reconnects if the running server was launched with something else.
+                let value = CodexContextWindow.stored(new.codexContextWindow)
+                Task { try? await store.setSetting(key, value) }
+            }
+        }
+
         let session = transcript.session
 
         // Picking a model out of the other backend's section is picking that backend, and what
@@ -303,9 +335,20 @@ struct ComposerView: View {
     /// Same workspace, same worktree, same branch: a fork is cheap, and it is far less surprising
     /// than losing the conversation that is on screen.
     private func fork(onto kind: AgentKind, with controls: ComposerControls) {
-        guard let model, let store = app.store else { return }
-        let title = BackendChange.forkedTitle(transcript.session.title, to: kind)
         let draft = transcript.draft
+
+        // Ask Bloom has no workspace and therefore no tab beside this one to fork into. Its
+        // equivalent is a fresh conversation: the old one is archived, so its transcript is
+        // retained, while the new backend starts with a thread it actually owns.
+        guard let model else {
+            Task { @MainActor in
+                await app.ask.startFresh(controls: controls, draft: draft)
+            }
+            return
+        }
+
+        guard let store = app.store else { return }
+        let title = BackendChange.forkedTitle(transcript.session.title, to: kind)
 
         Task { @MainActor in
             guard let session = await model.createSession(title: title) else { return }
@@ -470,6 +513,13 @@ struct ComposerView: View {
         FileReview.open(path: attachment.path, in: model)
     }
 
+    /// Skill and command files use the same in-app file tab as attachments. Absolute paths are
+    /// supported by the review pane for skills installed outside the current worktree.
+    private func open(commandPath path: String) {
+        guard let model else { return }
+        FileReview.open(path: path, in: model)
+    }
+
     /// A comment chip opens the diff it was written on, where its band is.
     private func open(reviewComment comment: ReviewComment) {
         guard let model else { return }
@@ -482,6 +532,43 @@ struct ComposerView: View {
     }
 
     // MARK: - First open
+
+    /// Puts a chat back on a model that is a model, if it is holding something that is not.
+    ///
+    /// Every time a chat is opened, and deliberately not only on the first open: the value this
+    /// corrects was written by a version that had no rule for it, and a chat carrying one is a
+    /// chat that cannot run. `codex:gpt-5.6-sol` was found on a real session row, put there
+    /// verbatim from a settings file's `models.default`; nothing recognised it, so it was parked
+    /// on whatever backend was running, the menu drew it as a fifth row inside the Claude Code
+    /// section reading "Codex:gpt 5.6 Sol", and the CLI, handed a model that does not exist, ran
+    /// on its own default. See `ModelIdentifier`, whose head is the whole report.
+    ///
+    /// The backend only moves for a chat that has never opened a thread. One that has keeps it,
+    /// for the reason `BackendChange` forks rather than changes: its rows are in one CLI's
+    /// vocabulary and its `agentSessionID` names a thread on that CLI's server. Its id is still
+    /// corrected, which is what puts it back in the right section of the menu, and the move is
+    /// then offered as the fork it is.
+    private func repairModel() {
+        let session = transcript.session
+        let hasSpoken = !(session.agentSessionID ?? "").isEmpty
+        guard let repair = ModelIdentifier.correction(
+            model: session.model,
+            on: session.agentKind,
+            hasSpoken: hasSpoken,
+            codexModels: ComposerModelCatalog.shared.codexModels
+        ) else { return }
+
+        sessionEditor.apply {
+            $0.model = repair.model
+            if let kind = repair.kind, kind != $0.agentKind {
+                $0.agentKind = kind
+                // A mode the new backend has no row for cannot survive the move, which is the
+                // invariant `ComposerControls` holds and this write goes around. See
+                // `PermissionMode.nearest(on:)`.
+                $0.permissionMode = $0.permissionMode.nearest(on: kind)
+            }
+        }
+    }
 
     /// Settle what a new session starts out as, and read back the two values that are not columns.
     /// All of it is only interesting once, hence the `task(id:)`. The precedence rules live in
@@ -498,6 +585,8 @@ struct ComposerView: View {
         isFocused = true
         caret = (transcript.draft as NSString).length
 
+        repairModel()
+
         guard let store = app.store else { return }
         let sessionID = transcript.session.id
         let storedFastMode = (try? await store.setting(
@@ -506,6 +595,9 @@ struct ComposerView: View {
         let storedStyle = (try? await store.setting(
             ComposerControls.outputStyleKey(sessionID: sessionID)
         )) ?? OutputStyle.defaultName
+        let storedContextWindow = CodexContextWindow.normalised(try? await store.setting(
+            ComposerControls.contextWindowKey(sessionID: sessionID)
+        ))
         // Checked before every write of the pane's state from here down. The pane is reused
         // across sessions, and an actor call does not stop for cancellation, so a switch made
         // while this task was reading used to let the OLD session's answers resume and land on
@@ -513,10 +605,11 @@ struct ComposerView: View {
         guard !Task.isCancelled else { return }
         isFastMode = storedFastMode
         outputStyle = storedStyle
+        codexContextWindow = storedContextWindow
 
         // The marker is what separates "never opened" from "opened and left alone", which the
         // column values cannot express: a session created with the built-in defaults looks exactly
-        // like one the user deliberately set to the same values. The create sheet writes it too,
+        // like one the user deliberately set to the same values. The create window writes it too,
         // so a model chosen there is never overruled the first time the workspace is opened.
         let appliedKey = ComposerControls.defaultsAppliedKey(sessionID: sessionID)
         let wasPrepared = (try? await store.setting(appliedKey)) == "1"
@@ -538,7 +631,14 @@ struct ComposerView: View {
         // whole of decision two: the default is Full access, and this is the one conversation in
         // Bloom that sits above every project. See `ComposerDefaults.resolve`.
         let resolved = ComposerDefaults.resolve(
-            repo: repoSettings, app: appDefaults, hasWorktree: transcript.workspace != nil
+            repo: repoSettings,
+            app: appDefaults,
+            hasWorktree: transcript.workspace != nil,
+            // Where a model nothing recognises leaves the chat: on the backend it is already on.
+            // Everything else is decided by the model, including the permission mode, so "start in
+            // plan mode" still cannot write Plan onto a Codex row.
+            running: transcript.session.agentKind,
+            codexModels: ComposerModelCatalog.shared.codexModels
         )
 
         if appDefaults.fastMode != isFastMode {
@@ -564,13 +664,31 @@ struct ComposerView: View {
             guard !Task.isCancelled else { return }
         }
 
+        // Same shape again, and the app-wide default is the only layer it has: a repository's
+        // settings file carries no key for it, and inventing one would be a second place to look
+        // for a value the Settings screen already owns.
+        if appDefaults.codexContextWindow != codexContextWindow {
+            codexContextWindow = appDefaults.codexContextWindow
+            try? await store.setSetting(
+                ComposerControls.contextWindowKey(sessionID: sessionID),
+                CodexContextWindow.stored(appDefaults.codexContextWindow)
+            )
+            guard !Task.isCancelled else { return }
+        }
+
         let session = transcript.session
         if session.model != resolved.model
             || session.effort != resolved.effort
+            || session.agentKind != resolved.backend
             || session.permissionMode != resolved.permissionMode {
+            // The backend moves with the model, and it can only move here: this runs once, before
+            // the chat has said anything, so there is no transcript in the old backend's
+            // vocabulary and no thread on its server to strand. A chat that has spoken forks
+            // instead, which is `BackendChange` and is the footer's problem rather than this one.
             sessionEditor.apply {
                 $0.model = resolved.model
                 $0.effort = resolved.effort
+                $0.agentKind = resolved.backend
                 $0.permissionMode = resolved.permissionMode
             }
         }

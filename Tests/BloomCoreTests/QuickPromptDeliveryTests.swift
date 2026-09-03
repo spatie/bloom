@@ -48,7 +48,7 @@ struct QuickPromptDeliveryTests {
 
     // MARK: - What a surface can do
 
-    /// The create sheet: no conversation to send into, no strip to open a chat on. Every prompt
+    /// The create window: no conversation to send into, no strip to open a chat on. Every prompt
     /// writes into the box there, which is what it did before either switch existed.
     @Test("a surface that can do neither writes into the box, whatever the prompt asks")
     func composeOnlySurface() {
@@ -99,27 +99,37 @@ struct QuickPromptDeliveryTests {
 
     // MARK: - What the form says
 
-    /// The line under the two switches is the whole of how clear this is, so it is pinned: four
-    /// cases, four different sentences, none of them empty.
-    @Test("every combination has its own sentence")
+    /// The line under the two switches is the whole of how clear this is, so it is pinned: every
+    /// combination that changes something says a different thing, and the one that changes nothing
+    /// says nothing at all.
+    @Test("every combination that does something has its own sentence")
     func sentences() {
-        let said = QuickPromptDelivery.allCases.map(\.sentence)
-        #expect(Set(said).count == QuickPromptDelivery.allCases.count)
+        let said = QuickPromptDelivery.allCases.compactMap(\.sentence)
+        #expect(said.count == QuickPromptDelivery.allCases.count - 1)
+        #expect(Set(said).count == said.count)
         #expect(said.allSatisfy { !$0.isEmpty })
+    }
+
+    /// The state the form opens in, and the one every prompt had before these switches existed.
+    /// Its sentence read "The words go in the composer here, and nothing is sent until you send
+    /// it", and the owner could not tell what it meant.
+    @Test("both switches off explains nothing, because nothing unusual happens")
+    func quietCombinationSaysNothing() {
+        #expect(QuickPromptDelivery.compose.sentence == nil)
     }
 
     /// Sending in place sends the rest of the draft with the prompt, which is the one thing about
     /// these switches somebody could be surprised by afterwards. The sentence has to say so.
     @Test("the sentence for sending in place names what is already in the box")
     func namesTheDraft() {
-        #expect(QuickPromptDelivery.send.sentence.contains("already typed"))
+        #expect(QuickPromptDelivery.send.sentence?.contains("already typed") == true)
     }
 
     @Test("both of the new chat sentences say a chat opens, and only one of them sends")
     func namesTheChat() {
-        #expect(QuickPromptDelivery.composeInNewChat.sentence.contains("new chat"))
-        #expect(QuickPromptDelivery.sendInNewChat.sentence.contains("new chat"))
-        #expect(QuickPromptDelivery.composeInNewChat.sentence.contains("Nothing is sent"))
+        #expect(QuickPromptDelivery.composeInNewChat.sentence?.contains("new chat") == true)
+        #expect(QuickPromptDelivery.sendInNewChat.sentence?.contains("new chat") == true)
+        #expect(QuickPromptDelivery.composeInNewChat.sentence?.contains("Nothing is sent") == true)
     }
 
     // MARK: - What the chat is called

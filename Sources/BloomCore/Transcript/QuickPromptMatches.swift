@@ -67,16 +67,10 @@ public struct QuickPromptMatches: Sendable, Hashable {
 
     /// Where the highlight lands after a step, given what is highlighted now.
     ///
-    /// It wraps at both ends, which is what every menu on the Mac does, and it answers with the
-    /// first row when nothing is highlighted yet, so the first press of Down does not swallow
-    /// itself.
+    /// The wrapping and the empty-highlight rule are `MenuRows`, which is where the third copy of
+    /// them went when the permission picker wanted a fourth.
     public func stepped(from current: QuickPrompt?, by step: Int) -> QuickPrompt? {
-        guard !prompts.isEmpty else { return nil }
-        guard let current, let index = prompts.firstIndex(of: current) else {
-            return step < 0 ? prompts.last : prompts.first
-        }
-        let next = (index + step + prompts.count) % prompts.count
-        return prompts[next]
+        MenuRows.stepped(from: current, by: step, in: prompts)
     }
 
     /// What stays highlighted when the list changes under the field: the same row if it survived

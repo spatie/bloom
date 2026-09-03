@@ -15,11 +15,16 @@ private func makeCodexSession(
     let workspace = try await store.upsert(Workspace(
         repoID: repo.id, name: "w", branch: "b", path: "/tmp/w", baseBranch: "main"
     ))
+    // Said out loud, and it was not. The fixture is named for Codex, ran through `CodexRunner`
+    // and was left on the default backend, which was invisible until `Session` started holding
+    // the mode and the backend legal against each other: Approve for me is a Codex row, so a
+    // session claiming Claude Code cannot be in it, and this one silently became Auto.
     let session = try await store.upsert(Session(
         workspaceID: workspace.id,
         agentSessionID: agentSessionID,
         model: "gpt-5.6-sol",
         effort: "low",
+        agentKind: .codex,
         permissionMode: permissionMode
     ))
     return (session, repo.id)
@@ -78,7 +83,7 @@ private func eventually(
 
 // MARK: - Tests
 
-@Suite struct CodexRunnerTests {
+@Suite(.scratchDirectory) struct CodexRunnerTests {
     @Test func startsAThreadOnTheFirstTurnAndStoresItsID() async throws {
         let store = try makeTestStore("codex-runner-start")
         let (session, _) = try await makeCodexSession(store)
@@ -149,16 +154,53 @@ private func eventually(
         #expect(params["sandboxPolicy"]?["type"]?.stringValue == "workspaceWrite")
         // A Codex chat may write where its own worktree is, and nowhere else.
         #expect(params["sandboxPolicy"]?["writableRoots"]?[0]?.stringValue == "/tmp/w")
+        // Named on every turn, not only on the turn that wants a reviewer of its own. The field
+        // is sticky on this protocol, so a mode that left it out would inherit whatever the last
+        // turn asked for.
+        #expect(params["approvalsReviewer"]?.stringValue == "user")
     }
 
-    @Test func mapsEveryPermissionModeOntoThePolicyAndSandboxPair() {
+    @Test func mapsEveryPermissionModeOntoThePolicySandboxAndReviewerTriple() {
         #expect(CodexRunner.approvalPolicy(for: .bypassPermissions) == .never)
         #expect(CodexRunner.sandboxMode(for: .bypassPermissions) == .dangerFullAccess)
         #expect(CodexRunner.approvalPolicy(for: .acceptEdits) == .onRequest)
         #expect(CodexRunner.sandboxMode(for: .acceptEdits) == .workspaceWrite)
         #expect(CodexRunner.approvalPolicy(for: .auto) == .onRequest)
-        // Ask means do not write without telling me, and read-only is the sandbox that means it.
+        // Read only means do not write without telling me, and read-only is the sandbox for it.
         #expect(CodexRunner.sandboxMode(for: .auto) == .readOnly)
+
+        // The four are Codex's own four presets: read-only, workspace, auto, full-access.
+        for mode in [PermissionMode.auto, .acceptEdits, .bypassPermissions, .plan] {
+            #expect(CodexRunner.approvalsReviewer(for: mode) == .user)
+        }
+    }
+
+    /// The bug a user reported: Bloom's Codex menu had no row for the preset the Codex app calls
+    /// "Approve for me", so the only mode that reaches Codex's own reviewer was unreachable.
+    /// Approve for me and Ask for approval differ in exactly one field, which is who answers.
+    @Test func approveForMeIsAskForApprovalWithCodexsOwnReviewerAnswering() {
+        #expect(CodexRunner.approvalsReviewer(for: .autoReview) == .autoReview)
+        #expect(CodexRunner.approvalsReviewer(for: .acceptEdits) == .user)
+        #expect(CodexRunner.approvalPolicy(for: .autoReview) == CodexRunner.approvalPolicy(for: .acceptEdits))
+        #expect(CodexRunner.sandboxMode(for: .autoReview) == CodexRunner.sandboxMode(for: .acceptEdits))
+        // The value the server parses. Measured against codex 0.149.1, which rejects anything
+        // else with "unknown variant, expected one of `user`, `auto_review`, `guardian_subagent`".
+        #expect(CodexApprovalsReviewer.autoReview.rawValue == "auto_review")
+        #expect(CodexApprovalsReviewer.user.rawValue == "user")
+    }
+
+    @Test func sendsTheReviewerWithTheTurnWhenApproveForMeIsChosen() async throws {
+        let store = try makeTestStore("codex-runner-approve-for-me")
+        let (session, _) = try await makeCodexSession(store, permissionMode: .autoReview)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+
+        try await runner.send("hello")
+
+        let turn = try #require(box.process.sentFrame { $0["method"]?.stringValue == "turn/start" })
+        let params = try #require(turn["params"])
+        #expect(params["approvalsReviewer"]?.stringValue == "auto_review")
+        #expect(params["sandboxPolicy"]?["type"]?.stringValue == "workspaceWrite")
     }
 
     @Test func replaysARecordedTurnIntoTheTranscript() async throws {
@@ -463,12 +505,18 @@ private func eventually(
 
 // MARK: - The column
 
-@Suite struct SessionAgentKindTests {
+@Suite(.scratchDirectory) struct SessionAgentKindTests {
     /// Every chat that existed before the column did was a Claude Code chat, and the default has
     /// to say so rather than leaving a value nothing can read.
     @Test func aChatDefaultsToClaudeCode() async throws {
         let store = try makeTestStore("agent-kind-default")
-        let (session, _) = try await makeCodexSession(store)
+        // A chat made here rather than through `makeCodexSession`, which now says which backend
+        // it is for. A test about the default cannot borrow a fixture that names one.
+        let repo = try await store.upsert(Repo(name: "r", path: "/tmp/r-\(UUID().uuidString)"))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id, name: "w", branch: "b", path: "/tmp/w", baseBranch: "main"
+        ))
+        let session = try await store.upsert(Session(workspaceID: workspace.id))
         #expect(session.agentKind == .claudeCode)
 
         let stored = try await store.session(id: session.id)
@@ -505,6 +553,70 @@ private func eventually(
         #expect(stored.agentKind == .codex)
         #expect(stored.agentSessionID == "thread-1")
         #expect(stored.inputTokens == 42)
+    }
+
+    // MARK: - The context window
+
+    /// The one composer setting that cannot travel with the turn: it is a `-c` override read when
+    /// `codex app-server` starts, so a chat set to it before its first turn has to be launched
+    /// with it. See `CodexContextWindow`.
+    @Test func launchesTheServerWithTheWindowTheChatIsSetTo() async throws {
+        let store = try makeTestStore("codex-runner-window")
+        let (session, _) = try await makeCodexSession(store)
+        try await store.setSetting(
+            ComposerControls.contextWindowKey(sessionID: session.id), "1000000"
+        )
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+
+        try await runner.send("hello")
+
+        let arguments = box.process.launch.arguments
+        #expect(arguments.contains("model_context_window=1000000"))
+        #expect(arguments.contains("model_auto_compact_token_limit=900000"))
+    }
+
+    /// **The bug this exists to stop:** every other chip takes effect on the next turn, so a
+    /// window changed mid chat looked like it had too, while the long-lived server went on running
+    /// on the size it was started with. Changing it starts another server, and the thread id on
+    /// the row is what makes that a resume rather than a new conversation.
+    @Test func startsAnotherServerWhenTheWindowChangesMidChat() async throws {
+        let store = try makeTestStore("codex-runner-window-change")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+
+        try await runner.send("first")
+        #expect(box.processes.count == 1)
+        #expect(!box.process.launch.arguments.contains("model_context_window=500000"))
+
+        try await store.setSetting(
+            ComposerControls.contextWindowKey(sessionID: session.id), "500000"
+        )
+        try await runner.send("second")
+
+        #expect(box.processes.count == 2)
+        #expect(box.process.launch.arguments.contains("model_context_window=500000"))
+        // The conversation goes with it. Anything else would make a picker press a way to lose
+        // the chat that is on screen.
+        #expect(box.process.sentMethods.contains("thread/resume"))
+    }
+
+    /// A reconnect costs the grants that live only inside the server, so it happens when the value
+    /// has actually changed and not on every turn.
+    @Test func leavesTheServerAloneWhenTheWindowHasNotChanged() async throws {
+        let store = try makeTestStore("codex-runner-window-same")
+        let (session, _) = try await makeCodexSession(store)
+        try await store.setSetting(
+            ComposerControls.contextWindowKey(sessionID: session.id), "500000"
+        )
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+
+        try await runner.send("first")
+        try await runner.send("second")
+
+        #expect(box.processes.count == 1)
     }
 
     /// Every migration step has to survive being replayed over a database that already has it

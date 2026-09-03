@@ -12,15 +12,32 @@ struct ComposerFooterView: View {
     var onChange: @MainActor (ComposerControls) -> Void
     /// Nil until the session has run a turn, because that is the first moment the agent says
     /// anything about the window. Absent rather than zero: a gauge reading 0% would be a claim.
-    /// Always nil in the create sheet, where there is not yet anything to report.
+    /// Always nil in the create window, where there is not yet anything to report.
     var context: ContextWindowUsage?
     var isRunning: Bool = false
     var canSend: Bool
     /// What the button at the end of the row does. See `ComposerIntent`.
     var intent: ComposerIntent = .send
+    /// Whether the row is allowed to drop its words to fit the space it is given.
+    ///
+    /// True in the centre column, whose width the user owns: it can be dragged to 420 points and
+    /// split in two, and at that width something has to give. False in the create window, whose
+    /// width is fixed and was measured against this row with every word on.
+    ///
+    /// It is a parameter of its own rather than something read off `ComposerIntent`, because the
+    /// intent says what the primary button does and nothing about how much room there is. Welding
+    /// the two would mean that any other surface wanting the labels would have to claim it was
+    /// creating a workspace to get them.
+    ///
+    /// The reason it has to be said at all: the row grew a sixth labelled control, the quick
+    /// prompt button, after the create window's width was last measured, so the labelled row no
+    /// longer fitted and `ViewThatFits` quietly took every word off. Five unlabelled glyphs in a
+    /// window asking what you want to work on say nothing about what it is about to do, which is
+    /// what the owner reported after putting the two composers side by side.
+    var adaptsToWidth: Bool = true
     /// The checkout the output style menu should look in for styles this project defines, or nil
     /// where there is not one yet. A repository can carry its own `.claude/output-styles`, and in
-    /// the create sheet the worktree does not exist, so the repository is the honest answer there.
+    /// the create window the worktree does not exist, so the repository is the honest answer there.
     var project: String?
     var onAttach: @MainActor () -> Void
     /// What choosing a quick prompt does, or nil where there is nowhere to put one. Nil hides the
@@ -31,7 +48,7 @@ struct ComposerFooterView: View {
     var onStop: @MainActor () -> Void = {}
     /// Whether the row carries the choices the agent runs on.
     ///
-    /// False for a terminal workspace, which has no agent: the create sheet was offering a model,
+    /// False for a terminal workspace, which has no agent: the create window was offering a model,
     /// a reasoning effort, a permission mode, fast mode and a paperclip for a workspace that opens
     /// a shell and never sends any of them anywhere. What is left is the send button, which is the
     /// one control on the row that still does something.
@@ -61,11 +78,21 @@ struct ComposerFooterView: View {
     /// contain that control and `ViewThatFits` throws away the state of the ones it does not
     /// pick. See the binding on that view.
     @State private var isShowingContextDetail = false
+    /// Where the context gauge is, in this footer's own space, so the popover can point at it.
+    ///
+    /// The popover is presented on the whole row rather than on the gauge, because narrowing the
+    /// pane drops the gauge out of the `ViewThatFits` and would take the presenter with it while
+    /// the card was up. Presented on the row, its default anchor is the row's own bounds, so the
+    /// arrow came out under the middle of the footer pointing at nothing. This is the gauge's
+    /// frame, handed to `attachmentAnchor` so the card hangs off the control it describes.
+    @State private var gaugeFrame: CGRect?
 
     /// Whether the quick prompt panel is up. Held here for the same reason the flag above it is:
     /// the button is in all three candidates `ViewThatFits` builds, and state inside a candidate
     /// belongs to the candidate.
     @State private var isShowingQuickPrompts = false
+    /// Kept outside the transient popover so changing apps does not discard a half-written prompt.
+    @State private var quickPromptDraft: QuickPromptFormDraft?
 
     var body: some View {
         // Everything the row is built out of, worked out once.
@@ -86,15 +113,36 @@ struct ComposerFooterView: View {
         // had no way to send. Each step drops the least load-bearing thing left: first the words
         // beside the picker glyphs, then the context reading, which is the one control here that
         // reports rather than does.
-        return ViewThatFits(in: .horizontal) {
-            row(isCompact: false, showsContext: true, choices: choices)
-            row(isCompact: true, showsContext: true, choices: choices)
-            row(isCompact: true, showsContext: false, choices: choices)
+        //
+        // Only where the width is the user's to change. Where the caller owns it and has sized the
+        // window to this row, the full row is drawn outright: a candidate list is a set of ways to
+        // give up, and a window that cannot be resized has nothing to give up for. What a label too
+        // long for the room does there is truncate, which is what `lineLimit(1)` on the label and
+        // the horizontal give in `ComposerOptionMenu` already arrange, and one shortened word reads
+        // better than five missing ones.
+        return Group {
+            if adaptsToWidth {
+                ViewThatFits(in: .horizontal) {
+                    row(isCompact: false, showsContext: true, choices: choices)
+                    row(isCompact: true, showsContext: true, choices: choices)
+                    row(isCompact: true, showsContext: false, choices: choices)
+                }
+            } else {
+                row(isCompact: false, showsContext: true, choices: choices)
+            }
         }
         // Outside the `ViewThatFits`, so narrowing the pane cannot take the presenter out of the
         // tree while the popover is up.
-        .popover(isPresented: $isShowingContextDetail, arrowEdge: .top) {
-            if let context { ContextWindowDetail(usage: context) }
+        .coordinateSpace(.named(composerFooterSpace))
+        .popover(
+            isPresented: $isShowingContextDetail,
+            attachmentAnchor: gaugeFrame.map { .rect(.rect($0)) } ?? .rect(.bounds),
+            arrowEdge: .top
+        ) {
+            if let context {
+                ContextWindowDetail(usage: context)
+                    .environment(\.fontScale, 1)
+            }
         }
         .onChange(of: controls.model, initial: true) { _, id in
             remember(id, known: catalog.options(for: controls.agentKind), in: &extraModels)
@@ -127,7 +175,6 @@ struct ComposerFooterView: View {
         var models: [ComposerModelSection] = []
         var efforts: [ComposerOption] = []
         var outputStyles: [ComposerOption] = []
-        var outputStyleDetail: String?
         var permissionModes: [ComposerOption] = []
         var context: ContextWindowUsage.Reading?
     }
@@ -146,11 +193,11 @@ struct ComposerFooterView: View {
             outputStyles: controls.offersOutputStyle
                 ? outputStyles.options(includingCurrent: controls.outputStyle)
                 : [],
-            outputStyleDetail: controls.offersOutputStyle
-                ? outputStyles.detail(of: controls.outputStyle)
-                : nil,
-            permissionModes: controls.availablePermissionModes.map {
-                ComposerOption(id: $0.rawValue, label: $0.label)
+            // Labelled and described in the backend's own vocabulary, not Bloom's. A Codex chat's
+            // picker reads the way the Codex app reads and a Claude Code chat's reads the way that
+            // CLI does, which is the whole of `PermissionVocabulary`.
+            permissionModes: controls.permissionModeChoices.map {
+                ComposerOption(id: $0.mode.rawValue, label: $0.label, detail: $0.summary)
             },
             context: context?.reading
         )
@@ -159,78 +206,38 @@ struct ComposerFooterView: View {
     private func row(isCompact: Bool, showsContext: Bool, choices: Choices) -> some View {
         HStack(spacing: Metrics.spacingTight) {
             if showsAgentControls {
-                ComposerOptionMenu(
-                    options: [],
-                    // One section per backend that can run a chat. A flat list of five names says
-                    // nothing about which agent each one belongs to, and picking a name here is
-                    // picking an agent.
-                    sections: choices.models,
-                    selection: controls.model,
-                    // No heading. Opus 5 and Sonnet 5 are names, and the chip this opened from is
-                    // showing one of them.
-                    heading: nil,
-                    systemImage: "sparkle",
+                ComposerSettingsPicker(
+                    controls: controls,
+                    models: choices.models,
+                    efforts: choices.efforts,
+                    outputStyles: choices.outputStyles,
+                    permissionModes: choices.permissionModes,
                     isCompact: isCompact,
-                    help: "Choose the model",
-                    onSelect: selectModel
+                    onModel: selectModel,
+                    onEffort: { id in edit { $0.effort = id } },
+                    onOutputStyle: { id in edit { $0.outputStyle = id } },
+                    onPermissionMode: selectPermissionMode,
+                    onFastMode: { value in edit { $0.isFastMode = value } },
+                    onContextWindow: { tokens in edit { $0.codexContextWindow = tokens } }
                 )
-
-                ComposerOptionMenu(
-                    options: choices.efforts,
-                    selection: controls.effort,
-                    heading: "Reasoning effort",
-                    systemImage: "chart.bar.fill",
-                    isCompact: isCompact,
-                    help: "Choose reasoning effort",
-                    onSelect: { id in edit { $0.effort = id } }
-                )
-
-                // Beside the model and the effort rather than after the permission mode, because
-                // those three all answer "how does it think and how does it write", and the
-                // permission mode answers "what may it touch". Absent entirely for Codex, which
-                // has no output styles: see `ComposerControls.offersOutputStyle`.
-                if controls.offersOutputStyle {
-                    ComposerOptionMenu(
-                        options: choices.outputStyles,
-                        // The selected style, in its own words. The CLI's own sentence for the
-                        // four it compiles in, and the file's `description` for a custom one.
-                        footnote: choices.outputStyleDetail,
-                        selection: controls.outputStyle,
-                        heading: "Output style",
-                        systemImage: "textformat",
-                        isCompact: isCompact,
-                        help: "Choose the output style",
-                        onSelect: { id in edit { $0.outputStyle = id } }
-                    )
-                }
-
-                ComposerOptionMenu(
-                    options: choices.permissionModes,
-                    footnote: controls.missingPermissionModeNote,
-                    selection: controls.permissionMode.rawValue,
-                    heading: "Permission mode",
-                    systemImage: Self.permissionGlyph(controls.permissionMode),
-                    tint: controls.permissionMode == .bypassPermissions
-                        ? Palette.warning
-                        : Palette.textSecondary,
-                    isCompact: isCompact,
-                    help: "Choose permission mode",
-                    onSelect: selectPermissionMode
-                )
-
-                // After the three pickers rather than between them: the pickers all answer "which",
-                // and a toggle wedged into that run made the row read as four unrelated controls.
-                fastToggle(isCompact: isCompact)
             }
 
-            Spacer(minLength: Metrics.spacing)
+            if intent != .create {
+                Spacer(minLength: Metrics.spacing)
+            }
 
             // On the far side of the spacer, away from the pickers. It is a reading rather than
             // something to choose, and among the three menus it read as a fourth one.
-            if let context, let reading = choices.context, showsContext {
+            if let reading = choices.context, showsContext {
                 ComposerContextGauge(
-                    usage: context, reading: reading, isShowingDetail: $isShowingContextDetail
+                    reading: reading, isShowingDetail: $isShowingContextDetail
                 )
+                // In the footer's space rather than the window's, which is what
+                // `attachmentAnchor` wants. Only the gauge is measured, and only while it is
+                // drawn, so a compact row that has dropped it reads nothing.
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(composerFooterSpace)) } action: {
+                    gaugeFrame = $0
+                }
             }
 
             // Beside the paperclip, because those two are the only controls in this row that
@@ -242,13 +249,8 @@ struct ComposerFooterView: View {
                     isShowingQuickPrompts = true
                 } label: {
                     ComposerControlLabel(
-                        // Named while there is room, and a glyph alone only when there is not.
-                        // The paperclip beside it can afford to be a glyph forever because
-                        // everybody already knows what a paperclip does; this is a new idea with
-                        // no icon anybody has learned, and unlabelled it is a button people do not
-                        // press. It drops its word on the same step the pickers drop theirs.
                         systemImage: "text.badge.plus",
-                        text: isCompact ? nil : "Quick prompts",
+                        text: nil,
                         isActive: isShowingQuickPrompts
                     )
                 }
@@ -267,9 +269,11 @@ struct ComposerFooterView: View {
                     if let onQuickPrompt {
                         QuickPromptMenu(
                             catalog: QuickPromptCatalog.shared,
+                            draft: $quickPromptDraft,
                             onPick: onQuickPrompt,
                             onClose: { isShowingQuickPrompts = false }
                         )
+                        .environment(\.fontScale, 1)
                     }
                 }
             }
@@ -286,6 +290,10 @@ struct ComposerFooterView: View {
                 .accessibilityLabel("Attach a file")
             }
 
+            if intent == .create {
+                Spacer(minLength: Metrics.spacing)
+            }
+
             // Stop before Send, and only while there is a turn to stop. The pair used to be one
             // control; see `ComposerStopButton` for why it no longer can be, and why Send is the
             // one that keeps the end of the row in every state.
@@ -300,23 +308,6 @@ struct ComposerFooterView: View {
                 onSend: onSend
             )
         }
-    }
-
-    private func fastToggle(isCompact: Bool) -> some View {
-        Button {
-            edit { $0.isFastMode.toggle() }
-        } label: {
-            ComposerControlLabel(
-                systemImage: "bolt.fill",
-                text: isCompact ? nil : "Fast",
-                tint: controls.isFastMode ? Palette.accent : Palette.textSecondary,
-                isActive: controls.isFastMode
-            )
-        }
-        .buttonStyle(.plain)
-        .help("Fast mode trades some reasoning for a quicker reply")
-        .accessibilityLabel("Fast mode")
-        .accessibilityAddTraits(controls.isFastMode ? .isSelected : [])
     }
 
     // MARK: - Edits
@@ -354,20 +345,18 @@ struct ComposerFooterView: View {
             $0.model = id
             $0.agentKind = backend
             $0.effort = catalog.resolvedEffort($0.effort, for: backend, model: id)
-            // A mode the new backend does not have cannot survive the move. Codex has no Plan, and
-            // a chat left holding it would be in a mode nothing implements.
-            if !$0.availablePermissionModes.contains($0.permissionMode) {
-                $0.permissionMode = .acceptEdits
-            }
+            // The permission mode moves itself. A mode the new backend does not have cannot
+            // survive the move (Codex has no Plan, Claude Code has no Approve for me), and that
+            // used to be arranged here, in a view, by one of the four places a backend changes.
+            // It is an invariant of `ComposerControls` now: see the property's own note.
         }
     }
 
-    private static func permissionGlyph(_ mode: PermissionMode) -> String {
-        switch mode {
-        case .auto: "hand.raised"
-        case .acceptEdits: "checkmark.shield"
-        case .bypassPermissions: "exclamationmark.shield"
-        case .plan: "list.bullet.rectangle"
-        }
-    }
 }
+
+/// The footer's own coordinate space, so the gauge can report where it is inside it.
+///
+/// A file-level constant rather than a static on the view: the geometry closure is `Sendable` and
+/// cannot reach a main-actor-isolated static, which is a warning and this project builds with
+/// warnings as errors.
+private let composerFooterSpace = "composer.footer"

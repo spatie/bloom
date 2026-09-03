@@ -46,6 +46,19 @@ struct PermissionAskRowView: View {
     @State private var reason = ""
     @FocusState private var isReasonFocused: Bool
 
+    /// What the conversation is set at, for the leading below and for nothing else. The face is
+    /// read with it because `TranscriptLayout.codeLeading` takes both, and it costs nothing here:
+    /// a monospaced rung resolves to the system mono whatever the prose face is.
+    @Environment(\.fontScale) private var fontScale
+    @Environment(\.chatFont) private var chatFont
+
+    /// The leading a wrapped command is set with, held at a ratio of its own line box rather than
+    /// at a fixed four points. See `TranscriptLayout.codeLeading` for why it moved and for why it
+    /// is still not the number prose gets.
+    private var codeLeading: CGFloat {
+        TranscriptLayout.codeLeading(Typo.codeSmall, scale: fontScale, face: chatFont)
+    }
+
     private var isOpen: Bool { decision == nil }
 
     /// Which allows this ask may honestly draw, widest first, and the sentence under them.
@@ -79,13 +92,13 @@ struct PermissionAskRowView: View {
         .padding(TranscriptLayout.cardInset)
         .background(
             RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
-                .fill(Palette.warning.opacity(isOpen ? 0.07 : 0.03))
+                .fill(isOpen ? Palette.cautionWash : Palette.cautionWashSettled)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
                 .strokeBorder(
-                    isOpen ? Palette.warning.opacity(0.46) : Palette.border,
-                    lineWidth: Metrics.hairline
+                    isOpen ? Palette.cautionBorder : Palette.border,
+                    lineWidth: Metrics.outline
                 )
         )
         .padding(.vertical, TranscriptLayout.tight)
@@ -160,7 +173,7 @@ struct PermissionAskRowView: View {
                 Text(ask.subject)
                     .font(ask.subjectIsCode ? Typo.codeSmall : Typo.label)
                     .foregroundStyle(Palette.textPrimary)
-                    .lineSpacing(ask.subjectIsCode ? TranscriptLayout.codeLeading : 0)
+                    .lineSpacing(ask.subjectIsCode ? codeLeading : 0)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -177,7 +190,7 @@ struct PermissionAskRowView: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Metrics.cornerSmall, style: .continuous)
-                    .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                    .strokeBorder(Palette.border, lineWidth: Metrics.outline)
             )
             // SwiftUI's selectable Text is a private NSTextField subclass whose own context
             // menu comes back empty, so a copy item has to be put here by hand. Kept alongside
@@ -231,9 +244,8 @@ struct PermissionAskRowView: View {
                     // "Always allow" and would have granted one call.
                     Button(offer.prominent.buttonLabel) { onAnswer(.allow(scope: offer.prominent)) }
                         .buttonStyle(.borderedProminent)
-                        // Bloom's fill rather than the system accent, as every other prominent button in
-                        // the app carries. See `EmptyStateView`.
-                        .tint(Palette.accentFill)
+                        // The shared system control accent for a primary action.
+                        .tint(Palette.controlAccent)
                         // Command and Return while there is more than one allow to choose between,
                         // and a bare Return when this is the only one. Exactly what the two
                         // branches this replaced did, kept because the modifier is what stops a
@@ -315,9 +327,8 @@ struct PermissionAskRowView: View {
                 HStack(spacing: Metrics.spacing) {
                     Button("Deny") { onAnswer(.deny(message: reason, endsTurn: false)) }
                         .buttonStyle(.borderedProminent)
-                        // Bloom's fill rather than the system accent, as every other prominent button in
-                        // the app carries. See `EmptyStateView`.
-                        .tint(Palette.accentFill)
+                        // The shared system control accent for a primary action.
+                        .tint(Palette.controlAccent)
                         .keyboardShortcut(.return, modifiers: .command)
 
                     Button("Deny and stop the turn") {

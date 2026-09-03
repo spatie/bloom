@@ -19,8 +19,13 @@ struct ReviewCommentChip: View {
 
     @State private var isHovered = false
 
-    /// The same slot as the sibling chips, so a row holding all three kinds has one rhythm.
-    private static let slot: CGFloat = 14
+    /// The same slot as the sibling chips, so a row holding all three kinds has one rhythm. Their
+    /// constant rather than a third copy of its value.
+    private static let slot: CGFloat = AttachmentChip.slot
+    /// And the same ceiling on the name, which was written here as a bare 340 in the frame below.
+    /// A comment's summary is the same kind of thing a plugin's name is: middle truncated, the
+    /// half that says which one it is goes first.
+    private static let maxNameWidth: CGFloat = SlashCommandChip.maxNameWidth
 
     var body: some View {
         HStack(spacing: Metrics.spacingSmall) {
@@ -31,7 +36,7 @@ struct ReviewCommentChip: View {
                 .foregroundStyle(Palette.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .frame(maxWidth: 340, alignment: .leading)
+                .frame(maxWidth: Self.maxNameWidth, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, Metrics.spacing)
@@ -43,7 +48,7 @@ struct ReviewCommentChip: View {
         }
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         }
         .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
         .onTapGesture(perform: onOpen)
@@ -67,16 +72,10 @@ struct ReviewCommentChip: View {
     @ViewBuilder
     private var leading: some View {
         if isHovered {
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .resizable()
-                    .frame(width: Self.slot, height: Self.slot)
-                    .foregroundStyle(Palette.textSecondary)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .help("Remove the comment")
-            .accessibilityLabel("Remove the comment")
+            // The same control the other chips in this strip draw, out of the same numbers. It
+            // was an `xmark.circle.fill`, whose X is a hole in the disc rather than a mark on it.
+            // See `ChipRemoveMark`.
+            ChipRemoveButton(diameter: Self.slot, label: "Remove the comment", action: onRemove)
         } else {
             Image(systemName: "text.bubble")
                 .resizable()

@@ -24,7 +24,7 @@ struct QuickPromptRow: View {
 
     var body: some View {
         Button(action: onPick) {
-            HStack(spacing: Metrics.spacing) {
+            HStack(spacing: Metrics.gutter) {
                 // Larger than the glyph column the one line lists use, and deliberately. This row
                 // is two lines tall, and `Metrics.glyph` beside it read as a speck someone had
                 // dropped rather than as the mark that tells five prompts apart at a glance, which
@@ -58,8 +58,6 @@ struct QuickPromptRow: View {
 
                 Spacer(minLength: Metrics.spacingSmall)
 
-                deliveryMarks
-
                 // The space is always taken, and only the pencil comes and goes. Shown and hidden
                 // by presence, a name long enough to need the room lost forty points of it the
                 // moment the row was arrowed onto: the text reflowed into an ellipsis under the
@@ -77,9 +75,11 @@ struct QuickPromptRow: View {
         .buttonStyle(.plain)
         .accessibilityLabel(prompt.resolvedName)
         .accessibilityValue(
-            QuickPromptDelivery(prompt) == .compose
-                ? prompt.preview
-                : prompt.preview + ". " + QuickPromptDelivery(prompt).sentence
+            // The quiet combination has no sentence of its own to read out, which is the same
+            // reason the form no longer prints one under its switches.
+            [prompt.preview, QuickPromptDelivery(prompt).sentence]
+                .compactMap { $0 }
+                .joined(separator: ". ")
         )
         // The labels above set no emphasized colour, and that is the other half of this decision.
         // They used to switch to white whenever the row was selected and the window was active,
@@ -109,34 +109,14 @@ struct QuickPromptRow: View {
         }
     }
 
-    /// What this row does beyond writing its words into the box, when it does anything.
-    ///
-    /// **A list somebody arrows through must not hide a send.** The panel's whole safety argument
-    /// was that choosing a row cannot start a turn, and a prompt with the switches on breaks that
-    /// for itself. So it says so on the row, at the trailing edge beside the pencil, before the
-    /// press rather than after it. Two glyphs and not a word, because the row spends its width
-    /// on a name and a preview, and the sentence they stand for is on the tooltip and in the
-    /// accessibility value.
-    ///
-    /// The chat comes before the paperplane, in the order the thing happens and in the order
-    /// `QuickPromptDelivery.sentence` says it.
-    @ViewBuilder
-    private var deliveryMarks: some View {
-        let delivery = QuickPromptDelivery(prompt)
-        if delivery != .compose {
-            HStack(spacing: Metrics.spacingSmall) {
-                if delivery.opensNewChat { glyph("plus.bubble") }
-                if delivery.sends { glyph("paperplane") }
-            }
-            .help(delivery.sentence)
-        }
-    }
-
-    private func glyph(_ name: String) -> some View {
-        Image(systemName: name)
-            .imageScale(.small)
-            .foregroundStyle(Palette.textTertiary)
-    }
+    // **The two delivery glyphs are gone**, and what they were for is worth writing down because
+    // it was a real argument. A prompt with its switches on can send a turn the moment it is
+    // chosen, and the panel's safety claim was that arrowing through a list cannot start one; a
+    // chat mark and a paperplane at the trailing edge said so before the press. The owner has
+    // looked at the row and asked for the pencil alone, so the sentence they stood for is carried
+    // by the row's accessibility value and by the form the pencil opens, which is where the
+    // switches are set in the first place. Three marks in a row of two lines was the complaint,
+    // and it is a fair one: the pencil is the only one of the three that does anything.
 
     /// A button inside the row's own button, which AppKit resolves the way it looks: a click on the
     /// pencil edits, a click anywhere else on the row inserts.

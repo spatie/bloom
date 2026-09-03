@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The project settings window's three panes, drawn as the toolbar macOS gives a preferences
-/// window: icons with their words underneath, centred under the title.
+/// The project settings window's panes, drawn as the toolbar macOS gives a preferences window:
+/// icons with their words underneath, centred under the title.
 ///
 /// **What was there before, and why it was not this.** The window held a SwiftUI `TabView`, which
 /// is what the app's own Settings window holds, on the reasoning that the same construct in two
@@ -45,7 +45,7 @@ final class RepoSettingsToolbar: NSObject, NSToolbarDelegate {
         // Icons with their words under them. `.preference` asks for this shape anyway, but a
         // toolbar that says so itself cannot be talked out of it by a saved configuration.
         preferenceToolbar.displayMode = .iconAndLabel
-        // There is nothing here a user could sensibly rearrange: three panes, in the order the
+        // There is nothing here a user could sensibly rearrange: the panes go in the order the
         // window's own sentence about them goes.
         preferenceToolbar.allowsUserCustomization = false
         preferenceToolbar.delegate = self
@@ -81,8 +81,8 @@ final class RepoSettingsToolbar: NSObject, NSToolbarDelegate {
         toolbarDefaultItemIdentifiers(toolbar)
     }
 
-    /// All three, which is what makes the toolbar behave like a row of tabs rather than a row of
-    /// buttons: one of them is lit at any moment, and clicking another moves the light.
+    /// Every one of them, which is what makes the toolbar behave like a row of tabs rather than a
+    /// row of buttons: one is lit at any moment, and clicking another moves the light.
     func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         toolbarDefaultItemIdentifiers(toolbar)
     }
@@ -107,7 +107,7 @@ final class RepoSettingsToolbar: NSObject, NSToolbarDelegate {
     }
 
     /// The item is asked which pane it is rather than carrying an index in its `tag`, so nothing
-    /// here depends on the order the three were inserted in.
+    /// here depends on the order they were inserted in.
     @objc private func choose(_ sender: NSToolbarItem) {
         guard let pane = RepoSettingsPane.allCases
             .first(where: { $0.itemIdentifier == sender.itemIdentifier })
@@ -145,8 +145,8 @@ private struct RepoSettingsToolbarInstaller: ViewModifier {
 }
 
 extension View {
-    /// Draws the project settings window's three panes in its title bar, the way a Mac
-    /// preferences window draws its own. See `RepoSettingsToolbar`.
+    /// Draws the project settings window's panes in its title bar, the way a Mac preferences
+    /// window draws its own. See `RepoSettingsToolbar`.
     func choosesPaneInTheTitleBar(_ pane: Binding<RepoSettingsPane>) -> some View {
         modifier(RepoSettingsToolbarInstaller(pane: pane))
     }

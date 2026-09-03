@@ -302,21 +302,24 @@ struct WorkspaceMergeToolTests {
         #expect(result.text.contains("setup script is still running"))
     }
 
-    @Test("a failed setup means no agent was ever started, so retrying will not help")
+    @Test("a failed setup is not a hold, so the merge is asked for anyway")
     func setupFailed() async throws {
+        // It used to refuse, on the reasoning that a failed setup meant no agent had ever been
+        // started there. A failed setup no longer silences a workspace: the chat takes messages
+        // and this asks for the merge like any other. See `DeliveryHold`.
         let store = try makeTestStore("merge-setup-failed")
         var target = try await workspace(in: store)
         target.apply(.runStarted)
         target.apply(.runFinished(succeeded: false, log: "npm install exploded"))
         _ = try await store.upsert(target)
 
-        let result = await tool().call(
+        let sent = Sent()
+        let result = await tool(sent: sent).call(
             request(["workspace": .string(target.id.rawValue)]), as: .owner, store: store
         )
 
-        #expect(result.isError)
-        #expect(result.text.contains("setup script failed"))
-        #expect(result.text.contains("Retrying will not help"))
+        #expect(!result.isError)
+        #expect(sent.count == 1)
     }
 
     // MARK: What GitHub said
@@ -517,7 +520,6 @@ struct WorkspaceMergeToolTests {
             .blocked(workspace: "w", number: 1, headline: "Draft", reason: "It is a draft."),
             .localWork(workspace: "w", number: 1, detail: "1 file to commit", needsCommit: true),
             .wouldQueue(workspace: "w", hold: .setup),
-            .wouldQueue(workspace: "w", hold: .setupFailed),
             .wouldQueue(workspace: "w", hold: .question),
             .wouldQueue(workspace: "w", hold: .turn),
             .wouldQueue(workspace: "w", hold: .none),

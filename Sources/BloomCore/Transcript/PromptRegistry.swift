@@ -10,6 +10,7 @@ public enum PromptID: String, Sendable, Hashable, CaseIterable, Codable {
     case mergePullRequest
     case fixConflicts
     case continueAfterMerge
+    case carryOnArchived
     case review
     case nameWorkspace
 }
@@ -62,7 +63,7 @@ public struct PromptDefinition: Sendable, Hashable, Identifiable {
 public enum PromptRegistry {
     public static let all: [PromptDefinition] = [
         createPullRequest, pushLocalWork, mergePullRequest, fixConflicts, continueAfterMerge,
-        review, nameWorkspace,
+        carryOnArchived, review, nameWorkspace,
     ]
 
     public static func definition(for id: PromptID) -> PromptDefinition {
@@ -125,6 +126,19 @@ public enum PromptRegistry {
         public static let previousBranch = "previous_branch"
         public static let baseBranch = "base_branch"
         public static let pullRequest = "pull_request"
+    }
+
+    /// The names the carry-on prompt may use.
+    public enum CarryOnArchived {
+        public static let workspace = "workspace"
+        public static let project = "project"
+        /// The branch the archive was on, and that no longer exists anywhere.
+        public static let previousBranch = "previous_branch"
+        /// The directory the archive was in, which was removed with it. The agent is holding
+        /// paths under it, so it is named rather than left to be discovered.
+        public static let previousPath = "previous_path"
+        public static let branch = "branch"
+        public static let baseBranch = "base_branch"
     }
 
     /// The names the workspace-naming prompt may use.
@@ -270,16 +284,23 @@ public enum PromptRegistry {
     /// command, goes through the permission mode the user already set, and can say in words that
     /// a required check is missing rather than throwing.
     ///
-    /// The steps are not here. They are in `.bloom/merge-instructions.md`, or in Bloom's own copy
-    /// of it, for the same reason the pull request steps are in a file: they belong to the project
-    /// and not to this app. This is only the sentence that carries it, and the three facts the
-    /// file cannot know, which are the pull request, the branch and the method.
+    /// The steps are not here, and this is the one prompt where that is a safety decision rather
+    /// than a tidying one. They are `MergeInstructions.canonical`, a constant the turn is built
+    /// from, because a template is editable in Settings and somebody rewording the sentence that
+    /// names the pull request must not be able to delete the paragraph forbidding `--admin` by
+    /// accident. What belongs here is the four facts the rules cannot know: the pull request, the
+    /// branch it is on, the branch it goes into, and the method.
+    ///
+    /// The steps used to be a file, written into the worktree on every press and attached back.
+    /// See `MergeInstructions` for why they are not one any more, and `ProjectInstructions` for
+    /// what still is.
     static let mergePullRequest = PromptDefinition(
         id: .mergePullRequest,
         title: "Merge a pull request",
         summary: """
-        Sent when you confirm Merge, with the project's `.bloom/merge-instructions.md` attached. \
-        The agent runs `gh pr merge` in front of you, not Bloom.
+        Sent when you confirm Merge, with Bloom's own merge steps under it and the project's own \
+        instructions attached when it has any. The agent runs `gh pr merge` in front of you, not \
+        Bloom.
         """,
         variables: [
             PromptVariable(name: MergePullRequest.workspace, summary: "The workspace's name."),
@@ -312,15 +333,21 @@ public enum PromptRegistry {
     /// to run `gh pr merge` on something GitHub had already refused to merge. The state has one
     /// remedy, a person resolving the conflict, and the button now offers that instead.
     ///
-    /// No instructions file, and that is the difference from the merge prompt rather than an
-    /// omission. `MergeInstructions` is a file because merging is policy about a server: which
-    /// flags are allowed, what to do when GitHub refuses, when the branch is deleted, and a
-    /// project that merges differently has to be able to say so once for everybody. Resolving a
-    /// conflict is ordinary work in this worktree, of the kind every other turn asks for, and the
-    /// conventions for it are already in front of the agent in the project's own instruction
-    /// files. A second file repeating them would be a second place to keep them right.
+    /// **The steps used to be here, all eight paragraphs of them, and they are a file now.** They
+    /// are `ConflictInstructions`, written into the shielded scratch folder and named in the
+    /// sentence this template renders, which is the arrangement Create pull request has had all
+    /// along. The bubble was the argument: beside a pull request turn that reads as one sentence
+    /// and a path, this one was a wall of text, and a wall of text in a transcript is not read.
+    /// `ConflictInstructions` says why this turn went to a file while merging went the other way.
     ///
-    /// **The template pushes the resolution, and it used to stop short of that.** The argument for
+    /// What is left here is the record, and that is what decides where the cut goes. A transcript
+    /// read months later has to say what was asked without opening anything, and the file it names
+    /// may well be gone by then, because the scratch folder goes when the worktree does. So the
+    /// message keeps the facts and the outcome: which pull request, which two branches, that the
+    /// resolution is pushed, and that the pull request is not merged. How it is done is the part
+    /// that can live in a file.
+    ///
+    /// **The turn pushes the resolution, and it used to stop short of that.** The argument for
     /// stopping was that a resolved worktree is the state the strip's Commit and push button is
     /// for, so the next press could be the reader's. What that produced in practice was a turn
     /// that reported success on a pull request GitHub still refused to merge, because a conflict
@@ -330,20 +357,20 @@ public enum PromptRegistry {
     /// standing is not finished.
     ///
     /// It still merges nothing. Pushing is what makes the resolution real; merging is a decision
-    /// about whether the work is good, and that one stays with the reader.
+    /// about whether the work is good, and that one stays with the reader. That sentence is in
+    /// this template rather than only in the file, because it is the one limit on the turn that a
+    /// person reading the transcript afterwards has to be able to see.
     ///
-    /// The push is conditional on the agent being sure, and that is not a hedge. Bringing a base
-    /// branch in is the one ordinary operation that regularly needs a person: two changes that
-    /// genuinely disagree, a test that now fails for a reason neither branch expected, a rebase
-    /// that rewrote history somebody else may have pulled. An agent that pushes a resolution it
-    /// does not believe in has made the problem harder to see, so the template tells it to stop
-    /// and say so instead.
+    /// A project that has more to say about conflicts than the file does says it once, for
+    /// everybody, in `.bloom/conflict-instructions.md` or in the project settings window, and
+    /// Bloom attaches that after Bloom's own and says it wins. See `ProjectInstructions`.
     static let fixConflicts = PromptDefinition(
         id: .fixConflicts,
         title: "Fix merge conflicts",
         summary: """
-        Sent when you press Fix merge conflicts. It resolves against the base branch here and \
-        pushes the result; it never merges the pull request.
+        Sent when you press Fix merge conflicts, with Bloom's own steps attached as a file. It \
+        resolves against the base branch here and pushes the result; it never merges the pull \
+        request.
         """,
         variables: [
             PromptVariable(name: FixConflicts.workspace, summary: "The workspace's name."),
@@ -359,33 +386,76 @@ public enum PromptRegistry {
         ],
         defaultTemplate: """
         Pull request #{{number}} conflicts with {{base_branch}}, so GitHub will not merge it as it \
-        stands. Resolve that here, in this worktree, on {{branch}}.
+        stands. Resolve that here, in this worktree, on {{branch}}: bring {{base_branch}} into this \
+        branch, work through the conflicts, commit, and push {{branch}}, so the conflict is gone \
+        for everybody rather than only here.
 
-        Fetch {{base_branch}} first, so you are working against what is on the server rather than \
-        a stale copy of it, then bring it into this branch the way this project brings it in: \
-        merge it unless the project's own conventions say to rebase onto it. It goes into this \
-        branch and never the other way round.
+        Do not merge the pull request.
+        """
+    )
 
-        Work through every conflicted file. Keep what this branch changed and what \
-        {{base_branch}} changed, and where the two genuinely disagree, read enough of the code \
-        around them to work out which is right instead of taking a side. Follow this project's \
-        conventions, and run whatever it uses to check itself before you call anything resolved.
+    /// Sent into the first chat of the workspace Carry On makes, once its worktree exists.
+    ///
+    /// The chat it lands in is resuming the archived workspace's thread, so the agent reading it
+    /// has the whole of that conversation and is not being briefed by a stranger. What it does
+    /// not have is the worktree: the directory was deleted by the archive and the branch is gone
+    /// from this Mac and from the remote, which is why Restore could not be offered. Every path
+    /// the agent is holding is therefore stale, and that is the one fact this template exists to
+    /// state.
+    ///
+    /// It asks for one line about where the two of them got to, and that request is for the
+    /// reader rather than for the agent. Bloom's transcript rows belong to the chat they were
+    /// written for, so the new workspace's conversation is empty on screen while the agent's
+    /// context is full, and a chat that opens with the agent saying what it is carrying is what
+    /// closes that gap honestly. The archived workspace is still there to read in full.
+    ///
+    /// Like `continueAfterMerge`, it must tell the agent not to start anything. Carry On is a
+    /// press on a button, not a brief.
+    static let carryOnArchived = PromptDefinition(
+        id: .carryOnArchived,
+        title: "Carry on from an archive",
+        summary: """
+        Sent when you press Carry On in an archived workspace, into a new worktree, resuming that \
+        workspace's conversation. It only says what moved.
+        """,
+        variables: [
+            PromptVariable(
+                name: CarryOnArchived.workspace,
+                summary: "The archived workspace's name, which the new one keeps."
+            ),
+            PromptVariable(name: CarryOnArchived.project, summary: "The project it belongs to."),
+            PromptVariable(
+                name: CarryOnArchived.previousBranch,
+                summary: "The branch the archived workspace was on, which no longer exists."
+            ),
+            PromptVariable(
+                name: CarryOnArchived.previousPath,
+                summary: "The worktree the archive removed."
+            ),
+            PromptVariable(
+                name: CarryOnArchived.branch,
+                summary: "The branch the new worktree is on."
+            ),
+            PromptVariable(
+                name: CarryOnArchived.baseBranch,
+                summary: "The branch the new one was cut from."
+            ),
+        ],
+        defaultTemplate: """
+        We are carrying on somewhere else. The workspace this conversation was in, \
+        {{workspace}}, has been archived: its worktree at {{previous_path}} was deleted, and \
+        {{previous_branch}} is gone from this Mac and from the remote, so there was nothing left \
+        to rebuild it from.
 
-        Commit the resolution, with a message worded the way this project words one.
+        You are in a new worktree now, on a fresh branch {{branch}} cut from an up \
+        to date {{base_branch}} in {{project}}. Everything we said to each other is still yours, \
+        and none of the files are: every path you remember is stale, so read anything here before \
+        you rely on it, and expect work that landed on {{base_branch}} to already be underneath \
+        you.
 
-        Then push it. A conflict resolved only in this worktree is still a conflict to everybody \
-        else, and pull request #{{number}} goes on refusing to merge until the branch on the \
-        server carries the resolution. If bringing {{base_branch}} in rewrote this branch's \
-        commits, which a rebase does, the push needs `--force-with-lease`, and it may only ever go \
-        to {{branch}}, never to {{base_branch}} and never to any other branch.
-
-        Do not push if you are not sure. Genuine uncertainty about what a resolution should be, a \
-        check that fails for a reason neither branch explains, or anything you had to guess at: \
-        leave the commit here, say what you are unsure about, and let a person look. A resolution \
-        nobody believes in is worse on the server than in a worktree.
-
-        Do not merge the pull request whatever happens. Finish by saying which files conflicted, \
-        what you decided in each of them, whether you pushed, and anything you are not sure about.
+        Do not redo what the old branch held, and do not start anything new yet. Say in one or \
+        two lines where we had got to and what was left, which is the only record of it this \
+        chat has, then wait for what I ask next.
         """
     )
 

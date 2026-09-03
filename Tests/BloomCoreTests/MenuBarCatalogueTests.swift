@@ -65,22 +65,20 @@ struct MenuBarCatalogueTests {
         }
     }
 
-    /// Two doors into the project list, and the words are the point of the pair: New makes a
-    /// folder and a repository for somebody with an idea, Add takes a repository that already
-    /// exists. Both are in File, both carry a key, and the sidebar's own menu draws these same
-    /// titles rather than a second spelling of them.
-    @Test("the two ways to get a project are both published, and named differently")
-    func bothProjectDoorsAreInTheBar() {
-        let new = MenuBarCatalogue[.newProject]
-        let add = MenuBarCatalogue[.addProjectFolder]
-        #expect(new.menu == .file)
-        #expect(add.menu == .file)
-        #expect(new.title != add.title)
-        #expect(new.key != nil)
-        #expect(add.key != nil)
-        // Neither depends on a project existing, since one of them is how the first one arrives.
-        #expect(new.availability == .always)
-        #expect(add.availability == .always)
+    /// One door into the project list, where there were two. New Project and Add Project Folder
+    /// both ended in a project in the sidebar, so the pair asked which kind of person you were
+    /// before you had said anything; the target decides the verb now. The sidebar's `+` draws this
+    /// same title rather than a second spelling of it.
+    @Test("there is one way to get a project, it is in File, and it carries a key")
+    func oneProjectDoorInTheBar() {
+        let start = MenuBarCatalogue[.startProject]
+        #expect(start.menu == .file)
+        #expect(start.key != nil)
+        // It does not depend on a project existing, since it is how the first one arrives.
+        #expect(start.availability == .always)
+        // The retired key is not quietly reused: shift-command-O was Add Project Folder and now
+        // belongs to nothing, which is what lets it come back if a second act ever earns one.
+        #expect(!MenuBarCatalogue.commands.contains(where: { $0.title.contains("Add Project") }))
     }
 
     /// The two splits are the only items whose key lives on a submenu row, because they are the

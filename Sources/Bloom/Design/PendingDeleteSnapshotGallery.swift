@@ -86,10 +86,10 @@ struct PendingDeleteSnapshotGallery: View {
 
             // Its words cannot come back as text, so Edit is not drawn at all rather than drawn
             // dead. See `PendingMessageEdit.canEdit`.
-            group("A message carrying a file, which Edit is not offered for") {
+            group("A pending message carrying a file pill") {
                 PendingTurnRowView(
                     delivery: Self.delivery(
-                        AttachmentTrailer.compose(text: "Look at this.", paths: ["/tmp/shot.png"])
+                        "Look at this \(AttachmentDraft.token(for: ".bloom/attachments/2UCGb6/shot.png"))"
                     ),
                     hold: .turn,
                     onEdit: {},
@@ -154,6 +154,6 @@ extension Gallery {
         title: "Pending message delete",
         size: CGSize(width: 820, height: 900),
         needsFocus: false,
-        view: { _ in AnyView(PendingDeleteSnapshotGallery()) }
+        view: { app in AnyView(PendingDeleteSnapshotGallery().environment(app)) }
     )
 }

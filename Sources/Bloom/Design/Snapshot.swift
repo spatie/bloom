@@ -208,7 +208,7 @@ enum Snapshot {
         #endif
     }
 
-    /// Creates the workspace the create sheet's terminal mode makes, so it can be photographed.
+    /// Creates the workspace the create window's terminal mode makes, so it can be photographed.
     ///
     ///     Bloom --terminal-workspace plumage
     ///
@@ -482,19 +482,28 @@ enum Snapshot {
             // now: the archived workspaces are Home under its Archived chip, and what they cost
             // is `--settings --settings-tab storage`.
 
-            // `--create-sheet` opens the New Workspace sheet and captures the sheet rather than
-            // the window behind it. Without it that sheet could only be looked at by asking a
+            // `--create-sheet` opens the New Workspace window and captures it rather than the
+            // main window behind it. Without it that surface could only be looked at by asking a
             // human for a screenshot, which is why it went years without one. Pass it LAST, for
             // the reason spelled out for `--settings` just below.
-            let wantsCreateSheet = arguments.contains("--create-sheet")
-            if wantsCreateSheet {
+            //
+            // The flag keeps its old name, as `--new-project` does: it is what the scripts and
+            // the people who run them already type, and what it opens is the same surface with a
+            // title bar of its own. What did change is where the picture comes from, which is the
+            // second-window branch below rather than the attached-sheet one.
+            let wantsCreateWindow = arguments.contains("--create-sheet")
+            if wantsCreateWindow {
                 NotificationCenter.default.post(name: .bloomNewWorkspace, object: nil)
                 try? await Task.sleep(for: .seconds(2))
             }
 
-            // `--new-project` opens the New Project sheet, for the same reason `--create-sheet`
-            // opens the other one: it is a sheet, and a sheet has no way in that a capture run can
-            // press. Pass it LAST, as above.
+            // `--new-project` opens the window that starts a project, for the same reason
+            // `--create-sheet` opens the window beside it: neither has a way in that a capture run
+            // can press. Pass it LAST, as above. The flag keeps the old name because that is what
+            // the notification is still called: `StartProjectView` absorbed the second door rather
+            // than replacing the first. What moved when it stopped being a sheet is where the
+            // picture comes from, which is the second-window branch below rather than the
+            // attached-sheet one.
             let wantsNewProject = arguments.contains("--new-project")
             if wantsNewProject {
                 NotificationCenter.default.post(name: .bloomNewProject, object: nil)
@@ -561,13 +570,16 @@ enum Snapshot {
             // showing, and it titles the MAIN window after the selected workspace, so a title
             // comparison against "Bloom" matched neither and every settings capture silently
             // returned a picture of the main window instead.
-            if wantsSettings || wantsRepoSettings || wantsAbout || wantsWelcome {
+            if wantsSettings || wantsRepoSettings || wantsAbout || wantsWelcome || wantsCreateWindow
+                || wantsNewProject {
                 let main = candidate
                 candidate = nil
                 for _ in 0..<40 {
                     candidate = capturableWindows().first { $0 !== main }
                     if candidate != nil { break }
-                    if wantsRepoSettings {
+                    if wantsCreateWindow {
+                        NotificationCenter.default.post(name: .bloomNewWorkspace, object: nil)
+                    } else if wantsRepoSettings {
                         NotificationCenter.default.post(
                             name: .bloomOpenRepoSettings, object: repoSettingsProject
                         )
@@ -575,6 +587,8 @@ enum Snapshot {
                         openAppMenuItem(titled: "About")
                     } else if wantsWelcome {
                         WelcomeWindow.show()
+                    } else if wantsNewProject {
+                        NotificationCenter.default.post(name: .bloomNewProject, object: nil)
                     } else {
                         openSettingsWindow()
                     }
@@ -583,8 +597,8 @@ enum Snapshot {
             }
 
             // The Help menu sheets and their thank-you cards, raised by
-            // `FeedbackPresenter.presentIfRequested` rather than from here, but captured the
-            // same way `--create-sheet` is: the sheet, not the window behind it.
+            // `FeedbackPresenter.presentIfRequested` rather than from here, and captured as
+            // sheets: the sheet, not the window behind it.
             let wantsFeedbackSheet = [
                 "--feedback-sheet", "--feedback-logs", "--feedback-problems", "--feedback-sent",
                 "--prompt-sheet", "--prompt-problems", "--prompt-sent",
@@ -593,7 +607,7 @@ enum Snapshot {
             // A sheet is its own window, hanging off the one it was presented from, and it is
             // never in `capturableWindows()`: it carries no title bar. Asked for by name here
             // rather than searched for, so nothing else on screen can be picked by mistake.
-            if wantsCreateSheet || wantsNewProject || wantsProjectSetup || wantsFeedbackSheet {
+            if wantsProjectSetup || wantsFeedbackSheet {
                 for _ in 0..<20 where candidate?.attachedSheet == nil {
                     try? await Task.sleep(for: .milliseconds(250))
                 }
@@ -894,6 +908,12 @@ enum Snapshot {
             // overwritten by a yellow bar. Here neither picture is wrong, which is worse, because
             // nothing about the file would say which one it is.
             ("running-glyph-still", AnyView(RunningGlyphGallery()), Gallery.runningGlyph.size),
+            // The rest of that column, which unlike the running mark holds no representable at
+            // all once the two that do are left off it. So this one is a real photograph rather
+            // than a consolation, and it is the only way to look at the marks side by side
+            // without opening the app in front of whoever is using this Mac. See
+            // `StatusColumnGallery` for what is on it and what is deliberately not.
+            ("status-column", AnyView(StatusColumnGallery()), Gallery.statusColumn.size),
             // The activity rule, on the same terms and for a better reason than most: the still
             // figure is the point of that page rather than a consolation. It is what `Reduce
             // Motion` draws, and the claim being made about it is that a crest parked at the
@@ -901,6 +921,22 @@ enum Snapshot {
             // photograph can settle. The moving rows come out as yellow placeholders here; they
             // are what `--snapshot-gallery --gallery activity-rule` is for.
             ("activity-rule-still", AnyView(ActivityRuleGallery()), Gallery.activityRule.size),
+            // The one column the source list is built on, with a rule drawn down it. This one
+            // belongs offscreen more than most: it is a page about where things sit rather than
+            // about how they move, nothing on it is layer backed, and it is the only picture of
+            // the sidebar's alignment an agent can take without a window in front of whoever is
+            // using this Mac. See `SidebarIndentGallery` for why nothing on it is running.
+            (
+                "sidebar-indent",
+                AnyView(SidebarIndentGallery(app: model)),
+                Gallery.sidebarIndent.size
+            ),
+            // The four marks the busy indicator has to be told apart from, which is the page the
+            // hue was chosen with. It belongs offscreen for the reason `status-column` does and
+            // one more: it is about colour, and colour is the one thing a still can settle
+            // completely. Everything on it that would otherwise be a layer is asked for held
+            // still, so nothing here comes out as a placeholder. See `RunningColourGallery`.
+            ("running-colour", AnyView(RunningColourGallery()), Gallery.runningColour.size),
             // No review-comments and no inspector-tabs scene, deliberately, and for one reason:
             // `ImageRenderer` paints SwiftUI's yellow placeholder over an `NSViewRepresentable`,
             // and each of those two pages exists to show one. The review comment box is the

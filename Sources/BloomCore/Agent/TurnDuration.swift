@@ -43,6 +43,15 @@ public enum TurnDuration {
             : "\(minutes + 1)m 0s"
     }
 
+    /// The turn footer's calm, whole-second form. A tenth of a second is useful while inspecting
+    /// an individual action, but it is noise beside a completed answer.
+    public static func wholeSeconds(_ milliseconds: Int) -> String {
+        let seconds = Int((Double(max(0, milliseconds)) / 1000).rounded())
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+        return minutes == 0 ? "\(seconds)s" : "\(minutes)m \(remainder)s"
+    }
+
     /// The compact form a single row uses, where there is room for four characters at most.
     public static func short(_ milliseconds: Int, locale: Locale = .autoupdatingCurrent) -> String {
         let clamped = max(0, milliseconds)

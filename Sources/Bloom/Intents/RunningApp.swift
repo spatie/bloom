@@ -28,7 +28,7 @@ enum RunningApp {
         Self.model = model
     }
 
-    /// Starts a workspace the way the create sheet does, and answers with it or with why not.
+    /// Starts a workspace the way the create window does, and answers with it or with why not.
     ///
     /// This replaced a `bloom://` link and a poll. An intent used to build a URL, hand it to the
     /// window, and then read the database every 400ms for up to sixty seconds looking for a row it

@@ -9,7 +9,7 @@ import Testing
 /// agent, with the main checkout among them looking exactly like the rest; the Bloom repository
 /// adds the `locked <reason>` line. Both are trimmed to the records that make a point, and not one
 /// character of a record is changed.
-@Suite("Worktree listing")
+@Suite("Worktree listing", .scratchDirectory)
 struct WorktreeListingTests {
     /// `git worktree list --porcelain` in /Users/freek/dev/code/there-there, trimmed to six of its
     /// twenty-two records: the main checkout, two of Bloom's, and three of Conductor's, including
@@ -190,7 +190,7 @@ struct WorktreeListingTests {
 }
 
 /// Who holds a branch, and how that is said.
-@Suite("Branch holders")
+@Suite("Branch holders", .scratchDirectory)
 struct BranchHolderTests {
     private var thereThere: [WorktreeEntry] {
         WorktreeListing.parse(WorktreeListingTests.thereThere)

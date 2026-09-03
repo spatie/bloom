@@ -24,7 +24,7 @@ struct ThinkingRowView: View {
                 Text(text)
                     .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
-                    .lineSpacing(TranscriptLayout.proseLeading)
+                    .proseLeading(Typo.label)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, TranscriptLayout.detailIndent)
@@ -59,7 +59,7 @@ struct ThinkingRowView: View {
             Spacer(minLength: TranscriptLayout.tight)
 
             if tokens > 0 {
-                Text("\(tokens) tokens")
+                Text(Counted.of(tokens, "token"))
                     .font(Typo.micro)
                     .foregroundStyle(Palette.textTertiary)
                     .monospacedDigit()

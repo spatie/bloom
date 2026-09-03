@@ -97,6 +97,27 @@ struct TranscriptWindowTests {
         #expect(TranscriptWindow(start: 100, end: 900).grownUp().start == 0)
     }
 
+    @Test("idle preparation adds one bounded chunk after the session has arrived")
+    func idlePreparationAddsAChunk() {
+        let window = TranscriptWindow(start: 1_000, end: 2_000)
+        #expect(
+            window.preparedHistory(afterArrival: true)
+                == TranscriptWindow(start: 1_000 - TranscriptWindow.chunk, end: 2_000)
+        )
+    }
+
+    @Test("idle preparation waits for the session to finish arriving")
+    func idlePreparationWaitsForArrival() {
+        let window = TranscriptWindow(start: 1_000, end: 2_000)
+        #expect(window.preparedHistory(afterArrival: false) == nil)
+    }
+
+    @Test("idle preparation stops once the table knows the whole history")
+    func idlePreparationStopsAtTheTop() {
+        let whole = TranscriptWindow(start: 0, end: 2_000)
+        #expect(whole.preparedHistory(afterArrival: true) == nil)
+    }
+
     @Test("a growth downward adds a chunk of what came after")
     func growthDownAddsAChunk() {
         let grown = TranscriptWindow(start: 0, end: 500).grownDown(rowCount: 4_000)

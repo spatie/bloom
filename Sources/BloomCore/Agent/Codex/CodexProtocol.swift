@@ -108,6 +108,34 @@ public enum CodexClientError: Sendable, Error, Equatable {
     case timedOut(method: String, seconds: Int)
 }
 
+extension CodexClientError: CustomStringConvertible {
+    /// A person-facing account of a transport failure. RPC method names remain in diagnostics,
+    /// where they are useful, rather than leaking into the transcript as implementation detail.
+    public var description: String {
+        switch self {
+        case .connectionClosed(let reason):
+            reason.isEmpty
+                ? "The connection to Codex closed"
+                : "The connection to Codex closed: \(reason)"
+        case .unexpectedResult:
+            "Codex returned a response Bloom could not read"
+        case .notInitialized:
+            "Bloom could not connect to Codex"
+        case .timedOut(let method, _):
+            switch method {
+            case "thread/resume":
+                "Codex did not respond while reopening this conversation"
+            case "thread/start":
+                "Codex did not respond while starting this conversation"
+            case "turn/start":
+                "Codex did not accept the message in time"
+            default:
+                "Codex did not respond in time"
+            }
+        }
+    }
+}
+
 // MARK: - Frames
 
 public struct CodexServerRequest: Sendable, Hashable {

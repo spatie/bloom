@@ -37,8 +37,18 @@ public protocol SessionRunner: Actor {
     /// while it was still running. One name, two facts, and the wrong one was being polled.
     var isProcessAlive: Bool { get }
 
-    /// Write one user turn. Starts whatever has to be started, on first use.
-    func send(_ text: String) async throws
+    /// Write one turn. Starts whatever has to be started, on first use.
+    ///
+    /// `text` is what the agent is handed. `recording` is the row to write down instead of the
+    /// user row the send would otherwise store, encoded: a `CrewMessage` payload, for a turn one
+    /// agent started in another agent's chat.
+    ///
+    /// **The two used to be the same string, and that is the bug.** A subagent's message is
+    /// wrapped for the model, the runner wrote down exactly what it sent, and the envelope was
+    /// then drawn in the owner's own bubble as though he had typed it. So the caller says what to
+    /// record, once, and the runner writes one row either way. Never two: a turn is one message
+    /// in the transcript whoever asked for it.
+    func send(_ text: String, recording: Data?) async throws
 
     /// Stop the turn now, from synchronous code that cannot wait for a turn on the actor. Which is
     /// exactly when the actor is least available, because it is busy running the thing being
@@ -61,6 +71,16 @@ public protocol SessionRunner: Actor {
 
     /// Answer one permission question. Not a turn: it unblocks a turn already in flight.
     func answer(requestID: String, decision: PermissionDecision) async
+}
+
+extension SessionRunner {
+    /// The owner's own turn: what goes out is what is written down.
+    ///
+    /// An extension rather than a default argument on the requirement, because Swift does not
+    /// allow one there, and every caller that had nothing to record predates the second argument.
+    public func send(_ text: String) async throws {
+        try await send(text, recording: nil)
+    }
 }
 
 // MARK: - Event fanout

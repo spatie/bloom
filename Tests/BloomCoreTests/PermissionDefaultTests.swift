@@ -5,7 +5,7 @@ import Foundation
 /// What a session nobody has configured is allowed to do.
 ///
 /// The default moved from Accept edits to Full access, and the reason it needs a suite of its own
-/// is that "the default" is not one value in one place: the create sheet, the composer's first
+/// is that "the default" is not one value in one place: the create window, the composer's first
 /// open, a `bloom://` link and a session row written with no mode stated each used to reach their
 /// own literal. They all reach `AppDefaults.fallbackPermissionMode` now, and these tests are what
 /// stops a second literal growing back.
@@ -13,12 +13,12 @@ import Foundation
 /// The last two say out loud what the default actually grants on each backend, because a constant
 /// naming a mode is not a description of what that mode permits, and this is the one change in
 /// Bloom where the difference is the whole point.
-@Suite("The default permission mode")
+@Suite("The default permission mode", .scratchDirectory)
 struct PermissionDefaultTests {
     @Test("a brand new session may act without asking")
     func fallbackIsFullAccess() {
         #expect(AppDefaults.fallbackPermissionMode == .bypassPermissions)
-        #expect(PermissionMode.bypassPermissions.label == "Full access")
+        #expect(PermissionMode.bypassPermissions.label(on: .codex) == "Full access")
     }
 
     /// The three values that stand in for "nobody has said anything yet", which must agree. Each
@@ -93,7 +93,7 @@ struct PermissionDefaultTests {
     }
 
     /// What Codex is told, which is a different shape: an approval policy crossed with a sandbox
-    /// rather than a mode. Full access is the only one of the four that turns the sandbox off, so
+    /// rather than a mode. Full access is the only mode that turns the sandbox off, so
     /// a Codex chat on the default may write outside its own worktree, which the Accept edits it
     /// replaces could not.
     @Test("on Codex it is no approvals and no sandbox")

@@ -17,9 +17,8 @@ import BloomCore
 /// photograph. Multiple selection is not a state the pane itself offers; it is here only so that
 /// the two rows can be compared without flicking between two files.
 ///
-/// The prominent button at the foot is the third colour in the argument: `Palette.accentFill` on a
-/// control, which is what "our blue" meant when it was asked for. Before this page's own change it
-/// was the only thing on it wearing that colour.
+/// The prominent button at the foot uses the same semantic system accent as the selected rows, so
+/// this page also catches a custom control drifting away from AppKit's selection colour.
 ///
 ///     Bloom --snapshot-gallery <dir> --gallery sidebar-selection
 struct SidebarSelectionGallery: View {
@@ -42,7 +41,7 @@ struct SidebarSelectionGallery: View {
                 }
 
                 Section("Projects") {
-                    row("sidebar blue", "arrow.triangle.branch", "workspace")
+                    row("workspace row", "arrow.triangle.branch", "workspace")
                     row("limits panel", "arrow.triangle.branch", "other")
                 }
             }
@@ -52,7 +51,7 @@ struct SidebarSelectionGallery: View {
 
             Button("Choose a folder", systemImage: "folder") {}
                 .buttonStyle(.borderedProminent)
-                .tint(Palette.accentFill)
+                .tint(Palette.controlAccent)
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

@@ -55,6 +55,7 @@ struct TranscriptListView: View {
         // that is `@ObservationIgnored`, so asking costs nothing and subscribes to nothing.
         let remembered = memory?.remembered(session: transcript.session.id)
         _expanded = State(initialValue: remembered?.expanded ?? [])
+        _unfolded = State(initialValue: remembered?.unfolded ?? [])
         let rows = transcript.rows
         _drawn = State(initialValue: Drawn(
             session: transcript.session.id,
@@ -78,6 +79,28 @@ struct TranscriptListView: View {
     /// re-folded every time the reader looked at the changes and came back. It is seeded from, and
     /// written to, the pane's own memory, which lasts as long as the launch and no longer.
     @State private var expanded: Set<Int> = []
+    /// Which turns' working the reader has opened, by the sequence number of the first row of
+    /// each. Kept in the pane's memory beside `expanded` and for the same reason: a turn somebody
+    /// opened to read must not fold itself away again behind a tab switch.
+    @State private var unfolded: Set<Int> = []
+    /// Every turn's working in this session. See `TranscriptFold`.
+    ///
+    /// **State rather than a computed property, and the lag is the point.** It is refreshed from
+    /// an `onChange` on the row count, which runs after the pass that drew the new row, so the
+    /// arrival is one `.grew` and the fold that follows it is one `.shrank`. Computed in `entries`
+    /// instead, a run closing would insert the row that closed it and remove the rows it hides in
+    /// a single pass, and two edits in one list is the `.rebuilt` that throws away every cell and
+    /// the reader's text selection.
+    ///
+    /// **And empty rather than seeded in `init`, which is not where the other three come from.**
+    /// The expression inside a `State(initialValue:)` is evaluated on every rebuild of this struct
+    /// and thrown away on all but the first, and this view is rebuilt by every row that lands: a
+    /// scan of the whole session there would be a walk of four thousand rows per arrival, to
+    /// produce a value that already exists. The first pass therefore draws a conversation with no
+    /// folds in it and the `onChange` below folds it on the next, which costs nothing at all,
+    /// because a pane arriving at a session is held blank until `arrived()` and only the last pass
+    /// that landed while it was held is ever applied. See `TranscriptTable.Coordinator.apply`.
+    @State private var folds = TranscriptFold.Folds.none
     @State private var geometry = TranscriptGeometry()
     /// The width a bubble may fill, held as an object rather than in `geometry` so a pane changing
     /// width invalidates the handful of views that draw a bubble rather than this whole body. See
@@ -100,6 +123,12 @@ struct TranscriptListView: View {
     /// owner's 2,981 row session an upward scroll grows about eight times, so that was eight
     /// rebuilds of up to 2,981 entries each, for nothing. See `GeometryBox`.
     @State private var isGrowing = GeometryBox(false)
+    /// Whether a reader currently has the transcript's scroll view. Idle history preparation is
+    /// allowed to spend main-thread time only after that gesture has ended.
+    @State private var isLiveScrolling = GeometryBox(false)
+    /// Whether this transcript still owns a visible pane. Detached preparation tasks can outlive
+    /// a tab switch unless they have an explicit cancellation condition.
+    @State private var isVisible = GeometryBox(false)
     @State private var resumed: SessionID?
     @State private var opening: Opening?
     @State private var writingTo: WriteTarget?
@@ -112,10 +141,35 @@ struct TranscriptListView: View {
     /// How far below the viewport the end of the conversation is, read for one thing only: how
     /// long the jump pill's travel back to the live end should run for.
     @State private var reachToEnd = GeometryBox(0.0)
-    /// The row at the top of the pane, in a box for the reason the two above are: it moves on
-    /// every frame of a scroll and nothing draws from it. It replaces the set of visible row ids the
-    /// lazy stack had to keep, because a table can simply be asked which row is at the top.
-    @State private var topSeq = GeometryBox(0)
+    /// The row at the top of the pane and how far above its top the pane starts, in a box for the
+    /// reason the two above are: it moves on every frame of a scroll and nothing draws from it. It
+    /// replaces the set of visible row ids the lazy stack had to keep, because a table can simply
+    /// be asked which row is at the top.
+    ///
+    /// Both halves, because the row alone is the top of the row: see
+    /// `TranscriptPaneState.anchorDelta`. Nil until the table has a stored row to name, and never
+    /// cleared by a pane that cannot see one, so what is written down is the last real place.
+    @State private var topPlace = GeometryBox<(seq: Int, delta: CGFloat)?>(nil)
+    /// User turns indexed once as rows arrive. The scroll callback reads it every frame without
+    /// making this body observe those reads or walking backwards through the transcript.
+    @State private var questionIndex = GeometryBox(PinnedQuestionIndex())
+    /// The question whose output is currently under the reader, only while its full bubble has
+    /// passed above the viewport.
+    @State private var pinnedQuestion: PinnedQuestion?
+    /// Whether the pane is at the live end EXACTLY, which is not `geometry.isNearBottom`.
+    ///
+    /// **Two different questions, and one number was answering both.** `ScrollEnd.threshold` is 96
+    /// points and it answers "may an arriving row move the view", which is a question about a
+    /// reader who has nudged the wheel and is still following along. What is written down here is
+    /// "where was this person", and somebody ninety points up is somebody who scrolled up ninety
+    /// points: coming back to the live end instead is the pane deciding it knows better.
+    /// `TranscriptAnchor.isAtEnd` is the exact test and its doc comment already draws the line.
+    ///
+    /// Exact, and then the two standing claims to be there, because neither of those is a reader
+    /// who has gone anywhere: `TranscriptTableController.holdsEnd` is somebody having asked for
+    /// the end out loud, and `TranscriptLiveEndFollower.isFollowing` is a turn being watched
+    /// arrive, which parks the view up to `TranscriptFollow.takeBack` behind the end on purpose.
+    @State private var atLiveEnd = GeometryBox(false)
 
     /// Which rows have only just turned up, so they settle in rather than appear at full opacity
     /// in a single frame. An object rather than `@State` because a table's cells are built after
@@ -148,6 +202,9 @@ struct TranscriptListView: View {
     /// point into a document laid out at another.
     @Environment(\.fontScale) private var fontScale
     @Environment(\.chatFont) private var chatFont
+    /// And the line height, for the same reason: a step is points on every line of every
+    /// paragraph, so a row at another step is another height.
+    @Environment(\.chatLineHeight) private var chatLineHeight
 
     /// How much of the session the table is being handed, and which session that is about.
     ///
@@ -184,7 +241,27 @@ struct TranscriptListView: View {
     private enum Opening: Equatable {
         case liveEnd
         case row(Int, UnitPoint)
+        /// A row and how far above its top the pane started, which is where a reader who was part
+        /// way down a long answer left off. Not the same as `.row(seq, .top)`, which is a row
+        /// somebody is being SHOWN. See `TranscriptPaneState.anchorDelta`.
+        case rowOffset(Int, Double)
         case offset(Double)
+
+        /// The row this opening names, for the two cases that name one.
+        ///
+        /// **Asked in one place rather than pattern matched at the call site, because the call
+        /// site got it wrong the moment a second case named a row.** `revealedSeqs` matched
+        /// `.row` alone, so a returning reader, who has been restored through `.rowOffset` since
+        /// the anchor delta was added, could have the row they left at the top of the pane folded
+        /// away underneath them: `put(at:)` then finds no index for it and nothing moves at all.
+        /// A switch with no `default` means the next case that names a row cannot be added without
+        /// answering this.
+        var seq: Int? {
+            switch self {
+            case .row(let seq, _), .rowOffset(let seq, _): seq
+            case .liveEnd, .offset: nil
+            }
+        }
     }
 
     /// A user bubble takes this share of the pane, and never gets narrower than the floor, so a
@@ -250,6 +327,98 @@ struct TranscriptListView: View {
         return nil
     }
 
+    /// The rows something has asked to be visible, which is what stops a fold hiding them.
+    ///
+    /// The first is the reader: a tool result they opened while a turn was running would otherwise
+    /// vanish the moment the run around it closed.
+    ///
+    /// **The rest is the row this session was OPENED on, and it is worse than cosmetic.** A scroll
+    /// can only find a row the table is drawing, so a search hit, an unread mark or the row a
+    /// returning reader left at the top of the pane, folded away, is not a row somewhere off
+    /// screen: `put(at:)` finds no index, nothing moves, and the reader lands at the top of a
+    /// conversation they were meant to be put back into. They are exactly the seqs
+    /// `mustReachIndex` widens the window for, said again as sequence numbers. Which openings
+    /// name a row is `Opening.seq`'s question, and it is asked there because asking it here was
+    /// how the returning reader's case went missing.
+    ///
+    /// **Read from `opening` rather than from the two things that answered it, because both are
+    /// gone moments later.** `takeTranscriptTarget` consumes the search result and `markAllRead`
+    /// clears the unread mark, both in `position`, so a rule that asked them directly would fold
+    /// the run away a beat after putting the reader inside it. `opening` is what that decision was
+    /// written down as and it lasts as long as the visit. The live two are still asked, because
+    /// the pass that assembles the entries runs before `position` has run at all.
+    ///
+    /// The cost is one run staying open for the visit, at the place the reader was put. That is
+    /// the run whose context they are most likely to want.
+    private var revealedSeqs: Set<Int> {
+        var out = expanded
+        if let seq = opening?.seq { out.insert(seq) }
+        if let target = app.pendingTranscriptTarget,
+           target.workspaceID == transcript.workspace?.id {
+            out.insert(target.seq)
+        }
+        if let unread = transcript.firstUnreadSeq { out.insert(unread) }
+        return out
+    }
+
+    /// The runs of this session, read off the rows in the only terms `TranscriptFold` needs.
+    ///
+    /// Static, because it reads nothing this view holds and a rescan must not quietly depend on
+    /// one. Lazy, so the session is not projected into an array of facts to walk once:
+    /// `TranscriptFold.folds` only ever touches the last turn, which is what keeps a
+    /// turn's worth of arrivals off a walk of the whole conversation each time.
+    private static func rescan(
+        _ rows: [TranscriptRow], extending previous: TranscriptFold.Folds
+    ) -> TranscriptFold.Folds {
+        TranscriptFold.folds(
+            in: rows.lazy.map {
+                TranscriptFold.Fact(
+                    seq: $0.seq,
+                    kind: $0.kind,
+                    // A refusal travels as `is_error` too, and both are the same fact here: a call
+                    // that did not do what it was asked is a call the reader is looking for.
+                    failed: $0.isError || $0.refusal != nil,
+                    featured: MediaShowRow.isCall($0.payload)
+                        || CodexImageViewRow.isCall($0.payload),
+                    drawsNothing: TranscriptNoise.isHidden($0)
+                        || TranscriptRowInk.drawsNothing(kind: $0.kind, payload: $0.payload),
+                    settled: settled($0)
+                )
+            },
+            extending: previous
+        )
+    }
+
+    /// The runs to draw with, which are the ones held in state unless a rescan can be adopted
+    /// without moving anything into the tail. See `TranscriptFold.mayAdopt`.
+    ///
+    /// The rescan is skipped entirely on a pass where no row has arrived, which is nearly every
+    /// pass: a scroll, a hover and a selection all rebuild the entries and none of them changes
+    /// what is folded. `Folds.scannedRows` is what answers that, and it is on the value rather
+    /// than beside it so the two cannot drift.
+    private static func foldsForThisPass(
+        rows: [TranscriptRow], stored: TranscriptFold.Folds, drawn: Range<Int>
+    ) -> TranscriptFold.Folds {
+        guard stored.scannedRows != rows.count else { return stored }
+        let fresh = rescan(rows, extending: stored)
+        return TranscriptFold.mayAdopt(fresh, over: stored, drawn: drawn) ? fresh : stored
+    }
+
+    /// Whether nothing this row says can change again, which is what lets a fold hide it while the
+    /// turn is still running. See rule 1 in `TranscriptFold`.
+    ///
+    /// Two rows can still change and they are the two the reader must not lose: a call whose result
+    /// has not come back, and a question nobody has answered. Everything else is finished the
+    /// moment it is stored. A kind added later is settled, which is the safe direction: it can be
+    /// hidden a beat late, never revealed a beat after being hidden.
+    private static func settled(_ row: TranscriptRow) -> Bool {
+        switch row.kind {
+        case .toolUse: row.resultPayload != nil
+        case .permissionAsk: row.permissionDecision != nil
+        default: true
+        }
+    }
+
     /// What a link in any row of this transcript does. Comparable, so that a fresh struct per pass
     /// is not a change: see `TranscriptRowEnvironment`, which is what carries it to the rows.
     private var linkActions: TranscriptLinkActions {
@@ -262,10 +431,10 @@ struct TranscriptListView: View {
     /// an empty state on its way in, and not while setup is showing, which has something worth
     /// reading at the top of the pane.
     ///
-    /// `isStreaming` is last, and the position is the point rather than a tidying: it reads the
-    /// per-token buffers that `StreamingTailView` exists to keep out of this body, and `&&`
-    /// short-circuits, so a term only reached when a session is loaded, idle, without a setup row
-    /// and with nothing at all in it is a term never reached while an answer is streaming.
+    /// `isStreaming` is last, and the position is the point rather than a tidying: it moves on
+    /// every flush of a running turn, which is the one thing this body must not be woken by, and
+    /// `&&` short-circuits, so a term only reached when a session is loaded, idle, without a setup
+    /// row and with nothing at all in it is a term never reached while an answer is streaming.
     private var showsPlaceholder: Bool {
         transcript.isLoaded
             && !transcript.isRunning
@@ -284,6 +453,7 @@ struct TranscriptListView: View {
             linkActions: linkActions,
             fontScale: fontScale,
             chatFont: chatFont,
+            lineHeight: chatLineHeight,
             reduceMotion: reduceMotion
         )
     }
@@ -313,10 +483,32 @@ struct TranscriptListView: View {
         let projectName = transcript.projectName
         let rows = transcript.rows
         let permissionMode = transcript.session.permissionMode
+        let agentKind = transcript.session.agentKind
         let recoveredRuns = transcript.recoveredRuns
         let stoppedTurnSeq = transcript.stoppedTurnSeq
         let paneHeight = geometry.paneHeight
         let arrivals = self.arrivals
+        // The fold's three inputs, read once for the pass for the reason the eight above are: each
+        // is a property of an `@Observable` or a set this body copies, and reading one inside a
+        // per-row closure records an observation edge per row.
+        let unfolded = self.unfolded
+        let revealed = revealedSeqs
+        let sessionID = transcript.session.id
+        // Read once, and the range taken off the slice itself rather than off `drawnWindow` a
+        // second time, so the range a fold is measured against cannot disagree with the rows being
+        // walked.
+        let drawnRows = visibleRows
+        let drawnRange = drawnRows.startIndex..<drawnRows.endIndex
+        // The runs, brought up to date on this pass when doing so takes rows out of the tail and
+        // puts none in. Everything else waits for the pass below, which is what keeps an arrival
+        // and a fold from landing as one edit. See `TranscriptFold.mayAdopt`, which is the rule,
+        // and the `onChange` at the foot of `body`, which is the pass.
+        let folds = Self.foldsForThisPass(rows: rows, stored: self.folds, drawn: drawnRange)
+        let lastVisibleSeq = drawnRows.last(where: { !TranscriptNoise.isHidden($0) })?.seq
+        // The turn the loop below is inside, so a fold's own line is emitted once, and the first
+        // row of that turn's working which is NOT hidden. Every row before it is skipped.
+        var foldSeq: Int?
+        var shownFrom = 0
 
         var out: [TranscriptTableEntry] = []
         // A workspace's setup script, its worktree events and its opening prompt. All three are
@@ -353,10 +545,52 @@ struct TranscriptListView: View {
             ))
         }
 
-        for row in visibleRows where !TranscriptNoise.isHidden(row) {
+        for index in drawnRows.indices {
+            let row = drawnRows[index]
+            // A turn's working, drawn as one line and whatever of it still has to be on screen.
+            // See `TranscriptFold`, which holds every decision about where a turn's working starts
+            // and ends and what may be hidden; what happens here is only the emitting.
+            if let at = folds.index(containing: index) {
+                // By index above and by value here, so the turn's own array of rows is taken up
+                // once per turn rather than once per row. See `TranscriptFold.Folds.index`.
+                if folds.all[at].firstSeq != foldSeq {
+                    let work = folds.all[at]
+                    foldSeq = work.firstSeq
+                    // What the fold would hide if the reader had not opened it, which is what the
+                    // line has to say either way, and whether it has anything to say at all.
+                    let would = TranscriptFold.hides(work, revealed: revealed, drawn: drawnRange)
+                    let hidden = unfolded.contains(work.firstSeq) ? 0 : would
+                    shownFrom = if hidden == 0 {
+                        work.span.lowerBound
+                    } else if hidden < work.rows.count {
+                        work.rows[hidden].index
+                    } else {
+                        // The whole working is behind the line, so the next thing drawn is the
+                        // turn's answer, which is past the span.
+                        work.span.upperBound
+                    }
+                    out.append(foldEntry(
+                        firstSeq: work.firstSeq,
+                        hiding: hidden > 0 ? would : work.rows.count,
+                        showsMore: hidden > 0 && would < work.rows.count,
+                        isFolded: hidden > 0,
+                        // A turn with nothing to hide gets no line: a control that answers nothing
+                        // when it is pressed is worse than no control. Its entry stays in the list
+                        // all the same, drawing nothing, because an entry that came and went in
+                        // the middle of the list is the `.rebuilt` this is all arranged to avoid.
+                        shows: would > 0,
+                        session: sessionID
+                    ))
+                }
+                // Everything before the first row that stays is the fold, and the rows that draw
+                // nothing between them go with it.
+                if index < shownFrom { continue }
+            }
+            guard !TranscriptNoise.isHidden(row) else { continue }
             let isExpanded = expanded.contains(row.seq)
             let wasStopped = row.seq == stoppedTurnSeq
             let recovered = recoveredRuns[row.seq]
+            let closesTranscript = row.kind == .result && row.seq == lastVisibleSeq
             // The same fields `TranscriptRowView.==` compared, and for the same reason: the
             // payload is never read, because comparing it is 1.6MB of `Data` per pass.
             //
@@ -377,6 +611,7 @@ struct TranscriptListView: View {
                 $0.combine(row.parentToolUseID)
                 $0.combine(wasStopped)
                 $0.combine(recovered != nil)
+                $0.combine(closesTranscript)
             }
             // Free, and no for the two kinds that make up most of a long session, so it is asked
             // here rather than inside the closure that runs per cell.
@@ -390,20 +625,25 @@ struct TranscriptListView: View {
                     id: .row(row.seq), contentKey: key, drawsNothing: blank,
                     content: {
                         AnyView(
-                            // No top padding: the rule inside the footer carries its own air. The
-                            // bottom is deliberately the wider of the two, so the footer reads as
-                            // belonging to the turn above rather than to the one below.
+                            // No top padding: the rule inside the footer carries its own air. A
+                            // completed turn keeps the wider paragraph gap before a following
+                            // message. At the live end it keeps only the tight inset, so the
+                            // duration sits evenly between its own rule and the composer rule.
                             TurnFooterView(
                                 rows: rows,
                                 row: row,
                                 worktree: home.worktree,
                                 permissionMode: permissionMode,
+                                agentKind: agentKind,
                                 wasStopped: wasStopped,
                                 recovered: recovered
                             )
                             .arrivingRow(settles && arrivals.isArriving(row.seq))
                             .padding(.horizontal, TranscriptLayout.inset)
-                            .padding(.bottom, TranscriptLayout.turnGap)
+                            .padding(
+                                .bottom,
+                                closesTranscript ? TranscriptLayout.tight : TranscriptLayout.turnGap
+                            )
                             .frame(maxWidth: .infinity, alignment: .leading)
                         )
                     }
@@ -457,11 +697,15 @@ struct TranscriptListView: View {
                     Group {
                         if let review {
                             UserTurnRowView(
-                                text: review.message, reviewChips: review.chips, home: transcript.home
+                                text: review.message,
+                                reviewChips: review.chips,
+                                home: transcript.home
                             )
                         } else {
                             UserTurnRowView(
-                                text: turn.body, attachments: turn.paths, home: transcript.home
+                                text: turn.body,
+                                attachments: turn.paths,
+                                home: transcript.home
                             )
                         }
                     }
@@ -495,10 +739,6 @@ struct TranscriptListView: View {
                 AnyView(
                     StreamingTailView(transcript: transcript)
                         .padding(.horizontal, TranscriptLayout.inset)
-                        // The other half of the air. This entry is always in the list, and is
-                        // nothing at all between turns, so it is also what stops the last row of a
-                        // quiet conversation sitting against the bottom edge.
-                        .padding(.bottom, TranscriptLayout.block)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 )
             }
@@ -511,18 +751,39 @@ struct TranscriptListView: View {
             let isLast = delivery.id == transcript.waitingDeliveries.last?.id
             // One sentence for the queue, at the foot of it. See `PendingTurnRowView.caption`.
             let hold = isLast ? transcript.deliveryHold : nil
+            // In the key as well as in the row, because a cell whose key has not moved is left
+            // exactly as it is: a Steer button offered against a turn that has since ended would
+            // sit there until something else rebuilt the cell. It changes when the turn starts and
+            // when it ends, which is also when the sentence and Try Again below it change.
+            let canSteer = transcript.canSteer(delivery)
             out.append(TranscriptTableEntry(
                 id: .pending(delivery.id),
                 contentKey: TranscriptContentKey {
                     $0.combine("pending")
                     $0.combine(delivery.id)
                     $0.combine(isLast)
+                    $0.combine(canSteer)
                 },
                 content: {
-                    AnyView(
+                    // A message an agent wrote, waiting its turn in the same queue. It is drawn as
+                    // itself rather than as the owner's pending bubble: they did not write it,
+                    // Edit and Discard mean nothing on it, and drawing it in their bubble is the
+                    // bug `CrewMessageRowView` exists to end, in the one state that was missed.
+                    if let crew = delivery.crewMessage {
+                        return AnyView(
+                            CrewMessageRowView(message: crew, isWaiting: true)
+                                .padding(.horizontal, TranscriptLayout.inset)
+                        )
+                    }
+                    return AnyView(
                         PendingTurnRowView(
                             delivery: delivery,
+                            home: transcript.home,
                             hold: hold,
+                            canRetry: transcript.canRetry(delivery),
+                            onRetry: { Task { await transcript.retryPending() } },
+                            canSteer: canSteer,
+                            onSteer: { Task { await transcript.steer(delivery) } },
                             onEdit: { Task { await transcript.editPending(delivery) } },
                             onDelete: { transcript.askToDiscard(delivery) }
                         )
@@ -537,6 +798,58 @@ struct TranscriptListView: View {
         // the screen.
         TranscriptHoldCensus.builtEntries(out.count)
         return out
+    }
+
+    /// The line that stands for a folded turn, or an entry holding its place while it does not.
+    ///
+    /// **The session is in the key, and it is load bearing for the reason the streaming tail's
+    /// is.** The height cache survives a workspace switch and every other entry is keyed by a row
+    /// id, which is unique across sessions; a run's first sequence number is not, so without this
+    /// the next conversation's fold would be handed the last one's height.
+    ///
+    /// Handed the run's first sequence number rather than the run, because the closure below
+    /// outlives this pass and a `Run` carries the array of its calls with it: one entry per run in
+    /// the session, each holding a session's worth of nothing anybody reads.
+    private func foldEntry(
+        firstSeq: Int,
+        hiding: Int,
+        showsMore: Bool,
+        isFolded: Bool,
+        shows: Bool,
+        session: SessionID
+    ) -> TranscriptTableEntry {
+        TranscriptTableEntry(
+            id: .fold(firstSeq),
+            contentKey: TranscriptContentKey {
+                $0.combine("fold")
+                $0.combine(session)
+                $0.combine(firstSeq)
+                $0.combine(hiding)
+                $0.combine(showsMore)
+                $0.combine(isFolded)
+                $0.combine(shows)
+            },
+            // Not a guess. This entry draws nothing because it has been told to draw nothing, so
+            // the table can give it no view at all rather than build one to find out. See
+            // `TranscriptRowInk`, which is the estimate this is the certain version of.
+            drawsNothing: !shows,
+            content: {
+                guard shows else { return AnyView(EmptyView()) }
+                return AnyView(
+                    TranscriptFoldRowView(
+                        hiddenCount: hiding,
+                        showsMore: showsMore,
+                        isExpanded: !isFolded,
+                        onToggle: { toggleFold(firstSeq) }
+                    )
+                    // The same two insets every row in this list carries: one here, and one inside
+                    // `transcriptRowFrame`. A fold's line drawn with only the inner one would sit
+                    // a gutter to the left of the run it stands for.
+                    .padding(.horizontal, TranscriptLayout.inset)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                )
+            }
+        )
     }
 
     // MARK: - Body
@@ -557,14 +870,19 @@ struct TranscriptListView: View {
             scale: fontScale,
             rowEnvironment: rowEnvironment,
             onGeometryChange: { measured($0) },
-            onSettled: { remember() },
+            onSettled: {
+                remember()
+                scheduleHistoryPreparation()
+            },
             onLiveScrollChange: { hasHold in
                 // **A hand on the wheel outranks anything this view asked for.** The follower is
                 // paused rather than stopped, and for the momentum too: a flick that lands near
                 // the live end is still the reader's own movement, and something pulling the last
                 // few points out from under it is the same interruption a drag would be.
                 follower.isPaused = hasHold
+                isLiveScrolling.value = hasHold
                 guard hasHold else { return }
+                isGrowing.value = false
                 // A card that stayed up while the content moved under it would be pointing at a
                 // chip that is no longer there.
                 hoverHost.request = nil
@@ -573,6 +891,16 @@ struct TranscriptListView: View {
                 scroller.stop()
             }
         )
+        .overlay(alignment: .top) {
+            if let pinnedQuestion {
+                PinnedQuestionView(
+                    question: pinnedQuestion,
+                    onOpen: { showPinnedQuestion(pinnedQuestion) }
+                )
+                .transition(.opacity)
+            }
+        }
+        .animation(reduceMotion ? nil : Motion.hover, value: pinnedQuestion?.seq)
         .overlay { TranscriptHoverOverlay(host: hoverHost) }
         .overlay {
             if showsPlaceholder {
@@ -582,21 +910,54 @@ struct TranscriptListView: View {
         // The case the whole of `TranscriptResume` is about: a tab switch destroys this view, and
         // a reader who arrived, read what was on screen and moved on has scrolled nothing for the
         // settle to fire on.
-        .onDisappear { remember() }
+        .onAppear { isVisible.value = true }
+        .onDisappear {
+            remember()
+            isVisible.value = false
+            isGrowing.value = false
+        }
         .onChange(of: transcript.rows.count, initial: true) { _, _ in
+            questionIndex.value.update(
+                session: transcript.session.id, rows: transcript.rows
+            )
+            updatePinnedQuestion()
             position()
             // A row arriving is another chance to notice that the window stops short of it.
             growWindowDown()
             trackArrivals()
+            // **The runs are refreshed HERE, one pass behind the row that changed them, and that
+            // is the whole reason folding costs no reload.** The pass above has already drawn the
+            // new row, so it was one insertion; this writes state, so the fold it causes is one
+            // removal on a pass of its own. Computed inside `entries` instead, a run closing would
+            // put its closing row in and take four rows out at once, which
+            // `TranscriptEntryChange` can only call `.rebuilt`.
+            //
+            // Guarded, because `@State` does not compare before it invalidates and most row
+            // arrivals leave the runs exactly as they were.
+            let rescanned = Self.rescan(transcript.rows, extending: folds)
+            if rescanned != folds { folds = rescanned }
+            // An open live turn is useful while the reader is inspecting it. Once they are back at
+            // the live end and more work arrives, it is a growing log again: keep the newest item
+            // visible and return everything completed above it to the compact count.
+            if atLiveEnd.value {
+                let refolded = TranscriptFold.refoldedAtLiveEnd(unfolded, in: rescanned)
+                if refolded != unfolded { unfolded = refolded }
+            }
             // A row has landed, so the end of the content has moved. Between rows the tail grows
             // without any of this being told, which is what `isStreaming` below is for.
             follower.nudge()
         }
-        // The things that decide whether the follower may move anything, said out loud rather than
-        // read from a body: it writes no state and reads none, so nothing else would tell it.
-        .onChange(of: transcript.isStreaming, initial: true) { _, streaming in
-            follower.isStreaming = streaming
+        // Whether an answer is arriving, which is the one input the follower needs that moves
+        // while a turn runs. In a child rather than in an `onChange` here: the value expression of
+        // an `onChange` is evaluated inside the body it is written on, so this one made the list's
+        // whole `entries` pass a cost of the stream. See `TranscriptStreamingSignal`.
+        .background {
+            TranscriptStreamingSignal(transcript: transcript) { follower.isStreaming = $0 }
         }
+        // The rest of what decides whether the follower may move anything, said out loud rather
+        // than read from a body: it writes no state and reads none, so nothing else would tell it.
+        // Both of these move when a person changes something about the window, which is not a
+        // thing that happens while an answer arrives.
         .onChange(of: activeState, initial: true) { _, state in
             follower.isFrontmost = state != .inactive
         }
@@ -619,10 +980,19 @@ struct TranscriptListView: View {
             follower.stop()
             controller.releaseEnd()
             didPosition = false
+            isLiveScrolling.value = false
             opening = nil
+            pinnedQuestion = nil
+            questionIndex.value.update(
+                session: transcript.session.id, rows: transcript.rows
+            )
             // The folds of the session being arrived at, which are its own and are usually none.
             let remembered = memory?.remembered(session: transcript.session.id)
             expanded = remembered?.expanded ?? []
+            unfolded = remembered?.unfolded ?? []
+            // From nothing rather than extended: the rows below this pane have been replaced
+            // wholesale, so there is no tail of the last conversation worth keeping.
+            folds = Self.rescan(transcript.rows, extending: .none)
             // A session opens at its live end whatever the one being left was scrolled to, and the
             // anchor is read before the new rows arrive.
             geometry.isNearBottom = true
@@ -641,7 +1011,8 @@ struct TranscriptListView: View {
             writingTo = memory.map { WriteTarget(memory: $0, session: transcript.session.id) }
             resumed = TranscriptResume.isResuming(remembered) ? transcript.session.id : nil
             isGrowing.value = false
-            topSeq.value = 0
+            topPlace.value = nil
+            atLiveEnd.value = true
             // Nothing in the session being arrived at counts as having arrived. Cleared here as
             // well as set in `task`, because leaving a session before it had settled and coming
             // straight back must not find its own id still recorded and settle its whole tail.
@@ -659,7 +1030,7 @@ struct TranscriptListView: View {
             // The controller rather than this view, for the reason the lazy stack captured a
             // `State` box rather than `self`: the view holds the follower, the follower would hold
             // the closure, and a pane torn down mid turn would leave both of them behind.
-            follower.onStart = { [controller] _ in controller.followerTookOver() }
+            follower.onStart = { [controller] in controller.followerTookOver() }
             follower.onStop = { [controller] in controller.followerHandedBack() }
             follower.onRest = { [controller] in controller.goToEnd() }
             await transcript.load()
@@ -710,6 +1081,7 @@ struct TranscriptListView: View {
             // 163ms to 169ms main thread block on every return.
             guard resumed != transcript.session.id else {
                 arrivalSession = transcript.session.id
+                scheduleHistoryPreparation()
                 SwitchTrace.mark("transcript.window", workspace: transcript.workspace?.id)
                 SwitchTrace.markOnScreen("transcript.window", workspace: transcript.workspace?.id)
                 return
@@ -745,6 +1117,7 @@ struct TranscriptListView: View {
             // The session has finished arriving, so from here on a row that turns up is a row the
             // reader is watching turn up. The history that just landed is not one of them.
             arrivalSession = transcript.session.id
+            scheduleHistoryPreparation()
             SwitchTrace.mark("transcript.history", workspace: transcript.workspace?.id)
             SwitchTrace.markOnScreen("transcript.history", workspace: transcript.workspace?.id)
         }
@@ -798,7 +1171,9 @@ struct TranscriptListView: View {
             offset: table.offset
         )
         contentOffset.value = table.offset
-        if let seq = controller.topmostEntry?.seq { topSeq.value = seq }
+        if let place = controller.topmostPlace { topPlace.value = place }
+        updatePinnedQuestion()
+        atLiveEnd.value = table.isAtEnd || controller.holdsEnd || follower.isFollowing
 
         var measured = TranscriptGeometry(
             paneHeight: TranscriptGeometry.height(table.viewportHeight),
@@ -826,6 +1201,11 @@ struct TranscriptListView: View {
            drawn.window.canGrowDown(rowCount: transcript.rows.count) {
             measured.isNearBottom = false
             measured.isFarFromEnd = true
+            // And the same correction to what is written down: a pane whose window stops short of
+            // the newest row is at the end of what is drawn rather than at the end of the
+            // conversation, and coming back to "the live end" from that is coming back somewhere
+            // else.
+            atLiveEnd.value = false
         }
         // Written only on a change, because this runs on every frame of every scroll and each
         // write is a pass over this body. The report to the composer goes with it: one per frame
@@ -951,6 +1331,61 @@ struct TranscriptListView: View {
         }
     }
 
+    /// Returns to the full user bubble represented by the compact header.
+    private func showPinnedQuestion(_ question: PinnedQuestion) {
+        let rows = transcript.rows
+        guard let index = TranscriptWindow.index(
+            ofSeqAtOrAfter: question.seq, in: rows.lazy.map(\.seq)
+        ) else { return }
+
+        scroller.stop()
+        follower.stop()
+        controller.releaseEnd()
+
+        if drawn.session != transcript.session.id
+            || index < drawn.window.start
+            || index >= drawn.window.end {
+            let tailStart = drawn.session == transcript.session.id ? drawn.window.start : rows.count
+            drawn = Drawn(
+                session: transcript.session.id,
+                window: TranscriptWindow.opening(
+                    rowCount: rows.count, tailStart: tailStart, mustReach: index
+                )
+            )
+            TranscriptDrawn.note(drawn.window.count)
+        }
+
+        Task { @MainActor in
+            await Task.yield()
+            // Leave the row just inside the viewport instead of aiming its edge at the overlay's
+            // edge. That makes the real bubble visible, and because its top has no longer passed
+            // the viewport the compact navigation surface fades away.
+            controller.scroll(
+                to: .row(question.seq),
+                delta: PinnedQuestionView.height + Metrics.spacingWide
+            )
+        }
+    }
+
+    /// Updates the compact header only when the reader crosses a user-turn boundary. The geometry
+    /// callback reaches this every frame, but the binary lookup and one equality check do not make
+    /// scrolling invalidate the transcript.
+    private func updatePinnedQuestion() {
+        guard let place = controller.topmostPlace,
+              let question = questionIndex.value.latest(atOrBefore: place.seq)
+        else {
+            if pinnedQuestion != nil { pinnedQuestion = nil }
+            return
+        }
+
+        // A long user turn can fill most of the pane after its top has scrolled away. Pinning a
+        // summary while that real bubble is still visible duplicates the loudest thing on screen.
+        // The navigation surface starts only after the row's bottom has left the viewport.
+        let isGone = controller.isAboveViewport(.row(question.seq)) ?? (question.seq < place.seq)
+        let next = isGone ? question : nil
+        if pinnedQuestion != next { pinnedQuestion = next }
+    }
+
     /// Where a session opens: on the first thing the reader has not read, which is the whole point
     /// of leaving a session and coming back to it, and otherwise on its live end.
     private func position() {
@@ -974,11 +1409,13 @@ struct TranscriptListView: View {
             opening = .liveEnd
         case .offset(let y):
             opening = .offset(y)
-        case .row(let seq):
-            // At the top of the pane, which is where it was: the anchor IS the row the reader had
-            // at the top. Not centred, which is what a search result gets, because a search result
-            // is a row somebody is being shown rather than a place somebody is being put back.
-            opening = .row(seq, .top)
+        case .row(let seq, let delta):
+            // The row the reader had at the top of the pane, put back where it was rather than at
+            // the top of the pane: an answer two thousand points tall read half way down is a
+            // place, and `.top` on its row is that answer's first line. Not centred either, which
+            // is what a search result gets, because a search result is a row somebody is being
+            // shown rather than a place somebody is being put back.
+            opening = .rowOffset(seq, delta)
         case .first:
             // A search result outranks both of the others. Somebody who clicked a line of a
             // transcript in the search screen asked for that line. Centred rather than at the top,
@@ -1009,6 +1446,8 @@ struct TranscriptListView: View {
         switch opening {
         case .row(let seq, let anchor):
             controller.scroll(to: .row(seq), anchor: anchor)
+        case .rowOffset(let seq, let delta):
+            controller.scroll(to: .row(seq), delta: CGFloat(delta))
         case .liveEnd:
             controller.goToEnd()
         case .offset(let y):
@@ -1027,21 +1466,49 @@ struct TranscriptListView: View {
     /// dropped: a reader who arrives, reads what is on screen and switches tab has scrolled
     /// nothing and folded nothing, and is exactly the case this whole file is about.
     private func remember() {
-        // Nothing is written down about a pane that has not drawn anything yet, or has not been
-        // laid out yet. The height is what says a layout has happened, and it is checked HERE
-        // rather than where the memory is read, because nought is a real place to a reader who is
-        // at the top of a conversation.
-        guard let target = writingTo, drawn.window.count > 0, geometry.paneHeight > 0 else { return }
+        // What may be written down at all, including the arrival guard its two neighbours here
+        // already had. It is a rule rather than a line of this method because it was the bug: see
+        // `TranscriptResume.mayRemember`.
+        guard let target = writingTo,
+              TranscriptResume.mayRemember(
+                  arrived: arrivalSession,
+                  writingTo: target.session,
+                  drawnRows: drawn.window.count,
+                  paneHeight: geometry.paneHeight
+              )
+        else { return }
+        let place = topPlace.value
+        let rowCount = transcript.rows.count
+        let rememberedWindow: TranscriptWindow
+        if atLiveEnd.value {
+            rememberedWindow = .liveEnd(rowCount: rowCount)
+        } else if let seq = place?.seq,
+                  let index = TranscriptWindow.index(
+                      ofSeqAtOrAfter: seq, in: transcript.rows.lazy.map(\.seq)
+                  ) {
+            rememberedWindow = .opening(
+                rowCount: rowCount,
+                tailStart: max(0, rowCount - TranscriptWindow.settled),
+                mustReach: index
+            )
+        } else {
+            rememberedWindow = drawn.window
+        }
         target.memory.remember(
             TranscriptPaneState(
                 expanded: expanded,
+                unfolded: unfolded,
                 offset: contentOffset.value,
-                // The row at the top of the pane, which is the place; the offset above is what
-                // answers when there is no row to name.
-                anchorSeq: topSeq.value > 0 ? topSeq.value : nil,
-                isAtLiveEnd: geometry.isNearBottom,
-                rowCount: transcript.rows.count,
-                drawn: drawn.window
+                // The row at the top of the pane and how far into it the reader was, which is the
+                // place; the offset above is what answers when there is no row to name.
+                anchorSeq: place?.seq,
+                anchorDelta: Double(place?.delta ?? 0),
+                isAtLiveEnd: atLiveEnd.value,
+                rowCount: rowCount,
+                // Idle preparation may have filled the whole table. Remember only the reader's
+                // neighbourhood so returning from another tab does not rebuild thousands of
+                // entries before the pane can appear.
+                drawn: rememberedWindow
             ),
             session: target.session
         )
@@ -1095,6 +1562,51 @@ struct TranscriptListView: View {
         }
     }
 
+    /// Hands the table another chunk before the reader reaches it.
+    ///
+    /// `onSettled` only arrives after the clip view has been quiet for 150ms and after a live
+    /// gesture has ended. Growing here therefore pays the entry diff, row insertion and initial
+    /// height estimates while nobody is waiting on a scroll frame. Long conversations fill one
+    /// bounded chunk at a time until the table knows all of their rows.
+    ///
+    /// `growWindow` above stays as the fallback for a reader who starts moving before this idle
+    /// preparation has reached the beginning. It should become rare rather than becoming a hard
+    /// stop at the top of the prepared history.
+    private func prepareHistoryWhileIdle() {
+        guard drawn.session == transcript.session.id,
+              isVisible.value,
+              !isGrowing.value,
+              !isLiveScrolling.value,
+              arrivalSession == transcript.session.id,
+              drawn.window.canGrowUp
+        else { return }
+        isGrowing.value = true
+        Task { @MainActor in
+            // `onSettled` comes from an NSTableView delegate callback. Leave that callback before
+            // changing the table's rows, or AppKit correctly diagnoses a reentrant delegate pass.
+            await Task.yield()
+            while isGrowing.value,
+                  isVisible.value,
+                  arrivalSession == transcript.session.id,
+                  drawn.session == transcript.session.id,
+                  let prepared = drawn.window.preparedHistory(afterArrival: true) {
+                drawn.window = prepared
+                TranscriptDrawn.note(prepared.count)
+                try? await Task.sleep(for: .milliseconds(180))
+            }
+            isGrowing.value = false
+        }
+    }
+
+    /// Gives the arrival's own positioning and geometry callbacks time to finish first. One of
+    /// those callbacks may perform the ordinary near-top growth and hold `isGrowing` briefly.
+    private func scheduleHistoryPreparation() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            prepareHistoryWhileIdle()
+        }
+    }
+
     // MARK: - Arrivals
 
     /// Takes the list in and works out what is new about it, unless the session is still arriving.
@@ -1110,6 +1622,26 @@ struct TranscriptListView: View {
             return
         }
         arrivals.absorb(seqs)
+    }
+
+    /// A turn's working opened, or shut again.
+    ///
+    /// A group opening adds rows and closing removes them. Tell the table this is a reader-driven
+    /// change so it can cross-fade those rows without applying that effect to live arrivals.
+    private func toggleFold(_ firstSeq: Int) {
+        // A disclosure click is the reader taking the view. Stop any live-end travel first, then
+        // hold the clicked fold line in place while its children enter or leave below it.
+        scroller.stop()
+        follower.stop()
+        controller.willChangeFoldRows(.fold(firstSeq))
+        if unfolded.contains(firstSeq) {
+            unfolded.remove(firstSeq)
+        } else {
+            unfolded.insert(firstSeq)
+        }
+        // Written down at once, for the reason `toggle` gives: opening a run to read it and
+        // switching tab to look at what it did is one gesture.
+        remember()
     }
 
     private func toggle(_ seq: Int) {

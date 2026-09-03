@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import BloomCore
 
-/// The choice the create sheet draws as two tabs, as `workspace_start` takes it: cut a new branch
+/// The choice the create window draws as two tabs, as `workspace_start` takes it: cut a new branch
 /// from one, or carry on one that already exists.
 ///
 /// Everything here is the pure half, which is where the decisions are. What the tool does with
@@ -26,6 +26,11 @@ struct AgentStartSourceTests {
         #expect(
             AgentStartRequest.read(baseBranch: nil, existingBranch: "freek/figma")
                 == .existingBranch("freek/figma")
+        )
+        #expect(
+            AgentStartRequest.read(
+                baseBranch: nil, existingBranch: nil, pullRequest: "#66"
+            ) == .pullRequest("#66")
         )
     }
 
@@ -157,7 +162,7 @@ struct AgentStartSourceTests {
     }
 
     /// The point of the whole thing: what reaches `WorkspaceManager` is the same `WorkspaceCheckout`
-    /// the create sheet hands it, so the worktree lands on the branch rather than beside it.
+    /// the create window hands it, so the worktree lands on the branch rather than beside it.
     @Test("an existing branch carries a checkout and no base")
     func existingBranchSource() {
         let branch = ExistingBranch(name: "freek/figma", isLocal: true)
@@ -167,6 +172,22 @@ struct AgentStartSourceTests {
         #expect(source.baseBranch == nil)
         #expect(source.namedBranch == "freek/figma")
         #expect(source.checkout == .branch(branch))
+    }
+
+    @Test("a pull request carries its checkout and base")
+    func pullRequestSource() {
+        let request = PullRequestListing(
+            number: 66,
+            title: "Add name suffix",
+            headRefName: "name-suffix",
+            baseRefName: "main"
+        )
+        let source = AgentStartSource.pullRequest(request)
+
+        #expect(source.tab == .existingBranch)
+        #expect(source.baseBranch == nil)
+        #expect(source.namedBranch == "name-suffix")
+        #expect(source.checkout == .pullRequest(request))
     }
 
     // MARK: The spawn digest

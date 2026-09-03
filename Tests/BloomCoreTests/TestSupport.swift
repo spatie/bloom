@@ -19,6 +19,50 @@ extension Tag {
     @Tag static var persistence: Self
 }
 
+// MARK: - Per-process scratch directory
+
+/// The one directory a test run owns, removed when the process exits.
+///
+/// **Everything a test writes has to end up under here, and this is the second half of a bug the
+/// per-test directory below only half closed.** That one removes what a test wrote when the test
+/// ends, and it works; what it cannot cover is the two things that deliberately outlive a single
+/// test: the fallback for a suite that forgot the trait, and the built repository templates,
+/// which are shared by every test in the process. Nothing removed either, so each run of the
+/// suite left them behind, and a machine that runs this suite all day was found with **9,468
+/// `bloom-unscoped-` directories and 219 template roots** in its temporary directory. That is a
+/// leak per run, not a leak per test, which is why it went unnoticed for so long: it is invisible
+/// until somebody counts, and by then it is 300,000 files.
+///
+/// Named by process id and swept at exit through `atexit`, which takes a C function and therefore
+/// captures nothing: the path is derived again inside the handler from the same two pieces it was
+/// built from. A run killed with SIGKILL still leaves its directory, which is what
+/// `Tools/test-core.sh` sweeps on its way in.
+enum TestProcessScratch {
+    /// The root, created once.
+    static let root: String = {
+        let path = Self.path(pid: getpid())
+        try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        atexit {
+            // No capture: a C function pointer cannot have one, and this needs none.
+            try? FileManager.default.removeItem(atPath: TestProcessScratch.path(pid: getpid()))
+        }
+        return path
+    }()
+
+    /// A directory inside it, with a name of its own.
+    static func directory(_ prefix: String) -> String {
+        let path = (root as NSString).appendingPathComponent("\(prefix)-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        return path
+    }
+
+    /// Where a run of this process id keeps its scratch. `Tools/test-core.sh` knows this shape,
+    /// so the prefix is worth keeping stable.
+    static func path(pid: pid_t) -> String {
+        NSTemporaryDirectory() + "bloom-test-run-\(pid)"
+    }
+}
+
 // MARK: - Per-test scratch directory
 
 /// The directory the running test owns.
@@ -33,11 +77,10 @@ enum TestScratch {
     /// A path inside the running test's directory. Falls back to a fresh unique directory so a
     /// test that forgot the trait still cannot collide with a parallel one.
     static func path(_ name: String) -> String {
-        let root = directory ?? {
-            let fallback = NSTemporaryDirectory() + "bloom-unscoped-\(UUID().uuidString)"
-            try? FileManager.default.createDirectory(atPath: fallback, withIntermediateDirectories: true)
-            return fallback
-        }()
+        // Under the process's own root, so a test that forgot the trait costs a directory for the
+        // length of the run rather than one left on the machine for ever. See
+        // `TestProcessScratch`.
+        let root = directory ?? TestProcessScratch.directory("unscoped")
         return (root as NSString).appendingPathComponent(name)
     }
 
@@ -62,7 +105,9 @@ actor RepoTemplate {
     /// no suspension between the look and the write, so every caller after the first waits on the
     /// same build. `AgentCatalog` shares a detection the same way and for the same reason.
     private var building: [String: Task<String, Error>] = [:]
-    private let root = NSTemporaryDirectory() + "bloom-repo-templates-\(UUID().uuidString)"
+    /// Outside every test's scratch directory, since those are deleted per test and this outlives
+    /// all of them, and inside the process's, which is deleted when the run ends.
+    private let root = TestProcessScratch.directory("repo-templates")
 
     func path(defaultBranch: String) async throws -> String {
         if let inFlight = building[defaultBranch] { return try await inFlight.value }
@@ -122,7 +167,8 @@ struct ScratchDirectoryTrait: TestTrait, SuiteTrait, TestScoping {
             return
         }
 
-        let root = NSTemporaryDirectory() + "bloom-scratch-\(UUID().uuidString)"
+        let root = (TestProcessScratch.root as NSString)
+            .appendingPathComponent("scratch-\(UUID().uuidString)")
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
 
         do {

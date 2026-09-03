@@ -11,6 +11,15 @@ import BloomCore
 /// which is what has been happening. Grouping by time answers that instead. Each heading carries
 /// its own count, so "yesterday, 48" is readable before a single row is.
 ///
+/// **The Archived chip is also where storage lives, and it used to be a pane in Settings.** That
+/// pane listed every archived workspace with its project, its branch, its age and its size, over a
+/// list this screen was already drawing with the project, the branch and the age on it: the same
+/// objects twice, with one extra column and a different sort. What crossed over is the column, an
+/// order to put it in, and the two totals, which are in the status bar because that is where facts
+/// about the whole of the list already live. What did not cross is written down where it was
+/// dropped: the share bar and the counts in `ArchivedWorkspaceFootprint.contents`, the
+/// multi-selection in `ArchiveCleanup`.
+///
 /// **What is computed where.** The filtering, the recency sort and the date buckets are a pass
 /// over every workspace on the machine, so they live in `HomeList` and run when their inputs
 /// change, never inside a `body`. What each row cannot cache is its own state: whether an agent
@@ -56,6 +65,22 @@ struct HomeView: View {
     /// The id of the row being renamed in place, shared across the whole list so only one field
     /// can ever be open. The same arrangement the sidebar's rows use.
     @State private var renaming: WorkspaceID?
+    /// The deletion waiting to be confirmed, held by the list rather than by the menu, because a
+    /// menu is gone by the time the sheet would appear.
+    @State private var deleting: ArchiveDeletion?
+
+    /// What each archived record still holds, measured, and only while the Archived chip is lit.
+    /// See `loadFootprints` for why it is not simply always loaded.
+    @State private var footprints = ArchiveCleanup(footprints: [])
+    /// How big the database file is, loaded beside the footprints and reported by the status bar.
+    @State private var databaseSize: DatabaseSize?
+    /// Which `archivedRevision` the two above were measured at, so flicking between All and
+    /// Archived does not re-run a database read and a `git for-each-ref` per project for an
+    /// answer that cannot have changed.
+    @State private var measuredRevision: Int?
+    /// Whether a `VACUUM` is running. It is seconds of the store actor answering nothing, so the
+    /// button says so rather than looking like it did not take the click.
+    @State private var isCompacting = false
 
     /// Which rows have just been added to the list, so they can fade in rather than appear. The
     /// same tracker and the same rules as the sidebar's, which is what stops one workspace
@@ -94,7 +119,7 @@ struct HomeView: View {
             // The counts, at the foot of the pane rather than at the trailing end of the strip,
             // beside the rows they are about. See `HomeStatusBar`.
             if hasAnyWorkspace, !summary.isEmpty {
-                HomeStatusBar(summary: summary)
+                HomeStatusBar(summary: summary, compaction: compaction)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -117,8 +142,24 @@ struct HomeView: View {
         // seconds by the diff stat refresh while this is a database read. `AppModel` bumps the
         // revision from the archive and the restore themselves, so this reloads when the answer
         // changed and at no other time.
-        .task(id: app.archivedRevision) { archived = await app.archivedWorkspaces() }
+        .task(id: app.archivedRevision) {
+            archived = await app.archivedWorkspaces()
+            await loadFootprints()
+        }
         .task { await keepAgesCurrent() }
+        // The one irreversible act in the app, so it counts what would go rather than asking "are
+        // you sure" over an unnamed quantity.
+        .confirmation($deleting) { deletion in
+            Confirmation(
+                title: deletion.title,
+                message: deletion.message,
+                confirmLabel: deletion.confirmLabel,
+                cancelLabel: deletion.cancelLabel,
+                tone: .destructive
+            )
+        } onConfirm: { deletion in
+            Task { await delete(deletion) }
+        }
         .onChange(of: app.workspaces, initial: true) { _, _ in rebuild() }
         .onChange(of: app.repos) { _, _ in rebuild() }
         .onChange(of: archived) { _, _ in rebuild() }
@@ -132,6 +173,9 @@ struct HomeView: View {
         // the same way the sidebar's filter does. See `RowArrival`.
         .onChange(of: app.homeFilter) { old, new in
             rebuild(rescoped: true)
+            // The Archived chip is the only one that draws sizes, so it is the only one that pays
+            // for measuring them. See `loadFootprints`.
+            if old.scope != new.scope { Task { await loadFootprints() } }
             // Only when the QUERY moved. Clicking a chip or a project rebuilds the list out of
             // results already in memory, and re-running an FTS5 match and a join for it would put
             // a database query behind a filter that changes nothing about what matched.
@@ -209,13 +253,11 @@ struct HomeView: View {
                             )
                         )
                         .contextMenu {
-                            HomeRowMenu(row: row) { renaming = $0 }
+                            HomeRowMenu(row: row, onRename: { renaming = $0 }, onDelete: askToDelete)
                         }
                     }
                 }
             }
-
-            recentArchive
 
             transcriptResults
         }
@@ -244,73 +286,22 @@ struct HomeView: View {
             return .handled
         }
         // Delete on the highlighted row, which is what Mail does with the same key and what this
-        // list answered with nothing at all. Live rows only: an archived row's worktree has
-        // already gone, and destroying its record is Settings > Storage's own gesture, behind a
-        // confirmation, because there is no undo for that one.
+        // list answered with nothing at all.
+        //
+        // **It means two different things on the two kinds of row, and that is the state each row
+        // is in rather than an overload.** A live workspace has a worktree, and the way to be done
+        // with it is to archive it, which is reversible and which `archive` asks about when there
+        // is anything to lose. An archived one has already been through that; the only thing left
+        // to destroy is the record, and there is no undo for it, so the key raises the same
+        // confirmation the row's own menu does and destroys nothing on its own. That second half
+        // used to be Settings > Storage's gesture, in another window, which is the pane this list
+        // has absorbed.
         .onDeleteCommand {
-            guard let selected, let row = row(for: selected), !row.isArchived else { return }
-            Task { await app.archive(row.workspace) }
-        }
-    }
-
-    /// The finished work under the live list: the most recent few, and a way through to the rest.
-    ///
-    /// **This is what makes defaulting to Live honest.** The archive is not behind a chip nobody
-    /// clicks, it is on the page, demoted: a quieter heading saying how many of how many, the same
-    /// rows the list draws anywhere else, and a plain row at the foot that moves the chip to
-    /// Archived. What it is not is the page, which is what it was when Home opened on All and
-    /// seventeen of twenty rows were over. Which rows and how many is `HomeList.tail`.
-    ///
-    /// These rows are real list rows, so the arrow keys walk into them and Return opens one, the
-    /// same as any other archived row on this screen. The "show the rest" row is not: it is a
-    /// control rather than a workspace, and giving the selection somewhere to land that is not a
-    /// workspace would break the one keyboard model the whole pane runs on.
-    @ViewBuilder
-    private var recentArchive: some View {
-        if !listing.tail.isEmpty {
-            Section {
-                HomeGroupHeading(title: "Recently archived", isSecondary: true)
-                    .listRowInsets(Self.rowInsets)
-                    .listRowBackground(Color.clear)
-                    .selectionDisabled()
-
-                ForEach(listing.tail) { row in
-                    HomeListRow(
-                        row: row,
-                        isRunning: false,
-                        now: now,
-                        isRenaming: false,
-                        onCommitRename: { _ in },
-                        onCancelRename: {}
-                    )
-                    .arrivingRow(arrival.isArriving(row.id))
-                    .tag(row.id)
-                    .simultaneousGesture(TapGesture().onEnded { open(row) })
-                    .listRowInsets(Self.rowInsets)
-                    .onHoverChange { hovered = $0 ? row.id : (hovered == row.id ? nil : hovered) }
-                    .listRowBackground(
-                        HomeRowBackground(
-                            isSelected: selected == row.id,
-                            isHovered: hovered == row.id
-                        )
-                    )
-                    .contextMenu {
-                        HomeRowMenu(row: row) { renaming = $0 }
-                    }
-                }
-
-                // Bloom's accent rather than `.link`, which is the system's and is blue glass on a
-                // Mac set to Graphite. The same note is on every prominent button in the app.
-                Button("Show all \(ArchiveDeletion.count(listing.tailTotal, "archived workspace"))") {
-                    app.homeFilter.scope = .archived
-                }
-                .buttonStyle(.plain)
-                .font(Typo.caption)
-                .foregroundStyle(Palette.accent)
-                .padding(.vertical, Metrics.spacingSmall)
-                .listRowInsets(Self.rowInsets)
-                .listRowBackground(Color.clear)
-                .selectionDisabled()
+            guard let selected, let row = row(for: selected) else { return }
+            if row.isArchived {
+                askToDelete(row.workspace)
+            } else {
+                Task { await app.archive(row.workspace) }
             }
         }
     }
@@ -378,7 +369,23 @@ struct HomeView: View {
     /// branches can be asked about: this was four pieces of view state picking between sentences,
     /// and one of those sentences had already been wrong once.
     private var summary: String {
-        HomeList.summary(listing: listing, filter: filter, projects: app.repos.count)
+        HomeList.summary(
+            listing: listing,
+            filter: filter,
+            projects: app.repos.count,
+            database: databaseSize
+        )
+    }
+
+    /// The compaction offer, which is nil almost always: it needs the Archived chip lit, a
+    /// measurement taken, and enough unused space in the file for the wait to be worth it.
+    private var compaction: HomeStatusBar.Compaction? {
+        guard filter.scope.showsFootprints, let size = databaseSize, size.isWorthCompacting else {
+            return nil
+        }
+        return HomeStatusBar.Compaction(help: size.compactionHelp, isRunning: isCompacting) {
+            Task { await compact() }
+        }
     }
 
     private var hasAnyWorkspace: Bool {
@@ -435,21 +442,16 @@ struct HomeView: View {
     private func action(for state: HomeEmptyState) -> some View {
         switch state {
         case .noProjects:
-            // The only state with two ways out, because it is the only one where the reader might
-            // have nothing on disk yet. The prominent half is the half that needs no folder.
-            Button(state.actionTitle, systemImage: "plus", action: newProject)
+            // One button, where this state used to be the only one with two. The second went to a
+            // file panel, and pointing at a folder is what the sheet's own Choose does now.
+            Button(state.actionTitle, systemImage: "plus", action: startProject)
                 .buttonStyle(.borderedProminent)
-                // Tinted explicitly, like every other prominent button in the app: untinted it
-                // follows the system accent, which on a Mac set to Graphite is grey glass. See
-                // `EmptyStateView`, which says the same over the same button.
-                .tint(Palette.accentFill)
-            if let second = state.secondaryActionTitle {
-                Button(second, systemImage: "folder", action: addProject)
-            }
+                // Explicit so every primary action reads from the shared semantic token.
+                .tint(Palette.controlAccent)
         case .noWorkspaces:
             Button(state.actionTitle, systemImage: "plus") { requestWorkspace(in: nil) }
                 .buttonStyle(.borderedProminent)
-                .tint(Palette.accentFill)
+                .tint(Palette.controlAccent)
         case .noMatch:
             Button(state.actionTitle) { app.homeFilter.query = "" }
         case .noneInChosenProjects:
@@ -484,6 +486,7 @@ struct HomeView: View {
             activity: HomeActivity(
                 running: app.runningWorkspaceIDs, waiting: app.waitingWorkspaceIDs
             ),
+            footprints: footprints,
             now: stamp
         )
         // Every row in the list, flattened out of its date heading. Which heading a row is filed
@@ -495,12 +498,35 @@ struct HomeView: View {
         // In the same breath as `listing` rather than from an `onChange` watching it, so a row
         // and the fact that it is new land in one update and the row's first drawn frame is the
         // faded one.
-        let ids = listing.groups.flatMap { $0.rows.map(\.id) } + listing.tail.map(\.id)
+        let ids = listing.groups.flatMap { $0.rows.map(\.id) }
         if rescoped {
             arrival.adopt(ids)
         } else {
             arrival.absorb(ids)
         }
+    }
+
+    /// Measures what the archived records hold, and how big the file holding them is.
+    ///
+    /// **Only while the Archived chip is lit, and only once per change to the archive.** Both
+    /// halves matter. `archiveCleanup` is six aggregate queries over the whole database plus one
+    /// `git for-each-ref` per project, and Home is the screen the app opens with: paying that at
+    /// launch, in every window, to fill a column that two of the chips do not draw is the kind of
+    /// cost that never shows up in a profile and is always there. And `archivedRevision` moves
+    /// only when something is archived, restored or deleted, so somebody flicking between All and
+    /// Archived measures the database once rather than once a click.
+    ///
+    /// The revision is read before the awaits and stored after them. If the archive changed while
+    /// this was running, what is stored is the revision this answer is actually about, so the
+    /// guard fails next time and the measurement is taken again.
+    private func loadFootprints() async {
+        guard filter.scope.showsFootprints else { return }
+        let revision = app.archivedRevision
+        guard measuredRevision != revision else { return }
+        footprints = await app.archiveCleanup()
+        databaseSize = await app.databaseSize()
+        measuredRevision = revision
+        rebuild()
     }
 
     /// Keeps "3h" from sitting at "3h" all afternoon.
@@ -516,13 +542,14 @@ struct HomeView: View {
         }
     }
 
-    /// The tail is searched too, because those rows are selectable: without it, arrowing into the
-    /// recent archive left Return doing nothing and greyed out every item in the Workspace menu.
+    /// Every group is walked, because the arrow keys walk the whole list: a row the selection can
+    /// land on and this cannot find leaves Return doing nothing and greys out every item in the
+    /// Workspace menu.
     private func row(for id: WorkspaceID) -> HomeRow? {
         for group in listing.groups {
             if let match = group.rows.first(where: { $0.id == id }) { return match }
         }
-        return listing.tail.first { $0.id == id }
+        return nil
     }
 
     /// The highlighted row, offered to the menu bar. It carries the workspace itself because an
@@ -534,6 +561,54 @@ struct HomeView: View {
     }
 
     // MARK: - Actions
+
+    /// Raises the confirmation for one archived workspace.
+    ///
+    /// Through `archiveCleanup`, which loads every archived footprint, rather than a query for
+    /// this one. That is a database read and a `for-each-ref` per project to delete one row, and
+    /// it is deliberate: the footprint is what the confirmation counts (the chats, the transcript
+    /// rows, the review comments somebody typed by hand), and the branch standing is what stops it
+    /// claiming the work is gone when the branch is still there. Both are already written and
+    /// tested there, and a second cheaper path would be a second set of numbers to keep true.
+    ///
+    /// It measures again even when the Archived chip has already measured, and that is not waste.
+    /// What this needs is the branch standing at the moment the question is put, and a branch can
+    /// be deleted in a terminal between the chip being pressed and the menu being opened.
+    private func askToDelete(_ workspace: Workspace) {
+        Task {
+            let cleanup = await app.archiveCleanup()
+            guard let footprint = cleanup.footprints.first(where: { $0.id == workspace.id }) else {
+                return
+            }
+            deleting = ArchiveDeletion([footprint])
+        }
+    }
+
+    /// Destroys the records, and says so when the database refuses.
+    ///
+    /// **A refusal used to be swallowed here**: the outcome was discarded, the rows reloaded, and
+    /// every one of them was still there with nothing said. The pane that did report it was
+    /// Settings > Storage, which raised the sentence itself because it stood in the Settings
+    /// window and `app.alert` is presented in the main one. This list is in the main window, so
+    /// it hands the sentence to the one presenter rather than growing an alert of its own.
+    ///
+    /// A delete that worked says nothing, which is `ArchiveDeletionOutcome.sentence`'s rule: the
+    /// rows leaving the list is the whole report.
+    private func delete(_ deletion: ArchiveDeletion) async {
+        let outcome = await app.deleteArchived(deletion.footprints.map(\.id))
+        if let sentence = outcome.sentence {
+            app.alert = BloomAlert(title: "Nothing was deleted", message: sentence)
+        }
+    }
+
+    /// Hands the pages a delete freed back to the filesystem. Slow, never automatic, and offered
+    /// only where the number it changes is printed. See `Store.compactDatabase`.
+    private func compact() async {
+        isCompacting = true
+        await app.compactDatabase()
+        databaseSize = await app.databaseSize()
+        isCompacting = false
+    }
 
     /// An archived row opens too, into the reader rather than into the centre column.
     ///
@@ -565,17 +640,13 @@ struct HomeView: View {
         }
     }
 
-    /// Handed to `RootView`, which owns the only create sheet in the app.
+    /// Handed to `RootView`, which is what opens the create window. See `openCreateWindow`.
     private func requestWorkspace(in repo: Repo?) {
         NotificationCenter.default.post(name: .bloomNewWorkspace, object: repo)
     }
 
-    private func addProject() {
-        Task { await app.addProjectByAsking() }
-    }
-
-    /// Handed to `RootView`, which owns the only new-project sheet in the app.
-    private func newProject() {
+    /// Handed to `RootView`, which opens the one window that starts a project.
+    private func startProject() {
         NotificationCenter.default.post(name: .bloomNewProject, object: nil)
     }
 

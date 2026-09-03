@@ -43,7 +43,7 @@ Everything real is a script in `Tools/`; the `Makefile` is the index.
     make build      compile every target    make test       the BloomCore suite
     make swiftlint  Tools/swiftlint.sh
     make app        assemble a debug .app   make run        release .app, launched
-    make master     install ~/Applications/Bloom.app  (see the guard below)
+    make master     install /Applications/Bloom.app   (see the guard below)
     make dev        install ~/Applications/Bloom Dev.app
     make dev-db     copy the real database into the dev copy
     make release    sign, notarise and staple a zip and a disk image into dist/
@@ -59,6 +59,13 @@ flakes, `BLOOM_LOCAL_AGENTS=1`, `BLOOM_LOCAL_SETTINGS=1` and `BLOOM_LOCAL_SKILLS
 against this machine, with `BLOOM_LOCAL_PROJECT` naming the checkout the last of those reads,
 `BLOOM_LIVE=1` to drive the real `claude` binary (**this costs money**), and
 `BLOOM_TEST_SWIFT_ARGS` for flags like `--sanitize=thread`.
+
+**A mutating call cannot go inside `#expect`.** The macro rewrites its argument into a closure
+taking the value immutably, so `#expect(flow.advance())` fails to compile with "cannot use mutating
+member on immutable value: `$0` is immutable", and the error is reported against expanded code
+rather than against the line you wrote. Lift it: `let moved = flow.advance()` and then
+`#expect(moved)`. This has cost two separate agents an hour each, on `TranscriptRowHeights` and on
+`OnboardingFlow`, and it is the sort of thing nobody deduces twice.
 
 **A green `make test` does not mean the app compiles.** The mirror has no app target, so the
 core suite has stayed green while `Sources/Bloom` was broken, four times, every one of them a
@@ -182,10 +189,10 @@ one too, by looking for `await Git.` and `await Shell.` under `Sources/Bloom/Vie
 calls are all async and the pure helpers on the same types are not, so the test costs no exception
 list of its own. The three of those that live under `Views/` are named in the allow-list because
 they are what a view calls **instead** of reaching for a process itself; `WorkspaceModel` is outside
-that path, so the rule never sees it and needs no entry. `CreateWorkspaceSheet` was the last
+that path, so the rule never sees it and needs no entry. `CreateWorkspaceView` was the last
 exception, calling `Git.branches` from its own `.task`; that loading and both branch decisions it
-fed are `WorkspaceStartContext` in the core now, tested, so the sheet's entry came off and the
-allow-list in `Tools/house-rules.sh` is back to the three helper types it was meant to hold.
+fed are `WorkspaceStartContext` in the core now, tested, so its entry came off and the allow-list
+in `Tools/house-rules.sh` is back to the three helper types it was meant to hold.
 
 ## Where a file goes
 
@@ -217,10 +224,10 @@ subjects so that "this is a view's decision, moved" stays visible.
 `Sources/Bloom` is grouped the same way, by **pane rather than by kind**. `Views/` holds one
 directory per region of the window (`Sidebar`, `Center`, `Inspector`, `Home`, `Transcript`,
 `Terminal`, `Chrome`, `Tabs`) and one per thing that gets a window or a sheet of its own
-(`Archive`, `Code`, `Markdown`, `Oceans`, `OpenIn`, `RepoSettings`), and the two that outgrew a
-single directory are split by what they are for rather than by what they are: `Center/Composer`,
-`Center/Panes`, `Center/Attachments`, `Center/Browser`; `Chrome/Window`, `Chrome/Settings`,
-`Chrome/MenuBar`, `Chrome/App`, `Chrome/Feedback`, `Chrome/Notices`.
+(`Archive`, `Code`, `CreateWorkspace`, `Markdown`, `Oceans`, `OpenIn`, `RepoSettings`), and the
+two that outgrew a single directory are split by what they are for rather than by what they are:
+`Center/Composer`, `Center/Panes`, `Center/Attachments`, `Center/Browser`; `Chrome/Window`,
+`Chrome/Settings`, `Chrome/MenuBar`, `Chrome/App`, `Chrome/Feedback`, `Chrome/Notices`.
 
 Four directories sit beside `Views/` and are not panes, because none of them is drawn in one
 place. `Design/` is the theme and the snapshot galleries, `State/` is `AppModel` with its
@@ -303,7 +310,7 @@ which has twice turned out to be the owner's own screen.
 Bloom is developed in Bloom. The app you are running inside is the owner's, holding his real
 projects, and he is using it right now.
 
-**Never touch any of these.** `~/Applications/Bloom.app`. `~/Library/Application Support/Bloom/`.
+**Never touch any of these.** `/Applications/Bloom.app`. `~/Library/Application Support/Bloom/`.
 The `be.spatie.bloom` UserDefaults domain. Not to test something, not briefly.
 
 **`make dev` is how you get a build you can run.** It installs `~/Applications/Bloom Dev.app`: its
@@ -332,7 +339,7 @@ the copied workspace rows at a root that does not exist, so the dev copy can sho
 and cannot delete a real worktree. `--keep-paths` opts out and says why you should not.
 
 **`make master` will refuse if you are inside the app it would replace**, because that script
-removes `~/Applications/Bloom.app` and kills the process running from it. `Tools/guard.sh` finds the
+removes `/Applications/Bloom.app` and kills the process running from it. `Tools/guard.sh` finds the
 app either as a real ancestor of this shell or, for a terminal pane whose tmux server has reparented
 away, by the socket name derived from the database path. Do not work around it. Build `make dev`
 instead.

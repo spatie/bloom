@@ -178,7 +178,10 @@ final class WorkspaceTabsStore {
     /// has dragged it into. `TabSet` states the first rule and `StripOrder` the second, and this is
     /// the only place either is asked, so a tab is in the strip once or not at all.
     func entries(in model: WorkspaceModel) -> [PaneContent] {
-        let sessions = model.sessions.map(\.id)
+        // `TabSet.tabbable` and never `sessions.map(\.id)`: a workspace's chats include the crew
+        // members an agent started in it, and those are sidebar rows rather than tabs. See
+        // `TabSet.tabbable`, which is where that rule is argued.
+        let sessions = TabSet.tabbable(model.sessions)
         let tools = CenterTabStore.shared.tabs(for: model.workspace.id).map(\.id)
         return StripOrder.entries(
             sessions: sessions,
@@ -198,7 +201,7 @@ final class WorkspaceTabsStore {
         let workspaceID = model.workspace.id
         guard let order = StripOrder.rewritten(
             drawn,
-            sessions: model.sessions.map(\.id),
+            sessions: TabSet.tabbable(model.sessions),
             tools: CenterTabStore.shared.tabs(for: workspaceID).map(\.id),
             stored: stripOrders[workspaceID] ?? []
         ) else { return }
@@ -312,7 +315,9 @@ final class WorkspaceTabsStore {
     /// which one that is. A tab whose focused pane is a shell or a page says nothing about it and
     /// leaves the last answer standing, which is what clicking a terminal tab has always done.
     func select(_ tab: PaneContent, in model: WorkspaceModel) {
-        selected[model.workspace.id] = tab
+        // A selected tab remains clickable. Do not turn that click into an observed dictionary
+        // mutation and a redraw of the strip and panes when the selection did not move.
+        if selected[model.workspace.id] != tab { selected[model.workspace.id] = tab }
         adoptActiveSession(of: tab, in: model)
     }
 
@@ -509,6 +514,11 @@ final class WorkspaceTabsStore {
         guard var arrangement = arrangements[tab.id],
               arrangement.layout.setRatio(ratio, at: path) else { return }
         arrangements[tab.id] = arrangement
+    }
+
+    /// The divider updates its observable layout continuously, then writes the final shape once.
+    /// Double-click and accessibility adjustments use the same boundary immediately.
+    func persistRatio(in tab: PaneContent) {
         persist(tab.id)
     }
 

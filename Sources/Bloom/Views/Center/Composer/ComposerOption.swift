@@ -5,11 +5,23 @@ import BloomCore
 struct ComposerOption: Identifiable, Hashable {
     var id: String
     var label: String
+    /// One line saying what picking this row would do, drawn under the name in the pickers that
+    /// open a list rather than a menu. See `ComposerOptionRow`.
+    ///
+    /// Nil for the two pickers whose rows have nothing to add: a model is a name and an effort is
+    /// a word on a scale, and a sentence under either would be Bloom inventing copy about
+    /// somebody else's product. The two that have one are the two that were printing it as a
+    /// footnote under the whole menu, which is what the owner could not read before choosing.
+    var detail: String?
 
+    /// Most capable first, which here means most expensive first: see `ClaudeModelRank`, whose
+    /// head carries the prices this order is read off. The order is not left to this literal.
+    /// `ranked` sorts it, so a model pinned in a settings file lands among these rather than
+    /// under them.
     static let models = [
+        ComposerOption(id: "fable", label: "Fable 5.1"),
         ComposerOption(id: "opus", label: "Opus 5"),
         ComposerOption(id: "sonnet", label: "Sonnet 5"),
-        ComposerOption(id: "fable", label: "Fable 5"),
         ComposerOption(id: "haiku", label: "Haiku 4.5"),
     ]
 
@@ -24,10 +36,6 @@ struct ComposerOption: Identifiable, Hashable {
         ComposerOption(id: "max", label: "Max"),
     ]
 
-    static let permissionModes = PermissionMode.allCases.map {
-        ComposerOption(id: $0.rawValue, label: $0.label)
-    }
-
     /// The built-in list plus any id the app is in, or has been in, that is not on it.
     ///
     /// Model and effort ids are an open set. A repository's settings file, `~/.conductor` or the
@@ -39,6 +47,15 @@ struct ComposerOption: Identifiable, Hashable {
     ///
     /// So whatever the app has been set to is on the list, and it stays on the list. It goes after
     /// the named ones, because those are the ones almost every reader wants.
+    ///
+    /// **This row was blamed for a bug it only reported, and it keeps its job.** A settings file
+    /// pinned `codex:gpt-5.6-sol`, nothing recognised it, and it was drawn here as a fifth Claude
+    /// Code model reading "Codex:gpt 5.6 Sol". Deleting the row would have hidden the broken value
+    /// while leaving the chat running on it, which is precisely the one-way door above: the id
+    /// would have been in force and off every control that could change it. The fix is upstream,
+    /// where an id that names its own backend is now read rather than stored whole
+    /// (`ModelIdentifier`), so a row like that no longer appears and, if an old one does, it
+    /// appears in the section it belongs to and can be pressed away.
     static func adding(_ extras: [String], to options: [ComposerOption]) -> [ComposerOption] {
         var known = Set(options.map(\.id))
         var result = options
@@ -57,6 +74,15 @@ struct ComposerOption: Identifiable, Hashable {
         if let match = options.first(where: { $0.id == id }) { return match.label }
         guard !id.isEmpty else { return options.first?.label ?? id }
         return titleCased(id)
+    }
+
+    /// Model rows in the order `ClaudeModelRank` puts them, keeping each row's label.
+    ///
+    /// Only for a model menu. `adding` is also what fills the effort and output style menus, and
+    /// those are a scale and a set of names respectively, neither of which a model's price ranks.
+    static func ranked(_ options: [ComposerOption]) -> [ComposerOption] {
+        let byID = Dictionary(options.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return ClaudeModelRank.ordered(options.map(\.id)).compactMap { byID[$0] }
     }
 
     /// `ModelLabel.readable` in the core, where it can be tested. See its head for why it moved.

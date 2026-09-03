@@ -1,6 +1,36 @@
 import SwiftUI
 import BloomCore
 
+/// The unfinished form lives above the popover that draws it. macOS dismisses transient popovers
+/// when the app deactivates, but switching apps must not throw away a prompt somebody was writing.
+struct QuickPromptFormDraft: Equatable {
+    var editing: QuickPrompt?
+    var name: String
+    var symbol: String
+    var text: String
+    var sendsImmediately: Bool
+    var opensNewChat: Bool
+
+    init(editing: QuickPrompt? = nil, suggestedName: String = "") {
+        self.editing = editing
+        name = editing?.name ?? suggestedName
+        symbol = editing.map { QuickPrompt.resolvedSymbol($0.symbol) } ?? QuickPrompt.defaultSymbol
+        text = editing?.text ?? ""
+        sendsImmediately = editing?.sendsImmediately ?? false
+        opensNewChat = editing?.opensNewChat ?? false
+    }
+
+    var fields: QuickPrompt.Fields {
+        QuickPrompt.Fields(
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            symbol: symbol,
+            text: text.trimmingCharacters(in: .whitespacesAndNewlines),
+            sendsImmediately: sendsImmediately,
+            opensNewChat: opensNewChat
+        )
+    }
+}
+
 /// Writing a quick prompt, or changing one: a name, a mark, the words, and the two switches that
 /// say what pressing it does.
 ///
@@ -19,18 +49,22 @@ import BloomCore
 /// puts the choice behind one press instead of in front of everybody who only wanted to rename
 /// something.
 ///
-/// **The picker opens into a gap rather than over the form**, which is what the second round of
-/// this panel got wrong. It used to be an overlay positioned off a measured well, with the panel
-/// padded at the foot by whatever the card overhung by; that arithmetic was right and the result
-/// was still a card sitting on top of the Text field and the Save button. A row in the stack costs
-/// the panel exactly the same height and covers nothing, and it takes the measured well frame, the
-/// measured content height and the reserve sum with it.
+/// **The picker is a popover hung off the well**, which is the third and last answer.
+///
+/// It was a hand-built overlay positioned off a measured well, and that covered the Text field and
+/// the Save button. It was then a row in the stack, which covered nothing and cost the panel
+/// exactly the picker's height: the form grew by three hundred points when the well was pressed
+/// and shrank again when it was not, so pressing a small square resized the dialogue around it.
+/// The owner's words on seeing it: that does not feel like macOS at all, and he is right. Nothing
+/// on this platform makes a panel bigger to show a picker.
+///
+/// A popover is not the overlay that failed. It is an `NSPopover`: its own window above the sheet,
+/// with an arrow saying which control opened it, closing on Escape or on a click outside without
+/// this file arranging either, and costing the form no height at all. The measured well frame, the
+/// measured content height and the reserve sum all went with the row, because a popover sizes
+/// itself to what is in it.
 struct QuickPromptForm: View {
-    /// The prompt being changed, or nil when this is a new one.
-    var editing: QuickPrompt?
-    /// What a new prompt is called before anybody types: whatever was in the search field, because
-    /// somebody who searched for a prompt they have not written yet has just said what to call it.
-    var suggestedName: String = ""
+    @Binding var draft: QuickPromptFormDraft
     /// Whether the form opens with the picker already up.
     ///
     /// False everywhere but `QuickPromptGallery`, which renders this form offscreen and cannot
@@ -43,15 +77,6 @@ struct QuickPromptForm: View {
     /// Asks for the prompt to go. The panel owns the question, because the list can ask it too.
     var onDelete: @MainActor () -> Void
 
-    @State private var name = ""
-    @State private var symbol = QuickPrompt.defaultSymbol
-    @State private var text = ""
-    @State private var sendsImmediately = false
-    @State private var opensNewChat = false
-    /// Whether the fields have been filled from `editing` yet. A `task` rather than `onAppear`
-    /// would run again when the panel is rebuilt under an open form and would throw away what has
-    /// been typed since.
-    @State private var isPrepared = false
     /// Whether the icon picker is up.
     @State private var isPickingMark = false
 
@@ -79,7 +104,7 @@ struct QuickPromptForm: View {
                     HStack(spacing: Metrics.spacing) {
                         well
 
-                        TextField("Run the tests", text: $name)
+                        TextField("Run the tests", text: $draft.name)
                             .textFieldStyle(.roundedBorder)
                             .font(Typo.body)
                             .focused($isNameFocused)
@@ -87,16 +112,12 @@ struct QuickPromptForm: View {
                     }
                 }
 
-                if isPickingMark {
-                    picker
-                }
             }
 
             field("Text") {
-                TextEditor(text: $text)
+                TextEditor(text: $draft.text)
                     .font(Typo.body)
                     .scrollContentBackground(.hidden)
-                    .padding(Metrics.spacingSmall)
                     .frame(height: Self.textHeight)
                     .background(
                         Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall)
@@ -105,7 +126,7 @@ struct QuickPromptForm: View {
                     // `PromptEditor` draws for the same reason.
                     .overlay {
                         RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                            .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                            .strokeBorder(Palette.border, lineWidth: Metrics.outline)
                     }
                     .accessibilityLabel("Quick prompt text")
             }
@@ -115,18 +136,13 @@ struct QuickPromptForm: View {
             buttons
         }
         .padding(Metrics.pane)
-        // Behind the form rather than over it, which is the whole of why this is a `background`.
-        // An overlay took the clicks meant for the fields under it; a background takes only the
-        // ones nothing else wanted, which is exactly the click on the panel's own padding that
-        // ought to put the picker away.
-        .background {
-            if isPickingMark {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { closePicker() }
-            }
+        // Command-Backspace is delete-to-start-of-line in a text box, and the menu bar had it
+        // for Archive Workspace. See `FocusedValues.isTypingProse`.
+        .focusedValue(\.isTypingProse, isNameFocused)
+        .onAppear {
+            isPickingMark = startsPickingMark
+            isNameFocused = true
         }
-        .onAppear(perform: prepare)
         // Escape leaves the form and goes back to the list, rather than closing the whole panel and
         // losing what was typed with it. While the picker is up it has Escape first, and gives it
         // back on the second press.
@@ -138,12 +154,12 @@ struct QuickPromptForm: View {
         // title above it and the two read as one wrapped line, which is what the owner meant by the
         // heading sitting almost on its subtitle.
         VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-            Text(editing == nil ? "New quick prompt" : "Edit quick prompt")
+            Text(draft.editing == nil ? "New quick prompt" : "Edit quick prompt")
                 .font(Typo.bodyEmphasis)
                 .foregroundStyle(Palette.textPrimary)
 
             Text(
-                editing == nil
+                draft.editing == nil
                     ? "It is available in every workspace."
                     : "Changes apply everywhere. Nothing already sent is affected."
             )
@@ -159,7 +175,7 @@ struct QuickPromptForm: View {
             isPickingMark.toggle()
         } label: {
             QuickPromptMarkView(
-                stored: symbol, points: Self.wellPoints, tint: Palette.textPrimary
+                stored: draft.symbol, points: Self.wellPoints, tint: Palette.textPrimary
             )
             .frame(width: Self.wellSize, height: Self.wellSize)
             .background(
@@ -169,12 +185,22 @@ struct QuickPromptForm: View {
                 RoundedRectangle(cornerRadius: Metrics.cornerSmall)
                     .strokeBorder(
                         isPickingMark ? Palette.accent : Palette.border,
-                        lineWidth: Metrics.hairline
+                        lineWidth: Metrics.outline
                     )
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // `.bounds` so the arrow points at the square rather than at the row it sits in, and
+        // `.bottom` so the card hangs under the well the way a menu does, leaving the name field
+        // beside it readable while an icon is chosen.
+        .popover(
+            isPresented: $isPickingMark,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            picker
+        }
         .help("Choose an icon or an emoji")
         .accessibilityLabel("Quick prompt icon")
     }
@@ -183,9 +209,9 @@ struct QuickPromptForm: View {
     /// square that opened it rather than as a second panel the width of the first.
     private var picker: some View {
         QuickPromptMarkPicker(
-            selection: symbol,
+            selection: draft.symbol,
             onChoose: { mark in
-                symbol = mark.stored
+                draft.symbol = mark.stored
                 closePicker()
             },
             onClose: closePicker
@@ -206,21 +232,26 @@ struct QuickPromptForm: View {
     private var behaviour: some View {
         field("When you choose it") {
             VStack(alignment: .leading, spacing: Metrics.spacing) {
-                toggle("Send it straight away", isOn: $sendsImmediately)
-                toggle("Open it in a new chat tab", isOn: $opensNewChat)
+                toggle("Send it straight away", isOn: $draft.sendsImmediately)
+                toggle("Open it in a new chat tab", isOn: $draft.opensNewChat)
 
-                Text(delivery.sentence)
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let sentence = delivery.sentence {
+                    Text(sentence)
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
     }
 
     /// What the two switches add up to, which is what the line under them says.
     private var delivery: QuickPromptDelivery {
-        QuickPromptDelivery(sendsImmediately: sendsImmediately, opensNewChat: opensNewChat)
+        QuickPromptDelivery(
+            sendsImmediately: draft.sendsImmediately,
+            opensNewChat: draft.opensNewChat
+        )
     }
 
     /// One switch, drawn as a settings row rather than as SwiftUI lays a bare `Toggle` out.
@@ -254,7 +285,7 @@ struct QuickPromptForm: View {
 
     private var buttons: some View {
         HStack(spacing: Metrics.spacingWide) {
-            if editing != nil {
+            if draft.editing != nil {
                 // `role: .destructive` alone leaves a bordered button on macOS drawn in the
                 // ordinary label colour, so it read as a third neutral button beside Cancel and
                 // Save. Coloured explicitly, which is what `RepoSettingsView` does for Remove
@@ -272,20 +303,12 @@ struct QuickPromptForm: View {
                 .keyboardShortcut(.cancelAction)
 
             Button("Save") {
-                onSave(
-                    QuickPrompt.Fields(
-                        name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                        symbol: symbol,
-                        text: text.trimmingCharacters(in: .whitespacesAndNewlines),
-                        sendsImmediately: sendsImmediately,
-                        opensNewChat: opensNewChat
-                    )
-                )
+                onSave(draft.fields)
             }
             .keyboardShortcut(.defaultAction)
             // The words are the whole of a quick prompt. A name is not: an unnamed one is listed
             // and searched by its own first line. See `QuickPrompt.resolvedName`.
-            .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
     }
 
@@ -306,17 +329,4 @@ struct QuickPromptForm: View {
         isNameFocused = true
     }
 
-    private func prepare() {
-        guard !isPrepared else { return }
-        isPrepared = true
-        isPickingMark = startsPickingMark
-        name = editing?.name ?? suggestedName
-        symbol = editing.map { QuickPrompt.resolvedSymbol($0.symbol) } ?? QuickPrompt.defaultSymbol
-        text = editing?.text ?? ""
-        // Off for a new prompt, and whatever the row says for one being edited. Cancelling writes
-        // nothing, so opening the form and leaving it cannot move either switch.
-        sendsImmediately = editing?.sendsImmediately ?? false
-        opensNewChat = editing?.opensNewChat ?? false
-        isNameFocused = true
-    }
 }

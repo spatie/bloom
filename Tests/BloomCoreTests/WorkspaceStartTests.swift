@@ -101,7 +101,7 @@ struct WorkspaceStartTests {
 
     // MARK: - The choices the sheet used to be the only route to carry
 
-    /// Every one of these was reachable from the create sheet and from nowhere else. The link, the
+    /// Every one of these was reachable from the create window and from nowhere else. The link, the
     /// Services menu and the Shortcuts intent all opened a chat on the app-wide default model
     /// whatever the caller wanted, and nothing said so.
     @Test("the chosen backend, model, effort and permission mode reach the session row")
@@ -396,8 +396,8 @@ struct WorkspaceStartTests {
 /// `defaults:`. So this one was untestable, and testing it as it stood would have written into
 /// the owner's own `be.spatie.bloom` domain, which is the one thing the house rules say never to
 /// touch.
-@Suite("Opening a new workspace on its terminal")
-struct WorkspaceOpensOnTerminalTests {
+@Suite("Which tab a new workspace opens on")
+struct WorkspaceOpeningTabTests {
     private func scratchDefaults() -> UserDefaults {
         let suite = "bloom.tests.startmode.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -405,11 +405,11 @@ struct WorkspaceOpensOnTerminalTests {
         return defaults
     }
 
-    /// Only a terminal workspace leaves anything behind. A chat one is the ordinary case and the
+    /// Only a start with no agent leaves anything behind. A chat one is the ordinary case and the
     /// centre column's own default, so writing a key for it would be a key per workspace ever
     /// created, forever, saying what would have happened anyway.
-    @Test("only a terminal start records anything")
-    func onlyTerminalRecords() {
+    @Test("only a start that is not a chat records anything")
+    func onlyAgentlessStartsRecord() {
         let defaults = scratchDefaults()
         let id = WorkspaceID("w1")
 
@@ -417,28 +417,81 @@ struct WorkspaceOpensOnTerminalTests {
         #expect(defaults.object(forKey: WorkspaceStartMode.defaultsKey(workspaceID: id)) == nil)
 
         WorkspaceStartMode.record(.terminal, workspaceID: id, defaults: defaults)
-        #expect(defaults.bool(forKey: WorkspaceStartMode.defaultsKey(workspaceID: id)))
+        #expect(defaults.string(forKey: WorkspaceStartMode.defaultsKey(workspaceID: id)) == "terminal")
+
+        WorkspaceStartMode.record(.browser, workspaceID: id, defaults: defaults)
+        #expect(defaults.string(forKey: WorkspaceStartMode.defaultsKey(workspaceID: id)) == "browser")
     }
 
-    /// Reading clears it, so re-selecting the workspace later does not keep forcing a terminal in
+    /// The reason the flag became a value. A `Bool` could ask for the one tab there was a case
+    /// for, and the sheet now offers three, so what comes back has to say which.
+    @Test("the hint says which tab, not whether")
+    func hintSaysWhich() {
+        for mode in [WorkspaceStartMode.terminal, .browser] {
+            let defaults = scratchDefaults()
+            let id = WorkspaceID("w1")
+            WorkspaceStartMode.record(mode, workspaceID: id, defaults: defaults)
+
+            #expect(WorkspaceStartMode.consumeOpeningTab(workspaceID: id, defaults: defaults) == mode)
+        }
+    }
+
+    /// And the pane each of them names, because the centre column opens what this says and a
+    /// browser start that opened a shell would be the same bug the hint was written to fix.
+    @Test("each mode names the pane it opens")
+    func modesNameTheirPane() {
+        #expect(WorkspaceStartMode.chat.pane == .chat)
+        #expect(WorkspaceStartMode.terminal.pane == .terminal)
+        #expect(WorkspaceStartMode.browser.pane == .browser)
+    }
+
+    /// Reading clears it, so re-selecting the workspace later does not keep forcing a tab in
     /// front of whatever the user has since arranged. That is the whole behaviour and it was
     /// resting on nothing.
-    @Test("the hint is true exactly once")
-    func trueExactlyOnce() {
+    @Test("the hint answers exactly once")
+    func answersExactlyOnce() {
         let defaults = scratchDefaults()
         let id = WorkspaceID("w1")
-        WorkspaceStartMode.record(.terminal, workspaceID: id, defaults: defaults)
+        WorkspaceStartMode.record(.browser, workspaceID: id, defaults: defaults)
 
-        #expect(WorkspaceStartMode.consumeOpensOnTerminal(workspaceID: id, defaults: defaults))
-        #expect(!WorkspaceStartMode.consumeOpensOnTerminal(workspaceID: id, defaults: defaults))
+        #expect(WorkspaceStartMode.consumeOpeningTab(workspaceID: id, defaults: defaults) == .browser)
+        #expect(WorkspaceStartMode.consumeOpeningTab(workspaceID: id, defaults: defaults) == nil)
         #expect(defaults.object(forKey: WorkspaceStartMode.defaultsKey(workspaceID: id)) == nil)
     }
 
     @Test("a workspace nobody recorded anything for opens on its chat")
     func unknownWorkspacesOpenOnChat() {
-        #expect(!WorkspaceStartMode.consumeOpensOnTerminal(
+        #expect(WorkspaceStartMode.consumeOpeningTab(
             workspaceID: WorkspaceID("never-seen"), defaults: scratchDefaults()
-        ))
+        ) == nil)
+    }
+
+    /// A value written by a version that knows a mode this one does not. Nothing here can honour
+    /// it, and a key nothing can honour is one to clear rather than to read again on every open.
+    @Test("an unreadable hint is nothing to do, and is cleared")
+    func unreadableIsCleared() {
+        let defaults = scratchDefaults()
+        let id = WorkspaceID("w1")
+        defaults.set("notes", forKey: WorkspaceStartMode.defaultsKey(workspaceID: id))
+
+        #expect(WorkspaceStartMode.consumeOpeningTab(workspaceID: id, defaults: defaults) == nil)
+        #expect(defaults.object(forKey: WorkspaceStartMode.defaultsKey(workspaceID: id)) == nil)
+    }
+
+    /// The build before this one wrote a `Bool` under another key. A workspace cut as a terminal
+    /// and not opened before the update landed would otherwise open on a chat, and its `true`
+    /// would sit in the defaults for good with nothing left that reads it.
+    @Test("a terminal recorded by the previous build is still honoured, once")
+    func legacyFlagIsHonoured() {
+        let defaults = scratchDefaults()
+        let id = WorkspaceID("w1")
+        defaults.set(true, forKey: WorkspaceStartMode.legacyTerminalKey(workspaceID: id))
+
+        #expect(WorkspaceStartMode.consumeOpeningTab(workspaceID: id, defaults: defaults) == .terminal)
+        #expect(WorkspaceStartMode.consumeOpeningTab(workspaceID: id, defaults: defaults) == nil)
+        #expect(defaults.object(
+            forKey: WorkspaceStartMode.legacyTerminalKey(workspaceID: id)
+        ) == nil)
     }
 
     /// One key per workspace, so consuming one cannot answer for another.
@@ -447,7 +500,11 @@ struct WorkspaceOpensOnTerminalTests {
         let defaults = scratchDefaults()
         WorkspaceStartMode.record(.terminal, workspaceID: WorkspaceID("a"), defaults: defaults)
 
-        #expect(!WorkspaceStartMode.consumeOpensOnTerminal(workspaceID: WorkspaceID("b"), defaults: defaults))
-        #expect(WorkspaceStartMode.consumeOpensOnTerminal(workspaceID: WorkspaceID("a"), defaults: defaults))
+        #expect(WorkspaceStartMode.consumeOpeningTab(
+            workspaceID: WorkspaceID("b"), defaults: defaults
+        ) == nil)
+        #expect(WorkspaceStartMode.consumeOpeningTab(
+            workspaceID: WorkspaceID("a"), defaults: defaults
+        ) == .terminal)
     }
 }

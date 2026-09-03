@@ -120,29 +120,35 @@ struct AskConversationTests {
 
     /// The choice expires, so the menu has to say so before it is made rather than after.
     @Test("the permission menu says what a mode means with no worktree")
-    func theMenuSaysWhatAModeMeansHere() {
+    func theMenuSaysWhatAModeMeansHere() throws {
         let inWorktree = ComposerControls(
             session: Session(workspaceID: WorkspaceID("w1")), isFastMode: false, outputStyle: ""
         )
         #expect(inWorktree.hasWorktree)
-        #expect(inWorktree.missingPermissionModeNote == nil)
+        // Nothing at all. Every row says what it does on its own line now, so the footnote is
+        // left with the one fact that is about this conversation rather than about any row.
+        #expect(inWorktree.permissionModeNote == nil)
 
         let ask = ComposerControls(
             session: AskConversation.newSession(), isFastMode: false, outputStyle: ""
         )
         #expect(!ask.hasWorktree)
-        let note = ask.missingPermissionModeNote ?? ""
+        let note = try #require(ask.permissionModeNote)
         #expect(note.contains("whole machine"))
         #expect(note.contains("Bloom next starts"))
     }
 
-    /// The empty state is the first thing the owner sees, and the surprising half is the second
-    /// sentence: it looks exactly like every other conversation in Bloom and it cannot change a
-    /// file.
-    @Test("the opening words say what it cannot do as well as what it can")
-    func openingWordsSayBothHalves() {
+    /// The empty state is the first thing the owner sees, and it used to open by listing what this
+    /// chat cannot do, in Bloom's own vocabulary ("this chat has no worktree"). It says what to ask
+    /// for now. The limits are still said, in the permission menu, which is where they change a
+    /// decision rather than merely being true.
+    @Test("the opening words offer something rather than apologise")
+    func openingWordsOffer() {
         #expect(!AskConversation.emptyHeading.isEmpty)
-        #expect(AskConversation.emptyDetail.contains("cannot"))
         #expect(!AskConversation.placeholder.isEmpty)
+        #expect(!AskConversation.emptyDetail.contains("cannot"))
+        // "worktree" is a word for a thing the reader meets later, if at all.
+        #expect(!AskConversation.emptyDetail.lowercased().contains("worktree"))
+        #expect(!AskConversation.emptyHeading.lowercased().contains("worktree"))
     }
 }

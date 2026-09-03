@@ -23,12 +23,14 @@ struct FileTreeFilterTests {
     @Test("An empty needle is no filter at all, which is not the same answer as no matches")
     func emptyNeedleChangesNothing() {
         #expect(FileTreeFilter.apply(to: index, needle: "") == nil)
-        #expect(FileTreeFilter.apply(to: index, needle: FileTreeFilter.needle("   ")) == nil)
+        #expect(FileTreeFilter.apply(to: index, needle: FileNeedle.canonical("   ")) == nil)
     }
 
     @Test("Whitespace is trimmed and case folded before anything is asked of the needle")
     func needleIsCanonical() {
-        #expect(FileTreeFilter.needle("  UserCon ") == "usercon")
+        // Shared with the Changes tab's filter, which is the one thing the two are not allowed to
+        // disagree about. See `FileNeedle`.
+        #expect(FileNeedle.canonical("  UserCon ") == "usercon")
     }
 
     // MARK: - What survives

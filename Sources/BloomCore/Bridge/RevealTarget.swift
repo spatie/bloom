@@ -43,8 +43,8 @@ public enum RevealOutcome: Sendable, Equatable {
 public struct RevealOrder: Sendable, Equatable {
     public var workspace: String?
     public var project: String?
-    /// `RevealChoice.scopeWhenUnnamed`, and read its note: it is not `HomeFilter`'s own default,
-    /// on purpose.
+    /// `RevealChoice.scopeWhenUnnamed`, and read its note: it is written down there rather than
+    /// taken from `HomeFilter`, on purpose.
     public var scope: HomeScope
     public var search: String
 
@@ -62,11 +62,6 @@ public struct RevealOrder: Sendable, Equatable {
 }
 
 public enum RevealChoice {
-    /// How many names a refusal lists before it stops. The same ten `WorkspaceTabChoice` stops at,
-    /// and for the same reason: a refusal that prints four hundred workspaces is a refusal nobody
-    /// reads.
-    static let listLimit = 10
-
     /// Reads the arguments, with nothing looked up yet.
     ///
     /// **A workspace and a Home narrowing together is a refusal rather than a precedence rule.**
@@ -112,16 +107,17 @@ public enum RevealChoice {
     /// a chip that shows nothing.
     static let offered: [HomeScope] = [.all, .needsYou, .running, .live, .archived]
 
-    /// What a caller that named no scope gets, and it is deliberately **not** `HomeFilter`'s own
-    /// default.
+    /// What a caller that named no scope gets, decided here rather than taken from `HomeFilter`.
     ///
-    /// Home rests on `.live`, which is right for a person browsing: it is the old "hide archived"
-    /// switch, and somebody opening Home is looking for work in progress. It is wrong for this
-    /// tool, for one reason that outweighs the consistency. **A reveal that hides rows is a reveal
-    /// that lies about what it revealed**, and the headline use of this verb is the request there
-    /// is deliberately no archive tool for: asked to clean up the finished ones, an agent ends by
-    /// showing the candidates, and under `.live` the finished ones are exactly what Home would
-    /// leave out.
+    /// **A reveal that hides rows is a reveal that lies about what it revealed**, and the headline
+    /// use of this verb is the request there is deliberately no archive tool for: asked to clean up
+    /// the finished ones, an agent ends by showing the candidates, so a scope that left archived
+    /// work out would leave the candidates out.
+    ///
+    /// Home rests on `.all` as well today, and the two agreeing is a coincidence rather than a
+    /// link. It rested on `.live` when this was written, which is what forced the constant to be
+    /// its own decision, and if Home ever narrows what it rests on again this must not narrow with
+    /// it.
     ///
     /// One rule rather than two, and that is the second half of the argument. A default that
     /// varied by which other arguments were passed (everything when a project was named, live when
@@ -130,8 +126,6 @@ public enum RevealChoice {
     ///
     /// What makes it safe is that `homeSentence` names the scope every time, including this one,
     /// so an agent can tell the owner what he is looking at rather than leaving him to notice.
-    /// **`.all` is a change now**, where it used to be Home's resting value, and a sentence that
-    /// stayed silent about it would be the quiet part of this decision.
     public static let scopeWhenUnnamed = HomeScope.all
 
     /// Turns names into a target, against the rows as they are right now.
@@ -158,31 +152,27 @@ public enum RevealChoice {
         return .success(RevealPlan(target: .home(filter), sentence: homeSentence(filter, project: project)))
     }
 
+    /// Which workspace a name means is `BridgeWorkspaceLookup`'s answer rather than this file's,
+    /// so `reveal` and `workspace_rename` cannot come to disagree about it. The sentences stay
+    /// here, because a refusal is about the tool that refused: this one offers the names there
+    /// are, since the caller is a person asking to be shown something.
     private static func workspaceTarget(
         _ name: String,
         among workspaces: [Workspace],
         projects: [Repo]
     ) -> Result<RevealPlan, PaneRefusal> {
-        if let exact = workspaces.first(where: { $0.id.rawValue == name }) {
+        switch BridgeWorkspaceLookup.find(name, among: workspaces) {
+        case .found(let workspace):
             return .success(RevealPlan(
-                target: .workspace(exact.id), sentence: sentence(for: exact, projects: projects)
+                target: .workspace(workspace.id),
+                sentence: sentence(for: workspace, projects: projects)
             ))
-        }
-
-        let needle = name.lowercased()
-        let matches = workspaces.filter { $0.name.lowercased() == needle }
-        switch matches.count {
-        case 1:
-            return .success(RevealPlan(
-                target: .workspace(matches[0].id),
-                sentence: sentence(for: matches[0], projects: projects)
-            ))
-        case 0:
+        case .unknown:
             return .failure(PaneRefusal(
                 "There is no workspace called '\(name)'. There is: "
                     + list(workspaces.map(\.name)) + "."
             ))
-        default:
+        case .ambiguous(let matches):
             return .failure(PaneRefusal(
                 "\(matches.count) workspaces are called '\(name)', in "
                     + list(matches.map { projectName($0, projects: projects) })
@@ -205,9 +195,8 @@ public enum RevealChoice {
     }
 
     /// The scope is named every time, and that is load bearing rather than wordy. See
-    /// `scopeWhenUnnamed`: what a bare call selects is not what Home rests on, so a sentence that
-    /// mentioned the scope only when it was unusual would be silent about the one thing the caller
-    /// did not choose.
+    /// `scopeWhenUnnamed`: a bare call picks a scope the caller did not, so a sentence that
+    /// mentioned it only when it was unusual would be silent about exactly the case nobody chose.
     private static func homeSentence(_ filter: HomeFilter, project: Repo?) -> String {
         var clauses = ["showing \(filter.scope.label(searching: false))"]
         if let project { clauses.append("in \(project.name)") }
@@ -220,12 +209,11 @@ public enum RevealChoice {
     }
 
     /// Names, comma separated, cut off before a refusal turns into a directory listing.
-    static func list(_ names: [String]) -> String {
-        guard !names.isEmpty else { return "nothing" }
-        let shown = names.prefix(listLimit).joined(separator: ", ")
-        let rest = names.count - listLimit
-        return rest > 0 ? shown + " and \(rest) more" : shown
-    }
+    ///
+    /// The cap and the wording moved to `BridgeWorkspaceLookup` when `workspace_rename` needed
+    /// the same sentence ending. Kept here as the name this file's own refusals call it by, and
+    /// as the name the suite pins the cap through.
+    static func list(_ names: [String]) -> String { BridgeWorkspaceLookup.list(names) }
 
     private static func text(_ value: JSONValue?) -> String? {
         guard let raw = value?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),

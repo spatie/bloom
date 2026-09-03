@@ -340,8 +340,12 @@ public actor AgentRunner {
 
     // MARK: Sending
 
-    /// Write one user turn. Starts the process on first use.
-    public func send(_ text: String) async throws {
+    /// Write one turn. Starts the process on first use.
+    ///
+    /// `recording` is the row to write down in place of the user row, for a turn another agent
+    /// asked for: see `SessionRunner.send(_:recording:)` for why what goes out and what is drawn
+    /// are not the same string.
+    public func send(_ text: String, recording: Data? = nil) async throws {
         // The two settings reads come first, and that ordering is the whole of the fix.
         //
         // They were between the wait and the start, and each is a store round trip, so there were
@@ -359,7 +363,14 @@ public actor AgentRunner {
         let line = try Self.encodeTurn(text)
         handle.current?.writeLine(line)
 
-        await persist(kind: .user, payload: Data(line.utf8))
+        // One row, whichever it is. The crew payload carries what a person reads and what the
+        // model was handed, so writing the user row beside it would put the envelope back on
+        // screen, which is the whole of what this argument exists to stop.
+        if let recording {
+            await persist(kind: .crew, payload: recording)
+        } else {
+            await persist(kind: .user, payload: Data(line.utf8))
+        }
 
         session.apply(.turnStarted)
         await save(session)
@@ -495,13 +506,29 @@ public actor AgentRunner {
 
         switch event {
         case .initialized(let info):
+            // **An `init` line is the CLI saying a turn has begun, and not every turn is one
+            // Bloom sent.** The CLI runs a background task's completion notification as a turn of
+            // its own, mid process, without reading anything from stdin. `StrayResult` is the
+            // other half of that story and only covers the empty ones; the ones that do real work
+            // are what this is about. Measured from the owner's own database: after a turn ended
+            // at 22:24 the CLI started five more of its own, each announced by an `init` and each
+            // closed by a real `result` with prose in it, while `sessions.state` sat at `idle`
+            // from the first of them onwards. The workspace was working for twenty minutes with
+            // no activity mark on its tab and a Send button where Stop belonged.
+            //
+            // Nothing is guessed here: the state machine already knows what this line can mean.
+            // `turnStarted` is `unchanged` from `running`, which is what a turn Bloom sent is by
+            // the time its own `init` arrives, so the ordinary path writes nothing extra. It is
+            // refused from `waiting`, which is what keeps a raised hand raised.
+            var moved = session.apply(.turnStarted).moves
             if !info.sessionID.isEmpty, session.agentSessionID != info.sessionID {
                 session = session.with {
                     $0.agentSessionID = info.sessionID
                     $0.updatedAt = Date()
                 }
-                await save(session)
+                moved = true
             }
+            if moved { await save(session) }
 
         case .assistantText(let block), .thinking(let block):
             guard block.parentToolUseID == nil, block.usage.contextUsedTokens > 0 else { break }
@@ -655,20 +682,25 @@ public actor AgentRunner {
     /// A question has arrived. Either a rule the user already granted answers it, or it goes on
     /// the pile and the session stops being a session that is working.
     private func handle(_ ask: PermissionAsk) async {
+        // Bloom's own bridge tools answer themselves, and they do it before anything is stored or
+        // put on the pile, so no row is drawn at all. See `BridgeToolApproval` for why this is
+        // not a shortcut round consent, and for why the row it used to leave behind has gone: a
+        // settled question saying Bloom allowed Bloom is a second row about a call the transcript
+        // already draws, and an agent that opens four panes and lists its crew left the reader
+        // scrolling past five of them to find what it actually did.
+        //
+        // Nothing can race this one. It is never on screen, so no person can answer it, and it is
+        // never in `pending`, so `denyPendingAsks` has nothing to deny.
+        if BridgeToolApproval.isSelfApproved(toolName: ask.toolName) {
+            await write(answerTo: ask, decision: .allow(scope: .once))
+            return
+        }
+
         pending.add(ask)
         do {
             try await store.appendPermissionAsk(sessionID: session.id, ask: ask)
         } catch {
             await report("could not store a permission question", error)
-        }
-
-        // Bloom's own bridge tools answer themselves. Checked before the grant lookup because it
-        // needs no lookup: there is nothing stored to match and nothing for a person to weigh.
-        // See `BridgeToolApproval` for why this is not a shortcut round consent.
-        if BridgeToolApproval.isSelfApproved(toolName: ask.toolName), let claimed = pending.take(ask.requestID) {
-            await write(answerTo: claimed, decision: .allow(scope: .once))
-            await close(claimed, as: PermissionAskOutcome.auto, note: BridgeToolApproval.note)
-            return
         }
 
         // Both awaits below are suspension points on this actor, and the question is already on
@@ -1075,9 +1107,14 @@ private final class ProcessHandle: Sendable {
 public extension PermissionMode {
     /// What `--permission-mode` expects. Bloom's names happen to line up with the CLI's today,
     /// but they are two separate vocabularies and drift is a matter of time.
+    ///
+    /// Two cases answer `auto` and neither is a mistake. `autoReview` is not offered for a Claude
+    /// Code chat precisely because `auto` already is that mode here, so a row that somehow carries
+    /// it, out of a settings default or a session written before the backend moved, runs as the
+    /// thing it names rather than being quietly rewritten into something stricter.
     var cliValue: String {
         switch self {
-        case .auto: "auto"
+        case .auto, .autoReview: "auto"
         case .acceptEdits: "acceptEdits"
         case .bypassPermissions: "bypassPermissions"
         case .plan: "plan"

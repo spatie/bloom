@@ -35,6 +35,14 @@ import Foundation
 /// all and the whole of why they ask. `quick_prompt_list` is on the list below; the other three
 /// are not.
 ///
+/// `workspace_rename` is the near miss on that paragraph and is on the list, so the line between
+/// them is worth stating. It overwrites something with no copy kept too, and what makes it
+/// different is what is overwritten and what it costs to put back. A quick prompt is a paragraph
+/// the owner wrote; a workspace name is a label Bloom proposed and the owner accepted, it is one
+/// column of one row, and it is on the screen in the row the reader is looking at the moment it
+/// changes. The answer carries the previous name, so undoing it from the far side of the socket
+/// is one more call. See `WorkspaceRenameTool`.
+///
 /// ## The browser pane, which is where the line got its sharpest test
 ///
 /// Seven tools reach a browser pane the owner has open, and two of them are on the list. The
@@ -95,6 +103,14 @@ public enum BridgeToolApproval {
         // typing the old one back. There is nothing here for a person to weigh that they cannot
         // see and reverse in a second.
         "pane_rename",
+        // A workspace's own name, which is a bigger label than a tab's and answers the same two
+        // questions. There is nothing for a person to weigh: one column of one row, nothing
+        // destroyed, nothing published, and the change is in the row they are looking at as it
+        // lands. And the way back costs one call, because the answer carries the name it had. The
+        // reason it must not ask is the bug it was written from: an agent nine commits into a
+        // piece of work stopped and asked the owner to rename the workspace by hand, and an ask
+        // on this from a parent running unattended is the hung turn described above.
+        "workspace_rename",
         // The only one of the four quick prompt tools on this list, and the only one of them a
         // parent can call unattended. It reads the owner's own library and changes nothing in it,
         // so the ask would carry nothing for a person to weigh, and an unanswered ask on a read is
@@ -109,6 +125,35 @@ public enum BridgeToolApproval {
         // that act on one.
         "pane_list",
         "browser_read",
+        // The four crew tools, and they stand or fall together, because a crew that can be
+        // assembled and not spoken to is worse than no crew at all. An orchestrator that has to
+        // stop and ask the owner before it can talk to agents it started itself is an
+        // orchestrator that hangs on an unattended turn, which is the failure this whole file is
+        // about; and the agent waiting at the other end of the unanswered ask is a second bill
+        // running while nothing happens. None of the four reaches outside the workspace the
+        // caller is already in: they read and write the `sessions` rows of one worktree, the
+        // caller's own token says which worktree that is, and there is no argument on any of them
+        // that could name another.
+        //
+        // Weighed against the paragraph above about what is deliberately off this list: none of
+        // them destroys anything. `agent_start` adds a chat to the sidebar in front of the
+        // reader, which is the visibility a pane has. `agent_say` puts a message in a chat the
+        // owner can read and answer. `agent_list` reads. `agent_stop` ends a turn and leaves the
+        // conversation and every file the agent wrote exactly where they are, so what it costs is
+        // work in flight rather than work done, and `agent_say` starts the same agent again.
+        //
+        // What holds the ceiling, the depth limit and the name rule is `Crew`, enforced in the
+        // handler before the window is asked for anything, which is the same argument
+        // `workspace_start` is on this list under: there is nothing here for a person to weigh
+        // that Bloom has not already decided.
+        "agent_start",
+        "agent_say",
+        "agent_list",
+        "agent_stop",
+        // A presentation request, scoped to an image or movie that resolves inside the caller's
+        // own worktree. It changes no file and sends nothing away. The row it adds is the visible
+        // record and the file remains under the same agent permission that created or read it.
+        "media_show",
         // The strip, read as a strip, which is the same furniture `pane_list` reports in another
         // shape and is on the list for the same reason: it is on the screen in front of the reader
         // already, none of it is the contents of a page, a diff or a note, and it is the first
@@ -134,10 +179,13 @@ public enum BridgeToolApproval {
         return selfApproved.contains(String(toolName.dropFirst(toolPrefix.count)))
     }
 
-    /// The note the transcript shows on a question Bloom answered for itself.
-    ///
-    /// A settled row rather than no row at all: the call still happened, and a reader scrolling
-    /// back should find out that it did and who let it through. "Allowed automatically" with no
-    /// reason is the thing that makes people distrust an app's permission model.
-    public static let note = "Bloom's own tool, allowed without asking. See BridgeToolApproval."
+    /// **A self-approved ask leaves no row in the transcript**, and that is a change from what
+    /// this file used to say. The argument for a settled row was that a reader scrolling back
+    /// should find out the call happened and who let it through. The first half of that is
+    /// already true without a row: the tool call itself is drawn, with its name and its result,
+    /// exactly as every other call is. What the row added was a second entry per call saying
+    /// Bloom had allowed Bloom, and a turn that opens a pane, splits it, renames a tab and lists
+    /// its crew produced four of them between the reader and the work. The list above is what
+    /// says who let these through, and it is the thing to read rather than a row repeated at
+    /// runtime. See `AgentRunner.handle(_:)`, which answers before it stores.
 }

@@ -121,6 +121,23 @@ final class TerminalPersistence {
         return TmuxSessions.parseSessionList(result.stdout)
     }
 
+    /// The shell pid inside each session on our socket.
+    ///
+    /// A tmux-backed pane's pty child is a *client*, so its process group holds nothing the user
+    /// started: the shell and everything under it belong to the server. This is the only way from
+    /// a pane to the pid whose children say what is running there, which is what
+    /// `TerminalCommandRecall` needs both to record a command and to know it is still going.
+    ///
+    /// Empty rather than nil when tmux is absent or the server is down, for the same reason
+    /// `sessions()` answers with none: nothing can be running in a session that does not exist.
+    func panePIDs() async -> [String: Int32] {
+        guard let command else { return [:] }
+        guard let result = try? await Shell.run(
+            command.executable, command.listPanes, timeout: .seconds(5)
+        ) else { return [:] }
+        return TmuxSessions.parsePanePIDs(result.stdout)
+    }
+
     // MARK: - Teardown
 
     /// Kills the sessions of panes that are going away for good.

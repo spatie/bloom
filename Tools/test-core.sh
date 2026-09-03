@@ -41,6 +41,27 @@ ID="${BLOOM_TEST_ID:-$$}"
 WORK="$TMP/bloom-core-tests-$ID"
 SCRATCH="$TMP/bloom-core-build-$ID"
 
+# **Both go when this exits, unless the caller named the run.** A build directory is ~750MB and
+# this script made a fresh one per invocation and never removed it; on the machine this was written
+# on that had reached **463 of them, 300GB**, and the disk filled during an ordinary afternoon of
+# agents running the suite. Naming a run through BLOOM_TEST_ID is the one case that wants the
+# directory kept, because that is what makes a repeated run incremental, and a caller that named it
+# is a caller that knows it is there.
+#
+# `EXIT` alone covers the ordinary end and a `set -e` failure; the signals are the ones a person or
+# an editor sends, and without them a cancelled run keeps its 750MB for ever.
+if [[ -z "${BLOOM_TEST_ID:-}" ]]; then
+  trap 'rm -rf "$WORK" "$SCRATCH"' EXIT INT TERM HUP
+fi
+
+# What a previous run left when it was killed outright, which no trap can cover. A day, so a run
+# still going on somebody else's terminal is never swept out from under them, and quiet because
+# this is tidying rather than news. The test process sweeps its own scratch the same way: see
+# `TestProcessScratch` in Tests/BloomCoreTests/TestSupport.swift.
+find "$TMP" -maxdepth 1 \( -name 'bloom-core-build-*' -o -name 'bloom-core-tests-*' \
+  -o -name 'bloom-test-run-*' \) -mtime +1 -print0 2>/dev/null \
+  | xargs -0 -n 20 rm -rf 2>/dev/null || true
+
 rm -rf "$WORK"
 mkdir -p "$WORK/Sources" "$WORK/Tests"
 ln -sfn "$ROOT/Sources/BloomCore" "$WORK/Sources/BloomCore"

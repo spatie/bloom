@@ -22,6 +22,18 @@ enum FileReview {
         WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
     }
 
+    /// Opens a file in a tab that stays on it, which is what a double click on a file pill and
+    /// Open in New Tab from its menu both mean.
+    ///
+    /// The other door, above, points the workspace's one review tab at a file, and that is still
+    /// what a single click does. This one is the deliberate second gesture: the tab it opens is
+    /// never the one `showReview` repoints, so a reading you set aside survives the next filename
+    /// you click. See `CenterTab.isPinnedToPath`.
+    static func openInNewTab(path: String, in model: WorkspaceModel) {
+        let tab = CenterTabStore.shared.openPinnedReview(path: path, workspaceID: model.workspace.id)
+        WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
+    }
+
     /// Opens the review on whatever the reader was last looking at, which is the selected changed
     /// file, and failing that the first one. Used by the `+` menu and by the keyboard, where no
     /// file has been named.

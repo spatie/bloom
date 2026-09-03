@@ -41,12 +41,17 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         JumpProbe.attach(model)
         servicesProvider.attach(model)
         // And a Shortcut needs it for the same reason the Services menu does: an intent runs in
-        // this process and has to execute the same code a click in the create sheet does, rather
+        // this process and has to execute the same code a click in the create window does, rather
         // than a copy of it written for callers with no window.
         RunningApp.attach(model)
         // The suppression rule needs to know which workspace the window is showing, and this is
         // the first moment there is a window to ask.
         NotificationService.shared.attach(model)
+        // And the welcome window needs it for one thing: whether this copy of Bloom has a bridge
+        // to offer the owner's own terminal. That window is an `NSWindow` opened from a menu item
+        // and from `applicationDidFinishLaunching`, so it is not in the environment and this is
+        // the one route it has.
+        WelcomeWindow.attach(model)
         // The updater needs the same state, for one question: how many agents are mid turn. This
         // is also the first moment there is any, and it is deliberately after launching rather
         // than during it, so Sparkle's first scheduled check cannot land inside the launch.

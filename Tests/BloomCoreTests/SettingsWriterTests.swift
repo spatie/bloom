@@ -21,8 +21,65 @@ struct SettingsWriterTests {
         return root
     }
 
+    /// TOML's multi-line forms keep the newline before their closing delimiter, so prose comes
+    /// back one newline longer than it went in. That is the same slack `RepoSettingsDraft` gives
+    /// every value it compares.
+    private func trimmed(_ text: String?) -> String? {
+        text?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func read(_ repo: String, _ relative: String) -> String? {
         try? String(contentsOfFile: (repo as NSString).appendingPathComponent(relative), encoding: .utf8)
+    }
+
+    // MARK: - Instructions
+
+    /// The field in the Instructions pane, round tripped. It is prose, and often several
+    /// paragraphs of it, so what it comes back as matters: TOML's multi-line forms are the only
+    /// ones that survive a newline, and a value that came back mangled would reach an agent.
+    @Test("what a project says about merging survives being written and read back")
+    func instructionsRoundTrip() throws {
+        let repo = try makeRepo()
+        let text = "Squash unless the branch is a stack.\n\nNever merge on a Friday."
+
+        try SettingsWriter.write(
+            [.mergeInstructions(text), .conflictInstructions("Regenerate the lock file.")],
+            repo: repo, settings: RepoSettings()
+        )
+        let settings = SettingsLoader.load(repo: repo)
+
+        #expect(trimmed(ProjectInstructions.stated(.merge, in: settings)) == text)
+        #expect(trimmed(ProjectInstructions.stated(.fixConflicts, in: settings))
+            == "Regenerate the lock file.")
+    }
+
+    /// Prose stays in the settings file however long it is, where a script of the same length
+    /// would have been moved into one of its own. A project that wants a file has the one the
+    /// turn already prefers, and two ways to end up with a file would be two files to keep right.
+    @Test("instructions are never moved into a file of their own")
+    func instructionsStayInTheSettingsFile() throws {
+        let repo = try makeRepo()
+
+        try SettingsWriter.write(
+            [.mergeInstructions("#!/bin/zsh\nnot a script, but it starts like one")],
+            repo: repo, settings: RepoSettings()
+        )
+
+        #expect(read(repo, ".bloom/settings.toml")?.contains("not a script") == true)
+        #expect(read(repo, ".bloom/merge-instructions.md") == nil)
+    }
+
+    /// Clearing the box has to be a statement rather than a deletion when something below is still
+    /// saying it, which is the same rule the setup script follows and for the same reason.
+    @Test("clearing the box takes the line out")
+    func clearingTakesTheLineOut() throws {
+        let repo = try makeRepo([".bloom/settings.toml": "[instructions]\nmerge = \"Squash.\"\n"])
+        let settings = SettingsLoader.load(repo: repo)
+
+        try SettingsWriter.write([.mergeInstructions(nil)], repo: repo, settings: settings)
+
+        #expect(SettingsLoader.load(repo: repo).mergeInstructions == nil)
+        #expect(read(repo, ".bloom/settings.toml")?.contains("merge") == false)
     }
 
     // MARK: - Destination

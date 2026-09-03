@@ -31,7 +31,7 @@ struct RepoHeaderRow: View {
     /// How many workspace rows are drawn under this project, which is what the filter is letting
     /// through. Said out loud rather than drawn: see `name`.
     var workspaceCount: Int
-    /// Raised to the sidebar, which owns the create sheet.
+    /// Raised to the sidebar, which asks for the create window.
     var onCreateWorkspace: (Repo) -> Void
 
     @Environment(AppModel.self) private var app
@@ -265,9 +265,10 @@ struct RepoHeaderRow: View {
     /// way. The owner asked for it on the leading side, before the name, and still only under the
     /// pointer. That is a harder place to put a control than it sounds, because the leading end of
     /// this header is already two columns wide and both of them are load bearing: the chevron's
-    /// gutter is the step every workspace row underneath is indented by, and the tile starts the
-    /// column a workspace's status mark is drawn in. A gear inserted between them, or given a
-    /// reserved slot of its own, moves one of those columns for good, and the rows below with it.
+    /// gutter is the first term of the indent every workspace row underneath is given, and the
+    /// tile IS the column a workspace's status mark is drawn in. A gear inserted between them, or
+    /// given a reserved slot of its own, moves one of those columns for good, and the rows below
+    /// with it.
     /// A gear that appears and pushes the name aside reflows the row every time the pointer
     /// crosses it, which is worse again.
     ///
@@ -356,10 +357,11 @@ struct RepoHeaderRow: View {
     /// away to do it: the one thing in the header worth scanning vanished exactly when you looked
     /// at the header. A gutter costs eleven points and gives the tile back for good.
     ///
-    /// Eleven points is also the step the workspace rows are indented by, which is what makes a
-    /// project read as containing its rows: the chevron sits alone at the pane's leading edge, the
-    /// project's tile starts one gutter in, and a row's status mark starts on that same column
-    /// rather than to the left of it. See `SidebarMetrics.rowIndent`, which is this number.
+    /// Eleven points is also the first term of the indent every row underneath is given, which is
+    /// what makes a project read as containing its rows: the chevron sits alone at the pane's
+    /// leading edge, the project's tile starts one gutter and one gap in, and a row's status mark
+    /// starts on that same column. See `SidebarMetrics.rowIndent`, which is built from this number
+    /// and the gap this `HStack` puts after it.
     ///
     /// The chevron is the smallest mark in the pane on purpose. It is furniture: it says the thing
     /// beside it opens, and then it should get out of the way of everything that has something to

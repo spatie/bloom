@@ -58,9 +58,9 @@ public enum BusyCrest {
 
     /// How long the crest is, in points.
     ///
-    /// Long enough to be a shape rather than a dash, short enough that a rule holds several of its
-    /// own lengths. The inspector's segment is 380 points, so even the narrowest rule in the window
-    /// is two of these.
+    /// Long enough to be a shape rather than a dash, short enough that the rule holds several of
+    /// its own lengths. The centre column is the narrow case, since it is what is left of the
+    /// window after the sidebar and the inspector, and at 760 points it is four of these.
     public static let length = 190.0
 
     /// How thick it is, where the rule it travels is one point.
@@ -107,11 +107,12 @@ public enum BusyCrest {
     /// heartbeat, and a figure whose period shares no whole multiple with the rest would be a
     /// second one beating against it.
     ///
-    /// **The period is shared and the speed is not.** The centre column's rule and the inspector's
-    /// are different lengths, so a fixed speed would have them finishing at different moments and a
-    /// fixed period has them starting and finishing together. A shared instant is what
-    /// `BusyPulse.epoch` is for, and it is worth more here than a shared speed: two rules crossing
-    /// at once read as one signal, two rules crossing at their own rates read as two.
+    /// **It is a period rather than a speed, and one crossing rather than a distance, because the
+    /// crest crosses exactly one thing.** This used to be lit on two segments of one line, the
+    /// centre column's and the inspector's, on a shared period and therefore at two different
+    /// speeds; the report on that was that it read as two bubbles rather than one. There is one
+    /// segment now (see `ActivityRule`), so the only thing the period has to agree with is the
+    /// heartbeat.
     public static var period: TimeInterval { BusyBreath.period }
 
     /// How far apart two crests sit in the train the `current` variant draws.

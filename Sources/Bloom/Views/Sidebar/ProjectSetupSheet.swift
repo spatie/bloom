@@ -41,6 +41,8 @@ struct ProjectSetupSheet: View {
     @State private var access: GitHubAvailability.State = .unknown
     @State private var phase: Phase = .choosing
     @State private var signIn: GitHubSignIn.Request?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @State private var isShowingExcluded = false
     @State private var availabilityCheck: Task<Void, Never>?
     @State private var isLoadingOwners = false
@@ -196,7 +198,7 @@ struct ProjectSetupSheet: View {
             HStack(alignment: .top, spacing: Metrics.spacingWide) {
                 Image(systemName: choice == value ? "largecircle.fill.circle" : "circle")
                     .font(Typo.body)
-                    .foregroundStyle(choice == value ? Palette.accent : Palette.textTertiary)
+                    .foregroundStyle(choice == value ? Palette.controlAccent : Palette.textTertiary)
                     .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: Metrics.spacingTight) {
@@ -220,7 +222,10 @@ struct ProjectSetupSheet: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Metrics.corner)
-                    .strokeBorder(choice == value ? Palette.accent : Palette.border)
+                    .strokeBorder(
+                        choice == value ? Palette.controlAccent : Palette.border,
+                        lineWidth: Metrics.outline
+                    )
             )
         }
         .buttonStyle(.plain)
@@ -242,12 +247,18 @@ struct ProjectSetupSheet: View {
                     HStack(spacing: Metrics.spacingSmall) {
                         Image(systemName: isShowingExcluded ? "chevron.down" : "chevron.right")
                             .font(Typo.micro)
-                        Text(excludedSummary)
+                        Text(request.contents.excludedSummary ?? "")
                             .font(Typo.caption)
                     }
                     .foregroundStyle(Palette.textSecondary)
                 }
                 .buttonStyle(.plain)
+                // The three things `RepoHeaderRow.disclosure` gives its own chevron and this one
+                // had none of: the state as a value rather than only in the glyph's direction, a
+                // tooltip, and the turn as movement that Reduce Motion drops.
+                .animation(reduceMotion ? nil : Motion.pane, value: isShowingExcluded)
+                .accessibilityValue(isShowingExcluded ? "Expanded" : "Collapsed")
+                .help(isShowingExcluded ? "Hide what is left out" : "Show what is left out")
 
                 if isShowingExcluded {
                     VStack(alignment: .leading, spacing: Metrics.spacingTight) {
@@ -284,23 +295,6 @@ struct ProjectSetupSheet: View {
         .padding(Metrics.inset)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
-    }
-
-    private var excludedSummary: String {
-        let secrets = request.contents.sensitiveFiles.count
-        let repositories = request.contents.nestedRepositories.count
-        var parts: [String] = []
-        if secrets > 0 {
-            parts.append(secrets == 1
-                ? "1 file that looks like a credential"
-                : "\(secrets) files that look like credentials")
-        }
-        if repositories > 0 {
-            parts.append(repositories == 1
-                ? "1 repository of its own"
-                : "\(repositories) repositories of their own")
-        }
-        return "Kept out and added to .gitignore: " + parts.joined(separator: ", ")
     }
 
     // MARK: - The GitHub half
@@ -355,7 +349,8 @@ struct ProjectSetupSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
         .overlay(
-            RoundedRectangle(cornerRadius: Metrics.corner).strokeBorder(Palette.border)
+            RoundedRectangle(cornerRadius: Metrics.corner)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         )
     }
 
@@ -569,7 +564,7 @@ struct ProjectSetupSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button(primaryTitle) { start() }
                     .buttonStyle(.borderedProminent)
-                    .tint(Palette.accentFill)
+                    .tint(Palette.controlAccent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!canStart)
 
@@ -588,7 +583,7 @@ struct ProjectSetupSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Try again") { phase = .choosing }
                     .buttonStyle(.borderedProminent)
-                    .tint(Palette.accentFill)
+                    .tint(Palette.controlAccent)
                     .keyboardShortcut(.defaultAction)
 
             case .failed(let failure):
@@ -608,7 +603,7 @@ struct ProjectSetupSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Try again") { start(resuming: failure.completed) }
                     .buttonStyle(.borderedProminent)
-                    .tint(Palette.accentFill)
+                    .tint(Palette.controlAccent)
                     .keyboardShortcut(.defaultAction)
 
             case .finished(let outcome):
@@ -617,7 +612,7 @@ struct ProjectSetupSheet: View {
                 }
                 Button("Add project") { onFinish(request.path) }
                     .buttonStyle(.borderedProminent)
-                    .tint(Palette.accentFill)
+                    .tint(Palette.controlAccent)
                     .keyboardShortcut(.defaultAction)
             }
         }

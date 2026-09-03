@@ -3,7 +3,7 @@ import Foundation
 /// Attachments written before there was a worktree to write them into.
 ///
 /// The composer copies an attached file into the worktree the agent will stand in, because a path
-/// outside it is a path the agent may not be allowed to read. The create sheet is a composer for a
+/// outside it is a path the agent may not be allowed to read. The create window is a composer for a
 /// worktree that does not exist yet, so it writes into a staging directory laid out exactly like
 /// one: `.bloom/attachments/<id>/<name>`, relative to the staging root. That is what makes the
 /// handover a move and not a rewrite. Every stored path is already the path it will have in the

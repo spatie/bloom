@@ -15,13 +15,13 @@ import Foundation
 /// The content is a `TranscriptContentKey`, which is a hash rather than the string it used to be:
 /// see that type for what building four hundred of those strings on every pass cost.
 ///
-/// A row's height depends on three things: what it draws, how wide it is drawn, and the text size
-/// it is drawn at. The obvious spelling folds all three into one key, which is what the spike did,
-/// and it is wrong in a way that only shows up after a while: the pane is resized all day, so the
-/// cache accumulates one entry per row per width it has ever been, none of which will ever be
-/// asked for again. Width and scale are properties of the whole cache instead, held once, and
-/// changing either empties it. That is also the truthful shape, because there is never more than
-/// one width in play.
+/// A row's height depends on four things: what it draws, how wide it is drawn, the text size it is
+/// drawn at, and how far apart its lines are set. The obvious spelling folds all four into one
+/// key, which is what the spike did, and it is wrong in a way that only shows up after a while:
+/// the pane is resized all day, so the cache accumulates one entry per row per width it has ever
+/// been, none of which will ever be asked for again. Width, scale and leading are properties of
+/// the whole cache instead, held once, and changing any of them empties it. That is also the
+/// truthful shape, because there is never more than one width in play.
 ///
 /// ## Nothing is measured up front
 ///
@@ -51,6 +51,27 @@ import Foundation
 /// which the transcript's two synthetic entries have to be given (see `TranscriptListView`). And
 /// the cache has to have a bound, which is `mostRows`.
 ///
+/// ## The measurements outlive the conversation. The ESTIMATE must not
+///
+/// **This is the reader's report of "switching workspaces sometimes leaves gigantic gaps", and
+/// it was measured rather than argued.** A measured height belongs to a row, so it is worth
+/// keeping for ever. The estimate belongs to a CONVERSATION: it is the mean of what has been
+/// measured, and it is what every row nobody has looked at yet is drawn at. A pane that had been
+/// reading prose settled it at 400, and every unmeasured row of the tool-heavy workspace arriving
+/// next was then laid out at 400 against a true 24. On the fifteen inked rows of one screen that
+/// is 5,640 points of blank, which is eight screens of it, and it is exactly the picture the
+/// report came with: a message, a fold, a pane of nothing, and two lines jammed against the
+/// composer.
+///
+/// Worse, it could not be taken again. `resettleDrift` will only re-form the number once the
+/// sample has DOUBLED, and the sample was the two thousand rows of the conversation being left, so
+/// four hundred measured rows of the one arriving moved it by nothing at all. The number a
+/// workspace switch handed you was permanent for the visit.
+///
+/// So `showing(_:)` says which conversation the pane is pointed at, and a change of it starts the
+/// estimate again while keeping every measured height. What the sample is formed from is the rows
+/// measured since, which is `sampled`.
+///
 /// ## A live resize does not remeasure, on purpose
 ///
 /// Every cached height was taken at a width that no longer holds, so all of them are wrong the
@@ -70,7 +91,7 @@ import Foundation
 /// succession under `Session started`, then three, then three more above a turn footer. So
 /// nothing is stored and returned exactly as it arrives.
 public struct TranscriptRowHeights: Equatable, Sendable {
-    /// The width and text size every height in this cache was taken at.
+    /// The width, text size and line height every height in this cache was taken at.
     ///
     /// One measure for the whole cache rather than part of each key: see the header. Nil until a
     /// width has arrived at all, which is the state a table is in for its first pass, before it
@@ -78,15 +99,25 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     public struct Measure: Equatable, Sendable {
         public var width: Double
         public var scale: Double
+        /// The prose line height the rows were laid out at, as `ChatLineHeight.ratio` states it.
+        ///
+        /// Here because the owner made the line height a setting, and a setting that moves every
+        /// measured row while the cache holds the old numbers is rows drawn on top of each other.
+        /// It is the ratio rather than the step, so nothing in the core has to know that a step is
+        /// what a person picks.
+        public var leading: Double
 
-        public init(width: Double, scale: Double) {
+        public init(width: Double, scale: Double, leading: Double) {
             self.width = width
             self.scale = scale
+            self.leading = leading
         }
 
         /// Whether two measures are the same one.
         func matches(_ other: Measure) -> Bool {
-            TranscriptRowHeights.isSameWidth(width, other.width) && scale == other.scale
+            TranscriptRowHeights.isSameWidth(width, other.width)
+                && scale == other.scale
+                && leading == other.leading
         }
     }
 
@@ -174,17 +205,31 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// is not there.
     public static let narrowest: Double = 1
 
-    /// The width and text size every height in here was taken at, or nothing before a width has
-    /// arrived. What a caller measures a fresh row against, so that it cannot measure at one width
-    /// and file the answer under another.
+    /// The width, text size and line height every height in here was taken at, or nothing before a
+    /// width has arrived. What a caller measures a fresh row against, so that it cannot measure at
+    /// one width and file the answer under another.
     public private(set) var measure: Measure?
+    /// The conversation the pane is drawing, and therefore the one the estimate is about. Nothing
+    /// before the first `showing(_:)`, which is a pane that has not been pointed anywhere yet.
+    public private(set) var conversation: SessionID?
     private var heights: [TranscriptContentKey: Double] = [:]
     /// The keys whose height was taken at a width that no longer holds. See `rewidth`.
     private var stale: Set<TranscriptContentKey> = []
-    /// The sum of `heights`, kept in step on every write so the mean below costs nothing to ask.
+    /// **The rows the estimate is formed from: the ones measured since the pane was pointed at
+    /// this conversation.**
+    ///
+    /// A set rather than a count, because `note` has to know whether a number arriving is a
+    /// row joining the sample or a row already in it saying itself again, and the two are
+    /// arithmetic in opposite directions. `heights` cannot answer that question after
+    /// `showing(_:)`: a key it already knows can be a row of the conversation being arrived at,
+    /// measured on the last visit, and subtracting a contribution that was never added is how a
+    /// mean goes negative.
+    private var sampled: Set<TranscriptContentKey> = []
+    /// The sum of the sampled heights, kept in step on every write so the mean below costs
+    /// nothing to ask.
     private var total: Double = 0
-    /// How many of `heights` are more than nothing, which is what `estimate` divides by. See it
-    /// for why a mean over the rows that drew nothing was the wrong number.
+    /// How many of the sampled rows are more than nothing, which is what `estimate` divides by.
+    /// See it for why a mean over the rows that drew nothing was the wrong number.
     private var inked = 0
     /// The estimate once it has stopped moving, or nothing while it is still being formed. See
     /// `settleAfter`, which carries what a drifting one costs.
@@ -201,7 +246,8 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// How many rows are remembered. For tests and for a probe; nothing decides anything on it.
     public var count: Int { heights.count }
 
-    /// Declares the width and text size the cache is now for, and says whether that emptied it.
+    /// Declares the width, text size and line height the cache is now for, and says whether that
+    /// emptied it.
     ///
     /// True means every height the caller holds is now unknown and the rows have to be renoted to
     /// the table. False means nothing moved and there is nothing to do, which is the answer on
@@ -210,13 +256,36 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// A width narrower than `narrowest` is not an answer and is refused: it leaves the cache
     /// exactly as it was rather than emptying it against a number no row will be drawn at.
     @discardableResult
-    public mutating func reset(width: Double, scale: Double) -> Bool {
+    public mutating func reset(width: Double, scale: Double, leading: Double) -> Bool {
         guard width > Self.narrowest else { return false }
-        let wanted = Measure(width: width, scale: scale)
+        let wanted = Measure(width: width, scale: scale, leading: leading)
         if let measure, measure.matches(wanted) { return false }
         measure = wanted
         heights.removeAll()
         stale.removeAll()
+        sampled.removeAll()
+        total = 0
+        inked = 0
+        settled = nil
+        settledFrom = 0
+        return true
+    }
+
+    /// **Declares which conversation the pane is drawing, and says whether that started the
+    /// estimate again.**
+    ///
+    /// Keeps every measured height, because a height belongs to a row and coming back to a
+    /// conversation that has been read once is meant to be free. Starts the estimate again,
+    /// because the mean of the rows of the conversation being left is not a claim about the one
+    /// arriving: see the header for the eight screens of blank that produced, and for why nothing
+    /// could take the number again afterwards.
+    ///
+    /// Idempotent, so a caller may say it on every pass. Nothing happens until the answer changes.
+    @discardableResult
+    public mutating func showing(_ conversation: SessionID) -> Bool {
+        guard self.conversation != conversation else { return false }
+        self.conversation = conversation
+        sampled.removeAll()
         total = 0
         inked = 0
         settled = nil
@@ -237,13 +306,13 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// and notices whose height does not depend on the width at all, so for most of the list the
     /// old number is not a guess, it is the answer.
     ///
-    /// Only ever a width: a text size change goes through `reset`, because a paragraph at another
-    /// size is not an estimate of anything.
+    /// Only ever a width: a text size or line height change goes through `reset`, because a
+    /// paragraph set at another size, or led differently, is not an estimate of anything.
     @discardableResult
     public mutating func rewidth(to width: Double) -> Bool {
         guard let current = measure, width > Self.narrowest else { return false }
         guard !Self.isSameWidth(current.width, width) else { return false }
-        measure = Measure(width: width, scale: current.scale)
+        measure = Measure(width: width, scale: current.scale, leading: current.leading)
         stale = Set(heights.keys)
         return true
     }
@@ -254,6 +323,55 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// How many heights are still estimates. For a probe: it is the count of rows a resize did
     /// NOT have to measure, which is the whole of what the hold buys.
     public var staleCount: Int { stale.count }
+
+    /// **Whether this content is owed a measurement, and a hit in here is not always the answer.**
+    ///
+    /// A stored row's key is hashed from everything that can change what it draws, so a number
+    /// filed under one is the answer until the key moves and this can say no. Four of the entries
+    /// in a transcript are not stored rows, and each of them redraws itself from its own
+    /// observation inside the cell it is in: the streaming tail, the setup log, the bubble on its
+    /// way out and the delivery at the head of the queue. Their keys carry the session and nothing
+    /// else that moves, so a hit for one of those is not what it draws, it is **what it happened to
+    /// be the last time somebody looked**.
+    ///
+    /// The tail is the one that bites, and it is the reader's report: leave a workspace with a
+    /// turn running and the last number taken from that tail is several hundred points; come back
+    /// once the turn has finished and it draws nothing at all, under the same key, with the table
+    /// still laying out the several hundred. That is a screen and a half of blank between the last
+    /// turn's footer and the composer, and every mechanism that could put it right declines to.
+    /// The caller's `measureExactly` skipped it because the cache knows it, the warming pass skips
+    /// it on purpose, and the screen census cannot see it because the cache and the table agree
+    /// about a number that is wrong in both.
+    ///
+    /// So the caller says which kind of entry it is holding and this says whether what is held is
+    /// still evidence. See `TranscriptEntryID.redrawsItself`, which is the claim, and the census's
+    /// `screenWrong`, which is the counter this shape is invisible to.
+    public func needsMeasuring(_ contentKey: TranscriptContentKey, redrawsItself: Bool) -> Bool {
+        redrawsItself || heights[contentKey] == nil || stale.contains(contentKey)
+    }
+
+    /// **Whether a screenful the reader has stopped on is worth putting right.**
+    ///
+    /// Two faults, one answer, and the second one is why this is not simply `wrong > 0`.
+    ///
+    /// `wrong` is the table and the cache disagreeing: a number was taken and the table was never
+    /// told. `guessed` is a visible row the table is drawing at a height NOBODY has measured, and
+    /// there the two agree perfectly about a number that is wrong in both, which is what makes it
+    /// invisible to a disagreement count. That is the shape this file has now been wrong about
+    /// twice: once as the streaming tail, where the cache held a stale number and the row was not
+    /// even counted as a guess, and once as a fold's line, where the cache holds nothing at all.
+    ///
+    /// A fold's line is the case that forced this. Its content key carries the count in its words,
+    /// so the key moves every time a call lands, and the row is one line tall in every one of
+    /// those states. `HostedRow` reports through `onChange(of: proxy.size.height)`, so an entry
+    /// whose key moves without its height moving never reports again after the first time, and the
+    /// cache has nothing for the key the table is currently drawing. `assumed` then answers the
+    /// running mean, which is `assumedRowHeight` at worst and a prose-heavy conversation's average
+    /// at best, and what the reader sees is a one line row with most of a screen of nothing under
+    /// it. The screen census counted it and nothing acted on the count.
+    public static func needsRepair(guessed: Int, wrong: Int) -> Bool {
+        guessed > 0 || wrong > 0
+    }
 
     /// The remembered height of this content, or nothing if it has never been measured.
     public func height(for contentKey: TranscriptContentKey) -> Double? {
@@ -281,8 +399,9 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         heights[contentKey] == 0
     }
 
-    /// What an unmeasured row that draws SOMETHING is worth: the mean of the rows measured here
-    /// that drew something, or `assumedRowHeight` before there is one.
+    /// What an unmeasured row that draws SOMETHING is worth: the mean of the rows of THIS
+    /// conversation that have been measured here and drew something, or `assumedRowHeight` before
+    /// there is one. See `showing(_:)` for why the conversation is in that sentence.
     ///
     /// A mean rather than a median, because it is kept as a running total and a median would mean
     /// holding the numbers sorted for an answer that is corrected the moment the row is drawn.
@@ -334,16 +453,31 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         // the old width still stops being owed a measurement.
         stale.remove(contentKey)
         let rounded = Self.rounded(height)
-        guard !Self.isSameHeight(heights[contentKey] ?? -1, rounded) else { return false }
+        let known = heights[contentKey]
         // See `mostRows`. Asked before the insert, so the cache never holds more than it says.
-        if heights.count >= Self.mostRows, heights[contentKey] == nil { forget() }
-        let previous = heights[contentKey] ?? 0
-        total += rounded - previous
-        if previous > 0 { inked -= 1 }
-        if rounded > 0 { inked += 1 }
+        if heights.count >= Self.mostRows, known == nil { forget() }
+        // **Before the news test, and that is the whole of what a returning reader gets.** A row
+        // this pane measured on its last visit reports the same number again, which is no news to
+        // the cache and is the only evidence this conversation has offered about how tall its rows
+        // are. Counted here, the sample fills on a return as it does on a first visit; counted
+        // after the test, a conversation the pane already knows would estimate from nothing.
+        sample(rounded, for: contentKey)
+        guard !Self.isSameHeight(known ?? -1, rounded) else { return false }
         heights[contentKey] = rounded
-        settleIfItIsTime()
         return true
+    }
+
+    /// Puts a measurement into the sample the estimate is formed from, once per row.
+    ///
+    /// The second and later times a row says itself, which is the streaming tail on every frame of
+    /// a turn and any row corrected after it was drawn, what it said before comes out again: the
+    /// sample is one contribution per row, not one per report.
+    private mutating func sample(_ height: Double, for contentKey: TranscriptContentKey) {
+        let previous = sampled.insert(contentKey).inserted ? 0 : (heights[contentKey] ?? 0)
+        total += height - previous
+        if previous > 0 { inked -= 1 }
+        if height > 0 { inked += 1 }
+        settleIfItIsTime()
     }
 
     /// Takes the estimate, if there is enough to take it from and it is worth taking again.
@@ -377,11 +511,12 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         max(0, height.rounded(.up))
     }
 
-    /// Empties the cache without changing the width it is for. What a text size change and a
-    /// finished resize both come down to.
+    /// Empties the cache without changing the width it is for. What a text size change, a line
+    /// height change and a finished resize all come down to.
     public mutating func forget() {
         heights.removeAll()
         stale.removeAll()
+        sampled.removeAll()
         total = 0
         inked = 0
         settled = nil

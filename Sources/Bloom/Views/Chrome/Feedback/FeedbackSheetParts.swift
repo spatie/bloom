@@ -127,12 +127,12 @@ struct FeedbackSentCard: View {
 
     var body: some View {
         VStack(spacing: Metrics.gutter) {
-            // `accentFill`, the same token as the Done button under it, not `positive`. The two
+            // The control accent, the same token as the Done button under it, not `positive`. The two
             // used to differ, teal circle over blue button, and two accents on a card this small
             // read as a mistake. The tick is not carrying the news anyway; the heading is.
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 34, weight: .light))
-                .foregroundStyle(Palette.accentFill)
+                .foregroundStyle(Palette.controlAccent)
 
             VStack(spacing: Metrics.spacingWide) {
                 Text(title)
@@ -148,7 +148,7 @@ struct FeedbackSentCard: View {
 
             Button(Feedback.Copy.sentDismiss, action: onDismiss)
                 .buttonStyle(.borderedProminent)
-                .tint(Palette.accentFill)
+                .tint(Palette.controlAccent)
                 // Both keys, because this card has one button and either key should press it:
                 // Return is what a dialog with one button trains you to press, and Escape is what
                 // anybody who has already read it will reach for.
@@ -196,9 +196,8 @@ struct FeedbackSendButton: View {
             }
         }
         .buttonStyle(.borderedProminent)
-        // Tinted explicitly, like every other prominent button in the app: untinted it follows the
-        // system accent and renders as grey glass on macOS 26.
-        .tint(Palette.accentFill)
+        // Explicit so every primary action reads from the shared semantic token.
+        .tint(Palette.controlAccent)
         .keyboardShortcut(.return, modifiers: .command)
         .disabled(!isEnabled)
     }

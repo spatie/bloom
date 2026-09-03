@@ -30,12 +30,19 @@ struct BrowserDownloadsBar: View {
             }
         }
         .background(Palette.surfaceSunken)
-        .overlay(alignment: .top) { Hairline() }
+        // Ruled along the bottom, which is what the find bar above it does. Ruled at the top, the
+        // two strips drew a rule each when both were showing: two points of line between them,
+        // against a `Metrics.hairline` that is deliberately one. The toolbar draws its own rule
+        // above whichever strip comes first, so nothing is lost when this one stands alone.
+        .overlay(alignment: .bottom) { Hairline() }
     }
 
     private func row(_ download: BrowserDownloadItem) -> some View {
         HStack(spacing: Metrics.spacingWide) {
             Image(systemName: glyph(download))
+                // Sized to the two lines it stands beside, which are 11 and 10 points. At the
+                // default it was the largest thing in a row of the quietest type in the app.
+                .imageScale(.small)
                 .foregroundStyle(tint(download))
                 .frame(width: Metrics.glyph)
 

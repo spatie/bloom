@@ -3,9 +3,10 @@ import Observation
 
 /// What a transcript draws in the card that floats over it while the pointer rests on something.
 ///
-/// Two kinds, and they are the same question asked about two different things: "what is that,
-/// really". A chip names a file and the card shows the file. A tool row states what it did on one
-/// line, that line is cut to fit the row, and the card puts it back.
+/// Three kinds, and they are the same question asked about three different things: "what is that,
+/// really". A chip names a file and the card shows the file. A chip stands for instructions Bloom
+/// put in the message and the card shows those words. A tool row states what it did on one line,
+/// that line is cut to fit the row, and the card puts it back.
 ///
 /// One type rather than two hosts and two overlays, because one pointer can only rest on one
 /// thing: making them separate would mean two popovers that could be up at once, over each other,
@@ -14,6 +15,11 @@ enum TranscriptHoverCard: Equatable {
     /// A file a chip names, drawn by Quick Look. `worktree` is empty for a file outside it, whose
     /// path is already absolute.
     case file(attachment: PromptAttachment, worktree: String)
+    /// The words a chip stands for when there is no file behind it, which is what Bloom's merge
+    /// rules are and what a project's own instructions become in a checkout that cannot be written
+    /// to. Carried rather than fetched: they were in the turn, the turn is in hand, and the disk
+    /// has nothing to say about them.
+    case instructions(title: String, body: String)
     /// A tool row's own line, put back whole. Everything here is already in hand: it is the
     /// `ToolPresentation` the row is drawn from, so the card asks nothing of the row it belongs to
     /// and nothing of the disk. `isCode` travels with the detail so the card sets the line in the
@@ -25,6 +31,7 @@ enum TranscriptHoverCard: Equatable {
     var identity: String {
         switch self {
         case .file(let attachment, _): "file:" + attachment.path
+        case .instructions(let title, let body): "instructions:" + title + "\u{0}" + body
         case .row(let title, let detail, let isCode):
             "row:" + title + "\u{0}" + detail + "\u{0}" + (isCode ? "code" : "prose")
         }

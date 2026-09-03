@@ -105,11 +105,12 @@ enum Palette {
     /// as a smudge. These are the same two steps, taken along Bloom's ramp instead.
     static let selected = dynamic(PaletteInk.selected)
     /// Selection in a focused list inside the key window, where macOS uses the accent colour.
+    /// Selection and control emphasis supplied by macOS.
     ///
-    /// Bloom's accent rather than the system's, for the reason spelled out on `accent`. This is the
-    /// most visible of the surfaces that now ignore System Settings: the selected sidebar row and
-    /// the selected changed file are brand blue on a Mac set to Graphite.
-    static let selectedEmphasized = accentFill
+    /// Interactive colour follows the user's system accent. Brand colour remains available through
+    /// `accent` and `accentFill` for identity and status marks that are not controls.
+    static let controlAccent = Color(nsColor: .controlAccentColor)
+    static let selectedEmphasized = controlAccent
     /// The ink that survives an emphasized fill. `alternateSelectedControlTextColor` is AppKit's
     /// name for it, and it is the one semantic colour in this file that is right without argument.
     static let selectedEmphasizedText = Color(nsColor: .alternateSelectedControlTextColor)
@@ -202,14 +203,10 @@ enum Palette {
     // follows the text colour on high contrast, and the selection is the paler fill a text run
     // gets rather than the solid one a list row gets.
     //
-    // All three are still semantic and none of them is a hex here, which is right for the same
-    // three reasons. What changed is what they are derived FROM. They are computed off
-    // `controlAccentColor`, and until `NSAccentColorName` went into the bundle that was the user's
-    // accent while every fill Bloom drew was Bloom's, so a focus ring round a field was the system
-    // blue an inch under a selected row that was Spatie Blue. Now the accent AppKit derives them
-    // from is `accentFill`, and the three follow it: measured `#006282` and `#37A3C7` for the ring
-    // at half alpha, and `PaletteInk.accentTextSelection` for the selection, which
-    // `PaletteContrastTests` holds a floor over because it is a fill with a paragraph on it.
+    // All three remain semantic and derive from `controlAccentColor`, the same source exposed as
+    // `Palette.controlAccent`. Bloom's AccentColor asset supplies the default under Multicolour,
+    // while an explicit user-selected accent wins. Native and custom interactive surfaces
+    // therefore stay aligned.
 
     /// The focus ring around the control that has keyboard focus.
     static let focusRing = Color(nsColor: .keyboardFocusIndicatorColor)
@@ -220,13 +217,10 @@ enum Palette {
 
     // MARK: Meaning
 
-    /// Bloom's accent, and deliberately not the user's.
+    /// Bloom's brand accent for identity, links and status ink.
     ///
-    /// This is the one place the app overrides a system preference on purpose. `controlAccentColor`
-    /// follows System Settings, so on a machine set to Graphite every tinted glyph, chip and
-    /// selected segment in Bloom came out grey, and on one set to Pink they came out pink. Bloom
-    /// has a mark and a site built on one ramp, and an app whose accent is whatever the user last
-    /// picked cannot be part of it. See `PALETTE.md` in the brand folder.
+    /// It deliberately does not paint controls or selections. Those use `controlAccent`, which
+    /// follows the user's system preference. See `PALETTE.md` in the brand folder.
     ///
     /// A pair, not a colour, because the ramp is explicit that its bottom half is for dark grounds
     /// and its top half for light. Bloom `#4FD8C4` measures 10.6 to 1 on the dark surface and 1.7
@@ -234,51 +228,22 @@ enum Palette {
     /// Ink `#0C7A6E`, which measures 5.1. Both are the same hue, so a glyph that is teal in dark is
     /// recognisably the same glyph in light.
     ///
-    /// This is for ink and for strokes. A filled control that has to carry white text uses
-    /// `accentFill`, which is a different member of the ramp for exactly that reason.
-    ///
-    /// **The override used to reach only what Bloom draws itself, and that was the whole bug.**
-    /// Thirty-seven toggles, three steppers, every focus ring and every text selection are drawn by
-    /// AppKit off `controlAccentColor`, which no `.tint` can reach, so one Settings pane held a
-    /// switch in the user's blue, a focus ring in the user's blue and a selected sidebar row in
-    /// Bloom's. Two accents in one window, structurally rather than by slip. `NSAccentColorName` in
-    /// `Resources/Info.plist` names the `AccentColor` set in Assets.car, which carries `accentFill`,
-    /// and `controlAccentColor` then answers that for the whole process: measured `#197593` in both
-    /// appearances, with the ring, the text selection and the list selection all derived from it.
-    ///
-    /// **What it does not reach, and this was measured rather than repeated from the docs.** The
-    /// key wins only where the user has left the accent on Multicolour, which is the default and so
-    /// most machines. A probe bundle carrying this exact key and catalogue, handed a chosen accent,
-    /// answered `#F74F9E` for `controlAccentColor` and derived its ring and its selection from that:
-    /// the user's choice beats the app's every time. So a Mac set to Pink or to Graphite has the
-    /// two accents it had before, and this fixes the default case and nothing else. The other
-    /// coherent answer, giving the sidebar selection back to `controlAccentColor`, is the one to
-    /// reach for if the brand argument ever gives.
-    ///
-    /// Increase Contrast is the system's business either way now, because the colour it is lifting
-    /// is `controlAccentColor` and that is this. A colour set can carry a High Contrast variant of
-    /// its own the day `PaletteInk` grows a high-contrast tier; it has none, so it declares one
-    /// colour and the system does what it does to it.
+    /// This is for ink and strokes that convey Bloom identity or status, not interactive emphasis.
     static let accent = dynamic(PaletteInk.accent)
 
     /// The same pair as an `NSColor`, for the layers that hold a `CGColor` and therefore have to be
     /// handed a colour already resolved against the window's appearance.
     static let accentNSColor = dynamicNSColor(light: 0x0C7A6E, dark: 0x4FD8C4)
 
-    /// The accent as a fill with light text on it: a selected row, a prominent button.
+    /// A brand fill capable of carrying light text, for identity surfaces such as the user's
+    /// message bubble. Controls and selections use `controlAccent` instead.
     ///
     /// Spatie Blue, the ramp's anchor and the only colour in it that works on both grounds. White
-    /// on it measures 5.2 to 1, which is where macOS's own selection fill sits (4.9 to 1), so a
-    /// selected row reads exactly as firmly as it did. Bloom itself cannot do this job: white on
+    /// on it measures 5.2 to 1. Bloom itself cannot do this job: white on
     /// `#4FD8C4` is 1.6 to 1, an unreadable row.
     ///
-    /// **This is also the colour AppKit is handed**, through `NSAccentColorName` and the
-    /// `AccentColor` set in Assets.car, and it is this member of the ramp rather than `accent` for
-    /// the reason above: `controlAccentColor` is a FILL everywhere the system reaches for it, the
-    /// track of a switch, the box of a ticked checkbox, the dot of a radio button, all of them with
-    /// white on top. `accent` in dark is `#4FD8C4` and would leave every tick in the app at 1.6 to
-    /// 1. One value in both appearances is what a colour set wants anyway, and this pair already is
-    /// one, which is why `Tools/build.sh` refuses a build where the two halves have come apart.
+    /// This also supplies the app's default AccentColor when the system preference is Multicolour.
+    /// An explicit user-selected accent still wins for native and custom interactive controls.
     static let accentFill = dynamic(PaletteInk.accentFill)
 
     /// An address in running text: underlined, and this colour.
@@ -340,6 +305,11 @@ enum Palette {
     /// That is fine and deliberate: `WorkspaceStatusGlyph` already draws every state as a
     /// different shape, so the column can be read by someone who cannot tell the red one from the
     /// green one, and the reference collapses the same two the same way.
+    ///
+    /// **`running` was on that list too and is not any more**, which is the one collapse that was
+    /// not fine: a finished workspace and a working one are the two states a glance most needs to
+    /// tell apart, and they were the same value. See `running` below, and `PaletteContrastTests`,
+    /// which now fails if the two ever meet again.
     static let positive = accent
 
     /// The wash and the rule of the agent's question card while it is holding the turn open.
@@ -354,6 +324,20 @@ enum Palette {
     /// The same card once the question is settled: barely off the page, behind the plain border,
     /// so a finished question reads as part of the record rather than as something still waiting.
     static let questionWashSettled = accent.opacity(0.03)
+
+    /// The amber twin of the set above: the wash and the rule of a card that wants something of
+    /// the reader without being an error. The permission ask while it is holding the turn open,
+    /// and a retry while it is counting down.
+    ///
+    /// Named for the same reason `questionWash` is, and named because the two cards had already
+    /// drifted apart: the ask card was `0.07` over `0.46` and the retry `0.07` over `0.28`, two
+    /// amber plates a reader meets in one scroll with visibly different rules. The border takes
+    /// `questionBorder`'s rung rather than either of the two literals it replaces, since neither
+    /// of them had an argument behind it and the question card is the same card in another colour.
+    static let cautionWash = warning.opacity(0.07)
+    static let cautionBorder = warning.opacity(0.4)
+    /// The ask card once it has been answered, matching `questionWashSettled`.
+    static let cautionWashSettled = warning.opacity(0.03)
 
     /// Something went wrong: a failed check, an error row, a deletion count.
     ///
@@ -406,9 +390,46 @@ enum Palette {
     /// percent of value and invisible: it measured 4.39 to 1 on the sunken surface, and the sunken
     /// surface is where a strip sits.
     static let warning = dynamic(PaletteInk.warning)
-    /// An agent mid turn. The ramp is explicit that this is the accent rather than a green of its
-    /// own: "Running, healthy, done. Reuse the accent, do not invent a green."
-    static let running = accent
+    /// An agent mid turn: the sidebar's dot, the tab's dot, and the rule under the tab strip.
+    ///
+    /// **A hue of its own, and it must never equal `positive`.** It was `accent`, which is what
+    /// `positive` is too, and the report was that "a green busy indicator is easily being confused
+    /// with another green icon status": in one screenshot a passing workspace's tick sat two rows
+    /// above a running workspace's dot and the Chat tab's dot was the same value again, so three
+    /// marks meaning three different things were one colour and only their shapes told them apart.
+    /// Hue is what a glance reads first, and it was saying nothing.
+    ///
+    /// It was orange for a day, which was the first answer to that report and is not this one. The
+    /// owner looked at it in the window and asked for the house blue instead, and the whole of what
+    /// follows is why the house blue could not simply be taken.
+    ///
+    /// **`accentFill` itself is not usable here, and the numbers say so twice.** In dark it is not
+    /// an ink at all: `#197593` on `surfaceRaised` measures 2.62 to 1, under even the 3.0 floor a
+    /// mark holds without being read, which is the whole reason that pair is one value in both
+    /// appearances and is documented as a FILL that carries white text. And in light it is 17.9
+    /// from `positive` by CIEDE2000, closer than `positive` is to the tertiary ink, which is the
+    /// same bug in a new hue: a teal-blue dot two rows under a teal-green tick.
+    ///
+    /// So it is moved round the wheel until it stops being teal, and no further: hue 195 to 207 in
+    /// light and to 211 in dark, twelve degrees and sixteen. That buys 31.1 and 30.4 from
+    /// `positive`, both past the 27.9 and 28.8 that `warning` and `negative` already sit apart at,
+    /// which is the closest two meaning colours in this app are deliberately drawn. It is still
+    /// recognisably the same blue: 12.9 from `accentFill` in light, where `accent`'s own light
+    /// member is 17.9 from it.
+    ///
+    /// What a blue costs that the orange did not is that it has two near neighbours instead of
+    /// none. `merged` is GitHub violet, at 21.3 and 25.0, and `textTertiary` is a blue-grey in dark
+    /// (`#769AAA`, hue 198), at 17.8 and 15.1. Both clear the 14.2 and 14.9 that `merged` and
+    /// `textTertiary` are already drawn at in this window, so neither is a new kind of closeness,
+    /// but they are why the lightness is where it is: darker in light and lighter in dark than the
+    /// separation alone would want, so the mark is never a grey one. `PaletteContrastTests` pins
+    /// all of it.
+    static let running = dynamic(PaletteInk.running)
+
+    /// The same pair as an `NSColor`, for `ActivityRuleView`'s layers. See `accentNSColor`.
+    static let runningNSColor = dynamicNSColor(
+        light: PaletteInk.running.light, dark: PaletteInk.running.dark
+    )
 
     /// A pull request that has landed.
     ///
@@ -493,8 +514,6 @@ enum Palette {
     static let diffAddEmphasis = diffPositive.opacity(0.28)
     static let diffDeleteBackground = negative.opacity(0.14)
     static let diffDeleteEmphasis = negative.opacity(0.30)
-    /// The line number column, which is the sunken step and nothing else.
-    static let diffGutter = surfaceSunken
 
     /// A line under review, and the band holding its comment. The one amber wash in the window,
     /// on `warning`'s hue, because the diff's own washes have already spent green and red: a
@@ -603,6 +622,12 @@ extension Color {
 /// step the app actually wanted, was never used at all. `.subheadline` is that step, and it is
 /// where everything that sat at 10 for want of anywhere else has moved to.
 enum Typo {
+    /// Large brand copy, expressed as a system text style so the welcome and about windows cannot
+    /// drift into unrelated point sizes.
+    static let display = ScaledFont(.largeTitle, weight: .light, design: .serif)
+    /// A page heading inside the welcome sequence.
+    static let displayHeading = ScaledFont(.title2, weight: .medium, design: .serif)
+    static let displayTracking: CGFloat = -0.6
     /// 15. The only rung above reading size, for the two places something has to read as a heading
     /// rather than as a bold sentence: a heading inside agent prose, and the state of the pull
     /// request at the top of the inspector.
@@ -691,6 +716,9 @@ enum Metrics {
     /// step, the rules in this window were not so much subtle as absent, and every pane floated.
     /// The name stays because a one point rule is still what everyone calls a hairline.
     static let hairline: CGFloat = 1
+    /// A device-pixel-style outline for controls and cards. Structural pane dividers remain a full
+    /// point through `hairline`.
+    static let outline: CGFloat = 0.5
 
     // MARK: Spacing
     //
@@ -729,11 +757,54 @@ enum Metrics {
     /// The same mark set inline in a line of caption text, where the full size outweighs the
     /// words beside it.
     static let repoIconSmall: CGFloat = 13
-    /// The box a sidebar row's state glyph sits in, matching the cap height of the text beside
-    /// it so the glyphs line up down the column whichever state each row is in.
+    /// The box a sidebar row's state glyph sits in, so the glyphs line up down the column
+    /// whichever state each row is in. It is the point size of the name beside them, not the cap
+    /// height of it, which measures 9.16 at that rung.
+    ///
+    /// A box, and not a size. What a mark draws INSIDE it is `glyphInk`, and the gap between the
+    /// two is the whole of the report the three constants under this one were written for.
     static let glyph: CGFloat = 13
-    /// A status dot, sized to sit on a text baseline rather than to be noticed on its own.
-    static let dot: CGFloat = 6
+
+    /// What a round mark in that box actually puts on the page.
+    ///
+    /// Measured rather than chosen, because the number a mark is given says nothing about the
+    /// number it draws. An SF Symbol sits inside its em box with its own bearing, so a filled one
+    /// comes out under the box it is framed in; a `Circle()` fills the frame it is handed exactly.
+    /// Hand the two the same 13 and they are not the same size, which is how a column meant to
+    /// read as one family ends up reading as two.
+    ///
+    /// The report was "that green dot feels too big", with a filled tick, a busy dot and a dotted
+    /// ring in three rows of one project. Measured off a headless render of the real symbols at
+    /// twenty times, in the configuration this column asks for (`Typo.caption`, semibold,
+    /// `.imageScale(.medium)`): every round mark draws 11.25 across, `circle.fill`,
+    /// `checkmark.circle.fill`, `xmark.circle.fill`, `slash.circle`, `clock` and `circle.dotted`
+    /// alike, which is what makes this one number instead of thirteen.
+    static let glyphInk: CGFloat = 11.25
+
+    /// The bare disc in that same column: the unread mark, which is `circle.fill` a type rung
+    /// down, `Typo.micro` against `Typo.caption`.
+    ///
+    /// Ten elevenths of the ink above, because a symbol's ink tracks its point size one for one:
+    /// measured, 11.25 at the eleven point rung and 10.25 at the ten. Written as the ratio of the
+    /// two rungs rather than as a measurement of its own, so a column that changes rung moves
+    /// both marks together.
+    static let glyphDisc: CGFloat = glyphInk * 10 / 11
+
+    /// A status dot, sized to sit on a text baseline rather than to be noticed on its own: the
+    /// busy mark in the sidebar, on a tab and in the transcript, and the bullets the inspector and
+    /// the settings set beside a line.
+    ///
+    /// Derived, and that is what the report bought. It was a free six, chosen against a
+    /// measurement of the unread disc that had been taken at the wrong image scale, so the one
+    /// mark in the column drawn as a shape rather than as a symbol came out at little over half
+    /// of what it stood beside.
+    ///
+    /// The dot swells by `BusyDot.peakScale` while it works, and the one thing it must never do
+    /// is reach the unread disc: that is the same shape in another hue, and two circles of one
+    /// size would be told apart only by which of them happened to be moving. So the peak is set
+    /// at nine tenths of the disc and the resting figure falls out of it: 6.8 at rest and 9.2 at
+    /// the top of the pulse, against the disc's 10.2 and the box's 13.
+    static let dot: CGFloat = glyphDisc * 0.9 / CGFloat(BusyDot.peakScale)
     /// What a `Chip` keeps inside its fill. Named because the transcript footer draws a two colour
     /// chip by hand next to a real one, and the two have to be the same shape.
     static let chipInsetH: CGFloat = 5
@@ -745,6 +816,51 @@ enum Metrics {
     /// browser bar's address pill and the capsule its arrows sit in. Five points of ground above
     /// and below, which is the clearance a bare glyph in the same strip already has.
     static let controlHeight: CGFloat = 22
+}
+
+/// How far off the window a floating thing is lifted.
+///
+/// Three call sites had invented three recipes for one question: `MenuPanel` at 0.24 over twelve
+/// points, `JumpToNewestPill` at 0.18 over four and 0.28 over twelve under the pointer, and the
+/// pane drag ghost at 0.18 over eight. Nothing distinguished them; they were written on three
+/// days. Two levels are enough for what the window actually has, and they are named for what the
+/// thing is doing rather than for how dark the shadow is.
+///
+/// Black rather than the label colour, in both. A shadow tinted with `labelColor` becomes a white
+/// glow in dark appearance, which is the opposite of what a shadow is for, and every one of the
+/// three call sites had already had to write that down for itself.
+enum Elevation {
+    /// A control sitting on the page: the jump pill at rest.
+    case resting
+    /// A panel open over the window, or something carried under the pointer.
+    case lifted
+
+    var opacity: Double {
+        switch self {
+        case .resting: 0.18
+        case .lifted: 0.24
+        }
+    }
+
+    var radius: CGFloat {
+        switch self {
+        case .resting: Metrics.spacingSmall
+        case .lifted: Metrics.gutter
+        }
+    }
+
+    var offset: CGFloat {
+        switch self {
+        case .resting: Metrics.spacingTight
+        case .lifted: Metrics.spacingSmall
+        }
+    }
+}
+
+extension View {
+    func elevation(_ level: Elevation) -> some View {
+        shadow(color: .black.opacity(level.opacity), radius: level.radius, y: level.offset)
+    }
 }
 
 /// How a pane arrives and leaves.
@@ -785,6 +901,10 @@ enum Motion {
     /// deliberately not `pane`: this movement belongs to the split view and the other two are
     /// joining it, and a speed chosen here that the split view then declined to use would put them
     /// back out of step, which is the whole bug.
+    ///
+    /// `hoverSeconds` below is the same idea for the hover speed, and exists for the same reason:
+    /// an `NSAnimationContext` takes a `TimeInterval` and cannot be handed an `Animation`, so
+    /// anything AppKit plays needs the length written down separately or it writes its own.
     static let inspectorSeconds: TimeInterval = 0.25
 
     /// A hover state fading in, and a disclosure settling. See the sidebar rows.
@@ -793,7 +913,12 @@ enum Motion {
     /// before the cursor has finished arriving, or the row reads as lagging rather than as
     /// responding. Named because five call sites had grown their own literals (0.12 twice, 0.15,
     /// 0.2 once) and a file that argues one window has one speed cannot also hold four of them.
-    static let hover: Animation = .easeInOut(duration: 0.12)
+    ///
+    /// A sixth had grown one since: a tab's favicon crossfading in `TabItemIcon`, spelled out as
+    /// `.easeInOut(duration: 0.12)`, which is this constant with the name taken off. Naming a
+    /// speed only stops the drift if the next call site reads the name.
+    static let hoverSeconds: TimeInterval = 0.12
+    static let hover: Animation = .easeInOut(duration: hoverSeconds)
 
     /// A pane's own length, borrowed by anything that settles at the same speed.
     ///
@@ -918,8 +1043,8 @@ struct Hairline: View {
 /// Something the user has to read before pressing, or after it went wrong.
 ///
 /// Here rather than beside the sheet that first drew it: `ProjectSetupSheet` and
-/// `NewProjectSheet` are the two halves of one question, so a warning worded and tinted two ways
-/// would be the same fault the two dialogs were split to avoid.
+/// `StartProjectView` say the same things about the same folders, so a warning worded and tinted
+/// two ways would be the same fault the two dialogs were split to avoid.
 struct Callout: View {
     enum Tone {
         case warning

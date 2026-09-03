@@ -18,32 +18,32 @@ struct SlashCommandRow: View {
 
     var body: some View {
         Button(action: onPick) {
-            HStack(spacing: Metrics.spacing) {
-                name
-                    .font(Typo.code)
-                    .lineLimit(1)
-                    .layoutPriority(1)
+            HStack(alignment: .top, spacing: Metrics.spacing) {
+                VStack(alignment: .leading, spacing: Metrics.spacingTight) {
+                    HStack(spacing: Metrics.spacing) {
+                        name
+                            .font(Typo.codeSmall)
+                            .lineLimit(1)
+                            .layoutPriority(1)
 
-                if !command.detail.isEmpty {
-                    Text(command.detail)
-                        .font(Typo.label)
-                        .foregroundStyle(
-                            isEmphasized
-                                ? Palette.selectedEmphasizedText.opacity(0.75)
-                                : Palette.textTertiary
-                        )
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
+                        Spacer(minLength: 0)
 
-                Spacer(minLength: 0)
+                        if let badge = command.badge {
+                            Chip(text: badge)
+                        }
+                    }
 
-                if let badge = command.badge {
-                    Chip(text: badge)
+                    if !command.detail.isEmpty {
+                        Text(command.detail)
+                            .font(Typo.caption)
+                            .foregroundStyle(detailColour)
+                            .lineLimit(3)
+                            .truncationMode(.tail)
+                    }
                 }
             }
             .padding(.horizontal, Metrics.spacing)
-            .frame(height: Metrics.rowHeight)
+            .padding(.vertical, Metrics.spacingSmall)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -91,11 +91,19 @@ struct SlashCommandRow: View {
     }
 
     private var loud: Color {
-        isEmphasized ? Palette.selectedEmphasizedText : Palette.textPrimary
+        if isEmphasized { return Palette.selectedEmphasizedText }
+        return command.kind == .skill ? Palette.accent : Palette.textPrimary
     }
 
     private var quiet: Color {
-        isEmphasized ? Palette.selectedEmphasizedText.opacity(0.65) : Palette.textSecondary
+        if isEmphasized { return Palette.selectedEmphasizedText.opacity(0.72) }
+        return command.kind == .skill ? Palette.accent.opacity(0.76) : Palette.textSecondary
+    }
+
+    private var detailColour: Color {
+        isEmphasized
+            ? Palette.selectedEmphasizedText.opacity(0.88)
+            : Palette.textPrimary.opacity(0.68)
     }
 
     /// See `FileMentionRow`: the labels set their own colour, so they have to know when the row

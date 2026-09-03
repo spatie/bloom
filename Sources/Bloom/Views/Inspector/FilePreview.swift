@@ -12,14 +12,14 @@ import BloomCore
 struct FilePreview: View {
     let model: WorkspaceModel
     let path: String
+    let absolutePathOverride: String?
+    let canEditInBloom: Bool
 
     /// Far more than fits on a screen, and enough that scrolling never reaches the truncation on
     /// any file a person would open on purpose.
     private static let lineLimit = 5_000
     /// A horizontal scroll wider than this helps nobody and makes the scroller useless.
     private static let columnLimit = 800
-    /// The same cap `FilePathChip` puts on the folder above a diff.
-    private static let chipWidth: CGFloat = 170
 
     @State private var lines: [String] = []
     @State private var carries: [LexState] = []
@@ -43,11 +43,21 @@ struct FilePreview: View {
     /// editor. `DiffView` seeds its own mode the same way and for the same reason: coming back to
     /// a file you were typing in and finding the read only half is indistinguishable from finding
     /// the typing gone.
-    init(model: WorkspaceModel, path: String) {
+    init(
+        model: WorkspaceModel,
+        path: String,
+        absolutePathOverride: String? = nil,
+        canEditInBloom: Bool = true
+    ) {
         self.model = model
         self.path = path
-        let absolute = (model.workspace.path as NSString).appendingPathComponent(path)
-        _isEditing = State(initialValue: FileEditSession.shared.isDirty(absolute))
+        self.absolutePathOverride = absolutePathOverride
+        self.canEditInBloom = canEditInBloom
+        let absolute = absolutePathOverride
+            ?? (model.workspace.path as NSString).appendingPathComponent(path)
+        _isEditing = State(
+            initialValue: canEditInBloom && FileEditSession.shared.isDirty(absolute)
+        )
     }
 
     private struct LoadID: Hashable {
@@ -80,7 +90,9 @@ struct FilePreview: View {
                     content
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Top, for the reason `ReviewPaneView` gives where it holds this view: an unaligned
+            // fill centres, and a short file centred in a tall pane reads as a layout accident.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .background(Palette.surface)
         .background { shortcut }
@@ -110,19 +122,9 @@ struct FilePreview: View {
     /// to say: nothing here has a diff, a revert or two layouts to choose between.
     private var header: some View {
         HStack(spacing: InspectorLayout.gap) {
-            if FileBarLayout.showsDirectory(width: width), !directory.isEmpty {
-                Chip(text: directory)
-                    .frame(maxWidth: Self.chipWidth, alignment: .leading)
-                    .layoutPriority(-1)
-            }
+            FilePathLabel(path: path, width: width)
 
-            Text(filename)
-                .font(Typo.bodyEmphasis)
-                .foregroundStyle(Palette.textPrimary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-
-            // The same dot `FilePathChip` puts after a changed file's name, because Edit mode
+            // The same dot `FileHeaderBar` puts after a changed file's name, because Edit mode
             // holds its text in `FileEditSession` rather than on this view: switching to View,
             // to another file or to another workspace keeps the typing, and the dot is the only
             // thing that says so.
@@ -131,7 +133,9 @@ struct FilePreview: View {
             Spacer(minLength: InspectorLayout.tight)
 
             openInMenu
-            modePicker
+            if canEditInBloom {
+                modePicker
+            }
         }
         .padding(.horizontal, InspectorLayout.inset)
         .frame(height: InspectorLayout.barHeight)
@@ -202,7 +206,8 @@ struct FilePreview: View {
     private var filename: String { (path as NSString).lastPathComponent }
 
     private var absolutePath: String {
-        (model.workspace.path as NSString).appendingPathComponent(path)
+        absolutePathOverride
+            ?? (model.workspace.path as NSString).appendingPathComponent(path)
     }
 
     /// Names the application, so the button says what it will do before it is pressed.
@@ -212,15 +217,11 @@ struct FilePreview: View {
         return "Open \(filename) in \(app.app.name)"
     }
 
+    /// One call, because `Reveal.inEditor` now asks `OpenIn.preferred` itself and records the
+    /// choice the same way. This used to ask, open, and hand the miss to a second answer.
     private func openInPreferredApp() {
-        guard let app = OpenIn.preferred(for: .file(absolutePath), repo: model.repo?.id) else {
-            Reveal.inEditor(absolutePath)
-            return
-        }
-        OpenIn.open(absolutePath, with: app, repo: model.repo?.id)
+        Reveal.inEditor(absolutePath, repo: model.repo?.id)
     }
-
-    private var directory: String { (path as NSString).deletingLastPathComponent }
 
     /// `GeometryReader` because the sheet has to be at least as wide as the container AND at least
     /// as wide as the longest line, and there is no container-relative modifier that expresses a
@@ -236,8 +237,8 @@ struct FilePreview: View {
             )
             ScrollView([.vertical, .horizontal]) {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(lines.indices, id: \.self) { index in
-                        row(at: index, width: width)
+                    ForEach(runs, id: \.lowerBound) { range in
+                        run(range, width: width)
                     }
                     if isTruncated {
                         Text("Showing the first \(Self.lineLimit.formatted()) lines")
@@ -254,19 +255,54 @@ struct FilePreview: View {
         }
     }
 
-    private func row(at index: Int, width: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            Text("\(index + 1)")
-                .font(Typo.codeTiny)
-                .monospacedDigit()
-                .foregroundStyle(Palette.textTertiary)
-                .frame(width: CodeMetrics.numberWidth, alignment: .trailing)
-                .padding(.trailing, CodeMetrics.gutterPadding)
-                .background(Palette.diffGutter)
-            CodeText(
-                line: lines[index],
-                language: language,
-                carry: index < carries.count ? carries[index] : LexState()
+    /// The file in blocks, so a selection can run across lines.
+    ///
+    /// **A file was a `Text` per line and could not be selected across two of them**, which is the
+    /// same report the diff got on 0.20.0 and the same answer: sibling `Text`s are separate
+    /// selection scopes on this system. Nothing here needs the diff's machinery, since a file that
+    /// has not changed has no washes, no markers and no comment buttons, so it is a column of
+    /// numbers beside one `CodeRunText`.
+    ///
+    /// Blocks rather than the whole file, through the same rule the diff groups by, because a run
+    /// is one item in a lazy stack however many lines it holds and this pane will show five
+    /// thousand of them.
+    private var runs: [Range<Int>] {
+        DiffRunGrouping.chunks(count: lines.count, isLine: { _ in true }).map { chunk in
+            switch chunk {
+            case let .single(index): index..<(index + 1)
+            case let .run(range): range
+            }
+        }
+    }
+
+    /// No tint behind the numbers, for the reason `DiffGutter` gives: a grey column against the
+    /// ground the code sits on draws a hard vertical edge down the left of the file, and a hard
+    /// edge reads as a boundary between two things rather than as the margin of one. It also has
+    /// to match, because Diff, Preview and Edit are three views of one file and this pane is the
+    /// one you land in by clicking a file that has not changed.
+    private func run(_ range: Range<Int>, width: CGFloat) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                ForEach(range, id: \.self) { index in
+                    Text("\(index + 1)")
+                        .font(Typo.codeTiny)
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.textTertiary)
+                        .frame(width: CodeMetrics.numberWidth, alignment: .trailing)
+                        .padding(.trailing, CodeMetrics.gutterPadding)
+                        // One fixed height cell per line, which is what the block of text beside
+                        // this column is tuned to match. See `CodeMetrics.rowSpacing`.
+                        .frame(height: CodeMetrics.rowHeight)
+                }
+            }
+            CodeRunText(
+                lines: range.map { index in
+                    CodeRunLine(
+                        text: lines[index],
+                        carry: index < carries.count ? carries[index] : LexState()
+                    )
+                },
+                language: language
             )
             // The diff pays for this with its marker column. Without it here the first character
             // of every line sits against the gutter's edge, and the width computed above already
@@ -274,7 +310,11 @@ struct FilePreview: View {
             .padding(.leading, CodeMetrics.textInset)
             Spacer(minLength: 0)
         }
-        .frame(width: width, height: CodeMetrics.rowHeight, alignment: .leading)
+        .frame(
+            width: width,
+            height: CodeMetrics.rowHeight * CGFloat(range.count),
+            alignment: .leading
+        )
     }
 
     private func load() async {
@@ -285,6 +325,10 @@ struct FilePreview: View {
         // Same call and same answer as `DiffView`, so the two bars never disagree about whether a
         // file can be edited.
         let absolute = absolutePath
+        guard canEditInBloom else {
+            isEditable = false
+            return
+        }
         isEditable = await Task.detached(priority: .utility) {
             FileEditor.isEditable(absolute)
         }.value

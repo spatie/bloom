@@ -42,6 +42,11 @@ struct PullRequestCreator: View {
     /// It settles both halves of the strip: the line under the branch name, and whether there is a
     /// button at all.
     var hasChanges: Bool
+    /// Set for the branch this workspace was carried on to when its pull request merged, and only
+    /// while nothing has been committed to it. It is the difference between an empty branch that
+    /// has just been cut from a landed pull request and an empty branch nobody has done anything
+    /// on, which read identically until `ContinuedBranch` gave the first of them a sentence.
+    var continued: ContinuedBranch?
     var action: () -> Void
 
     /// Whether the pointer is on the branch name, which is the only time anything asks whether it
@@ -150,10 +155,7 @@ struct PullRequestCreator: View {
                 // first candidate, and "Create pull request" therefore kept its title at every
                 // pane width and the icon-only form was unreachable. See
                 // `PullRequestSummary.continueButton`.
-                ViewThatFits(in: .horizontal) {
-                    createButton.labelStyle(.titleOnly).fixedSize()
-                    createButton.labelStyle(.iconOnly).fixedSize()
-                }
+                createButton.labelStyle(.titleOnly).fixedSize()
             }
         }
         // Reading the name is half of what a truncated branch name is wanted for. The other half
@@ -180,18 +182,17 @@ struct PullRequestCreator: View {
         // `PullRequestSummary.detailLine` gives: a disabled button that explains itself only on
         // hover is a button most people never get an explanation from.
         if let note = branchActions.note { return note }
-        return hasChanges
-            ? "No pull request yet. Target \(baseBranch)."
-            : "Nothing has changed on this branch yet."
+        guard hasChanges else { return ContinuedBranch.line(on: branch, continued: continued) }
+        return "No pull request yet. Target \(baseBranch)."
     }
 
-    /// Tinted explicitly. An untinted `.borderedProminent` follows the system accent on this
-    /// platform, and this is the button the strip exists for. See `PullRequestSummary.mergeButton`
-    /// for the measurement, and for the one case no tint survives.
+    /// Explicit so the button reads from the shared semantic token. See
+    /// `PullRequestSummary.mergeButton` for the one case where a state colour replaces it.
     private var createButton: some View {
         Button("Create pull request", systemImage: "arrow.triangle.pull", action: action)
             .buttonStyle(.borderedProminent)
-            .tint(Palette.accentFill)
+            .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
+            .tint(Palette.controlAccent)
             .controlSize(.regular)
             // Held back while a turn runs, like every other button in this band: opening the
             // pull request pushes the branch, and a worktree being written to as it is read

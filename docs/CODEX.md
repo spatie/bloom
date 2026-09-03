@@ -339,38 +339,87 @@ and Bloom's `DiffParser` reads that shape.
 ## 7. Permissions
 
 **None of Claude Code's rule grammar exists on this protocol.** No `permission-rule`, no allow list
-to append to, no `--permission-prompt-tool`. What Codex has is a policy crossed with a sandbox, and
-five request shapes.
+to append to, no `--permission-prompt-tool`. What Codex has is a policy crossed with a sandbox
+crossed with a reviewer, and five request shapes.
 
 ### Policy, per turn
 
 `approvalPolicy` is `untrusted` | `on-request` | `never` | `{granular: {…}}`, crossed with
-`sandbox` (`read-only` | `workspace-write` | `danger-full-access`). Bloom's four `PermissionMode`
-cases do not map onto that grid, and **`plan` has no equivalent at all**.
+`sandbox` (`read-only` | `workspace-write` | `danger-full-access`), crossed with
+`approvalsReviewer` (`user` | `auto_review` | `guardian_subagent`). **`plan` has no equivalent at
+all**, and the other four `PermissionMode` cases are exactly Codex's own four presets:
 
-Proposal, and it should be argued with:
+| Bloom mode | Codex preset | `approvalPolicy` | `sandbox` | `approvalsReviewer` |
+| --- | --- | --- | --- | --- |
+| `auto`, "Read only" | `read-only` | `on-request` | `read-only` | `user` |
+| `acceptEdits`, "Ask for approval" | `workspace` | `on-request` | `workspace-write` | `user` |
+| `autoReview`, "Approve for me" | `auto` | `on-request` | `workspace-write` | `auto_review` |
+| `bypassPermissions`, "Full access" | `full-access` | `never` | `danger-full-access` | `user` |
+| `plan` | **not offered**, falls to `auto` | | | |
 
-| Bloom mode | Codex `approvalPolicy` | Codex `sandbox` |
-| --- | --- | --- |
-| Ask (`auto`) | `on-request` | `read-only` |
-| Accept edits | `on-request` | `workspace-write` |
-| Full access | `never` | `danger-full-access` |
-| Plan | **not offered** | |
-
-**Shipped, and measured.** Ask means "do not write without telling me", and read-only is the
+**Shipped, and measured.** Read only means "do not write without telling me", and read-only is the
 sandbox that means it: reads and commands run untouched, writes arrive as questions. The measured
 run is above, and the number that matters is zero questions for two shell commands. `untrusted`
 was the stricter alternative and was rejected on that same evidence: it asks about reads too, which
-would make Ask a mode nobody leaves on rather than a strict one.
+would make the strictest mode one nobody leaves on rather than one somebody works in.
 
-Accept edits differs by exactly one thing, which is the one thing its name promises: the sandbox
-lets the worktree be written, so an edit inside it is not a question. `workspaceWrite` names the
-worktree as its only writable root, so a Codex chat can write where its own workspace is and
-nowhere else.
+Ask for approval differs by exactly one thing: the sandbox lets the worktree be written, so an edit
+inside it is not a question. `workspaceWrite` names the worktree as its only writable root, so a
+Codex chat can write where its own workspace is and nowhere else.
 
-`plan` is **absent from the picker for a Codex chat and the picker says why**: "Plan is a Claude
-Code mode. Codex has no equivalent." Absent and silent would leave somebody who knows Bloom has a
-Plan mode hunting for it.
+Approve for me differs from Ask for approval by exactly one field, and it is not the policy or the
+sandbox: it is who answers. `approvalsReviewer: auto_review` hands each question to a subagent of
+Codex's own, which gathers context and applies a risk framework before approving or denying it.
+`codex --approve-for-me` says the same in its own help, "Route approval requests through automatic
+review using the workspace-write sandbox".
+
+**Bloom shipped without that row, and a user said so**, having read the Codex app's picker beside
+Bloom's: three rows in Claude Code's vocabulary, and the one he wanted, the one the Codex app calls
+"Approve for me", nowhere. `acceptEdits` was already sending the pair that app calls "Ask for
+approval", so the middle mode was genuinely absent rather than merely renamed. Measured against
+0.149.1 while adding it: both `thread/start` and `turn/start` parse `approvalsReviewer`, and a
+value neither knows comes back as ``unknown variant `bogus_value`, expected one of `user`,
+`auto_review`, `guardian_subagent` ``. The third is the older spelling of the second and Bloom does
+not offer it.
+
+**The reviewer is named on every turn, not only on the turn that wants it.** The field is sticky,
+"this turn and subsequent turns", so a chat that ran one turn as Approve for me and was then moved
+back would keep the reviewer while the chip in the composer said otherwise.
+
+**What Bloom does not yet draw.** With `auto_review` the server also emits
+`item/autoApprovalReview/started` and `.../completed`, and offers
+`thread/approveGuardianDeniedAction` so a person can overrule a denial the subagent made. Bloom
+ignores both, so an action the reviewer denies is denied without a row saying so. They are marked
+`[UNSTABLE]` in the app-server schema, "This shape is expected to change soon", which is why the
+mode ships without them rather than waiting for them.
+
+`plan` is **absent from the picker for a Codex chat, and silently so**. It used to be named in the
+picker's footnote as a mode Codex does not have, on the argument that somebody who knows Bloom has
+a Plan mode would otherwise hunt for it. The owner's verdict was the other way: do the right thing
+rather than explain what you are not offering. A chat carrying Plan that moves onto Codex falls to
+`auto`, Codex's Read only, which is the preset that keeps Plan's promise that nothing changes
+until you say so; it used to fall to `acceptEdits`, which can write the worktree without asking,
+and that was a silent widening of what the agent may do. The falling is an invariant of
+`ComposerControls` rather than an arrangement made at each of the four places a backend changes,
+and moving back to Claude Code offers Plan again without choosing it. See
+`PermissionMode.nearest(on:)`.
+
+### The words over the rows
+
+**Each backend's modes are labelled in that backend's own vocabulary**, which is `PermissionVocabulary`
+in the core. The same user's report is the reason: Bloom was printing "Ask, Accept edits, Full
+access" over a Codex chat, and somebody who has read one product's documentation could not find the
+row he wanted. The labels and the one-line sentences above them are the vendors' own, from the
+`codex` binary at 0.149.1 and from `claude` at 2.1.246. Every row prints its own sentence under its
+own name: they were one footnote describing the selected row, because an `NSMenu` row is one line
+with no room under it, which meant the one thing a permission picker has to answer was only
+answered after the choice. The picker is a popover of two line rows now. See `ComposerOptionList`.
+
+Claude Code's side of that was wrong too, and in the same direction. Its `--permission-mode auto`
+is documented in the CLI as "Use a model classifier to approve/deny permission prompts", which is
+the mode Codex calls Approve for me; Bloom had been labelling it "Ask". It reads "Auto" now, which
+is what Claude Code calls it, and it is why Approve for me is offered for Codex only: a second row
+for Claude Code would be two names for one `--permission-mode auto`.
 
 ### The five questions
 
@@ -493,6 +542,38 @@ A chat with **no** messages yet simply changes backend, because there is nothing
 
 Same workspace, same worktree, same branch: a fork is cheap, and it is much less surprising than
 what the earlier framing implied (a new workspace).
+
+## 9a. The context window, which is the one setting that is not a turn argument
+
+Codex sizes its window from its own model catalogue, and the catalogue's figure is well under what
+the model will take. The way past it is two `-c` overrides, which is what a Codex user types by
+hand:
+
+    codex -c model_context_window=1000000 -c model_auto_compact_token_limit=900000
+
+Both keys, never one. `model_context_window` alone leaves auto-compaction firing at the old limit,
+so the chat compacts at a fraction of a window it has just been told is much larger.
+`model_auto_compact_token_limit` alone pushes compaction past the window and the turn fails on the
+model's own limit. `CodexContextWindow` holds the pair and the 90% fraction between them, and it is
+what the picker, the Settings screen and `CodexClient.launch` all read.
+
+**It cannot travel with the turn, and everything else in the composer can.** Model, effort,
+approval policy and sandbox are arguments of `turn/start`, which is why changing a chip mid chat
+takes effect on the next message with nothing restarted. These two are read when `codex app-server`
+starts. So `CodexRunner.applyContextWindowChange` re-reads the chat's setting before every turn and,
+if the live server was launched with something else, kills it and connects again; the thread id on
+the session row makes the next `openThread` a `thread/resume`, so the conversation survives. What
+does not survive is anything that lived only inside the process, which is the grants somebody gave
+with "allow for this session", and that is why the reconnect happens on a change rather than on
+every turn.
+
+It is per chat and it has no column: `session.<id>.codexContextWindow` in the settings table,
+beside fast mode and the output style, for the reason those two are there. `defaults.codex.contextWindow`
+is the app-wide default a new chat inherits, and the repository's settings file has no say, because
+it has no key for one.
+
+`model/list` does not report a window, so the sizes offered are a list rather than something read
+off the catalogue: the model's own, 500K and 1M.
 
 ---
 

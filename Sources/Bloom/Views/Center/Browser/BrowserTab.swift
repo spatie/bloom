@@ -96,14 +96,57 @@ enum BrowserTab {
 
     static func open(_ url: URL, in model: WorkspaceModel) {
         guard canOpen(url) else { return }
-        let address = url.absoluteString
-        let tabs = CenterTabStore.shared
+        show(url.absoluteString, in: model)
+    }
 
+    /// Opens a page out of the worktree in the workspace's browser tab, in front.
+    ///
+    /// **Its own door rather than `open` above being handed a file URL, and `LocalPage` rather
+    /// than `BrowserAddress.shows`.** That rule refuses every `file://` there is and has to keep
+    /// refusing them, because `openWindow` above asks it before a page's own `window.open` is
+    /// honoured: widening it would let a page from the network name a path on this Mac and have
+    /// Bloom open it. A reader right clicking a row of their own worktree is the one caller that
+    /// has named a file itself, so it is the only one given this.
+    ///
+    /// The workspace's existing browser tab is reused, for the reason `open` reuses it: the
+    /// changed file list is where somebody clicks a dozen times in a row, and a tab per press
+    /// would bury the conversations the strip is mostly for.
+    ///
+    /// - Parameter path: absolute, which is what `ChangedFileRow.fullPath` already carries.
+    static func openFile(_ path: String, in model: WorkspaceModel) {
+        guard let address = LocalPage.address(forFile: path) else { return }
+        show(address, in: model)
+    }
+
+    /// The same page in the half a split opens.
+    ///
+    /// A fresh browser rather than the tab `openFile` reuses, for the reason `split` above gives:
+    /// a `WKWebView` is one live view, so a tab cannot be in two panes.
+    ///
+    /// The pane divided is the focused pane of the tab in front, which is the pane the strip's own
+    /// Open in Split Right divides. Unlike `split` above there is no pane for the caller to name:
+    /// a file row is drawn in the inspector rather than inside the column, so it has no pane of
+    /// its own to be beside.
+    static func splitFile(_ path: String, in model: WorkspaceModel, axis: SplitAxis) {
+        guard let address = LocalPage.address(forFile: path) else { return }
+        let tabs = WorkspaceTabsStore.shared
+        guard let tab = tabs.selectedTab(in: model) else { return }
+        let pane = tabs.focusedPane(of: tab)
+        NewPane.open(.browser, in: model, url: address) { content in
+            tabs.split(tab: tab, pane: pane, axis: axis, showing: content)
+        }
+    }
+
+    /// The workspace's browser tab, pointed at `address` and brought forward. Shared by the two
+    /// doors above so that a page and a link land in the same tab, which is what stops a worktree
+    /// full of reports from opening a strip full of browsers.
+    private static func show(_ address: String, in model: WorkspaceModel) {
+        let tabs = CenterTabStore.shared
         let existing = tabs.tabs(for: model.workspace.id).last { $0.kind == .browser }
         let tab: CenterTab
         if let existing {
             tabs.setURL(address, for: existing)
-            tabs.browser(for: existing).load(address)
+            tabs.browser(for: existing, root: model.workspace.path).load(address)
             tab = existing
         } else {
             tab = tabs.add(kind: .browser, workspaceID: model.workspace.id, url: address)

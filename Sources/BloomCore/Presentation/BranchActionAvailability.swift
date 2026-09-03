@@ -60,8 +60,8 @@ public struct BranchActionAvailability: Sendable, Hashable {
         guard isAgentBusy else { return .allowed }
         return BranchActionAvailability(
             isAllowed: false,
-            note: "The agent is still writing here.",
-            reason: "The agent is still writing to this worktree. Merging or pushing now would "
+            note: "The agent is still running here.",
+            reason: "The agent is still running in this worktree. Merging or pushing now would "
                 + "act on a branch whose commits may not all be pushed yet, and none of that can "
                 + "be undone from in here. It comes back when the turn ends."
         )

@@ -16,6 +16,11 @@ final class RepoSettingsModel {
     private(set) var loaded = RepoSettings()
     private(set) var isLoaded = false
 
+    /// The instruction files this project keeps of its own, which outrank the Instructions pane's
+    /// fields. Read here rather than in the view, because it is a look at the disk. See
+    /// `ProjectInstructions.files(in:)`.
+    private(set) var instructionFiles: [ProjectInstructions.Subject: String] = [:]
+
     /// The editable copy the window's fields are bound to.
     var draft = RepoSettingsDraft()
 
@@ -41,6 +46,7 @@ final class RepoSettingsModel {
     func load() async {
         let path = repo.path
         let settings = await Task.detached { SettingsLoader.load(repo: path) }.value
+        instructionFiles = await Task.detached { ProjectInstructions.files(in: path) }.value
         apply(settings)
         isLoaded = true
         scheduleResolve(immediately: true)
@@ -55,6 +61,9 @@ final class RepoSettingsModel {
         guard isLoaded else { return }
         let path = repo.path
         let settings = await Task.detached { SettingsLoader.load(repo: path) }.value
+        // Outside the guard below, because a `git pull` that adds `.bloom/merge-instructions.md`
+        // changes which of the two sources wins without changing a line of any settings file.
+        instructionFiles = await Task.detached { ProjectInstructions.files(in: path) }.value
         guard settings != loaded else {
             scheduleResolve()
             return

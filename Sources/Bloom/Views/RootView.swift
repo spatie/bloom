@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import BloomCore
 
@@ -12,7 +13,7 @@ import BloomCore
 ///
 /// The columns themselves are `SidebarView` and `DetailColumn`, and the toolbar is
 /// `BloomWindowToolbar`. What is left here is only what belongs to the window as a whole: the
-/// split view, the inspector, the create sheet, the archive confirmation and the alert.
+/// split view, the inspector, the archive confirmation and the alert.
 struct RootView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -25,19 +26,10 @@ struct RootView: View {
     @Bindable private var feedback = FeedbackPresenter.shared
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var isStartingFreshAskConversation = false
     /// Whether the window's search field has the keyboard. Shift+Cmd+F, and Cmd+F where nothing in
     /// front can find, put it here. See `FindCommand`.
     @FocusState private var isSearchFocused: Bool
-    @State private var isCreateSheetPresented = false
-    @State private var createTargetRepo: Repo?
-    /// Set by the File menu's pull request item and by nothing else. See `CreateWorkspaceSheet`.
-    @State private var createStartsOnPullRequest = false
-    @State private var isNewProjectPresented = false
-    /// The project the new-project sheet has just made, waiting for that sheet to leave the
-    /// screen. Two sheets cannot be up at once, and raising the second one from inside the first
-    /// one's dismissal is the only ordering AppKit reliably draws, so the hand-off is a value
-    /// parked here and read in `onDismiss`.
-    @State private var projectToStartWorkIn: Repo?
 
     var body: some View {
         @Bindable var app = app
@@ -45,6 +37,9 @@ struct RootView: View {
         return windowWiring(
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView()
+                // The system toggle offers an irrelevant label-style context menu on macOS 26.
+                // BloomWindowToolbar replaces it with the same image-only action.
+                .toolbar(removing: .sidebarToggle)
                 // The sidebar's ground is set here rather than inside `SidebarView`, because what has
                 // to be replaced is the `List`'s own scroll background, and that is a property of the
                 // column rather than of anything the sidebar draws. See `sidebarMaterial` for why a
@@ -58,8 +53,16 @@ struct RootView: View {
                 // is survivable while both columns are the system's own white, and it is not once
                 // they are two steps of a ramp, because then the two panes simply run into each other.
                 .overlay(alignment: .trailing) { Hairline(axis: .vertical) }
+                // The ceiling is not always the reserve. On a display too narrow to hold all
+                // three panes at their minimums, the sidebar is the one that gives, because it is
+                // a list of rows that truncate where the other two hold a transcript and a diff
+                // that do not. `WindowWidths.sidebarMaximum` is that decision, and it answers with
+                // the plain 420 reserve on every display that can afford it, which is every Mac
+                // one. A nil is a screen with no room for a sidebar at all, and the column folds.
                 .navigationSplitViewColumnWidth(
-                    min: 200, ideal: Metrics.sidebarWidth, max: BloomApp.sidebarMaximumWidth
+                    min: BloomApp.sidebarMinimumWidth,
+                    ideal: Metrics.sidebarWidth,
+                    max: sidebarCeiling ?? BloomApp.sidebarMinimumWidth
                 )
             } detail: {
                 // An `NSSplitViewController`, not `.inspector()` and not `HSplitView`.
@@ -80,18 +83,12 @@ struct RootView: View {
                     isInspectorPresented: isInspectorPresented,
                     animated: !reduceMotion
                 )
-                    // The toolbar's `+` is there only while the sidebar is not, so the column that
-                    // owns starting work owns it alone whenever it is on screen. The flag is this
-                    // binding rather than anything read off the window, because this is what actually
-                    // decides whether the first column is drawn: the menu item below writes it, and
-                    // AppKit's own sidebar toggle writes it back through the binding. That second
-                    // half is the one worth measuring, and it was: driving that button through the
-                    // running app's accessibility tree, which is the channel a real click ends up in,
-                    // folds the pane away and the `+` arrives, and driving it again takes both back.
-                    // See `BloomWindowToolbar.isSidebarCollapsed`.
                     .toolbar {
                         BloomWindowToolbar(
-                            app: app, isSidebarCollapsed: columnVisibility == .detailOnly
+                            app: app,
+                            isSidebarVisible: columnVisibility != .detailOnly,
+                            toggleSidebar: toggleSidebar,
+                            startFreshAskConversation: { isStartingFreshAskConversation = true }
                         )
                     }
                     // Said here as well as under `navigationTitle` below, and deliberately.
@@ -130,6 +127,9 @@ struct RootView: View {
                         prompt: Text("Search")
                     )
                     .searchFocused($isSearchFocused)
+                    .onChange(of: app.selectedWorkspace != nil, initial: true) { _, available in
+                        InspectorGeometry.shared.setWorkspaceAvailable(available)
+                    }
                     // Published to the model, because the pane that needs the answer cannot see a
                     // `@FocusState` declared up here and Home's list was taking the keyboard off this
                     // field mid word. See `HomeListKeyboard` for the sequence that did it.
@@ -167,6 +167,15 @@ struct RootView: View {
             // while Settings or a project settings window is key. See `MainWindowFocus`.
             .focusedSceneValue(\.isMainWindowFocused, true)
 
+            // A display with no room for a sidebar folds it rather than clipping it. The other two
+            // panes cannot fold and cannot truncate, so this is the only pane there is a decision
+            // to take about. It stays folded when the room comes back: unfolding a column the user
+            // has not asked for is a window rearranging itself behind them, and the toggle and its
+            // Command key are both a keystroke away. See `WindowWidths.sidebarMaximum`.
+            .onChange(of: sidebarCeiling == nil, initial: true) { _, folds in
+                if folds { columnVisibility = .detailOnly }
+            }
+
             // Bottom trailing, out of the way of the sidebar and of the composer's send button.
             .overlay(alignment: .bottomTrailing) {
                 if let notice = app.notice {
@@ -186,33 +195,6 @@ struct RootView: View {
             // Debug builds only, and only when asked for on the command line: raises one of the two
             // Help menu sheets so a capture run can look at it. See `FeedbackPresenter`.
             .task { FeedbackPresenter.shared.presentIfRequested() }
-            .sheet(isPresented: $isCreateSheetPresented) {
-                CreateWorkspaceSheet(
-                    initialRepo: createTargetRepo, startsOnPullRequest: createStartsOnPullRequest
-                )
-            }
-            // Starting a project that is not a repository yet, and then going straight on to its
-            // first workspace.
-            //
-            // **The hand-off is the one behavioural change.** Adding a folder ends with a project in
-            // the sidebar because the person already had one and may well have work in it. Creating a
-            // project ends in the create sheet, because a repository with one empty commit in it is
-            // not something anybody wanted for its own sake: they had an idea, and the next thing is
-            // an agent working on it.
-            .sheet(isPresented: $isNewProjectPresented, onDismiss: startWorkInNewProject) {
-                NewProjectSheet { path in
-                    guard let path else {
-                        isNewProjectPresented = false
-                        return
-                    }
-                    // Registered before the sheet comes down rather than after, so the project is in
-                    // hand by the time `onDismiss` looks for it. It is one store write.
-                    Task {
-                        projectToStartWorkIn = await app.addCreatedProject(at: path)
-                        isNewProjectPresented = false
-                    }
-                }
-            }
             // Send Feedback and Submit a Prompt, raised from the Help menu. Here rather than at the
             // menu item, because a `Commands` body is not a view and cannot present anything, and
             // because what was typed into either of them belongs to the app rather than to the sheet:
@@ -285,6 +267,18 @@ struct RootView: View {
                 // `ArchiveRequest` in the core, where it can be tested.
                 Text(request.message)
             }
+            .confirmationDialog(
+                "Start a new conversation?",
+                isPresented: $isStartingFreshAskConversation,
+                titleVisibility: .visible
+            ) {
+                Button("Start New Conversation") {
+                    Task { await app.ask.startFresh() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The current Ask Bloom conversation will be cleared from view.")
+            }
             // The question asked before a session that is still working is closed. On the window for
             // the reason the archive confirmation above is: it is raised from the tab strip's close
             // button and from Cmd+W in the menu bar, and there is no one control both of those could
@@ -345,11 +339,11 @@ struct RootView: View {
 
     /// The window's notification wiring, in a method rather than in `body`.
     ///
-    /// Not tidiness. `body` was one chain of forty-odd modifiers, and the new-project sheet took
-    /// it past the type checker's budget: the build fails with "unable to type-check this
-    /// expression in reasonable time", which names no cause and points at whichever line the
-    /// solver happened to give up on. A method has a signature of its own to solve against, so
-    /// the two halves are solved separately.
+    /// Not tidiness. `body` was one chain of forty-odd modifiers, and the new-project sheet that
+    /// used to be among them took it past the type checker's budget: the build fails with "unable
+    /// to type-check this expression in reasonable time", which names no cause and points at
+    /// whichever line the solver happened to give up on. A method has a signature of its own to
+    /// solve against, so the two halves are solved separately.
     ///
     /// A method and not a `ViewModifier`, because half of these handlers write this view's own
     /// `@State` and `@FocusState`, and a modifier is a separate type that can see neither.
@@ -373,7 +367,7 @@ struct RootView: View {
             if now { app.selection = .home }
         }
         .onReceive(NotificationCenter.default.publisher(for: .bloomToggleSidebar)) { _ in
-            columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
+            toggleSidebar()
         }
         .onReceive(NotificationCenter.default.publisher(for: .bloomOfferProjectSetup)) { note in
             guard let path = note.object as? String else { return }
@@ -392,24 +386,41 @@ struct RootView: View {
         // window into the state the two busy signals are for. See `Snapshot`.
         .acceptsCaptureRunningState(app)
         .acceptsCaptureNotice(app)
+        // A window now rather than a sheet on this one, so this is the same translation the create
+        // window's post gets in the handler below. The four controls that ask still post, because
+        // a `Commands` body cannot reach `openWindow` and the other three have always gone through
+        // one door. What that window does once its button is pressed is its own, which is why
+        // nothing is parked here waiting for it to come down: see `StartProjectView.finish`.
         .onReceive(NotificationCenter.default.publisher(for: .bloomNewProject)) { _ in
-            isNewProjectPresented = true
+            openWindow(id: StartProjectWindow.id)
         }
+        // The post is still the one door every control goes through, and what it opens is a
+        // window now rather than a sheet on this one. The translation is here because this is
+        // where the post was already being received and because `openWindow` needs a view: the
+        // window itself is `CreateWorkspaceWindow`, and it is keyed by project, so asking twice
+        // for the same project brings the first one forward with its draft still in it.
         .onReceive(NotificationCenter.default.publisher(for: .bloomNewWorkspace)) { note in
-            createTargetRepo = note.object as? Repo ?? app.selectedWorkspace.flatMap(app.repo(for:))
-            createStartsOnPullRequest = note.userInfo?[Notification.bloomPullRequestKey] as? Bool == true
-            isCreateSheetPresented = true
+            if note.userInfo?[Notification.bloomPullRequestKey] as? Bool == true {
+                CreateWorkspaceOpening.shared.askForPullRequest()
+            }
+            openCreateWindow(in: note.object as? Repo)
         }
-        // Makes the workspace the create sheet's terminal mode makes, for a capture run, which
-        // cannot choose a mode or press a button. It goes through `createWorkspace` exactly as the
-        // sheet does, sea and all, so
-        // what is photographed is the real workspace rather than a hand-built row that looks like
-        // one. Debug builds only, through the same flag family as `--create-sheet`.
+        // Makes the workspace the create window's terminal mode makes, for a capture run, which
+        // cannot choose a mode or press a button. It goes through `createWorkspace` exactly as that
+        // window does, sea and all, so what is photographed is the real workspace rather than a
+        // hand-built row that looks like one. Debug builds only, through the same flag family as
+        // `--create-sheet`.
         .onReceive(NotificationCenter.default.publisher(for: .bloomStartTerminalWorkspace)) { note in
             let named = note.object as? String
             let repo = app.repos.first { $0.name == named } ?? app.repos.first
             guard let repo else { return }
             Task { await app.createWorkspace(in: repo, prompt: "", opensWith: .terminal) }
+        }
+    }
+
+    private func toggleSidebar() {
+        withAnimation(reduceMotion ? nil : Motion.pane) {
+            columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
         }
     }
 
@@ -420,23 +431,39 @@ struct RootView: View {
     /// points back to Home's list, which is what keeps a workspace name, its diff counts and its
     /// age on one line without truncating any of them.
     ///
-    /// Keyed on `selectedWorkspace` rather than on `selection`, because `DetailColumn` already
-    /// falls back to Home when a selected id no longer resolves to a workspace.
-    private var isInspectorPresented: Bool {
-        app.isInspectorVisible && app.selectedWorkspace != nil
+    /// It is the model's, because the window's own minimum width depends on the same answer and
+    /// `BloomApp` cannot read a private computed property on a view. See `AppModel`.
+    private var isInspectorPresented: Bool { app.isInspectorPresented }
+
+    /// What the first column may be dragged out to on the display this window is on, or nil when
+    /// there is no room for one at all. See `WindowWidths.sidebarMaximum`.
+    ///
+    /// `NSScreen.main` is the screen holding the key window, which is this one whenever anybody is
+    /// dragging anything. It is read rather than observed, so moving the window to a narrower
+    /// display leaves this a redraw behind; the consequence of being late is a sidebar that could
+    /// have been dragged 98 points wider than it was, on a display Bloom is unlikely to meet, and
+    /// the consequence of not reading it at all is a clipped window on that display.
+    private var sidebarCeiling: CGFloat? {
+        BloomApp.widths.sidebarMaximum(
+            sharing: NSScreen.main?.visibleFrame.width ?? .greatestFiniteMagnitude,
+            withInspector: isInspectorPresented
+        )
     }
 
     // MARK: - Actions
 
-    /// The first workspace of a project that has just been created, raised as the new-project
-    /// sheet leaves the screen. Nothing happens when the sheet was cancelled, which is what an
-    /// empty `projectToStartWorkIn` means.
-    private func startWorkInNewProject() {
-        guard let repo = projectToStartWorkIn else { return }
-        projectToStartWorkIn = nil
-        createTargetRepo = repo
-        createStartsOnPullRequest = false
-        isCreateSheetPresented = true
+    /// Opens the create window, on the project that was asked for or on the one the window is
+    /// already looking at.
+    ///
+    /// The project is resolved here rather than inside the window, because it is the selection in
+    /// THIS window that answers "which project did they mean", and a window keyed by project has
+    /// to be given one before it exists. A machine with no projects at all opens it with none,
+    /// which is the empty state that offers to add one; every control that could ask is disabled
+    /// or diverted in that state anyway.
+    private func openCreateWindow(in repo: Repo?) {
+        let target = repo ?? app.selectedWorkspace.flatMap(app.repo(for:)) ?? app.repos.first
+        guard let target else { return openWindow(id: CreateWorkspaceWindow.id) }
+        openWindow(id: CreateWorkspaceWindow.id, value: target.id)
     }
 
     private func confirmArchive(_ request: ArchiveRequest) {
@@ -453,16 +480,23 @@ extension Notification.Name {
     /// by Cmd+F falling through, neither of which can reach a `@FocusState` from a `Commands`
     /// body.
     static let bloomFocusSearch = Notification.Name("bloom.focusSearch")
+    /// Asks for the create window. Still a notification rather than an `openWindow` at each of
+    /// the four controls that can ask, because which project is meant depends on what this window
+    /// has selected, and because the four have always behaved identically by going through one
+    /// door. See `openCreateWindow`.
     static let bloomNewWorkspace = Notification.Name("bloom.newWorkspace")
-    /// Raises the New Project sheet. A notification for the same reason the create sheet is one:
-    /// the sheet lives here, and the sidebar's menu, Home's empty state, the toolbar and a
-    /// `Commands` body can none of them present anything themselves.
+    /// Opens the window that starts a project. A notification for the same reason the create
+    /// window is opened by one: the sidebar's `+`, Home's empty state, the toolbar and a
+    /// `Commands` body can none of them reach `openWindow`, and this is where the receiver that
+    /// can has always been. The name is the old one twice over, because what it raises is still
+    /// the same surface: `StartProjectView` absorbed the second door rather than replacing the
+    /// first, and it stopped being a sheet without changing what it asks.
     static let bloomNewProject = Notification.Name("bloom.newProject")
     /// Posted only by `Snapshot`, and only in a debug build. See the handler above.
     static let bloomStartTerminalWorkspace = Notification.Name("bloom.startTerminalWorkspace")
     /// The Workspace menu's Rename, aimed at whichever list is drawing that row.
     ///
-    /// A notification rather than a flag on `AppModel`, for the same reason the create sheet is
+    /// A notification rather than a flag on `AppModel`, for the same reason the create window is
     /// one: the field belongs to a row inside a list, the list owns the one field that can be open
     /// at a time, and a menu item cannot reach into either. Both lists listen, and each ignores a
     /// workspace it is not drawing, so the post can be made without knowing which is on screen.
@@ -477,7 +511,7 @@ extension Notification.Name {
 }
 
 extension Notification {
-    /// Whether a `bloomNewWorkspace` post wants the sheet opened on the pull request route. Absent
+    /// Whether a `bloomNewWorkspace` post wants the window opened on the pull request route. Absent
     /// on every other post, which is the ordinary new branch opening.
     static let bloomPullRequestKey = "bloom.newWorkspace.pullRequest"
     /// Which workspace a `bloomRenameWorkspace` post is about, as its raw id.

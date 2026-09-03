@@ -1,3 +1,4 @@
+import Foundation
 import BloomCore
 
 /// The tools an agent can call back into this window with, and the app work behind each of them.
@@ -40,6 +41,10 @@ extension AppModel {
             guard let self else { return .refused("Bloom is still starting up.") }
             return await self.driveBrowserForBridge(command, in: workspaceID)
         }
+        let terminal: TerminalPaneCommanding = { [weak self] command, workspaceID in
+            guard let self else { return .refused("Bloom is still starting up.") }
+            return await self.driveTerminalForBridge(command, in: workspaceID)
+        }
 
         return BridgeToolbox(handlers: BridgeToolbox.standard.handlers + [
             WorkspaceStartTool { [weak self] order, project, identity, origin in
@@ -51,6 +56,17 @@ extension AppModel {
             PaneOpenTool { [weak self] order, workspaceID in
                 guard let self else { return .refused("Bloom is still starting up.") }
                 return await self.openPaneForBridge(order, in: workspaceID)
+            },
+            TerminalStartTool { [weak self] order, workspaceID in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return await self.startTerminalForBridge(order, in: workspaceID)
+            },
+            TerminalReadTool(terminal),
+            TerminalWriteTool(terminal),
+            TerminalSendKeyTool(terminal),
+            MediaShowTool { [weak self] order, workspaceID in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return self.showMediaForBridge(order, in: workspaceID)
             },
             PaneSplitTool { [weak self] order, axis, workspaceID in
                 guard let self else { return .refused("Bloom is still starting up.") }
@@ -98,7 +114,41 @@ extension AppModel {
                 guard let self else { return .refused("Bloom is still starting up.") }
                 return await self.revealForBridge(reveal)
             },
+            // The three crew verbs. Every rule about them is in `Crew` and in the tools, which is
+            // where a test can read it; what crosses here is the one thing the core cannot do,
+            // which is make a chat in this window run a CLI. See `CrewSeam`.
+            AgentStartTool { [weak self] order, sessionID, workspaceID in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return await self.startCrewForBridge(order, from: sessionID, in: workspaceID)
+            },
+            AgentSayTool { [weak self] name, text, sessionID, workspaceID in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return await self.sayToCrewForBridge(name, saying: text, from: sessionID, in: workspaceID)
+            },
+            AgentStopTool { [weak self] name, sessionID, workspaceID in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return await self.stopCrewForBridge(name, from: sessionID, in: workspaceID)
+            },
         ])
+    }
+
+    /// Confirms that the path the model named is a real image or movie inside its own worktree.
+    /// The transcript resolves it again before drawing, which closes the symlink race between the
+    /// tool call and a later visit to this row.
+    func showMediaForBridge(
+        _ order: MediaShowOrder, in workspaceID: WorkspaceID
+    ) -> MediaShowOutcome {
+        guard let model = paneTarget(workspaceID) else {
+            return .refused(Self.noWorkspaceForPane)
+        }
+        guard let media = WorkspaceMedia.resolve(path: order.path, in: model.workspace.path) else {
+            return .refused(
+                "That is not an image or video file inside this workspace. Save it in the "
+                    + "workspace, then call media_show with that path."
+            )
+        }
+        let noun = media.kind == .image ? "image" : "video"
+        return .shown("Showing \(noun) '\(media.relativePath)' inline in the chat.")
     }
 
     /// Point the window at something, because the owner's own chat asked to be shown it.
@@ -129,9 +179,9 @@ extension AppModel {
     ///
     /// The whole of the app side, and it deliberately does nothing of its own. `requestMerge` is
     /// what the strip's Merge button calls, so the template the owner may have edited in Settings,
-    /// the project's `.bloom/merge-instructions.md` and the guard that refuses mid turn are all
-    /// reached through one path rather than two. Anything this function added would be a second
-    /// way to move the same state.
+    /// Bloom's own merge rules, whatever the project adds to them and the guard that refuses mid
+    /// turn are all reached through one path rather than two. Anything this function added would
+    /// be a second way to move the same state.
     ///
     /// The chat's title comes back because the tool's answer has to name where to watch the turn,
     /// and `requestMerge` has just made that chat the active one.
@@ -168,13 +218,22 @@ extension AppModel {
         // the owner's own client, which has nothing to inherit and gets Bloom's defaults.
         var controls = ComposerControls()
         if let sessionID = identity.sessionID, let session = try await store.session(id: sessionID) {
-            controls = ComposerControls(session: session, isFastMode: false, outputStyle: OutputStyle.defaultName)
+            // The context window comes with it, because on Codex it is part of what "the thing it
+            // already trusts" means: an agent running on a widened window that starts a helper on
+            // the catalogue's own would be handing the harder half of its job to the smaller one.
+            let contextWindow = CodexContextWindow.normalised(try await store.setting(
+                ComposerControls.contextWindowKey(sessionID: sessionID)
+            ))
+            controls = ComposerControls(
+                session: session,
+                isFastMode: false,
+                outputStyle: OutputStyle.defaultName,
+                codexContextWindow: contextWindow
+            )
         }
-        if let agent = order.agent {
-            controls.agentKind = agent
-        }
+        controls = try await workspaceControls(for: order, inheriting: controls)
 
-        // Both halves of the order's source, handed to the same two arguments the create sheet's
+        // Both halves of the order's source, handed to the same two arguments the create window's
         // two tabs fill in. Nothing is decided here: `AgentStartSource` has already found the
         // branch in the project and refused the call if it is not there, so this side is the same
         // pass-through it always was.
@@ -196,6 +255,116 @@ extension AppModel {
             branch: workspace.branch,
             path: workspace.path
         )
+    }
+
+    /// Keeps the backend and model one valid choice. Changing only the backend used to carry the
+    /// caller's model across with it, which is how a Codex workspace was started with `opus`.
+    private func workspaceControls(
+        for order: AgentWorkspaceOrder,
+        inheriting inherited: ComposerControls
+    ) async throws -> ComposerControls {
+        var controls = inherited
+        let inheritedAgent = controls.agentKind
+        // A caller that names a model and no agent has named an agent, because a model id says
+        // which CLI runs it. This used to be free: everything inherited Claude Code, so
+        // `workspace_start(model: "opus")` could only mean Claude Code. It stopped being free the
+        // moment the Models screen could make Codex the default, which would have turned that
+        // same call into "opus is not a Codex model". No list is fetched to answer it: the four
+        // families `ClaudeModelRank` knows are what the old reading covered, and anything else
+        // stays on the backend that was inherited. See `DefaultBackend`.
+        let agent = order.agent
+            ?? order.model.map {
+                DefaultBackend.kind(ofModel: $0, running: inheritedAgent, codexModels: [])
+            }
+            ?? inheritedAgent
+        controls.agentKind = agent
+
+        switch agent {
+        case .claudeCode:
+            let models = Set(ComposerOption.models.map(\.id))
+            if let model = order.model {
+                guard models.contains(model) else {
+                    throw BridgeWorkspaceModelFailure.invalid(
+                        model: model,
+                        agent: agent,
+                        available: models.sorted()
+                    )
+                }
+                controls.model = model
+            } else if agent != inheritedAgent {
+                controls.model = AppDefaults.fallbackModel
+            }
+        case .codex:
+            if order.model == nil, agent == inheritedAgent { return controls }
+
+            let models = try await CodexModelCatalog.live().pickerModels()
+            let chosen: CodexModel?
+            if let requested = order.model {
+                chosen = models.first { $0.id == requested }
+                guard chosen != nil else {
+                    throw BridgeWorkspaceModelFailure.invalid(
+                        model: requested,
+                        agent: agent,
+                        available: models.map(\.id)
+                    )
+                }
+            } else {
+                chosen = models.first { $0.isDefault } ?? models.first
+            }
+            guard let chosen else {
+                throw BridgeWorkspaceModelFailure.noneAvailable(agent)
+            }
+            controls.model = chosen.id
+            controls.effort = chosen.resolvedEffort(preferring: controls.effort)
+        case .cursor, .openCode:
+            throw BridgeWorkspaceModelFailure.noneAvailable(agent)
+        }
+
+        return controls
+    }
+
+    // MARK: - Crew
+
+    /// A crew member runs in the caller's own worktree and nowhere else, so a workspace archived
+    /// out from under a running turn is a real answer here rather than a guard for tidiness,
+    /// exactly as it is for the pane tools. `paneTarget` resolves it, and only the sentence is
+    /// this family's own: the pane one talks about panes, and a model told the wrong noun learns
+    /// the wrong thing.
+    static let noWorkspaceForCrew =
+        "That workspace is not open in Bloom any more, so there is no worktree to run a subagent in."
+
+    /// `agent_start`, handed to the model that can actually spawn a CLI.
+    ///
+    /// The same seam `workspace_start` crosses and for the same reason: everything that makes a
+    /// chat run lives on the main actor in `WorkspaceModel`, and a bridge handler runs off it on a
+    /// background task per connection. Nothing is decided here. `AgentStartTool` has already put
+    /// the name through `Crew.normalisedName` and weighed both the ceiling and the name against
+    /// the rows; `startCrewMember` re-checks the one rule a second door must never skip, which is
+    /// that a crew member may not start a crew member.
+    private func startCrewForBridge(
+        _ order: CrewOrder, from sessionID: SessionID, in workspaceID: WorkspaceID
+    ) async -> CrewStartOutcome {
+        guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForCrew) }
+        return await model.startCrewMember(order, reportingTo: sessionID)
+    }
+
+    /// `agent_say`, in whichever direction the caller is talking. `name` is nil when a crew member
+    /// is talking up, which is the one place it has to talk. See `CrewSaying`.
+    private func sayToCrewForBridge(
+        _ name: String?, saying text: String, from sessionID: SessionID, in workspaceID: WorkspaceID
+    ) async -> CrewSayOutcome {
+        guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForCrew) }
+        return await model.sayToCrew(text, to: name, from: sessionID)
+    }
+
+    /// `agent_stop`. Only the chat that started a crew member may stop it, and that is enforced by
+    /// the lookup rather than by a comparison here: `Store.crew(of:)` answers with one chat's own
+    /// crew, so a name belonging to somebody else's simply is not found.
+    private func stopCrewForBridge(
+        _ name: String, from sessionID: SessionID, in workspaceID: WorkspaceID
+    ) async -> CrewStopOutcome {
+        guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForCrew) }
+        return await model.stopCrewMember(named: name, startedBy: sessionID)
     }
 
     // MARK: - Panes
@@ -384,6 +553,21 @@ extension AppModel {
             case .browser: return .browser
             case .review, .notes: return nil
             }
+        }
+    }
+}
+
+private enum BridgeWorkspaceModelFailure: LocalizedError {
+    case invalid(model: String, agent: AgentKind, available: [String])
+    case noneAvailable(AgentKind)
+
+    var errorDescription: String? {
+        switch self {
+        case let .invalid(model, agent, available):
+            let choices = available.isEmpty ? "none were reported" : available.joined(separator: ", ")
+            return "The model '\(model)' is not available for \(agent.label). Available models: \(choices)."
+        case .noneAvailable(let agent):
+            return "Bloom could not find an available model for \(agent.label)."
         }
     }
 }

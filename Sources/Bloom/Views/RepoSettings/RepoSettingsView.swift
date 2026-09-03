@@ -4,14 +4,14 @@ import BloomCore
 
 /// Everything that belongs to one project rather than to the app: what it is called and what it
 /// looks like in the sidebar, which ignored files a new workspace needs, what runs when one is
-/// created, and how to stop tracking it.
+/// created, what it tells an agent when Bloom asks for something, and how to stop tracking it.
 ///
-/// Three panes rather than one long scroll, because the three are different kinds of thing and
-/// nobody arrives here wanting all of them: what the project IS, what a new workspace STARTS with,
-/// and what Bloom RUNS in it. Which one is showing is chosen in the title bar, from the same
-/// toolbar the app's own Settings window is chosen from, so the two windows read as one app. It
-/// is an `NSToolbar` rather than the `TabView` that used to be here, and `RepoSettingsToolbar`
-/// says what the difference between those two turned out to be.
+/// Panes rather than one long scroll, because they are different kinds of thing and nobody
+/// arrives here wanting all of them: what the project IS, what a new workspace STARTS with, what
+/// Bloom RUNS in it, and what it SAYS on the project's behalf. Which one is showing is chosen in
+/// the title bar, from the same toolbar the app's own Settings window is chosen from, so the two
+/// windows read as one app. It is an `NSToolbar` rather than the `TabView` that used to be here,
+/// and `RepoSettingsToolbar` says what the difference between those two turned out to be.
 ///
 /// Two kinds of setting live here and they are stored in two different places, which the screen is
 /// explicit about. The name, mark and colour are Bloom's own record of a folder and live in its
@@ -89,6 +89,11 @@ struct RepoSettingsView: View {
                 case .scripts:
                     Form {
                         RepoScriptsSection(model: model)
+                    }
+                    .settingsForm()
+                case .instructions:
+                    Form {
+                        RepoInstructionsSection(model: model)
                     }
                     .settingsForm()
                 }
@@ -469,7 +474,7 @@ struct RepoSettingsView: View {
 
                         Spacer(minLength: Metrics.spacingSmall)
 
-                        Button("Open") { Reveal.inEditor(source) }
+                        Button("Open") { Reveal.inEditor(source, repo: repo.id) }
                     }
                 }
             }
@@ -623,7 +628,7 @@ struct AccentSwatches: View {
                 .fill(Color(hexString: hex))
                 .frame(width: Self.size, height: Self.size)
                 .overlay {
-                    Circle().strokeBorder(Palette.textPrimary.opacity(0.12), lineWidth: Metrics.hairline)
+                    Circle().strokeBorder(Palette.textPrimary.opacity(0.12), lineWidth: Metrics.outline)
                 }
                 // A ring cut out of the swatch, which is what macOS itself marks a chosen colour
                 // with, and which needs no room between the swatches to be drawn in.

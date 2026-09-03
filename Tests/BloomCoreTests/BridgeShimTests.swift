@@ -25,10 +25,15 @@ struct BridgeShimTests {
         return process
     }
 
-    /// A socket short enough for `sun_path`, in the test's own directory. Not
-    /// `BridgeSocketPath.derive`, because that answers for a database and these tests have none.
+    /// A socket short enough for `sun_path`, in the process's own directory. Not
+    /// `BridgeSocketPath.derive`, because that answers for a database and these tests have none,
+    /// and not the running test's own directory either: that is a `bloom-scratch-` plus a whole
+    /// UUID, which with a name on the end runs past the 104 bytes `sun_path` holds. The process
+    /// root is short, and it is swept when the run ends, which is what these used to skip: one
+    /// abandoned `.sock` per test per run. See `TestProcessScratch`.
     private func scratchSocket() -> String {
-        NSTemporaryDirectory() + "bloom-shim-\(UUID().uuidString.prefix(8)).sock"
+        (TestProcessScratch.root as NSString)
+            .appendingPathComponent("shim-\(UUID().uuidString.prefix(8)).sock")
     }
 
     @Test("relays a whole MCP conversation between its stdin and the app", .timeLimit(.minutes(1)))

@@ -13,6 +13,7 @@ struct TranscriptResumeTests {
         expanded: Set<Int> = [],
         offset: Double = 1_200,
         anchorSeq: Int? = nil,
+        anchorDelta: Double = 0,
         isAtLiveEnd: Bool = false,
         rowCount: Int = 400,
         drawn: TranscriptWindow = TranscriptWindow(start: 0, end: 400)
@@ -21,6 +22,7 @@ struct TranscriptResumeTests {
             expanded: expanded,
             offset: offset,
             anchorSeq: anchorSeq,
+            anchorDelta: anchorDelta,
             isAtLiveEnd: isAtLiveEnd,
             rowCount: rowCount,
             drawn: drawn
@@ -66,7 +68,18 @@ struct TranscriptResumeTests {
 
     @Test("a reader is put back at the row they had at the top of the pane")
     func theAnchorRowIsRestored() {
-        #expect(TranscriptResume.placement(for: state(anchorSeq: 120), rowCount: 400) == .row(120))
+        let placement = TranscriptResume.placement(for: state(anchorSeq: 120), rowCount: 400)
+        #expect(placement == .row(seq: 120, delta: 0))
+    }
+
+    /// The row alone is the top of the row, and a single answer is regularly two thousand points
+    /// tall. Somebody who left half way down one came back to its first line.
+    @Test("how far into that row they were comes back with it")
+    func theAnchorDeltaIsRestored() {
+        let placement = TranscriptResume.placement(
+            for: state(anchorSeq: 120, anchorDelta: -1_840), rowCount: 400
+        )
+        #expect(placement == .row(seq: 120, delta: -1_840))
     }
 
     @Test("the row outranks the point, because the point is what answers without one")
@@ -74,7 +87,7 @@ struct TranscriptResumeTests {
         let placement = TranscriptResume.placement(
             for: state(offset: 9_000, anchorSeq: 120), rowCount: 400
         )
-        #expect(placement == .row(120))
+        #expect(placement == .row(seq: 120, delta: 0))
     }
 
     @Test("a reader who left at the end is put back at the end whatever row was on top")
@@ -89,6 +102,51 @@ struct TranscriptResumeTests {
     func noRowFallsBackToThePoint() {
         let placement = TranscriptResume.placement(for: state(offset: 1_200), rowCount: 400)
         #expect(placement == .offset(1_200))
+    }
+
+    // MARK: What may be written down
+
+    /// **The report was "it loses my place on a workspace switch", and the cause is a write rather
+    /// than a read.** The pane is handed the arriving session and its write target with it, and
+    /// then suspends on the load. A settle firing in that window wrote the leaving conversation's
+    /// numbers under the arriving conversation's key.
+    @Test("a place measured in one session cannot land under another session's key")
+    func aWriteBelongsToTheSessionItWasMeasuredIn() {
+        #expect(!TranscriptResume.mayRemember(
+            arrived: SessionID("being-left"),
+            writingTo: SessionID("arriving"),
+            drawnRows: 400,
+            paneHeight: 800
+        ))
+    }
+
+    /// And the way out of a conversation still writes, which is the case the memory exists for: a
+    /// reader who arrived, read what was on screen and switched tab scrolled nothing at all.
+    @Test("the session being left is written down on the way out")
+    func theSessionBeingLeftIsWritten() {
+        #expect(TranscriptResume.mayRemember(
+            arrived: SessionID("being-left"),
+            writingTo: SessionID("being-left"),
+            drawnRows: 400,
+            paneHeight: 800
+        ))
+    }
+
+    @Test("a pane that has drawn nothing, or has never been laid out, writes nothing")
+    func nothingIsWrittenBeforeThereIsSomethingToWrite() {
+        let session = SessionID("one")
+        #expect(!TranscriptResume.mayRemember(
+            arrived: session, writingTo: session, drawnRows: 0, paneHeight: 800
+        ))
+        #expect(!TranscriptResume.mayRemember(
+            arrived: session, writingTo: session, drawnRows: 400, paneHeight: 0
+        ))
+        #expect(!TranscriptResume.mayRemember(
+            arrived: nil, writingTo: session, drawnRows: 400, paneHeight: 800
+        ))
+        #expect(!TranscriptResume.mayRemember(
+            arrived: session, writingTo: nil, drawnRows: 400, paneHeight: 800
+        ))
     }
 
     /// The three tests that used to sit at the foot of this suite are gone with the rule they

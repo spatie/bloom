@@ -9,13 +9,18 @@ import BloomCore
 /// says "Nothing to show" for a screenshot. An attachment is very often a screenshot, and clicking
 /// its chip has to land on the picture.
 ///
-/// The bar over the top is the one `FilePreview` draws, said the same way: the folder as a chip,
-/// then the name. The reveal button is Finder rather than an editor, because opening a JPEG in a
-/// text editor is not a thing anybody wants.
+/// The bar over the top is the one `FilePreview` draws, said the same way: the path relative to
+/// the worktree root, quiet, then the name in bold. The reveal button is Finder rather than an
+/// editor, because opening a JPEG in a text editor is not a thing anybody wants.
 struct FileMediaView: View {
     var worktree: String
     /// Relative to the worktree, exactly as the review tab carries it.
     var path: String
+
+    /// The bar's own width, for the same reason `FilePreview` measures its own. This bar used to
+    /// measure nothing and always draw the folder, so the one of the three that is most often
+    /// opened in a narrow pane was also the one that could not give the folder up.
+    @State private var width: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,17 +41,7 @@ struct FileMediaView: View {
 
     private var header: some View {
         HStack(spacing: InspectorLayout.gap) {
-            if !directory.isEmpty {
-                Chip(text: directory)
-                    .frame(maxWidth: Self.chipWidth, alignment: .leading)
-                    .layoutPriority(-1)
-            }
-
-            Text(filename)
-                .font(Typo.bodyEmphasis)
-                .foregroundStyle(Palette.textPrimary)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            FilePathLabel(path: path, width: width)
 
             Spacer(minLength: InspectorLayout.tight)
 
@@ -61,19 +56,15 @@ struct FileMediaView: View {
         .padding(.horizontal, InspectorLayout.inset)
         .frame(height: InspectorLayout.barHeight)
         .background(Palette.surfaceSunken)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .help(path)
     }
-
-    /// The same cap `FilePathChip` puts on the folder above a diff.
-    private static let chipWidth: CGFloat = 170
 
     private var url: URL {
         URL(filePath: (worktree as NSString).appendingPathComponent(path))
     }
 
     private var filename: String { (path as NSString).lastPathComponent }
-
-    private var directory: String { (path as NSString).deletingLastPathComponent }
 
     /// Whether a path is one of these rather than one for `FilePreview`.
     ///

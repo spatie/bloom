@@ -24,15 +24,15 @@ extension PullRequestStatus.Tone {
     /// The colour of the one prominent button in this state.
     ///
     /// It exists so the answer is given once. Every filled control in the strip used to spell out
-    /// `tint ?? Palette.accentFill` for itself: three call sites agreeing by hand about something
+    /// `tint ?? Palette.controlAccent` for itself: three call sites agreeing by hand about something
     /// the tone already knows, and a fourth state added tomorrow would have had to remember. The
     /// rule is that the prominent button carries the colour of the band it stands in, because a
     /// blue button in an amber band says the strip is two decisions rather than one, and a rule
     /// stated in three places is a rule waiting to be broken in one of them.
     ///
     /// Never optional, because there is always a button to paint. The neutral tone has no colour
-    /// of its own by design, and it has no band either, so it falls back to the app's own
-    /// prominent fill: Draft and Closed are the only states where the button is not the band's
+    /// of its own by design, and it has no band either, so it falls back to the system control
+    /// accent: Draft and Closed are the only states where the button is not the band's
     /// colour, and in both the band is the bare surface.
     ///
     /// `merged` is the one tone whose fill is not its ink. `Palette.merged` is a pair tuned for
@@ -43,7 +43,7 @@ extension PullRequestStatus.Tone {
     var fill: Color {
         switch self {
         case .merged: Palette.mergedFill
-        default: color ?? Palette.accentFill
+        default: color ?? Palette.controlAccent
         }
     }
 }

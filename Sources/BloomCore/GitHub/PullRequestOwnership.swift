@@ -39,6 +39,51 @@ public enum PullRequestOwnership {
         guard let closedAt = pullRequest.closedAt else { return true }
         return closedAt >= startedAt
     }
+
+    /// Which of several pull requests that once had this head branch is this workspace's.
+    ///
+    /// The same two facts as `belongs` and the same order of precedence, applied to a list rather
+    /// than to one answer, because searching by a head that has been deleted is the one lookup
+    /// that can come back with more than one. It genuinely does: `gh pr list --head patch-2
+    /// --state all` in the repository this bug was reported from answers with three, from three
+    /// different people, spread over years.
+    ///
+    /// Newest first, so that where two of them are equally plausible the recent one wins. That is
+    /// the same reasoning as `belongs`: an old pull request wearing a reused name is exactly what
+    /// this type exists to refuse.
+    ///
+    /// - Returns: the number to look up properly, or nil when none of them is this workspace's.
+    public static func choose(
+        from matches: [PullRequestHeadMatch],
+        startedAt: Date,
+        checkedOutAs checkedOutNumber: Int?
+    ) -> Int? {
+        if let checkedOutNumber {
+            return matches.contains { $0.number == checkedOutNumber } ? checkedOutNumber : nil
+        }
+        return matches
+            .sorted { $0.number > $1.number }
+            .first { $0.closedAt.map { closed in closed >= startedAt } ?? true }?
+            .number
+    }
+}
+
+/// One candidate from a search for a head branch that may no longer exist: enough to choose
+/// between several pull requests that wore the same name, and nothing more.
+///
+/// Deliberately not a `PullRequest`. Nothing here is drawn: it is the two fields
+/// `PullRequestOwnership.choose` weighs, read out of `gh pr list`, and the winner is then fetched
+/// properly by number. A half-filled `PullRequest` would be a value the strip could accidentally
+/// be handed, with `mergeable` reading `UNKNOWN` because that is what `gh pr list` says.
+public struct PullRequestHeadMatch: Sendable, Hashable {
+    public let number: Int
+    /// When it stopped being open, or nil while it is open.
+    public let closedAt: Date?
+
+    public init(number: Int, closedAt: Date?) {
+        self.number = number
+        self.closedAt = closedAt
+    }
 }
 
 public extension Git {
@@ -48,6 +93,13 @@ public extension Git {
     /// it cannot track by branch, which is every fork and, on recent gh, the ordinary case too.
     /// Reading it back costs one `git config` and needs no column of Bloom's own: the association
     /// is written where git already keeps it, by the command that made it.
+    ///
+    /// **That last sentence holds only while the branch does.** Deleting a branch deletes its
+    /// `branch.<name>.*` config with it, so the merge that makes the number necessary is the same
+    /// event that destroys git's copy of it: in the workspace this was reported from,
+    /// `git config --get-regexp '^branch\.'` no longer mentions the merged branch at all. That is
+    /// what `Workspace.pullRequestNumber` is for, and this stays the cheaper answer for as long as
+    /// there is a branch to ask about.
     ///
     /// Nil for a worktree on a branch of its own, whose `merge` names a branch on the remote.
     static func checkedOutPullRequest(branch: String, worktree: String) async -> Int? {
@@ -97,10 +149,64 @@ public extension GitHub {
     private static func pullRequest(
         for workspace: Workspace, onBranch head: String, maxAge: Duration
     ) async throws -> PullRequest? {
-        guard let found = try await snapshot(
+        try await snapshot(for: workspace, onBranch: head, maxAge: maxAge)?.pullRequest
+    }
+
+    /// This workspace's pull request as gh last described it, asked for three ways.
+    ///
+    /// **A branch name stops being a question the moment the branch is deleted.** That is the bug
+    /// this ladder was built for: a review of pull request #222 was squashed, the branch went on
+    /// both sides, the worktree moved to `main`, and every route Bloom had ran out at once. `gh pr
+    /// view sentry-worker-src-blob` answered "no pull requests found for branch", the unnamed
+    /// fallback answered the same about `main`, and because a nil is deliberately never written
+    /// over a known pull request (see `WorkspaceModel.refreshPullRequest`, and that rule is
+    /// right), the strip went on showing the snapshot taken before the merge: open, eighteen
+    /// checks passed, and a live Squash and merge button over work GitHub had already landed.
+    ///
+    /// So, three routes, in order, each one only asked when the one above it came away empty:
+    ///
+    /// 1. **By branch.** What everything did before, and still the answer nearly every time. It
+    ///    finds merged pull requests too, so long as the ref still resolves.
+    /// 2. **By the number on the row.** Exact, and it needs no ref at all. Not gated on
+    ///    `PullRequestOwnership`, and that is deliberate: the number IS the ownership answer,
+    ///    the thing `belongs` spends two heuristics approximating. Gating it would refuse a
+    ///    workspace opened to review a pull request that merged last month, which is the one case
+    ///    `checkedOutAs` was added to allow and which is precisely when that git config is gone.
+    /// 3. **By searching for the head.** `gh pr list --head <branch> --state all` reads the head
+    ///    ref recorded on the pull request, which is history rather than a ref, so it answers
+    ///    after the branch is deleted. This is the recovery route for a row whose number was never
+    ///    written down, which is every workspace that predates `Workspace.pullRequestNumber`. It
+    ///    IS gated, because a name can be reused and this one comes back with a list.
+    ///
+    /// Route 3 only runs when the recorded branch is gone locally, and that gate is what keeps it
+    /// from costing anything. Without it every poll of every workspace with no pull request yet,
+    /// which is most of them, would spend a second `gh` process finding nothing. A branch that is
+    /// still here is a branch `gh pr view` can still be asked about; a branch that has been
+    /// deleted is the state Bloom's own merge leaves behind, and the only state route 3 helps in.
+    internal static func snapshot(
+        for workspace: Workspace, onBranch head: String, maxAge: Duration
+    ) async throws -> PullRequestSnapshot? {
+        if let found = try await snapshot(
             forBranch: head, worktree: workspace.path, maxAge: maxAge
-        ), await owns(found.pullRequest, workspace: workspace, onBranch: head) else { return nil }
-        return found.pullRequest
+        ), await owns(found.pullRequest, workspace: workspace, onBranch: head) {
+            return found
+        }
+
+        if let number = workspace.pullRequestNumber,
+           let found = await snapshot(forNumber: number, worktree: workspace.path, maxAge: maxAge) {
+            return found
+        }
+
+        let branchIsGone = await !Git.branchExists(head, in: workspace.path)
+        guard branchIsGone else { return nil }
+
+        let matches = await pullRequestsWithHead(head, worktree: workspace.path)
+        guard let chosen = PullRequestOwnership.choose(
+            from: matches,
+            startedAt: workspace.createdAt,
+            checkedOutAs: await Git.checkedOutPullRequest(branch: head, worktree: workspace.path)
+        ) else { return nil }
+        return await snapshot(forNumber: chosen, worktree: workspace.path, maxAge: maxAge)
     }
 
     /// This workspace's checks, which are the checks of this workspace's pull request.
@@ -117,8 +223,8 @@ public extension GitHub {
         // The same branch both times, or the rollup is read for one branch and gated on another.
         let head = await headBranch(of: workspace)
         guard let found = try await snapshot(
-            forBranch: head, worktree: workspace.path, maxAge: maxAge
-        ), await owns(found.pullRequest, workspace: workspace, onBranch: head) else { return [] }
+            for: workspace, onBranch: head, maxAge: maxAge
+        ) else { return [] }
         return found.runs
     }
 

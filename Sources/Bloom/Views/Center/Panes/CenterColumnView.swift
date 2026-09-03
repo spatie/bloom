@@ -18,7 +18,7 @@ struct CenterColumnView: View {
         }
         .background(Palette.windowBackground)
         .task(id: model.workspace.id) {
-            openStartingTerminal()
+            openStartingPane()
             await model.onAppear()
             // Last, and that ordering is the whole of it. `onAppear` does not return until the
             // first visit of a launch has the workspace's sessions in hand, and the tool tabs were
@@ -32,22 +32,31 @@ struct CenterColumnView: View {
         }
     }
 
-    /// Opens the terminal a workspace created with "Opens with: Terminal" was promised.
+    /// Opens the tab a workspace created with "Start with: Terminal" or "Start with: Browser" was
+    /// promised.
     ///
-    /// This is the consumer `WorkspaceStartMode.consumeOpensOnTerminal` never had. Creating a
-    /// terminal workspace wrote the flag, skipped the session and the opening turn, and then
-    /// nothing read the flag: the workspace opened on an empty conversation, which is not what the
-    /// control said and not what anybody picking it wanted. The tab is opened here rather than at
-    /// creation because a tab is a thing the centre column owns, and because the flag has to be
-    /// consumed exactly once, on the first open, and never forced in front of an arrangement the
-    /// user has since made for themselves.
-    private func openStartingTerminal() {
+    /// This is the consumer `WorkspaceStartMode.consumeOpeningTab` never had. Creating a terminal
+    /// workspace wrote the hint, skipped the session and the opening turn, and then nothing read
+    /// the hint: the workspace opened on an empty conversation, which is not what the control said
+    /// and not what anybody picking it wanted. The tab is opened here rather than at creation
+    /// because a tab is a thing the centre column owns, and because the hint has to be consumed
+    /// exactly once, on the first open, and never forced in front of an arrangement the user has
+    /// since made for themselves.
+    ///
+    /// Through `NewPane`, which is the door the strip's `+` and every split menu already use, so
+    /// a tab a workspace is born on and a tab somebody opens a second later are the same tab.
+    private func openStartingPane() {
         let workspaceID = model.workspace.id
         // Idempotent, and first: adding a tab to a workspace whose stored list has not been read
         // back yet would replace that list rather than extend it.
         CenterTabStore.shared.load(workspaceID: workspaceID)
-        guard WorkspaceStartMode.consumeOpensOnTerminal(workspaceID: workspaceID) else { return }
-        let tab = CenterTabStore.shared.add(kind: .terminal, workspaceID: workspaceID)
-        WorkspaceTabsStore.shared.select(.tool(tab.id), in: model)
+        guard let opening = WorkspaceStartMode.consumeOpeningTab(workspaceID: workspaceID) else {
+            return
+        }
+        // No address for a browser, where the strip's `+` passes the workspace's own dev server.
+        // The worktree was cut seconds ago and its setup script may still be running, so the port
+        // is answering nothing: an opening tab on a refused connection would be an error page as
+        // the first thing a new workspace shows. The address field is where somebody says.
+        NewPane.open(opening.pane, in: model) { WorkspaceTabsStore.shared.select($0, in: model) }
     }
 }

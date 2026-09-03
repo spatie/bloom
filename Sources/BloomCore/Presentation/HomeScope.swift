@@ -34,37 +34,44 @@ public enum HomeScope: String, Hashable, Sendable, CaseIterable, Codable {
 
     /// The chips on offer, in the order they are drawn.
     ///
-    /// **Browsing, `live` leads, because it is what Home opens on.** A strip whose first chip is
-    /// one nobody wants selected reads as a strip you have to correct. After it come the two
-    /// subsets of it, `needsYou` and `running`, which are the two questions asked ABOUT live work
-    /// rather than instead of it; then `archived`, which is the other half of the machine; then
-    /// `all`, which is the widest net and the way out of every narrowing to its left.
+    /// **Browsing, there are two: `all` and `archived`.** There were five, and the three that went
+    /// (`live`, `needsYou`, `running`) were each a true fact about the list drawn as a control.
+    /// The owner asked for them to go, and the reason is visible in the strip they made: five
+    /// chips across the top of the first screen he sees, of which he pressed one. A filter nobody
+    /// reaches for is a row of words to read past.
     ///
-    /// Searching, `all` leads, because there is no default worth having: what was typed is the
-    /// narrowing, and the chips only split the answer by kind.
+    /// What is lost is real and worth naming rather than pretending away: **there is now no way to
+    /// ask "which of these is waiting on me" from this strip.** The list still answers it, by the
+    /// glyph on each row and by the order, and the sidebar answers it too. If that turns out not
+    /// to be enough, `needsYou` is the one to bring back, because it is the only one of the three
+    /// that asks something the list does not already show at a glance.
+    ///
+    /// Searching, `all` still leads and the two kind chips stay, because there the chips split an
+    /// answer rather than narrowing a list nobody asked to narrow.
     public static func offered(searching: Bool) -> [HomeScope] {
         searching
             ? [.all, .workspaces, .transcripts, .archived]
-            : [.live, .needsYou, .running, .archived, .all]
+            : [.all, .archived]
     }
 
     /// What the strip is set to when nothing has been asked of it.
     ///
-    /// **Browsing, that is `live` rather than `all`, and it is the biggest decision on this
-    /// screen.** Home is what somebody sees on launch, so it has to answer "what was I doing, and
-    /// what needs me" before anything else. On the machine this was redesigned against, `all` was
-    /// twenty rows of which seventeen were archived: a page about the past, in which the three
-    /// workspaces that could still be acted on were outnumbered six to one and drawn almost the
-    /// same.
+    /// **Browsing, that is `all`, and it was `live` until the strip lost the chip for it.** A
+    /// resting scope with no chip is a state you cannot see you are in and cannot leave, which is
+    /// worse than either answer.
     ///
-    /// Nothing is hidden by it. `archived` is a chip on the same strip carrying its own count, and
-    /// `HomeList` follows a live list with a capped tail of the most recent archived work, which
-    /// is more than the "Hide archived" switch this scope replaced ever said.
+    /// The argument for `live` is still on the record and still true: on the machine this screen
+    /// was redesigned against, `all` is twenty rows of which seventeen are archived, a page about
+    /// the past in which the three workspaces that can still be acted on are outnumbered six to
+    /// one. What stops that being the whole story is that an archived row is drawn quiet, the
+    /// live ones carry a glyph, and the list is ordered by when it happened, so the top of `all`
+    /// is the recent work whichever state it is in. If Home starts reading as a page about the
+    /// past again, this is the line to change back.
     ///
     /// Searching, it is `all`: a search is a question about the whole machine, archived work
     /// included, and narrowing one by default would be answering a question that was not asked.
     public static func resting(searching: Bool) -> HomeScope {
-        searching ? .all : .live
+        .all
     }
 
     public func label(searching: Bool) -> String {
@@ -96,6 +103,20 @@ public enum HomeScope: String, Hashable, Sendable, CaseIterable, Codable {
 
     /// Whether workspace rows are drawn at all under this scope.
     public var showsWorkspaces: Bool { self != .transcripts }
+
+    /// Whether the rows say what each record still costs, and can be ordered by it.
+    ///
+    /// **The Archived chip alone, and that is what folded a Settings pane into this list rather
+    /// than beside it.** Settings had a Storage screen listing every archived workspace with its
+    /// size, its project, its branch and its age: the same objects as this list, ordered
+    /// differently, with one extra column. Under this chip every row is a database record and
+    /// nothing else, so a column of bytes has a value on every one of them and means one thing.
+    ///
+    /// Under `all` it would not. The same slot would hold a size on the archived rows and a diff
+    /// on the live ones, on alternating rows down one column, which is a column that means two
+    /// things. It is also what keeps the measurement off the screen the app opens with: see
+    /// `HomeView.loadFootprints` for what asking costs.
+    public var showsFootprints: Bool { self == .archived }
 
     /// Whether transcript results are drawn under this scope. Only ever asked while searching.
     public var showsTranscripts: Bool {

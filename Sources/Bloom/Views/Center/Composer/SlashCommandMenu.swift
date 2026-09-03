@@ -13,6 +13,8 @@ struct SlashCommandMenu: View {
     /// What the room on the menu's side of the composer allows. The default is the cap a menu
     /// keeps even with a whole transcript above it.
     var maxHeight: CGFloat = MenuLayout.maxHeight
+    /// The composer stays fluid, while this list keeps the compact measure of a native popover.
+    var availableWidth: CGFloat = Self.maxWidth + Metrics.gutter * 2
     var onPick: @MainActor (SlashCommand) -> Void
     var onHighlight: @MainActor (Int) -> Void = { _ in }
 
@@ -56,6 +58,16 @@ struct SlashCommandMenu: View {
                 }
             }
         }
+        .frame(width: panelWidth)
+    }
+
+    // A completion list is a menu, not another pane. Keeping it close to the measure of the
+    // agent-settings popover makes the name and description read as one compact choice and stops
+    // short descriptions leaving a broad strip of empty material behind them.
+    private static let maxWidth: CGFloat = 440
+
+    private var panelWidth: CGFloat {
+        min(Self.maxWidth, max(160, availableWidth - Metrics.gutter * 2))
     }
 
     /// Three different nothings, and they call for three different sentences. The first scan has

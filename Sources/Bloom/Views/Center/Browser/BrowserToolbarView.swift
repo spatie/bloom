@@ -12,6 +12,7 @@ import BloomCore
 /// for a control that is there and cannot be pressed.
 struct BrowserToolbarButton: View {
     var control: BrowserToolbar.Control
+    var opticalOffsetY: CGFloat = 0
     var action: @MainActor () -> Void
 
     var body: some View {
@@ -19,6 +20,7 @@ struct BrowserToolbarButton: View {
             Label(control.name, systemImage: control.symbol)
                 .labelStyle(.iconOnly)
                 .foregroundStyle(control.isEnabled ? Palette.textSecondary : Palette.textDisabled)
+                .offset(y: opticalOffsetY)
         }
         .buttonStyle(.accessoryBar)
         .disabled(!control.isEnabled)
@@ -34,7 +36,7 @@ struct BrowserToolbarButton: View {
 ///
 /// **Three groups, which is the anatomy every Mac browser's bar has.** Back and forward joined in
 /// one capsule; the address in a capsule of its own, with the connection glyph at one end and
-/// Reload at the other; then the two glyphs that hand this page to somebody else, bare. There is
+/// Reload at the other; then the two round controls that hand this page to somebody else. There is
 /// no stock component for any of it, and `BrowserToolbar` says why: the toolbar, the joined pair
 /// and the search item are all `NSWindow`'s, and this is a pane inside a split inside a tab.
 ///
@@ -43,9 +45,8 @@ struct BrowserToolbarButton: View {
 /// so this bar sits above the page rather than over it. What the two shapes sample is the bar's
 /// own `surfaceSunken`, which is ours.
 ///
-/// The camera and Share stay `.accessoryBar` rather than taking `.buttonStyle(.glass)`. Four
-/// raised capsules in a row is a bar with no groups left in it, and Safari's own two are bare
-/// glyphs until the pointer is on them. The camera is on that side because with Reload inside the
+/// Camera and Share use the same circular treatment. Their glyphs still use `.accessoryBar` for
+/// the native hover and pressed states. The camera is on that side because with Reload inside the
 /// field, what is left on the right is the pair that takes this page elsewhere.
 struct BrowserToolbarView: View {
     var toolbar: BrowserToolbar
@@ -87,8 +88,7 @@ struct BrowserToolbarView: View {
             HStack(spacing: Metrics.spacingWide) {
                 navigation
                 addressField
-                BrowserToolbarButton(control: toolbar.screenshot, action: capture)
-                BrowserShareButton(control: toolbar.share, shareable: toolbar.shareable)
+                pageActions
             }
         }
         .padding(.horizontal, Metrics.spacingSmall)
@@ -120,7 +120,7 @@ struct BrowserToolbarView: View {
         .glassEffect(.regular.interactive(), in: Capsule())
         // The rim is drawn rather than left to the material's, because it is what still says where
         // the capsule ends once Reduce Transparency has turned the glass opaque.
-        .overlay { Capsule().strokeBorder(Palette.border, lineWidth: Metrics.hairline) }
+        .overlay { Capsule().strokeBorder(Palette.border, lineWidth: Metrics.outline) }
     }
 
     private var addressField: some View {
@@ -135,10 +135,8 @@ struct BrowserToolbarView: View {
                     .accessibilityLabel(display.security.help ?? "")
             }
             field
-            BrowserToolbarButton(control: toolbar.reload, action: reloadOrStop)
         }
-        .padding(.leading, Metrics.spacing)
-        .padding(.trailing, Metrics.spacingTight)
+        .padding(.horizontal, Metrics.spacingWide + Metrics.spacingSmall)
         .frame(height: Metrics.controlHeight)
         .background(alignment: .leading) { load }
         .clipShape(Capsule())
@@ -149,10 +147,43 @@ struct BrowserToolbarView: View {
         .overlay {
             Capsule().strokeBorder(
                 isRingVisible ? Palette.focusRing : Palette.border,
-                lineWidth: isRingVisible ? Self.focusRingWidth : Metrics.hairline
+                lineWidth: isRingVisible ? Self.focusRingWidth : Metrics.outline
             )
         }
     }
+
+    /// Reload, capture and share are one family of page actions. A joined glass capsule gives
+    /// them equal hit targets and one boundary, while the native button style still supplies each
+    /// action's hover and pressed feedback.
+    private var pageActions: some View {
+        HStack(spacing: 0) {
+            pageAction(toolbar.reload, action: reloadOrStop)
+            Hairline(axis: .vertical)
+            pageAction(toolbar.screenshot, action: capture)
+            Hairline(axis: .vertical)
+            BrowserShareButton(
+                control: toolbar.share,
+                shareable: toolbar.shareable,
+                opticalOffsetY: -0.5
+            )
+                .frame(width: pageActionWidth, height: Metrics.controlHeight)
+        }
+        .frame(height: Metrics.controlHeight)
+        .clipShape(Capsule())
+        .glassEffect(.regular.interactive(), in: Capsule())
+        .overlay { Capsule().strokeBorder(Palette.border, lineWidth: Metrics.outline) }
+    }
+
+    private func pageAction(
+        _ control: BrowserToolbar.Control, action: @escaping @MainActor () -> Void
+    ) -> some View {
+        BrowserToolbarButton(control: control, action: action)
+            .frame(width: pageActionWidth, height: Metrics.controlHeight)
+    }
+
+    /// A little wider than the control is tall, matching a compact Mac toolbar button without
+    /// letting three adjacent glyphs crowd their separators.
+    private var pageActionWidth: CGFloat { Metrics.controlHeight + Metrics.spacingSmall }
 
     /// How far the page has got, over the glass and under the address.
     ///

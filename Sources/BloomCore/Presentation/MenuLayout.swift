@@ -8,7 +8,7 @@ public enum MenuLayout {
     public static let maxHeight: CGFloat = 240
 
     /// Roughly three rows plus the panel's padding. A menu shorter than this is not a menu, it is
-    /// a letterbox: the create sheet has about seventy points above its composer, and a panel cut
+    /// a letterbox: the create window has about seventy points above its composer, and a panel cut
     /// to that showed two arbitrary rows with the ranked ones scrolled off inside it.
     public static let minimumHeight: CGFloat = 100
 
@@ -16,7 +16,7 @@ public enum MenuLayout {
     ///
     /// `above` hangs the panel's bottom over the box's top edge, which is the transcript's shape:
     /// the composer sits at the foot of the window with the whole conversation above it. `below`
-    /// hangs the panel's top under the line being typed, which is the create sheet's shape: the
+    /// hangs the panel's top under the line being typed, which is the create window's shape: the
     /// box sits near the top of a small window, and a panel that opened upwards there was clipped
     /// at the sheet's edge with the best ranked rows, the selected one among them, off screen.
     public enum Placement: Equatable, Sendable {

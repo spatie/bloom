@@ -45,6 +45,17 @@ struct CenterPaneView: View {
         tab.map { tabs.content(of: pane, in: $0) }
     }
 
+    /// What every pane of this tab is showing, this one included, and empty when there is no tab
+    /// to be in. A tab nobody has split is one entry.
+    ///
+    /// Only the review reads it, to decide whether the conversation it would send to is already on
+    /// screen and therefore whether it draws a composer of its own. See `ReviewComposer`. It costs
+    /// no dependency this body did not already have: `showing` reads the same arrangement.
+    private var paneContents: [PaneContent] {
+        guard let tab else { return [] }
+        return tabs.layout(of: tab).panes.map { tabs.content(of: $0, in: tab) }
+    }
+
     /// What a pane with nothing to draw is waiting for.
     ///
     /// Two of them, and they are two different moments of the same switch. Which one the user
@@ -172,6 +183,7 @@ struct CenterPaneView: View {
                 .first(where: { $0.id == tabID }) {
                 ToolPaneView(
                     model: model, tab: tab,
+                    siblings: paneContents,
                     splitColumn: { split($0, opening: $1) },
                     paneMenu: hostedMenu
                 )
@@ -351,13 +363,38 @@ struct CenterPaneView: View {
     /// composer. Somebody who asked for a shell in this worktree is offered a shell in it. The
     /// other three kinds of tab are one click up, in the `+` the strip carries.
     private var noConversationState: some View {
-        EmptyStateView(
-            glyph: "apple.terminal",
-            title: "Nothing open in this pane",
-            message: "This workspace has no conversation. Open a terminal in the worktree, or pick another kind of tab from the plus above.",
-            actionTitle: "Open a terminal",
-            action: openTerminal
-        )
+        VStack(spacing: Metrics.spacingWide) {
+            EmptyStateView(
+                glyph: "apple.terminal",
+                title: "Nothing open in this pane",
+                message: "Open one of these in the worktree."
+            )
+
+            // **All three, rather than one and a sentence pointing at the `+`.** It used to offer
+            // a terminal and tell the reader that the other kinds were "one click up, in the plus
+            // above", which is a screen explaining where its own controls are. The three kinds are
+            // three buttons; the `+` is still there for the fourth thing and for a second tab.
+            //
+            // The nouns and the glyphs are `PaneKind`'s, the same ones the `+` menu and the split
+            // menus take theirs from, so this cannot end up calling a browser something else.
+            HStack(spacing: Metrics.spacing) {
+                ForEach(PaneKind.allCases) { kind in
+                    Button {
+                        NewPane.open(kind, in: model) { tabs.reveal($0, in: model) }
+                    } label: {
+                        Label(kind.title, systemImage: kind.symbol)
+                            .labelStyle(.titleAndIcon)
+                    }
+                    // Terminal is the prominent one because this pane exists for a workspace that
+                    // opened with a terminal and whose shell has ended, so it is what the reader
+                    // most likely wants back. It carries the system control accent, like every
+                    // primary action in the app.
+                    .buttonStyle(.borderedProminent)
+                    .tint(kind == .terminal ? Palette.controlAccent : Palette.surfaceRaised)
+                    .foregroundStyle(kind == .terminal ? Palette.selectedEmphasizedText : Palette.textPrimary)
+                }
+            }
+        }
     }
 
     private func openTerminal() {

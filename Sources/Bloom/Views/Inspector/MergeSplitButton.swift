@@ -63,10 +63,7 @@ struct MergeSplitButton: View {
         // form below it was never once drawn. The candidates carry their own, on `control`, which
         // is what makes each of them report the width its label really wants. See
         // `PullRequestSummary.continueButton`, where the same slip was on four more.
-        ViewThatFits(in: .horizontal) {
-            styled.labelStyle(.titleAndIcon)
-            styled.labelStyle(.iconOnly)
-        }
+        styled.labelStyle(.titleAndIcon)
         // **The label and the tick are one value, and this is what makes that true.** A `Menu`'s
         // content is not evaluated when the view is rebuilt; it is evaluated when the menu opens,
         // out of the closure SwiftUI stored, and the tick is drawn from the selection that closure
@@ -80,6 +77,7 @@ struct MergeSplitButton: View {
     private var styled: some View {
         control
             .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
             // The label, the chevron and the hairline in white. See the type's note: the system
             // will not tint this control, so the only lever left over its ink is the appearance
             // it draws itself for.
@@ -89,14 +87,14 @@ struct MergeSplitButton: View {
                 // draws a disabled prominent button and therefore how this one has to look beside
                 // them.
                 fill.opacity(isLive ? 1 : 0.35),
-                in: .rect(cornerRadius: Metrics.corner)
+                in: RoundedRectangle(cornerRadius: Metrics.corner)
             )
     }
 
     private var control: some View {
         Menu {
             // An inline `Picker` rather than a `Button` per method, for the reason
-            // `ComposerOptionItems` states: the tick lives in an `NSMenu` item's state column,
+            // `ComposerOptionMenu` states: the tick lives in an `NSMenu` item's state column,
             // which is the menu's to draw and not a label's, and an inline picker is what asks
             // the platform to draw it. It also cannot perform anything, which is exactly the
             // promise this menu makes.

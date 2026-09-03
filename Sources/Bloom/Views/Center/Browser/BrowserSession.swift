@@ -115,7 +115,13 @@ final class BrowserSession {
     /// agreeing rather than a duplicate: `refresh` reads the web view and writes what changed.
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
 
-    init(url: String) {
+    /// The worktree this tab belongs to, which is the directory a `file://` page is granted read
+    /// access to. Empty for a session belonging to no workspace, which is the design gallery's,
+    /// and empty is a session that will not load a local page at all. See `LocalPage.fileURL`.
+    @ObservationIgnored private let root: String
+
+    init(url: String, root: String = "") {
+        self.root = root
         Self.preferInspectorDocked()
         let configuration = WKWebViewConfiguration()
         Self.enableDeveloperExtras(on: configuration.preferences)
@@ -170,6 +176,18 @@ final class BrowserSession {
     /// ignored rather than handed to a search engine: this field is for the dev server next door,
     /// and shipping a half-typed line off to a third party is not what it is for.
     func load(_ text: String) {
+        // A page out of the worktree, which cannot go the way every other address goes. WebKit
+        // drops a `file://` handed to it as a `URLRequest` and leaves the pane blank, and a page
+        // loaded with read access to itself alone comes out unstyled, because the stylesheet
+        // beside it is a separate origin it may not fetch. `loadFileURL` with the worktree root is
+        // the supported answer to both, and `LocalPage.fileURL` is what refuses an address
+        // pointing outside that root before the root is handed over.
+        if let file = LocalPage.fileURL(from: text, root: root) {
+            webView.loadFileURL(
+                file, allowingReadAccessTo: URL(filePath: root, directoryHint: .isDirectory)
+            )
+            return
+        }
         guard let url = BrowserAddress.url(from: text) else { return }
         webView.load(URLRequest(url: url))
     }

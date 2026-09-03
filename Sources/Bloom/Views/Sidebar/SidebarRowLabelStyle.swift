@@ -17,21 +17,30 @@ import SwiftUI
 /// agreement. `WorkspaceRow` and the notice that stands in for it when a project is empty both
 /// wear it, which is what stops them drifting apart the way two hand-built stacks would.
 ///
-/// The numbers reproduce what the system's own label geometry measured at, so nothing moved when
-/// this went in. Measured off a window capture before and after, in points from the pane's edge:
-/// the mark's ink runs 33.0 to 46.5 and the name's ink begins at 57.5, both ways. That is what
-/// `SidebarMetrics.markInset`, `Metrics.glyph`, `imageScale(.large)` and
-/// `SidebarMetrics.markToText` are between them for. The image scale in particular is not
-/// decoration: a sidebar `Label` raises it for the icon slot, and without it the mark came out
-/// 10.5 points across rather than 13.5.
+/// The two columns are the project header's, term for term. The mark takes the tile's box and the
+/// gap after it is the header's own, so a row laid out with this and given
+/// `SidebarMetrics.rowIndent` puts its mark under the project's mark and its name under the
+/// project's name, which is `SidebarMetrics.nameColumn`. The numbers used to reproduce what the
+/// system's label geometry happened to measure at, and that is what made them a pair of literals
+/// nothing could move.
+///
+/// **The image scale has come off this style, and that is a fix rather than a tidy up.** A sidebar
+/// `Label` raises it for the icon slot and this style raised it as well, on a measurement that was
+/// read the wrong way round: `arrow.triangle.branch` came out 13.5 points across with it and 10.5
+/// without, and the larger was taken for the right one. What it did was push every mark past the
+/// 13 point box this column is aligned on, and only in the sidebar, since Home, the legend and the
+/// hover card draw the same marks with no scale at all. One state, two sizes, depending which pane
+/// it was read in. The marks carry their own scale now, in `WorkspaceStatusGlyph` and
+/// `SubagentMarkGlyph`, which is where a decision about how large a mark is belongs.
 struct SidebarRowLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: SidebarMetrics.markToText) {
+        HStack(spacing: Metrics.spacing) {
             configuration.icon
-                .imageScale(.large)
-                .frame(width: Metrics.glyph, height: Metrics.glyph)
+                // Wider than the mark it holds, because it is the tile's box rather than the
+                // mark's: the glyph is centred in the project's column instead of hung off its
+                // leading edge.
+                .frame(width: SidebarMetrics.markColumn, height: Metrics.glyph)
             configuration.title
         }
-        .padding(.leading, SidebarMetrics.markInset)
     }
 }

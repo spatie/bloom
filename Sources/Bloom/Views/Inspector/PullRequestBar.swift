@@ -42,10 +42,6 @@ struct PullRequestBar: View {
     var body: some View {
         strip
             .task(id: model.workspace.id) { await poll() }
-            // The other half of the button. `WorkspaceModel` counts the turns that Create pull
-            // request started and that ended with no pull request; this is where one gets said
-            // out loud.
-            .onChange(of: model.pullRequestShortfalls) { _, _ in reportShortfall() }
     }
 
     private var strip: some View {
@@ -111,6 +107,7 @@ struct PullRequestBar: View {
                 branchActions: branchActions,
                 worktree: model.workspace.path,
                 hasChanges: hasChanges,
+                continued: model.continued,
                 action: createPullRequest
             )
         }
@@ -182,27 +179,6 @@ struct PullRequestBar: View {
                 )
             }
         }
-    }
-
-    /// What to say when the agent finished the turn and there is still no pull request.
-    ///
-    /// Quiet about it when Bloom cannot see GitHub at all, because then it has not found out that
-    /// there is no pull request: it has only found out that it cannot ask. `PullRequestCreator`
-    /// already says that, in the one line under the branch name.
-    ///
-    /// A leftover rather than a failure. The agent ran, the worktree may well have been pushed,
-    /// and what is missing is the last step, so the sentence points at the transcript rather than
-    /// claiming to know what stopped it.
-    private func reportShortfall() {
-        guard GitHubAvailability.shared.state.isUsable else { return }
-        report = PullRequestNotice(
-            tone: .leftover,
-            title: "No pull request was opened",
-            message: "\(model.workspace.name) finished the turn without one. The end of the "
-                + "transcript says what stopped it: a rejected push, or a command the permission "
-                + "mode would not let it run, are the two usual answers.",
-            details: nil
-        )
     }
 
     /// Hands the outstanding work to the agent, the same way Create pull request does.

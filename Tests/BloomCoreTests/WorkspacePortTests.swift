@@ -10,7 +10,7 @@ import Foundation
 /// launches is a dev server bound where nothing is looking. It is also the only thing that lets
 /// an archive script take down what a setup script put up, since it is what makes `$BLOOM_PORT`
 /// the same number in both.
-@Suite("Workspace ports")
+@Suite("Workspace ports", .scratchDirectory)
 struct WorkspacePortTests {
     private func seed(
         _ store: Store, name: String = "w", port: Int = 0

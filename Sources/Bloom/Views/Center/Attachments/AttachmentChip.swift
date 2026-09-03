@@ -38,6 +38,14 @@ struct AttachmentChip: View {
     /// still drawn, because it is still a file and the icon is still the honest thing to say about
     /// it. It simply does not answer to the pointer.
     var onOpen: (@MainActor () -> Void)?
+    /// Opens the file in a tab of its own, on a double click and from the menu. Nil where a chip
+    /// has nowhere to open, exactly as `onOpen` is.
+    ///
+    /// **Two gestures because they mean two things.** A single click points the workspace's one
+    /// review tab at this file, which is the cheap look you take twenty times while reading a
+    /// turn. A double click says keep it: it opens a tab pinned to this file, which the next
+    /// filename you click cannot steal. See `CenterTab.isPinnedToPath`.
+    var onOpenInNewTab: (@MainActor () -> Void)?
     /// Nil where there is nothing to take the chip off, which is a turn that has already been
     /// sent: the prompt the agent read named that file, so the transcript cannot un-name it. The
     /// icon then stays an icon rather than swapping under the pointer.
@@ -75,8 +83,6 @@ struct AttachmentChip: View {
     @State private var isHovered = false
     @State private var isMissing = false
     @State private var hoverTask: Task<Void, Never>?
-    /// The pointer on the remove button itself, which is a smaller target than the chip.
-    @State private var isRemoveHovered = false
     /// Read once, when the pointer enters, and only where a preview is wanted. See `probe`.
     @State private var frameInWindow: CGRect = .zero
 
@@ -86,9 +92,18 @@ struct AttachmentChip: View {
     /// Shorter than a list row: this is a label above the text field, and at 28 points a row of
     /// them read as a second toolbar. Not private: the bar reads it to know how tall one row of
     /// chips is before it has measured any.
-    static let height: CGFloat = 22
+    ///
+    /// It is `Metrics.controlHeight` rather than a 22 of its own, which is what it was: the same
+    /// number, said twice. That rung is "a control drawn with a fill of its own inside a strip",
+    /// which is exactly what a chip is.
+    static let height: CGFloat = Metrics.controlHeight
     /// The icon, and the close control that replaces it.
-    private static let slot: CGFloat = 14
+    ///
+    /// Not private, because `SlashCommandChip` and `ReviewCommentChip` each held a 14 of their own
+    /// with a comment promising it was this one. `SlashCommandChip` already condemns that shape
+    /// three lines below its copy, for `hoverDelay`: a promise in a comment cannot stop the drift
+    /// and a reference to the constant can.
+    static let slot: CGFloat = 14
     /// Enough for a name like `Screenshot 2026-08-19 at 14.03.11.png` to be recognisable once it
     /// is truncated in the middle, and short enough that four chips fit across a narrow column.
     private static let maxNameWidth: CGFloat = 150
@@ -133,11 +148,17 @@ struct AttachmentChip: View {
         }
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                .strokeBorder(stroke, lineWidth: Metrics.hairline)
+                .strokeBorder(stroke, lineWidth: Metrics.outline)
         }
         .background { probe }
         .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+        // The double click is declared FIRST, which is what makes both gestures possible on one
+        // chip: SwiftUI matches the higher count before it falls back to the single tap, and
+        // declared the other way round the single one swallows every click and the second never
+        // arrives.
+        .modifier(TapWhenOffered(count: 2, action: onOpenInNewTab))
         .modifier(TapWhenOffered(action: onOpen))
+        .contextMenu { menu }
         .onHover(perform: hover(_:))
         .help(attachment.path)
         .accessibilityElement(children: .contain)
@@ -145,6 +166,24 @@ struct AttachmentChip: View {
         .accessibilityHint(onOpen == nil ? "" : "Opens \(attachment.path) in a tab")
         .modifier(PresenceProbe(path: verifiesOnDisk ? url.path : nil, isMissing: $isMissing))
         .onDisappear { hoverTask?.cancel() }
+    }
+
+    // MARK: Menu
+
+    /// What a file pill offers on a right click.
+    ///
+    /// The same three the changed-file rows and the worktree tree already offer, in the order
+    /// those use, so a file behaves like a file wherever the window draws one: the ones that hand
+    /// it to something that opens it, then the one about the clipboard. Reveal and Copy path are
+    /// offered on a chip whose file is not there too, since a path is still a path and Finder
+    /// says so better than a greyed-out item does.
+    @ViewBuilder
+    private var menu: some View {
+        if let onOpenInNewTab {
+            Button("Open in New Tab", action: onOpenInNewTab)
+        }
+        Button("Reveal in Finder") { Reveal.inFinder(url.path) }
+        Button("Copy path") { Clipboard.copy(attachment.path) }
     }
 
     // MARK: Ground
@@ -176,44 +215,18 @@ struct AttachmentChip: View {
             : Palette.selectedEmphasizedText
     }
 
-    /// Full strength, because this glyph is the whole control. The rest of the chip is allowed to
-    /// be quiet; the thing that throws the file away is not.
-    private var removeInk: Color {
-        isOnSelection ? Palette.selectedEmphasizedText : Palette.textPrimary
-    }
-
-    /// The plate the X sits on, which darkens under the pointer so the press has somewhere to land
-    /// before it happens.
-    private var removePlate: Color {
-        if isOnSelection {
-            return Palette.selectedEmphasizedText.opacity(isRemoveHovered ? 0.28 : 0.16)
-        }
-        return isRemoveHovered ? Palette.hover : Palette.surface
-    }
-
     @ViewBuilder
     private var leading: some View {
         if isHovered, let onRemove {
-            // **A drawn glyph on a plate, not `xmark.circle.fill`.** That symbol knocks its X out
-            // of a filled disc, so the X is a hole showing whatever is behind the chip: grey on
-            // grey at eleven points, which is a smudge rather than a control. The X is the ink
-            // here and the plate is behind it, which is the same way the system draws a token's
-            // remove button and the reason Conductor's reads at a glance where ours did not.
-            Button(action: onRemove) {
-                Image(systemName: "xmark")
-                    .font(.system(size: Self.slot * 0.58, weight: .bold))
-                    .foregroundStyle(removeInk)
-                    .frame(width: Self.slot, height: Self.slot)
-                    .background(removePlate, in: Circle())
-                    .overlay {
-                        Circle().strokeBorder(stroke, lineWidth: Metrics.hairline)
-                    }
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .onHoverChange { isRemoveHovered = $0 }
-            .help("Remove \(attachment.filename)")
-            .accessibilityLabel("Remove \(attachment.filename)")
+            // A drawn glyph on a plate rather than `xmark.circle.fill`, which is the fix this
+            // chip got first and the other three did not, including the one inside the composer
+            // box that the complaint had actually been about. `ChipRemoveMark` is where the
+            // argument lives now, so the next chip cannot be written without it.
+            ChipRemoveButton(
+                diameter: Self.slot,
+                label: "Remove \(attachment.filename)",
+                action: onRemove
+            )
         } else {
             Image(nsImage: FileTypeIcon.icon(for: attachment.filename))
                 .resizable()
@@ -303,11 +316,14 @@ enum FileTypeIcon {
 /// A gesture with an empty closure is not the same as no gesture: it swallows the click, which
 /// inside a transcript row means the row stops expanding when you click its chip.
 private struct TapWhenOffered: ViewModifier {
+    /// One click or two. See the call sites: the two-click gesture is declared above the
+    /// one-click one so SwiftUI can match it first.
+    var count: Int = 1
     var action: (@MainActor () -> Void)?
 
     func body(content: Content) -> some View {
         if let action {
-            content.onTapGesture(perform: action)
+            content.onTapGesture(count: count, perform: action)
         } else {
             content
         }

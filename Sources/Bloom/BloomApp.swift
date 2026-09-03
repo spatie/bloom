@@ -83,30 +83,61 @@ struct BloomApp: App {
         #endif
     }
 
-    /// The narrowest the window may be dragged.
+    /// The thicknesses the window's minimum width is built out of.
     ///
-    /// Derived rather than a literal. It used to be a flat 1000, which was chosen before the
-    /// centre column and the inspector became an `NSSplitViewController` with real minimum
-    /// thicknesses. Those minimums do not negotiate: at 1000 the split view needed 121 points more
-    /// than it was given and simply overflowed, so a window dragged to its own minimum clipped the
-    /// sidebar's rows off their leading edge and the inspector's Create Pull Request button off
-    /// the trailing one. `NavigationSplitView` does not shrink its sidebar to make room either, so
-    /// the sidebar's MAXIMUM is what the rest has to be added to.
-    private static let minimumWindowWidth =
-        Self.sidebarMaximumWidth + DetailSplitViewController.minimumWidth + 1
+    /// Derived rather than a literal, and conditional rather than derived once. The minimum used to
+    /// be a flat 1000, which was chosen before the centre column and the inspector became an
+    /// `NSSplitViewController` with real minimum thicknesses. Those minimums do not negotiate: at
+    /// 1000 the split view needed 121 points more than it was given and simply overflowed, so a
+    /// window dragged to its own minimum clipped the sidebar's rows off their leading edge and the
+    /// inspector's Create Pull Request button off the trailing one.
+    ///
+    /// It then became 1122, which is those panes added up with the sidebar at its maximum, and 1122
+    /// is what a window showing two panes was still being held to. `WindowWidths` is where that
+    /// stopped being a constant: it carries the numbers below, answers the minimum for the state
+    /// the window is actually in, and owns the companion rule that makes a conditional minimum safe
+    /// rather than a trap. Read its head before changing any of these five numbers.
+    static let widths = WindowWidths(
+        sidebar: Self.sidebarMaximumWidth,
+        sidebarMinimum: Self.sidebarMinimumWidth,
+        detail: DetailSplitViewController.detailMinimum,
+        inspector: DetailSplitViewController.inspectorMinimum,
+        // AppKit's `.thin` divider, which is one point. Both boundaries in this window use it.
+        divider: 1
+    )
+
+    /// The main window's scene id. Named rather than repeated, because the create window brings
+    /// it forward after a workspace is made and a second literal is how those two stop matching.
+    static let mainWindowID = "main"
 
     /// What the sidebar column may be dragged out to. Shared with `RootView`, which declares it on
     /// the column, so the window minimum above can never fall out of step with it.
+    ///
+    /// This is also what the window RESERVES for that column, rather than the width it is at, and
+    /// the obvious next saving is to reserve the real width instead. Read why that is not taken in
+    /// `WindowWidths` before reaching for it: it is worth up to 220 points and it puts a minimum
+    /// that rises under a window that will not grow behind a control the owner drags constantly.
     static let sidebarMaximumWidth: CGFloat = 420
+
+    /// And what it may be squeezed to, which is the same arrangement: declared on the column in
+    /// `RootView`, and the number `WindowWidths` folds the column away below.
+    static let sidebarMinimumWidth: CGFloat = 200
 
     var body: some Scene {
         // A single `Window` rather than a `WindowGroup`. Bloom's whole model is one window
         // listing every workspace, and a WindowGroup opens an extra window every time a
         // `bloom://` link arrives, which is the opposite of what a deep link should do.
-        Window("Bloom", id: "main") {
+        Window("Bloom", id: Self.mainWindowID) {
             RootView()
                 .environment(model)
-                .frame(minWidth: Self.minimumWindowWidth, minHeight: 620)
+                // Conditional, because the window does not need room for a pane that is not on
+                // screen. It goes back up when the inspector is presented, and `WindowWidths`
+                // explains why raising it is not enough on its own: see
+                // `DetailSplitViewController.makeRoomForInspector`, which is the other half.
+                .frame(
+                    minWidth: Self.widths.minimum(withInspector: model.isInspectorPresented),
+                    minHeight: 620
+                )
                 .handlesBloomURLs(using: model)
                 // What the rest of the OS is told: the App Nap assertion and the dock badge,
                 // the worktree behind the title bar, and the optional menu bar item. All three
@@ -141,11 +172,12 @@ struct BloomApp: App {
         .windowToolbarStyle(.unified(showsTitle: true))
         .defaultSize(width: 1_440, height: 900)
         .commands {
+            // One `Commands` body, and it is on the MAIN window: SwiftUI only realizes a scene's
+            // commands while one of that scene's own windows is key, so the item that opens the
+            // project settings window cannot live on that window's own scene or it would appear
+            // only once the window was already open. It is a row of `BloomCommands`' File group
+            // now, which is where `MenuBarCatalogue` says it is.
             BloomCommands(model: model)
-            // Attached to the MAIN window rather than to the project settings window group below,
-            // because SwiftUI only realizes a scene's commands while one of that scene's own
-            // windows is key, and an item that opens a window is no use only once it is open.
-            RepoSettingsCommands(model: model)
         }
 
         Settings {
@@ -159,6 +191,14 @@ struct BloomApp: App {
 
         // One window per project, opened from the gear on its sidebar header. See the scene.
         RepoSettingsWindow(model: model)
+
+        // Where a workspace is started. A window rather than a sheet on the main window, so the
+        // code being described can be read while the task is written. See the scene.
+        CreateWorkspaceWindow(model: model)
+
+        // Where a project is started, a window for the same reason and at the owner's asking. One
+        // of these rather than one per project: it is not about a project yet. See the scene.
+        StartProjectWindow(model: model)
 
         // The map of the seas workspaces have been named after, opened from the Window menu.
         // See the scene.

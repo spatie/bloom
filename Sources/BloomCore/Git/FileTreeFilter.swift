@@ -15,15 +15,6 @@ import Foundation
 /// cleared. Losing where somebody had got to in a fifty thousand file repository because they
 /// typed a character and deleted it again is worse than not having the field at all.
 public enum FileTreeFilter {
-    /// Trimmed and lowercased, so a caller passes what was typed and nothing else.
-    ///
-    /// Lowercasing changes no answer, because `FuzzyMatch` folds both sides anyway. It is here so
-    /// that "is there a filter" is one comparison against one canonical value rather than a
-    /// question each caller trims for itself.
-    public static func needle(_ query: String) -> String {
-        query.trimmingCharacters(in: .whitespaces).lowercased()
-    }
-
     /// The listing narrowed to a needle.
     public struct Outcome: Equatable, Sendable {
         /// Every surviving directory's surviving children, in the shape the real index has.
@@ -116,21 +107,18 @@ public enum FileTreeFilter {
         }
     }
 
-    /// Case insensitive, and a subsequence rather than a prefix, which is `FuzzyMatch` and is
-    /// already what typing at a list of files means in this app: the composer's `@mention` menu
-    /// ranks every tracked path with the same function, so `usercon` finding `UserController.php`
-    /// behaves the same in both places rather than being a second idea of what typing does.
-    ///
     /// **Matched against the name, unless what was typed carries a slash, and then against the
     /// path.** `app/mod` is somebody saying where a file lives rather than what it is called, and
     /// there is no name to find that in. Going the other way and always matching the path would
     /// make every needle match on folder names it was never aimed at, and it costs more per node:
-    /// a name is a dozen characters where a path in this repository is sixty.
+    /// a name is a dozen characters where a path in this repository is sixty, on fifty thousand
+    /// nodes per keystroke.
     ///
-    /// Only whether there is a score is read, never its value. The tree is ordered by the
-    /// repository and not by rank, because a tree that reordered itself on every keystroke would
-    /// stop being a tree.
+    /// `ChangedFileFilter` matches the whole path instead, and its head says why the same rule is
+    /// wrong over there: that tree has no folder nodes for a needle to find, and its diff is fifty
+    /// files rather than a repository. What the two do share, so that neither can quietly become a
+    /// different kind of matcher, is `FileNeedle`.
     private static func matches(_ node: FileTreeNode, needle: String) -> Bool {
-        FuzzyMatch.score(needle.contains("/") ? node.path : node.name, query: needle) != nil
+        FileNeedle.matches(needle.contains("/") ? node.path : node.name, needle: needle)
     }
 }

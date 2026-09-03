@@ -158,6 +158,85 @@ struct TranscriptEntryChangeTests {
         #expect(rebuilt == new)
     }
 
+    // MARK: - Folding a turn's working
+
+    /// **The whole reason `TranscriptFold` is shaped the way it is, written down as the shapes it
+    /// has to produce.** Every one of these must be a single contiguous edit: `.rebuilt` is a
+    /// `reloadData()`, which throws away every cell and the reader's text selection, and a fold
+    /// that cost one of those per row of a turn would be far slower than no fold at all. The turns
+    /// are therefore held in the list's own state and refreshed one pass BEHIND the rows, so a row
+    /// landing and the fold that swallows it are never the same pass.
+    ///
+    /// The turn here opens with the reader's message at row 0, and `fold.1` is the line over its
+    /// working.
+    private func turn(_ entries: [TranscriptEntryID]) -> [TranscriptEntryID] {
+        [.setup, .row(0)] + entries + [.sending, .streaming]
+    }
+
+    /// A turn's line joins the list at the second row of its working, long before it can fold.
+    /// That gap is what makes every shape below a single edit: an entry appearing on the same pass
+    /// that rows leave is an insertion and a removal at once, and there is no answer to that but
+    /// `.rebuilt`.
+    @Test("a turn's line goes in while its working is far too short to fold")
+    func theFoldLineArrives() {
+        let old = turn(rows([1]))
+        let new = turn([.fold(1)] + rows([1, 2]))
+        #expect(TranscriptEntryChange.between(old, new) == .grew(head: 2..<3, tail: 4..<5))
+    }
+
+    /// **The pass a turn first folds is a removal and nothing else**, because the line was already
+    /// there and the newest row, which is what a working turn keeps on screen, does not move.
+    @Test("a working reaching four rows folds by taking three out")
+    func foldingIsOneRemoval() {
+        let open = turn([.fold(1)] + rows([1, 2, 3, 4]))
+        let folded = turn([.fold(1)] + rows([4]))
+        #expect(TranscriptEntryChange.between(open, folded) == .shrank(head: 3..<6, tail: 0..<0))
+    }
+
+    /// **And the shape that repeats for every row after that.** The row lands on its own pass and
+    /// the fold swallows the one before it on the next, so the transcript stops growing while a
+    /// turn works: one row in, one row out, and the line above them counting up.
+    @Test("a row landing in a folded turn, then the fold swallowing the one before it")
+    func aRowLandsIntoAFoldedTurn() {
+        let folded = turn([.fold(1)] + rows([4]))
+        let landed = turn([.fold(1)] + rows([4, 5]))
+        #expect(TranscriptEntryChange.between(folded, landed) == .grew(head: 4..<5, tail: 0..<0))
+        let swallowed = turn([.fold(1)] + rows([5]))
+        #expect(TranscriptEntryChange.between(landed, swallowed) == .shrank(head: 3..<4, tail: 0..<0))
+    }
+
+    /// **The turn's answer lands and takes the last of the working with it**, which is the whole
+    /// of what the owner asked for: his message, one line, and the answer. The same two passes,
+    /// and the same two shapes.
+    @Test("the answer landing swallows the last row of the working")
+    func theAnswerSwallowsTheRest() {
+        let working = turn([.fold(1)] + rows([7]))
+        let answered = turn([.fold(1)] + rows([7, 8]))
+        #expect(TranscriptEntryChange.between(working, answered) == .grew(head: 4..<5, tail: 0..<0))
+        let folded = turn([.fold(1)] + rows([8]))
+        #expect(TranscriptEntryChange.between(answered, folded) == .shrank(head: 3..<4, tail: 0..<0))
+    }
+
+    /// Opening a fold is the mirror of closing it. The line stays put and the working goes back in
+    /// behind it, which is what naming the fold by its FIRST row buys.
+    @Test("opening a fold puts a turn's working back in one run")
+    func unfoldingIsOneInsertion() {
+        let folded = turn([.fold(1)] + rows([8]))
+        let open = turn([.fold(1)] + rows([1, 2, 3, 4, 5, 6, 7, 8]))
+        #expect(TranscriptEntryChange.between(folded, open) == .grew(head: 3..<10, tail: 0..<0))
+        #expect(TranscriptEntryChange.between(open, folded) == .shrank(head: 3..<10, tail: 0..<0))
+    }
+
+    /// **And the shape that would happen if the turns were computed in the body rather than held
+    /// one pass behind it.** Here so that anybody who moves them back finds out from a test rather
+    /// than from a scroll.
+    @Test("a row landing and a turn folding on one pass is a rebuild")
+    func bothAtOnceIsARebuild() {
+        let working = turn([.fold(1)] + rows([1, 2, 3, 4]))
+        let landedAndFolded = turn([.fold(1)] + rows([5]))
+        #expect(TranscriptEntryChange.between(working, landedAndFolded) == .rebuilt)
+    }
+
     // MARK: - The five kinds of entry
 
     /// A delivery and a row must never be spelled into each other however the two lists grow,
@@ -168,5 +247,8 @@ struct TranscriptEntryChangeTests {
         #expect(TranscriptEntryID.streaming.seq == nil)
         #expect(TranscriptEntryID.setup != TranscriptEntryID.streaming)
         #expect(TranscriptEntryID.pending(DeliveryID("1")) != TranscriptEntryID.row(1))
+        // A run's line and the first row of that run hold the same number and are in the list at
+        // the same time.
+        #expect(TranscriptEntryID.fold(1) != TranscriptEntryID.row(1))
     }
 }

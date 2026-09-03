@@ -29,9 +29,50 @@ import BloomCore
 /// carries a hairline. Putting the signal there is not using an existing rule, it is adding one.
 /// The sidebar is out for the same reason, measured the same way.
 ///
+/// # Which segment of it, and why only one
+///
+/// The centre column's, and **the inspector's half is deliberately dark.** It was lit for a
+/// fortnight, off this same epoch, and the report was "there seems to be two going, one in middle
+/// pane, one in right". Neither half was wrong. They shared a period and therefore not a speed, so
+/// two crests set off from two leading edges at two rates, and two objects is what the eye counted.
+///
+/// The offered alternative was one crest crossing both as though they were one track with a gap in
+/// it, and it is not built. It is buildable, and the two things that would make it honest were
+/// checked rather than assumed, so the next person to want it starts from the arithmetic instead of
+/// from the idea.
+///
+/// **A segment can know where it is in the window, cheaply.** `convert(_:to: nil)` in `layout()`
+/// answers it, and it costs nothing per frame: the phase lives in a `CABasicAnimation` in the
+/// render server, so the geometry is read when AppKit lays the view out and never again. Better
+/// than that, the arithmetic is immune to a pane moving under it. With the travel written in a
+/// segment's own space as `absolute - origin`, the presented position is `A + (B - A) * phase` with
+/// the origin cancelled out, so the crest stays where the window puts it while the inspector slides
+/// beneath it over `Motion.inspectorSeconds`. This check passes.
+///
+/// **What it costs is the rhythm, and that is what stopped it.** One crest over both panes is one
+/// crest over roughly twice the track, so either the period doubles, which halves how often
+/// anything happens on a line whose whole job is to say something is happening, or the speed
+/// doubles, which on a 2560 point window is about 900 points a second and fifteen points a frame at
+/// the 60Hz cap this is drawn at, against the five points a frame the cap was chosen for.
+///
+/// **And making it exact needs the two panes to share a number.** The track has to start where the
+/// centre column starts, and the inspector cannot see that: it would have to be published across
+/// two views that know nothing about each other, which is `SharedRule`, deleted in `2c373fc` for
+/// exactly this reason. Anchoring instead to the window's own leading edge needs nothing shared and
+/// is what the check above assumed, but it puts the sidebar inside the track, so between 13 and 32
+/// per cent of every cycle is spent with the crest behind a pane that does not draw it, varying
+/// with the window and with where the sidebar divider happens to be. That is a mark that nearly
+/// lines up rather than one that does.
+///
+/// So the second option was taken, and it was offered rather than settled for: one rule that reads
+/// beats two that nearly agree. The inspector still says an agent is working, in the header spinner
+/// it already had, and the window still says it in the sidebar's dots and the status bar's count.
+/// `ActivityRuleGallery` keeps a picture of the two-crest version, because a defect that was fixed
+/// by deleting something leaves nothing behind to look at.
+///
 /// # What it costs
 ///
-/// Two small layers per segment, added when the signal appears and left alone: a gradient of one
+/// Two small layers, added when the signal appears and left alone: a gradient of one
 /// point and a gradient of two, moved by one `CABasicAnimation` each. This body runs when the
 /// heartbeat starts or stops, when the width changes, and at no other time. **Nothing here can make
 /// the transcript lay out**, which matters more than it used to: the figure is a layer inside a
@@ -54,9 +95,26 @@ struct ActivityRule: View {
 
     private var pulse: BusyPulse { .shared }
 
-    /// Read from the one observable set, not from a flag of this view's own. See
+    /// **This workspace's turn, not anybody's.** It was `!runningWorkspaceIDs.isEmpty`, so one
+    /// agent working anywhere lit the rule over every workspace in the window, and the report was
+    /// that the busy indicator shows on all workspaces if any workspace has a running AI. The rule
+    /// is drawn once per centre column and the centre column shows one workspace, so it answers
+    /// for that one.
+    ///
+    /// The Ask conversation is scoped to no workspace and has a turn of its own, which is why this
+    /// asks the selection rather than a workspace id: reading `runningWorkspaceIDs` alone would
+    /// have left Ask permanently dark.
+    ///
+    /// The clock stays shared. `BusyPulse` still ticks off the whole set, so every rule and dot in
+    /// the app agrees on the phase, and what changes here is only which of them is visible. See
     /// `AppModel.runningWorkspaceIDs`.
-    private var isRunning: Bool { !app.runningWorkspaceIDs.isEmpty }
+    private var isRunning: Bool {
+        switch app.selection {
+        case .ask: app.ask.isRunning
+        case .home: false
+        default: app.selection.workspaceID.map(app.runningWorkspaceIDs.contains) ?? false
+        }
+    }
 
     var body: some View {
         ActivityRuleFigure(variant: variant, isMoving: pulse.isTicking)
@@ -123,10 +181,10 @@ private struct StillActivityRule: View {
         case .crest:
             ZStack(alignment: .bottomTrailing) {
                 track
-                // Trailing, which is `restingCentre` for every rule wider than one crest, and that
-                // is every rule in this window: the narrowest is the inspector's at 380 points
-                // against a crest of 190. A pane dragged narrower than a crest loses the far end of
-                // the tail off the leading edge, which is the faintest part of the figure.
+                // Trailing, which is `restingCentre` for every width this rule is drawn at: the
+                // centre column is the narrow case and it is 760 points against a crest of 190. A
+                // window dragged narrower than a crest loses the far end of the tail off the
+                // leading edge, which is the faintest part of the figure.
                 crest(BusyCrest.stops()).frame(width: BusyCrest.length)
             }
         case .current:
@@ -148,7 +206,7 @@ private struct StillActivityRule: View {
             // exactly what a screenshot of this rule has shown since it was drawn. It is in the set
             // so the comparison has a control in it, and this is the state where it loses.
             Rectangle()
-                .fill(Palette.accent)
+                .fill(Palette.running)
                 .opacity(BusyRule.opacity(at: BusyRule.resting))
                 .frame(maxWidth: .infinity)
                 .frame(height: BusyRule.restingHeight)
@@ -158,7 +216,7 @@ private struct StillActivityRule: View {
     /// The lit line the crest rides, which is the whole width and is never dark.
     private var track: some View {
         Rectangle()
-            .fill(Palette.accent)
+            .fill(Palette.running)
             .opacity(BusyCrest.trackOpacity)
             .frame(maxWidth: .infinity)
             .frame(height: BusyRule.restingHeight)
@@ -178,7 +236,7 @@ private struct StillActivityRule: View {
         LinearGradient(
             stops: stops.map {
                 Gradient.Stop(
-                    color: Palette.accent.opacity($0.opacity * scale),
+                    color: Palette.running.opacity($0.opacity * scale),
                     location: CGFloat($0.location)
                 )
             },
@@ -208,9 +266,9 @@ private struct MovingActivityRule: NSViewRepresentable {
         view.configure(variant: variant, epoch: epoch)
     }
 
-    /// Fills whatever it is given. The strip and the inspector's tab row are different widths and
-    /// neither of them has to know the other's, so there is nothing here for SwiftUI to measure and
-    /// nothing the transcript underneath can be asked to lay out for.
+    /// Fills whatever it is given, and asks for nothing: the strip's width is the strip's business
+    /// and changes on every frame of a sidebar drag, so there is nothing here for SwiftUI to measure
+    /// and nothing the transcript underneath can be asked to lay out for.
     func sizeThatFits(
         _ proposal: ProposedViewSize, nsView: ActivityRuleView, context: Context
     ) -> CGSize? {
@@ -331,14 +389,16 @@ final class ActivityRuleView: BusyPulseLayerView {
     override func applyColors() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        let accent = resolved(Palette.accentNSColor)
-        track.backgroundColor = accent.copy(alpha: BusyCrest.trackOpacity) ?? accent
+        // `running` and not `accent`, which is what this drew for as long as the two were the
+        // same value. See `Palette.running`: a lit rule and a passing tick may not be one colour.
+        let running = resolved(Palette.runningNSColor)
+        track.backgroundColor = running.copy(alpha: BusyCrest.trackOpacity) ?? running
         // Hidden rather than transparent for the swell: its own core layer is the whole width and
         // is the rule, so a track under it would be a second line at a strength nobody chose.
         track.isHidden = variant == .swell
         let stops = gradientStops
-        apply(stops, scale: 1, to: core, accent: accent)
-        apply(stops, scale: BusyCrest.glowShare, to: glow, accent: accent)
+        apply(stops, scale: 1, to: core, tint: running)
+        apply(stops, scale: BusyCrest.glowShare, to: glow, tint: running)
         CATransaction.commit()
     }
 
@@ -358,9 +418,9 @@ final class ActivityRuleView: BusyPulseLayerView {
     }
 
     private func apply(
-        _ stops: [BusyCrest.Stop], scale: Double, to gradient: CAGradientLayer, accent: CGColor
+        _ stops: [BusyCrest.Stop], scale: Double, to gradient: CAGradientLayer, tint: CGColor
     ) {
-        gradient.colors = stops.map { (accent.copy(alpha: $0.opacity * scale) ?? accent) as Any }
+        gradient.colors = stops.map { (tint.copy(alpha: $0.opacity * scale) ?? tint) as Any }
         gradient.locations = stops.map { NSNumber(value: $0.location) }
     }
 

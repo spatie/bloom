@@ -90,6 +90,10 @@ struct TranscriptRowView: View, Equatable {
             // A review turn first: its message is mostly scaffolding the reader never typed, so
             // it renders as the typed words plus a chip per comment. `split` is strict and
             // returns nil for everything else, which falls through to the ordinary bubble.
+            //
+            // Nothing is taken out for the instructions Bloom appends. They stay in the text and
+            // the bubble draws each of them as a chip where it sits: see `SentTurn`, and the row
+            // this used to hand a separate string to.
             if let review = ReviewTurn.split(typed) {
                 UserTurnRowView(
                     text: review.message,
@@ -111,6 +115,15 @@ struct TranscriptRowView: View, Equatable {
                 )
             }
 
+        case .crew:
+            // Decoded here rather than through `TranscriptEventCache`, which parses the agent
+            // stream's own JSON and has no reading for this payload. A crew row is written once
+            // and is a sentence rather than a turn's worth of blocks, so there is nothing here for
+            // that cache to save.
+            if let message = CrewMessage.decode(row.payload), !message.text.isEmpty {
+                CrewMessageRowView(message: message)
+            }
+
         case .assistantText:
             if let text = assistantText, !text.isEmpty {
                 ProseRowView(text: text)
@@ -123,22 +136,32 @@ struct TranscriptRowView: View, Equatable {
 
         case .toolUse:
             if let use = toolUse {
-                ToolRowView(
-                    use: use,
-                    presentation: TranscriptPresentationCache.presentation(
-                        rowID: row.id,
+                if let media = successfulMediaRequest(use) {
+                    MediaShowRowView(request: media, home: home)
+                } else if let image = successfulCodexImageRequest(use) {
+                    MediaShowRowView(
+                        request: MediaShowRequest(path: image.path),
+                        home: home,
+                        source: .codexImageView
+                    )
+                } else {
+                    ToolRowView(
                         use: use,
-                        worktree: home.worktree
-                    ),
-                    home: home,
-                    result: toolResult,
-                    isError: row.isError,
-                    refusal: row.refusal,
-                    refusalReason: row.refusalReason,
-                    durationMS: row.durationMS,
-                    isExpanded: isExpanded,
-                    onToggle: onToggle
-                )
+                        presentation: TranscriptPresentationCache.presentation(
+                            rowID: row.id,
+                            use: use,
+                            worktree: home.worktree
+                        ),
+                        home: home,
+                        result: toolResult,
+                        isError: row.isError,
+                        refusal: row.refusal,
+                        refusalReason: row.refusalReason,
+                        durationMS: row.durationMS,
+                        isExpanded: isExpanded,
+                        onToggle: onToggle
+                    )
+                }
             }
 
         case .toolResult:
@@ -214,6 +237,20 @@ struct TranscriptRowView: View, Equatable {
         return use
     }
 
+    /// A media call becomes content only after its successful result arrives. Before that it stays
+    /// an ordinary pending tool row, and a refusal stays visible as the refusal it is.
+    private func successfulMediaRequest(_ use: AgentToolUse) -> MediaShowRequest? {
+        guard row.resultPayload != nil, !row.isError, row.refusal == nil else { return nil }
+        return MediaShowRequest(use: use)
+    }
+
+    /// Codex's native image viewer is also deliberate visible content. Its absolute paths often
+    /// point at `/tmp`, so it uses the narrower image-only resolver rather than the MCP resolver.
+    private func successfulCodexImageRequest(_ use: AgentToolUse) -> CodexImageViewRequest? {
+        guard row.resultPayload != nil, !row.isError, row.refusal == nil else { return nil }
+        return CodexImageViewRequest(use: use)
+    }
+
     /// A tool result whose call never made it into the transcript. Rare, but it must not vanish.
     private var orphanResult: AgentToolResult? {
         guard case .toolResult(let result)? = event else { return nil }
@@ -243,9 +280,6 @@ struct TranscriptRowView: View, Equatable {
     /// A user turn is the line Bloom itself wrote to stdin, so it is read straight out of the
     /// stored request rather than through the event decoder, which only knows about tool results.
     private var userText: String {
-        guard let blocks = json?["message"]?["content"]?.arrayValue else { return "" }
-        return blocks
-            .compactMap { $0["text"]?.stringValue }
-            .joined(separator: "\n")
+        UserTurnPrompt.text(in: row.payload)
     }
 }

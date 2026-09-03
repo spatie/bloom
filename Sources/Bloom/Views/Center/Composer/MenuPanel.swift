@@ -28,14 +28,11 @@ struct MenuPanel<Content: View>: View {
         // the card ends once Reduce Transparency has turned the material opaque.
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.corner)
-                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         }
-        // Black, not the label colour: a shadow tinted with `labelColor` turns into a white glow
-        // in dark mode, which is the opposite of what a shadow is for.
-        .shadow(
-            color: .black.opacity(0.24),
-            radius: Metrics.gutter,
-            y: Metrics.spacingSmall
-        )
+        // A panel open over the window is `lifted`, and the recipe is `Elevation`'s rather than
+        // this file's: the three shadows in the app were three unrelated numbers, including the
+        // "black, not the label colour" argument written out three times.
+        .elevation(.lifted)
     }
 }

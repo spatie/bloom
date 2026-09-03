@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-/// Which of the three parts of a project's settings is showing.
+/// Which part of a project's settings is showing.
 ///
 /// A type of its own rather than an enum nested inside the view, because three things outside
 /// that view now answer to it: the toolbar that draws the choice, the window that has to say
@@ -13,6 +13,7 @@ enum RepoSettingsPane: String, CaseIterable, Hashable {
     case project
     case workspaces
     case scripts
+    case instructions
 
     /// The word under the icon.
     var title: String {
@@ -20,6 +21,7 @@ enum RepoSettingsPane: String, CaseIterable, Hashable {
         case .project: "Project"
         case .workspaces: "Workspaces"
         case .scripts: "Scripts"
+        case .instructions: "Instructions"
         }
     }
 
@@ -30,6 +32,7 @@ enum RepoSettingsPane: String, CaseIterable, Hashable {
         case .project: "folder"
         case .workspaces: "square.stack.3d.up"
         case .scripts: "terminal"
+        case .instructions: "text.book.closed"
         }
     }
 
@@ -42,7 +45,7 @@ enum RepoSettingsPane: String, CaseIterable, Hashable {
         NSToolbarItem.Identifier("repo-settings.\(rawValue)")
     }
 
-    /// Which pane a window opens on, from `BLOOM_PANE=workspaces|scripts`.
+    /// Which pane a window opens on, from `BLOOM_PANE=workspaces|scripts|instructions`.
     ///
     /// A capture run can open this window through `--repo-settings` and cannot press anything in
     /// it, so without this the other two panes go in unverified. Nil for anything else, including

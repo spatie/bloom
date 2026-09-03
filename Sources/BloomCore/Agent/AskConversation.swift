@@ -28,9 +28,9 @@ public enum AskConversation {
     ///
     /// `acceptEdits` would be no better and is not the middle ground it sounds like: there is no
     /// worktree for an accepted edit to be in, so what it accepts is edits anywhere the agent can
-    /// reach. So the mode is the one that asks, and the composer still offers the other three for
-    /// the day somebody wants one. `ComposerDefaults.resolve` is what stops the owner's default
-    /// landing on this chat the first time it is opened.
+    /// reach. So the mode is the narrowest one there is, and the composer still offers the others
+    /// for the day somebody wants one. `ComposerDefaults.resolve` is what stops the owner's
+    /// default landing on this chat the first time it is opened.
     public static let permissionMode = PermissionMode.auto
 
     /// The chat's working directory: its own, empty, and made once.
@@ -93,9 +93,9 @@ public enum AskConversation {
     /// `abandonPendingPermissionAsks` are built on, which is that a launch boundary ends what a
     /// person's presence justified.
     ///
-    /// So: honoured for the rest of the launch, back to Ask on the next one, and the permission
-    /// menu's own footnote says so before the choice is made. See
-    /// `ComposerControls.missingPermissionModeNote`.
+    /// So: honoured for the rest of the launch, back to the narrowest mode on the next one, and
+    /// the permission menu's own footnote says so before the choice is made. See
+    /// `ComposerControls.permissionModeNote`.
     public static func modeOnOpening(
         stored: PermissionMode,
         isFirstOpenSinceLaunch: Bool
@@ -115,9 +115,17 @@ public enum AskConversation {
     }
 
     /// What the empty pane says before anything has been asked.
-    public static let emptyHeading = "One conversation, above every project"
+    ///
+    /// **It used to lead with what this chat cannot do.** "This chat has no worktree. ... It
+    /// cannot change a file." Both sentences are true and neither belongs on the first screen: a
+    /// worktree is Bloom's word for a thing the reader has not met yet, and an empty pane that
+    /// opens by listing its own limits reads as an apology for existing. The limits are real and
+    /// they are said where they change a decision, which is the permission menu's footnote.
+    ///
+    /// So this says what to ask it for, in the order somebody would want it: start something, find
+    /// out where everything stands, then go to the thing you found.
+    public static let emptyHeading = "Ask Bloom anything about your work"
     public static let emptyDetail =
-        "This chat has no worktree. It can list what you have running, tell you which workspaces "
-        + "have failing checks, register a repository, and start a workspace in one of them. "
-        + "It cannot change a file."
+        "Start a new project or a workspace, ask what is running and what needs you, "
+        + "find the workspace with the failing checks, and open it."
 }

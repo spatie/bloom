@@ -181,6 +181,32 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
     /// `WorkspaceManager.ensurePort`, and it is deliberately lazy: probing sixty-odd sockets for
     /// a workspace nothing will ever bind is work nobody asked for.
     public var port: Int
+    /// The pull request this workspace is about, once anything has found out which one that is.
+    ///
+    /// **A number outlives a branch and a branch name does not, and that asymmetry is the whole
+    /// reason this column exists.** Every lookup Bloom had went through `gh pr view <branch>`,
+    /// which resolves the name against the repository's live refs. Squash, merge, delete the
+    /// branch on both sides, and that question stops having an answer: gh says "no pull requests
+    /// found for branch", the unnamed fallback is refused too because the worktree is standing on
+    /// `main` by then, and the freshest thing the app can say about pull request #222 is the
+    /// snapshot it took before the merge. It stayed on screen as open and ready to merge, with a
+    /// live Squash and merge button over work GitHub had already landed.
+    ///
+    /// `Git.checkedOutPullRequest` reads the same fact out of `branch.<name>.merge`, and its own
+    /// doc comment says that needs no column of Bloom's. That holds right up until the branch is
+    /// deleted, which deletes its config with it: measured on the workspace in the report, where
+    /// `git config --get-regexp '^branch\.'` no longer mentions the branch at all. The event that
+    /// makes the number necessary is the event that destroys git's copy of it.
+    ///
+    /// Nil means nobody has found out yet, which is every row written before this column and every
+    /// workspace whose branch has never had a pull request. Written by `PullRequestNumber.record`
+    /// as soon as a lookup answers, at creation for a workspace opened on a pull request, and
+    /// cleared by `continueOnNewBranch`, where the worktree moves to a fresh branch and the merged
+    /// pull request stops being this workspace's.
+    ///
+    /// Not on the public initialiser, for the reason `state` is not: outside the module there is
+    /// nothing that legitimately knows this at the moment a workspace is created.
+    public var pullRequestNumber: Int?
 
     /// A workspace as it is at rest: the three lifecycle columns spelled out.
     ///
@@ -219,7 +245,8 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
         pinned: Bool = false,
         colour: String? = nil,
         origin: WorkspaceOrigin = .user,
-        port: Int = 0
+        port: Int = 0,
+        pullRequestNumber: Int? = nil
     ) {
         self.id = id
         self.repoID = repoID
@@ -242,6 +269,7 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
         self.colour = colour
         self.origin = origin
         self.port = port
+        self.pullRequestNumber = pullRequestNumber
     }
 
     /// A brand new workspace, which is the only kind anybody outside the module has any business
@@ -316,20 +344,32 @@ public enum SessionState: String, Sendable, Codable, CaseIterable, Hashable {
     case cancelled
 }
 
+/// The rows in the composer's permission picker.
+///
+/// **The cases are Bloom's slots, and the words over them belong to whichever CLI is about to
+/// run.** `PermissionVocabulary` holds those words and the reason there are two sets of them; the
+/// order here is the order the menu draws, strictest first.
 public enum PermissionMode: String, Sendable, Codable, CaseIterable {
     case auto
     case acceptEdits
+    /// Approvals answered by the agent's own reviewer instead of by the person at the keyboard.
+    ///
+    /// **Added because Bloom had no row for it and a user said so.** Codex's four presets are
+    /// `read-only`, `workspace`, `auto` and `full-access`, and Bloom offered three of them:
+    /// `acceptEdits` sends the pair the Codex app labels "Ask for approval", so the preset that
+    /// app labels "Approve for me" was not reachable from any row in the menu. On the wire it is
+    /// `approvalsReviewer: auto_review`, which nothing in Bloom had ever sent.
+    ///
+    /// Codex only, and Claude Code loses nothing by that: `auto` already is this mode there, which
+    /// is why `nearest(on:)` sends a chat carrying this one back to `auto` when it moves.
+    case autoReview
     case bypassPermissions
     case plan
 
-    public var label: String {
-        switch self {
-        case .auto: "Ask"
-        case .acceptEdits: "Accept edits"
-        case .bypassPermissions: "Full access"
-        case .plan: "Plan"
-        }
-    }
+    /// The name with no backend said, which is Claude Code's, because that is what a chat is
+    /// until somebody picks a model out of another section. `label(on:)` is the one to reach for
+    /// wherever the agent is known.
+    public var label: String { label(on: .claudeCode) }
 }
 
 public struct Session: Identifiable, Sendable, Hashable, Codable {
@@ -343,6 +383,16 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     /// workspace: the `workspaces` table's invariant is that a row in it is a real directory on
     /// disk, and the diff poll, the archive path and every git call believe it.
     public var workspaceID: WorkspaceID?
+    /// The chat that started this one, when another agent did.
+    ///
+    /// **A chat with a parent is a crew member**, which the app calls a subagent: an agent the
+    /// chat above it started in the same worktree, on the same branch, so that everything the two
+    /// of them do lands in one diff. It is not a `child` in the bridge's sense, which is a
+    /// workspace of its own with a branch and a pull request of its own. See `Crew`, whose head
+    /// argues the difference and says why the word here is not "subagent".
+    ///
+    /// Nil for every chat the owner made, which is nearly all of them.
+    public var parentSessionID: SessionID?
     public var title: String
     public var agentSessionID: String?
     public var model: String
@@ -356,8 +406,25 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     ///
     /// Every row that existed before this column defaults to Claude Code, because that is what
     /// every one of them was.
-    public var agentKind: AgentKind
-    public var permissionMode: PermissionMode
+    public var agentKind: AgentKind {
+        didSet { permissionMode = permissionMode.nearest(on: agentKind) }
+    }
+    /// How much this chat may do without asking.
+    ///
+    /// **It can only ever be a mode `agentKind` has a row for**, and the initialiser below is what
+    /// makes that true of every value of this type, including the one `Store` builds from a row
+    /// it has just read. A synthesised `init(from:)` is the one door that would go round this, and
+    /// nothing in the app or the suite decodes a `Session`. Codex
+    /// has no Plan and Claude Code has no Approve for me; a row written before this rule existed,
+    /// or by a version that had a different one, would otherwise be drawn with no tick on any row
+    /// of the picker while the wire carried something else again. See `PermissionMode.nearest(on:)`.
+    ///
+    /// The two observers hold the pair legal whichever of them is written, and in whichever order,
+    /// so `sessionEditor.apply` setting a backend and a mode in one block cannot land a
+    /// combination that does not exist. Writing inside a `didSet` does not run the observer again.
+    public var permissionMode: PermissionMode {
+        didSet { permissionMode = permissionMode.nearest(on: agentKind) }
+    }
     /// What this chat is doing. **Read anywhere, written only through `apply(_: SessionEvent)`,**
     /// which stamps `updatedAt` in the same statement because a state change nothing downstream
     /// notices is not a state change. See `SessionLifecycle`.
@@ -379,6 +446,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     init(
         id: SessionID = .new(),
         workspaceID: WorkspaceID?,
+        parentSessionID: SessionID? = nil,
         title: String = PaneNaming.chat,
         agentSessionID: String? = nil,
         model: String = AppDefaults.fallbackModel,
@@ -398,12 +466,15 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     ) {
         self.id = id
         self.workspaceID = workspaceID
+        self.parentSessionID = parentSessionID
         self.title = title
         self.agentSessionID = agentSessionID
         self.model = model
         self.effort = effort
         self.agentKind = agentKind
-        self.permissionMode = permissionMode
+        // Through the rule rather than straight in. See the property's own note: this is the one
+        // door every `Session` comes through, the ones `Store` builds from a row included.
+        self.permissionMode = permissionMode.nearest(on: agentKind)
         self.state = state
         self.sortOrder = sortOrder
         self.createdAt = createdAt
@@ -421,6 +492,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     public init(
         id: SessionID = .new(),
         workspaceID: WorkspaceID?,
+        parentSessionID: SessionID? = nil,
         title: String = PaneNaming.chat,
         agentSessionID: String? = nil,
         model: String = AppDefaults.fallbackModel,
@@ -439,6 +511,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         self.init(
             id: id,
             workspaceID: workspaceID,
+            parentSessionID: parentSessionID,
             title: title,
             agentSessionID: agentSessionID,
             model: model,
@@ -476,6 +549,16 @@ public enum MessageKind: String, Sendable, Codable {
     case error
     case system
     case notice
+    /// Something an agent said to another agent, or Bloom's own word about one of them. The
+    /// payload is a `CrewMessage`.
+    ///
+    /// **This kind exists because `.user` was a lie on these rows.** A subagent's message is
+    /// wrapped for the model in the untrusted envelope, and the row that carried it was written
+    /// with exactly the bytes that went out, in the bucket that means "the owner typed this". Six
+    /// lines explaining to a model what untrusted content is appeared in the owner's own bubble.
+    /// A row of this kind holds both renderings, so the window draws what a person reads and the
+    /// model still got what it was handed.
+    case crew
 }
 
 public struct Message: Identifiable, Sendable, Hashable {

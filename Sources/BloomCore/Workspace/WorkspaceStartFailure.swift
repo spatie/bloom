@@ -83,7 +83,7 @@ public enum WorkspaceStartTrouble: Sendable, Equatable {
     /// most produce the same string, and the third never reaches git at all, because launching a
     /// subprocess in a directory that has been deleted throws a Cocoa error before git runs and
     /// that error names only the missing directory's last path component. The questions live in
-    /// `CheckoutStanding` because the diff pane and the create sheet have to ask exactly the same
+    /// `CheckoutStanding` because the diff pane and the create window have to ask exactly the same
     /// ones, and they only run once a start has already failed, so the cost is paid on the unhappy
     /// path alone.
     public static func diagnose(

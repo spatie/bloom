@@ -3,7 +3,7 @@ import Foundation
 /// Everything a caller has to say to get a workspace with an agent ready to work in it.
 ///
 /// One value rather than eleven arguments, because there are now four routes to a workspace and
-/// they had already drifted apart: the create sheet could choose a base branch, a branch name, a
+/// they had already drifted apart: the create window could choose a base branch, a branch name, a
 /// backend, a model, an effort and a permission mode; the `bloom://` link, the Services menu and
 /// the Shortcuts intent were each hardwired to chat, the default branch and the default model,
 /// not by decision but because nobody carried the arguments through. A route that fills in a
@@ -49,6 +49,20 @@ public struct WorkspaceStartRequest: Sendable {
     /// message to. It is not a mode: the workspace can gain a chat later from the `+` menu like
     /// any other. See `WorkspaceStartMode`.
     public var opensSession: Bool
+    /// A thread on the chosen backend for the new chat to pick up instead of starting a fresh
+    /// one, or nil for every ordinary route in.
+    ///
+    /// It is written straight onto the session row as `agentSessionID`, which is the same column
+    /// a chat's own runner fills in after its first turn, so the first turn here goes out with
+    /// `--resume` (or `thread/resume`) exactly as a second turn in any other chat would. Both
+    /// backends resolve a thread by id rather than by directory, which is what makes a
+    /// conversation survive the worktree it was had in: see `ArchivedCarryOn`, whose head records
+    /// how that was measured.
+    ///
+    /// Only `AppModel.carryOn` passes one. Nothing validates it here, because the one thing that
+    /// could go wrong, an id the CLI cannot find, is the CLI's answer to give and not this
+    /// layer's to guess at.
+    public var resuming: String?
     /// Whether `start` runs the setup script itself, and waits for it.
     ///
     /// False for the app, which runs it through `WorkspaceModel` so the output streams into the
@@ -69,6 +83,7 @@ public struct WorkspaceStartRequest: Sendable {
         checkout: WorkspaceCheckout? = nil,
         controls: ComposerControls? = nil,
         opensSession: Bool = true,
+        resuming: String? = nil,
         runsSetup: Bool = false
     ) {
         self.id = id
@@ -81,6 +96,7 @@ public struct WorkspaceStartRequest: Sendable {
         self.checkout = checkout
         self.controls = controls
         self.opensSession = opensSession
+        self.resuming = resuming
         self.runsSetup = runsSetup
     }
 }
@@ -188,6 +204,12 @@ extension WorkspaceManager {
         var session: Session?
         if request.opensSession {
             let controls = request.controls
+            let backend = controls?.agentKind ?? .claudeCode
+            // A mode the chosen backend has no row for cannot be written to a session: Codex has
+            // no Plan and Claude Code has no Approve for me, and the app-wide default in Settings
+            // is picked before any backend is. `nearest(on:)` says where each one lands.
+            let mode = (controls?.permissionMode ?? AppDefaults.fallbackPermissionMode)
+                .nearest(on: backend)
             let opened = try await store.upsert(Session(
                 workspaceID: workspace.id,
                 // Not the prompt. The WORKSPACE is named after the work, by `namer` above and
@@ -196,13 +218,16 @@ extension WorkspaceManager {
                 // names, a real one in the sidebar and a fragment of a prompt in the strip. See
                 // `PaneNaming`.
                 title: PaneNaming.chat,
+                // Nil for every route but Carry On, which hands over the archived chat's thread
+                // so the first turn resumes that conversation rather than opening a new one.
+                agentSessionID: request.resuming,
                 model: controls?.model ?? AppDefaults.fallbackModel,
                 effort: controls?.effort ?? AppDefaults.fallbackEffort,
                 // A request chooses a backend for the first chat and for no other. Every chat
                 // opened in this worktree afterwards picks its own, and two chats in one worktree
                 // can be on different ones.
-                agentKind: controls?.agentKind ?? .claudeCode,
-                permissionMode: controls?.permissionMode ?? AppDefaults.fallbackPermissionMode
+                agentKind: backend,
+                permissionMode: mode
             ))
             // Fast mode and the output style have no column. Writing them here also marks the
             // session settled, which is what stops the composer's first-open defaults from

@@ -142,6 +142,7 @@ extension View {
 extension EnvironmentValues {
     @Entry var markdownIsStreaming: Bool = false
     @Entry var markdownLinkActions = TranscriptLinkActions()
+    @Entry var markdownLineSpacingOverride: CGFloat?
 }
 
 private struct MarkdownBlocksView: View {
@@ -172,10 +173,30 @@ private struct MarkdownBlockView: View {
     @Environment(\.fontScale) private var fontScale
     /// The conversation's face, for the same reason: prose set in it, inline code paired to it.
     @Environment(\.chatFont) private var chatFont
+    /// And its line height, which the `Text` branch below inherits through the environment but
+    /// the `NSTextView` one has to be handed as a number.
+    @Environment(\.chatLineHeight) private var chatLineHeight
     @Environment(\.markdownIsStreaming) private var isStreaming
     @Environment(\.markdownLinkActions) private var linkActions
+    @Environment(\.markdownLineSpacingOverride) private var lineSpacingOverride
 
     private var markerWidth: CGFloat { MarkdownMetrics.markerWidth * fontScale }
+    private var listLineSpacing: CGFloat {
+        TranscriptLayout.proseLeading(
+            Typo.body,
+            scale: fontScale,
+            face: chatFont,
+            ratio: chatLineHeight.listRatio
+        )
+    }
+
+    /// The same rhythm `listLineSpacing` sets an item's own lines in, applied between the items.
+    /// See `ListLeading`, which holds why the two are one number.
+    private func listItemGap(tight: Bool) -> CGFloat {
+        TranscriptLayout.listItemGap(
+            Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight, tight: tight
+        )
+    }
 
     @ViewBuilder
     var body: some View {
@@ -245,7 +266,14 @@ private struct MarkdownBlockView: View {
                     font: rung.resolvedNSFont(scale: fontScale, face: chatFont),
                     code: rung.monospacedCompanionNSFont(scale: fontScale, face: chatFont),
                     color: NSColor(color),
-                    lineSpacing: TranscriptLayout.proseLeading
+                    // The block's leading, not this rung's. A paragraph is led once, by the
+                    // caller's `.proseLeading()`, and the `Text` branch below inherits that
+                    // number through the environment; asking for a heading's own here would set
+                    // a heading with a link in it differently from the heading beside it and
+                    // change what the row measures at.
+                    lineSpacing: lineSpacingOverride ?? TranscriptLayout.proseLeading(
+                        Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight
+                    )
                 ),
                 linkColor: Palette.linkNSColor,
                 selectionColor: .selectedTextBackgroundColor,
@@ -276,15 +304,15 @@ private struct MarkdownBlockView: View {
     }
 
     private func list(items: [[MarkdownBlock]], start: Int?, tight: Bool) -> some View {
-        // A tight list at zero read as one paragraph with dots in it, and a loose one at four was
-        // tighter than the gap between the marker and its own text.
-        VStack(alignment: .leading, spacing: tight ? Metrics.spacingTight : Metrics.spacing) {
+        VStack(alignment: .leading, spacing: listItemGap(tight: tight)) {
             ForEach(items.indices, id: \.self) { offset in
                 // Baseline, not top: this is the alignment the task list beside it already used,
                 // and top alignment sat the marker a fraction above the line it marks.
                 HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
                     marker(start.map { "\($0 + offset)." } ?? "\u{2022}")
                     MarkdownBlocksView(blocks: items[offset], foreground: foreground)
+                        .lineSpacing(listLineSpacing)
+                        .environment(\.markdownLineSpacingOverride, listLineSpacing)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
@@ -292,7 +320,9 @@ private struct MarkdownBlockView: View {
     }
 
     private func taskList(_ items: [(checked: Bool, inline: [MarkdownInline])]) -> some View {
-        VStack(alignment: .leading, spacing: Metrics.spacingTight) {
+        // Tight, always: a task list carries no blank-line flag out of the parser, and it is
+        // written as a checklist rather than as a run of paragraphs.
+        VStack(alignment: .leading, spacing: listItemGap(tight: true)) {
             ForEach(items.indices, id: \.self) { index in
                 let item = items[index]
                 HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
@@ -302,6 +332,8 @@ private struct MarkdownBlockView: View {
                         .frame(width: markerWidth, alignment: .trailing)
                         .accessibilityLabel(item.checked ? "Done" : "Not done")
                     inlineText(item.inline, rung: Typo.body, color: foreground)
+                        .lineSpacing(listLineSpacing)
+                        .environment(\.markdownLineSpacingOverride, listLineSpacing)
                 }
             }
         }
@@ -344,7 +376,7 @@ private struct MarkdownBlockView: View {
             .clipShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
             .overlay {
                 RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                    .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                    .strokeBorder(Palette.border, lineWidth: Metrics.outline)
             }
         }
     }

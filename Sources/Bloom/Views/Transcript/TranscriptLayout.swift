@@ -14,6 +14,14 @@ import SwiftUI
 enum TranscriptLayout {
     /// The gap between two things that belong to each other, such as a label and its counter.
     static let tight = Metrics.spacingTight
+
+    /// How far down a row is drawn while it is still in the queue rather than in the transcript.
+    ///
+    /// The owner's own pending bubble says "not sent yet" by being outlined instead of filled,
+    /// which a row with no fill cannot borrow. This is the same sentence in the one language a
+    /// plain row has, and it is a step rather than a fade: far enough to read as waiting at a
+    /// glance, near enough that the words are still the point.
+    static let waitingOpacity = 0.55
     /// The horizontal inset a row keeps, and the general gap between pieces.
     ///
     /// Deliberately `spacing` and not `Metrics.inset`: a transcript row already carries a glyph
@@ -75,18 +83,11 @@ enum TranscriptLayout {
     /// The horizontal inset a `Chip` keeps, so a chip drawn by hand is the same shape as one that
     /// is not, which matters in the footer where the two sit next to each other.
     static let chipInset = Metrics.chipInsetH
-    /// Extra leading for the two places that render real prose rather than one line.
-    static let proseLeading: CGFloat = 3
-    /// Extra leading for a block of code that wraps, which is the permission panel's command.
-    ///
-    /// A point more than prose gets, and decided on its own rather than borrowed from it. A
-    /// wrapped shell command is the hardest thing in the window to read: it has no sentence shape
-    /// to fall back on, the eye has to find the start of the next line by position alone, and set
-    /// solid at eleven points a continuation line sat as close to its own predecessor as two
-    /// separate commands would. Four points on a thirteen point line box is a line height of about
-    /// 1.3, which is the ratio code is set at in every editor and is a rung of the spacing scale
-    /// rather than a number invented here.
-    static let codeLeading: CGFloat = Metrics.spacingSmall
+    // Leading is not here, and it is the one thing in this file that is not. A line of prose and a
+    // line of a wrapped command are each a ratio of the size the conversation is set at rather
+    // than a constant, so both have to ask a font how tall its line box is before they can answer:
+    // see `TranscriptProseLeading` beside this file, and `TextLeading` in the core for the ratios.
+
     /// How wide a paragraph is allowed to get.
     ///
     /// Nothing else in the window is read a line at a time, so nothing else needs a measure. With
@@ -95,4 +96,12 @@ enum TranscriptLayout {
     /// loses the start of the next line. Generous on purpose: at the sizes the window is usually
     /// dragged to this never bites, and it only ever stops prose running away.
     static let proseMeasure: CGFloat = 680
+
+    /// The shared reading column for a conversation in a wide pane.
+    ///
+    /// Individual paragraphs still use `proseMeasure`, but every transcript row now belongs to
+    /// this wider column. That keeps user bubbles, working rows, answers and turn footers on one
+    /// axis instead of leaving an answer at the far left while its question sits at the far right
+    /// of a large window. Below this width the column simply takes all available room.
+    static let conversationMeasure: CGFloat = 760
 }

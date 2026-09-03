@@ -63,7 +63,7 @@ struct FileTreeView: View {
             // Only over a listing there is something to narrow. A filter above "Nothing tracked"
             // is a control that cannot do anything, offered at the one moment it is useless.
             if model.hasReadFileTree, !model.fileTree.isEmpty {
-                FileTreeFilterField(query: $query, onEscape: escape, onReturn: enterTree)
+                InspectorFilterField(query: $query, onEscape: escape, onReturn: enterTree)
                 Hairline()
             }
 
@@ -157,7 +157,9 @@ struct FileTreeView: View {
                 isChanged: changedPaths.contains(path),
                 fullPath: fullPath(path),
                 action: { activate(item.node) },
-                onOpenTerminal: { FolderTerminalTab.open(folder: fullPath(path), in: model) }
+                onOpenTerminal: { FolderTerminalTab.open(folder: fullPath(path), in: model) },
+                onOpenPage: { BrowserTab.openFile(fullPath(path), in: model) },
+                onSplitPage: { BrowserTab.splitFile(fullPath(path), in: model, axis: $0) }
             )
             .equatable()
         }
@@ -204,7 +206,7 @@ struct FileTreeView: View {
     /// are: this runs when the listing or the needle changes, and `body` runs on every layout pass.
     private func rebuildRows() {
         let outcome = FileTreeFilter.apply(
-            to: model.fileTree, needle: FileTreeFilter.needle(query)
+            to: model.fileTree, needle: FileNeedle.canonical(query)
         )
         filtered = outcome
         // Taken from the outcome rather than merged with what was open a keystroke ago. Every call

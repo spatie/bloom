@@ -67,7 +67,7 @@ struct PullRequestBadge: View {
                 RoundedRectangle(cornerRadius: Metrics.corner)
                     .strokeBorder(
                         ink.opacity(InspectorLayout.badgeStrokeOpacity),
-                        lineWidth: Metrics.hairline
+                        lineWidth: Metrics.outline
                     )
             }
             .contentShape(RoundedRectangle(cornerRadius: Metrics.corner))

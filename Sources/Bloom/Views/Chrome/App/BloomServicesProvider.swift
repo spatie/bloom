@@ -10,7 +10,7 @@ import BloomCore
 /// the text it captured and lets the project be changed, with the last project used here already
 /// chosen. One extra keystroke, and nothing irreversible happens by accident.
 ///
-/// The panel is AppKit rather than the app's own `CreateWorkspaceSheet`, because a Service can
+/// The panel is AppKit rather than the app's own `CreateWorkspaceView`, because a Service can
 /// arrive while Bloom has no window on screen at all, and a sheet needs one to hang from.
 @MainActor
 final class BloomServicesProvider: NSObject {

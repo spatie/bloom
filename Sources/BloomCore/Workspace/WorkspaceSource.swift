@@ -21,7 +21,7 @@ public enum PullRequestOffer: Sendable, Hashable {
 /// One row the source picker can offer, over the three verbs the picker exists to put side by
 /// side.
 ///
-/// The bug that forced this: the create sheet's "Start from" menu listed "New branch from <name>"
+/// The bug that forced this: the create window's "Start from" menu listed "New branch from <name>"
 /// for every branch in the project and filed "Open an existing branch" underneath all of them,
 /// unsearchable. Picking a colleague's branch out of the top of that list cuts a fresh branch off
 /// their head, so the workspace opens empty and its Changes tab says nothing differs. The two
@@ -288,11 +288,11 @@ public enum WorkspaceSourceTab: String, Sendable, Hashable, CaseIterable, Identi
 
     public var id: String { rawValue }
 
-    /// The tab strip's own words. Both start with a verb so neither reads as a category.
+    /// The tab strip's own short labels. The sentence below explains what each choice does.
     public var title: String {
         switch self {
-        case .newBranch: "Create new branch"
-        case .existingBranch: "Continue on existing branch"
+        case .newBranch: "New branch"
+        case .existingBranch: "Existing branch"
         }
     }
 
@@ -370,19 +370,12 @@ public struct WorkspaceSourceMatches: Sendable, Hashable {
     /// Where the highlight lands after a step, given what is highlighted now.
     ///
     /// Here rather than in the panel because it is the whole of the keyboard's behaviour and a
-    /// decision taken in a view is a decision nothing can test. It wraps at both ends, which is
-    /// what every menu on the Mac does, and it answers with the first row when nothing is
-    /// highlighted yet, so the first press of Down after typing does not swallow itself.
+    /// decision taken in a view is a decision nothing can test. Scoped to the tab, which is this
+    /// panel's own half of the rule; the wrapping itself is `MenuRows`.
     public func stepped(
         from current: WorkspaceSource?, by step: Int, in tab: WorkspaceSourceTab
     ) -> WorkspaceSource? {
-        let rows = rows(in: tab)
-        guard !rows.isEmpty else { return nil }
-        guard let current, let index = rows.firstIndex(of: current) else {
-            return step < 0 ? rows.last : rows.first
-        }
-        let next = (index + step + rows.count) % rows.count
-        return rows[next]
+        MenuRows.stepped(from: current, by: step, in: rows(in: tab))
     }
 
     /// What stays highlighted when the list changes under the field: the same row if it survived

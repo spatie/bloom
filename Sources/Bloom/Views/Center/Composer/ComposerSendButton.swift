@@ -13,7 +13,7 @@ import SwiftUI
 /// This one therefore does not move. It is the last control in the footer in every state, which is
 /// what makes it the thing the hand goes to without looking, and it is what Return does.
 ///
-/// In the create sheet it is the same button doing the same job for a conversation that does not
+/// In the create window it is the same button doing the same job for a conversation that does not
 /// exist yet, so it says what it is about to do and shows the key that does it. See
 /// `ComposerIntent`.
 struct ComposerSendButton: View {
@@ -26,15 +26,14 @@ struct ComposerSendButton: View {
     var canSend: Bool
     var onSend: @MainActor () -> Void
 
-    /// The bordered styles add four points of padding on every edge, so the glyph box has to be
-    /// that much smaller than the row for the finished circle to match the controls beside it.
-    /// Sizing the glyph at `rowHeight` instead is what made the send button eight points taller
-    /// than everything else in the footer.
+    /// The bordered styles add four points of padding on every edge. A sixteen point glyph box
+    /// produces a quiet twenty-four point circle, while the outer frame preserves the full footer
+    /// row as the click target.
     ///
     /// Not private, because `ComposerStopButton` sits next to it and has to be the same circle.
-    static let glyph = Metrics.rowHeight - Metrics.spacingSmall * 2
+    static let glyph = Metrics.rowHeight - Metrics.spacingSmall * 3
 
-    /// A named action rather than a glyph, which only the create sheet uses. A round arrow is
+    /// A named action rather than a glyph, which only the create window uses. A round arrow is
     /// enough for a message going into a conversation the user is looking at; a control that is
     /// about to cut a branch and a worktree should say so, and the return glyph beside it says
     /// which key does it without a tooltip.
@@ -60,10 +59,17 @@ struct ComposerSendButton: View {
         }
         // Prominent, because sending is the action on offer and it is the only one here now.
         .buttonStyle(.borderedProminent)
-        .buttonBorderShape(isNamed ? .capsule : .circle)
-        // `accentFill`, not `accent`. A prominent button paints a white label on its tint, and
-        // white on Bloom teal is 1.6 to 1. Spatie Blue is the ramp member that carries a label.
-        .tint(Palette.accentFill)
+        // **A rounded rectangle rather than a capsule, and the same radius every other named
+        // button in the window takes.** The capsule was the only one of its kind in the app: the
+        // Merge button, Create pull request and the rest all go through
+        // `.roundedRectangle(radius: Metrics.corner)`, so a pill in the create window read as a
+        // control borrowed from somewhere else. The round variant beside it stays a circle,
+        // because a glyph in a circle is a different family and every footer already draws it.
+        .buttonBorderShape(isNamed ? .roundedRectangle(radius: Metrics.corner) : .circle)
+        .frame(minHeight: Metrics.rowHeight)
+        .contentShape(Rectangle())
+        // The system control accent keeps this primary action consistent with every native control.
+        .tint(Palette.controlAccent)
         .disabled(!canSend)
         .help(isRunning ? "Queue this message. It goes when the turn ends (Return)" : intent.help)
     }

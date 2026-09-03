@@ -31,6 +31,9 @@ struct TerminalSplitView: View {
     /// Ghostty's way of fading the panes that do not have the keyboard.
     @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
 
+    /// Read for the restart strip's slide, the same courtesy the setup strip above a terminal gets.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     private var splits: TerminalSplitStore { .shared }
 
     /// What a split takes out of the space its two panes share. One point, because the strip the
@@ -47,6 +50,10 @@ struct TerminalSplitView: View {
         // is a redraw that only happens by luck.
         let layout = splits.layout(for: ownerID)
         let focusRequest = splits.focusRequest(for: ownerID)
+        // Read here for the same reason, and it is the reason this one is asked for every pane at
+        // once: a command remembered from the last launch arrives after the pane has been drawn,
+        // and a read that happens only in the layout pass would not bring the strip with it.
+        let remembered = TerminalSessionStore.shared.recall.offers(inPanes: layout.panes)
 
         return GeometryReader { proxy in
             let geometry = layout.geometry(in: proxy.size, dividerThickness: Self.dividerThickness)
@@ -57,7 +64,12 @@ struct TerminalSplitView: View {
                 // wait for the first real layout pass instead.
                 if proxy.size.width > 1, proxy.size.height > 1 {
                     ForEach(geometry.panes, id: \.pane) { item in
-                        pane(item.pane, in: layout, focusRequest: focusRequest)
+                        pane(
+                            item.pane,
+                            in: layout,
+                            focusRequest: focusRequest,
+                            remembered: remembered[item.pane]
+                        )
                             .frame(width: item.frame.width, height: item.frame.height)
                             .position(x: item.frame.midX, y: item.frame.midY)
                     }
@@ -70,10 +82,12 @@ struct TerminalSplitView: View {
                             length: divider.axis == .horizontal
                                 ? divider.frame.height
                                 : divider.frame.width,
-                            color: dividerColor
-                        ) { ratio in
-                            splits.setRatio(ratio, at: divider.path, in: ownerID)
-                        }
+                            color: dividerColor,
+                            onChange: { ratio in
+                                splits.setRatio(ratio, at: divider.path, in: ownerID)
+                            },
+                            onChangeEnded: { splits.persistRatio(in: ownerID) }
+                        )
                         .position(x: divider.frame.midX, y: divider.frame.midY)
                     }
                 }
@@ -82,28 +96,46 @@ struct TerminalSplitView: View {
         .background(Palette.surfaceSunken)
     }
 
-    private func pane(_ id: String, in layout: SplitLayout, focusRequest: Int) -> some View {
+    /// `remembered` is what this pane was running when Bloom last stopped, and only for a pane that
+    /// is not running it now. Nothing is started by drawing it; see `TerminalRestartStrip`.
+    private func pane(
+        _ id: String, in layout: SplitLayout, focusRequest: Int, remembered: String?
+    ) -> some View {
         let isFocused = layout.focus == id
 
-        return TerminalView(
-            tab: TerminalTab(id: TerminalTabID(id), workspaceID: workspace.id, title: "Terminal"),
-            workspace: workspace,
-            repo: repo,
-            port: port,
-            directory: directory,
-            isFocusedPane: isFocused,
-            focusRequest: focusRequest,
-            onFocus: { splits.focus(id, in: ownerID) },
-            onCommand: { handle($0, from: id) },
-            onExit: { finished($0, in: id) },
-            onContextMenu: {
-                TerminalPaneMenu.make(
-                    canClose: layout.paneCount > 1,
-                    isZoomed: layout.zoomed == id
-                ) { _ = handle($0, from: id) }
+        return VStack(spacing: 0) {
+            if let remembered {
+                TerminalRestartStrip(
+                    command: remembered,
+                    onStart: { TerminalSessionStore.shared.startRemembered(remembered, inPane: id) },
+                    onDismiss: { TerminalSessionStore.shared.dismissRemembered(inPane: id) }
+                )
             }
-        )
-        .padding(Self.paneInset)
+
+            TerminalView(
+                tab: TerminalTab(id: TerminalTabID(id), workspaceID: workspace.id, title: "Terminal"),
+                workspace: workspace,
+                repo: repo,
+                port: port,
+                directory: directory,
+                isFocusedPane: isFocused,
+                focusRequest: focusRequest,
+                onFocus: { splits.focus(id, in: ownerID) },
+                onCommand: { handle($0, from: id) },
+                onExit: { finished($0, in: id) },
+                onContextMenu: {
+                    TerminalPaneMenu.make(
+                        canClose: layout.paneCount > 1,
+                        isZoomed: layout.zoomed == id
+                    ) { _ = handle($0, from: id) }
+                }
+            )
+            .padding(Self.paneInset)
+        }
+        // The strip arrives a moment after the pane is drawn, because the command is read back out
+        // of the database. Gated for the same reason `ToolPaneView` gates the setup strip: what
+        // moves is the shell under it.
+        .animation(reduceMotion ? nil : Motion.pane, value: remembered)
         .overlay {
             if !isFocused && layout.paneCount > 1 { dimming }
         }

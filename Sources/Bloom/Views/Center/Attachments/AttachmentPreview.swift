@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import BloomCore
 import QuickLookThumbnailing
 import UniformTypeIdentifiers
 
@@ -39,6 +40,18 @@ struct AttachmentPreview: View {
     /// The box the "no preview" and "it is gone" states are drawn in, so a card holding one of
     /// them is not a sliver.
     private static let minSide: CGFloat = 120
+
+    /// The mark at the head of one of those two cards, and the box a file's own icon is drawn in.
+    ///
+    /// Deliberately off `Typo` and off `Metrics`, and said here rather than left as two bare
+    /// numbers in the stack below. `Typo` stops at 15, which is a heading inside prose, and its own
+    /// doc argues that a sixth rung invented for one card is how a five rung scale stops being one;
+    /// this is a picture rather than type. `NSWorkspace` hands an icon back at 16, 32 and 128, and
+    /// 48 is the step between the middle two that keeps it sharp beside `minSide`. The two are a
+    /// pair: the drawn glyph is smaller than the file icon because a stroked symbol at the icon's
+    /// size outweighs the filename under it.
+    private static let noteGlyph: CGFloat = 28
+    private static let noteIcon: CGFloat = 48
 
     var body: some View {
         content
@@ -90,12 +103,12 @@ struct AttachmentPreview: View {
         VStack(spacing: Metrics.spacing) {
             if let glyph {
                 Image(systemName: glyph)
-                    .font(.system(size: 28))
+                    .font(.system(size: Self.noteGlyph))
                     .foregroundStyle(Palette.textTertiary)
             } else {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
                     .resizable()
-                    .frame(width: 48, height: 48)
+                    .frame(width: Self.noteIcon, height: Self.noteIcon)
             }
 
             Text(title)
@@ -220,40 +233,19 @@ struct SourceLines: View {
 /// are its statics, and this runs on a detached task: the limits below would be main actor state
 /// read from a background thread.
 enum SourceHead {
-    /// How many lines of a text file are shown, and how wide a line may be before it is cut.
-    ///
-    /// Both are about the card rather than about the file: past this it stops being a glance and
-    /// starts being a reader, and the file is one click away in a review tab. Twenty four lines at
-    /// the code rung fit inside the card's own height cap with room to spare.
-    static let lines = 24
-    static let columns = 160
-
     /// Past this, a file is an attachment rather than something to print. Half a megabyte of one
     /// line JSON has nothing to show and reading it is not free.
     static let byteLimit = 512 * 1024
 
     /// The first lines of a file, or nil for anything that is not UTF-8 after all.
+    ///
+    /// How many lines that is, and how long one may be, is `TextHead` in the core: the card over a
+    /// chip that stands for words rather than for a file cuts them with the same two numbers, and
+    /// the two cards sit in the same popover.
     static func read(_ path: String) -> (lines: [String], truncated: Bool)? {
         guard let data = FileManager.default.contents(atPath: path),
               let text = String(data: data, encoding: .utf8)
         else { return nil }
-
-        // A file with no newline at the end must not gain a blank last line, and a file that is
-        // nothing but whitespace has nothing to show.
-        var all = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        while let last = all.last, last.trimmingCharacters(in: .whitespaces).isEmpty {
-            all.removeLast()
-        }
-        guard !all.isEmpty else { return nil }
-
-        let truncated = all.count > lines
-        let head = all.prefix(lines).map { line -> String in
-            // Tabs drawn at their own width make one long line as wide as the screen.
-            let expanded = line.replacingOccurrences(of: "\t", with: "    ")
-            return expanded.count > columns
-                ? String(expanded.prefix(columns)) + "\u{2026}"
-                : expanded
-        }
-        return (head, truncated)
+        return TextHead.head(of: text)
     }
 }

@@ -40,6 +40,22 @@ extension FocusedValues {
     /// ask that view to raise it; with the inspector closed, or its pane on another tab, there is
     /// no view to ask and the item has to say so rather than swallow the press.
     @Entry var mergeAction: MergeAction?
+
+    /// True while the keyboard is in a box somebody is typing prose into.
+    ///
+    /// **It exists for one key, and the report that produced it names the cost of not having it.**
+    /// Command-Backspace deletes to the start of the line in every text field on macOS, and Bloom
+    /// had given it to Archive Workspace. A user typing a prompt reached for it, and archived the
+    /// workspace he was writing in: "in Bloom this triggers a shortcut to delete the workspace".
+    ///
+    /// AppKit checks a menu's key equivalents before the responder chain sees the key, so the text
+    /// view never gets a chance to refuse. The menu item is what has to stand down, and this is how
+    /// it hears that it should. Every box that takes prose publishes it: the composer, the notes
+    /// pane, the rename fields, the quick prompt form, the free-text answer on a question card.
+    ///
+    /// Only Archive reads it today. It is a general fact rather than a private flag for one item,
+    /// because the next destructive shortcut somebody gives a bare key will want the same answer.
+    @Entry var isTypingProse: Bool?
 }
 
 /// A row a list has highlighted, carrying the workspace itself.

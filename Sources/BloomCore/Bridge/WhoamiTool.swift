@@ -104,7 +104,10 @@ public struct WhoamiTool: BridgeToolHandling {
     private func owner(store: Store) async -> BridgeToolResult {
         do {
             let projects = try await store.repos()
-            let running = try await store.workspaces()
+            // Not archived, which is not the same as running, and the name says so: a count
+            // of live workspaces published as a count of running ones is exactly what made
+            // project_list and workspace_list read as contradicting each other.
+            let workspaces = try await store.workspaces()
             return .json(.object([
                 "role": .string(BridgeRole.owner.rawValue),
                 "connected_to": .object([
@@ -113,7 +116,7 @@ public struct WhoamiTool: BridgeToolHandling {
                     "bridge_protocol": .integer(BridgeProtocol.version),
                 ]),
                 "projects": .integer(projects.count),
-                "workspaces": .integer(running.count),
+                "workspaces": .integer(workspaces.count),
                 "note": .string(
                     "You are talking to Bloom as its owner, from outside any workspace. You can "
                         + "list projects, register an existing repository as one, and start "

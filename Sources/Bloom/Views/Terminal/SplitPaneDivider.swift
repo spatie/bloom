@@ -22,6 +22,7 @@ struct SplitPaneDivider: View {
     var length: Double
     var color: Color
     var onChange: (Double) -> Void
+    var onChangeEnded: () -> Void
 
     /// Where the ratio was when the drag started. Without it the divider would chase the pointer
     /// by the whole translation on every event rather than by the delta.
@@ -63,14 +64,25 @@ struct SplitPaneDivider: View {
                             : drag.translation.height
                         onChange(origin + Double(travelled) / span)
                     }
-                    .onEnded { _ in dragOrigin = nil }
+                    .onEnded { _ in finishResize() }
             )
-            .onTapGesture(count: 2) { onChange(0.5) }
+            .onTapGesture(count: 2) {
+                onChange(0.5)
+                onChangeEnded()
+            }
+            .onDisappear { finishResize() }
             .accessibilityElement()
             .accessibilityLabel(axis == .horizontal ? "Pane divider" : "Pane divider, stacked")
             .accessibilityValue(Text(ratio, format: .percent.precision(.fractionLength(0))))
             .accessibilityAdjustableAction { direction in
                 onChange(ratio + (direction == .increment ? Self.step : -Self.step))
+                onChangeEnded()
             }
+    }
+
+    private func finishResize() {
+        guard dragOrigin != nil else { return }
+        onChangeEnded()
+        dragOrigin = nil
     }
 }

@@ -21,7 +21,7 @@ public struct AgentWorkspaceOrder: Sendable, Hashable {
     /// only to the tool would make the two doors behave differently for no reason visible from
     /// either. The accidental duplicate, a retried call, is already handled by `spawnID`.
     public let name: String?
-    /// Which of the create sheet's two routes this call asked for: a fresh branch cut from
+    /// Which of the create window's two routes this call asked for: a fresh branch cut from
     /// something, or an existing branch carried on. Defaulted to a new branch from the project's
     /// default, which is what every call made before there was a choice gets. See
     /// `AgentStartSource`.
@@ -29,6 +29,8 @@ public struct AgentWorkspaceOrder: Sendable, Hashable {
     /// Nil inherits whatever the calling session is using, which is almost always what is wanted:
     /// an agent asking for help wants help from the thing it already trusts.
     public let agent: AgentKind?
+    /// An exact model id, or nil for the selected backend's current default.
+    public let model: String?
 
     /// What the worktree is cut from, or nil for the project's default. Nil for a checkout too,
     /// which brings its own base.
@@ -38,12 +40,14 @@ public struct AgentWorkspaceOrder: Sendable, Hashable {
         prompt: String,
         name: String? = nil,
         source: AgentStartSource = .newBranch(from: nil),
-        agent: AgentKind? = nil
+        agent: AgentKind? = nil,
+        model: String? = nil
     ) {
         self.prompt = prompt
         self.name = name
         self.source = source
         self.agent = agent
+        self.model = model
     }
 }
 
@@ -100,13 +104,15 @@ extension AgentWorkspaceOrder {
     }
 
     private func spawnID(scope: String) -> String {
-        let material = ([
+        var parts = [
             scope,
             prompt,
             name ?? "",
         ] + source.digestMaterial + [
             agent?.rawValue ?? "",
-        ]).joined(separator: "\u{0}")
+        ]
+        if let model { parts.append(model) }
+        let material = parts.joined(separator: "\u{0}")
 
         let digest = SHA256.hash(data: Data(material.utf8))
 
@@ -130,6 +136,9 @@ extension AgentWorkspaceOrder {
 public typealias WorkspaceStarting =
     @Sendable (AgentWorkspaceOrder, Repo, BridgeIdentity, WorkspaceOrigin) async throws
         -> StartedWorkspaceSummary
+
+public typealias PullRequestCheckoutResolving =
+    @Sendable (_ reference: String, _ repoPath: String) async -> WorkspaceCheckoutResolution
 
 /// `workspace_start`: an agent asking Bloom for another workspace in the same project.
 ///
@@ -174,9 +183,16 @@ public typealias WorkspaceStarting =
 /// about the Create sheet, where each of them is a press; here neither of them is.
 public struct WorkspaceStartTool: BridgeToolHandling {
     private let start: WorkspaceStarting
+    private let resolvePullRequest: PullRequestCheckoutResolving
 
-    public init(start: @escaping WorkspaceStarting) {
+    public init(
+        start: @escaping WorkspaceStarting,
+        resolvePullRequest: @escaping PullRequestCheckoutResolving = {
+            await WorkspaceCheckoutResolver.resolve($0, repoPath: $1)
+        }
+    ) {
         self.start = start
+        self.resolvePullRequest = resolvePullRequest
     }
 
     public let roles: Set<BridgeRole> = [.parent, .owner]
@@ -196,7 +212,7 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             Use it when a task splits into parts that do not need to see each other's edits, and \
             you want them worked on at the same time rather than one after another.
 
-            There are two ways to start it, the two Bloom's own create sheet offers, and picking \
+            There are two ways to start it, the two Bloom's own create window offers, and picking \
             the wrong one is the mistake worth avoiding here.
 
             '\(WorkspaceSourceTab.newBranch.title)' is the default and needs nothing said. \
@@ -210,7 +226,12 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             you named. The branch has to exist already, and git allows one worktree per branch, \
             so a branch another workspace is sitting on is refused rather than opened twice.
 
-            Name one or the other, never both.
+            To review an existing GitHub pull request, use 'pull_request' with its number, '#123', \
+            or its GitHub URL. Bloom checks out the pull request itself, preserving its base and \
+            identity so the Changes, Checks and Merge controls refer to that pull request. Do not \
+            create a review branch with base_branch for this purpose.
+
+            Name only one of base_branch, existing_branch or pull_request.
 
             It returns as soon as the workspace exists, not when its work is done. The new agent \
             starts on its own and keeps running while you carry on. There is no way to wait for \
@@ -263,12 +284,31 @@ public struct WorkspaceStartTool: BridgeToolHandling {
                             + "with base_branch."
                     ),
                 ]),
+                "pull_request": .object([
+                    "type": .string("string"),
+                    "description": .string(
+                        "Open this GitHub pull request itself for review, by number, #number or "
+                            + "GitHub URL. This preserves the PR connection so Bloom can show "
+                            + "checks and merge it. Do not combine it with base_branch or "
+                            + "existing_branch."
+                    ),
+                ]),
                 "agent": .object([
                     "type": .string("string"),
                     "enum": .array(AgentKind.runnable.map { .string($0.rawValue) }),
                     "description": .string(
                         "Which agent runs it. Leave it out for the one you are running on, or "
                             + "for Bloom's own default if you are not running in Bloom."
+                    ),
+                ]),
+                "model": .object([
+                    "type": .string("string"),
+                    "description": .string(
+                        "The exact model id. Claude Code models are opus, sonnet, fable and "
+                            + "haiku. Codex model ids come from the signed-in Codex account, for "
+                            + "example gpt-5.6-sol. Do not use a Claude Code model with codex or "
+                            + "a Codex model with claudeCode. Leave this out to use the selected "
+                            + "agent's default model."
                     ),
                 ]),
             ]),
@@ -319,7 +359,8 @@ public struct WorkspaceStartTool: BridgeToolHandling {
         let source: AgentStartSource
         switch AgentStartRequest.read(
             baseBranch: filled(request.param("base_branch")),
-            existingBranch: filled(request.param("existing_branch"))
+            existingBranch: filled(request.param("existing_branch")),
+            pullRequest: filled(request.param("pull_request"))
         ) {
         case .refused(let sentence):
             return .failure(sentence)
@@ -331,13 +372,25 @@ public struct WorkspaceStartTool: BridgeToolHandling {
             case .refused(let sentence): return .failure(sentence)
             case .found(let branch): source = .existingBranch(branch)
             }
+        case .pullRequest(let reference):
+            switch await resolvePullRequest(reference, project.path) {
+            case .failure(let sentence): return .failure(sentence)
+            case .checkout(.pullRequest(let request)): source = .pullRequest(request)
+            case .checkout(.branch):
+                return .failure("Bloom resolved that pull request as a branch instead of a pull request.")
+            }
         }
 
         let order = AgentWorkspaceOrder(
             prompt: prompt,
-            name: filled(request.param("name")),
+            // `WorkspaceName.given` rather than `filled`, which is otherwise the same trim, so
+            // that the two doors a name can arrive through cannot drift: `workspace_rename` reads
+            // its argument with the same function, and a name this door accepts and that one
+            // refuses would be a workspace an agent can create and then cannot correct.
+            name: WorkspaceName.given(request.stringParam("name")),
             source: source,
-            agent: agent
+            agent: agent,
+            model: filled(request.param("model"))
         )
         let origin = origin(of: order, project: project, parent: parent)
 

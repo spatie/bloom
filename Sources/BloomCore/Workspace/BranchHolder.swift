@@ -76,7 +76,7 @@ public enum BranchHolder: Sendable, Hashable, Codable {
     /// negotiable and `--force` is not the answer: two worktrees on one branch is how work is
     /// lost, which is the thing this app exists to avoid. But the code is still reachable, because
     /// git is perfectly happy to cut a *new* branch from a branch that is checked out somewhere
-    /// else, and the create sheet has a tab for exactly that. So the sentence says so, and nothing
+    /// else, and the create window has a tab for exactly that. So the sentence says so, and nothing
     /// acts on it: opening somebody's branch and starting a branch beside it are different
     /// intentions, and Bloom does not get to pick between them on his behalf.
     public func refusal(branch: String) -> String {

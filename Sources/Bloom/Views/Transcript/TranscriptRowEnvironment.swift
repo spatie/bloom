@@ -28,8 +28,8 @@ import SwiftUI
 /// - `linkActions` for what a link inside a row's markdown does when it is pressed or chosen from
 ///   a menu. Equatable on its values, which is what keeps a fresh struct per pass from counting
 ///   as a change.
-/// - `fontScale` and `chatFont`, set by `ChatPaneView` from the reader's own text size. Nothing
-///   under a row reads the setting; they all read these.
+/// - `fontScale`, `chatFont` and `chatLineHeight`, set by `ChatPaneView` from the reader's own
+///   appearance settings. Nothing under a row reads a setting; they all read these.
 /// - `reduceMotion`, which is the one value here that is carried and **not** applied.
 ///   `EnvironmentValues.accessibilityReduceMotion` is read-only, so it cannot be handed down like
 ///   the rest; a hosting view resolves it from the system, which is where it comes from anyway.
@@ -50,6 +50,7 @@ struct TranscriptRowEnvironment: Equatable {
     let linkActions: TranscriptLinkActions
     let fontScale: CGFloat
     let chatFont: ChatFont
+    let lineHeight: ChatLineHeight
     let reduceMotion: Bool
 
     /// Identity for the three objects and value for the rest.
@@ -65,6 +66,7 @@ struct TranscriptRowEnvironment: Equatable {
             && lhs.linkActions == rhs.linkActions
             && lhs.fontScale == rhs.fontScale
             && lhs.chatFont == rhs.chatFont
+            && lhs.lineHeight == rhs.lineHeight
             && lhs.reduceMotion == rhs.reduceMotion
     }
 
@@ -76,8 +78,13 @@ struct TranscriptRowEnvironment: Equatable {
     /// change; an environment change emptied the whole height cache, so arriving at a conversation
     /// you had read a minute ago rebuilt an `NSHostingView` for every row in the window. What a
     /// link does when it is pressed cannot change how tall a paragraph is, and neither can a hover
-    /// host or Reduce Motion. The text size and the typeface can, and a different list object
-    /// means a different pane, so both of those keep their old answer.
+    /// host or Reduce Motion. The text size, the typeface and the line height can, and a different
+    /// list object means a different pane, so all of those keep their old answer.
+    ///
+    /// The line height is on this list because the owner made it a setting, and it is the one of
+    /// the three that moves EVERY row: a step is points added to every line of every paragraph in
+    /// the session. A cache not told about it hands the table the heights from the old step, and
+    /// rows drawn from those overlap.
     ///
     /// The rule is here rather than in the core with the other decisions because it is about this
     /// type, and this type holds `AppModel` and a SwiftUI environment value. There is nothing for
@@ -85,6 +92,7 @@ struct TranscriptRowEnvironment: Equatable {
     func wraps(differentlyFrom other: Self) -> Bool {
         fontScale != other.fontScale
             || chatFont != other.chatFont
+            || lineHeight != other.lineHeight
             || app !== other.app
             || bubbleWidth !== other.bubbleWidth
     }
@@ -99,5 +107,6 @@ extension View {
             .markdownLinkActions(values.linkActions)
             .environment(\.fontScale, values.fontScale)
             .environment(\.chatFont, values.chatFont)
+            .environment(\.chatLineHeight, values.lineHeight)
     }
 }

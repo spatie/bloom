@@ -84,8 +84,14 @@ struct BridgeServerTests {
         // `tools/list` is. The rest of a parent's surface (`workspace_start` and the four pane
         // tools) needs a seam into the window and is added by `AppModel.bridgeToolbox()`, which
         // there is none of here. The two quick prompt tools are on this list because a quick
-        // prompt is a row in the store and nothing else.
-        #expect(names == ["quick_prompt_create", "quick_prompt_list", "whoami"])
+        // prompt is a row in the store and nothing else, and `workspace_rename` is on it because
+        // a workspace's name is one column of one row. `agent_list` is on it for the same reason
+        // again: a crew is rows in `sessions` joined by `parent_session_id`, so listing one
+        // reaches nothing but the store, while starting, saying and stopping all need the window.
+        #expect(names == [
+            "agent_list", "quick_prompt_create", "quick_prompt_list", "whoami",
+            "workspace_rename",
+        ])
 
         let called = try await caller.call(
             #"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"whoami","arguments":{}}}"#
@@ -282,6 +288,16 @@ struct BridgeServerTests {
     func droppedServerIsReleased() async throws {
         let store = try makeTestStore("bridge-release")
         let socketPath = NSTemporaryDirectory() + "bloom-drop-\(UUID().uuidString.prefix(8)).sock"
+        // A socket file is one per test and nothing else removes it: a successor unlinks the path
+        // it is about to bind, and these names are unique, so every run left one behind. The `.d`
+        // beside it is the config directory the server derives from the same path, and it is left
+        // the same way. See `BridgeServer.configDirectory`.
+        defer {
+            try? FileManager.default.removeItem(atPath: socketPath)
+            try? FileManager.default.removeItem(
+                atPath: (socketPath as NSString).deletingPathExtension + ".d"
+            )
+        }
 
         weak var released: BridgeServer?
         do {
@@ -304,6 +320,16 @@ struct BridgeServerTests {
     func retiringASessionRemovesItsConfig() async throws {
         let store = try makeTestStore("bridge-retire")
         let socketPath = NSTemporaryDirectory() + "bloom-retire-\(UUID().uuidString.prefix(8)).sock"
+        // A socket file is one per test and nothing else removes it: a successor unlinks the path
+        // it is about to bind, and these names are unique, so every run left one behind. The `.d`
+        // beside it is the config directory the server derives from the same path, and it is left
+        // the same way. See `BridgeServer.configDirectory`.
+        defer {
+            try? FileManager.default.removeItem(atPath: socketPath)
+            try? FileManager.default.removeItem(
+                atPath: (socketPath as NSString).deletingPathExtension + ".d"
+            )
+        }
         let server = BridgeServer(store: store, socketPath: socketPath)
         defer { server.stop() }
         try server.start()
@@ -336,6 +362,16 @@ struct BridgeServerTests {
     func startingSweepsTheDirectory() async throws {
         let store = try makeTestStore("bridge-sweep")
         let socketPath = NSTemporaryDirectory() + "bloom-sweep-\(UUID().uuidString.prefix(8)).sock"
+        // A socket file is one per test and nothing else removes it: a successor unlinks the path
+        // it is about to bind, and these names are unique, so every run left one behind. The `.d`
+        // beside it is the config directory the server derives from the same path, and it is left
+        // the same way. See `BridgeServer.configDirectory`.
+        defer {
+            try? FileManager.default.removeItem(atPath: socketPath)
+            try? FileManager.default.removeItem(
+                atPath: (socketPath as NSString).deletingPathExtension + ".d"
+            )
+        }
         let server = BridgeServer(store: store, socketPath: socketPath)
         defer { server.stop() }
 

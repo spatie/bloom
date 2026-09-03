@@ -27,6 +27,8 @@ public enum SettingsKey: String, Sendable, Hashable, CaseIterable {
     case filesToCopy = "file_include_globs"
     case branchPrefix = "git.branch_prefix"
     case deleteBranchOnArchive = "git.delete_branch_on_archive"
+    case mergeInstructions = "instructions.merge"
+    case conflictInstructions = "instructions.fix_conflicts"
 
     /// The key path as components, for the document editor.
     public var path: [String] { rawValue.components(separatedBy: ".") }
@@ -70,6 +72,15 @@ public struct RepoSettings: Sendable, Hashable {
     public var filesToCopy: [String] = [".env*"]
     public var branchPrefix: String?
     public var deleteBranchOnArchive: Bool = false
+    /// What this project adds to the turn Bloom sends when someone presses Merge, and the one it
+    /// sends for Fix merge conflicts. Bloom's own words are not here and never were: for merging
+    /// they are in the message it composes, and for conflicts they are the file
+    /// `ConflictInstructions` writes. These are the project's, they go after Bloom's, they win
+    /// where the two disagree, and they are attached only when there are any. See
+    /// `ProjectInstructions`, which also says why the same words written into
+    /// `.bloom/merge-instructions.md` beat these.
+    public var mergeInstructions: String?
+    public var conflictInstructions: String?
     /// Set by a file inside the repository. Ranks ABOVE the app-level defaults, because pinning
     /// a model in a project's own settings is a deliberate statement about that project.
     public var defaultModel: String?
@@ -284,6 +295,17 @@ public enum SettingsLoader {
             settings.deleteBranchOnArchive = delete
             note(.deleteBranchOnArchive)
         }
+        // An empty string is a statement here for the same reason it is one for a script: it is
+        // the only way a file can say "this project has nothing extra to say about merging"
+        // loudly enough to beat a file below it that does.
+        if let text = toml["instructions.merge"]?.stringValue {
+            settings.mergeInstructions = text.isEmpty ? nil : text
+            note(.mergeInstructions)
+        }
+        if let text = toml["instructions.fix_conflicts"]?.stringValue {
+            settings.conflictInstructions = text.isEmpty ? nil : text
+            note(.conflictInstructions)
+        }
         if let model = toml["models.default"]?.stringValue {
             settings.defaultModel = model
         }
@@ -346,18 +368,29 @@ public struct AppDefaults: Sendable, Hashable {
     public enum Key {
         public static let model = "defaults.model"
         public static let effort = "defaults.effort"
+        /// Which CLI the model above belongs to. Written beside the model rather than worked out
+        /// from it, because Codex's model list is fetched and a machine that is offline, or that
+        /// has no Codex installed, must still open a new chat on the backend the owner chose.
+        /// See `DefaultBackend`.
+        public static let backend = "defaults.backend"
         public static let reviewModel = "defaults.review.model"
         public static let reviewEffort = "defaults.review.effort"
+        public static let reviewBackend = "defaults.review.backend"
         public static let permissionMode = "defaults.permissionMode"
         public static let planMode = "defaults.planMode"
         public static let fastMode = "defaults.fastMode"
         public static let outputStyle = "defaults.outputStyle"
+        public static let codexContextWindow = "defaults.codex.contextWindow"
     }
 
     /// The built-in fallbacks, which `Session`'s own initialiser now reads rather than restates.
     /// Nothing else may invent a second set of hard-coded defaults.
     public static let fallbackModel = "opus"
     public static let fallbackEffort = "high"
+    /// What a copy of Bloom with no row for `defaults.backend` runs on, which is every copy that
+    /// was configured before the key existed: the only models the screen could offer then were
+    /// Claude Code's, so a stored value with no backend beside it has exactly one honest reading.
+    public static let fallbackBackend = AgentKind.claudeCode
     /// Full access, because that is what the owner asked a new session to start on: a session
     /// that stops to ask before its first command is a session somebody has to sit and watch,
     /// and Bloom exists to run several at once.
@@ -369,8 +402,17 @@ public struct AppDefaults: Sendable, Hashable {
 
     public var model: String
     public var effort: String
+    /// Which CLI a new chat opens on, which is the backend `model` belongs to. Not a picker of
+    /// its own anywhere: choosing a model out of the Codex section of the menu is choosing Codex,
+    /// here exactly as in the composer. See `DefaultBackend` for how a model that came from a
+    /// settings file rather than from this screen is placed.
+    public var backend: AgentKind
     public var reviewModel: String
     public var reviewEffort: String
+    /// The review model's own backend. Reviewing is not tied to what a new chat runs on: an owner
+    /// who works in Codex can still want the review done by Claude Code, and one picker per row is
+    /// what lets them say so.
+    public var reviewBackend: AgentKind
     public var permissionMode: PermissionMode
     public var planMode: Bool
     public var fastMode: Bool
@@ -380,6 +422,11 @@ public struct AppDefaults: Sendable, Hashable {
     /// the ones it ships with, and anybody can add another by writing a file in
     /// `~/.claude/output-styles`. See `OutputStyleIndex`.
     public var outputStyle: String
+    /// How large a new Codex chat tells its server the context window is, in tokens, or
+    /// `CodexContextWindow.modelDefault` for Codex's own catalogue. Named for its backend, because
+    /// unlike every other value here it means nothing on the other one: Claude Code's long window
+    /// is a model variant and is picked in the model menu. See `CodexContextWindow`.
+    public var codexContextWindow: Int
 
     /// Nil when the user has never chosen one in Settings. `model` always holds a usable value,
     /// so it cannot answer "did they pick this, or is it just the fallback?", and that question is
@@ -390,21 +437,27 @@ public struct AppDefaults: Sendable, Hashable {
     public init(
         model: String = AppDefaults.fallbackModel,
         effort: String = AppDefaults.fallbackEffort,
+        backend: AgentKind = AppDefaults.fallbackBackend,
         reviewModel: String = AppDefaults.fallbackModel,
         reviewEffort: String = AppDefaults.fallbackEffort,
+        reviewBackend: AgentKind = AppDefaults.fallbackBackend,
         permissionMode: PermissionMode = AppDefaults.fallbackPermissionMode,
         planMode: Bool = false,
         fastMode: Bool = false,
-        outputStyle: String = OutputStyle.defaultName
+        outputStyle: String = OutputStyle.defaultName,
+        codexContextWindow: Int = CodexContextWindow.modelDefault
     ) {
         self.model = model
         self.effort = effort
+        self.backend = backend
         self.reviewModel = reviewModel
         self.reviewEffort = reviewEffort
+        self.reviewBackend = reviewBackend
         self.permissionMode = permissionMode
         self.planMode = planMode
         self.fastMode = fastMode
         self.outputStyle = outputStyle
+        self.codexContextWindow = codexContextWindow
     }
 
     /// A missing row means "never chosen", so every read falls back rather than failing.
@@ -420,22 +473,32 @@ public struct AppDefaults: Sendable, Hashable {
         defaults.storedEffort = await value(Key.effort)
         defaults.model = defaults.storedModel ?? fallbackModel
         defaults.effort = defaults.storedEffort ?? fallbackEffort
+        // A row nothing wrote means Claude Code, which is what every model this screen could
+        // offer before the key existed was. Nothing is migrated, because nothing needs to be.
+        defaults.backend = await value(Key.backend).flatMap(AgentKind.init) ?? fallbackBackend
         defaults.reviewModel = await value(Key.reviewModel) ?? defaults.model
         defaults.reviewEffort = await value(Key.reviewEffort) ?? defaults.effort
+        // The review row falls back to the default row for its backend as well as for its model,
+        // so the pair a copy of Bloom was already carrying stays one coherent choice.
+        defaults.reviewBackend = await value(Key.reviewBackend).flatMap(AgentKind.init)
+            ?? defaults.backend
         if let raw = await value(Key.permissionMode), let mode = PermissionMode(rawValue: raw) {
             defaults.permissionMode = mode
         }
         defaults.planMode = await value(Key.planMode) == "1"
         defaults.fastMode = await value(Key.fastMode) == "1"
         defaults.outputStyle = await value(Key.outputStyle) ?? OutputStyle.defaultName
+        defaults.codexContextWindow = CodexContextWindow.normalised(await value(Key.codexContextWindow))
         return defaults
     }
 
     public func save(to store: Store) async {
         try? await store.setSetting(Key.model, model)
         try? await store.setSetting(Key.effort, effort)
+        try? await store.setSetting(Key.backend, backend.rawValue)
         try? await store.setSetting(Key.reviewModel, reviewModel)
         try? await store.setSetting(Key.reviewEffort, reviewEffort)
+        try? await store.setSetting(Key.reviewBackend, reviewBackend.rawValue)
         try? await store.setSetting(Key.permissionMode, permissionMode.rawValue)
         try? await store.setSetting(Key.planMode, planMode ? "1" : "0")
         try? await store.setSetting(Key.fastMode, fastMode ? "1" : "0")
@@ -444,6 +507,12 @@ public struct AppDefaults: Sendable, Hashable {
         // comparing strings, and this is what keeps that question cheap to answer.
         try? await store.setSetting(
             Key.outputStyle, OutputStyle.isDefault(outputStyle) ? nil : outputStyle
+        )
+        // Nil rather than "0", for the reason the line above gives: "never chosen" and "chosen
+        // and then set back" have to read the same, and `CodexContextWindow.stored` is the one
+        // place that rule is written.
+        try? await store.setSetting(
+            Key.codexContextWindow, CodexContextWindow.stored(codexContextWindow)
         )
     }
 }

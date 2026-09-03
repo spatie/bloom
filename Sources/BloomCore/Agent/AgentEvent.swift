@@ -172,6 +172,11 @@ public struct AgentInit: Sendable, Hashable {
     public let cwd: String
     public let model: String
     public let permissionMode: String
+    /// Which CLI wrote this line, so the row that draws it can name the permission mode in that
+    /// CLI's own words. `CodexTranslation.initLine` has been stamping `agent_kind` since Codex
+    /// landed; nothing read it until the modes were given two vocabularies, and a Claude Code
+    /// line has no such key, which is why the default is that one.
+    public let agentKind: AgentKind
     public let tools: [String]
     public let slashCommands: [String]
     public let agents: [String]
@@ -185,6 +190,7 @@ public struct AgentInit: Sendable, Hashable {
         cwd: String = "",
         model: String = "",
         permissionMode: String = "",
+        agentKind: AgentKind = .claudeCode,
         tools: [String] = [],
         slashCommands: [String] = [],
         agents: [String] = [],
@@ -197,6 +203,7 @@ public struct AgentInit: Sendable, Hashable {
         self.cwd = cwd
         self.model = model
         self.permissionMode = permissionMode
+        self.agentKind = agentKind
         self.tools = tools
         self.slashCommands = slashCommands
         self.agents = agents
@@ -716,6 +723,8 @@ public enum AgentEvent: Sendable {
                 cwd: json["cwd"]?.stringValue ?? "",
                 model: json["model"]?.stringValue ?? "",
                 permissionMode: json["permissionMode"]?.stringValue ?? "",
+                agentKind: json["agent_kind"]?.stringValue.flatMap(AgentKind.init(rawValue:))
+                    ?? .claudeCode,
                 tools: (json["tools"] ?? .null).stringArray,
                 slashCommands: (json["slash_commands"] ?? .null).stringArray,
                 agents: (json["agents"] ?? .null).stringArray,

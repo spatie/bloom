@@ -24,8 +24,9 @@ struct ActivityRuleGallery: View {
     /// The centre column's rule at a window somebody would actually work in. The strip is as wide
     /// as the transcript under it, which is the width the complaint was made at.
     private static let columnWidth: CGFloat = 760
-    /// The other rule in the window, and the narrow case: a crest is 190 points and this is 380.
-    private static let inspectorWidth: CGFloat = 380
+    /// The narrow case: a crest is 190 points and this is 380. It is also the width the inspector
+    /// used to light, which is what the last row on this page is a record of.
+    private static let narrowWidth: CGFloat = 380
 
     var body: some View {
         VStack(alignment: .leading, spacing: 26) {
@@ -44,6 +45,7 @@ struct ActivityRuleGallery: View {
             beside
             enlarged
             narrow
+            twoSegments
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -144,23 +146,66 @@ struct ActivityRuleGallery: View {
         }
     }
 
-    /// The inspector's segment, which is the narrow case and the one a crest could overrun.
+    /// A narrow centre column, which is the case a crest could overrun.
+    ///
+    /// The column is what is left of the window after the sidebar and the inspector, so it is at
+    /// its narrowest with both of those at their widest. 380 points is well past that and is here
+    /// because it is the width the two crest defect below was reported at.
     private var narrow: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("The inspector's segment of the same rule")
+            Text("A narrow column")
                 .font(Typo.label)
-            Text("380 points against a crest of 190, and both rules cross on one clock.")
+            Text("380 points against a crest of 190. The tail clips; the head does not.")
                 .font(Typo.micro)
                 .foregroundStyle(Palette.textSecondary)
             strip(
                 .live, isMoving: true, caption: "Working",
-                width: ActivityRuleGallery.inspectorWidth
+                width: ActivityRuleGallery.narrowWidth
             )
             strip(
                 .live, isMoving: false, caption: "Reduce Motion",
-                width: ActivityRuleGallery.inspectorWidth
+                width: ActivityRuleGallery.narrowWidth
             )
         }
+    }
+
+    /// What the window drew instead, for a fortnight, and what was wrong with it.
+    ///
+    /// The rule ran on two segments, the centre column's and the inspector's, off one epoch. The
+    /// report was "there seems to be two going, one in middle pane, one in right". Drawn here
+    /// because the fix was to delete the second one, and a defect fixed by a deletion leaves
+    /// nothing behind to look at: the next person to propose lighting the inspector's half should
+    /// see what it did before proposing it.
+    ///
+    /// Both halves are correct on their own terms, and that is the point. They share a period, so
+    /// they set off together and finish together, and because they are different lengths they cross
+    /// at different speeds. Watch either one and it is right. Watch the pair and there are two.
+    private var twoSegments: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("What it did with the inspector's half lit")
+                .font(Typo.label)
+            Text("One period, two lengths, two speeds. Reported as two bubbles, and deleted.")
+                .font(Typo.micro)
+                .foregroundStyle(Palette.textSecondary)
+            HStack(alignment: .bottom, spacing: 0) {
+                segment(width: ActivityRuleGallery.columnWidth - ActivityRuleGallery.narrowWidth)
+                // The split divider, which is what the pair were meant to read as passing behind.
+                Rectangle()
+                    .fill(Palette.border)
+                    .frame(width: Metrics.hairline, height: 26)
+                segment(width: ActivityRuleGallery.narrowWidth)
+            }
+        }
+    }
+
+    /// One lit segment with no caption beside it, for the row that draws two of them touching.
+    private func segment(width: CGFloat) -> some View {
+        ZStack(alignment: .bottom) {
+            Palette.sidebar
+            Hairline()
+            ActivityRuleFigure(variant: .live, isMoving: true)
+        }
+        .frame(width: width, height: 26)
     }
 }
 
@@ -172,7 +217,7 @@ extension Gallery {
     static let activityRule = Gallery(
         name: "activity-rule",
         title: "Activity rule",
-        size: CGSize(width: 900, height: 1000),
+        size: CGSize(width: 900, height: 1120),
         needsFocus: false,
         view: { _ in AnyView(ActivityRuleGallery()) }
     )

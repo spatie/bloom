@@ -285,9 +285,41 @@ import Foundation
         #expect(row.spokenValue == "stopped")
     }
 
-    @Test func aRowWithNoFileToOpenRefusesTheClick() {
-        #expect(!SubagentRow(Subagent(id: SubagentID("a"), state: .failed)).opensOutput)
-        #expect(SubagentRow(Subagent(id: SubagentID("a"), outputFile: "/tmp/x")).opensOutput)
+    /// An agent's row opens whatever state it is in, because there is always the prompt and there
+    /// are always the nested rows Bloom stored, and because the file is named on the line that
+    /// ENDS it: gating on the file made a running subagent unclickable, which is the one it is
+    /// worth looking inside. A background command still needs the file, since its output lives
+    /// nowhere else.
+    @Test func anAgentOpensWhateverItIsDoingAndACommandNeedsItsFile() {
+        #expect(SubagentRow(Subagent(id: SubagentID("a"))).opensOutput)
+        #expect(SubagentRow(Subagent(id: SubagentID("a"), state: .failed)).opensOutput)
+
+        let command = Subagent(id: SubagentID("b"), taskType: "local_bash")
+        #expect(!SubagentRow(command).opensOutput)
+        #expect(SubagentRow(
+            Subagent(id: SubagentID("b"), taskType: "local_bash", outputFile: "/tmp/x")
+        ).opensOutput)
+    }
+
+    /// The readout used to be the CLI's count alone, and a fan-out of seven arrived with no
+    /// `tool_progress` at all: `duration(0)` is the empty string, so a working row said nothing
+    /// and never moved. Bloom's own clock is the floor under it.
+    @Test func aRunningRowCountsItsOwnSecondsWhenNoTickDoes() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let silent = Subagent(id: SubagentID("a"), startedAt: start)
+        #expect(SubagentRow(silent, now: start.addingTimeInterval(42)).detail == .elapsed(seconds: 42))
+        #expect(SubagentRow(silent, now: start.addingTimeInterval(42)).detail.text == "42s")
+
+        // The CLI's number wins where it is further on: it counts the work, and this counts the row.
+        let ticked = Subagent(id: SubagentID("a"), elapsedSeconds: 90, startedAt: start)
+        #expect(SubagentRow(ticked, now: start.addingTimeInterval(5)).detail == .elapsed(seconds: 90))
+
+        // And a finished one stops counting, whichever clock it was on.
+        let done = Subagent(
+            id: SubagentID("a"), state: .completed,
+            finishedAt: start.addingTimeInterval(8), startedAt: start
+        )
+        #expect(done.secondsElapsed(at: start.addingTimeInterval(600)) == 8)
     }
 
     @Test func aRowWithNoDescriptionFallsBackToItsType() {

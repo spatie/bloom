@@ -55,8 +55,8 @@ enum TranscriptLink {
     }
 
     /// A sent turn as an `NSAttributedString`, for `TranscriptTextView`: the words with their
-    /// addresses marked, and the files in them drawn as the chip the composer drew a moment before
-    /// the message went.
+    /// addresses marked, the files in them drawn as the chip the composer drew a moment before the
+    /// message went, and the instructions Bloom appended drawn as that same chip.
     ///
     /// **The files are `NSTextAttachment`s rather than a second view laid beside the text**, and
     /// that is not a drawing preference. TextKit 1 has no way to put a view inside a line, and a
@@ -102,7 +102,7 @@ enum TranscriptLink {
         if let cached = sentTurns.object(forKey: key) { return cached }
 
         let value = attributedString(
-            FileMention.segments(in: text),
+            SentTurn.segments(in: text),
             font: font,
             color: color,
             lineSpacing: lineSpacing,
@@ -124,7 +124,7 @@ enum TranscriptLink {
 
     @MainActor
     static func attributedString(
-        _ segments: [AttachmentDraft.Segment],
+        _ segments: [SentTurn.Segment],
         font: NSFont,
         color: NSColor,
         lineSpacing: CGFloat,
@@ -144,8 +144,20 @@ enum TranscriptLink {
             switch segment {
             case .text(let words):
                 output.append(attributedRun(words, font: font, color: color))
-            case .attachment(let path):
-                output.append(ComposerChipText.chip(for: path, font: font, ground: chipGround))
+            case .file(let path):
+                output.append(
+                    ComposerChipText.chip(for: .file(path: path), font: font, ground: chipGround)
+                )
+            case .instructions(let block):
+                // The same chip, standing for words instead of for a file. It sits exactly where
+                // the block sits in the turn, so nothing is lifted out of the message and the
+                // paragraph the agent read is still the paragraph the reader is looking at. See
+                // `SentTurn`.
+                output.append(
+                    ComposerChipText.chip(
+                        for: .instructions(block), font: font, ground: chipGround
+                    )
+                )
             }
         }
 

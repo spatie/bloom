@@ -15,7 +15,16 @@ public enum ModelAlias {
     private static let families = ["opus", "sonnet", "fable", "haiku"]
 
     public static func cliValue(for model: String) -> String {
-        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // Two shapes that are not ids at all are taken apart before anything else, because this is
+        // the last thing between a stored value and the process: a backend written in front of the
+        // id (`codex:gpt-5.6-sol`), and the spaces a rendered label has where the id had
+        // separators ("Opus 5"). Both have been found on real session rows; see `ModelIdentifier`
+        // for how the first one got there. Doing it here as well as at the source is what lets a
+        // row written before that rule existed still start.
+        let named = ModelIdentifier.resolve(model).model
+        let trimmed = named.lowercased()
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: "-")
         guard !trimmed.isEmpty else { return "opus" }
 
         // Anything already in the CLI's own namespace is passed through untouched, so a user who

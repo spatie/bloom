@@ -23,7 +23,7 @@ struct SleepSettingsSection: View {
                 Text(SleepPrevention.settingTitle)
                 Text(SleepPrevention.settingDetail)
             }
-        } footer: {
+
             Text(SleepPrevention.caveat)
                 .settingsFootnote()
         }

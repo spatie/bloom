@@ -5,7 +5,7 @@ import BloomCore
 
 /// Photographs the centre pane's contextual menu, or the items one of its split submenus offers.
 ///
-///     Bloom --menu-probe /tmp/menu.png [--menu-part menu|kinds|terminal|terminalKinds|browser|row|colour|style|worktree|project|projectHidden|filter|diffScope] [--menu-project <path>] [--menu-base <branch>]
+///     Bloom --menu-probe /tmp/menu.png [--menu-part menu|kinds|terminal|terminalKinds|browser|row|colour|worktree|project|projectHidden|filter|diffScope] [--menu-project <path>] [--menu-base <branch>]
 ///
 /// It exists because a menu is the one part of this interface that cannot be captured any other
 /// way. `ImageRenderer` draws SwiftUI's yellow placeholder for one, a menu only exists while it is
@@ -51,10 +51,12 @@ import BloomCore
 /// offered for a checkout on this machine. No pull request, which is the shape a workspace has
 /// before anything is pushed and the shortest the menu ever is.
 ///
-/// `style` is the composer's output style picker. Its list is read off disk rather than written
-/// down, so `--menu-project` points it at a checkout whose `.claude/output-styles` should be in
-/// the picture. Without one the shot is the built in styles alone, which is what almost every
-/// machine has.
+/// **There is no `style` part any more.** The composer's output style picker was here, and it is
+/// not a menu now: it and the permission picker are panels of two line rows, because their rows
+/// carry a sentence and an `NSMenu` row is one line. A probe that photographed a menu the app no
+/// longer draws would be exactly the failure the paragraph above is written against, so the two
+/// went to `ComposerPickerGallery`, which is rendered offscreen in both appearances and needs
+/// nobody's screen.
 ///
 /// The two are photographed separately because AppKit tracks one menu at a time. A submenu cannot
 /// be opened beside the item it hangs off from inside the process: popping the submenu up while its
@@ -99,8 +101,6 @@ enum MenuProbe {
         case row
         /// The colour submenu inside it, on its own, because AppKit tracks one menu at a time.
         case colour
-        /// The composer's output style picker, rows and describing footnote.
-        case style
         /// The inspector's overflow menu for the worktree it is looking at.
         case worktree
         /// A project header's context menu, for a project that is showing.
@@ -145,11 +145,6 @@ enum MenuProbe {
                     await fresh.model(for: workspace).reloadSettings()
                 }
                 model = fresh
-            }
-            // Read before the menu is built, because building it is synchronous and the scan is a
-            // walk of two directories. An empty catalogue would photograph as the built in list.
-            if part == .style {
-                await outputStyles.refreshIfStale(project: value(for: "--menu-project"))
             }
             // The commits in this menu are read out of a real repository with `git log`, so the
             // rows are commits that exist rather than rows written down here. `--menu-project`
@@ -269,8 +264,6 @@ enum MenuProbe {
             NSHostingMenu(rootView: SidebarFilterMenuItems(
                 filter: .constant(.all), showsHiddenProjects: .constant(true), hiddenCount: 2
             ))
-        case .style:
-            NSHostingMenu(rootView: outputStyleItems)
         case .worktree:
             NSHostingMenu(rootView: worktreeItems)
         case .diffScope:
@@ -376,23 +369,6 @@ enum MenuProbe {
     }
 
     private static var parentOfKinds: NSMenu?
-
-    /// The output style picker's own rows, built from the same catalogue and the same item view
-    /// the composer's footer uses. Selected on Concise, which is the style this menu was added
-    /// for, so the picture shows both the tick and the sentence that goes with it.
-    private static let outputStyles = ComposerOutputStyleCatalog()
-
-    private static var outputStyleItems: ComposerOptionItems {
-        let selection = "Concise"
-        return ComposerOptionItems(
-            options: outputStyles.options(includingCurrent: selection),
-            footnote: outputStyles.detail(of: selection),
-            selection: selection,
-            heading: "Output style",
-            help: "Choose the output style",
-            onSelect: { _ in }
-        )
-    }
 
     /// The inspector's worktree menu, over a workspace invented here.
     ///

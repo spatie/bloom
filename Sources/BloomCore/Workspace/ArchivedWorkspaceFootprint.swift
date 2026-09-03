@@ -57,6 +57,33 @@ public struct ArchivedWorkspaceFootprint: Sendable, Identifiable, Hashable {
         workspace.archivedAt ?? workspace.lastActivityAt
     }
 
+    /// What this record is made of, in the one line a tooltip has.
+    ///
+    /// **It was three columns and a share bar on a screen of its own, and it is a tooltip because
+    /// Home's row has no room for any of it.** That row is two lines and three columns of fixed
+    /// width, and the widths are fixed precisely so a mark, a count and an age line up down the
+    /// list; a fourth column for a message count, or a bar under every row, costs the alignment
+    /// that makes the list readable to buy a number nobody orders by. The size earns its column
+    /// because it is the number the list can be ordered by and the number the Archived chip now
+    /// exists to answer.
+    ///
+    /// The branch standing is here rather than on the row for a different reason. It is the fact
+    /// that decides whether this record is the last thing left of the work, which makes it worth
+    /// saying, and it is already said in full by `ArchiveDeletion.branchStanding` at the only
+    /// moment anyone can act on it. On the row it would be a fourth thing on a two-line row, on
+    /// every row, saying nothing on most of them.
+    public var contents: String {
+        var parts = [ArchiveDeletion.bytes(totalBytes)]
+        if messageCount > 0 {
+            parts.append(
+                "\(ArchiveDeletion.count(messageCount, "transcript message")) in "
+                + "\(ArchiveDeletion.count(sessionCount, "chat"))"
+            )
+        }
+        if branchIsLocal == false { parts.append("branch not on this Mac") }
+        return parts.joined(separator: " \u{00B7} ")
+    }
+
     public init(
         workspace: Workspace,
         repoName: String,
@@ -80,25 +107,19 @@ public struct ArchivedWorkspaceFootprint: Sendable, Identifiable, Hashable {
     }
 }
 
-/// How the list is ordered, as a value rather than as whichever sort the view last ran.
-public enum ArchiveCleanupOrder: String, Sendable, CaseIterable, Hashable {
-    /// What the screen is for: the rows holding the most come first.
-    case largest
-    /// What the owner asked for in words: the ones archived longest ago come first.
-    case oldest
-
-    public var label: String {
-        switch self {
-        case .largest: "Largest"
-        case .oldest: "Oldest"
-        }
-    }
-}
-
-/// The archived workspaces, ordered, totalled, and able to say what deleting a selection destroys.
+/// The archived workspaces and what they hold between them.
 ///
-/// Pure, and it holds every decision this screen makes apart from where the pixels go. The view
-/// that draws it owns no rule about ordering, no arithmetic and no sentence.
+/// **It used to order them and reconcile a multi-selection with a right-clicked row, and neither
+/// is anybody's job any more.** Both existed for a Settings pane that listed the archived
+/// workspaces a second time with a Largest/Oldest switch, a tick box per row and a Delete button
+/// over the selection. That pane has gone into Home, which was already drawing the same rows:
+/// Home orders its own list (`HomeOrder`, because "oldest first" is not one of the orders a
+/// date-grouped list can offer), and Home is single-selection, so a delete is always the one row
+/// that was clicked and there is nothing to reconcile it with.
+///
+/// If Home ever grows a multi-selection, the rule that went is worth reading before writing
+/// another: `ArchiveCleanup.target` in the history, and the destructive bug in its doc comment,
+/// where a confirmation counted one workspace over a selection of three.
 public struct ArchiveCleanup: Sendable, Hashable {
     public let footprints: [ArchivedWorkspaceFootprint]
 
@@ -106,68 +127,11 @@ public struct ArchiveCleanup: Sendable, Hashable {
         self.footprints = footprints
     }
 
-    /// The rows in the order asked for.
-    ///
-    /// Both orders break ties the same way, on the identifier, because a list that reshuffles
-    /// equal rows between two refreshes is a list somebody clicks the wrong row in. Every
-    /// workspace archived in the same second by the same script is such a tie.
-    public func ordered(by order: ArchiveCleanupOrder) -> [ArchivedWorkspaceFootprint] {
-        footprints.sorted { first, second in
-            switch order {
-            case .largest:
-                if first.totalBytes != second.totalBytes { return first.totalBytes > second.totalBytes }
-            case .oldest:
-                if first.archivedAt != second.archivedAt { return first.archivedAt < second.archivedAt }
-            }
-            return first.id.rawValue < second.id.rawValue
-        }
-    }
-
     public var totalBytes: Int {
         footprints.reduce(0) { $0 + $1.totalBytes }
     }
 
-    public var messageCount: Int {
-        footprints.reduce(0) { $0 + $1.messageCount }
-    }
-
     public var isEmpty: Bool { footprints.isEmpty }
-
-    /// The rows for a selection, in the order they were shown, so the confirmation lists them the
-    /// way the list did.
-    public func selected(
-        _ ids: Set<WorkspaceID>, order: ArchiveCleanupOrder
-    ) -> [ArchivedWorkspaceFootprint] {
-        ordered(by: order).filter { ids.contains($0.id) }
-    }
-
-    /// The rows a command aimed at one row acts on: the whole selection when that row is inside
-    /// it, and that row on its own when it is not.
-    ///
-    /// **This is the rule the row context menu did not have, and the bug was destructive.** The
-    /// menu passed the row it had been opened on and nothing else, so somebody who had selected
-    /// three workspaces, watched the strip count them and total their bytes, and then right
-    /// clicked one of the three to reach "Delete Permanently" was shown a confirmation naming one
-    /// workspace and had one workspace deleted. Two numbers about an irreversible delete, on
-    /// screen at the same time, disagreeing: the strip said three and 356 kB, the dialogue said
-    /// one and 121 kB. Read one way that is a delete that took too little, which is the safe
-    /// direction and is why nothing was lost. Read the other way it is a person who has been told
-    /// the wrong thing at the only moment it mattered, and the next time they trust the dialogue
-    /// they will believe the two they still see are gone.
-    ///
-    /// So the decision lives here rather than in the button, both because it is the same rule
-    /// Finder applies to a right click and because a decision taken inside a view is a decision
-    /// nothing can test. It is built on `selected` so the strip, the Delete button and this menu
-    /// read one list through one path and cannot drift apart again.
-    ///
-    /// It can never widen a delete beyond what was already on screen: the answer is either the
-    /// selection the strip was counting, or the single row that was clicked.
-    public func target(
-        _ id: WorkspaceID, selection: Set<WorkspaceID>, order: ArchiveCleanupOrder
-    ) -> [ArchivedWorkspaceFootprint] {
-        if selection.contains(id) { return selected(selection, order: order) }
-        return footprints.filter { $0.id == id }
-    }
 }
 
 /// The size of the database file, in the two numbers that matter after a delete.
@@ -197,6 +161,22 @@ public struct DatabaseSize: Sendable, Hashable {
     /// megabytes is roughly one large transcript, which is the smallest saving a person would
     /// notice in Finder.
     public var isWorthCompacting: Bool { freeBytes >= 8 * 1_000_000 }
+
+    /// Why the list's total and the file's size are two different numbers, said on the control
+    /// that closes the gap.
+    ///
+    /// **Deleting rows does not shrink the file.** SQLite puts the pages on a free list and
+    /// reuses them, which is right and is also the reason a delete of half a gigabyte changes
+    /// nothing in Finder. It has to be said somewhere, and where it used to be said was a
+    /// paragraph across the foot of a pane of its own. Home's foot is one line, so it is the
+    /// tooltip on the button it is about, standing next to the number it explains.
+    public var compactionHelp: String {
+        """
+        \(ArchiveDeletion.bytes(freeBytes)) inside the database is space nothing is using. \
+        Deleting frees pages inside the file; compacting rewrites the file and hands them back to \
+        the disk, which takes a while and stops everything else while it runs.
+        """
+    }
 }
 
 /// What deleting a set of archived workspaces would destroy, in the words the confirmation uses.
@@ -385,8 +365,7 @@ public struct ArchiveDeletion: Sendable, Hashable {
     ///   forced it: Home's transcript heading counts matches, and "1 matchs" is the sort of thing
     ///   a reader stops on.
     public static func count(_ value: Int, _ noun: String, plural: String? = nil) -> String {
-        let word = value == 1 ? noun : (plural ?? noun + "s")
-        return "\(value.formatted()) \(word)"
+        Counted.of(value, noun, plural: plural)
     }
 
     /// One formatter for every size in this feature, so the list, the summary and the confirmation

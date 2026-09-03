@@ -24,7 +24,17 @@ public struct Subagent: Sendable, Hashable, Identifiable {
     /// is a symlink into `~/.claude/projects/.../subagents/agent-<task_id>.jsonl` and it holds the
     /// prompt, the answer and the API error.
     public private(set) var outputFile: String?
+    /// The elapsed seconds the CLI last reported, which is the count it keeps on the work itself.
+    ///
+    /// **Not what the row reads out, and that is the fix this pair records.** It moves only on
+    /// `tool_progress`, and on a real fan-out of seven subagents not one tick ever landed: the
+    /// row said nothing at all on the right, so a still mark was the whole of what a running
+    /// subagent looked like. The CLI's number is still preferred where there is one, because it
+    /// is the count of the work rather than of the row. See `startedAt` and `SubagentRow.detail`.
     public private(set) var elapsedSeconds: Int = 0
+    /// When `task_started` arrived, by Bloom's own clock, so a row can count its own seconds when
+    /// no tick does it for us.
+    public let startedAt: Date
     /// The API refusing it, while it is being refused. Cleared by the first tick that does not
     /// carry one, because a retry that succeeded is not a fact about the subagent any more.
     public private(set) var retry: AgentRetry?
@@ -33,7 +43,8 @@ public struct Subagent: Sendable, Hashable, Identifiable {
     /// question is how long the ROW has been on screen and the CLI's counter is about the work.
     public private(set) var finishedAt: Date?
 
-    init(_ start: SubagentStart) {
+    init(_ start: SubagentStart, at now: Date) {
+        startedAt = now
         id = start.id
         toolUseID = start.toolUseID
         description = start.description
@@ -59,8 +70,10 @@ public struct Subagent: Sendable, Hashable, Identifiable {
         outputFile: String? = nil,
         elapsedSeconds: Int = 0,
         retry: AgentRetry? = nil,
-        finishedAt: Date? = nil
+        finishedAt: Date? = nil,
+        startedAt: Date = Date()
     ) {
+        self.startedAt = startedAt
         self.id = id
         self.toolUseID = toolUseID
         self.description = description
@@ -86,6 +99,18 @@ public struct Subagent: Sendable, Hashable, Identifiable {
     /// routinely does NOT for a background command: `task_notification.output_file` comes through
     /// empty for `local_bash` in the same captures where it is an absolute path for `local_agent`.
     public var hasOutput: Bool { !(outputFile ?? "").isEmpty }
+
+    /// How long it has been going, by whichever of the two clocks is further on.
+    ///
+    /// The CLI's `tool_progress` count where there is one, because that is the count of the work,
+    /// and Bloom's own otherwise, because a fan-out that produces no ticks at all is a real thing
+    /// that happened and a row reading nothing is what it looked like. A subagent that has
+    /// finished counts to the moment it finished rather than to now: nothing arrives to raise it
+    /// again, and a row that kept counting would be inventing seconds.
+    public func secondsElapsed(at now: Date) -> Int {
+        let ours = Int((finishedAt ?? now).timeIntervalSince(startedAt))
+        return max(elapsedSeconds, max(0, ours))
+    }
 
     fileprivate mutating func move(to state: SubagentState, at now: Date) {
         self.state = state
@@ -199,7 +224,7 @@ public struct SubagentRoster: Sendable, Hashable {
         switch signal {
         case .started(let start):
             guard let index = subagents.firstIndex(where: { $0.id == start.id }) else {
-                subagents.append(Subagent(start))
+                subagents.append(Subagent(start, at: now))
                 if !start.toolUseID.isEmpty { byToolUse[start.toolUseID] = start.id }
                 return
             }

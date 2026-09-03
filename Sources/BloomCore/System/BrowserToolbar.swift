@@ -142,7 +142,7 @@ public struct BrowserToolbar: Equatable, Sendable {
             symbol: "camera",
             name: "Send a Screenshot to the Agent",
             help: "Send a screenshot of this page to the agent",
-            isEnabled: !isCapturing
+            isEnabled: destination != nil && !isCapturing
         )
     }
 

@@ -42,7 +42,7 @@ struct ScaledFont: Hashable, Sendable {
     /// diff stats line up in a column because they are all one face, and a prose face chosen for
     /// paragraphs is not a face whose columns line up.
     func resolved(scale: CGFloat, face: ChatFont = .system) -> Font {
-        let wantsFace = face != .system && design != .monospaced
+        let wantsFace = !face.isSystemFace && design != .monospaced
         guard scale != 1 || wantsFace else { return unscaled }
         let base = NSFont.preferredFont(forTextStyle: style.appKitStyle)
         let size = (base.pointSize * scale).rounded()
@@ -65,7 +65,7 @@ struct ScaledFont: Hashable, Sendable {
         guard design != .monospaced else {
             return .monospacedSystemFont(ofSize: size, weight: (weight ?? base.systemWeight).appKitWeight)
         }
-        guard face != .system else {
+        guard !face.isSystemFace else {
             return .systemFont(ofSize: size, weight: (weight ?? base.systemWeight).appKitWeight)
         }
         return face.nsFont(size: size)

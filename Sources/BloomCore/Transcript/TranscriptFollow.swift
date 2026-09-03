@@ -4,8 +4,23 @@ import Foundation
 ///
 /// **This is about the reader who is already at the end.** Somebody who has scrolled up to read
 /// something is nobody's business but their own: `ScrollEnd` says who is at the end, the jump pill
-/// says there is more below, and nothing here ever moves a view that is further from the end than
-/// `ScrollEnd.threshold`. That one rule is what makes the rest of this safe.
+/// says there is more below, and nothing here ever moves a view that somebody else has taken. That
+/// one rule is what makes the rest of this safe.
+///
+/// ## Whose gap it is, which is not the same question as how wide it is
+///
+/// That rule used to be a distance: a gap wider than `ScrollEnd.threshold` was abandoned, whatever
+/// had opened it. One number was answering two questions. "Has the reader scrolled away" is
+/// answered by a flag, because the reader either took the view or did not, and `ownsGap` is that
+/// flag: the caller put the view where it is and nothing has moved it since. "Has our own travel
+/// fallen behind" is a distance, and the answer to it is to catch up rather than to give up.
+///
+/// Reported as the transcript stopping following part way through a turn and never starting
+/// again. A stored row replacing the tail with a taller block, a tool result landing whole, a
+/// height correction below the fold or one starved display link frame each open a gap in a single
+/// step while the view is mid travel, and past ninety six points the following simply stopped:
+/// the link stayed up because a turn was still running, so `endLink` was never reached, and when
+/// the turn ended `endLink`'s own at-the-end guard meant nothing was handed back either.
 ///
 /// ## Why a settle rather than a step per row
 ///
@@ -106,25 +121,41 @@ public enum TranscriptFollow {
 
     /// Where the travel starts from, when content has just grown under a reader at the end.
     ///
-    /// Called with what the view grew by since the last frame. A reader who is anywhere but at the
-    /// end is left exactly where they are, which is the same rule `step` follows and is why this
-    /// cannot yank anybody: growth is only ever taken back from somebody who was watching the end
-    /// of it.
+    /// Called with what the view grew by since the last frame. A view that is away from the end
+    /// and is not the caller's own is left exactly where it is, which is the same rule `step`
+    /// follows and is why this cannot yank anybody: growth is only ever taken back from somebody
+    /// who was watching the end of it.
     ///
     /// It returns the offset unchanged rather than an optional so that a caller cannot honour the
     /// take-back and skip the guard.
-    public static func start(offset: Double, end: Double, grew: Double) -> Double {
+    ///
+    /// **`ownsGap` is also what stops a gap of this object's own running away**, which is the
+    /// stranding in the header. Content growing does not move the offset, so an arrival mid travel
+    /// simply adds its own height to a gap that was already open, and enough of them in a row put
+    /// the view further from the end than the following was ever willing to travel.
+    ///
+    /// So what is taken back is how far behind the view already is or how much has just arrived,
+    /// whichever is the more, capped either way. The two are the same number in the case this was
+    /// written for, because something else pins the view to the end on the pass that grows the
+    /// content and the arrival is then the whole of the distance. They come apart mid travel, and
+    /// there the larger one is the gap: below the cap the arithmetic hands back the offset it was
+    /// given, which is the coalescing rule unchanged, and above it the excess is given up in one
+    /// step so that what is left is a travel rather than a tour.
+    public static func start(offset: Double, end: Double, grew: Double, ownsGap: Bool) -> Double {
         guard grew > 0, end > 0 else { return offset }
-        // Only somebody the content has just been pinned under. Mid travel the gap is already
-        // open, and taking it back again would be a second bite of the same arrival.
-        guard end - offset <= arrived else { return offset }
-        return max(0, end - min(grew, takeBack))
+        let gap = end - offset
+        // Somebody else's open gap is somebody reading further up, and taking a growth back from
+        // them is the one thing this file may never do. Ours, or a view the content has just been
+        // pinned under, is the only thing there is to take back from.
+        guard ownsGap || gap <= arrived else { return offset }
+        return max(0, end - min(max(gap, grew), takeBack))
     }
 
     /// This frame's offset, or `rest`.
     ///
-    /// `frame` is the time since the last one, in seconds.
-    public static func step(offset: Double, end: Double, frame: Double) -> Move {
+    /// `frame` is the time since the last one, in seconds. `ownsGap` is whether the view is where
+    /// this object left it: see the header, and `start`.
+    public static func step(offset: Double, end: Double, frame: Double, ownsGap: Bool) -> Move {
         guard end > 0 else { return .rest }
         let gap = end - offset
 
@@ -133,8 +164,15 @@ public enum TranscriptFollow {
         // backwards, so it is simply put right.
         guard gap > -arrived else { return .settle(end) }
         guard gap > arrived else { return .rest }
-        // Somebody reading further up. Not ours, at any distance, ever.
-        guard gap <= ScrollEnd.threshold else { return .rest }
+        if gap > ScrollEnd.threshold {
+            // Somebody reading further up. Not ours, at any distance, ever.
+            guard ownsGap else { return .rest }
+            // And the same distance when the gap is this object's own is a travel that has fallen
+            // behind, which is jumped rather than abandoned. To `takeBack` rather than to the end,
+            // so that the last of it is still something the eye can follow: this is what the same
+            // arrival would have looked like had every frame been on time.
+            return .settle(end - takeBack)
+        }
 
         let elapsed = min(max(frame, 0), longestFrame)
         guard elapsed > 0 else { return .rest }

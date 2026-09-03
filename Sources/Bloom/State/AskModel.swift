@@ -105,8 +105,30 @@ final class AskModel {
     /// Archived rather than deleted, which is what the column already means everywhere else: the
     /// old conversation is still in the database, with its cost and its permission history, and
     /// nothing that has been said is thrown away because somebody wanted a clean start.
-    func startFresh() async {
+    func startFresh(controls: ComposerControls? = nil, draft: String = "") async {
         guard let store = app.store, let current = session else { return }
+
+        let carriedControls: ComposerControls
+        if let controls {
+            carriedControls = controls
+        } else {
+            let isFastMode = (try? await store.setting(
+                ComposerControls.fastModeKey(sessionID: current.id)
+            )) == "1"
+            let outputStyle = (try? await store.setting(
+                ComposerControls.outputStyleKey(sessionID: current.id)
+            )) ?? OutputStyle.defaultName
+            let contextWindow = CodexContextWindow.normalised(try? await store.setting(
+                ComposerControls.contextWindowKey(sessionID: current.id)
+            ))
+            carriedControls = ComposerControls(
+                session: current,
+                isFastMode: isFastMode,
+                outputStyle: outputStyle,
+                codexContextWindow: contextWindow
+            )
+        }
+
         transcript?.teardown()
         transcript = nil
         session = nil
@@ -114,6 +136,18 @@ final class AskModel {
         // row and may have written any of them since this copy was read.
         _ = try? await store.update(sessionID: current.id) { $0.archivedAt = Date() }
         app.bridge?.retire(sessionID: current.id)
+
+        var next = AskConversation.newSession()
+        next.model = carriedControls.model
+        next.effort = carriedControls.effort
+        next.agentKind = carriedControls.agentKind
+        next.permissionMode = carriedControls.permissionMode
+        if let made = try? await store.upsert(next) {
+            await carriedControls.store(sessionID: made.id, in: store)
+            if !draft.isEmpty {
+                try? await store.saveDraft(sessionID: made.id, body: draft)
+            }
+        }
         await open()
     }
 

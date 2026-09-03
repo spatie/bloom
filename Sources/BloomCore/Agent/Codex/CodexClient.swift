@@ -42,6 +42,11 @@ public actor CodexClient {
         /// `-c` override at launch is a per-session registration exactly as Claude Code's
         /// recomputed argv is. See `BridgeRegistration.codexArguments`.
         public var bridge: BridgeAttachment?
+        /// How large this process should be told the model's context window is, in tokens, or
+        /// `CodexContextWindow.modelDefault` for Codex's own catalogue. Per process, which here is
+        /// per chat, and unlike the model and the effort it cannot travel with a turn: the two
+        /// `-c` keys behind it are read when the server starts. See `CodexContextWindow`.
+        public var contextWindow: Int
 
         public init(
             executable: String = CodexClient.executable,
@@ -50,7 +55,8 @@ public actor CodexClient {
             clientName: String = "Bloom",
             clientVersion: String = "0.0.0",
             environment: [String: String] = Shell.environment(),
-            bridge: BridgeAttachment? = nil
+            bridge: BridgeAttachment? = nil,
+            contextWindow: Int = CodexContextWindow.modelDefault
         ) {
             self.executable = executable
             self.cwd = cwd
@@ -59,6 +65,7 @@ public actor CodexClient {
             self.clientVersion = clientVersion
             self.environment = environment
             self.bridge = bridge
+            self.contextWindow = contextWindow
         }
     }
 
@@ -82,6 +89,7 @@ public actor CodexClient {
         if let bridge = configuration.bridge {
             arguments += BridgeRegistration.codexArguments(bridge)
         }
+        arguments += CodexContextWindow.overrides(for: configuration.contextWindow)
         return AgentLaunch(
             executable: configuration.executable,
             arguments: arguments,
@@ -299,13 +307,15 @@ public actor CodexClient {
         cwd: String? = nil,
         model: String? = nil,
         approvalPolicy: CodexApprovalPolicy? = nil,
-        sandbox: CodexSandboxMode? = nil
+        sandbox: CodexSandboxMode? = nil,
+        approvalsReviewer: CodexApprovalsReviewer? = nil
     ) async throws -> CodexThreadHandle {
         let result = try await send("thread/start", params: .object(omittingNil: [
             "cwd": .string(cwd ?? configuration.cwd),
             "model": model.map(JSONValue.string),
             "approvalPolicy": approvalPolicy.map { .string($0.rawValue) },
             "sandbox": sandbox.map { .string($0.rawValue) },
+            "approvalsReviewer": approvalsReviewer.map { .string($0.rawValue) },
         ]))
         guard let id = result["thread"]?["id"]?.stringValue else {
             throw CodexClientError.unexpectedResult(method: "thread/start")
@@ -356,7 +366,8 @@ public actor CodexClient {
         model: String? = nil,
         effort: String? = nil,
         approvalPolicy: CodexApprovalPolicy? = nil,
-        sandboxPolicy: JSONValue? = nil
+        sandboxPolicy: JSONValue? = nil,
+        approvalsReviewer: CodexApprovalsReviewer? = nil
     ) async throws -> CodexTurn {
         let result = try await send("turn/start", params: .object(omittingNil: [
             "threadId": .string(threadID),
@@ -365,6 +376,7 @@ public actor CodexClient {
             "effort": effort.flatMap { $0.isEmpty ? nil : .string($0) },
             "approvalPolicy": approvalPolicy.map { .string($0.rawValue) },
             "sandboxPolicy": sandboxPolicy,
+            "approvalsReviewer": approvalsReviewer.map { .string($0.rawValue) },
         ]))
         return CodexTurn.decode(result["turn"] ?? .null, threadID: threadID, raw: Data())
     }
@@ -541,6 +553,24 @@ public enum CodexApprovalPolicy: String, Sendable, Hashable, CaseIterable {
     case untrusted
     case onRequest = "on-request"
     case never
+}
+
+/// Who answers the questions the approval policy raises.
+///
+/// **The third axis, and the one Bloom was not sending.** A policy crossed with a sandbox decides
+/// which actions become questions; this decides who is asked. `user` is the default and is the
+/// person at the keyboard. `autoReview` hands the question to a subagent of Codex's own, which
+/// gathers context and applies a risk framework before approving or denying, and it is what the
+/// Codex app means by "Approve for me" and what `codex --approve-for-me` turns on.
+///
+/// Measured against 0.149.1 rather than read off a document: `thread/start` and `turn/start` both
+/// parse the field, and a value neither of them knows comes back as ``unknown variant
+/// `bogus_value`, expected one of `user`, `auto_review`, `guardian_subagent` ``. The third of
+/// those is the older spelling of the second and is deliberately not offered, because two ways to
+/// ask for one behaviour is a way for the two to drift.
+public enum CodexApprovalsReviewer: String, Sendable, Hashable, CaseIterable {
+    case user
+    case autoReview = "auto_review"
 }
 
 /// The kebab-case spelling `thread/start` and `thread/resume` take. `turn/start` takes a different

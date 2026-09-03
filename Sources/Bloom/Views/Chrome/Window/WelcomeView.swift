@@ -4,10 +4,13 @@ import BloomCore
 
 /// What the welcome window draws.
 ///
-/// Two steps, and the sequence is `OnboardingFlow` in the core rather than a boolean here,
-/// because which screen follows which and whether back is offered is the only part of a wizard
-/// that can be wrong and a decision taken inside a view is a decision nothing can test. The
-/// greeting is `WelcomeGreeting`; everything below is the second step.
+/// Two steps and two offers, and the sequence is `OnboardingFlow` in the core rather than a set of
+/// booleans here, because which screen follows which, whether back is offered and whether the
+/// third screen exists at all is the only part of a wizard that can be wrong, and a decision taken
+/// inside a view is a decision nothing can test. The greeting is `WelcomeGreeting`, the checks are
+/// the second step and are everything below, the third is `WelcomeCommandLine`, which is drawn
+/// only when `CommandLineRegistration` says there is something to offer, and the last is
+/// `WelcomePromptSubmission`, which is always there because nothing can make it empty.
 ///
 /// Three bands, in the register the About window established: the brand's plinth with the water
 /// moving in it, the reading ground under a hairline, and a chrome strip at the foot with the
@@ -16,6 +19,9 @@ import BloomCore
 /// is carrying information rather than decorating the column. See `soundingLine`.
 struct WelcomeView: View {
     let inspection: SetupInspection
+    /// The optional third step's model: the command, and whether the owner's own Claude Code has
+    /// already been told about this Bloom.
+    let registration: CommandLineRegistration
     let onFinish: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -27,8 +33,14 @@ struct WelcomeView: View {
     /// The login running inside this window, and which row asked for it.
     @State private var login: (tool: SetupTool, session: GitHubLoginSession)?
 
-    init(inspection: SetupInspection, start: OnboardingStep, onFinish: @escaping () -> Void) {
+    init(
+        inspection: SetupInspection,
+        registration: CommandLineRegistration,
+        start: OnboardingStep,
+        onFinish: @escaping () -> Void
+    ) {
         self.inspection = inspection
+        self.registration = registration
         self.onFinish = onFinish
         _flow = State(initialValue: OnboardingFlow(step: start))
     }
@@ -43,20 +55,35 @@ struct WelcomeView: View {
 
     private var report: SetupReport { inspection.shown }
 
+    /// See the note where they are applied: the brand band is off the spacing scale on purpose.
+    private static let plinthTop: CGFloat = 30
+    private static let plinthBottom: CGFloat = 22
+
     var body: some View {
         Group {
             switch flow.step {
             case .greeting:
                 WelcomeGreeting(
                     isFirstVisit: flow.isFirstVisit(to: .greeting),
+                    continueTitle: flow.forwardButtonTitle,
                     onContinue: { move { flow.advance() } }
                 )
             case .checks:
                 checksStep
+            case .commandLine:
+                commandLineStep
+            case .promptSubmission:
+                promptStep
             }
         }
         .frame(width: Self.width)
         .background(Palette.surface)
+        // The answer comes off the disk, so it lands after the window is already up. Applied as it
+        // arrives rather than read at the moment the checks footer draws, because a `body` that
+        // asked would be asking on every redraw of a screen with four probes settling on it.
+        .onChange(of: registration.isOffered, initial: true) { _, isOffered in
+            flow.offerCommandLine(isOffered)
+        }
         .onAppear {
             inspection.revealsInstantly = reduceMotion
             // Started here rather than on the checks step, so four subprocesses are already
@@ -67,6 +94,7 @@ struct WelcomeView: View {
         .onDisappear {
             login?.session.stop()
             inspection.cancel()
+            registration.cancel()
         }
     }
 
@@ -92,6 +120,41 @@ struct WelcomeView: View {
         .onDisappear { inspection.dismissChecks() }
     }
 
+    /// The offer, in the same three bands the checks step is built from.
+    ///
+    /// `command` is nil only if this copy of Bloom lost its bridge while somebody was standing on
+    /// this screen, which nothing produces: `AppModel.bridge` is cleared during the quit sequence
+    /// and nowhere else. There is no consolation copy for it, because the footer is still drawn
+    /// and its button still moves the window on.
+    private var commandLineStep: some View {
+        VStack(spacing: 0) {
+            plinth
+            hairline
+            if let command = registration.command {
+                WelcomeCommandLine(command: command)
+            }
+            hairline
+            footer
+        }
+        .transition(reduceMotion ? .identity : .opacity)
+    }
+
+    /// The last screen, in the same three bands as the two before it.
+    ///
+    /// Its one control is the offer, so it is in the reading band rather than in the footer: the
+    /// footer's button still says "Start using Bloom" and still only leaves, which is what keeps
+    /// a screen somebody may walk straight past from reading as one they have to get through.
+    private var promptStep: some View {
+        VStack(spacing: 0) {
+            plinth
+            hairline
+            WelcomePromptSubmission(onSubmit: submitAPrompt)
+            hairline
+            footer
+        }
+        .transition(reduceMotion ? .identity : .opacity)
+    }
+
     private var hairline: some View {
         Rectangle().fill(Palette.border).frame(height: Metrics.hairline)
     }
@@ -114,14 +177,19 @@ struct WelcomeView: View {
                 .accessibilityHidden(true)
 
             Text(verbatim: "Welcome to Bloom")
-                .font(.system(size: 26, weight: .light, design: .serif))
-                .tracking(-0.6)
+                .font(Typo.display)
+                .tracking(Typo.displayTracking)
                 .foregroundStyle(Brand.foam)
                 .padding(.top, Metrics.spacingWide + Metrics.spacingSmall)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 30)
-        .padding(.bottom, 22)
+        // The brand plinth's own numbers, and deliberately not rungs of the spacing scale. This
+        // band is a fixed-size window's header holding serif display type over moving water, laid
+        // out against the title bar rather than against a row of controls, and the scale is for
+        // gaps between things that sit in a resizable pane. `AboutWindow` says the same about its
+        // own two. Off the scale and said so, rather than off the scale in silence.
+        .padding(.top, Self.plinthTop)
+        .padding(.bottom, Self.plinthBottom)
         .padding(.horizontal, Metrics.pane)
         .background {
             ZStack {
@@ -152,7 +220,7 @@ struct WelcomeView: View {
     private func verdict(_ report: SetupReport) -> some View {
         VStack(alignment: .leading, spacing: Metrics.spacing) {
             Text(report.headline)
-                .font(.system(size: 19, weight: .medium, design: .serif))
+                .font(Typo.displayHeading)
                 .foregroundStyle(Palette.textPrimary)
 
             Text(report.sentence)
@@ -428,7 +496,8 @@ struct WelcomeView: View {
         .padding(.vertical, Metrics.spacingWide)
         .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
         .overlay(
-            RoundedRectangle(cornerRadius: Metrics.corner).strokeBorder(Palette.border)
+            RoundedRectangle(cornerRadius: Metrics.corner)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         )
         .transition(reduceMotion ? .identity : .opacity)
     }
@@ -473,7 +542,10 @@ struct WelcomeView: View {
                 .frame(height: 220)
         }
         .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
-        .overlay(RoundedRectangle(cornerRadius: Metrics.corner).strokeBorder(Palette.border))
+        .overlay(
+            RoundedRectangle(cornerRadius: Metrics.corner)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
+        )
     }
 
     private func startLogin(_ check: SetupCheck, fix: SetupFix) {
@@ -487,7 +559,11 @@ struct WelcomeView: View {
         guard let session = GitHubLoginSession(
             executable: executable,
             arguments: Array(parts.dropFirst()),
-            directory: FileManager.default.homeDirectoryForCurrentUser.path,
+            // Not the home directory. This is the first launch, before Bloom has been shown a
+            // project, and the command is a sign-in that reads nothing off the disk it is standing
+            // on. Rooting it at `~` pointed Claude Code at everything the user owns and made macOS
+            // ask about it in Bloom's name. See `AgentScratchDirectory`.
+            directory: AgentScratchDirectory.current(),
             onExit: { _ in
                 // Whatever it exited with, ask the machine rather than the exit status. A CLI that
                 // returns zero because the user pressed Escape at its first question has not
@@ -509,12 +585,23 @@ struct WelcomeView: View {
 
     /// One primary button that always works, and one quiet way out beside it.
     ///
-    /// The primary is never disabled and never waits for the settling: `inspection.truth` is what
-    /// titles it, so a machine that has already answered can be left the instant its owner wants
-    /// to leave, whatever the rows are still doing. Making somebody watch an animation they did
-    /// not ask for is the trap this whole window is one step away from.
+    /// The primary is never disabled and never waits for the settling, so a machine that has
+    /// already answered can be left the instant its owner wants to leave, whatever the rows are
+    /// still doing. Making somebody watch an animation they did not ask for is the trap this whole
+    /// window is one step away from.
+    ///
+    /// What it says and what it does is `OnboardingPrimary` in the core. It was an `if` on the
+    /// verdict written out here, which was right while there were two screens and one of them had
+    /// no footer; a button whose meaning depends on the step as well as on the machine is a rule,
+    /// and a rule in a `body` is a rule nothing can test.
     private var footer: some View {
-        HStack(spacing: Metrics.inset) {
+        let primary = OnboardingPrimary(
+            step: flow.step,
+            verdict: inspection.truth.verdict,
+            next: flow.next
+        )
+
+        return HStack(spacing: Metrics.inset) {
             if let title = flow.backButtonTitle {
                 // Bottom left, which is where a Mac setup assistant has put Go Back since there
                 // were setup assistants. It is drawn quietly and it never carries the return key:
@@ -537,43 +624,74 @@ struct WelcomeView: View {
             // Check again next to each other read as one pair of links and neither of them said
             // which way it went; back belongs with the way out, and Check again belongs with the
             // button it is the alternative to.
-            if inspection.truth.verdict == .blocked {
-                Button("Skip for now") { finish() }
-                    .buttonStyle(.plain)
-                    .font(Typo.body)
-                    .foregroundStyle(Palette.link)
-            } else {
-                Button("Check again") { inspection.start() }
-                    .buttonStyle(.plain)
-                    .font(Typo.body)
-                    .foregroundStyle(inspection.isRunning ? Palette.textTertiary : Palette.link)
-                    .disabled(inspection.isRunning)
-            }
-
-            Button(inspection.truth.primaryButtonTitle) {
+            //
+            // Both of them are about the column, so neither follows the window onto the screens
+            // after it: "Check again" there would re-probe a list that is not on screen, and a
+            // second way out beside a button that already leaves is how an offer starts reading
+            // as a step somebody has to get past.
+            if flow.step == .checks {
                 if inspection.truth.verdict == .blocked {
-                    inspection.start()
+                    Button("Skip for now") { finish() }
+                        .buttonStyle(.plain)
+                        .font(Typo.body)
+                        .foregroundStyle(Palette.link)
                 } else {
-                    finish()
+                    Button("Check again") { inspection.start() }
+                        .buttonStyle(.plain)
+                        .font(Typo.body)
+                        .foregroundStyle(inspection.isRunning ? Palette.textTertiary : Palette.link)
+                        .disabled(inspection.isRunning)
                 }
             }
-            .keyboardShortcut(.defaultAction)
-            .buttonStyle(.borderedProminent)
-            // Bloom's own fill rather than whatever the user picked in Appearance, which is what
-            // every other prominent button in the app already does. A system blue button two
-            // inches under a teal wordmark is the one place this window could have looked like
-            // somebody else's.
-            .tint(Palette.accentFill)
-            .controlSize(.large)
+
+            Button(primary.title) { perform(primary.action) }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                // The user's control accent, matching every other primary action in the app.
+                .tint(Palette.controlAccent)
+                .controlSize(.large)
         }
         .padding(.horizontal, Metrics.pane)
         .padding(.vertical, Metrics.inset + Metrics.spacingSmall)
         .background(Palette.surfaceSunken)
     }
 
+    private func perform(_ action: OnboardingPrimary.Action) {
+        switch action {
+        case .checkAgain:
+            inspection.start()
+        case .advance:
+            // The login goes with the step, for the reason the back control kills it: walking off
+            // the checks would otherwise leave a `gh auth login` waiting on a pty nobody can see,
+            // for an answer nobody can give it.
+            move { stopLogin(); flow.advance() }
+        case .finish:
+            finish()
+        }
+    }
+
     private func finish() {
         stopLogin()
         WelcomeLaunch.recordCompletion()
         onFinish()
+    }
+
+    /// Opens the same sheet Help's Submit a Prompt opens, and closes this window on the way to it.
+    ///
+    /// **The closing is the route rather than a courtesy.** That sheet is presented by `RootView`,
+    /// on the main window, through `FeedbackPresenter`, because a draft has to outlive the sheet
+    /// it was typed into and a `Commands` body cannot present anything. This window is a separate
+    /// `NSWindow` built by hand and is not in the app's environment, so presenting the same sheet
+    /// here would mean either a second view bound to `FeedbackPresenter.sheet`, with two windows
+    /// raising a form each off one assignment, or a copy of `PromptSubmissionSheet` wired to
+    /// something else, which is two forms to keep in step over one endpoint. Left as it is, the
+    /// form would open on the window behind this one and the press would look like nothing
+    /// happening. So the window goes first, and the screen's own caption says it will.
+    ///
+    /// It finishes the sequence, and should: this is the last screen, and somebody who pressed the
+    /// one control on it has done more than the button beside it asks for.
+    private func submitAPrompt() {
+        finish()
+        FeedbackPresenter.shared.open(.prompt)
     }
 }

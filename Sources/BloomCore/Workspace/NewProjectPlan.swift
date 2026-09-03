@@ -16,6 +16,14 @@ import Foundation
 // `FolderVerdict` correctly refuses as a container of projects. So the location rules that still
 // apply (Bloom's own worktrees, a repository above, the folders macOS owns) are asked here of the
 // target, and the ones about what a folder holds are asked only when the folder exists.
+//
+// **Which is why this rule is now asked only of a target with nothing at it, or an empty folder.**
+// `ProjectTargetVerdict` is the one caller, and it asks what a folder holds first. Two refusals
+// used to live here that were not about the disk at all: a folder that was already a repository,
+// and a folder with files in it. Both of their sentences ended by telling the person to close the
+// window and come in through the other door, and there is one door now, so a repository is Add and
+// a folder with work in it is Start Tracking. Retiring them is what the unification looks like
+// from in here.
 
 // MARK: - What the disk says about the path being typed
 
@@ -44,8 +52,16 @@ public struct NewProjectFacts: Sendable, Equatable {
     /// writable for anything below it to be created.
     public var nearestExistingAncestor: String
     public var isAncestorWritable: Bool
+    /// Whether the target itself can be written to, which is a different question from the one
+    /// above and is the one that matters once the folder is already there: `git init` writes
+    /// inside it.
+    public var isTargetWritable: Bool
     public var homeDirectory: String
     public var workspacesRoot: String
+    /// Direct children of the target that are repositories of their own. Gathered only for a
+    /// folder that is there and has something in it, because it answers one question and it is
+    /// `FolderVerdict`'s: a folder holding three of these is somebody's projects directory.
+    public var childRepositories: [String]
 
     public init(
         name: String = "",
@@ -59,8 +75,10 @@ public struct NewProjectFacts: Sendable, Equatable {
         enclosingRepository: String? = nil,
         nearestExistingAncestor: String = "",
         isAncestorWritable: Bool = true,
+        isTargetWritable: Bool = true,
         homeDirectory: String = "",
-        workspacesRoot: String = ""
+        workspacesRoot: String = "",
+        childRepositories: [String] = []
     ) {
         self.name = name
         self.location = location
@@ -73,8 +91,37 @@ public struct NewProjectFacts: Sendable, Equatable {
         self.enclosingRepository = enclosingRepository
         self.nearestExistingAncestor = nearestExistingAncestor
         self.isAncestorWritable = isAncestorWritable
+        self.isTargetWritable = isTargetWritable
         self.homeDirectory = homeDirectory
         self.workspacesRoot = workspacesRoot
+        self.childRepositories = childRepositories
+    }
+}
+
+extension NewProjectFacts {
+    /// The same target, put to the rule that judges a folder that is there.
+    ///
+    /// **`isRepository` here means a `.git` in this very folder, and not git's own answer.** The
+    /// facts are gathered while somebody is typing, so they cost no subprocess, and a walk up the
+    /// tree with `FileManager` cannot tell a work tree from a folder that merely sits inside one.
+    /// That is the honest answer anyway for a window that has to say what it will do to the path
+    /// in front of it: `~/dev/code/bloom/Tools` is refused for being inside a repository, with the
+    /// repository offered as the way out, rather than silently adding a project the person did not
+    /// type.
+    var folderFacts: FolderFacts {
+        FolderFacts(
+            path: path,
+            isRepository: targetIsRepository,
+            repositoryRoot: targetIsRepository ? path : nil,
+            enclosingRepository: targetIsRepository ? nil : enclosingRepository,
+            isWritable: isTargetWritable,
+            isDirectory: targetIsDirectory,
+            exists: targetExists,
+            isAbsolute: !path.isEmpty,
+            homeDirectory: homeDirectory,
+            workspacesRoot: workspacesRoot,
+            childRepositories: childRepositories
+        )
     }
 }
 
@@ -100,12 +147,6 @@ public enum NewProjectRefusal: Sendable, Equatable {
     case locationNotAbsolute(String)
     /// Something is there and it is not a folder.
     case somethingThere(String)
-    /// The folder is there and has things in it. The one refusal that is really a redirection:
-    /// the sheet that turns an existing folder into a repository is the answer, not this one.
-    case folderNotEmpty(String)
-    /// The folder is there and is already a repository, so it is a project waiting to be added
-    /// rather than one waiting to be made.
-    case alreadyRepository(String)
     case insideRepository(String)
     case insideBloomsWorkspaces(String)
     /// A folder macOS or the Finder owns.
@@ -114,6 +155,17 @@ public enum NewProjectRefusal: Sendable, Equatable {
 }
 
 public extension NewProjectRefusal {
+    /// The repository to offer as the way out, where there is an obvious one.
+    ///
+    /// The same accessor `FolderRefusal` has, for the same case and for the same reason: the two
+    /// lists are one policy and a person meeting either of them should be offered the same way
+    /// out. The path is the abbreviated one carried by the case, which is what goes back into the
+    /// field.
+    var alternative: String? {
+        guard case .insideRepository(let root) = self else { return nil }
+        return root
+    }
+
     /// One sentence, said under the field. No command lines: none of these is fixed by running
     /// something, they are fixed by typing something else.
     var sentence: String {
@@ -122,8 +174,8 @@ public extension NewProjectRefusal {
             "Give the project a name."
         case .nameHasSeparator:
             """
-            A project's name is the name of its folder, so it cannot hold a slash or a colon. \
-            Choose where it goes with the location field instead.
+            A project's name is the name of its folder, and macOS reads a colon in one as a slash. \
+            Pick another name, or type the whole path of the folder you mean.
             """
         case .nameIsHidden:
             """
@@ -136,21 +188,11 @@ public extension NewProjectRefusal {
             "Bloom cannot tell where '\(path)' is, because it is not a full path."
         case .somethingThere(let path):
             "There is already a file called \(path). Pick another name."
-        case .folderNotEmpty(let path):
-            """
-            \(path) already exists and has things in it. Bloom starts a new project in a folder it \
-            makes or in an empty one. Pick another name, or add that folder as a project instead.
-            """
-        case .alreadyRepository(let path):
-            """
-            \(path) is already a git repository. Add it as a project rather than creating a new \
-            one over the top of it.
-            """
         case .insideRepository(let root):
             """
             That location is inside the git repository at \(root). Starting another repository \
-            here would nest one inside the other, which git cannot check out again. Pick a folder \
-            outside it.
+            here would nest one inside the other, which git cannot check out again. Add \(root) \
+            instead, or pick a folder outside it.
             """
         case .insideBloomsWorkspaces(let path):
             """
@@ -188,6 +230,10 @@ public enum NewProjectVerdict: Sendable, Equatable {
 public extension NewProjectVerdict {
     /// The whole rule, from facts alone.
     ///
+    /// **Asked only of a target with nothing at it, or a folder that is there and empty.** What a
+    /// folder holds is `FolderVerdict`'s question, and `ProjectTargetVerdict` asks that one first;
+    /// see the head of this file for the two refusals that used to be here.
+    ///
     /// The order is what a person would ask in: is there a name, is there a location, is the path
     /// they make somewhere Bloom is willing to work at all, and only then what is already there.
     /// The location questions come before the contents questions because a `~/Desktop/thing` that
@@ -220,10 +266,9 @@ public extension NewProjectVerdict {
 
         if facts.targetExists {
             guard facts.targetIsDirectory else { return .refuse(.somethingThere(shown(facts.path))) }
-            // Asked before emptiness, because a repository is never empty and "it has things in
-            // it" would be a true sentence that hid the useful one.
-            if facts.targetIsRepository { return .refuse(.alreadyRepository(shown(facts.path))) }
-            guard facts.targetIsEmpty else { return .refuse(.folderNotEmpty(shown(facts.path))) }
+            // The target's own permissions rather than its parent's, because nothing is being made
+            // above it: `git init` writes inside the folder that is already there.
+            guard facts.isTargetWritable else { return .refuse(.notWritable(shown(facts.path))) }
             return .adopt
         }
 
@@ -293,6 +338,18 @@ public enum NewProjectPlan {
         let commonest = order.max { (counts[$0] ?? 0) < (counts[$1] ?? 0) }
         return commonest ?? (FolderPath.normalize(home) as NSString)
             .appendingPathComponent(fallbackLocationName)
+    }
+
+    /// How many of the projects Bloom already has live in this folder.
+    ///
+    /// Said out loud in the block under the field, because "New projects go in ~/dev/code" is an
+    /// assertion and "where three of your projects live" is the reason it is right. It is also the
+    /// only part of the opening sentence that could be wrong on somebody else's machine.
+    public static func projectsIn(_ location: String, projectPaths: [String]) -> Int {
+        let folder = FolderPath.normalize(location)
+        return projectPaths.count {
+            (FolderPath.normalize($0) as NSString).deletingLastPathComponent == folder
+        }
     }
 
     /// The name as a folder name: trimmed, and nothing else.

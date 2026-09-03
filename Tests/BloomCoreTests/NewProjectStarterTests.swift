@@ -36,8 +36,8 @@ struct NewProjectStarterTests {
         #expect(NewProjectVerdict.of(facts) == .create(makesLocation: true))
     }
 
-    @Test("an empty folder that is already there is adopted, and one with a file in it is not")
-    func adoptsOnlyWhatIsEmpty() throws {
+    @Test("an empty folder that is already there is adopted, and a stray .DS_Store is not content")
+    func adoptsAnEmptyFolder() throws {
         let (location, name) = scratch()
         let target = (location as NSString).appendingPathComponent(name)
         try FileManager.default.createDirectory(atPath: target, withIntermediateDirectories: true)
@@ -51,14 +51,11 @@ struct NewProjectStarterTests {
         )
         #expect(NewProjectVerdict.of(inspect(location, name)) == .adopt)
 
-        try "hello".write(
-            toFile: (target as NSString).appendingPathComponent("notes.md"),
-            atomically: true, encoding: .utf8
-        )
-        guard case .refuse(.folderNotEmpty) = NewProjectVerdict.of(inspect(location, name)) else {
-            Issue.record("a folder with a file in it was not refused")
-            return
-        }
+        // A folder with work in it used to be refused here, as `folderNotEmpty`, and that refusal
+        // retired with the second door: such a folder is a thing to start tracking rather than an
+        // error, and `ProjectTargetVerdict` is what says so. `NewProjectVerdict` is now asked only
+        // of a target with nothing at it or an empty folder, so what it answers about a full one
+        // is not this suite's business. `ProjectTargetTests` holds that case.
     }
 
     @Test("a location inside an existing repository is refused rather than nested")

@@ -180,7 +180,7 @@ struct WorkspaceEvent: Identifiable, Equatable {
                 // row must always carry: whether anything else happened. See `SetupFailure`.
                 note: [
                     diagnosis.sentence,
-                    diagnosis.advice.isEmpty ? SetupFailure.instruction : SetupFailure.noAgent,
+                    diagnosis.advice.isEmpty ? SetupFailure.instruction : SetupFailure.agentStarted,
                 ]
                     .filter { !$0.isEmpty }
                     .joined(separator: " "),
@@ -215,13 +215,15 @@ struct WorkspaceEvent: Identifiable, Equatable {
 /// own log tail and its "Show the full log" link already open onto, and that running setup again
 /// is the way out.
 enum SetupFailure {
-    static let instruction = "No agent was started. Check the setup output and run setup again."
+    static let instruction =
+        "The agent was started anyway. Check the setup output and run setup again."
 
     /// The half of that sentence which is true whatever went wrong, for the rows where
     /// `SetupDiagnosis` already said what to do and saying it twice would be the only result.
     ///
     /// It is the half that must never be dropped. A red row that leaves somebody guessing whether
     /// their worktree survived, or whether an agent is off working in it anyway, is worse than one
-    /// that explains nothing.
-    static let noAgent = "No agent was started."
+    /// that explains nothing. It used to read "No agent was started", which was the honest answer
+    /// while a failed setup held the queue; it does not any more. See `DeliveryHold`.
+    static let agentStarted = "The agent was started anyway."
 }

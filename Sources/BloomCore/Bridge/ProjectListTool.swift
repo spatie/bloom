@@ -19,9 +19,21 @@ public struct ProjectListTool: BridgeToolHandling {
         name: "project_list",
         description: """
             The projects Bloom knows about: the name and the path of each git repository \
-            registered in the sidebar, its default branch, how many workspaces it has running, \
-            whether it is still where Bloom recorded it, and whether the owner has hidden it \
-            from the sidebar.
+            registered in the sidebar, its default branch, how many workspaces it has, how many \
+            of those have an agent working or stopped on a question, whether it is still where \
+            Bloom recorded it, and whether the owner has hidden it from the sidebar.
+
+            Those are three different numbers and none of them stands in for another. \
+            workspaces counts the worktrees the project has that nobody has archived, whether or \
+            not anything is happening in them, and it is what the sidebar draws under the \
+            project. agents_running counts how many of those have an agent mid turn right now, \
+            and awaiting_permission how many have one stopped on a permission question. A \
+            project with workspaces and agents_running 0 has worktrees sitting idle, which is not \
+            the same as having none, and a project with workspaces 0 has none at all.
+
+            workspace_list names those same workspaces one by one and is counted from the same \
+            rows, so this project's workspaces is how many it lists for the project and its \
+            agents_running is how many of them it marks agent_running.
 
             Call it before naming a project in any other tool, because Bloom will only act on \
             repositories it already has and this is the list of them. Every project here can be \
@@ -49,16 +61,27 @@ public struct ProjectListTool: BridgeToolHandling {
                 ]))
             }
 
+            // One reading for every project, and the same reading `workspace_list` answers from.
+            // This used to be a query per project counting `state != .archived`, published under
+            // the key `workspaces_running`, and the key is the whole bug: a model told four
+            // projects had a workspace running, then handed `agent_running: false` on every row
+            // by `workspace_list`, reported the two tools as contradicting each other. See
+            // `BridgeWorkspaceCensus`.
+            let census = try await BridgeWorkspaceCensus.read(from: store)
+
             var rows: [JSONValue] = []
             for project in projects {
-                let live = try await store.workspaces(repoID: project.id)
-                    .filter { $0.state != .archived }
+                let counts = census.counts(repoID: project.id)
                 rows.append(.object([
                     "id": .string(project.id.rawValue),
                     "name": .string(project.name),
                     "path": .string(project.path),
                     "default_branch": .string(project.defaultBranch),
-                    "workspaces_running": .integer(live.count),
+                    // Three numbers rather than one, because the one was read as whichever of the
+                    // three the reader wanted. Archived workspaces are in none of them.
+                    "workspaces": .integer(counts.workspaces),
+                    "agents_running": .integer(counts.agentsRunning),
+                    "awaiting_permission": .integer(counts.awaitingPermission),
                     // Asked of the file system rather than assumed, because a project whose folder
                     // has been moved still has a row, and a caller that starts a workspace in it
                     // gets a failure it could have been warned about here for nothing.

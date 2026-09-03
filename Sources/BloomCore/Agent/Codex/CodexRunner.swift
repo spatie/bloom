@@ -29,6 +29,16 @@ public actor CodexRunner: SessionRunner {
     private var cancelled = false
     private var cachedRepoID: RepoID?
 
+    /// How large this chat's server was told the context window is, and therefore what the live
+    /// connection was launched with. See `applyContextWindowChange`.
+    private var contextWindow = CodexContextWindow.modelDefault
+
+    /// The model id this chat's row means, which is not always the string it holds: a row written
+    /// from a settings file can carry the backend in front of the id, and `codex:gpt-5.6-sol` is
+    /// not something the server accepts. `ModelAlias.cliValue` is the same guard on the other
+    /// backend, and `ModelIdentifier`'s head is the bug both were added for.
+    private var wireModel: String { ModelIdentifier.resolve(session.model).model }
+
     /// The items seen this turn, by id.
     ///
     /// An approval request carries only an item id: the diff or the command is on the
@@ -77,7 +87,7 @@ public actor CodexRunner: SessionRunner {
         self.bridge = bridge
         self.makeClient = makeClient
         self.translation = CodexTranslation(context: CodexTranslation.Context(
-            model: session.model,
+            model: ModelIdentifier.resolve(session.model).model,
             cwd: workspacePath,
             permissionMode: session.permissionMode.rawValue
         ))
@@ -106,25 +116,37 @@ public actor CodexRunner: SessionRunner {
 
     public var persistenceFailureCount: Int { persistenceFailures }
 
-    /// Write one user turn. Connects, and starts or resumes the thread, on first use.
+    /// Write one turn. Connects, and starts or resumes the thread, on first use.
+    ///
+    /// `recording` is the row to write down in place of the user row, for a turn another agent
+    /// asked for: see `SessionRunner.send(_:recording:)` for why what goes out and what is drawn
+    /// are not the same string.
     ///
     /// Model, effort, approval policy and sandbox all travel **with the turn** rather than with
     /// the process, which is what makes changing a composer chip mid chat take effect on the next
     /// turn without restarting anything. Claude Code cannot do that: its equivalents are argv.
-    public func send(_ text: String) async throws {
+    public func send(_ text: String, recording: Data? = nil) async throws {
+        await applyContextWindowChange()
         let client = try await connected()
         let threadID = try await openThread(on: client)
 
         cancelled = false
-        await persist(kind: .user, payload: Self.userPayload(text))
+        // One row, whichever it is, for the reason `AgentRunner.send` gives: the crew payload
+        // already holds both renderings, and a user row beside it is the envelope back on screen.
+        if let recording {
+            await persist(kind: .crew, payload: recording)
+        } else {
+            await persist(kind: .user, payload: Self.userPayload(text))
+        }
 
         let turn = try await client.startTurn(
             threadID: threadID,
             input: [.text(text)],
-            model: session.model,
+            model: wireModel,
             effort: session.effort,
             approvalPolicy: Self.approvalPolicy(for: session.permissionMode),
-            sandboxPolicy: Self.sandboxPolicy(for: session.permissionMode, writableRoot: workspacePath)
+            sandboxPolicy: Self.sandboxPolicy(for: session.permissionMode, writableRoot: workspacePath),
+            approvalsReviewer: Self.approvalsReviewer(for: session.permissionMode)
         )
         handle.begin(turnID: turn.id)
 
@@ -245,6 +267,16 @@ public actor CodexRunner: SessionRunner {
         // and can be closed while it is mid turn. `SessionLifecycle` refuses a stop on a session
         // with no turn open, so the one that did not happen writes nothing.
         if session.apply(.cancelled).moves { await save(session) }
+        await dropConnection()
+    }
+
+    /// Kill the server and forget everything that belonged to it, leaving the chat resumable.
+    ///
+    /// Split out of `shutdown` because `applyContextWindowChange` needs exactly this and none of
+    /// what surrounds it: nothing is being stopped there, so there are no questions to file and
+    /// no cancellation to record, and writing either would say a turn had been interrupted when
+    /// none was running.
+    private func dropConnection() async {
         await client?.stop()
         client = nil
         // The thread belonged to the process that has just been killed. Held on to, the next
@@ -258,6 +290,32 @@ public actor CodexRunner: SessionRunner {
         handle.end()
     }
 
+    /// Pick up a context window chosen since this server started, by starting another one.
+    ///
+    /// **The one composer setting that cannot travel with the turn.** Model, effort, approval
+    /// policy and sandbox are all arguments of `turn/start`, which is what makes changing a chip
+    /// mid chat take effect on the next message with nothing restarted. `model_context_window`
+    /// and `model_auto_compact_token_limit` are `-c` overrides read when `codex app-server`
+    /// starts, so a chat left on the old connection would go on running at the old window while
+    /// the picker said otherwise, which is the failure this whole setting exists to fix.
+    ///
+    /// The chat survives it: the thread id is on the session row, so the next `openThread` is a
+    /// `thread/resume` rather than a new conversation. What does not survive is anything that
+    /// lived only inside the process, which is the grants somebody gave with "allow for this
+    /// session"; the same cost `terminateNow` pays, and the reason this reconnects only when the
+    /// value has actually changed rather than on every turn.
+    private func applyContextWindowChange() async {
+        let stored = try? await store.setting(
+            ComposerControls.contextWindowKey(sessionID: session.id)
+        )
+        let wanted = CodexContextWindow.normalised(stored)
+        guard wanted != contextWindow else { return }
+        contextWindow = wanted
+        guard client != nil else { return }
+        connection.current?.terminateNow()
+        await dropConnection()
+    }
+
     // MARK: - Connecting
 
     private func connected() async throws -> CodexClient {
@@ -267,7 +325,8 @@ public actor CodexRunner: SessionRunner {
             cwd: workspacePath,
             clientName: "Bloom",
             clientVersion: Self.clientVersion,
-            bridge: bridge
+            bridge: bridge,
+            contextWindow: contextWindow
         ))
         self.client = client
         connection.attach(client)
@@ -298,9 +357,10 @@ public actor CodexRunner: SessionRunner {
         } else {
             handle = try await client.startThread(
                 cwd: workspacePath,
-                model: session.model,
+                model: wireModel,
                 approvalPolicy: Self.approvalPolicy(for: session.permissionMode),
-                sandbox: sandbox
+                sandbox: sandbox,
+                approvalsReviewer: Self.approvalsReviewer(for: session.permissionMode)
             )
         }
 
@@ -319,27 +379,51 @@ public actor CodexRunner: SessionRunner {
 
     // MARK: - Permission policy
 
-    /// How Bloom's four modes reach a protocol that has no modes.
+    /// How Bloom's five modes reach a protocol that has no modes.
     ///
-    /// Codex crosses an approval policy with a sandbox, and the grid does not line up with the
-    /// picker: `plan` has no equivalent at all and must not be offered for a Codex chat, and Ask
-    /// and Accept edits differ only in how much the sandbox lets through without a question.
+    /// Codex crosses an approval policy with a sandbox and a reviewer, and the grid does not line
+    /// up with the picker: `plan` has no equivalent at all and must not be offered for a Codex
+    /// chat. The other four are exactly Codex's own four presets, which is not a coincidence but
+    /// the point, and their labels come out of `PermissionVocabulary`:
+    ///
+    /// | Bloom | Codex preset | policy | sandbox | reviewer |
+    /// | --- | --- | --- | --- | --- |
+    /// | `auto` | `read-only` | `on-request` | `read-only` | `user` |
+    /// | `acceptEdits` | `workspace` | `on-request` | `workspace-write` | `user` |
+    /// | `autoReview` | `auto` | `on-request` | `workspace-write` | `auto_review` |
+    /// | `bypassPermissions` | `full-access` | `never` | `danger-full-access` | `user` |
     public static func approvalPolicy(for mode: PermissionMode) -> CodexApprovalPolicy {
         switch mode {
         case .bypassPermissions: .never
         // `untrusted` asks about nearly everything, including reads, which is a mode nobody leaves
         // on. `on-request` is the one that asks about what the sandbox refused.
-        case .auto, .acceptEdits, .plan: .onRequest
+        case .auto, .acceptEdits, .autoReview, .plan: .onRequest
         }
     }
 
     public static func sandboxMode(for mode: PermissionMode) -> CodexSandboxMode {
         switch mode {
         case .bypassPermissions: .dangerFullAccess
-        case .acceptEdits: .workspaceWrite
-        // Ask and Plan both mean "do not write without telling me". Read-only is the sandbox that
-        // means it, and a write then arrives as a question rather than as a fact.
+        // Approve for me differs from Ask for approval in who answers, not in what is asked, so
+        // the two share a sandbox. `codex --approve-for-me` says the same thing in its own help:
+        // "Route approval requests through automatic review using the workspace-write sandbox."
+        case .acceptEdits, .autoReview: .workspaceWrite
+        // Read only and Plan both mean "do not write without telling me". Read-only is the sandbox
+        // that means it, and a write then arrives as a question rather than as a fact.
         case .auto, .plan: .readOnly
+        }
+    }
+
+    /// Who answers, which is the whole of what Approve for me adds.
+    ///
+    /// **Sent on every turn, including the modes that want the default.** The field is sticky on
+    /// this protocol, "this turn and subsequent turns", so a chat that ran one turn as Approve for
+    /// me and was then moved back would keep the reviewer it had while the chip in the composer
+    /// said otherwise. Naming it every time is what keeps the chip and the server in step.
+    public static func approvalsReviewer(for mode: PermissionMode) -> CodexApprovalsReviewer {
+        switch mode {
+        case .autoReview: .autoReview
+        case .auto, .acceptEdits, .bypassPermissions, .plan: .user
         }
     }
 

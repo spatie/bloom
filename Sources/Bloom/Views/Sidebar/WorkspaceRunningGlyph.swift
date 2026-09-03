@@ -44,21 +44,26 @@ struct WorkspaceRunningGlyph: View {
     var isOnSelection = false
 
     /// The box the figure is centred in, which is the box every other mark in this column already
-    /// uses. The dot reaches 8.1 points at the top of its pulse, so 13 cannot clip it.
+    /// uses. The dot reaches 9.2 points at the top of its pulse, so 13 cannot clip it.
     static let box: CGFloat = Metrics.glyph
 
     /// How wide the dot rests. The app's one dot size, and the size is not free.
     ///
-    /// The unread mark in this same column is `circle.fill` at `Typo.micro`, which is a filled
-    /// circle in the same accent: measured off an offscreen render at two times, it is ten points
-    /// across. So the running mark is now a state that differs from its neighbour in size and in
-    /// whether it moves, where the rest of the column differs in shape, and the only thing that
-    /// keeps the two apart in a still is the gap between them. Eight was tried first and was
-    /// wrong: it swells to 10.8, so at the top of every pulse it was exactly the unread mark.
-    /// `Metrics.dot` rests at six and peaks at 8.1, which never reaches it.
+    /// The unread mark in this same column is `circle.fill` a type rung down, which is this exact
+    /// shape in another hue. So these two are told apart by size, by colour and by whether they
+    /// move, where every other pair in the column is told apart by shape, and in a still it is the
+    /// size that does the work. `Metrics.dot` is derived from that disc for that reason, and the
+    /// derivation is written out there rather than repeated here.
     ///
-    /// The box is what caps this. The dot cannot be made bigger than the unread mark instead: 13
-    /// points of box over a peak of 1.35 leaves 9.6, which is under ten before the pulse starts.
+    /// **The measurement it used to be derived from was taken in the wrong place**, and that is
+    /// the whole of what went wrong. The note here read "measured off an offscreen render at two
+    /// times, it is ten points across", which is true of a gallery, where nothing raises the image
+    /// scale. The sidebar raised it. So the mark a reader was actually comparing this dot against
+    /// was 13.05 points across while this one rested at 6, a bare disc under half the neighbour it
+    /// was sized against, in a column meant to read as one family. That is the report, "that green
+    /// dot feels too big ... they should fit same sizyness", and it is answered from both ends:
+    /// the symbols come down to 11.25 by pinning their own scale, and this rests at 6.8 and peaks
+    /// at 9.2 against a disc that is 10.2 in every pane that draws it.
     static let diameter: CGFloat = Metrics.dot
 
     private var tint: Color { isOnSelection ? Palette.textInverted : Palette.running }

@@ -112,7 +112,12 @@ struct AgentErrorRowView: View {
         VStack(alignment: .leading, spacing: TranscriptLayout.tight * 2) {
             Text(shown)
                 .font(Typo.code)
-                .foregroundStyle(Palette.negative)
+                // The ordinary ink, not `negative`. `WorkspaceEvent.failureSummary` makes exactly
+                // this argument for the setup log and acted on it: a script that created a
+                // symlink, restarted nginx and issued a certificate before it stopped is mostly
+                // success, and painting all of it red said the opposite. The headline above is
+                // already `negative` and is what says the turn failed; this block is the evidence.
+                .foregroundStyle(Palette.textSecondary)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
 

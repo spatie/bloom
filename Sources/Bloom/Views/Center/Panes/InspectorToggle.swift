@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The right pane's control, at the trailing end of the tab strip that borders it.
+/// A window pane control used at either end of the title bar.
 ///
 /// Drawn as the sidebar's control is drawn, because the two do the same job to opposite edges of
 /// one window. That reference is `NSToolbarToggleSidebarItemIdentifier`, which the SDK describes
@@ -18,34 +18,58 @@ import SwiftUI
 /// reader has the pane itself, and a VoiceOver user has nothing unless this says so.
 ///
 /// A binding rather than the app model, so the gallery can hold both states on one page.
-struct InspectorToggle: View {
-    @Binding var isVisible: Bool
+struct WindowPaneToggle: View {
+    enum Edge {
+        case leading
+        case trailing
+
+        var name: String {
+            switch self {
+            case .leading: "Sidebar"
+            case .trailing: "Inspector"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .leading: "sidebar.left"
+            case .trailing: "sidebar.right"
+            }
+        }
+    }
+
+    var edge: Edge
+    var isVisible: Bool
+    var action: @MainActor @Sendable () -> Void
     @State private var isHovered = false
 
-    /// **The glass disc came off.** It was `.buttonStyle(.glass)` in a circle, borrowed from the
-    /// sidebar's toolbar control on the argument that the two do the same job to opposite edges of
-    /// the window. That argument holds in a toolbar, where every control wears a plate and a round
-    /// one is the convention. This control is not in a toolbar: it is at the end of a tab strip,
-    /// eight points from a `+` that is a bare glyph, so the plate had nothing to belong to and
-    /// read as a white disc floating on the strip.
-    ///
-    /// So it is drawn as its neighbour is drawn, which is the rule the strip already follows: a
-    /// borderless glyph in secondary ink, on the strip's own ground, with a hover tint to say it
-    /// is pressable. The state it used to carry in a plate is carried by the pane itself, which is
-    /// a whole column wide, and by the accessibility value below for a reader who has neither.
+    /// Both controls use the same icon-only geometry at opposite ends of the title bar. A subtle
+    /// hover fill gives the pointer a target without leaving permanent circles around the icons.
     var body: some View {
-        Button { isVisible.toggle() } label: {
-            Label("Inspector", systemImage: "sidebar.right")
+        Button(action: action) {
+            Label(edge.name, systemImage: edge.symbol)
                 .labelStyle(.iconOnly)
                 .font(Typo.labelEmphasis)
                 // Full ink when the pane is open, quiet when it is not. The one place the control
                 // says anything about its own state, and it is the same two-step the tab strip
                 // uses for a selected tab against an unselected one.
                 .foregroundStyle(isVisible ? Palette.textPrimary : Palette.textSecondary)
+                // **Inside the label, and that is the whole of the bug.** Both of these were on
+                // the Button rather than on what the Button draws, which reads as though it sizes
+                // the control and does not: a `.plain` Button takes its clicks inside its LABEL,
+                // and a frame wrapped round the finished Button only centres a glyph-sized button
+                // in a 32 point box. A `contentShape` out there sets the hit shape of the box,
+                // which is not a thing anybody can press.
+                //
+                // So the target was the glyph, about fourteen points across in a slot more than
+                // twice that, and the miss was reported by two people on the same afternoon:
+                // "often when I click on the hide sidebar icon in the top right corner nothing is
+                // happening", and "unless you click on the area where the icon is, it doesn't seem
+                // to work". It was both ends of the title bar because both ends are this view.
+                .frame(width: Metrics.barHeight, height: Metrics.barHeight)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .frame(width: Metrics.barHeight, height: Metrics.barHeight)
-        .contentShape(Rectangle())
         .onHoverChange { isHovered = $0 }
         // **The plate is inset inside the slot rather than filling it**, and the two points are
         // measured rather than chosen. `fee6766` read the bottom panel's two controls off a two
@@ -63,8 +87,29 @@ struct InspectorToggle: View {
         // A stable name with a spoken state, rather than a name that changes under the reader: a
         // control called "Show the changed files" one moment and "Hide" the next is a different
         // control every time it is found. The direction is in `help`, which is also the tooltip.
-        .accessibilityLabel("Inspector")
+        .accessibilityLabel(edge.name)
         .accessibilityValue(isVisible ? "Shown" : "Hidden")
-        .help(isVisible ? "Hide the changed files" : "Show the changed files")
+        .help(help)
+    }
+
+    private var help: String {
+        switch (edge, isVisible) {
+        case (.leading, true): "Hide the sidebar"
+        case (.leading, false): "Show the sidebar"
+        case (.trailing, true): "Hide the changed files"
+        case (.trailing, false): "Show the changed files"
+        }
+    }
+}
+
+/// Kept as a small wrapper for the pane gallery, which presents both inspector states without an
+/// app model. The live window uses `WindowPaneToggle` directly in its title bar.
+struct InspectorToggle: View {
+    @Binding var isVisible: Bool
+
+    var body: some View {
+        WindowPaneToggle(edge: .trailing, isVisible: isVisible) {
+            isVisible.toggle()
+        }
     }
 }

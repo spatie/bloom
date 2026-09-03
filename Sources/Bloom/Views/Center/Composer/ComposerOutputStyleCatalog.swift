@@ -37,7 +37,7 @@ final class ComposerOutputStyleCatalog {
     /// re-read a list that was fresh; what it could not do was find one, because the object
     /// holding it had been destroyed with the view.
     ///
-    /// Keyed on the project, which can be nil in the create sheet, where there is no checkout yet
+    /// Keyed on the project, which can be nil in the create window, where there is no checkout yet
     /// and the built in styles are the whole answer.
     private static var byProject: [String: ComposerOutputStyleCatalog] = [:]
 
@@ -73,15 +73,26 @@ final class ComposerOutputStyleCatalog {
             // whose row is a word at the top of a menu.
             ComposerOption(
                 id: style.name,
-                label: style.name == OutputStyle.defaultName ? "Default" : style.name
+                label: style.name == OutputStyle.defaultName ? "Default" : style.name,
+                // On the row rather than under the picker. It was one footnote describing the
+                // style already chosen, because an `NSMenu` row is one line of text and four
+                // descriptions cannot sit beside four names; the picker is a panel of two line
+                // rows now, so all four are readable before one is picked.
+                detail: style.detail
             )
         }
+        // Whatever the session is set to, kept on the list even if the style has since been
+        // deleted or renamed. It arrives with no sentence, which is honest: there is no file left
+        // to read one out of.
         return ComposerOption.adding([current], to: known)
     }
 
-    /// The sentence under the menu, which is whichever style is selected describing itself. An
-    /// `NSMenu` row is one line of text, so four descriptions cannot sit beside four names, and
-    /// the one worth reading is the one in force.
+    /// One style's own sentence, for a caller drawing a list it did not build.
+    ///
+    /// The composer no longer asks: its rows carry a sentence each. What is left is the Settings
+    /// screen, whose picker is a `Picker` inside a `Form` and whose subtitle line is the platform's
+    /// own place for this. It is a settings row rather than a menu of consequences, so it keeps the
+    /// system control.
     func detail(of name: String) -> String? {
         styles.first { $0.name == name }?.detail
     }

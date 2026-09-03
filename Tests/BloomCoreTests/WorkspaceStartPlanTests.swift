@@ -93,7 +93,7 @@ struct WorkspaceStartPlanTests {
 
 /// What survives a person changing their mind about which of the two things they are doing.
 ///
-/// The whole reason the create sheet chooses a mode first is that the two-button version could
+/// The whole reason the create window chooses a mode first is that the two-button version could
 /// take a sentence, name a workspace after it and never say so. Choosing first removes the input,
 /// which only helps if what was written comes with it.
 @Suite("Crossing between chat and terminal")
@@ -166,7 +166,7 @@ struct WorkspaceModeCrossingTests {
     }
 }
 
-@Suite("What the create sheet opens on")
+@Suite("What the create window opens on")
 struct WorkspaceStartModeTests {
     /// Nineteen creations out of twenty are chats, and somebody who has not chosen yet can back
     /// out of chat mode by simply typing.
@@ -179,6 +179,7 @@ struct WorkspaceStartModeTests {
     func lastChoiceWins() {
         #expect(WorkspaceStartMode.remembered(raw: "terminal") == .terminal)
         #expect(WorkspaceStartMode.remembered(raw: "chat") == .chat)
+        #expect(WorkspaceStartMode.remembered(raw: "browser") == .browser)
     }
 
     /// A value written by a future version, or a key somebody cleared by hand. Neither is worth an
@@ -195,47 +196,86 @@ struct WorkspaceStartModeTests {
     func onlyChatRunsAnAgent() {
         #expect(WorkspaceStartMode.chat.runsAnAgent)
         #expect(!WorkspaceStartMode.terminal.runsAnAgent)
+        #expect(!WorkspaceStartMode.browser.runsAnAgent)
+    }
+
+    /// The segmented control is the only thing on the sheet saying what the difference is, and
+    /// three segments have to read as a list. "Just a terminal" was a disclaimer against the one
+    /// segment beside it, which is not a thing a list has a member for.
+    @Test("only the segment that runs an agent says more than its tab's name")
+    func onlyChatSaysMoreThanItsName() {
+        #expect(WorkspaceStartMode.chat.pickerLabel == "Chat with an agent")
+        #expect(WorkspaceStartMode.terminal.pickerLabel == WorkspaceStartMode.terminal.label)
+        #expect(WorkspaceStartMode.browser.pickerLabel == WorkspaceStartMode.browser.label)
+    }
+
+    /// The sheet's heading lower-cases the label to say what is being opened in, so a label that
+    /// is not a plain noun would read as "Open #12 in a just a terminal".
+    @Test("every label is one word the heading can borrow")
+    func labelsAreNounsTheHeadingCanUse() {
+        for mode in WorkspaceStartMode.allCases {
+            #expect(!mode.label.contains(" "))
+        }
     }
 }
 
 /// What the sheet says under the name field, and the one word it may not use.
-@Suite("What terminal mode says about itself")
-struct TerminalNoteTests {
+@Suite("What a mode with no agent says about itself")
+struct StartNoteTests {
     /// The sentence somebody standing in front of an empty field needs: the field is optional,
     /// and something will fill it.
     @Test("an empty field promises a name without explaining where it comes from")
     func emptyFieldPromisesAName() {
-        let note = WorkspaceStartPlan.terminalNote(hasCheckout: false, name: "")
+        let note = WorkspaceStartPlan.startNote(mode: .terminal, hasCheckout: false, name: "")
         #expect(note.contains("Leave it empty and Bloom names it for you"))
     }
 
     @Test("a filled field says what it is about to name")
     func filledFieldSaysWhatItNames() {
-        let note = WorkspaceStartPlan.terminalNote(hasCheckout: false, name: "spike")
+        let note = WorkspaceStartPlan.startNote(mode: .terminal, hasCheckout: false, name: "spike")
         #expect(note.contains("This names the workspace and its branch"))
     }
 
     @Test("whitespace is an empty field")
     func whitespaceIsEmpty() {
-        #expect(WorkspaceStartPlan.terminalNote(hasCheckout: false, name: "  \n ")
-                == WorkspaceStartPlan.terminalNote(hasCheckout: false, name: ""))
+        #expect(WorkspaceStartPlan.startNote(mode: .terminal, hasCheckout: false, name: "  \n ")
+                == WorkspaceStartPlan.startNote(mode: .terminal, hasCheckout: false, name: ""))
     }
 
     /// A pull request brought its own name, so there is no field and nothing to say about one.
     @Test("a checkout says what the workspace will be instead")
     func checkoutSaysWhatItWillBe() {
-        let note = WorkspaceStartPlan.terminalNote(hasCheckout: true, name: "")
+        let note = WorkspaceStartPlan.startNote(mode: .terminal, hasCheckout: true, name: "")
         #expect(note.contains("a shell opens in the worktree"))
         #expect(!note.contains("Leave it empty"))
+    }
+
+    /// And it says the right one. The sentence was a shell in every mode while there was only one
+    /// mode it could be, which is the shape of the bug a third one would have arrived as.
+    @Test("a browser checkout does not promise a shell")
+    func browserCheckoutOpensABrowser() {
+        let note = WorkspaceStartPlan.startNote(mode: .browser, hasCheckout: true, name: "")
+        #expect(note.contains(WorkspaceStartMode.browser.openingSentence))
+        #expect(!note.contains("shell"))
+    }
+
+    /// The field is the same field in both, and so is what it promises. Only the clause about
+    /// what opens is allowed to differ, and only where a checkout has taken the field away.
+    @Test("without a checkout the two agentless modes say the same thing")
+    func agentlessModesAgreeWithoutACheckout() {
+        for name in ["", "spike"] {
+            #expect(WorkspaceStartPlan.startNote(mode: .terminal, hasCheckout: false, name: name)
+                    == WorkspaceStartPlan.startNote(mode: .browser, hasCheckout: false, name: name))
+        }
     }
 
     /// The half that is the whole difference between the two modes, and the half the sheet went
     /// four days without saying at all.
     @Test("every sentence says that nothing is sent to an agent")
     func everySentenceSaysNoAgent() {
-        for hasCheckout in [true, false] {
-            for name in ["", "spike"] {
-                let note = WorkspaceStartPlan.terminalNote(hasCheckout: hasCheckout, name: name)
+        for mode in [WorkspaceStartMode.terminal, .browser] {
+            for (hasCheckout, name) in [(true, ""), (true, "spike"), (false, ""), (false, "spike")] {
+                let note = WorkspaceStartPlan.startNote(mode: mode, hasCheckout: hasCheckout, name: name)
                 #expect(note.hasSuffix("Nothing is sent to an agent."))
             }
         }
@@ -299,10 +339,10 @@ struct TerminalNoteTests {
     @Test("no sentence names the mechanism behind the name")
     func nothingNamesTheMechanism() {
         let forbidden = ["sea", "ocean"]
-        for hasCheckout in [true, false] {
-            for name in ["", "spike"] {
+        for mode in [WorkspaceStartMode.terminal, .browser] {
+            for (hasCheckout, name) in [(true, ""), (true, "spike"), (false, ""), (false, "spike")] {
                 let note = WorkspaceStartPlan
-                    .terminalNote(hasCheckout: hasCheckout, name: name)
+                    .startNote(mode: mode, hasCheckout: hasCheckout, name: name)
                     .lowercased()
                 for word in forbidden {
                     #expect(!note.contains(word), "\(note) names \(word)")

@@ -149,7 +149,7 @@ public enum HomeEmptyState: Sendable, Equatable {
     /// which is the reason there are five states rather than one.
     public var actionTitle: String {
         switch self {
-        case .noProjects: "New project"
+        case .noProjects: "Start a project"
         case .noWorkspaces: "New workspace"
         case .noMatch: "Clear the search"
         case .noneInChosenProjects: "Show all projects"
@@ -157,19 +157,9 @@ public enum HomeEmptyState: Sendable, Equatable {
         }
     }
 
-    /// The second way out, where there are two, and nil everywhere else.
-    ///
-    /// Only the first state has one, and it is the state this exists for: somebody with no
-    /// projects is either about to start one or about to point Bloom at a repository they already
-    /// have, and those are two different acts with two different first steps. Every other state
-    /// here is undoing a control that is still on screen, which has exactly one way back.
-    ///
-    /// The prominent half is deliberately the one that needs no folder, because the person who
-    /// has nothing yet is the one this screen fails today.
-    public var secondaryActionTitle: String? {
-        switch self {
-        case .noProjects: "Add a project folder"
-        default: nil
-        }
-    }
+    // There is no second way out any more, and the state that had one is where it went. Somebody
+    // with no projects was offered New project and Add a project folder, which are the two doors
+    // the sidebar's `+` used to offer, one screen further out. They end in the same place and
+    // which one a folder needs is worked out from the folder, so this state has one button like
+    // every other. See `ProjectTargetVerdict`.
 }

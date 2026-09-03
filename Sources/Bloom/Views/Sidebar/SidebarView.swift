@@ -67,6 +67,12 @@ struct SidebarView: View {
     /// sayings: two drops refused in the same project produce the same words, and a note keyed to
     /// the words would have the second one taken away on the first one's clock.
     @State private var reorderNote: ReorderNote?
+    /// The crew member whose Stop is waiting on an answer, and nil when nothing is being asked.
+    ///
+    /// Only ever set for one that is still working: stopping an agent that has already finished
+    /// takes nothing away, and a dialog in front of a row nobody was going to lose is a dialog
+    /// that teaches the reader to click through the next one.
+    @State private var stoppingCrew: PendingCrewStop?
 
     private struct ReorderNote: Equatable {
         var id = UUID()
@@ -91,8 +97,9 @@ struct SidebarView: View {
             // One row, and it is the root of the list rather than one of three destinations:
             // Mail's All Inboxes, Photos' Library. Search and Archive were here, and both were
             // the same list of workspaces Home draws. Search is a field in the window's toolbar
-            // now and the archive is a chip on Home; what the Archive screen held that Home did
-            // not is Settings > Storage. See `HomeScope`.
+            // now and the archive is a chip on Home, which carries the one thing the Archive
+            // screen had and Home did not: what each finished workspace still costs. See
+            // `HomeScope`.
             //
             // Their sixty points are not refilled. The Projects heading moves up to sit under the
             // title bar, which is where a source list's content begins in Finder, in Mail and in
@@ -113,7 +120,7 @@ struct SidebarView: View {
             // themselves sections and a list cannot nest one inside another. It carries no tag
             // and refuses selection, so it stays a label. Home keeps its own section above it,
             // which is what stops it reading as the first project.
-            SidebarProjectsHeader(onNewProject: newProject, onAddProject: addProject)
+            SidebarProjectsHeader(onStartProject: startProject)
                 .selectionDisabled()
                 .listRowSeparator(.hidden)
 
@@ -142,6 +149,25 @@ struct SidebarView: View {
                     // and they are applied in `workspaceRow` rather than here: written inline,
                     // this `switch` stopped type checking in reasonable time.
                     workspaceRow(workspace, projectName: projectName)
+                case .crew(let member, let workspaceID, _):
+                    CrewSidebarRow(row: member)
+                        // The owner's own way to be finished with a subagent, which the agent
+                        // above it has in `agent_stop` and the person watching it did not.
+                        .contextMenu {
+                            Button("Stop Subagent") { askToStop(member, in: workspaceID) }
+                        }
+                        // Always selectable, unlike the subagent row below it: a crew member is a
+                        // conversation, so there is always something to open, whatever it is
+                        // doing and whether or not it is still running.
+                        //
+                        // Never something to pick up. A crew member is where it is because of the
+                        // worktree it shares, not because of an order anybody chose.
+                        .moveDisabled(true)
+                        .tag(SidebarSelection.crew(workspaceID, member.id))
+                        .listRowBackground(selectionFill(for: .crew(workspaceID, member.id)))
+                        .selectedRowInk(
+                            isEmphasized: isEmphasized(.crew(workspaceID, member.id))
+                        )
                 case .subagent(let subagent, let workspaceID, _):
                     SubagentSidebarRow(row: subagent)
                         // A row with no file to open refuses selection rather than taking it and
@@ -152,8 +178,7 @@ struct SidebarView: View {
                         .moveDisabled(true)
                         .tag(SidebarSelection.subagent(workspaceID, subagent.id))
                         // A subagent that CAN be selected selects like everything else in the
-                        // pane. One of these left on the system accent would have put the second
-                        // blue straight back, one rung further in.
+                        // pane. It shares the same semantic selection as every other selected row.
                         .listRowBackground(
                             selectionFill(for: .subagent(workspaceID, subagent.id))
                         )
@@ -188,26 +213,10 @@ struct SidebarView: View {
         }
         // The list draws its own row height, and that is left to it. Its selection is not.
         //
-        // Selection: the fill is Bloom's, painted through `listRowBackground` on the one row that
-        // is selected. This paragraph used to argue the other way, that a source list selection is
-        // a system affordance and the brand is everywhere else. It was right that repainting the
-        // row costs something and wrong about how much. Keyboard navigation is untouched, because
-        // a background is not a behaviour. The inversion of the row's ink is not lost either, it
-        // is simply ours now: `selectedRowInk` sets `backgroundProminence` itself, and everything
-        // that reads it goes on reading it. What is genuinely coarser is the dimming, and
-        // `selectionFill(for:)` says exactly how.
-        //
-        // What it did cost was the pane disagreeing with the window it is in. Every other list
-        // here goes through `RowBackground`, whose emphasized fill is `Palette.accentFill`, and
-        // the very same workspaces are drawn on Home by one of them. So one workspace was Spatie
-        // Blue in the middle of the window and the user's own accent on the left, and a Mac set
-        // to Graphite had a grey sidebar selection in an app with a teal one four hundred points
-        // to the right. Photographed both ways: `--snapshot-gallery --gallery sidebar-selection`.
-        //
-        // This is the same opinion `Palette.accent` already holds and documents, held in one more
-        // place rather than decided afresh. The rest of the accent's work in this window, the
-        // focus ring, the caret, the text selection and a selected tab, is not ours and is
-        // untouched.
+        // Selection is painted through `listRowBackground` on the selected row, using the same
+        // semantic system accent as other emphasized selections. Keyboard navigation remains the
+        // list's responsibility. `selectedRowInk` restores the matching semantic label colour and
+        // `backgroundProminence` that the custom background would otherwise suppress.
         //
         // Row height: 32 points, where `Metrics.rowHeight` is 28 and the reference render is 28
         // as well. It is not ours to set. `listRowInsets`, an explicit `frame(height:)` on the
@@ -218,6 +227,16 @@ struct SidebarView: View {
         // that. What was in reach was making the rhythm EVEN, which is what a project header's
         // own top padding is spent on. See `SidebarMetrics.headerLead`.
         .listStyle(.sidebar)
+        .confirmation($stoppingCrew) { pending in
+            Confirmation(
+                title: "Stop \(pending.name)?",
+                message: Self.crewStopMessage,
+                confirmLabel: "Stop",
+                cancelLabel: "Keep Working"
+            )
+        } onConfirm: { pending in
+            Task { await stop(pending) }
+        }
         // What puts the fold back.
         //
         // A `List` animates nothing on its own: rows arrive and leave in whatever transaction the
@@ -250,6 +269,11 @@ struct SidebarView: View {
         // would put the whole column into a 220 millisecond transaction on every tick of every
         // fan-out, which is the same trap the fold above is keyed away from.
         .animation(subagentMotion, value: subagentIdentities)
+        // A crew member's row arriving when an agent starts one, on the same curve and for the
+        // same reason: it is an insertion into the middle of a project's block, and the rows below
+        // it travel. The value is WHICH crew members have rows, never what those rows say, so a
+        // member moving between working and idle does not put the column into a transaction.
+        .animation(subagentMotion, value: crewIdentities)
         .settlesArrivals($arrival)
         // The note takes itself back, and each one is on its own clock.
         .task(id: reorderNote) {
@@ -282,6 +306,10 @@ struct SidebarView: View {
         // one is running, and regrouping on that would filter and sort every project's workspaces
         // once a second for the whole of a fan-out.
         .onChange(of: app.subagentRows) { _, _ in reflow() }
+        // The same rebuild for the same kind of change, and the groups are left alone for the same
+        // reason: an agent starting or finishing changes no project's membership, its filtering or
+        // its order. See `AppModel.crewRows`.
+        .onChange(of: app.crewRows) { _, _ in reflow() }
         // A create appearing, and the same row being retired when the stored one lands. The run
         // and not the groups, for the same reason: a workspace being cut changes no project's
         // membership, its filtering or its order.
@@ -390,6 +418,11 @@ struct SidebarView: View {
         app.subagentRows.mapValues { $0.map(\.id) }
     }
 
+    /// Which crew members have rows, per workspace. See the animation this keys.
+    private var crewIdentities: [WorkspaceID: [SessionID]] {
+        app.crewRows.mapValues { $0.map(\.id) }
+    }
+
     /// A subagent's row leaving. See `ProjectVisibilityMotion.subagentRemoval`.
     private var subagentMotion: Animation? {
         guard hasSettled,
@@ -409,7 +442,7 @@ struct SidebarView: View {
             showingHidden: showsHiddenProjects
         )
         paneRows = SidebarPaneRow.rows(
-            groups, subagents: app.subagents(of:), pending: pending(in:)
+            groups, crew: app.crew(of:), subagents: app.subagents(of:), pending: pending(in:)
         )
         // Every workspace the groups hold, a folded project's included. A fold hides rows rather
         // than removing them from the list, and unfolding one already has a movement of its own:
@@ -448,7 +481,7 @@ struct SidebarView: View {
     /// without changing which workspaces are in the pane.
     private func reflow() {
         paneRows = SidebarPaneRow.rows(
-            groups, subagents: app.subagents(of:), pending: pending(in:)
+            groups, crew: app.crew(of:), subagents: app.subagents(of:), pending: pending(in:)
         )
     }
 
@@ -537,10 +570,8 @@ struct SidebarView: View {
 
     /// The root of the pane, as a row of the list. There used to be three of these.
     ///
-    /// The mark is inked by `SidebarNavRow` rather than left to the label, and that is the second
-    /// half of the "two kinds of blue" this file was changed for. A `Label` in a source list draws
-    /// its symbol in `controlAccentColor`, so a nav row was the user's blue sitting a row away
-    /// from a selection that is now Bloom's: the same disagreement, one rung quieter.
+    /// The mark is inked by `SidebarNavRow` so it follows the row's emphasized semantic label
+    /// colour rather than retaining the unselected source-list tint.
     private func navRow(_ target: SidebarSelection, title: String, icon: String) -> some View {
         SidebarNavRow(title: title, icon: icon)
             .tag(target)
@@ -556,7 +587,7 @@ struct SidebarView: View {
     /// "working" and "waiting on you" in one shape throughout.
     private var askRow: some View {
         HStack(spacing: 0) {
-            SidebarNavRow(title: AskConversation.title, icon: "bubble.left.and.bubble.right")
+            SidebarNavRow(title: AskConversation.title, icon: PaneGlyph.chat)
             Spacer(minLength: Metrics.spacingSmall)
             if let status = app.askStatus {
                 WorkspaceStatusGlyph(status: status, isOnSelection: isEmphasized(.ask))
@@ -611,42 +642,89 @@ struct SidebarView: View {
     /// It used to say "Point Bloom at a git repository to start running agents in it", which for
     /// the person with an idea and no folder is the sentence that ends the evaluation. It had also
     /// stopped being true: Bloom will make the repository, and now it will make the folder too.
-    /// The prominent half is the one that needs no folder, because that is the reader this panel
-    /// was failing.
+    ///
+    /// One button, where there were two. The second said Choose a folder and went to a file panel,
+    /// which is the same fork the `+` above used to offer and is now the Choose inside the sheet.
     private var noProjects: some View {
         ContentUnavailableView {
             Label("No projects yet", systemImage: "folder.badge.plus")
         } description: {
             Text("Start a new project, or point Bloom at a repository you already have.")
         } actions: {
-            VStack(spacing: Metrics.spacingSmall) {
-                Button("New project", systemImage: "plus", action: newProject)
-                    .buttonStyle(.borderedProminent)
-                    // Tinted explicitly, like every other prominent button in the app: untinted it
-                    // follows the system accent, which on a Mac set to Graphite is grey glass. See
-                    // `EmptyStateView`, which says the same over the same button.
-                    .tint(Palette.accentFill)
-                Button("Choose a folder", systemImage: "folder", action: addProject)
-            }
+            Button("Start a project", systemImage: "plus", action: startProject)
+                .buttonStyle(.borderedProminent)
+                // Explicit so every primary action reads from the shared semantic token.
+                .tint(Palette.controlAccent)
         }
     }
 
     // MARK: - Actions
 
-    /// The create sheet lives in `RootView`, so every entry point (the toolbar, the repo header's
-    /// `+`, the menu bar command) goes through one notification and behaves identically.
+    /// What the question says, as one string rather than four concatenations inside a view
+    /// builder: the compiler timed out type-checking it in place, and the words are worth more
+    /// here than in an expression.
+    ///
+    /// Consequences rather than "are you sure": what is lost is the turn, what survives is the
+    /// work and the conversation, and the agent above it hears about it either way.
+    private static let crewStopMessage =
+        "It is working now, and the turn it is in the middle of is lost. Everything it has "
+        + "already written in the worktree stays exactly as it is, and its conversation stays "
+        + "here to read. The agent that started it is told."
+
+    /// One crew member the owner has asked to stop, held while the question is on screen.
+    ///
+    /// The workspace travels with it because the row that asked is gone by the time the answer
+    /// comes back: stopping is the one action here that removes the row it was started from.
+    struct PendingCrewStop: Equatable {
+        var sessionID: SessionID
+        var workspaceID: WorkspaceID
+        var name: String
+    }
+
+    /// Asks first only when there is something to lose.
+    ///
+    /// A member that has finished its turn is stopped on the spot: the row goes, the name is freed
+    /// and nothing that was running stops, so a dialog would be asking about nothing. One that is
+    /// working gets the question, because its turn dies with it.
+    private func askToStop(_ member: CrewRow, in workspaceID: WorkspaceID) {
+        let pending = PendingCrewStop(
+            sessionID: member.id, workspaceID: workspaceID, name: member.name
+        )
+
+        switch member.state {
+        case .running, .waiting: stoppingCrew = pending
+        case .idle, .failed, .cancelled: Task { await stop(pending) }
+        }
+    }
+
+    /// Stops it through the workspace's own door, which is what tells the agent above it.
+    ///
+    /// `WorkspaceModel.closeCrewMember` rather than an archive from here: an orchestrator left
+    /// waiting on a member that vanished is the failure the whole crew design is built to avoid,
+    /// and the owner reaching into the sidebar is the one way a member can go without the agent
+    /// above it having done anything.
+    private func stop(_ pending: PendingCrewStop) async {
+        // The model this launch already has, never a fresh one. Building a `WorkspaceModel` to
+        // close one of its chats would start the very machinery the close is about to tear down.
+        guard let model = app.existingModel(for: pending.workspaceID),
+              let member = model.sessions.first(where: { $0.id == pending.sessionID })
+        else { return }
+
+        await model.closeCrewMember(member)
+    }
+
+    /// The create window is opened by `RootView`, so every entry point (the toolbar, the repo
+    /// header's `+`, the menu bar command) goes through one notification and behaves identically:
+    /// which project is meant depends on what the main window has selected, and only that window
+    /// knows. See `RootView.openCreateWindow`.
     private func presentCreate(in repo: Repo?) {
         renaming = nil
         NotificationCenter.default.post(name: .bloomNewWorkspace, object: repo)
     }
 
-    private func addProject() {
-        Task { await app.addProjectByAsking() }
-    }
-
-    /// The sheet lives in `RootView` for the same reason the create sheet does, so every entry
-    /// point posts and behaves identically.
-    private func newProject() {
+    /// The window is opened from `RootView` for the same reason the create window is, so every
+    /// entry point posts and behaves identically.
+    private func startProject() {
         NotificationCenter.default.post(name: .bloomNewProject, object: nil)
     }
 }
@@ -676,7 +754,7 @@ struct SidebarNavRow: View {
         } icon: {
             Image(systemName: icon)
                 .foregroundStyle(
-                    prominence == .increased ? Palette.textInverted : Palette.textSecondary
+                    prominence == .increased ? Palette.selectedEmphasizedText : Palette.textSecondary
                 )
         }
     }
@@ -708,11 +786,11 @@ extension View {
     /// Two things at once, on purpose. `foregroundStyle` is what the label and the symbol read, and
     /// `backgroundProminence` is what everything further in reads: the status mark, the running
     /// figure's breathing rings, the project tile and the diff stat all key off it, and every one
-    /// of them already knows to switch to `Palette.textInverted` on a fill. The table used to set
+    /// of them already knows to switch to `Palette.selectedEmphasizedText` on a fill. The table used to set
     /// that environment value for us because the table drew the fill. Bloom draws it now, so Bloom
     /// sets it, and the two can never say different things about the same row.
     func selectedRowInk(isEmphasized: Bool) -> some View {
         environment(\.backgroundProminence, isEmphasized ? .increased : .standard)
-            .foregroundStyle(isEmphasized ? Palette.textInverted : Palette.textPrimary)
+            .foregroundStyle(isEmphasized ? Palette.selectedEmphasizedText : Palette.textPrimary)
     }
 }

@@ -7,7 +7,7 @@ struct DeliveryHoldTests {
     @Test("a running setup script holds everything behind it")
     func setupWins() {
         let hold = DeliveryHold.of(
-            isRunningSetup: true, didSetupFail: false, isTurnRunning: true, isAwaitingQuestion: true
+            isRunningSetup: true, isTurnRunning: true, isAwaitingQuestion: true
         )
         #expect(hold == .setup)
         #expect(!hold.allowsDelivery)
@@ -18,7 +18,7 @@ struct DeliveryHoldTests {
         // The turn is still marked running while the agent waits on an answer, so the more useful
         // of the two true answers is the one that tells the reader what to do.
         let hold = DeliveryHold.of(
-            isRunningSetup: false, didSetupFail: false, isTurnRunning: true, isAwaitingQuestion: true
+            isRunningSetup: false, isTurnRunning: true, isAwaitingQuestion: true
         )
         #expect(hold == .question)
     }
@@ -26,35 +26,40 @@ struct DeliveryHoldTests {
     @Test("a running turn holds the queue")
     func turnHolds() {
         let hold = DeliveryHold.of(
-            isRunningSetup: false, didSetupFail: false, isTurnRunning: true, isAwaitingQuestion: false
+            isRunningSetup: false, isTurnRunning: true, isAwaitingQuestion: false
         )
         #expect(hold == .turn)
         #expect(!hold.allowsDelivery)
     }
 
-    @Test("a failed setup does not launch an agent into a worktree that was never built")
-    func failedSetupHolds() {
+    @Test("a setup script that failed holds nothing, so the queue still moves")
+    func failedSetupDoesNotHold() {
+        // The workspace is not asked about its setup failure at all any more: what failed is said
+        // in the red setup row, the alert, the notification and the sidebar, and none of those is
+        // a reason to leave a chat that cannot be spoken to. See `DeliveryHold`.
         let hold = DeliveryHold.of(
-            isRunningSetup: false, didSetupFail: true, isTurnRunning: false, isAwaitingQuestion: false
-        )
-        #expect(hold == .setupFailed)
-        #expect(!hold.allowsDelivery)
-    }
-
-    @Test("an idle session lets the queue move")
-    func idleDelivers() {
-        let hold = DeliveryHold.of(
-            isRunningSetup: false, didSetupFail: false, isTurnRunning: false, isAwaitingQuestion: false
+            isRunningSetup: false, isTurnRunning: false, isAwaitingQuestion: false
         )
         #expect(hold == .none)
         #expect(hold.allowsDelivery)
     }
 
-    @Test("every hold says something, and only one of them lets a message go")
+    @Test("an idle session lets the queue move")
+    func idleDelivers() {
+        let hold = DeliveryHold.of(
+            isRunningSetup: false, isTurnRunning: false, isAwaitingQuestion: false
+        )
+        #expect(hold == .none)
+        #expect(hold.allowsDelivery)
+    }
+
+    @Test("every hold that is holding something says what, and only one lets a message go")
     func everyHoldSpeaks() {
-        for hold in DeliveryHold.allCases {
-            #expect(!hold.sentence.isEmpty)
+        for hold in DeliveryHold.allCases where hold != .none {
+            #expect(hold.sentence?.isEmpty == false)
         }
+        // Nothing to wait on, so nothing to say. See `DeliveryHold.sentence`.
+        #expect(DeliveryHold.none.sentence == nil)
         #expect(DeliveryHold.allCases.filter(\.allowsDelivery) == [.none])
     }
 }
@@ -320,5 +325,188 @@ struct DeliveryEchoTests {
                 #expect(Delivery.goesImmediately(behind: queue, hold: hold) == goesNext)
             }
         }
+    }
+}
+
+/// The owner presses Stop, and what he typed while the agent was working is still sitting under
+/// the transcript. Not draining after a Stop is right: he stepped in, and a message queued four
+/// minutes ago going out into the silence he just made is the opposite of what Stop is for. What
+/// was wrong is what happened to the message afterwards, which was nothing, under a bubble that
+/// had been promising it would go when this turn ended.
+///
+/// So Stop empties the queue into the composer, where the words can be read, changed and sent
+/// again by the person who wrote them. See `PendingMessageReturn`.
+@Suite("What a Stop leaves behind")
+struct PendingMessageReturnTests {
+    private func typed(_ body: String, delivered: Bool = false) -> Delivery {
+        Delivery(
+            targetSessionID: SessionID("s"),
+            body: body,
+            deliveredAt: delivered ? Date() : nil
+        )
+    }
+
+    private func fromAnAgent(_ text: String) -> Delivery {
+        Delivery(
+            targetSessionID: SessionID("s"),
+            sourceWorkspaceID: WorkspaceID("ws-1f2a"),
+            kind: .message,
+            crew: CrewMessage.said(from: "indexer", text: text, sender: .subagent)
+        )
+    }
+
+    @Test("the whole queue comes back, in the order it was asked for")
+    func everythingReturnsInOrder() {
+        let queue = [typed("first"), typed("second"), typed("third")]
+        #expect(PendingMessageReturn.returning(from: queue).map(\.body) == ["first", "second", "third"])
+        #expect(PendingMessageReturn.draft(taking: queue, into: "") == "first\n\nsecond\n\nthird")
+    }
+
+    /// The one thing this must never do. A queue coming back into a box somebody is typing in is
+    /// only an improvement if what they are typing survives it.
+    @Test("a draft already in the composer is kept, and goes last")
+    func theDraftIsNotDestroyed() {
+        let joined = PendingMessageReturn.draft(
+            taking: [typed("first"), typed("second")], into: "half a thought"
+        )
+        #expect(joined == "first\n\nsecond\n\nhalf a thought")
+    }
+
+    /// The reading `PendingMessageDiscard.recovery` takes, inherited rather than restated: a box
+    /// holding three newlines is not something anybody is in the middle of writing.
+    @Test("a blank composer counts as empty and its whitespace does not survive")
+    func blankDraftCountsAsEmpty() {
+        #expect(PendingMessageReturn.draft(taking: [typed("one")], into: " \n\n ") == "one")
+    }
+
+    @Test("an empty queue leaves the composer exactly as it was")
+    func nothingToReturnChangesNothing() {
+        #expect(PendingMessageReturn.draft(taking: [], into: "half a thought") == "half a thought")
+    }
+
+    /// The whole point of folding through `PendingMessageEdit`: a Stop with one message queued has
+    /// to leave the composer in the state pressing the pencil on it would have.
+    @Test("returning one message is the same move as editing it")
+    func oneMessageMatchesTheEditButton() {
+        for draft in ["", "  ", "half a thought"] {
+            let one = typed("one")
+            #expect(
+                PendingMessageReturn.draft(taking: [one], into: draft)
+                    == PendingMessageEdit.draft(taking: one, into: draft)
+            )
+        }
+    }
+
+    /// **A crew message is not the owner's writing.** It is another agent's sentence, drawn in its
+    /// own row rather than in his bubble, and putting it in his composer would have him send back
+    /// words he never wrote. It waits where it is.
+    @Test("something an agent said stays in the queue")
+    func crewMessagesStayQueued() {
+        let queue = [typed("mine"), fromAnAgent("the index is rebuilt")]
+        #expect(PendingMessageReturn.returning(from: queue).map(\.body) == ["mine"])
+        #expect(PendingMessageReturn.keeping(from: queue).map(\.kind) == [.message])
+    }
+
+    /// The same answer Edit gives, for the same reason: neither the chips nor the paths survive a
+    /// round trip through a text box, so the message keeps its place rather than coming back as
+    /// the machine's rendering of itself.
+    @Test("a message carrying attachments stays in the queue")
+    func attachmentsStayQueued() {
+        let attached = typed(AttachmentTrailer.compose(text: "look at this", paths: ["a.png"]))
+        let queue = [typed("mine"), attached]
+        #expect(PendingMessageReturn.returning(from: queue).map(\.body) == ["mine"])
+        #expect(PendingMessageReturn.keeping(from: queue).count == 1)
+    }
+
+    @Test("a message that has already gone is not offered back")
+    func deliveredIsNotReturned() {
+        #expect(!PendingMessageReturn.canReturn(typed("gone", delivered: true)))
+    }
+
+    /// Every message is in exactly one of the two answers, and both keep the queue's order. A
+    /// message in neither is one stranded by the very fix this suite is about.
+    @Test("what comes back and what stays partition the queue")
+    func thePartitionIsComplete() {
+        let queue = [
+            typed("first"),
+            fromAnAgent("from the indexer"),
+            typed(AttachmentTrailer.compose(text: "look", paths: ["a.png"])),
+            typed("last"),
+        ]
+        let returning = PendingMessageReturn.returning(from: queue)
+        let keeping = PendingMessageReturn.keeping(from: queue)
+        #expect(returning.count + keeping.count == queue.count)
+        #expect(returning.map(\.body) == ["first", "last"])
+        #expect(keeping.map(\.id) == [queue[1].id, queue[2].id])
+    }
+}
+
+/// One message goes now, in place of the turn it was waiting behind, and the rest of the queue
+/// does not notice. See `DeliverySteer`.
+@Suite("Steering one message past the rest")
+struct DeliverySteerTests {
+    private func typed(_ body: String, delivered: Bool = false) -> Delivery {
+        Delivery(
+            targetSessionID: SessionID("s"),
+            body: body,
+            deliveredAt: delivered ? Date() : nil
+        )
+    }
+
+    @Test("offered only while there is a turn to interrupt")
+    func onlyDuringATurn() {
+        let one = typed("one")
+        for hold in DeliveryHold.allCases {
+            #expect(DeliverySteer.canSteer(one, hold: hold) == (hold == .turn))
+        }
+    }
+
+    @Test("a message that has already gone cannot be steered")
+    func deliveredCannotSteer() {
+        #expect(!DeliverySteer.canSteer(typed("gone", delivered: true), hold: .turn))
+    }
+
+    /// Interrupting an agent is a person's decision. A crew message is drawn in its own row and
+    /// never carries these controls, and this is the rule behind that rather than a fact about
+    /// which view is used.
+    @Test("a message from another agent carries no Steer")
+    func crewCannotSteer() {
+        let fromAnAgent = Delivery(
+            targetSessionID: SessionID("s"),
+            sourceWorkspaceID: WorkspaceID("ws-1f2a"),
+            kind: .message,
+            crew: CrewMessage.said(from: "indexer", text: "done", sender: .subagent)
+        )
+        #expect(!DeliverySteer.canSteer(fromAnAgent, hold: .turn))
+    }
+
+    /// Where Steer parts company with Edit. Nothing is being turned back into text, so a body the
+    /// composer could not hold is a body the agent can still be handed exactly as it stood.
+    @Test("a message carrying attachments can be steered, unlike edited")
+    func attachmentsCanStillSteer() {
+        let attached = typed(AttachmentTrailer.compose(text: "look at this", paths: ["a.png"]))
+        #expect(!PendingMessageEdit.canEdit(attached))
+        #expect(DeliverySteer.canSteer(attached, hold: .turn))
+    }
+
+    /// The ordering rule, stated over every position in the queue: one message leaves, and what is
+    /// left is what was left, in the order it was asked for. Nothing is promoted behind it.
+    @Test("everything else keeps its place and its order, whichever one is steered")
+    func theRestIsUntouched() {
+        let queue = [typed("first"), typed("second"), typed("third")]
+        let expected = [["second", "third"], ["first", "third"], ["first", "second"]]
+        for (index, chosen) in queue.enumerated() {
+            let rest = DeliverySteer.queue(after: chosen, from: queue)
+            #expect(rest.map(\.body) == expected[index])
+        }
+    }
+
+    /// Steering the front of the queue is the drain's own move, so the two must not disagree about
+    /// what is left behind.
+    @Test("steering the front leaves what the drain would have left")
+    func steeringTheFrontMatchesTheDrain() throws {
+        let queue = [typed("first"), typed("second"), typed("third")]
+        let front = try #require(Delivery.next(from: queue, hold: .none))
+        #expect(DeliverySteer.queue(after: front, from: queue).map(\.body) == ["second", "third"])
     }
 }

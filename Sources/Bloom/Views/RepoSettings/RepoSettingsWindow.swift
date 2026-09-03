@@ -58,38 +58,6 @@ struct RepoSettingsWindow: Scene {
     }
 }
 
-/// The menu item that opens it.
-///
-/// Declared apart from the scene above and attached to the MAIN window instead, because SwiftUI
-/// only realizes a scene's commands while one of that scene's own windows is key. Left on the
-/// window group, the item that opens the window would only appear once it was already open.
-@MainActor
-struct RepoSettingsCommands: Commands {
-    let model: AppModel
-
-    @Environment(\.openWindow) private var openWindow
-
-    /// The project of the selected workspace, or the only sensible fallback: the first one.
-    private var repo: Repo? {
-        model.selectedWorkspace.flatMap(model.repo(for:)) ?? model.repos.first
-    }
-
-    var body: some Commands {
-        // In File, under the block that adds a project, because that block is where a project is
-        // already dealt with. An item added after `.appSettings` lands in the app menu beside
-        // Settings, which reads better and is where a Mac user looks, but it is also where a
-        // second Settings item invites the wrong click.
-        CommandGroup(after: .newItem) {
-            Button("Project Settings…") {
-                guard let repo else { return }
-                openWindow(id: RepoSettingsWindow.id, value: repo.id)
-            }
-            .keyboardShortcut(",", modifiers: [.command, .shift])
-            .disabled(repo == nil)
-        }
-    }
-}
-
 /// Resolves the id to a project every time the database changes, so a project renamed or removed
 /// in the main window does not leave a stale copy of itself sitting in this one.
 private struct RepoSettingsWindowContent: View {

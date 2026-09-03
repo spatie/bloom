@@ -55,8 +55,10 @@ final class CenterTabStore {
 
     /// The workspace's one review tab, if it has been opened. There is never a second: see the
     /// note on `CenterTab`.
+    /// The workspace's shared review tab, which is the one a clicked filename repoints. A tab
+    /// pinned to its own file is deliberately not it: see `CenterTab.isPinnedToPath`.
     func review(for workspaceID: WorkspaceID) -> CenterTab? {
-        tabs(for: workspaceID).first { $0.kind == .review }
+        tabs(for: workspaceID).first { $0.kind == .review && !$0.isPinnedToPath }
     }
 
     /// The workspace's one notes tab, if it has been opened. As with the review there is never a
@@ -97,6 +99,10 @@ final class CenterTabStore {
             )
         case .review:
             guard !tab.path.isEmpty else { return tab.title }
+            // A pinned tab is about one file and says so, whether or not the change happens to
+            // touch it: "All changes" on a tab that will never show another file would be a lie
+            // the strip repeated all day.
+            if tab.isPinnedToPath { return (tab.path as NSString).lastPathComponent }
             if model.changedFiles.contains(where: { $0.path == tab.path }) { return tab.title }
             return (tab.path as NSString).lastPathComponent
         case .terminal, .notes:
@@ -303,6 +309,32 @@ final class CenterTabStore {
         return tab
     }
 
+    /// Opens a review tab that stays on one file, or hands back the one already reading it.
+    ///
+    /// Never a second tab for the same file: a reader who double clicks the same pill twice means
+    /// "show me that", and two identical tabs is not what anybody means by it. Deliberately not
+    /// `showReview`, which is the shared tab and would have thrown the reader out of whatever it
+    /// was already on.
+    @discardableResult
+    func openPinnedReview(path: String, workspaceID: WorkspaceID) -> CenterTab {
+        if let existing = tabs(for: workspaceID).first(
+            where: { $0.kind == .review && $0.isPinnedToPath && $0.path == path }
+        ) {
+            return existing
+        }
+        var tabs = tabs(for: workspaceID)
+        let tab = CenterTab(
+            workspaceID: workspaceID,
+            kind: .review,
+            title: (path as NSString).lastPathComponent,
+            path: path,
+            isPinnedToPath: true
+        )
+        tabs.append(tab)
+        apply(tabs, to: workspaceID)
+        return tab
+    }
+
     /// Opens the workspace's notes tab, or hands back the one it already has.
     ///
     /// No path and no url: the tab is a pointer at a row keyed by the workspace, and the text
@@ -371,9 +403,15 @@ final class CenterTabStore {
     // MARK: - Sessions
 
     /// The live web view for a browser tab, created on first use and reused forever after.
-    func browser(for tab: CenterTab) -> BrowserSession {
+    ///
+    /// `root` is the workspace's worktree, and it is passed in rather than looked up because this
+    /// store holds tabs keyed by workspace and knows nothing else about one. It is only read when
+    /// the tab's address is a `file://` one, which is a page out of that worktree opened from a
+    /// file row: see `LocalPage.fileURL`. Empty means no local page will load, which is right for
+    /// a caller with no workspace to name.
+    func browser(for tab: CenterTab, root: String = "") -> BrowserSession {
         if let existing = browsers[tab.id] { return existing }
-        let session = BrowserSession(url: tab.url)
+        let session = BrowserSession(url: tab.url, root: root)
         browsers[tab.id] = session
         return session
     }

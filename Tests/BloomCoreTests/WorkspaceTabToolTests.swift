@@ -14,7 +14,7 @@ import Testing
 /// both `@MainActor` singletons in `Sources/Bloom`, which `Tests/BloomCoreTests` does not depend
 /// on. The walk over them lives in `AppModel+TabBridge` and is held by the same thing that holds
 /// `pane_list`'s walk, which is reading it.
-@Suite("Seeing a workspace's tabs")
+@Suite("Seeing a workspace's tabs", .scratchDirectory)
 struct WorkspaceTabToolTests {
     // MARK: - Building a strip to talk about
 

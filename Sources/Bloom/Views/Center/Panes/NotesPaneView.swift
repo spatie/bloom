@@ -54,12 +54,25 @@ struct NotesPaneView: View {
         // one; the pane going away covers switching tab, switching workspace and closing the tab,
         // all of which tear this view down while a scheduled save is still sleeping.
         .onChange(of: isEditing) { _, editing in if !editing { saveNow() } }
+        // Command-Backspace is delete-to-start-of-line in every text box on macOS, and the
+        // menu bar had it for Archive Workspace. See `FocusedValues.isTypingProse`.
+        .focusedValue(\.isTypingProse, isEditing)
         .onDisappear(perform: saveNow)
     }
 
     private var editor: some View {
         TextEditor(text: $text)
             .focused($isEditing)
+            // The system hangs a Writing Tools button off a text view, and on an empty one it
+            // lands at the view's leading edge outside the pane: the owner's report was a circle
+            // floating half over the sidebar, attached to nothing he could name. `ComposerTextEditor`
+            // turned it off for the same reason and records that there is no setting that keeps the
+            // feature and loses the circle.
+            //
+            // The cost is smaller here than it looks. This box holds a line somebody wants to
+            // remember about a workspace, and proofreading a note to yourself is not a job anybody
+            // has wanted done.
+            .writingToolsBehavior(.disabled)
             .font(Typo.body)
             .foregroundStyle(Palette.textPrimary)
             .scrollContentBackground(.hidden)

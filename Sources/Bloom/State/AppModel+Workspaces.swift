@@ -1,16 +1,19 @@
 import BloomCore
 
-/// Making a workspace, starting one, and carrying one on after its pull request is merged.
+/// Making a workspace, starting one, and the two ways a finished one is carried on.
 ///
 /// The first half is the ordinary route in: `createWorkspace` cuts the worktree,
 /// `startWorkspace` is the same thing said by an agent through the bridge, and `adopt` is what
 /// the app has to do once either of them has produced a workspace.
 ///
-/// The second half exists because a merged workspace used to be a dead end. Continuing keeps the
-/// installed dependencies, the copied `.env`, the dev servers on their ports and above all the
-/// agent's session, and changes only the thing that is genuinely finished, which is the branch.
-/// The decision itself is `ContinuationGate` in BloomCore and is the only thing allowed to say
-/// yes; what is here is the app work either side of it.
+/// The second half exists because a workspace whose work has landed used to be a dead end, and
+/// there are two shapes of that. `continueAfterMerge` is the one where the worktree is still on
+/// disk: the branch is finished, everything else about the directory is worth keeping, so a new
+/// branch is cut under the same worktree and the same session. `carryOn` is the one where the
+/// worktree is not: the workspace was archived and its branch has gone from this Mac and from the
+/// remote, so a new worktree has to be cut somewhere else and only the conversation can come
+/// across. The decisions are `ContinuationGate` and `CarryOnGate` in BloomCore, and they are the
+/// only things allowed to say yes; what is here is the app work either side of them.
 
 extension AppModel {
     /// Creates the worktree, selects it, kicks off setup, and sends the first prompt once setup
@@ -23,8 +26,8 @@ extension AppModel {
     /// because the code was on the main actor in a target nothing else can reach.
     ///
     /// `opensWith` decides the starting layout, not a mode: see `WorkspaceStartMode`. A terminal
-    /// workspace skips the session and the opening message, because there is nobody to send one
-    /// to, and names its own branch since there is no task to derive one from.
+    /// or browser workspace skips the session and the opening message, because there is nobody to
+    /// send one to, and names its own branch since there is no task to derive one from.
     ///
     /// `controls` are the model, effort, permission mode and fast mode chosen in the create
     /// sheet's composer footer. Nil everywhere else, which keeps those callers exactly as they
@@ -90,7 +93,10 @@ extension AppModel {
         name: String? = nil,
         /// An existing pull request or branch to open instead of cutting a branch. See
         /// `WorkspaceCheckout`.
-        checkout: WorkspaceCheckout? = nil
+        checkout: WorkspaceCheckout? = nil,
+        /// A thread on the chosen backend for the new chat to pick up. Only `carryOn` passes one.
+        /// See `WorkspaceStartRequest.resuming`.
+        resuming: String? = nil
     ) async throws -> Workspace {
         guard let manager else { throw AppNotReady.stillStartingUp }
         isCreatingWorkspace = true
@@ -100,9 +106,12 @@ extension AppModel {
         // paths in the sentence now, and every reader below this line is naming something after
         // what was asked for: a workspace called `9JVKW4` after the folder a screenshot was copied
         // into would be a name nobody could recognise.
-        let spoken = AttachmentDraft.withoutAttachments(
-            prompt, paths: staged?.attachments.map(\.path) ?? []
-        )
+        //
+        // `prompt` is the draft as it was written, files and all. The sheet used to strip them
+        // before handing it over, which named the workspace correctly and left the agent reading a
+        // sentence about screenshots it had never been told about. See `WorkspaceStartAttachments`.
+        let stagedPaths = staged?.attachments.map(\.path) ?? []
+        let spoken = WorkspaceStartAttachments.spoken(prompt, staged: stagedPaths)
 
         // A caller with no controls gets the ones the owner actually chose, not the built-in
         // fallback. The sheet and the bridge both pass controls; a `bloom://` link, the Services
@@ -137,9 +146,10 @@ extension AppModel {
             userSuppliedBranch: branch,
             isChatWorkspace: opensWith == .chat,
             wantsAutomaticName: wantsAName,
-            // A terminal workspace started with nothing written has no other source of a name:
-            // no turn is sent, so no model is asked, and there is no sentence to slug a branch
-            // out of. The sea is both, and it is the name for good rather than a placeholder.
+            // A workspace with no agent, started with nothing written, has no other source of a
+            // name: no turn is sent, so no model is asked, and there is no sentence to slug a
+            // branch out of. The sea is both, and it is the name for good rather than a
+            // placeholder.
             hasTask: !spoken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         ) {
             pick = try? await store?.claimOcean()
@@ -154,7 +164,7 @@ extension AppModel {
         //
         // Off the main actor, like `resolvedControls` above and for the same reason: the load
         // reads and parses every settings file this project answers to, and this line sits on the
-        // frame that is dismissing the create sheet.
+        // frame that is dismissing the create window.
         let seaBranch: String?
         if let pick {
             let path = repo.path
@@ -174,11 +184,14 @@ extension AppModel {
         // here changes nothing about what `start` does with it: the closure below hands back this
         // value, `start` still reports it as `placeholder`, and `adopt` still starts the automatic
         // rename against it.
-        let suppliedName = name ?? (opensWith == .terminal
-            ? WorkspaceStartPlan.terminalName(
+        // Asked as "does an agent run here" rather than as "is this a terminal", which is what it
+        // said while terminal was the only answer. A browser workspace has no turn either, so it
+        // has to settle its own name here for the same reason and by the same rule.
+        let suppliedName = name ?? (opensWith.runsAnAgent
+            ? nil
+            : WorkspaceStartPlan.terminalName(
                 userSuppliedBranch: branch, claimedSea: pick?.ocean.name
-            )
-            : nil)
+            ))
         let placeholder: String?
         if suppliedName == nil, checkout == nil, wantsAName {
             // The AI rename compares against the exact placeholder handed over, so the sea's name
@@ -216,8 +229,8 @@ extension AppModel {
             // The claimed sea's slug when there is one, so the branch and the name tell the same
             // story. `Git.uniqueBranch` still suffixes a collision with an earlier voyage.
             branch: branch ?? seaBranch,
-            // A terminal workspace is named after the branch the user typed, or after the sea it
-            // just claimed when nothing was typed at all. Either way the name is settled above
+            // A workspace with no agent is named after the branch the user typed, or after the
+            // sea it just claimed when nothing was typed at all. Either way the name is settled above
             // rather than left to the namer, because nothing is going to be asked: passing a name
             // is also what stops `start` returning a placeholder and so what stops `adopt`
             // kicking off an automatic rename with no first turn to read.
@@ -225,6 +238,7 @@ extension AppModel {
             checkout: checkout,
             controls: effectiveControls,
             opensSession: opensWith == .chat,
+            resuming: resuming,
             // The app runs setup itself, through `WorkspaceModel`, so the output streams into the
             // transcript, a failure raises the one sentence every route says about a failed setup,
             // and an archive can cancel it. See `adopt`.
@@ -267,35 +281,17 @@ extension AppModel {
             )
         }
 
-        // The files come across whichever mode asked for the workspace.
-        //
-        // This used to be inside the `.chat` branch below, so a workspace opened as a terminal
-        // dropped every staged file on the floor: nothing moved them into the worktree, and
-        // `AttachmentStaging.discard` deleted them a moment later. Nothing said so, and the chips
-        // had already gone with the sheet. A screenshot somebody dragged in is a file they wanted
-        // in the worktree, and the shell they are about to get is standing in that worktree, so
-        // the honest answer is to carry it rather than to announce a deletion.
-        var moved: Set<String> = []
-        if let staged, !staged.attachments.isEmpty {
-            moved = Set(
-                AttachmentFiles
-                    .adopt(staged.attachments, from: staged.directory, into: started.workspace.path)
-                    .map(\.path)
-            )
-        }
-
-        // The agent gets the sentence as it was written, files and all, because the paths in it
-        // are already the paths those files have in the worktree: staging lays a draft out under
-        // exactly the layout it will have here, so this is a move and nothing has to be rewritten.
-        // What is taken out is anything that failed to arrive, which is a path to nothing and
-        // worse than one file fewer. Only this half is a chat's: a terminal workspace has no turn
-        // to put a sentence in, which is the whole of the difference between the two.
-        var opening: String? = opensWith == .chat ? prompt : nil
-        if opensWith == .chat, let staged, !moved.isEmpty {
-            opening = AttachmentDraft
-                .parse(prompt, paths: staged.attachments.map(\.path))
-                .keeping { moved.contains($0) }
-        }
+        // The files come across whichever mode asked for the workspace, and the sentence names
+        // whichever of them arrived. Both halves are `WorkspaceStartAttachments`, in the core,
+        // because an attachment is only correct when the two agree and neither is visible from
+        // the other's side.
+        let arrived: Set<String> = staged.map {
+            WorkspaceStartAttachments
+                .adopt(stagedPaths, from: $0.directory, into: started.workspace.path)
+        } ?? []
+        let opening = WorkspaceStartAttachments.opening(
+            prompt, staged: stagedPaths, arrived: arrived, isChatWorkspace: opensWith == .chat
+        )
 
         // Setup runs whether or not there is an agent turn to follow it. Only the turn is skipped
         // for a terminal workspace.
@@ -305,7 +301,7 @@ extension AppModel {
 
     /// The model, effort and permission mode the owner has actually chosen for this project.
     ///
-    /// The same resolution the composer and the create sheet do, so a workspace created without a
+    /// The same resolution the composer and the create window do, so a workspace created without a
     /// window agrees with one created from the sheet rather than falling back to the built-in.
     /// Repository settings first, then the Settings screen, then a machine-wide file. See
     /// `ComposerDefaults.resolve`.
@@ -316,18 +312,28 @@ extension AppModel {
         let repoSettings = await Task.detached(priority: .userInitiated) {
             SettingsLoader.load(repo: repo.path)
         }.value
-        let resolved = ComposerDefaults.resolve(repo: repoSettings, app: appDefaults)
+        // The Codex list as this window last fetched it, which may well be empty here: nothing
+        // waits for a fetch to start a workspace. Empty costs only the effort fallback, because
+        // the backend the Models screen recorded is read without any list at all. See
+        // `DefaultBackend`.
+        let resolved = ComposerDefaults.resolve(
+            repo: repoSettings,
+            app: appDefaults,
+            codexModels: ComposerModelCatalog.shared.codexModels
+        )
 
-        // The backend is left at its default rather than derived from the model. Nothing in the
-        // tree maps one to the other: the composer takes it from the picker press, because
-        // choosing a model out of the Codex section IS choosing Codex, and there is no rule that
-        // reads it back off the name. Guessing here would be inventing that rule where the
-        // consequence of getting it wrong is a chat on a backend nobody chose.
+        // The backend comes from the model now. It used to be left at its default here, with a
+        // note saying nothing in the tree mapped one to the other, and that was true: the composer
+        // took it from the picker press and no rule read it back off a name. `DefaultBackend` is
+        // that rule, and the Models screen records the backend beside the model so the common case
+        // needs no list to look an id up in.
         return ComposerControls(
             model: resolved.model,
             effort: resolved.effort,
+            agentKind: resolved.backend,
             permissionMode: resolved.permissionMode,
-            isFastMode: appDefaults.fastMode
+            isFastMode: appDefaults.fastMode,
+            codexContextWindow: appDefaults.codexContextWindow
         )
     }
 
@@ -415,10 +421,11 @@ extension AppModel {
         do {
             facts = try await manager.continuationFacts(
                 workspace: workspace,
-                // GitHub's own answer, from the strip the button lives in rather than from a
-                // fresh lookup. The strip is the reason the button is on screen at all, so
-                // asking again would only introduce a way for the two to disagree.
-                isPullRequestMerged: pullRequest.isMerged,
+                // The pull request the strip is showing rather than a fresh lookup. The strip is
+                // the reason the button is on screen at all, so asking again would only introduce
+                // a way for the two to disagree, and this one carries the branch it is for, which
+                // is what the gate weighs the checkout against.
+                pullRequest: pullRequest,
                 isAgentRunning: isRunning(workspace)
             )
         } catch {
@@ -442,6 +449,128 @@ extension AppModel {
 
         await adopt(continuation, pullRequest: pullRequest)
         return .continued(continuation)
+    }
+
+    /// What pressing Carry On in an archived workspace does.
+    ///
+    /// The archived workspace is not touched. Nothing is unarchived, nothing is written to its
+    /// row, and its transcript is still there to read afterwards: a new workspace is cut beside
+    /// it and the conversation is picked up in that one. Two rows saying they are the same piece
+    /// of work is the honest description of what happened, and it is why the new workspace keeps
+    /// the old one's name rather than being given a fresh codename.
+    ///
+    /// The chat carries across for real. `plan.agentSessionID` is written onto the new chat as
+    /// its `agentSessionID`, so its very first turn goes out with `--resume`, and the agent
+    /// answers holding the whole of the conversation rather than a summary of it. What does not
+    /// come across is Bloom's own transcript, whose rows belong to the chat they were written
+    /// for, and the opening turn is worded to say so out loud. See `ArchivedCarryOn`.
+    ///
+    /// It goes through `startWorkspace` like every other route in, with three of its decisions
+    /// stated rather than derived: the branch and the base, which `CarryOnGate` worked out, and
+    /// the name, which is the archived workspace's. Passing a name is also what stops the namer
+    /// asking a model to invent one out of a handover message that describes no task.
+    func carryOn(_ workspace: Workspace, plan: CarryOnPlan) async {
+        guard let repo = repo(for: workspace) else {
+            alert = BloomAlert(
+                title: "Could not carry \(workspace.name) on",
+                message: "Its project is no longer in Bloom, so there is no repository to cut a "
+                    + "worktree from. Add the project again and try once more."
+            )
+            return
+        }
+        guard !carryingOn.contains(workspace.id) else { return }
+
+        carryingOn.insert(workspace.id)
+        defer { carryingOn.remove(workspace.id) }
+
+        let handover = ArchivedCarryOn(workspace: workspace, project: repo.name, plan: plan)
+        let template = PromptOverrides().template(for: .carryOnArchived)
+
+        do {
+            let started = try await startWorkspace(
+                in: repo,
+                prompt: handover.render(template: template).text,
+                baseBranch: plan.baseBranch,
+                branch: plan.branch,
+                // The archived chat's own model, effort, backend and permission mode, so the
+                // conversation resumes under the settings it was being had under rather than
+                // under whatever the Settings screen says today. A resumed Claude Code thread
+                // handed to Codex would be an id that backend has never heard of.
+                controls: await carryOnControls(plan: plan, workspace: workspace),
+                name: workspace.name,
+                resuming: plan.agentSessionID
+            )
+            Log.archive.info(
+                "carried \(workspace.name, privacy: .public) on as \(started.branch, privacy: .public)"
+            )
+        } catch {
+            Log.archive.error(
+                "could not carry \(workspace.name, privacy: .public) on: \(error.readableMessage, privacy: .public)"
+            )
+            let trouble = await WorkspaceTrouble.creating(
+                error,
+                project: repo.name,
+                projectPath: repo.path,
+                baseBranch: plan.baseBranch
+            )
+            alert = BloomAlert(
+                title: "Could not carry \(workspace.name) on", message: trouble.sentence
+            )
+        }
+    }
+
+    /// Whether the archive screen may offer Carry On, and where it would cut.
+    ///
+    /// Asked here rather than in the view for the reason every git call is: listing the
+    /// repository's branches is a subprocess. The network half of the answer is not asked again,
+    /// it is handed in, because the screen has already paid for it once. See
+    /// `WorkspaceManager.carryOnFacts`.
+    func carryOnDecision(
+        for workspace: Workspace, session: Session?, source: RestoreSource?
+    ) async -> CarryOnDecision {
+        guard let manager else { return .refuse(.stillLooking) }
+        guard let repo = repo(for: workspace) else { return .refuse(.projectGone) }
+        return CarryOnGate.decide(
+            await manager.carryOnFacts(
+                workspace: workspace, repo: repo, session: session, source: source
+            )
+        )
+    }
+
+    /// The four settings the archived chat was being had under, plus the three that have no column.
+    ///
+    /// Read off the plan and the archived session rather than resolved from the project, because
+    /// this chat is not new. It is the same conversation, and the only reason it is being handed
+    /// a `ComposerControls` at all is that a workspace start is where those get written.
+    private func carryOnControls(plan: CarryOnPlan, workspace: Workspace) async -> ComposerControls {
+        guard let store, let session = await archivedSession(plan: plan, workspace: workspace) else {
+            return ComposerControls(agentKind: plan.agentKind)
+        }
+        let isFastMode = (try? await store.setting(
+            ComposerControls.fastModeKey(sessionID: session.id)
+        )) == "1"
+        let outputStyle = (try? await store.setting(
+            ComposerControls.outputStyleKey(sessionID: session.id)
+        )) ?? OutputStyle.defaultName
+        let contextWindow = CodexContextWindow.normalised(try? await store.setting(
+            ComposerControls.contextWindowKey(sessionID: session.id)
+        ))
+        return ComposerControls(
+            session: session,
+            isFastMode: isFastMode,
+            outputStyle: outputStyle,
+            codexContextWindow: contextWindow
+        )
+    }
+
+    /// The archived chat the plan was made from, found by the thread it is resuming.
+    ///
+    /// By the thread rather than by an id passed down, because that is the one fact the plan and
+    /// the row are guaranteed to agree on: the gate would not have produced a plan without it.
+    private func archivedSession(plan: CarryOnPlan, workspace: Workspace) async -> Session? {
+        guard let store else { return nil }
+        let sessions = (try? await store.sessions(workspaceID: workspace.id)) ?? []
+        return sessions.first { $0.agentSessionID == plan.agentSessionID }
     }
 
     /// Both catches above, so the two sentences cannot drift apart.
@@ -468,6 +597,11 @@ extension AppModel {
         // age beside the shared one's 110, and forgetting one and not the other was a bug waiting
         // for the next caller who only knew about one of them.
         WorkspacePullRequests.shared.forget(continuation.workspace.id)
+
+        // What the strip says instead, until something is committed here or the worktree moves
+        // again. Without it the band falls back to the line it shows a workspace nobody has
+        // touched: see `ContinuedBranch`.
+        model.continued = ContinuedBranch(continuation, pullRequest: pullRequest.number)
 
         // The diff is measured against the base, and the base just moved under it.
         await model.refreshChanges()

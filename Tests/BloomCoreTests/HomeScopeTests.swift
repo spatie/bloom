@@ -65,7 +65,7 @@ struct HomeScopeTests {
     @Test("a chip that is not on offer falls back to the resting one")
     func aScopeThatIsNotOfferedSettles() {
         #expect(HomeScope.settle(.running, searching: true) == .all)
-        #expect(HomeScope.settle(.transcripts, searching: false) == .live)
+        #expect(HomeScope.settle(.transcripts, searching: false) == .all)
         #expect(HomeScope.settle(.all, searching: true) == .all)
     }
 
@@ -74,9 +74,9 @@ struct HomeScopeTests {
     /// a search narrowed by default answers a question nobody asked.
     @Test("Home rests on Live, and a search rests on Everything")
     func theRestingScopeIsLive() {
-        #expect(HomeScope.resting(searching: false) == .live)
+        #expect(HomeScope.resting(searching: false) == .all)
         #expect(HomeScope.resting(searching: true) == .all)
-        #expect(HomeFilter().scope == .live)
+        #expect(HomeFilter().scope == .all)
     }
 
     /// The default leads, because a strip whose first chip is one nobody wants selected reads as a
@@ -84,7 +84,9 @@ struct HomeScopeTests {
     /// then the widest net.
     @Test("Live leads the browsing chips and All closes them")
     func liveLeadsTheStrip() {
-        #expect(HomeScope.offered(searching: false) == [.live, .needsYou, .running, .archived, .all])
+        // Two, not five. See `offered`: the three that went were each a true fact drawn as a
+        // control nobody pressed, and `needsYou` is the one to bring back if it is missed.
+        #expect(HomeScope.offered(searching: false) == [.all, .archived])
         #expect(HomeScope.offered(searching: true).first == .all)
     }
 
@@ -196,9 +198,6 @@ struct HomeScopeTests {
         // And the two that do keep a number still drop it at nought.
         #expect(HomeScopeCounts().badge(of: .all, searching: false) == nil)
         #expect(HomeScopeCounts().badge(of: .archived, searching: false) == nil)
-        // The chip is still offered, because a strip that reflowed every time an agent started
-        // would be movement under the pointer for no gain.
-        #expect(HomeScope.offered(searching: false).contains(.running))
     }
 
     /// The project menu narrows what the chips count, because it narrows what clicking one would

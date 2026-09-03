@@ -54,6 +54,20 @@ struct TranscriptRow: Identifiable, Hashable {
 @MainActor
 @Observable
 final class TranscriptModel {
+    private struct RunnerPreferences: Equatable {
+        var model: String
+        var effort: String
+        var permissionMode: String
+        var agentKind: String
+
+        init(session: Session) {
+            model = session.model
+            effort = session.effort
+            permissionMode = session.permissionMode.rawValue
+            agentKind = session.agentKind.rawValue
+        }
+    }
+
     var session: Session
     /// The workspace as it was when this model was made, or nil for a chat that is in none.
     ///
@@ -205,6 +219,27 @@ final class TranscriptModel {
     /// turn starts, so it never outlives the turn it describes.
     private var wasStoppedByHand = false
 
+    /// The queued message a Steer has picked, waiting for the turn it stopped to finish dying.
+    ///
+    /// **Held rather than sent on the button press, for the reason `drain` is called from the
+    /// result rather than from `stop`.** A cancelled turn still emits its own result, and that
+    /// event is where a turn actually ends: it clears the streaming tail, files the run and sets
+    /// `isRunning` false. A send racing it would start the steered turn and then have the dying
+    /// turn's result switch it off again, leaving a composer that says nothing is running over an
+    /// agent that is. So Steer books the message here and the one place that decides what happens
+    /// when a turn ends sends it. Cleared there, and wherever the chat stops expecting a result.
+    private var steering: Delivery?
+
+    /// Whether the chat above this one has already been told that this turn ended.
+    ///
+    /// A turn has two endings that report, `.error` and `.result`, and they are not alternatives:
+    /// `AgentRunner` yields `.error(.storage(...))` when a transcript write fails without ending
+    /// the turn, so the failure sentence went out and then the turn's own result went out behind
+    /// it. An orchestrator told twice that one agent stopped picks the work back up twice, on the
+    /// first sentence and then again on a second that says the same thing. Cleared where a turn
+    /// begins, so it never silences the next one.
+    private var hasReportedTurnEnded = false
+
     /// Bumped whenever something outside the list asks it to go back to the newest row. A counter
     /// rather than a flag, so two requests in a row are two requests, and the list has nothing to
     /// clear afterwards. See `jumpToLiveEnd`.
@@ -217,6 +252,9 @@ final class TranscriptModel {
 
     private var runner: (any SessionRunner)?
     private var pumpTask: Task<Void, Never>?
+    /// Preferences are captured when a runner is created. Comparing them at delivery time avoids
+    /// reusing a process after the picker changed, even when persistence is still catching up.
+    private var runnerPreferences: RunnerPreferences?
     private var indexByRefID: [String: Int] = [:]
     /// The one read of this session's history, held so that it happens once however many callers
     /// ask for it.
@@ -227,6 +265,11 @@ final class TranscriptModel {
     /// last line of the read. `SingleFlight` is named after, and documents, the transcript that
     /// would not draw when the two of them ran the read at once.
     private let loader = SingleFlight()
+    /// The newest stored message this model has ingested, whether or not that message became a
+    /// row. Tool results fold into their tool-use row, so the rendered rows cannot answer this
+    /// without both walking the whole transcript and still sometimes returning an older sequence.
+    /// Outside observation because it is only a database cursor and nothing draws it.
+    @ObservationIgnored private var highestSeenMessageSeq = -1
     /// When the current turn was handed to the runner, so a session row written before that can be
     /// recognised as belonging to the previous turn.
     private var turnStartedAt: Date?
@@ -298,14 +341,17 @@ final class TranscriptModel {
         let built = await Task.detached(priority: .userInitiated) {
             var rows: [TranscriptRow] = []
             var index: [String: Int] = [:]
+            var highestMessageSeq = -1
             for message in messages {
+                highestMessageSeq = max(highestMessageSeq, message.seq)
                 Self.absorb(message, decisions: decisions, into: &rows, indexByRefID: &index)
             }
-            return (rows: rows, index: index)
+            return (rows: rows, index: index, highestMessageSeq: highestMessageSeq)
         }.value
 
         rows = built.rows
         indexByRefID = built.index
+        highestSeenMessageSeq = built.highestMessageSeq
 
         // The parsing every row of the window is about to want, done now and off this thread. See
         // `TranscriptPrime`, which is where the whole argument for it is. Nothing cancels it: it
@@ -432,11 +478,17 @@ final class TranscriptModel {
         title: String? = nil,
         model: String? = nil,
         effort: String? = nil,
-        permissionMode: PermissionMode? = nil
+        permissionMode: PermissionMode? = nil,
+        agentKind: AgentKind? = nil
     ) async {
         guard let store else { return }
         try? await store.updateSessionPreferences(
-            id: session.id, title: title, model: model, effort: effort, permissionMode: permissionMode
+            id: session.id,
+            title: title,
+            model: model,
+            effort: effort,
+            permissionMode: permissionMode,
+            agentKind: agentKind
         )
         await refreshSession()
     }
@@ -547,7 +599,6 @@ final class TranscriptModel {
         let model = workspace.flatMap { app.existingModel(for: $0.id) }
         return DeliveryHold.of(
             isRunningSetup: model?.isRunningSetup ?? false,
-            didSetupFail: (model?.workspace ?? workspace)?.setupState == .failed,
             isTurnRunning: isRunning,
             isAwaitingQuestion: isAwaitingPermission
         )
@@ -581,6 +632,17 @@ final class TranscriptModel {
         await refreshQueue()
 
         await deliver(next)
+    }
+
+    /// Whether this delivery is at the front of an idle queue and can be attempted now.
+    func canRetry(_ delivery: Delivery) -> Bool {
+        Delivery.next(from: pendingDeliveries, hold: deliveryHold)?.id == delivery.id
+    }
+
+    /// Attempts the front of the queue again without changing its order or duplicating its text.
+    func retryPending() async {
+        wasStoppedByHand = false
+        await drain()
     }
 
     /// The queued message the owner has asked to delete, and the reason the sheet is up.
@@ -652,6 +714,88 @@ final class TranscriptModel {
         await saveDraft()
     }
 
+    /// Empties the queue back into the composer, because the owner stopped the turn it was
+    /// waiting behind.
+    ///
+    /// Which messages travel, in what order, and what becomes of a draft already in the box are
+    /// all `PendingMessageReturn`'s: the rule is a decision, and the suite cannot see a view.
+    ///
+    /// Called from `stop` and from nowhere else. Not from the result the cancellation produces:
+    /// the words should be back in the box on the frame the button was pressed rather than
+    /// whenever the CLI gets round to closing the turn, and doing it in both places would only be
+    /// a second run finding an empty queue.
+    private func returnQueueToComposer() async {
+        guard let store else { return }
+        await refreshQueue()
+        let wanted = PendingMessageReturn.returning(from: pendingDeliveries)
+        guard !wanted.isEmpty else { return }
+
+        // One cancel each, and only what really left the queue reaches the box. A message that
+        // went in the instant between the Stop and this line is a turn the agent is already
+        // running, and putting its words in the composer would be offering to send it twice.
+        // `Store.cancelDelivery` answering false is what tells the two apart, which is the race
+        // `PendingMessageDiscard.alreadySentSentence` names. It needs no sentence here: nothing
+        // was promised, and the message is on screen as an ordinary bubble that has gone.
+        var returned: [Delivery] = []
+        for delivery in wanted {
+            let left = (try? await store.cancelDelivery(id: delivery.id)) ?? false
+            guard left else { continue }
+            returned.append(delivery)
+        }
+        await refreshQueue()
+        guard !returned.isEmpty else { return }
+
+        // The draft is read after the cancels rather than before, the way `editPending` reads it:
+        // the words go in front of whatever the box holds by the time they arrive rather than in
+        // front of what it held a round trip ago.
+        draft = PendingMessageReturn.draft(taking: returned, into: draft)
+        composerFocusRequests += 1
+        await saveDraft()
+    }
+
+    /// Whether this queued message may be sent in place of the turn that is running.
+    func canSteer(_ delivery: Delivery) -> Bool {
+        DeliverySteer.canSteer(delivery, hold: deliveryHold)
+    }
+
+    /// Stops the turn that is running and sends this queued message into the space it makes.
+    ///
+    /// Everything else in the queue is left untouched, in the table, so what is still waiting
+    /// waits in the order it was asked for and this one is simply no longer part of it. See
+    /// `DeliverySteer.queue(after:from:)`.
+    func steer(_ delivery: Delivery) async {
+        guard canSteer(delivery) else { return }
+        // Booked rather than sent. See `steering` for why a send here would race the result of
+        // the turn this is about to cancel.
+        steering = delivery
+        cancelTurn()
+    }
+
+    /// Hands over the message a Steer picked, once the turn it stopped has ended.
+    ///
+    /// `drain`'s body with one line different, and that line is the whole feature: the message is
+    /// the one that was pressed rather than the front of the queue. It goes through the same
+    /// retire-then-deliver order for the same reason, which is that a delivery still marked
+    /// pending while its turn is starting is drawn twice.
+    private func sendSteered(_ delivery: Delivery) async {
+        guard let store else { return }
+        // A turn was started while this one was dying, which takes the owner typing into the
+        // composer inside that second: `submit` drains, and the drain does not know a Steer is
+        // booked. Two sends into one runner is the one outcome to avoid, and the cost of avoiding
+        // it is nothing, since the message keeps its place and goes when this new turn ends.
+        guard !isRunning else { return }
+
+        await refreshQueue()
+        // Deleted, or drained by something else, while the turn was dying. Nothing to say: the row
+        // it was pressed on has gone, which is the whole of what happened.
+        guard pendingDeliveries.contains(where: { $0.id == delivery.id }) else { return }
+
+        sending = delivery
+        try? await store.markDelivered(id: delivery.id)
+        await refreshQueue()
+        await deliver(delivery)
+    }
+
     /// Closes the question when the message it is about is no longer waiting.
     ///
     /// Called from `refreshQueue`, which is the one place this object learns the queue has moved.
@@ -685,6 +829,7 @@ final class TranscriptModel {
         }
         turnStartedAt = Date()
         wasStoppedByHand = false
+        hasReportedTurnEnded = false
         // **The clearing rule.** The last turn's subagents go here, at the one place a turn
         // starts, and nowhere else. Clearing them when they finish is the option that reads well
         // in a screenshot and badly in use: three rows leaving one by one take everything below
@@ -696,7 +841,11 @@ final class TranscriptModel {
         statusLabel = "Starting"
 
         do {
-            try await runner.send(delivery.body)
+            // `sent` rather than `body`, and the payload beside it. They are the same string for
+            // anything the owner typed and two different strings for a crew message: what the
+            // model is handed is the envelope, and what the transcript draws is the words. See
+            // `Delivery.sent` and `SessionRunner.send(_:recording:)`.
+            try await runner.send(delivery.sent, recording: delivery.crewPayload)
             // The runner writes the user row as part of the send, and until this line nothing read
             // it back: the transcript only pulled rows on an agent event, so the owner's own
             // message did not appear until the answer did. Reading it here is what retires the
@@ -716,7 +865,8 @@ final class TranscriptModel {
     /// it once, to whoever is looking at that moment, and then it is gone; the transcript is where
     /// somebody goes a minute later to work out what happened, and it held nothing at all. So the
     /// account of it goes in as an `.error` row, drawn by `AgentErrorRowView` beside every other
-    /// way a turn can fail, and the alert stays for the person who is watching now.
+    /// way a turn can fail. A modal alert would hide that recovery UI and require dismissal before
+    /// the person can act, so it is reserved for the exceptional case where no row can be stored.
     ///
     /// The delivery goes back to being pending rather than reading as sent. It used to go back
     /// into the composer, which was right when the composer was the only place an unsent prompt
@@ -733,18 +883,19 @@ final class TranscriptModel {
         )
 
         // Everything durable needs the database, and one of the two ways in here is the database
-        // never having opened. The alert below is outside this on purpose: it is the half that
-        // still works when there is nowhere to write, and the half nobody can be left without.
-        if let store {
-            try? await store.restoreDelivery(id: delivery.id)
-            await refreshQueue()
-
-            let row = AgentError.notStarted(message: complaint)
-            _ = try? await store.appendNext(sessionID: session.id, kind: .error, payload: row.raw)
-            await appendLatestMessages()
+        // never having opened. Only that path needs an alert because it has nowhere to put an
+        // inline explanation or a message that can be retried.
+        guard let store else {
+            app.alert = BloomAlert(title: "Could not start the agent", message: complaint)
+            return
         }
 
-        app.alert = BloomAlert(title: "Could not start the agent", message: complaint)
+        try? await store.restoreDelivery(id: delivery.id)
+        await refreshQueue()
+
+        let row = AgentError.notStarted(message: complaint)
+        _ = try? await store.appendNext(sessionID: session.id, kind: .error, payload: row.raw)
+        await appendLatestMessages()
     }
 
     func saveDraft() async {
@@ -762,6 +913,23 @@ final class TranscriptModel {
     ///
     /// Idempotent, so a path that stops an already stopped turn writes nothing and invalidates
     /// nobody.
+    /// The turn bookkeeping `deliver` does, for a turn that arrived without one.
+    ///
+    /// Everything here is about the turn rather than about the message, which is why this is the
+    /// part `deliver` and an `init` line have in common and the queue, the draft and the crew
+    /// payload are not. Guarded by `isRunning` at the call site so a turn Bloom sent, whose `init`
+    /// lands a moment after `deliver` has already done all of this, does not have its subagent
+    /// rows cleared a second time.
+    private func noteTheAgentStartedItsOwnTurn() {
+        turnStartedAt = Date()
+        // Not this turn, whatever the last one was. A Stop the owner pressed belongs to the turn
+        // it stopped, and leaving it set would make the next result skip the queue drain.
+        wasStoppedByHand = false
+        hasReportedTurnEnded = false
+        subagents.turnStarted()
+        setRunning(true)
+    }
+
     private func setRunning(_ value: Bool) {
         // A turn that has ended cannot still be waiting on a question, and there are six places
         // that end one: a stale terminal state read back from the row, a send that threw, Stop,
@@ -795,6 +963,30 @@ final class TranscriptModel {
     /// turn still emits its own result, and that event is what writes the final state back into the
     /// session row. Tearing the pump down here used to strand the session until the next launch.
     func stop() {
+        cancelTurn()
+
+        // **And the queue comes back with it.** Not draining after a Stop was right about the
+        // messages not going and wrong about what became of them: they sat under the transcript
+        // for the rest of the launch, under a sentence that had promised they would go when this
+        // turn ended. They go back to the composer instead, where they can be read, changed and
+        // sent again, and where nothing is promising anything on their behalf. See
+        // `PendingMessageReturn`.
+        //
+        // A task rather than an await, because Stop has to look instant: cancelling the turn is
+        // the thing the hand asked for, and it must not wait on two round trips to a SQLite actor
+        // that a diff refresh can be sitting in front of.
+        Task { await returnQueueToComposer() }
+    }
+
+    /// Cancelling the running turn, and saying nothing about what happens next.
+    ///
+    /// The callers want opposite things from the queue, so one method meant one of them was
+    /// wrong. Stop hands the waiting messages back to the composer, and Steer sends one of them
+    /// in the space it just made; quitting, archiving and closing a chat have to leave the queue
+    /// exactly where it is, because a queued message survives a relaunch on purpose and coming
+    /// back as a draft in a chat nobody has open is not surviving. The shared half is here and
+    /// each caller says what it wants after it.
+    private func cancelTurn() {
         // Remembered so the result this cancellation is about to produce does not look like a turn
         // that finished, and therefore does not let the queue move. See `wasStoppedByHand`.
         wasStoppedByHand = true
@@ -812,7 +1004,12 @@ final class TranscriptModel {
     /// the same method. So a Codex chat's server was never signalled by anything, which is the
     /// orphaned-children bug this app already fixed once on the Claude Code side.
     func terminateNow() {
-        stop()
+        // `cancelTurn` rather than `stop`, and this is the reason the two are separate: Stop's
+        // other half empties the queue into a composer that is going away with this chat.
+        cancelTurn()
+        // A Steer waits on the result of the turn it stopped, and nothing is coming back from a
+        // process about to be signalled. The message stays queued, which is where it was.
+        steering = nil
         runner?.terminateNow()
     }
 
@@ -860,6 +1057,14 @@ final class TranscriptModel {
     /// somewhere other than here.
     private func ensureRunner() -> (any SessionRunner)? {
         guard let store else { return nil }
+        let preferences = RunnerPreferences(session: session)
+        if runner != nil, runnerPreferences != preferences {
+            runner?.terminateNow()
+            pumpTask?.cancel()
+            pumpTask = nil
+            runner = nil
+            runnerPreferences = nil
+        }
         // Two registrations, because there are two identities. A chat in a worktree gets a token
         // minted for that workspace and the role its origin says; Ask Bloom gets the owner's own,
         // which is the same door the owner's terminal comes in through and the reason every owner
@@ -873,6 +1078,7 @@ final class TranscriptModel {
             bridge: bridge
         )
         self.runner = runner
+        runnerPreferences = preferences
         if pumpTask == nil { startPump(on: runner) }
         return runner
     }
@@ -940,13 +1146,25 @@ final class TranscriptModel {
     private func handle(_ event: AgentEvent) async {
         switch event {
         case .initialized:
+            // **A turn Bloom did not send starts here and nowhere else.** The CLI runs a
+            // background task's completion notification as a turn of its own, and it announces
+            // each one with an `init` exactly as it announces the ones Bloom asks for. Until this
+            // line the pane learned a turn had begun only from `deliver`, so a chat working its
+            // way through five self-started turns drew no activity mark on its tab, no busy
+            // sidebar row, and a Send button in place of Stop. `AgentRunner.ingest` moves the
+            // stored state on the same event, for the same reason and with the same argument.
+            if !isRunning { noteTheAgentStartedItsOwnTurn() }
             // The runner persists the agent session id itself. Read it back rather than writing
             // our own copy, which would be a second writer racing the runner on the same row.
             await refreshSession()
             statusLabel = "Working"
 
         case .status(let label):
-            statusLabel = label.capitalizedFirst
+            // "Requesting" describes the CLI's protocol state, not what the person is waiting
+            // for. The model has the request at this point and has not started answering yet.
+            statusLabel = label.lowercased() == "requesting"
+                ? "Waiting for model"
+                : label.capitalizedFirst
 
         case .retrying(let retry):
             absorb(retry)
@@ -983,6 +1201,11 @@ final class TranscriptModel {
             // The waiting row goes without leaving a note. The error row about to be drawn is
             // already the account of this outage, and two surfaces explaining one failure is
             // exactly the clutter the waiting row was written to avoid.
+            //
+            // A Steer booked against the turn that has just died goes with it, or it waits for a
+            // result that is never coming. The message it picked stays queued, where it can be
+            // pressed again once there is an agent to interrupt.
+            steering = nil
             abandonRetryRun()
             clearStreaming()
             await appendLatestMessages()
@@ -1000,6 +1223,12 @@ final class TranscriptModel {
             if let workspaceNow {
                 NotificationService.shared.agentFailed(workspace: workspaceNow, message: failure.message)
             }
+            // Both endings report, and this is the one that would otherwise be silent: an
+            // orchestrator waiting on a crew member that died looks exactly like one waiting on a
+            // crew member that is still thinking. See `Crew.failedSentence`.
+            await reportToOrchestrator(
+                CrewMessage.failed(name: session.title, reason: failure.message)
+            )
 
         case .result(let result):
             // A turn that recovered leaves its sentence on the row that closes it; one that failed
@@ -1021,8 +1250,28 @@ final class TranscriptModel {
             await notifyFinished(result: result)
             // A turn that ended by itself is the moment the next queued message is due. A turn the
             // owner stopped is not: they stepped in, and a message they queued minutes ago going
-            // out into the silence they just made is the opposite of what Stop is for.
-            if !wasStoppedByHand { await drain() }
+            // out into the silence they just made is the opposite of what Stop is for. Unless the
+            // silence was made for one particular message, which is what Steer is: the turn was
+            // stopped in order to say this, so this is what goes, and the rest of the queue waits
+            // as it was. Stop's own answer is not here at all, because it has already run: the
+            // queue was handed back to the composer on the frame the button was pressed.
+            if let steered = steering {
+                steering = nil
+                await sendSteered(steered)
+            } else if !wasStoppedByHand {
+                await drain()
+            }
+            // After the drain, and only if nothing moved: a crew member whose orchestrator said
+            // something while it was busy has just started the next turn, and telling the
+            // orchestrator it has stopped in the same breath would have it act on an answer that
+            // is about to be superseded. `drain` is awaited to completion above, `runner.send` and
+            // all, and `deliver` sets `isRunning` before that send, so by this line the flag is
+            // already describing the turn that has just begun rather than the one that ended.
+            if !isRunning {
+                await reportToOrchestrator(
+                    CrewMessage.stopped(name: session.title, lastMessage: result.summary)
+                )
+            }
 
         case .permissionAsk:
             // The row goes in where the call would have been, and the composer stops looking like
@@ -1155,15 +1404,17 @@ final class TranscriptModel {
         // still on its way in, and the read ends by putting the whole list on the model in one go:
         // a row appended here in the meantime would simply be overwritten.
         await loader.wait()
-        // `lazy`, because this runs on every assistant text, tool use and tool result event and the
-        // eager map allocated an array the length of the whole transcript each time. Not
-        // `rows.last?.seq`: a tool result folds onto a row that is already there rather than
-        // appending, so the last row is not reliably the highest sequence.
-        let after = rows.lazy.map(\.seq).max() ?? -1
-        let fresh = (try? await store.messages(sessionID: session.id, afterSeq: after)) ?? []
+        let fresh = (
+            try? await store.messages(sessionID: session.id, afterSeq: highestSeenMessageSeq)
+        ) ?? []
         guard !fresh.isEmpty else { return }
         let appendedFrom = rows.count
-        for message in fresh { absorb(message) }
+        for message in fresh {
+            // Before folding, because a tool result changes an old row rather than appending one.
+            // The cursor belongs to stored messages, not to their presentation.
+            highestSeenMessageSeq = max(highestSeenMessageSeq, message.seq)
+            absorb(message)
+        }
         // Over what actually arrived, not over the transcript. A tool result folds onto a row that
         // is already there rather than appending, so the slice can be empty, and an empty one
         // leaves the held reading exactly where it was.
@@ -1177,7 +1428,15 @@ final class TranscriptModel {
     }
 
     /// Text and thinking that has arrived and is not on screen yet. See `scheduleStreamFlush`.
-    private var buffer = (text: "", thinking: "")
+    ///
+    /// **`@ObservationIgnored`, and it is the difference between a redraw costing one pass over
+    /// the transcript and a token costing one.** This is staging. It is written on every delta,
+    /// which is tens to hundreds of times a second, and nothing outside `flushStream` has any
+    /// business reading it. Observed, it was an edge that anything reading `isStreaming` took, and
+    /// `TranscriptListView` was one of those: on the owner's 2,981 row session every single token
+    /// walked the whole list's dependencies to find that nothing it draws had moved, and then the
+    /// same again fifty milliseconds later when the flush it was staging for actually happened.
+    @ObservationIgnored private var buffer = (text: "", thinking: "")
     private var streamFlush: Task<Void, Never>?
 
     /// How often the live tail is allowed to redraw while an answer arrives.
@@ -1230,9 +1489,76 @@ final class TranscriptModel {
         streamingToolName = nil
     }
 
+    /// Whether an answer is arriving, as far as anything that draws is concerned.
+    ///
+    /// **Deliberately blind to `buffer`.** The staging is `@ObservationIgnored`, so a term reading
+    /// it would be a term nothing is told about, and this would go stale rather than late. Over
+    /// the flushed properties alone it moves at `streamFlushInterval` instead of per token, which
+    /// is the whole of what a reader of this wants: twenty answers a second about something that
+    /// is only redrawn twenty times a second.
+    ///
+    /// Nothing appears late because of it. The live tail is drawn on `isRunning || isStreaming`,
+    /// and `isRunning` is written synchronously by `deliver` before the send is even awaited, so
+    /// the tail is on screen from the frame the turn begins whatever this says. See
+    /// `StreamingTailView`.
     var isStreaming: Bool {
         !streamingText.isEmpty || !streamingThinking.isEmpty || streamingToolName != nil
-            || !buffer.text.isEmpty || !buffer.thinking.isEmpty
+    }
+
+    /// Tells the chat that started this one that it has stopped, and lets that chat's queue move.
+    ///
+    /// **This is the whole point of the crew design, which is why it hangs off the end of a turn
+    /// rather than off a tool an orchestrator has to remember to call.** An orchestrator that has
+    /// to ask either polls or forgets, so the end of a crew member's turn is an event Bloom
+    /// delivers, carrying what the agent last said rather than a handle to go and fetch it. The
+    /// head of `Crew` argues it at length, and the two sentences are written there so that the
+    /// promise is one a test can read.
+    ///
+    /// It enqueues and only then drains, rather than sending. The orchestrator is very often mid
+    /// turn at this moment, because a turn of its own is usually what started this agent, and
+    /// `DeliveryHold` is what decides: a held report goes when that turn ends, through the same
+    /// `drain` every other queued message goes through.
+    ///
+    /// A chat nobody started returns on the first line, which is nearly every chat in the app.
+    ///
+    /// At most one report per turn, whichever ending gets here first. See `hasReportedTurnEnded`.
+    ///
+    /// A `CrewMessage` rather than a sentence, because the two readers want different lengths of
+    /// it: the orchestrator is handed the paragraph with the agent's last words and the hint about
+    /// tidying up, and the owner's window draws the one line saying the agent stopped. Handing one
+    /// string to both is what put an instruction addressed to a model in the owner's own bubble.
+    private func reportToOrchestrator(_ message: CrewMessage) async {
+        guard let parentID = session.parentSessionID, let store, let workspace else { return }
+        guard !hasReportedTurnEnded else { return }
+
+        // Read before the enqueue, and dropped when the chat above has been closed. `session(id:)`
+        // answers for an archived row where `sessions(workspaceID:)` and `crew(of:)` do not, and
+        // `closeSession` archives a chat while leaving the crew it started running. A report
+        // enqueued against a closed chat did not sit there quietly: the drain below built that
+        // session a fresh transcript, minted it a bridge token and started a turn in a
+        // conversation that is in no tab strip, no session list and no sidebar row. An agent
+        // nobody can see, spending money.
+        guard let parent = try? await store.session(id: parentID),
+              parent.archivedAt == nil else { return }
+
+        hasReportedTurnEnded = true
+        _ = try? await store.enqueueDelivery(
+            Delivery(
+                targetSessionID: parentID,
+                sourceWorkspaceID: workspace.id,
+                kind: .report,
+                crew: message
+            )
+        )
+
+        // `existingModel` rather than `model(for:)`: `workspace` here is the snapshot this model
+        // was made with, and handing a stale one to `model(for:)` pushes it back into the live
+        // model, which is the bug `notifyFinished` below is written around. A crew member's
+        // orchestrator is in this same worktree, so the model it needs is one that already exists.
+        guard let model = app.existingModel(for: workspace.id) else { return }
+        let transcript = model.transcript(for: parent)
+        await transcript.refreshQueue()
+        await transcript.drain()
     }
 
     private func notifyFinished(result: AgentResult) async {

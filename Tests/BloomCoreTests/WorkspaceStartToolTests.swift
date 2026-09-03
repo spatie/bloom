@@ -24,18 +24,27 @@ struct WorkspaceStartToolTests {
 
         func tool() -> WorkspaceStartTool {
             WorkspaceStartTool { [self] order, project, identity, origin in
-                orders.append(order)
-                identities.append(identity)
-                projects.append(project)
-                origins.append(origin)
-                if let failure { throw failure }
-                return StartedWorkspaceSummary(
-                    workspaceID: WorkspaceID(rawValue: "w-new"),
-                    name: order.name ?? "Named by Bloom",
-                    branch: "claude/named-by-bloom",
-                    path: "/tmp/worktrees/w-new"
-                )
+                try await record(order, project: project, identity: identity, origin: origin)
             }
+        }
+
+        func record(
+            _ order: AgentWorkspaceOrder,
+            project: Repo,
+            identity: BridgeIdentity,
+            origin: WorkspaceOrigin
+        ) async throws -> StartedWorkspaceSummary {
+            orders.append(order)
+            identities.append(identity)
+            projects.append(project)
+            origins.append(origin)
+            if let failure { throw failure }
+            return StartedWorkspaceSummary(
+                workspaceID: WorkspaceID(rawValue: "w-new"),
+                name: order.name ?? "Named by Bloom",
+                branch: "claude/named-by-bloom",
+                path: "/tmp/worktrees/w-new"
+            )
         }
     }
 
@@ -134,6 +143,7 @@ struct WorkspaceStartToolTests {
                 "name": .string("Sentry importer"),
                 "base_branch": .string("develop"),
                 "agent": .string("codex"),
+                "model": .string("gpt-5.6-sol"),
             ]),
             as: fixture.identity,
             store: fixture.store
@@ -143,6 +153,7 @@ struct WorkspaceStartToolTests {
         #expect(order.name == "Sentry importer")
         #expect(order.baseBranch == "develop")
         #expect(order.agent == .codex)
+        #expect(order.model == "gpt-5.6-sol")
 
         _ = await recorder.tool().call(
             request(["prompt": .string("do a thing"), "name": .string("   ")]),
@@ -221,6 +232,42 @@ struct WorkspaceStartToolTests {
         #expect(order.source.tab == .existingBranch)
         #expect(order.source.checkout == .branch(ExistingBranch(name: "freek/figma", isLocal: true)))
         #expect(order.source.baseBranch == nil)
+    }
+
+    @Test("a call naming a pull request preserves the pull request checkout")
+    func startsOnAPullRequest() async throws {
+        let fixture = try await fixture(label: "start-pull-request")
+        let recorder = Recorder()
+        let pullRequest = PullRequestListing(
+            number: 66,
+            title: "Add name suffix",
+            headRefName: "name-suffix",
+            baseRefName: "main"
+        )
+        let tool = WorkspaceStartTool(
+            start: { order, project, identity, origin in
+                try await recorder.record(
+                    order, project: project, identity: identity, origin: origin
+                )
+            },
+            resolvePullRequest: { reference, path in
+                #expect(reference == "#66")
+                #expect(path == "/tmp/flare")
+                return .checkout(.pullRequest(pullRequest))
+            }
+        )
+
+        let result = await tool.call(
+            request([
+                "prompt": .string("Review the existing pull request"),
+                "pull_request": .string("#66"),
+            ]),
+            as: fixture.identity,
+            store: fixture.store
+        )
+
+        #expect(!result.isError)
+        #expect(recorder.orders.first?.source == .pullRequest(pullRequest))
     }
 
     @Test("a call naming neither still cuts a new branch, as it always did", .tags(.git, .subprocess))
@@ -578,6 +625,10 @@ struct WorkspaceStartDedupTests {
         #expect(order(prompt: "Something else").spawnID(parentWorkspaceID: parent) != base)
         #expect(order(name: "Named").spawnID(parentWorkspaceID: parent) != base)
         #expect(order().spawnID(parentWorkspaceID: WorkspaceID(rawValue: "w-other")) != base)
+        #expect(
+            AgentWorkspaceOrder(prompt: "Import the webhooks", model: "gpt-5.6-sol")
+                .spawnID(parentWorkspaceID: parent) != base
+        )
     }
 
     @Test("it is short enough to read in a log")
@@ -675,8 +726,13 @@ struct BridgeToolApprovalTests {
         #expect(BridgeToolApproval.toolPrefix == "mcp__\(BridgeRegistration.serverName)__")
     }
 
-    @Test("the transcript is told who let it through")
-    func theNoteSaysWhy() {
-        #expect(BridgeToolApproval.note.contains("Bloom's own tool"))
+    /// The list is what says who let these through, and it is read here rather than at runtime:
+    /// a self-approved ask is answered before it is stored, so it leaves no row in the transcript
+    /// to carry a note. See `AgentRunner.handle(_:)`.
+    @Test("every self-approved name is one of the bridge's own tools")
+    func selfApprovedAreOurs() {
+        for name in BridgeToolApproval.selfApproved {
+            #expect(BridgeToolApproval.isSelfApproved(toolName: BridgeToolApproval.toolPrefix + name))
+        }
     }
 }

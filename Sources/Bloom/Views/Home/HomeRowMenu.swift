@@ -23,6 +23,9 @@ struct HomeRowMenu: View {
     var row: HomeRow
     /// Raised to the list, which owns the one field that can be open at a time.
     var onRename: (WorkspaceID) -> Void
+    /// Raised for the same reason renaming is: the confirmation belongs to the list, which is what
+    /// stays on screen while it is up. A menu is gone by the time the sheet would appear.
+    var onDelete: (Workspace) -> Void
 
     @Environment(AppModel.self) private var app
 
@@ -37,6 +40,16 @@ struct HomeRowMenu: View {
             .disabled(app.restoring.contains(workspace.id))
             Divider()
             Button("Copy Branch Name") { Clipboard.copy(workspace.branch) }
+            Divider()
+            // The one irreversible thing this menu can do, so it is last, alone under a rule, and
+            // it takes an ellipsis because it opens the confirmation rather than doing it. That
+            // confirmation is `ArchiveDeletion`, which counts the chats, the transcript rows and
+            // the review comments that would go: the same words whether the deletion is started
+            // here or with the Delete key, because it is the same deletion.
+            //
+            // Home only. The sidebar never lists an archived workspace, and a live one has a
+            // worktree that Archive is the way through. See this file's head.
+            Button("Delete\u{2026}") { onDelete(workspace) }
         } else {
             WorkspaceMenuItems(workspace: workspace, onRename: onRename)
         }

@@ -15,6 +15,7 @@ struct SessionTabsView: View {
     @Bindable var model: WorkspaceModel
 
     @Environment(AppModel.self) private var app
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var renamingID: String?
     /// A tab being dragged along the strip, and the order the strip is showing because of it.
@@ -171,7 +172,13 @@ struct SessionTabsView: View {
             }
             // Only when a drag moves the tabs. A reload that came from anywhere else, a session
             // arriving or a tab being renamed, must not make the strip slide about.
-            .animation(.snappy(duration: 0.18), value: drag?.order)
+            //
+            // `Motion.pane` rather than the `.snappy(duration: 0.18)` this was written as. The
+            // length was already `pane`'s; what differed was the curve, and `.snappy` is a spring
+            // that overshoots, against the argument at the head of `Motion` that a pane is
+            // furniture and furniture that springs is a toy. Tabs moving out from under a dragged
+            // tab are the strip relaying out, not an event of their own.
+            .animation(reduceMotion ? nil : Motion.pane, value: drag?.order)
         } append: {
             // The rule between the last tab and the `+`, which is the same rule the tabs have
             // between each other and goes the same way: hidden against the selected tab, whose
@@ -181,11 +188,7 @@ struct SessionTabsView: View {
             TabStripSeparator(isHidden: entries.last.map { $0 == selected } ?? true)
 
             newTabMenu
-        } trailing: {
-            TabStripSeparator()
-
-            inspectorToggle
-        }
+        } trailing: {}
         // The list, and nothing else. Reconciling used to be here too, right after this line, and
         // it was wrong by exactly one await: this body has no suspension point in it, so it ran
         // while `WorkspaceModel` was still on the `Store` actor and judged real tool tabs against
@@ -375,20 +378,6 @@ struct SessionTabsView: View {
         .frame(width: Metrics.barHeight, height: Metrics.barHeight)
         .contentShape(Rectangle())
         .help("New tab in this workspace")
-    }
-
-    /// The right pane's control, at the trailing end of the strip that borders it.
-    ///
-    /// It used to be a toolbar item, where it sat above all three columns and so said nothing
-    /// about which of them it would move. On the boundary it opens, the target is the thing it is
-    /// pointing at.
-    ///
-    /// What it looks like is `InspectorToggle`, which is a view of its own so that the gallery can
-    /// draw it with the inspector both ways and show they come out the same.
-    private var inspectorToggle: some View {
-        @Bindable var app = app
-
-        return InspectorToggle(isVisible: $app.isInspectorVisible)
     }
 
     /// Whether this tab can be opened beside the one the user is in. The pair of menu items is

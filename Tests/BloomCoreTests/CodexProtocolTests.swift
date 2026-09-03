@@ -206,6 +206,17 @@ private func events(_ name: String) throws -> [CodexEvent] {
         #expect(unknownMethods.contains("mcpServer/startupStatus/updated"))
     }
 
+    @Test func readsTheLatestRequestRatherThanTheCumulativeThreadUsage() throws {
+        let usage = try #require(events("codex-approval.ndjson").compactMap {
+            if case .tokenUsage(let value) = $0 { return value }
+            return nil
+        }.first)
+
+        #expect(usage.inputTokens == 16_615)
+        #expect(usage.totalTokens == 16_620)
+        #expect(usage.contextWindow == 258_400)
+    }
+
     @Test func readsTheUserMessageItem() throws {
         let started = try events("codex-turn.ndjson").compactMap { event -> CodexItem? in
             if case .itemStarted(let item) = event { return item.item }

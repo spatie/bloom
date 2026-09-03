@@ -7,7 +7,7 @@ struct ProseRowView: View {
     var body: some View {
         MarkdownView(text)
             .font(Typo.body)
-            .lineSpacing(TranscriptLayout.proseLeading)
+            .proseLeading()
             .textSelection(.enabled)
             // Capped, then left aligned in whatever is left. One frame would centre the column
             // in a wide pane and take the paragraph off the line every other row starts on.

@@ -23,7 +23,7 @@ struct InstallPingSettingsSection: View {
                 Text(InstallPing.settingTitle)
                 Text(InstallPing.settingDetail)
             }
-        } footer: {
+
             Text(InstallPing.settingFooter)
                 .settingsFootnote()
         }

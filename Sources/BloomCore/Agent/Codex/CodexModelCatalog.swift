@@ -2,7 +2,10 @@ import Foundation
 
 // MARK: - Model
 
-/// One model the signed-in Codex account may use, as `model/list` describes it.
+/// One model Codex advertises through `model/list`.
+///
+/// This catalog is not an entitlement check. A model can appear here while the signed-in account
+/// cannot use it.
 ///
 /// **The efforts belong to the model, not to Bloom.** Claude Code takes the same five levels for
 /// every model, so one flat list is right there. Codex does not: measured against codex-cli
@@ -151,7 +154,12 @@ public actor CodexModelCatalog {
     ///
     /// A connection rather than a long-lived one, because this is asked for a few times an hour
     /// and holding a subprocess open between those is a process the user did not ask for.
-    public static func live(cwd: String = NSHomeDirectory(), codexHome: String? = nil) -> CodexModelCatalog {
+    /// `cwd` is an empty folder Bloom owns rather than the home directory: listing models opens no
+    /// file, and a CLI rooted at `~` is one that has been pointed at everything the user owns. See
+    /// `AgentScratchDirectory`.
+    public static func live(
+        cwd: String = AgentScratchDirectory.current(), codexHome: String? = nil
+    ) -> CodexModelCatalog {
         CodexModelCatalog(fetch: {
             let client = CodexClient(configuration: CodexClient.Configuration(
                 cwd: cwd,

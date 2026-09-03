@@ -71,7 +71,7 @@ because every tool a parent has is implicitly scoped to the worktree it is sitti
 caller is sitting in none.
 
 **Two clients come in on it, and neither is a special case of the other.** One is the owner's own
-terminal, holding the token Settings > Terminal handed them. The other is Ask Bloom, the
+terminal, holding the token the welcome window's command line step or Settings > Command Line handed them. The other is Ask Bloom, the
 conversation inside the app that belongs to no workspace: `BridgeServer.register(askSession:)`
 attaches it to the same standalone token rather than minting one, because the definition above is
 exactly what that chat is, and a fourth role or an invented workspace would have been the only
@@ -79,9 +79,13 @@ other ways to say so. It follows that regenerating the token from Settings cuts 
 what a revocation should do.
 
 Identity is minted by Bloom and handed to the CLI through the shim's environment, never claimed by
-the agent. That is what lets every tool be implicitly scoped: **no tool takes a workspace id as a
-parameter**, so there is nothing for a model to forge, mistype or hold on to after it has gone
-stale.
+the agent. That is what lets a tool be implicitly scoped: **nothing a workspace agent calls takes a
+workspace id as a parameter**, so there is nothing for a model to forge, mistype or hold on to after
+it has gone stale. The owner's own client is the exception and has to be, because it is sitting in
+no workspace: `reveal`, `workspace_merge` and `workspace_rename` are named a workspace out loud,
+resolved against the rows that exist, and refused when a name is shared by two of them. A workspace
+agent calling the last of those may not name one, and is refused rather than quietly given its
+own.
 
 The token is **not a secret and must not be commented as one**. Any process running as the user can
 read `ps`, the mode 0600 config file and the socket itself, and an agent has the user's whole home
@@ -99,19 +103,20 @@ uses, so Bloom and Bloom Dev can never land on one. The landmine there is `socka
 
 ## 3. The tools
 
-Twenty-six, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
+Thirty-six, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
 gate. A list of handlers rather than a switch, because a switch would put every tool in three
 places: the listing, the dispatch and the gate.
 
 | Tool | What it does | parent | child | owner |
 | --- | --- | :---: | :---: | :---: |
 | `whoami` | What this connection is: the workspace and its branch, the worktree path, the project, and whether the workspace was created by the owner or by another agent. From the owner's own client, which copy of Bloom was reached and how much it is holding | ✓ | ✓ | ✓ |
-| `project_list` | Every project in the sidebar: name, path, default branch, live workspace count, whether it is still where Bloom recorded it, whether it is hidden | | | ✓ |
+| `project_list` | Every project in the sidebar: name, path, default branch, how many workspaces it has, how many of those have an agent mid turn and how many have one stopped on a question, whether it is still where Bloom recorded it, whether it is hidden | | | ✓ |
 | `project_add` | Register a git repository that **already exists** as a project | | | ✓ |
 | `project_hide` | Take a project out of the sidebar. A view preference and nothing more | | | ✓ |
 | `project_unhide` | Put it back, in the place it already had | | | ✓ |
 | `workspace_list` | Every workspace, its state, its worktree path, its chats and their cost, what an agent is stopped on, what is queued and why | | | ✓ |
-| `workspace_start` | Cut a worktree and put an agent in it with a task, on a new branch or on a branch that already exists | ✓ | | ✓ |
+| `workspace_start` | Cut a worktree and put an agent in it with a task, on a new branch, existing branch or GitHub pull request | ✓ | | ✓ |
+| `workspace_rename` | Give a workspace the name the work in it turned out to be about. Its own, for a workspace agent; any of them, named out loud, for the owner | ✓ | | ✓ |
 | `workspace_merge` | Ask a workspace's own agent to merge its pull request | | | ✓ |
 | `reveal` | Point Bloom's window at one workspace, or at Home narrowed by project, scope and search. Navigation and nothing else: it creates nothing and archives nothing | | | ✓ |
 | `pane_open` | Open a chat, a terminal or a browser in a new tab of the caller's own workspace | ✓ | | |
@@ -127,6 +132,15 @@ places: the listing, the dispatch and the gate.
 | `browser_scroll` | Move the page up, down, to the top or to the bottom, and say where it ended up | ✓ | | |
 | `browser_screenshot` | A picture of the pane as it is on screen, as an image | ✓ | | |
 | `browser_text` | The visible text of the page, wrapped as untrusted content | ✓ | | |
+| `terminal_start` | Open a terminal tab and run a command visibly inside it | ✓ | | |
+| `terminal_read` | Read recent rendered output from a terminal tab | ✓ | | |
+| `terminal_write` | Type text into a live terminal, optionally followed by Enter | ✓ | | |
+| `terminal_send_key` | Send Enter, Control-C, Tab, Escape or an arrow key to a live terminal | ✓ | | |
+| `media_show` | Show an image or video from the workspace inline in its chat | ✓ | | |
+| `agent_start` | Start a subagent: a second agent in the caller's own worktree, on the same branch, with a task of its own | ✓ | | |
+| `agent_say` | Put a message in another agent's chat on this job. An orchestrator names which of its crew; a subagent names nobody and talks up. Waking a stopped one is held to the same ceiling as a start | ✓ | | |
+| `agent_list` | Who else is working in this worktree: each agent's name, whether it is running, and what it is doing | ✓ | | |
+| `agent_stop` | Finish with a subagent the caller started: it ends the agent if it is still running, takes its row out of the sidebar and frees its name, and undoes no work | ✓ | | |
 | `quick_prompt_list` | The owner's own quick prompts, whole, with the ids the other three take | ✓ | | ✓ |
 | `quick_prompt_create` | Write a new quick prompt into that library | ✓ | | ✓ |
 | `quick_prompt_update` | Change one, field by field, leaving the fields it does not name alone | | | ✓ |
@@ -146,17 +160,38 @@ transport failure the CLI may retry or surface as a broken server; an errored re
 model reads and can act on. "You are not allowed to do that" is something to tell the model, not
 something to tell the transport.
 
-### The sixteen that need the app, and the ten that do not
+### A workspace existing and an agent running in it are two numbers
 
-`BridgeToolbox.standard` holds the ten that reach nothing but the store, and it is what a
+`project_list` used to report one number per project, counting workspaces whose state was not
+`archived`, under the key `workspaces_running`, described as "how many workspaces it has running"
+and listed here as a "live workspace count". Three names for a count of workspaces that merely
+exist. An agent read it, told the owner that four projects had a workspace running, then called
+`workspace_list`, found `agent_running: false` on every row, and reported the two tools as
+contradicting each other. They never had. Both read the same table through the same
+`state = 'active'` predicate; only the name was wrong, and the name is what a model acts on.
+
+So `project_list` now reports `workspaces`, `agents_running` and `awaiting_permission` per
+project, and both tools answer from one `BridgeWorkspaceCensus`: one read of the workspaces and
+one of `Store.sessionActivity`, with the two turn questions put to `AgentTurns`, which is the same
+rule the sidebar mark asks. A project's `workspaces` is therefore exactly how many rows
+`workspace_list` prints for it, and its `agents_running` exactly how many of those are marked
+`agent_running`. Two tools deriving that separately is two rules to drift.
+
+One number kept its old sense deliberately: `WorkspaceStartAllowance.running`, the ceiling of
+eight on a parent agent's children, counts workspaces that are not archived and says so in its own
+doc comment. That is a brake on worktrees held open, not on turns in flight.
+
+### The twenty-four that need the app, and the twelve that do not
+
+`BridgeToolbox.standard` holds the twelve that reach nothing but the store, and it is what a
 `BridgeServer` built without the app serves, which is every test that did not ask for more.
-`AppModel.bridgeToolbox()` adds the other sixteen to it, because starting a workspace has to reach
+`AppModel.bridgeToolbox()` adds the other twenty-four to it, because starting a workspace has to reach
 the main-actor graph that runs one, asking for a merge has to reach the same path the Merge button
 takes, moving the selection is the window's own, and a pane is a thing the window owns. Each of
 those crosses the line as an injected closure
 (`WorkspaceStarting`, `WorkspaceMergeRequesting`, `Revealing`, `PaneOpening`, `PaneSplitting`,
-`PaneClosing`, `PaneRenaming`, `PaneListing`, `BrowserPaneCommanding`, `WorkspaceTabListing`,
-`WorkspaceTabSelecting`), so a pane an agent asks for is the pane the
+`PaneClosing`, `PaneRenaming`, `PaneListing`, `BrowserPaneCommanding`, `TerminalStarting`,
+`TerminalPaneCommanding`, `WorkspaceTabListing`, `WorkspaceTabSelecting`, `CrewStarting`, `CrewSaying`, `CrewStopping`), so a pane an agent asks for is the pane the
 menu makes, unchanged and not copied. It adds them **to** `.standard` rather than listing its
 handlers again, because a copy of that list is a copy that drifts: a tool added to the core toolbox
 and not to the app's would pass every test in the suite and never reach the running app.
@@ -171,11 +206,15 @@ There is no table to read, so there was never a version of these two that lived 
 rest of the family follows: no workspace argument, so the caller reads and moves the strip of the
 workspace it is standing in and no other.
 
-**The last two of those are what a browser tool sees the window through.** `PaneListing` takes a
+**The browser and terminal seams are how their tools see the window.** `PaneListing` takes a
 workspace and gives back a `PaneCensus`, and that shape is the point: there is no argument on it
 that could ask the window to do anything, so the tool that reports cannot act. `BrowserPaneCommanding`
 carries one `BrowserPaneCommand` and is what the other six share, so the pane a call means is
 resolved once, by `BrowserPaneChoice.choose` in the core, rather than six times in the window.
+`TerminalPaneCommanding` does the equivalent for terminal reads, text and control keys.
+`TerminalStarting` is separate because opening a blank pane is self-approved while running a
+command is not. Folding the command into `pane_open` would let it bypass the agent's permission
+mode.
 
 **The four quick prompt tools are the case that shows where the line really is.** They write, and
 they need no seam at all, because a quick prompt is a row in `quick_prompt` and `Store` is an actor
@@ -184,6 +223,24 @@ every other write: the update hook publishes the `quickPrompts` domain and `Quic
 re-reads. The panel used to read that list once and never again, so a prompt written over the
 bridge was invisible for the rest of the session; it subscribes now. An injected main-actor closure
 here would have been a second way to write the same row.
+
+`workspace_rename` is on the same side for the same reason, and it is worth saying because a
+workspace looks far more like a thing the window owns than a quick prompt does. It is not. A
+workspace's name is one column of the `workspaces` table, the sidebar draws it from there, and the
+sidebar re-reads on the `workspaces` domain already, because that is how it finds out about a
+rename typed into the row itself. The write goes through `Store.update(workspaceID:)` and never
+`upsert`: a diff stat refresh writes to that row every six seconds and an agent turn writes to it
+for ten minutes, and a whole-value write would put both back to whatever the rename had read. See
+`Tests/BloomCoreTests/WorkspaceWriteIsolationTests.swift`, which is that bug written down.
+
+**The four crew tools split three to one, and the line runs where it always does.** `agent_list`
+reads a crew, which is rows in `sessions` joined by `parent_session_id`, so it is in
+`BridgeToolbox.standard` beside the quick prompt tools and reaches no window at all. `agent_start`,
+`agent_say` and `agent_stop` are on the other side, because one runner per session is held in
+main-actor UI object identity: starting a chat, sending a turn into one and stopping one all happen
+in the graph that owns those runners, and a handler that reached round it would put a second CLI
+process on the same worktree. `CrewSeam` is the three closures, and `Crew` is every rule they are
+held to, both in the core and both testable without a socket, a worktree or a running CLI.
 
 `BridgeServer` **never constructs an `AgentRunner`, and nothing added to it ever may.** One runner
 per session is held in main-actor UI object identity, and a handler that built its own would put a
@@ -195,20 +252,26 @@ directly, and a second `SQLiteDatabase` on the file is the cross-connection sequ
 
 ## 4. What an agent cannot reach through it
 
-Nothing here reads or writes a file, runs a command, or touches a repository's contents. The
-worktree path is handed over precisely so the agent uses **its own** tools on an ordinary git
-checkout, which `workspace_list`'s description says out loud.
+Nothing here reads or writes a file directly or changes Git state. Terminal tools can run a
+command in the workspace's visible interactive shell. Starting, typing and sending control keys
+go through the agent's permission machinery. Reading terminal output uses that same boundary,
+because it can contain secrets, and marks that output as untrusted content.
 
 Nothing here opens or closes a tab except the tools whose whole subject that is. `workspace_tab_select`
 brings an existing tab forward and will not make one on the way, which is what keeps "go back to the
 terminal" from forking a second terminal.
 
-Nothing archives. `workspace_archive` is not one of the twenty-six: it removes a worktree and can
+Nothing archives. `workspace_archive` is not one of the thirty-six: it removes a worktree and can
 remove a branch with it, and the whole reason Bloom asks before archiving by hand is that the
 answer is sometimes no. `reveal` is the answer to the request that wants one. Asked to clean up the
 finished workspaces, an agent ends by putting the candidates on screen, selected, with the owner
 looking at them and the button under their finger, which is a different thing from eight worktrees
 being gone.
+
+Nothing a rename touches is on disk. `workspace_rename` writes one column of one row: the branch,
+the worktree, the pull request and the directory keep the names they have. That is worth saying out
+loud in the tool's own description as well, because a model asked to "rename this workspace" that
+believed the branch moved with it would report something to the owner that never happened.
 
 Nothing merges. `workspace_merge` **does not merge**: it composes the request Bloom's own Merge
 button composes and sends it into that workspace's chat as an ordinary message, so the agent runs
@@ -224,6 +287,91 @@ head that off in words rather than to hope.
 A parent cannot name a project, because its own is the only one it may act in, and `project` is
 refused rather than ignored if it names one. The owner's client must name one, because nothing else
 says which.
+
+### A subagent is not a child, and the crew tools are about the difference
+
+`workspace_start` cuts a worktree and a branch of its own for the agent it starts, and everything
+in the section above is about keeping that agent penned in. `agent_start` does the opposite on
+purpose: the agent it starts shares the caller's worktree and the caller's branch, so everything
+the crew does lands in one diff and one pull request. The test that says which of the two a caller
+wants is how many pull requests they expect at the end, and both descriptions say so out loud,
+because a model that picked the wrong one gets either a diff it cannot separate or a branch nobody
+asked for. `Crew`'s head argues the whole distinction, including why the code says crew where the
+app says subagent.
+
+**The other tool the descriptions have to be about is Claude Code's own Task tool**, and that is
+not a documentation nicety: a live test asked for "a subagent called reader" and the model called
+Task, because "subagent" is that tool's word and it was already in its hands. A feature a model
+never reaches for is invisible, however well it works. So all four descriptions open on the
+difference. A Task subagent lives inside one turn, cannot be spoken to and is gone when the turn
+ends; one of these gets its own chat and its own row in the sidebar, keeps its context between
+turns, takes more work at any time through `agent_say`, and says when it has stopped and what it
+last said. The rule given to the model is the useful half: `agent_start` when the work outlives a
+single turn or when it will want to talk to the agent again, the Task tool for a one-shot read that
+answers inside this turn.
+
+What holds the shape of a crew is three rules, and all three are in `Crew` and `CrewTools` rather
+than in the window.
+
+**Depth is one, and it is a column rather than a counter.** A chat with a `parentSessionID` is a
+crew member, and a crew member's `agent_start` is refused. That is the same argument
+`BridgeRole` makes about children: a depth number kept beside the thing it describes drifts out of
+step with it, and a flat crew has no cycle to deadlock in.
+
+**Three may run in one workspace at once**, counted from the database rather than from anything
+held in memory, so a restart cannot lose the count and it cannot drift out of step with the rows
+the sidebar draws. Running means `running` or `waiting`: a process holding its turn open on a
+question is a live agent in the worktree with a bill attached, while a failed or cancelled one is a
+row. Counting the dead would hold a third of a workspace's allowance until it was archived, with
+nothing on screen to explain why. Names are counted separately and across the whole workspace,
+running or not, because an agent that has finished keeps its conversation and its row until the
+orchestrator says it is done with it, and a second agent taking its name would make the transcript
+above it read as one agent. `agent_stop` is what gives a name back.
+
+That count is a check followed by an act rather than a lock, and it is worth being honest about
+which. The read happens in the handler and the agent is started a hop away on the main actor, so
+two orchestrator chats in one worktree calling at the same moment can both be let through. One
+orchestrator's own calls are serialised by the bridge, two of them are not, and that second case is
+supported on purpose. What the race costs is a fourth agent in the worktree and nothing worse,
+which does not pay for a locking scheme across the seam.
+
+**`agent_say` counts too, because waking a stopped agent is a start.** The census leaves a stopped
+member out on purpose, so it holds no slot; but a message to one puts a turn back on it. Without
+the same count in `agent_say` the ceiling was a formality: start three, stop one, start a fourth,
+then say something to the stopped one, and four agents are running on one branch. So a message to a
+member that is not currently running is refused with the same sentence `agent_start` gives when the
+workspace is full. A message to an agent whose turn is already open is never refused, because it
+joins that turn rather than opening a second one.
+
+**There is no sideways.** An orchestrator names which of its crew it is talking to; a crew member
+names nobody and talks up, because it has exactly one agent it can talk to. A crew member that does
+name a crewmate is refused rather than quietly redirected, and an orchestrator naming an agent
+another chat in the same worktree started resolves to nothing, because "its own crew" is
+`Store.crew(of:)`. Every message therefore passes through the agent that knows what the whole job
+is, and there is no ring of agents to deadlock on one another. `agent_stop` follows the same rule
+for the same reason: only the chat that started a member may stop it.
+
+`agent_stop` is not on the destructive side of any of this, and it is how an orchestrator finishes
+with an agent rather than only how it interrupts one. It ends the agent if it is still running,
+takes its row out of the owner's sidebar and gives its name back for another subagent to use, and
+leaves every file that agent wrote and every word it said exactly where they are: the conversation
+stays readable. What it costs is work in flight, not work done, which is what its description says
+so that a model does not call it expecting a revert.
+
+**Nothing sweeps a finished subagent away, and that is the decision rather than the thing nobody
+got round to.** A timer that clears a row can always clear the agent the orchestrator was about to
+send more work to, and there is no length of wait that is right for both cases, so Bloom sweeps
+nothing and the tools say what to do instead. `Crew.tidyHint` is that sentence, written once and
+carried into the three places a model reads: the line put in an orchestrator's chat when one of its
+subagents stops, `agent_start`'s description, and `agent_list`'s answer, which prefaces it with the
+count of how many of the crew have finished so the instruction is about somebody in particular
+rather than a line in every answer. An orchestrator that ignores it costs a row in the sidebar and
+nothing else, because a finished agent holds no running slot.
+
+A message from a crew member reaches its orchestrator inside `BridgeUntrustedText`, exactly as text
+read off a web page does and for the same reason: a subagent is a model that has been reading
+files, and what it says back is data rather than an instruction from the person the orchestrator is
+working for. See `Crew.message(from:saying:)`.
 
 **One thing on the bridge can now be destroyed, and it is a few lines of the owner's own writing.**
 `quick_prompt_update` overwrites a prompt and `quick_prompt_delete` removes one, and Bloom keeps no
@@ -390,6 +538,7 @@ translation between them.
 | --- | --- | --- |
 | `base_branch`, or nothing | Create new branch | It lands on a new branch, and merges into the branch that was named |
 | `existing_branch` | Continue on existing branch | It lands on the branch that was named, and merges when that branch does |
+| `pull_request` | Continue on existing branch | It checks out the pull request and keeps its GitHub identity, base branch, checks and merge controls |
 
 Nothing said is a new branch from the project's default branch, which is exactly what the tool did
 before there was a choice, so every caller written against the older tool keeps working. Naming
@@ -410,11 +559,11 @@ Bloom's rows, because git allows one worktree per branch and the alternative is 
 the middle of a start. Both refusals end by offering `base_branch` on the same name, which is a
 different intention and Bloom does not take it on a caller's behalf.
 
-A pull request cannot be named, though the sheet's second tab lists them beside the branches.
-Resolving one costs a `gh` call and a network round trip on a path that otherwise spends only local
-git, and an agent that wants a pull request's code can name its head branch, which is what the
-picker draws a listed pull request by anyway. `WorkspaceCheckout` already carries the case, so the
-day it is wanted it is an argument rather than a mechanism.
+A pull request can be named by number, `#number` or GitHub URL. Bloom resolves it through `gh` and
+hands the resulting `WorkspaceCheckout.pullRequest` to the same path as the create sheet. This is
+different from naming its head branch. The pull request checkout records the PR number and base,
+which lets the inspector show the existing checks and merge controls instead of offering to create
+a new pull request.
 
 ### How many a caller may start
 
@@ -456,7 +605,7 @@ So `BridgeToolApproval` names the tools Bloom answers for itself:
 
 | Self-approved | Not |
 | --- | --- |
-| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `pane_list`, `workspace_tabs`, `workspace_tab_select`, `browser_read`, `quick_prompt_list`, `reveal` | everything else |
+| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `workspace_rename`, `pane_list`, `workspace_tabs`, `workspace_tab_select`, `browser_read`, `media_show`, `quick_prompt_list`, `reveal`, `agent_start`, `agent_say`, `agent_list`, `agent_stop` | everything else |
 
 It is a list rather than "anything with our prefix", so a tool added later is opted in by somebody
 thinking about it rather than by inheriting a decision made before it existed.
@@ -473,6 +622,17 @@ The four pane tools are on the list because each adds or changes something the r
 undo, in the workspace whose agent is asking and nowhere else. `pane_close` refuses the two cases
 that would cost anything: it will not empty the centre column, and it cannot close the review or
 the notes, which hold the reader's own work.
+
+`workspace_rename` is on it, and it is the entry that had to be argued against the quick prompt
+paragraph below rather than against the pane one above, because it overwrites something and keeps
+no copy. Three things settle it. What it overwrites is one column of one row, and a label Bloom
+proposed most of the time, rather than a paragraph the owner wrote by hand. The change is in the
+sidebar row the reader is looking at as it lands, which is the same visibility a pane's name has,
+and typing over it is a double click away. And the answer carries the name the workspace had, so
+undoing it from the far side of the socket costs one more call. Against that sits the reason it
+must not ask: this tool exists because an agent nine commits into a piece of work stopped and asked
+the owner to rename the workspace by hand, and a permission prompt on a parent running unattended
+is the hung turn this whole section is about, spent on a label.
 
 The two tab tools follow them. `workspace_tabs` reports the same furniture `pane_list` reports in
 another shape, all of it on the screen in front of the reader and none of it the contents of a
@@ -500,6 +660,23 @@ who can tell answers.
 below. It is called by the owner's own client, so the owner IS sitting there, and asking would put
 a question in front of somebody who has just said out loud "show me those". It creates nothing,
 archives nothing and touches no file: what it costs is a glance, and the way back is a click.
+
+**The four crew tools are on it and they stand or fall together**, because a crew that can be
+assembled and not spoken to is worse than no crew at all. An orchestrator that has to stop and ask
+the owner before it may talk to agents it started itself is exactly the hung unattended turn this
+section is about, and here there is a second cost: an agent is sitting at the other end of the
+unanswered question with a bill running. None of the four reaches outside the workspace the caller
+is already in. They read and write the `sessions` rows of one worktree, the caller's own token says
+which worktree that is, and there is no argument on any of them that could name another.
+
+Against the paragraphs above about what is deliberately off this list: none of the four destroys
+anything. `agent_start` adds a chat to the sidebar in front of the reader, which is the visibility
+a pane has. `agent_say` puts a message in a chat the owner can read and answer. `agent_list` reads.
+`agent_stop` ends a turn the caller started itself and takes that agent's row off the sidebar,
+leaving the conversation and every file the agent wrote where they are.
+And what a person would otherwise be weighing has already been decided in the core, before the
+window is asked for anything: the depth limit, the ceiling of three and the name rule are all in
+`Crew`, which is the same argument `workspace_start` is on this list under.
 
 The project tools are not on it, and that is deliberate rather than an omission: the list is for
 tools an agent must be able to call while nobody is watching, and those are called by the owner's

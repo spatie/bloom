@@ -71,12 +71,12 @@ public enum MenuBarCatalogue {
         // spends a double click on it.
         MenuBarItem(.renameTab, in: .file, "Rename Tab", availability: .needsTab),
         MenuBarItem(.closeTab, in: .file, "Close Tab", key: .command("w"), availability: .needsTab),
-        // Two verbs for two different people, and they are not the same command with two names.
-        // New makes the folder and the repository for somebody who has an idea; Add takes a
-        // repository that already exists. Every door into this used to say Add, which is a word
-        // that only makes sense to the second of the two.
-        MenuBarItem(.newProject, in: .file, "New Project…", key: .init("n", .command, .option)),
-        MenuBarItem(.addProjectFolder, in: .file, "Add Project Folder…", key: .init("o", .command, .shift)),
+        // One item, where there were two: New Project at option-command-N and Add Project Folder
+        // at shift-command-O. They were two verbs for two different people, and both of them ended
+        // in a project in the sidebar, so the menu was asking which kind of person you were before
+        // you had said anything. Which verb a target needs is worked out from the target now. See
+        // `ProjectTargetVerdict`, and `StartProjectView` for the window it draws.
+        MenuBarItem(.startProject, in: .file, "Start a Project…", key: .init("n", .command, .option)),
         MenuBarItem(.save, in: .file, "Save", key: .command("s"), availability: .sometimes),
 
         // MARK: Edit
@@ -110,6 +110,10 @@ public enum MenuBarCatalogue {
         MenuBarItem(.previousWorkspace, in: .view, "Previous Workspace", key: .init(.upArrow, .command, .option), availability: .needsAnyWorkspace),
         MenuBarItem(.nextUnread, in: .view, "Next Unread", key: .init("u", .command, .shift), availability: .sometimes),
         MenuBarItem(.goToHome, in: .view, "Go to Home", key: .init("h", .command, .shift), availability: .sometimes),
+        // No key. Every letter that would read as this one is taken by something in front of it,
+        // and a menu item is discoverable without one where a second binding on a key the composer
+        // already uses is not.
+        MenuBarItem(.goToAsk, in: .view, "Go to Ask Bloom", availability: .sometimes),
         MenuBarItem(.zoomIn, in: .view, "Zoom In", key: .command("+"), availability: .sometimes),
         MenuBarItem(.zoomOut, in: .view, "Zoom Out", key: .command("-"), availability: .sometimes),
         MenuBarItem(.actualSize, in: .view, "Actual Size", key: .command("0"), availability: .sometimes),
@@ -198,8 +202,7 @@ public enum MenuBarAction: String, CaseIterable, Sendable {
     case showNotes
     case renameTab
     case closeTab
-    case newProject
-    case addProjectFolder
+    case startProject
     case save
 
     case find
@@ -223,6 +226,7 @@ public enum MenuBarAction: String, CaseIterable, Sendable {
     case previousWorkspace
     case nextUnread
     case goToHome
+    case goToAsk
     case zoomIn
     case zoomOut
     case actualSize

@@ -291,7 +291,8 @@ struct WorkspaceEventRow: View {
             isError: event.isFailure,
             durationMS: event.durationMS,
             isExpanded: isExpanded,
-            isHovered: isHovered
+            isHovered: isHovered,
+            showsDisclosure: canExpand
         )
     }
 
@@ -457,10 +458,11 @@ struct WorkspaceEventRow: View {
             // an empty stack is still a view, and the gap above it would be drawn under every
             // finished run.
             if showsExpandLink || showsRunSetupAgain {
-                // Wider than the `spacing` rung most pairs use. These two are plain words in the
-                // same size and the same accent colour, with nothing but the gap to say they are
-                // two controls, and at six points "Show more of the log Run setup again" read as
-                // one sentence somebody had forgotten to punctuate.
+                // Wider than the `spacing` rung most pairs use. The gap was the only thing
+                // saying these were two controls back when both were plain words, and at six
+                // points "Show more of the log Run setup again" read as one sentence somebody had
+                // forgotten to punctuate. The retry is a bordered button now and no longer relies
+                // on the gap to be told apart, but the link beside it still wants the air.
                 HStack(spacing: Metrics.gutter) {
                     if showsExpandLink {
                         Button(isExpanded ? "Show less" : "Show more of the log") { isExpanded.toggle() }
@@ -475,11 +477,22 @@ struct WorkspaceEventRow: View {
                             .accessibilityHidden(true)
                     }
 
+                    // **A button rather than a link, and the odd one out on this row on purpose.**
+                    // Reported as not looking clickable, and it did not: a failed setup draws a
+                    // red heading over a log full of red error text, and one more line of small
+                    // coloured words under it reads as the last line of the log rather than as
+                    // the way out of it. Its neighbour stays a link because it is a disclosure
+                    // and the caret above the row already affords it; this one is the only thing
+                    // on screen that does anything about the failure, and the transcript already
+                    // draws that kind of thing as a bordered button. See `AgentQuestionCard` and
+                    // `PermissionAskRowView`, which answer a question the same way.
+                    //
                     // Not hidden from accessibility the way its neighbour is. Nothing else on this
                     // row does what it does, so there is no second announcement of it to prefer.
                     if showsRunSetupAgain, let model {
                         Button("Run setup again") { SetupRunAlert.shared.ask(model) }
-                            .linkButton()
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
                             .font(Typo.caption)
                             .help("Asks, then runs this repository's setup script in this workspace again")
                     }

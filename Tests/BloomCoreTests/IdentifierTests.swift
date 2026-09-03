@@ -65,11 +65,11 @@ struct IdentifierTests {
 
     /// Why `Identifier` requires `CustomStringConvertible`.
     ///
-    /// `OpenInPreferences`, `ComposerControls`, `WorkspaceStartMode` and `ViewedToggle` all build a
-    /// user defaults key by interpolating an id into a string. Without `description` the
-    /// interpolation would render the struct, every key in the owner's preferences would change at
-    /// once, and every remembered editor, output style and viewed file would silently be orphaned.
-    /// The compiler cannot see that: interpolation accepts anything.
+    /// `OpenInPreferences`, `ComposerControls` and `WorkspaceStartMode` all build a user defaults
+    /// key by interpolating an id into a string. Without `description` the interpolation would
+    /// render the struct, every key in the owner's preferences would change at once, and every
+    /// remembered editor and output style would silently be orphaned. The compiler cannot see
+    /// that: interpolation accepts anything.
     @Test("an identifier interpolates as its raw value, so stored keys do not move")
     func interpolatesAsTheRawValue() {
         let workspace = WorkspaceID("w1")

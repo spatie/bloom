@@ -4,8 +4,8 @@ import BloomCore
 
 /// The window's one heartbeat, while an agent is working.
 ///
-/// Everything that moves while agents are running reads its phase from here: the shared rule under
-/// the title bar, which carries a crest along its whole width (`ActivityRule`), the dot at the
+/// Everything that moves while agents are running reads its phase from here: the rule that closes
+/// off the centre column's tab strip, which carries a crest (`ActivityRule`), the dot at the
 /// head of every working row in the sidebar (`WorkspaceRunningGlyph`), and the same dot beside
 /// "Working" in the transcript and in front of a running tab's label (`ActivityDot`). None of them
 /// starts an animation of its own, and that is the whole reason this type exists.
@@ -133,7 +133,19 @@ struct BusyPulseDriver: ViewModifier {
         // an id is what brings the heartbeat up and takes it down again. There is no poll here and
         // no second flag: the last agent finishing is the same event everything else in the window
         // hears.
-        let wanted = !app.runningWorkspaceIDs.isEmpty && !reduceMotion
+        //
+        // **Ask Bloom is in no workspace, and it was in neither half of this.** `AskModel` holds
+        // its own transcript outside `workspaceModels`, and a stored `SessionActivity` carries a
+        // workspace id, so `runningWorkspaceIDs` is empty for the whole of an Ask turn. The
+        // heartbeat therefore never started, and every busy mark in the window was drawn resting:
+        // the dot beside "Waiting for model" sat still, and so did the rule `AskView` puts on its
+        // own top edge, whose comment claims the clock stays shared. It does now.
+        //
+        // `askStatus` rather than `app.ask.isRunning`, because that accessor builds the model and
+        // a view body may not. `runningAgentCount` reaches for Ask through the same door and for
+        // the same reason, and says so: it is in no workspace, so nothing else here counts it.
+        let isAskRunning = app.askStatus == .running
+        let wanted = (!app.runningWorkspaceIDs.isEmpty || isAskRunning) && !reduceMotion
 
         return content.onChange(of: wanted, initial: true) { _, on in
             BusyPulse.shared.setTicking(on)

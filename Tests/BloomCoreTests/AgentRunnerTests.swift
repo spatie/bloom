@@ -389,6 +389,9 @@ struct AgentRunnerArgvTests {
     @Test("maps every permission mode to a value the CLI accepts", arguments: [
         (PermissionMode.auto, "auto"),
         (.acceptEdits, "acceptEdits"),
+        // Two rows answer `auto` and neither is a mistake: Approve for me is offered for Codex
+        // only because Claude Code's own Auto already is that mode. See `PermissionMode.cliValue`.
+        (.autoReview, "auto"),
         (.bypassPermissions, "bypassPermissions"),
         (.plan, "plan"),
     ])
@@ -404,7 +407,7 @@ struct AgentRunnerArgvTests {
     func coversEveryPermissionMode() {
         // A new case added to the enum has to be added to the table above too, or the CLI is
         // handed a value nothing checked.
-        #expect(PermissionMode.allCases.count == 4)
+        #expect(PermissionMode.allCases.count == 5)
     }
 
     @Test("launches in the worktree, resuming once the agent session is known")
@@ -478,6 +481,52 @@ struct AgentRunnerPersistenceTests {
         let all = try await store.messages(sessionID: session.id)
         let refs = all.filter { $0.refID == "toolu_01TWLhjSjYuicXQJSDpTGa2V" }
         #expect(refs.map(\.kind) == [.toolUse, .toolResult])
+    }
+
+    /// **The bug: a workspace working for twenty minutes with no activity mark on its tab.**
+    /// The CLI runs a background task's completion notification as a turn of its own, announced by
+    /// an `init` and closed by a real `result`, without Bloom sending it anything. Nothing moved
+    /// the session out of `idle` for those, so the sidebar, the tab strip and the composer all
+    /// said the chat was finished while it went on working. See `StrayResult` for the empty
+    /// variant of the same line, which is a different bug with the same cause.
+    @Test("a turn the CLI starts by itself marks the session running")
+    func aTurnTheCLIStartsByItselfIsRunning() async throws {
+        let store = try makeTestStore("agent")
+        let session = try await makeSession(store)
+        let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
+
+        let line = """
+        {"type":"system","subtype":"init","session_id":"s-1","cwd":"/tmp/w","model":"sonnet"}
+        """
+        await runner.ingest(try #require(AgentEvent.decode(line: line)))
+
+        let stored = try #require(try await store.session(id: session.id))
+        #expect(stored.state == .running)
+        #expect(stored.agentSessionID == "s-1")
+    }
+
+    /// The stored state is what the sidebar and the tab strip read, so a chat left `idle` by a
+    /// self-started turn is one the window cannot draw as busy.
+    @Test("and the same session goes back to idle when that turn's result arrives")
+    func theSelfStartedTurnStillEndsOnItsResult() async throws {
+        let store = try makeTestStore("agent")
+        let session = try await makeSession(store)
+        let runner = AgentRunner(workspacePath: "/tmp/w", session: session, store: store)
+
+        let initLine = """
+        {"type":"system","subtype":"init","session_id":"s-1","cwd":"/tmp/w","model":"sonnet"}
+        """
+        // A real one, with prose and API time on it, which is what tells it apart from the empty
+        // notification turn `StrayResult` drops.
+        let resultLine = """
+        {"type":"result","subtype":"success","is_error":false,"num_turns":3,"duration_api_ms":31662,\
+        "duration_ms":31662,"result":"Waiting on the fix-round implementer.",\
+        "origin":{"kind":"task-notification"},"session_id":"s-1","usage":{},"total_cost_usd":0}
+        """
+        await runner.ingest(try #require(AgentEvent.decode(line: initLine)))
+        await runner.ingest(try #require(AgentEvent.decode(line: resultLine)))
+
+        #expect(try await store.session(id: session.id)?.state == .idle)
     }
 
     @Test("drops stream deltas from the transcript unless asked to keep them")

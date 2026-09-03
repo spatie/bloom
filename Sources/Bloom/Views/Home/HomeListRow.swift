@@ -20,14 +20,17 @@ import BloomCore
 /// from anywhere else on the row is which project it belongs to. The status mark keeps its shape
 /// and its colour, it simply moves to the trailing cluster where the rest of the outcome is.
 ///
-/// **The rail.** Conductor puts a short coloured bar at the leading edge of some rows. Ours is the
-/// same idea with a rule behind it: it appears only for a workspace that is being worked on or is
-/// waiting for a person (`WorkspaceStatus.homeLane`), and it is drawn in exactly the tint
-/// `WorkspaceStatusGlyph` gives that state, so it is the sidebar's colour language projected onto
-/// the edge of the row rather than a second one. Nothing is carried by the rail alone: the same
-/// state is in the glyph's shape, in the row's accessibility label and, for an unread turn, in the
-/// weight of the name. That weight is `WorkspaceNameText`'s to pick rather than this row's, so the
-/// same workspace cannot be one weight here and another in the sidebar.
+/// **There is no rail.** There was: a short coloured bar at the leading edge of a row being worked
+/// on or waiting for a person, in the tint `WorkspaceStatusGlyph` gives that state. The argument
+/// for it was that it carried nothing on its own, since the same state is in the glyph's shape and
+/// in the row's accessibility label, so it was free signal for a reader who already knew the
+/// language.
+///
+/// **That is the argument it died on.** The owner's words on seeing it: "i don't know what that
+/// blue and red line in front of those two items mean". A mark that has to be learned, on the
+/// screen he opens first, sitting eleven points from a glyph that says the same thing in a shape
+/// he can name, is not free signal. It is a second alphabet for a sentence already written. The
+/// glyph stays, and it is the one that carries the state.
 ///
 /// **The row draws no selection of its own and inverts nothing.** It used to take `isSelected` and
 /// `isListFocused` and flip every colour on the row to white when the list held the keyboard,
@@ -60,7 +63,6 @@ struct HomeListRow: View {
     /// A hairline is too thin to read as a colour and a full chip is a second badge. Three points
     /// is what a coloured edge marker is on a Mac. Local rather than in `Metrics` because nothing
     /// else in the window has one yet; a candidate for promotion if a second list grows one.
-    private static let railWidth: CGFloat = 3
 
     /// Wide enough for "10mo" so the ages line up as a column rather than ragging against the
     /// window edge.
@@ -76,8 +78,6 @@ struct HomeListRow: View {
 
     var body: some View {
         HStack(spacing: Metrics.spacingWide) {
-            rail
-
             RepoIcon(repo: row.repo)
 
             VStack(alignment: .leading, spacing: Metrics.spacingHair) {
@@ -94,7 +94,7 @@ struct HomeListRow: View {
         // still inverts a selected row's text to white for the accent fill it thinks it drew. The
         // fill is covered by `HomeRowBackground`; the inversion is not, and without this the
         // selected row's name went white on a pale grey plate and all but disappeared. Everything
-        // on the row that carries a colour of its own (the rail, the glyph, the counts) already
+        // on the row that carries a colour of its own (the glyph, the counts) already
         // states it; this is for everything that does not.
         .foregroundStyle(Palette.textPrimary)
         // Greyed as a whole rather than colour by colour. An archived workspace still has a
@@ -123,6 +123,9 @@ struct HomeListRow: View {
         // it only the text is, and a list where half of each row ignores the pointer feels broken
         // long before anyone works out why.
         .contentShape(Rectangle())
+        // Command-Backspace is delete-to-start-of-line in a text box, and the menu bar had it
+        // for Archive Workspace. See `FocusedValues.isTypingProse`.
+        .focusedValue(\.isTypingProse, fieldFocused)
         // Merged into one sentence. Left as separate elements, VoiceOver reads a name, a repeated
         // project name, two bare numbers and "1d", in that order, which says nothing. Not while
         // renaming, though: the merge swallowed the rename field, so Rename from this row's own
@@ -224,16 +227,6 @@ struct HomeListRow: View {
 
     /// Always occupies its width, so every name in the list starts on the same vertical line
     /// whether or not its row is marked.
-    private var rail: some View {
-        RoundedRectangle(cornerRadius: Self.railWidth / 2, style: .continuous)
-            .fill(railTint)
-            .frame(width: Self.railWidth)
-            .frame(maxHeight: .infinity)
-            .padding(.vertical, Metrics.spacingTight)
-            .opacity(showsRail ? 1 : 0)
-            .accessibilityHidden(true)
-    }
-
     /// The outcome, what it came to, and when. In that order because the glyph is a shape read at
     /// a glance, the counts are numbers read on purpose, and the age is the column the eye runs
     /// down when it is looking for the boundary between two date headings.
@@ -267,11 +260,26 @@ struct HomeListRow: View {
             // status mark to its left slid two centimetres right on every row without a diff.
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
-                // No archived case of its own any more. These two counts used to drain their own
-                // hue, because they were the only thing on the row loud enough to need it; the
-                // row now drains itself, and a second copy of that decision here would be the
-                // one place the treatment could drift from the rest of the line.
-                if workspace.hasDiff {
+                // The size stands IN the diff's slot rather than beside it, and that is the whole
+                // of what Home's rows gained from the Storage pane.
+                //
+                // The same column because it answers the same question one state later: what this
+                // workspace amounts to. An archived workspace's diff counts describe a worktree
+                // that was removed when it was archived, which is the argument the `archivebox`
+                // glyph two columns to the left already makes about its status, so nothing true is
+                // covered up. And one slot rather than a fourth column is what keeps the age from
+                // sliding sideways when the Archived chip is pressed.
+                //
+                // The diff below has no archived case of its own any more. Those two counts used
+                // to drain their own hue, because they were the only thing on the row loud enough
+                // to need it; the row now drains itself, and a second copy of that decision here
+                // would be the one place the treatment could drift from the rest of the line.
+                if let bytes = row.bytes {
+                    Text(ArchiveDeletion.bytes(bytes))
+                        .font(Typo.captionEmphasis)
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.textSecondary)
+                } else if workspace.hasDiff {
                     DiffStatLabel(
                         additions: workspace.additions,
                         deletions: workspace.deletions,
@@ -317,25 +325,23 @@ struct HomeListRow: View {
         )
     }
 
-    /// Resting states get no rail. A rail on every row is a stripe down the edge of the list, and
-    /// the point of it is that only a few rows have one.
-    private var showsRail: Bool {
-        !row.isArchived && status.homeLane != .resting
-    }
-
-    private var railTint: AnyShapeStyle {
-        WorkspaceStatusGlyph.tint(for: status)
-    }
-
     // MARK: - Words
 
     private var statusDescription: String {
         row.isArchived ? "Archived" : status.summary(pullRequest: pullRequest)
     }
 
+    /// The tooltip, which is where everything else the Storage pane drew ended up.
+    ///
+    /// The message and chat counts and the branch standing were columns on that screen and are a
+    /// sentence here, because this row is three columns wide and they are worth reading once
+    /// rather than scanning down. This is also the closest thing Home has to the sidebar's hover
+    /// card: it is the row's own facts, unabbreviated, for a reader who has stopped on one row.
+    /// See `ArchivedWorkspaceFootprint.contents`.
     private var help: String {
         var text = statusDescription
         if let repo = row.repo { text += " in \(repo.name)" }
+        if let footprint = row.footprint { text += " \u{00B7} \(footprint.contents)" }
         return text
     }
 
@@ -350,7 +356,11 @@ struct HomeListRow: View {
         parts.append(statusDescription)
         if let colour = workspace.colourDescription { parts.append("colour \(colour)") }
         if workspace.pinned { parts.append("pinned") }
-        if workspace.hasDiff {
+        // Whichever of the two the trailing slot is actually drawing, in the same order, so the
+        // row read by ear and the row read by eye carry the same facts.
+        if let bytes = row.bytes {
+            parts.append("holding \(ArchiveDeletion.bytes(bytes))")
+        } else if workspace.hasDiff {
             parts.append("\(workspace.additions) added, \(workspace.deletions) removed")
         }
         parts.append(

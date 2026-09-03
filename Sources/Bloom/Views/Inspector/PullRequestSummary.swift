@@ -55,8 +55,8 @@ struct PullRequestSummary: View {
 
     /// The merge instructions ask for the branch to be deleted on GitHub, and for nothing on this
     /// machine to be touched. It is named in the confirmation rather than left as a surprise. See
-    /// `MergeInstructions.defaultMarkdown`, which is what the agent actually follows, and which is
-    /// where the reason gh's own `--delete-branch` is never used is written down.
+    /// `MergeInstructions.canonical`, which is what the agent actually follows, and which is where
+    /// the reason gh's own `--delete-branch` is never used is written down.
     private static let deletesBranch = true
 
     private var status: PullRequestStatus { pullRequest.status(local: localWork) }
@@ -335,27 +335,32 @@ struct PullRequestSummary: View {
     /// headline is more than the pane's default width carries, and the headline is the part that
     /// must not be the thing that truncates.
     ///
-    /// **The `.fixedSize()` is on the candidates, never on the `ViewThatFits`.** It sat outside on
-    /// all five of the strip's two-form controls, and that is what made the second form
-    /// unreachable: `.fixedSize()` proposes an unspecified width to what it wraps, and a
-    /// `ViewThatFits` measuring against an unspecified width finds its FIRST candidate fits, every
-    /// time and at every pane width. So "Continue", "Archive", "Commit and push" and "Fix merge
-    /// conflicts" kept their titles always, and the fallback four doc comments in this file
-    /// promise had never once been drawn. Inside, it does the job it was reached for: each
-    /// candidate reports the width its own label wants rather than a truncated one, and the row
-    /// takes the first that fits what it was actually offered. `InspectorToolbar` puts it on the
-    /// candidate and has always been right about it.
+    /// **The label always shows, and the icon-only fallback is gone.**
+    ///
+    /// It was a `ViewThatFits` dropping the title in a narrow pane, and for a long time it could
+    /// not fire at all because a `.fixedSize()` outside the stack proposed an unspecified width;
+    /// making it reachable is what finally showed the owner what it did. His answer on seeing it:
+    /// he does not want the smaller button, and the label should be there in every state.
+    ///
+    /// He is right, and the reason is what this strip is for. A glyph alone cannot tell "Fix merge
+    /// conflicts" from "Commit and push" from "Merge", and those are three different irreversible
+    /// things one press apart. The headline beside it is what gives way instead: it already
+    /// truncates, it is a description rather than a control, and a truncated sentence with a full
+    /// button beats a complete sentence beside a button nobody can name.
     private var continueButton: some View {
-        ViewThatFits(in: .horizontal) {
-            continueControl.labelStyle(.titleAndIcon).fixedSize()
-            continueControl.labelStyle(.iconOnly).fixedSize()
-        }
+        continueControl.labelStyle(.titleAndIcon).fixedSize()
     }
 
+    /// Untinted, deliberately.
+    ///
+    /// It carried `tint`, which on a merged pull request is `Palette.merged`, and it stands beside
+    /// an Archive filled with `mergedFill`. That drew two purple buttons rather than a primary and
+    /// a secondary, which is the one thing the strip's whole button hierarchy is about: exactly
+    /// one filled control per state, and everything beside it plainly not it. A bordered button in
+    /// the system's own grey is what a secondary looks like on this platform.
     private var continueControl: some View {
         Button("Continue", systemImage: "chevron.forward.2", action: onContinue)
             .buttonStyle(.bordered)
-            .tint(tint ?? Palette.accent)
             .controlSize(.regular)
             .help(
                 branchActions.reason
@@ -389,15 +394,13 @@ struct PullRequestSummary: View {
     ///
     /// Two forms, with the `.fixedSize()` on the candidates for the reason `continueButton` gives.
     private var archiveButton: some View {
-        ViewThatFits(in: .horizontal) {
-            archiveControl.labelStyle(.titleAndIcon).fixedSize()
-            archiveControl.labelStyle(.iconOnly).fixedSize()
-        }
+        archiveControl.labelStyle(.titleAndIcon).fixedSize()
     }
 
     private var archiveControl: some View {
         Button("Archive", systemImage: "archivebox", action: onArchive)
             .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
             .tint(status.tone.fill)
             .controlSize(.regular)
             .help(
@@ -423,15 +426,13 @@ struct PullRequestSummary: View {
     /// the headline truncate keeps the sentence, which is the part that cannot be guessed from a
     /// glyph. The `.fixedSize()` is on the candidates for the reason `continueButton` gives.
     private var pushButton: some View {
-        ViewThatFits(in: .horizontal) {
-            pushControl.labelStyle(.titleAndIcon).fixedSize()
-            pushControl.labelStyle(.iconOnly).fixedSize()
-        }
+        pushControl.labelStyle(.titleAndIcon).fixedSize()
     }
 
     private var pushControl: some View {
         Button(pushLabel, systemImage: "arrow.up.circle", action: onPush)
             .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
             .tint(status.tone.fill)
             .controlSize(.regular)
             // Disabled with the rest of the cluster while a turn runs: pushing a worktree that
@@ -472,10 +473,7 @@ struct PullRequestSummary: View {
     /// label in the strip and the headline is the part that must not be what truncates. The
     /// `.fixedSize()` is on the candidates for the reason `continueButton` gives.
     private var fixConflictsButton: some View {
-        ViewThatFits(in: .horizontal) {
-            fixConflictsControl.labelStyle(.titleAndIcon).fixedSize()
-            fixConflictsControl.labelStyle(.iconOnly).fixedSize()
-        }
+        fixConflictsControl.labelStyle(.titleAndIcon).fixedSize()
     }
 
     /// Tinted `status.tone.fill`, which in this state is red, and deliberately so.
@@ -492,6 +490,7 @@ struct PullRequestSummary: View {
     private var fixConflictsControl: some View {
         Button("Fix merge conflicts", systemImage: "wrench.and.screwdriver", action: onFixConflicts)
             .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
             .tint(status.tone.fill)
             .controlSize(.regular)
             // Disabled with the rest of the cluster while a turn runs: merging the base into a

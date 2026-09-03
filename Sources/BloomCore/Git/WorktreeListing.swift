@@ -3,7 +3,7 @@ import Foundation
 /// One record of `git worktree list --porcelain`, and the parser over the whole of it.
 ///
 /// Pure, and in a file of its own, because the answer to "which branches are already taken"
-/// decides whether the create sheet may offer a row at all, and that decision was reached by
+/// decides whether the create window may offer a row at all, and that decision was reached by
 /// asking Bloom's own database. The database only knows about worktrees Bloom cut. Git knows
 /// about all of them, whoever made them, which on this Mac means Conductor's, another agent
 /// runner's, and whatever was cut by hand. See `BranchHolder` for the bug that forced it.

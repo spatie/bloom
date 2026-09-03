@@ -70,6 +70,10 @@ final class AppModel {
     var selection: SidebarSelection {
         get { storedSelection }
         set {
+            // Observation treats an identical assignment as a mutation. A click on the selected
+            // sidebar row can arrive here again, and without this guard it writes defaults,
+            // rebuilds the subagent rows and starts another settings read for no state change.
+            guard newValue != storedSelection else { return }
             if let id = newValue.workspaceID, id != storedSelection.workspaceID {
                 SwitchTrace.begin(workspaceID: id)
             }
@@ -234,15 +238,19 @@ final class AppModel {
 
     /// The mark the Ask Bloom row wears, or nil when it has nothing to say.
     ///
-    /// It reads `storedAsk` rather than `ask`, and that is the point: the sidebar draws this row on
-    /// every pass, and asking whether the conversation is busy must not be what brings it into
-    /// existence. Nil until it has been opened this launch, which is exactly right, because a chat
-    /// that has never been opened is not doing anything.
-    var askStatus: WorkspaceStatus? {
-        guard let storedAsk else { return nil }
-        if storedAsk.isAwaitingPermission { return .awaitingPermission }
-        return storedAsk.isRunning ? .running : nil
-    }
+    /// **A stored mirror rather than a computed property, and it is the bug `waitingWorkspaceIDs`
+    /// already carries the note about, one property along.** It used to guard on `storedAsk`,
+    /// which is `@ObservationIgnored`, so a body that read it before Ask had ever been opened
+    /// registered a dependency on nothing at all: there was no property to notify, and nothing
+    /// invalidated the reader when a turn later started. The sidebar row got away with it, because
+    /// it is redrawn constantly for other reasons. `BusyPulseDriver` did not: in a window with no
+    /// workspace running, nothing else moved, so its body never ran again and the heartbeat never
+    /// started. The report was the rule on Ask Bloom's own pane sitting still through a whole
+    /// turn, which is exactly what a still `BusyPulse` draws.
+    ///
+    /// Rebuilt by `recomputeAgentTurns`, beside the two sets, because it is the same question
+    /// asked of the one conversation that is in no workspace and therefore in neither of them.
+    private(set) var askStatus: WorkspaceStatus?
 
     /// Workspaces whose row has already left the sidebar while their archive is still running.
     ///
@@ -510,6 +518,7 @@ final class AppModel {
 
     func reload() async {
         guard let store else { return }
+        let known = Set(workspaces.map(\.id))
         do {
             // Both lists are read before either is published, because the `await` between two
             // assignments is a suspension point the sidebar renders in. Publishing the projects
@@ -557,6 +566,12 @@ final class AppModel {
                     existing.workspace = workspace
                 }
             }
+            // A list that has gained or lost a row may have gained or lost a crew with it, and
+            // nothing writes to the sessions table when it happens: a workspace restored from the
+            // archive brings the crew members stored under it back into the pane. Only when the
+            // membership actually moved, because this method runs after every write anything
+            // makes and `refreshCrew` is a query per workspace. See `refreshCrew`.
+            if Set(workspaces.map(\.id)) != known { await refreshCrew() }
         } catch {
             alert = BloomAlert(
                 title: "Could not read workspaces",
@@ -693,9 +708,13 @@ final class AppModel {
         sessionObservationTask?.cancel()
         sessionObservationTask = Task { [weak self] in
             await self?.refreshAgentTurns()
+            // The sidebar's crew rows are sessions, so this is the feed that says when one is
+            // started, renamed or stopped. See `refreshCrew`.
+            await self?.refreshCrew()
             for await _ in store.changes(of: [.sessions]) {
                 guard let self else { return }
                 await self.refreshAgentTurns()
+                await self.refreshCrew()
             }
         }
     }
@@ -943,6 +962,20 @@ final class AppModel {
         return workspaces.first { $0.id == id }
     }
 
+    /// Whether the inspector is actually on screen, rather than merely switched on.
+    ///
+    /// Keyed on `selectedWorkspace` rather than on `selection`, because `DetailColumn` already
+    /// falls back to Home when a selected id no longer resolves to a workspace, and an inspector
+    /// over Home has nothing to say.
+    ///
+    /// Here rather than in `RootView`, which is where it was, because the window's own minimum
+    /// width now depends on it and `BloomApp` cannot see a private computed property on a view.
+    /// Two spellings of one rule is how the window ends up refusing a width for a pane it is not
+    /// drawing. See `WindowWidths`.
+    var isInspectorPresented: Bool {
+        isInspectorVisible && selectedWorkspace != nil
+    }
+
     /// The archived workspace being read, if that is what the window is on.
     ///
     /// Read out of its live model rather than out of a list, because the archived list is loaded
@@ -1067,6 +1100,18 @@ final class AppModel {
         let waiting = AgentTurns.workspaces(.awaitingPermission, stored: storedActivity, live: live)
         if runningWorkspaceIDs != running { runningWorkspaceIDs = running }
         if waitingWorkspaceIDs != waiting { waitingWorkspaceIDs = waiting }
+
+        // Ask Bloom is in neither set, because a `SessionActivity` carries a workspace id and
+        // `AskModel` holds its transcript outside `workspaceModels`. It is read here rather than
+        // in a view for the reason above, and `storedAsk` rather than `ask`, so that asking
+        // whether the conversation is busy is never what brings it into existence.
+        let ask: WorkspaceStatus? = if let storedAsk {
+            storedAsk.isAwaitingPermission ? .awaitingPermission
+                : (storedAsk.isRunning ? .running : nil)
+        } else {
+            nil
+        }
+        if askStatus != ask { askStatus = ask }
     }
 
     /// Workspaces whose agent has stopped and is waiting on a person.
@@ -1116,6 +1161,10 @@ final class AppModel {
         stopHidingFromSidebar(id)
         workspaceModels[id] = nil
         storedActivity.removeAll { $0.workspaceID == id }
+        // The crew rows go for the same reason the activity rows above do: `ON DELETE CASCADE`
+        // has taken this workspace's sessions with it, and rows read before that would keep
+        // drawing agents under a workspace that is not there until the next session write.
+        crewRows[id] = nil
         recomputeAgentTurns()
     }
 
@@ -1214,6 +1263,74 @@ final class AppModel {
         subagentFailures[workspaceID] ?? 0
     }
 
+    // MARK: - Crew
+
+    /// The crew members under each workspace, for the sidebar to draw.
+    ///
+    /// An observable mirror written from one place, exactly like `subagentRows` above and for
+    /// exactly the same reason: `workspaceModels` is `@ObservationIgnored`, so a sidebar that
+    /// walked it would register a dependency on nothing and would only redraw when the diff stat
+    /// poll happened to reassign `workspaces`.
+    ///
+    /// **Read from the store rather than from the models**, which is the one place this differs
+    /// from its sibling. A crew member is a `Session` row that outlives the turn that made it and
+    /// the launch it was made in, so a workspace nobody has opened this launch still has its crew
+    /// to draw, and `WorkspaceModel` is not there to ask. See `Crew`.
+    ///
+    /// Keyed by workspace and holding every crew member in it, whichever chat started them, which
+    /// is `Store.crewByWorkspace`'s own question. The nesting says which worktree an agent is
+    /// working in, and that is a true thing to say about all of them; whose crew it is, is the
+    /// bridge's business and not the pane's.
+    private(set) var crewRows: [WorkspaceID: [CrewRow]] = [:]
+
+    /// The crew under one workspace, without forcing a `WorkspaceModel` into existence. Asked by
+    /// the sidebar for every visible workspace on every redraw.
+    func crew(of workspaceID: WorkspaceID) -> [CrewRow] {
+        crewRows[workspaceID] ?? []
+    }
+
+    /// Re-reads every workspace's crew. Called on each write to the sessions table, and once at
+    /// startup, by `startObservingSessions`.
+    ///
+    /// **One hop onto the store actor, not one per workspace.** This used to ask
+    /// `Store.crew(inWorkspace:)` for each row in the sidebar, and the feed it hangs off fires on
+    /// every write to the sessions table: the runner rewrites state, both token counts, the cost
+    /// and `updatedAt` many times inside a single turn, so a sidebar holding twenty workspaces
+    /// queued twenty round trips onto that actor per batch, against the same actor the running
+    /// agent was writing through. `Store.crewByWorkspace` answers for all of them in one
+    /// statement and the grouping is free here.
+    ///
+    /// Filtered back down to the workspaces on screen rather than mirrored whole, because a crew
+    /// member in an archived workspace is a row the sidebar has nowhere to draw, and putting it in
+    /// `crewRows` would make the equality check below disagree with what is visible.
+    ///
+    /// Each workspace's list is written only when it has actually moved, for the reason
+    /// `recomputeAgentTurns` writes its two sets that way: an identical value assigned back is
+    /// still a mutation to the Observation runtime, and this runs on every session write, which
+    /// includes the token counts a running agent rewrites throughout a turn. `CrewRow` holds the
+    /// three fields the row draws and none of the ones that move like that.
+    func refreshCrew() async {
+        guard let store else { return }
+        let grouped = (try? await store.crewByWorkspace()) ?? [:]
+        var fresh: [WorkspaceID: [CrewRow]] = [:]
+        for workspace in workspaces {
+            guard let members = grouped[workspace.id], !members.isEmpty else { continue }
+            fresh[workspace.id] = members.map(CrewRow.init)
+        }
+        if crewRows != fresh { crewRows = fresh }
+
+        // **What the selection does when the crew member it is reading goes.** It falls back to
+        // the parent workspace, which is where every other pane in the window was already
+        // pointing: see `SidebarSelection.crew`, whose `workspaceID` is the parent precisely so
+        // that reading a crew member narrows the centre column and nothing else. The moment this
+        // catches is the workspace being archived under a chat somebody had open, which would
+        // otherwise leave the column drawing a conversation with no row in the pane.
+        if let sessionID = selection.crewSessionID, let workspaceID = selection.workspaceID,
+           !crew(of: workspaceID).contains(where: { $0.id == sessionID }) {
+            selection = .workspace(workspaceID)
+        }
+    }
+
     /// How many workspaces are waiting on the user, for the sidebar's status bar, the Dock badge
     /// and the menu bar item.
     ///
@@ -1305,6 +1422,16 @@ final class AppModel {
     /// `AppModel+Archive.swift`, so this is the one property the split genuinely publishes. Two
     /// seams for an insert and a remove would be more code saying less than the property does.
     var restoring: Set<WorkspaceID> = []
+
+    /// Workspaces whose Carry On is in flight, on the same terms as `restoring` and for the same
+    /// reason: cutting a worktree takes seconds, and a button that can be pressed again in that
+    /// time cuts two.
+    ///
+    /// A separate set rather than a shared one because the two are separate offers. They are
+    /// never on screen together, but a workspace that is being carried on has not left the
+    /// archived list, and reusing `restoring` would make the archive screen say a restore was
+    /// running when none is.
+    var carryingOn: Set<WorkspaceID> = []
 
     /// What the sidebar's drag ends in.
     ///

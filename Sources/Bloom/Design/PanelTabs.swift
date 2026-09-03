@@ -40,7 +40,7 @@ import SwiftUI
 ///
 /// Shared rather than local because a second panel wants it, and that panel is here:
 /// `QuickPromptMarkPicker` draws Icons and Emojis through this, in a card three hundred points
-/// wide inside a popover, where the create sheet's panel is four hundred and sixty in a sheet. It
+/// wide inside a popover, where the create window's own panel is four hundred and sixty. It
 /// needed no size of its own to get there. Every measurement above is a proportion or a token, the
 /// cells divide whatever width they are handed, and the two labels of either caller are short, so
 /// the only parameter the second caller added was its own words. The inspector's own tab row is
@@ -96,7 +96,7 @@ struct PanelTabs<Tab: Hashable>: View {
         }
         .overlay {
             RoundedRectangle(cornerRadius: Metrics.corner)
-                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         }
         // Dropped under Reduce Motion rather than slowed, which is what every other call site in
         // this app does with `Motion`: the setting is about movement, not about speed.

@@ -2,13 +2,10 @@ import SwiftUI
 import AppKit
 import BloomCore
 
-/// The `/command` the draft leads with, drawn as a chip above the text.
+/// The `/command` the draft leads with, drawn as a chip beside the text.
 ///
-/// A sibling of `AttachmentChip` and deliberately built to the same measurements: the same height,
-/// the same plate, the same icon slot that swaps for the close control under the pointer so the
-/// chip keeps the width it had, and the same hover delay before a card opens. The two sit in the
-/// same strip above the same box and they are the same kind of object, which is a thing the draft
-/// carries that is not a word of the prompt.
+/// It uses the inline file chip measurements for its height, padding and icon. This keeps both
+/// tokens on the same baseline when a command and an attachment share a sentence.
 ///
 /// What it is not is a second copy of an attachment. An attachment is a file the reader chose; this
 /// is a token of the prompt itself, and the text under the chip is still the literal `/name` the
@@ -21,6 +18,11 @@ struct SlashCommandChip: View {
     /// not noticed yet. The chip still draws, because the text still says what it says.
     var command: SlashCommand?
     var onRemove: @MainActor () -> Void
+    /// Opens the command's source inside Bloom. The create window has no workspace tabs, so its
+    /// default keeps the older external-editor behaviour.
+    var onOpen: @MainActor (String) -> Void = { path in
+        Reveal.inEditor(path, repo: nil)
+    }
     /// Raised once the pointer has settled, and lowered the moment it leaves.
     var onHover: @MainActor (Bool) -> Void
 
@@ -28,10 +30,9 @@ struct SlashCommandChip: View {
     @State private var hoverTask: Task<Void, Never>?
 
     @Environment(\.openInRepoID) private var repoID
+    @Environment(\.fontScale) private var fontScale
+    @Environment(\.chatFont) private var chatFont
 
-    /// The same slot as `AttachmentChip`, so a row holding one of each does not have two rhythms
-    /// in it.
-    private static let slot: CGFloat = 14
     /// And the same wait, which is `Motion.hoverCardDelay` rather than a number copied from that
     /// chip. It was copied, and then the shared constant moved and this one did not, which is the
     /// drift a promise in a comment cannot stop and a reference to the constant can.
@@ -39,14 +40,14 @@ struct SlashCommandChip: View {
     /// Wide enough that a plugin's longest name is not truncated at all, which matters more here
     /// than it does on a filename: a middle truncated `superpowers:requesting-code-review` has
     /// lost the half that says which review it is.
-    private static let maxNameWidth: CGFloat = 340
+    static let maxNameWidth: CGFloat = 340
 
     var body: some View {
-        HStack(spacing: Metrics.spacingSmall) {
+        HStack(spacing: ComposerInlineChipLayout.gap) {
             leading
 
             Text("/\(name)")
-                .font(Typo.codeSmall)
+                .font(Font(labelFont))
                 .foregroundStyle(Palette.textPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -55,20 +56,20 @@ struct SlashCommandChip: View {
 
             trailing
         }
-        .padding(.horizontal, Metrics.spacing)
-        .frame(height: AttachmentChip.height)
+        .padding(.horizontal, ComposerInlineChipLayout.horizontalPadding)
+        .frame(height: chipHeight)
         // Hugs its name rather than reserving the cap. The cap is a limit on a long name, not a
         // width for every chip, and a chip padded out to it reads as an empty field.
         .fixedSize(horizontal: true, vertical: false)
         .background {
-            RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+            RoundedRectangle(cornerRadius: ComposerInlineChipLayout.cornerRadius)
                 .fill(isHovered ? Palette.hover : Palette.surfaceRaised)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                .strokeBorder(Palette.border, lineWidth: Metrics.hairline)
+            RoundedRectangle(cornerRadius: ComposerInlineChipLayout.cornerRadius)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         }
-        .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+        .contentShape(RoundedRectangle(cornerRadius: ComposerInlineChipLayout.cornerRadius))
         .onHover(perform: hover(_:))
         .help(helpText)
         .contextMenu { menu }
@@ -96,21 +97,15 @@ struct SlashCommandChip: View {
     @ViewBuilder
     private var leading: some View {
         if isHovered {
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .resizable()
-                    .frame(width: Self.slot, height: Self.slot)
-                    .foregroundStyle(Palette.textSecondary)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .help("Remove /\(name)")
-            .accessibilityLabel("Remove /\(name)")
+            // The shared control rather than an `xmark.circle.fill` of its own, which cut its X
+            // out of the disc so the X was the chip showing through. See `ChipRemoveMark`: this
+            // chip is a sibling of `AttachmentChip` by design and was still missed by its fix.
+            ChipRemoveButton(diameter: iconSize, label: "Remove /\(name)", action: onRemove)
         } else {
             Image(systemName: glyph)
                 .resizable()
                 .scaledToFit()
-                .frame(width: Self.slot, height: Self.slot)
+                .frame(width: iconSize, height: iconSize)
                 .foregroundStyle(Palette.textSecondary)
                 .accessibilityHidden(true)
         }
@@ -128,9 +123,9 @@ struct SlashCommandChip: View {
             Button(action: open) {
                 Image(systemName: "arrow.up.forward.square")
                     .resizable()
-                .scaledToFit()
-                    .frame(width: Self.slot, height: Self.slot)
-                    .foregroundStyle(isHovered ? Palette.textSecondary : .clear)
+                    .scaledToFit()
+                    .frame(width: iconSize, height: iconSize)
+                    .foregroundStyle(Palette.textSecondary)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -154,6 +149,22 @@ struct SlashCommandChip: View {
 
     private var path: String? { command?.path }
 
+    private var lineFont: NSFont {
+        ComposerTextEditor.font(scale: fontScale, face: chatFont)
+    }
+
+    private var labelFont: NSFont {
+        ComposerInlineChipLayout.labelFont(for: lineFont)
+    }
+
+    private var iconSize: CGFloat {
+        ComposerInlineChipLayout.iconSize(for: lineFont)
+    }
+
+    private var chipHeight: CGFloat {
+        ComposerInlineChipLayout.height(for: lineFont)
+    }
+
     /// A skill and a command file are told apart, because "open" means a different kind of thing
     /// for each, and a built in gets the mark of something that lives in the CLI rather than a
     /// page it does not have.
@@ -166,10 +177,7 @@ struct SlashCommandChip: View {
     }
 
     private var openTitle: String {
-        guard let app = path.flatMap({ OpenIn.preferred(for: .file($0), repo: repoID) }) else {
-            return "Open /\(name)"
-        }
-        return "Open in \(app.app.name)"
+        "Open /\(name) in Bloom"
     }
 
     private var helpText: String {
@@ -177,16 +185,11 @@ struct SlashCommandChip: View {
         return detail.isEmpty ? "/\(name)" : "/\(name)  \(detail)"
     }
 
-    /// The application the rest of the app would use, which is what "open it up" has to mean here:
-    /// the file is in `~/.claude`, outside the worktree, so the review tab cannot show it and the
-    /// editor the reader already opens everything else in is the honest answer.
+    /// The primary action stays inside Bloom. The context menu still offers external editors for
+    /// readers who explicitly ask for one.
     private func open() {
         guard let path else { return }
-        if let app = OpenIn.preferred(for: .file(path), repo: repoID) {
-            OpenIn.open(path, with: app, repo: repoID)
-        } else {
-            Reveal.inEditor(path)
-        }
+        onOpen(path)
     }
 
     private func hover(_ hovering: Bool) {

@@ -57,6 +57,11 @@ struct MenuSearchField: NSViewRepresentable {
         // Only when it differs. Writing the value back on every pass would move the insertion
         // point to the end of the field mid word.
         if field.stringValue != text { field.stringValue = text }
+        // And the type, for the same reason the placeholder above is written here: a caller that
+        // changes its font keeps the one the field was made with. It is the same class of bug the
+        // line above was written to fix, one field along.
+        let resolved = font ?? .systemFont(ofSize: NSFont.systemFontSize)
+        if field.font != resolved { field.font = resolved }
         // Asked for again here, and it is not belt and braces: the panel is made before its window
         // exists, so the first attempt has nothing to be first responder in. The coordinator only
         // ever succeeds once, so a field somebody has since tabbed out of is left alone.
@@ -71,12 +76,6 @@ struct MenuSearchField: NSViewRepresentable {
         var text: Binding<String>
         var onKey: @MainActor (ComposerKey) -> Bool
         var onHorizontal: (@MainActor (Int) -> Bool)?
-    /// The type, for the one caller that is not a menu row.
-    ///
-    /// The search screen's field is the only thing on its screen and is set at the size a window's
-    /// search field gets, where every other caller here is a line in a floating panel. Absent by
-    /// default, so a panel keeps the system size it has always had.
-    var font: NSFont?
         /// Whether the keyboard has been claimed once already. The panel opens because somebody
         /// clicked the control it hangs off and the next thing they do is type, so it is claimed;
         /// claiming it again on a later pass would drag the caret back out of wherever they had

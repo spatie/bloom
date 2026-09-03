@@ -158,11 +158,11 @@ public struct WorkspaceNamer: Sendable {
     /// Not the worktree and not the home directory: both carry a `CLAUDE.md` and a git repository,
     /// and while `--safe-mode` already refuses to read them, the cheapest way to be sure a naming
     /// call cannot see a user's code is to run it where there is none.
-    public static var scratchDirectory: String {
-        let path = (NSTemporaryDirectory() as NSString).appendingPathComponent("bloom-naming")
-        try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
-        return path
-    }
+    ///
+    /// This reasoning was written here first and applied only here, while four other asks with no
+    /// workspace behind them went on standing in `~`. It is `AgentScratchDirectory` now, which is
+    /// the same folder under the same argument, said once.
+    public static var scratchDirectory: String { AgentScratchDirectory.current() }
 
     public static func launch(prompt: String, model: String = WorkspaceNamer.model) -> WorkspaceNamerLaunch {
         WorkspaceNamerLaunch(

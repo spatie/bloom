@@ -54,6 +54,19 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
     /// Absolute, and read at fork time rather than trusted: a tab outlives the folder under it.
     /// See `FolderTerminal.launchDirectory`.
     var directory: String = ""
+    /// Review only: whether this tab stays on the file it was opened with.
+    ///
+    /// **The workspace's review tab is one tab that walks over many files, and that is still what
+    /// clicking a filename gives you.** The head of this type argues that at length and none of it
+    /// has changed: a strip that grew a tab per file would bury the conversations the strip is
+    /// mostly for. What this adds is the deliberate second gesture. A double click on a file pill,
+    /// or Open in New Tab from its menu, says "keep this one where it is", and a pinned tab is
+    /// what that opens: it is never the tab `CenterTabStore.showReview` repoints, so the reading
+    /// you set aside survives the next filename you click.
+    ///
+    /// Decoded as false for every tab written before this existed, which is the right answer for
+    /// all of them: they are the one shared review.
+    var isPinnedToPath: Bool = false
     /// Review only: the file being read, relative to the worktree. Kept here rather than taken
     /// from `WorkspaceModel.selectedFilePath` because that one is only ever a CHANGED file: the
     /// poll drops any selection git no longer reports, which would throw the reader out of a file
@@ -98,13 +111,17 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
         pageTitle = try container.decodeIfPresent(String.self, forKey: .pageTitle) ?? ""
         isNamed = try container.decodeIfPresent(Bool.self, forKey: .isNamed) ?? false
         directory = try container.decodeIfPresent(String.self, forKey: .directory) ?? ""
+        // False for every tab written before this existed, which is what all of them are: the one
+        // shared review. See `isPinnedToPath`.
+        isPinnedToPath = try container.decodeIfPresent(Bool.self, forKey: .isPinnedToPath) ?? false
     }
 
     init(
         id: String = newID(), workspaceID: WorkspaceID, kind: Kind, title: String,
         url: String = "", path: String = "", pageTitle: String = "", isNamed: Bool = false,
-        directory: String = ""
+        directory: String = "", isPinnedToPath: Bool = false
     ) {
+        self.isPinnedToPath = isPinnedToPath
         self.id = id
         self.workspaceID = workspaceID
         self.kind = kind

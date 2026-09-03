@@ -139,7 +139,8 @@ struct SidebarWorkspaceRow: View {
 ///
 /// A `Label` with nothing in its icon, so the sentence starts on the same column a workspace's
 /// name starts on rather than on a column of its own. It is a sentence about the project, not an
-/// item in the list, so it takes the name's column and not the mark's.
+/// item in the list, so it takes the name's column and not the mark's, and that column is the
+/// project's own name: the sentence begins directly under the name it is about.
 ///
 /// It is a row in the run like any other now that the pane is flat, which is why it refuses both
 /// selection and the drag: a sentence is not something to pick up, and `SidebarReorder` refuses it
@@ -148,11 +149,18 @@ struct SidebarEmptyNoticeRow: View {
     /// Only used to say WHY there is nothing here, which is a different sentence when a filter is
     /// hiding rows than when the project has none.
     var isFiltered: Bool
-
     var body: some View {
         Label {
+            // **The sentence and nothing else.** There was a button under it, first as a blue
+            // link and then as a proper control, on the argument that the `+` which does the same
+            // thing sits on the header above and only appears on hover. The owner has overruled
+            // that: the `+` is enough, and a second control for one action inside one project is
+            // the thing this window has spent a night removing.
+            // No font of its own, which is what the rows around it do. It was `Typo.caption`,
+            // a size smaller than every name above and below it, and in a pane where each project
+            // can carry one of these the small type read as a second class of row rather than as
+            // a quiet one. The tertiary ink is what makes it quiet.
             Text(isFiltered ? "Nothing matches the filter" : "No workspaces yet")
-                .font(Typo.caption)
                 .foregroundStyle(Palette.textTertiary)
         } icon: {
             Color.clear

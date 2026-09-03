@@ -118,7 +118,13 @@ final class TerminalSplitStore {
     func setRatio(_ ratio: Double, at path: [Int], in ownerID: String) {
         var layout = layout(for: ownerID)
         guard layout.setRatio(ratio, at: path) else { return }
-        apply(layout, to: ownerID, movingFocus: false)
+        layouts[ownerID] = layout
+    }
+
+    /// The divider keeps the layout live while the pointer moves, then stores its final shape once.
+    func persistRatio(in ownerID: String) {
+        guard let layout = layouts[ownerID] else { return }
+        persist(layout, for: ownerID)
     }
 
     /// Called when the tab itself goes away, so a new tab reusing nothing starts unsplit and user

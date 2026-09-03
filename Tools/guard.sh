@@ -6,7 +6,7 @@
 #   source "$(dirname "$0")/guard.sh"
 #
 # Bloom is now developed inside Bloom. That makes `Tools/master.sh` genuinely
-# dangerous: it removes `~/Applications/Bloom.app` and replaces the bundle, then
+# dangerous: it removes `/Applications/Bloom.app` and replaces the bundle, then
 # kills the process running from it. Run from a session that copy is hosting,
 # it ends the agent mid sentence and takes the app the owner is using with it,
 # and the `rm -rf` lands on a bundle whose executable is still mapped.
@@ -31,7 +31,17 @@
 
 # Where the owner's real install and real data live. Nothing in this repository
 # may write any of these three except the app itself.
-BLOOM_REAL_APP="$HOME/Applications/Bloom.app"
+#
+# `/Applications`, not `~/Applications`, and that is the owner's own arrangement
+# rather than a default: every other app on his Mac is in the system folder and
+# the per-user one held nothing but this. It was `$HOME/Applications` here, so
+# `master.sh` installed to a path he does not use and this guard protected a
+# bundle nobody was running, which is the worst of both: a second Bloom under
+# the same bundle id, on the same database, with LaunchServices free to hand a
+# `bloom://` link to whichever it liked. The three dev identities below stay in
+# `~/Applications` on purpose: they are installed by agents rather than by him,
+# and keeping them out of the folder he actually opens is the point of them.
+BLOOM_REAL_APP="/Applications/Bloom.app"
 BLOOM_REAL_DB_DIR="$HOME/Library/Application Support/Bloom"
 BLOOM_REAL_DB="$BLOOM_REAL_DB_DIR/bloom.sqlite"
 BLOOM_REAL_BUNDLE_ID="be.spatie.bloom"
@@ -45,8 +55,25 @@ BLOOM_DEV_DB_DIR="$HOME/Library/Application Support/Bloom Dev"
 BLOOM_DEV_DB="$BLOOM_DEV_DB_DIR/bloom.sqlite"
 BLOOM_DEV_BUNDLE_ID="be.spatie.bloom.dev"
 
+# The third identity, for trying a feature out beside the other two. Same
+# separation as the dev copy and for the same reasons: its own container, its own
+# preferences domain, its own tmux socket, its own URL scheme. It exists because
+# a feature that changes what a workspace IS wants a copy of its own to be wrong
+# in, without taking the dev copy's data with it.
+BLOOM_SUB_APP="$HOME/Applications/Bloom Subagents.app"
+BLOOM_SUB_DB_DIR="$HOME/Library/Application Support/Bloom Subagents"
+BLOOM_SUB_DB="$BLOOM_SUB_DB_DIR/bloom.sqlite"
+BLOOM_SUB_BUNDLE_ID="be.spatie.bloom.subagents"
+
 # Where a detached dev copy's worktrees are said to be. See Tools/dev-db.sh for
 # why the copied rows are pointed here rather than left on the real ones.
+#
+# Deliberately NOT named to end `.noindex`, which is what a new installation's
+# real root is called and why. This path is a fiction: the whole point is that it
+# does not exist, so that every destructive action in the dev copy fails on a
+# missing directory. Nothing is ever written here, so there is nothing for
+# Spotlight to walk and nothing the suffix would buy, and a name that matched the
+# real root would read as somewhere worktrees actually go.
 BLOOM_DEV_WORKSPACES_ROOT="$HOME/bloom-dev/workspaces"
 
 # The private tmux socket an instance holding this database uses.
@@ -68,7 +95,7 @@ print("bloom-%08x" % h)
 # The pid of the nearest ancestor running the given executable, or nothing.
 #
 # `ps -o comm=` answers with the absolute path of the executable, so a copy at
-# ~/Applications/Bloom.app is told apart from ~/Applications/Bloom Dev.app and
+# /Applications/Bloom.app is told apart from ~/Applications/Bloom Dev.app and
 # from a debug build in .build without any name matching.
 bloom_hosting_pid() {
   local target="$1" pid=$$ exe parent

@@ -24,6 +24,7 @@ import BloomCore
 /// panel takes the keyboard for its own field, so what is left is the arrows, Return and Escape.
 struct QuickPromptMenu: View {
     var catalog: QuickPromptCatalog
+    @Binding var draft: QuickPromptFormDraft?
     /// What a chosen prompt does. The panel closes itself first, so the caret is put back in the
     /// composer rather than into a field that is about to go away.
     var onPick: @MainActor (QuickPrompt) -> Void
@@ -43,19 +44,11 @@ struct QuickPromptMenu: View {
     /// How tall the rows actually are, so the scroll view can be given a height rather than left
     /// to take whatever it is offered. See `rows(_:)`.
     @State private var contentHeight: CGFloat = 0
-    /// The form, when one is open. Two states of one panel rather than a second floating window.
-    @State private var editor: Editor?
     /// The prompt Delete was pressed on, while the question about it is up.
     ///
     /// One piece of state for both routes into it, the pencil's form and the row's own context
     /// menu, because they ask the same question. See `QuickPromptDeletion`.
     @State private var deleting: QuickPrompt?
-
-    /// Which form is up, and what it is about.
-    private enum Editor: Equatable {
-        case new(name: String)
-        case existing(QuickPrompt)
-    }
 
     /// Wide enough for a name and a line of the prompt under it without either being cut.
     /// Wider than the composer's other menus, because a row here carries a name somebody wrote
@@ -84,8 +77,8 @@ struct QuickPromptMenu: View {
 
     var body: some View {
         Group {
-            if let editor {
-                form(editor)
+            if draft != nil {
+                form
             } else {
                 list
             }
@@ -101,7 +94,7 @@ struct QuickPromptMenu: View {
             // The form was about the prompt that has just gone, so it goes with it. Cancelling
             // leaves it standing, which is the half that matters: nothing typed is lost by
             // pressing Delete and changing your mind.
-            if case .existing(let editing) = editor, editing.id == prompt.id { editor = nil }
+            if draft?.editing?.id == prompt.id { draft = nil }
         }
     }
 
@@ -180,7 +173,7 @@ struct QuickPromptMenu: View {
                             isSelected: prompt.id == selected?.id,
                             onPick: { pick(prompt) },
                             onHover: { selected = prompt },
-                            onEdit: { editor = .existing(prompt) },
+                            onEdit: { draft = QuickPromptFormDraft(editing: prompt) },
                             onDelete: { deleting = prompt }
                         )
                         // Identity is the thing the row names, never its position. See `selected`.
@@ -205,13 +198,13 @@ struct QuickPromptMenu: View {
     @ViewBuilder
     private var empty: some View {
         if !query.isEmpty {
-            MenuEmptyRow(text: "Nothing matches \(query)")
+            MenuEmptyRow(text: "Nothing matches \(query)", inset: Self.contentInset)
         } else if !catalog.isLoaded {
-            MenuEmptyRow(text: "Looking for quick prompts\u{2026}")
+            MenuEmptyRow(text: "Looking for quick prompts\u{2026}", inset: Self.contentInset)
         } else {
             VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
                 Text("Nothing here yet.")
-                    .font(Typo.body)
+                    .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
                 Text("A quick prompt is a few lines you find yourself typing again.")
                     .font(Typo.caption)
@@ -229,16 +222,16 @@ struct QuickPromptMenu: View {
     /// written yet has just said what it should be called.
     private var newRow: some View {
         Button {
-            editor = .new(name: matches.isEmpty ? query : "")
+            draft = QuickPromptFormDraft(suggestedName: matches.isEmpty ? query : "")
         } label: {
-            HStack(spacing: Metrics.spacing) {
+            HStack(spacing: Metrics.gutter) {
                 Image(systemName: "plus")
                     .imageScale(.medium)
                     .foregroundStyle(Palette.textSecondary)
                     .frame(width: Metrics.repoIcon, height: Metrics.repoIcon)
 
                 Text(newRowTitle)
-                    .font(Typo.body)
+                    .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
                     .lineLimit(1)
 
@@ -280,22 +273,16 @@ struct QuickPromptMenu: View {
 
     // MARK: - The form
 
-    private func form(_ editor: Editor) -> some View {
-        let editing: QuickPrompt? = {
-            guard case .existing(let prompt) = editor else { return nil }
-            return prompt
-        }()
-        let suggested: String = {
-            guard case .new(let name) = editor else { return "" }
-            return name
-        }()
-        return QuickPromptForm(
-            editing: editing,
-            suggestedName: suggested,
-            onCancel: { self.editor = nil },
-            onSave: { fields in save(editing, fields) },
+    private var form: some View {
+        QuickPromptForm(
+            draft: Binding(
+                get: { draft ?? QuickPromptFormDraft() },
+                set: { draft = $0 }
+            ),
+            onCancel: { draft = nil },
+            onSave: { fields in save(draft?.editing, fields) },
             onDelete: {
-                guard let editing else { return }
+                guard let editing = draft?.editing else { return }
                 deleting = editing
             }
         )
@@ -311,7 +298,7 @@ struct QuickPromptMenu: View {
     private func save(_ editing: QuickPrompt?, _ fields: QuickPrompt.Fields) {
         let catalog = catalog
         let store = app.store
-        editor = nil
+        draft = nil
         Task {
             if let editing {
                 await catalog.save(id: editing.id, fields, in: store)
@@ -347,7 +334,7 @@ struct QuickPromptMenu: View {
             // doing nothing at all.
             guard let selected else {
                 guard !query.isEmpty else { return false }
-                editor = .new(name: query)
+                draft = QuickPromptFormDraft(suggestedName: query)
                 return true
             }
             pick(selected)

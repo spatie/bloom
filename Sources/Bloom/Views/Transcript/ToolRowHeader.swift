@@ -16,6 +16,11 @@ struct ToolRowHeader: View {
     var durationMS: Int?
     var isExpanded: Bool
     var isHovered: Bool
+    /// Whether there is anything behind the chevron. False for the rows that cannot open: a merge
+    /// event has no log, and `WorkspaceEventsView` already refuses to wrap those in an
+    /// `ExpandableRowHeader`. Drawn unconditionally, the chevron appeared on hover over a row that
+    /// does not answer it, which is the case that row's own doc calls worse than no chevron.
+    var showsDisclosure = true
 
     /// The model is looked up rather than passed down, exactly as `UserTurnRowView` does it: the
     /// transcript is handed a session, not a workspace model, and this only ever reads. Nothing in
@@ -213,7 +218,9 @@ struct ToolRowHeader: View {
                     .fixedSize()
             }
 
-            TranscriptDisclosure(isExpanded: isExpanded, isVisible: isHovered)
+            if showsDisclosure {
+                TranscriptDisclosure(isExpanded: isExpanded, isVisible: isHovered)
+            }
         }
         .transcriptRowFrame()
         .background { frameProbe }
@@ -324,10 +331,20 @@ struct ToolRowHeader: View {
         // Spelled out rather than mapped over the optional, so the closure's actor is written down
         // rather than inferred through two layers of optional.
         let onOpen: (@MainActor () -> Void)?
+        let onOpenInNewTab: (@MainActor () -> Void)?
         if let opens = target.opens {
             onOpen = { open(opens) }
+            // The second gesture, and it asks the file system where the single click does not: a
+            // tab kept open on a file that is not there would be a tab saying nothing, whereas
+            // repointing the shared review at a missing file is a state that pane already draws.
+            // One `stat` on a double click is nothing; the row draws hundreds of these chips and
+            // asks nothing of the disk for any of them. See `AttachmentChip.verifiesOnDisk`.
+            onOpenInNewTab = {
+                openInNewTab(opens, at: (worktree as NSString).appendingPathComponent(opens))
+            }
         } else {
             onOpen = nil
+            onOpenInNewTab = nil
         }
 
         // The two things a transcript wants turned off: no close control to reveal, since a row is
@@ -337,6 +354,7 @@ struct ToolRowHeader: View {
             attachment: attachment,
             worktree: worktree,
             onOpen: onOpen,
+            onOpenInNewTab: onOpenInNewTab,
             onPreview: { frame in
                 let file = TranscriptHoverCard.file(attachment: attachment, worktree: worktree)
                 guard let frame else {
@@ -348,6 +366,17 @@ struct ToolRowHeader: View {
             verifiesOnDisk: false
         )
         .fixedSize()
+    }
+
+    /// A tab of its own for this file, which is what a double click means. Nothing happens for a
+    /// file that is not on disk: see the note at the call site.
+    /// - Parameter absolute: what to ask the file system about. `FileChipTarget.opens` is
+    ///   worktree relative, which is what the review takes and what `FileManager` would resolve
+    ///   against the process's own directory, so it is joined back onto the worktree here.
+    private func openInNewTab(_ path: String, at absolute: String) {
+        guard let id = home.workspaceID, let model = app.existingModel(for: id) else { return }
+        guard FileManager.default.fileExists(atPath: absolute) else { return }
+        FileReview.openInNewTab(path: path, in: model)
     }
 
     /// The same door the composer's chips and a sent turn's chips use.

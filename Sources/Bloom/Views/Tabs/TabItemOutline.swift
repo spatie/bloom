@@ -1,11 +1,9 @@
 import SwiftUI
 
-/// The line around a tab's top and two sides, with nothing along the bottom.
+/// The line around a selected tab.
 ///
-/// Stroking the fill shape would close the rectangle, and the bottom of that rectangle lands
-/// exactly where the strip's own rule is: the selected tab would be boxed in again by the very
-/// line its opaque fill exists to break. Three sides and a stop keeps the tab running into the
-/// pane below it, which is what says this is a tab and not a button.
+/// It closes the selected tab on all four sides. The bottom edge is deliberate: it keeps the tab
+/// visually attached to the strip instead of letting its white fill bleed into the pane below.
 ///
 /// Insettable so it can be drawn with `strokeBorder`. A centred `stroke` puts half its width
 /// outside the tab, and the strip sits directly under a unified toolbar, so that half would be
@@ -41,6 +39,10 @@ struct TabItemOutline: InsettableShape {
             radius: radius
         )
         path.addLine(to: CGPoint(x: box.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: box.minX, y: rect.maxY))
+        if !skipsLeadingEdge {
+            path.closeSubpath()
+        }
         return path
     }
 

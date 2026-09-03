@@ -6,7 +6,7 @@ import BloomCore
 /// it, and whatever footer the caller puts under it.
 ///
 /// This is the whole of "the composer" as a thing you can put somewhere. It was pulled out of
-/// `ComposerView` when the create sheet became a composer rather than a form, because creating a
+/// `ComposerView` when the create window became a composer rather than a form, because creating a
 /// workspace is writing the first message of a conversation and it should be the same surface as
 /// writing the second: the same chrome, the same drop target, the same `@mention` and `/command`
 /// menus, the same paperclip, the same hover cards. Copying that into a sheet would have been two
@@ -31,11 +31,11 @@ struct ComposerPrompt<Footer: View>: View {
     /// Where an attached file is copied to, and what its stored path is relative to.
     var attachmentRoot: String
     /// Which bucket of `PromptAttachmentStore` this prompt is filling: a session id in a
-    /// conversation, a draft id in the create sheet.
+    /// conversation, a draft id in the create window.
     var attachmentKey: String
 
     /// The review comments riding with the next message, drawn as chips above the text the way
-    /// the `/command` chip is. Only a conversation has any: the create sheet has no diff to have
+    /// the `/command` chip is. Only a conversation has any: the create window has no diff to have
     /// commented on, so its default stays empty and nothing about the sheet changes.
     var reviewComments: [ReviewComment] = []
     var onRemoveReviewComment: @MainActor (ReviewCommentID) -> Void = { _ in }
@@ -52,6 +52,10 @@ struct ComposerPrompt<Footer: View>: View {
     /// What clicking a chip does. A conversation opens the file in its review tab; the sheet has
     /// no tabs to open one in and hands it to the Finder instead.
     var onOpenAttachment: @MainActor (PromptAttachment) -> Void
+    /// Opens a slash command's backing file. Conversations use a Bloom file tab; prompts shown
+    /// before a workspace exists retain the chip's external-editor fallback.
+    var onOpenCommand: (@MainActor (String) -> Void)?
+    var fillsPanel = false
     /// The footer, handed what it can ask this view to write into the draft. Passed in rather than
     /// reached for, because everything an attachment and a quick prompt do lives here and the
     /// footer is only the buttons. See `ComposerPromptActions`.
@@ -136,33 +140,37 @@ struct ComposerPrompt<Footer: View>: View {
             }
 
             if let name = draft.name {
-                SlashCommandChip(
-                    name: name,
-                    command: named,
-                    onRemove: removeCommand,
-                    onHover: { isCommandPreviewed = $0 }
-                )
-            }
+                HStack(alignment: .top, spacing: Metrics.spacingSmall) {
+                    SlashCommandChip(
+                        name: name,
+                        command: named,
+                        onRemove: removeCommand,
+                        onOpen: { path in
+                            if let onOpenCommand {
+                                onOpenCommand(path)
+                            } else {
+                                Reveal.inEditor(path, repo: nil)
+                            }
+                        },
+                        onHover: { isCommandPreviewed = $0 }
+                    )
 
-            ComposerEditor(
-                text: promptBody,
-                caret: $caret,
-                isFocused: $isFocused,
-                height: editorHeight,
-                onContentHeightChange: onContentHeightChange,
-                onKey: handle(key:),
-                onBackspaceAtStart: backspaceCommand,
-                onAttach: attach(sources:replacing:),
-                attachmentPaths: attachments.map(\.path),
-                onOpenAttachment: open(path:),
-                onHoverAttachment: { hoveredPath = $0 },
-                handle: editor,
-                placeholder: placeholder
-            )
+                    promptEditor(attachments: attachments)
+                }
+            } else {
+                promptEditor(attachments: attachments)
+            }
 
             footer(ComposerPromptActions(attach: attachFiles, insert: insert(quickPrompt:)))
         }
-        .composerBox(isFocused: $isFocused, isDropTarget: isDropTarget)
+        .composerBox(
+            isFocused: $isFocused,
+            isDropTarget: isDropTarget,
+            fillsPanel: fillsPanel
+        )
+        // Publish this from the shared prompt rather than individual screens. This keeps prose
+        // editing shortcuts, including Command-Backspace, inside every prompt editor.
+        .focusedValue(\.isTypingProse, isFocused)
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
             boxWidth = frame.width
             boxTop = frame.minY
@@ -212,6 +220,7 @@ struct ComposerPrompt<Footer: View>: View {
                 files: fileMatches,
                 selectedIndex: menuIndex,
                 maxHeight: placement.menuHeight,
+                availableWidth: boxWidth,
                 onPickCommand: pick(command:),
                 onPickFile: pick(file:),
                 onHighlight: { menuIndex = $0 }
@@ -249,6 +258,27 @@ struct ComposerPrompt<Footer: View>: View {
             // the token entirely, makes the menu available again.
             if old.kind != new.kind { isMenuDismissed = false }
         }
+    }
+
+    /// The command is a prefix of the prompt rather than a separate row. Keeping the editor in
+    /// one helper lets the chipped and ordinary forms share exactly the same text behaviour while
+    /// the chipped form can place it immediately after the command.
+    private func promptEditor(attachments: [PromptAttachment]) -> some View {
+        ComposerEditor(
+            text: promptBody,
+            caret: $caret,
+            isFocused: $isFocused,
+            height: editorHeight,
+            onContentHeightChange: onContentHeightChange,
+            onKey: handle(key:),
+            onBackspaceAtStart: backspaceCommand,
+            onAttach: attach(sources:replacing:),
+            attachmentPaths: attachments.map(\.path),
+            onOpenAttachment: open(path:),
+            onHoverAttachment: { hoveredPath = $0 },
+            handle: editor,
+            placeholder: placeholder
+        )
     }
 
     /// Files that were attached before a file was a word in the draft.
@@ -414,7 +444,7 @@ struct ComposerPrompt<Footer: View>: View {
     /// Which side of the box the floating panels open on, and how much room that side has.
     ///
     /// In a conversation the composer sits at the foot of the window and the room above it is the
-    /// whole transcript, so this resolves to `above` and nothing moves. In the create sheet the
+    /// whole transcript, so this resolves to `above` and nothing moves. In the create window the
     /// box sits under one heading in a window sized exactly to its content, and a menu that
     /// opened upwards there was clipped at the sheet's top edge: two arbitrary rows survived, the
     /// ranked ones, the selected one among them, were cut off, and the header controls were

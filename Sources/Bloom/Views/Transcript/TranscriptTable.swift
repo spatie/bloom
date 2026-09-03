@@ -82,6 +82,11 @@ final class TranscriptTableController {
     /// Lets go of the standing instruction above, without moving anything.
     func releaseEnd() { coordinator?.releaseEnd() }
 
+    /// Whether that instruction is standing now. Read by the pane when it writes down where the
+    /// reader was: an instruction to be at the end is where somebody is, even on the frames a
+    /// height correction has left the view a few points short of it.
+    var holdsEnd: Bool { coordinator?.holdsEnd ?? false }
+
     /// **`TranscriptLiveEndFollower` is driving the clip view from here on, so nothing in the
     /// table may touch it.**
     ///
@@ -89,7 +94,7 @@ final class TranscriptTableController {
     /// height correction, and what reaches the screen is the instant pin with the travel invisible
     /// underneath it. The follower is the only one that can make a movement the eye can read, so
     /// it wins for as long as it is running.
-    func followerTookOver() { coordinator?.followerTookOver() }
+    func followerTookOver() -> Bool { coordinator?.followerTookOver() ?? false }
 
     /// The follower's link has gone down, wherever it left the view. See
     /// `TranscriptLiveEndFollower.onStop`, which carries why this cannot be `onRest`.
@@ -98,10 +103,22 @@ final class TranscriptTableController {
     func scroll(to entryID: TranscriptEntryID, anchor: UnitPoint) {
         coordinator?.scroll(to: entryID, anchor: anchor)
     }
+
+    /// Put this row back this far above the top of the pane, which is where a reader who was part
+    /// way down a long answer left it. See `TranscriptAnchor.offset(rowTop:delta:)`.
+    func scroll(to entryID: TranscriptEntryID, delta: CGFloat) {
+        coordinator?.scroll(to: entryID, delta: delta)
+    }
+
     func scroll(toY y: CGFloat) { coordinator?.scroll(toY: y) }
 
     /// A fold is about to open or close. See `Coordinator.pendingUnfolds`.
     func willUnfold(_ entryID: TranscriptEntryID) { coordinator?.willUnfold(entryID) }
+
+    /// A transcript activity group is about to add or remove its disclosed rows.
+    func willChangeFoldRows(_ entryID: TranscriptEntryID) {
+        coordinator?.willChangeFoldRows(entryID)
+    }
 
     /// **The conversation this pane was pointed at is in, and in the place the reader left it.**
     ///
@@ -111,8 +128,14 @@ final class TranscriptTableController {
     /// pane draws nothing. See `TranscriptHoldView.hold(_:)`.
     func arrived() { coordinator?.arrived() }
 
-    /// The entry at the top of the pane, which is the place a reader is put back at.
-    var topmostEntry: TranscriptEntryID? { coordinator?.topmostEntry }
+    /// Where the reader is, as the pair that puts them back: the stored row at the top of the
+    /// pane, and how far above its own top the pane starts. See `Coordinator.topmostPlace`.
+    var topmostPlace: (seq: Int, delta: CGFloat)? { coordinator?.topmostPlace }
+
+    /// Whether the whole entry is above the viewport. Nil when it is outside the drawn window.
+    func isAboveViewport(_ entryID: TranscriptEntryID) -> Bool? {
+        coordinator?.isAboveViewport(entryID)
+    }
 
     var geometry: TranscriptTableGeometry {
         coordinator?.currentGeometry ?? TranscriptTableGeometry()
@@ -259,6 +282,8 @@ struct TranscriptTable: NSViewRepresentable {
         /// `TranscriptRowHeights`.
         private var heights = TranscriptRowHeights()
         private var settleWork: Task<Void, Never>?
+        /// Preparing the rows just above the screen while nobody is moving. See `warmAhead`.
+        private var warmWork: Task<Void, Never>?
         /// A reflow saying its placement a second time. See `rewidth`.
         private var placeWork: Task<Void, Never>?
         private var resizeWork: Task<Void, Never>?
@@ -277,17 +302,36 @@ struct TranscriptTable: NSViewRepresentable {
 
         /// **A standing instruction to be at the end of the conversation.** See
         /// `TranscriptTableController.goToEnd`, which carries why a single scroll cannot mean it.
-        private var holdsEnd = false
+        ///
+        /// Readable through the controller, because the pane has to write down whether the reader
+        /// was at the live end and an instruction to be there is where somebody is. Written here
+        /// and nowhere else: `goToEnd` and `releaseEnd` are the only two things that move it.
+        fileprivate private(set) var holdsEnd = false
+        /// A pane reflow that began at the end is not a user scroll. AppKit can deliver the
+        /// bounds changes caused by its row-height corrections after `noteHeightOfRows` returns,
+        /// so `isPutting` alone cannot distinguish them from a wheel event. Keep that distinction
+        /// until the resized table has been quiet and has reached its new end once.
+        private var isSettlingResizeAtEnd = false
         /// Whether this file is the thing moving the clip view right now, so that the escape below
         /// does not read the transcript's own arrival at the end as the reader scrolling away.
         private var isPutting = false
         /// Whether the reader has hold of the view. `NSScrollView`'s own answer, not a guess.
         private var isLiveScrolling = false
+        /// When the last step of a live scroll arrived, so a gesture nothing announced the start
+        /// or the end of can be noticed to have stopped. See `liveScrolled`.
+        private var lastLiveScroll: CFTimeInterval = 0
+        private var quietWork: Task<Void, Never>?
         /// Whether the follower is driving. See `TranscriptTableController.followerTookOver`.
         private var isFollowerDriving = false
         /// Rows whose next height change is a fold the reader just clicked, and may therefore be
         /// animated. Consumed by the pass that applies it. See `willUnfold`.
         private var pendingUnfolds: Set<TranscriptEntryID> = []
+        /// The next row-list change came from a disclosure click rather than from live activity.
+        /// Only that change gets the brief cross-fade requested for opening and closing a group.
+        private var pendingFoldRows = false
+        /// The disclosure row where the reader clicked, held at the same point in the viewport
+        /// while its children enter or leave below it.
+        private var pendingFoldAnchor: (id: TranscriptEntryID, delta: CGFloat)?
 
         /// **Whether the transcript is being held still while a pane is resized.** Nothing in here
         /// measures, reloads or moves while it is on. See `TranscriptHoldView`.
@@ -308,6 +352,27 @@ struct TranscriptTable: NSViewRepresentable {
         /// The conversation this pane is currently drawing. A change of it is an arrival, and an
         /// arrival is not drawn until it is ready. See `showing(session:in:)`.
         private var shownSession: SessionID?
+        /// **What makes a cell rebuild even when its content key has not moved.**
+        ///
+        /// A cell recycles on its content key, which is the whole of what a table buys over a
+        /// stack, and twice that is not enough. A pool holds cells from the conversation the pane
+        /// has left, keyed by ids that are singletons across sessions (`.setup`, `.sending`,
+        /// `.streaming`), so coming back to a conversation can hand a row the very cell it had
+        /// last time: `apply` sees the key it already holds, returns, and the cell goes on hosting
+        /// a row built from the OTHER session's model, which is still running and still growing.
+        /// Its height reports are filed under this session's key, because the ids carry no session
+        /// to tell them apart, and the gap that opens is under the newest row.
+        ///
+        /// The second is the environment. `apply` reloads the table when the environment moves,
+        /// on the argument that every cell holds values from the one it was built in, and the key
+        /// guard silently defeated it: a reload re-asks for views and the pool hands the same
+        /// cells straight back, still carrying the pane a link opens into from the workspace
+        /// before last.
+        ///
+        /// Bumped rather than cleared per cell, because there is no reaching into an
+        /// `NSTableView`'s reuse pool: a number the cells carry is the only way to say "whatever
+        /// you are holding is from before".
+        private var cellGeneration = 0
         weak var holdView: TranscriptHoldView?
 
         /// The width a row is actually drawn at, which is the TABLE's width and not the clip
@@ -383,16 +448,33 @@ struct TranscriptTable: NSViewRepresentable {
             let previous = rowEnvironment
             rowEnvironment = environment
             let environmentMoved = previous != nil && previous != environment
+            // The reload below is what says every cell holds values from the environment it was
+            // built in, and a cell that recycles on its content key alone would take none of it.
+            // See `cellGeneration`.
+            if environmentMoved { cellGeneration += 1 }
             let wrapsDifferently = previous?.wraps(differentlyFrom: environment) ?? false
             if wrapsDifferently { heights.forget() }
 
             // The first width the table ever has, and any change of text size. Until a width
             // arrives every measurement is refused, and a table told a hair per row is a
             // transcript that is not there. See `TranscriptRowHeights.reset`.
-            let remeasured = heights.reset(width: columnWidth, scale: scale) || wrapsDifferently
+            // The line height comes off the environment rather than beside `scale`, because it
+            // arrives with everything else a row is drawn from and a second argument saying the
+            // same thing is a second thing to forget to pass. See `TranscriptRowHeights.Measure`.
+            let remeasured = heights.reset(
+                width: columnWidth, scale: scale, leading: environment.lineHeight.ratio
+            ) || wrapsDifferently
 
             let newIDs = newEntries.map(\.id)
             let change = TranscriptEntryChange.between(ids, newIDs)
+            let changesFoldRows = pendingFoldRows && change.movesRows
+            let foldAnchor = changesFoldRows ? pendingFoldAnchor : nil
+            let fadesFoldRows = changesFoldRows
+                && rowEnvironment?.reduceMotion != true
+            if change.movesRows {
+                pendingFoldRows = false
+                pendingFoldAnchor = nil
+            }
 
             // What has changed about the entries the two lists share, in the NEW list's indices,
             // and which of those are a fold the reader just clicked.
@@ -430,8 +512,11 @@ struct TranscriptTable: NSViewRepresentable {
             }
 
             // Both read before anything moves under the reader. See `keepPlace`.
-            let wasAtEnd = isFollowingAlong
-            let anchor = change.movesRows ? anchorEntry() : nil
+            // A disclosure click is navigation, even when the clicked row happens to be on the
+            // last screen. Keep that row where it was instead of treating the new children as
+            // live transcript activity and following them to the end.
+            let wasAtEnd = changesFoldRows ? false : isFollowingAlong
+            let anchor = foldAnchor ?? (change.movesRows ? anchorEntry() : nil)
 
             entries = newEntries
             ids = newIDs
@@ -444,9 +529,9 @@ struct TranscriptTable: NSViewRepresentable {
             case .same:
                 break
             case .grew(let head, let tail):
-                rowsArrived(head: head, tail: tail, in: tableView)
+                rowsArrived(head: head, tail: tail, fading: fadesFoldRows, in: tableView)
             case .shrank(let head, let tail):
-                rowsLeft(head: head, tail: tail, in: tableView)
+                rowsLeft(head: head, tail: tail, fading: fadesFoldRows, in: tableView)
             case .rebuilt:
                 rebuiltEverything(in: tableView)
             }
@@ -467,6 +552,23 @@ struct TranscriptTable: NSViewRepresentable {
                 // The cells first, so that a row whose height is about to travel already holds
                 // what it is travelling to show. See `noteHeights(_:over:)`.
                 tableView.reloadData(forRowIndexes: changed, columnIndexes: IndexSet(integer: 0))
+                // **A key that has just moved is a key nothing has measured, and this pass is the
+                // cheapest moment to take it.** It used to go straight to `noteHeights`, which
+                // tells the table what the cache holds, and for a new key the cache holds nothing:
+                // `assumed` answers the running mean and the row is drawn at it.
+                //
+                // Nothing put that right afterwards. `HostedRow` reports through
+                // `onChange(of: proxy.size.height)`, so a row whose key moved without its height
+                // moving never reports again; the cell is not rebuilt as a new identity, so the
+                // `initial: true` that would have does not fire; the warming pass only walks rows
+                // ABOVE the screen; and the screen census saw the cache and the table agreeing
+                // about the mean. A fold's line is the case that shipped: its key carries the
+                // count in its words, so it moves on every call that lands, and it is one line
+                // tall in every one of those states.
+                //
+                // `measureExactly` skips any key the cache already knows, so the ordinary changed
+                // row, one that has been in this state before, costs a dictionary lookup.
+                measureExactly(changed)
                 noteHeights(changed.subtracting(unfolding))
                 noteHeights(unfolding, over: unfoldSeconds)
             }
@@ -532,8 +634,8 @@ struct TranscriptTable: NSViewRepresentable {
             let identifier = NSUserInterfaceItemIdentifier("bloom.transcript.cell")
             let cell = tableView.makeView(withIdentifier: identifier, owner: self)
                 as? TranscriptTableCell ?? TranscriptTableCell(identifier: identifier)
-            cell.onHeightChange = { [weak self] id, height in
-                self?.noted(height: height, for: id)
+            cell.onHeightChange = { [weak self] id, key, height in
+                self?.noted(height: height, of: key, for: id)
             }
             // **Every row in the visible rect gets one of these, and this is where a row's SwiftUI
             // graph is actually built.** It is outside the pane's own layout pass, so
@@ -542,7 +644,9 @@ struct TranscriptTable: NSViewRepresentable {
             // really replace the root view, because a recycled cell holding what it already holds
             // returns early. See `TranscriptHoldCensus.cellSeconds`.
             let started = TranscriptHoldCensus.clock()
-            let rebuilt = cell.apply(entry: entry, environment: rowEnvironment)
+            let rebuilt = cell.apply(
+                entry: entry, environment: rowEnvironment, generation: cellGeneration
+            )
             TranscriptHoldCensus.askedCell(
                 rebuilt: rebuilt, seconds: TranscriptHoldCensus.since(started)
             )
@@ -581,33 +685,48 @@ struct TranscriptTable: NSViewRepresentable {
             return CGFloat(heights.assumed(for: entry.contentKey, drawsNothing: entry.drawsNothing))
         }
 
-        /// A fresh `NSHostingView` per measurement, at the exact width the cell is laid out at.
+        /// The one thing a row is hosted in to be measured, kept rather than built per row. See
+        /// `measure(_:at:)`, which carries why keeping it is safe now and was not before. Lazy, so
+        /// a coordinator that never measures never builds one.
+        private lazy var sizer = NSHostingController(rootView: AnyView(EmptyView()))
+
+        /// **What this row comes to at this width, asked of a hosting controller.**
         ///
-        /// **The other half of the wrong heights.** One hosting view reused for every row, with
-        /// its size invalidated by hand, gave a long conversation several hundred points of blank
-        /// between rows: an `NSHostingView` keeps its own fitting size and does not reliably
-        /// forget the row before. A fresh one has no previous answer to hand back, and a whole
-        /// SwiftUI graph per row is what this arrangement can afford: 2.1ms a layout pass against
-        /// the lazy stack's 11.9ms.
+        /// It was a fresh `NSHostingView` per row, with a required width constraint,
+        /// `layoutSubtreeIfNeeded()` and `fittingSize`. The comment beside it said a reused
+        /// hosting view "does not reliably forget the row before", and that is a description of
+        /// `fittingSize` rather than of reuse: `fittingSize` is the Auto Layout engine's answer for
+        /// the view as it stands, so a reused view hands back whatever the last solve left in it.
+        /// `sizeThatFits(in:)` takes a PROPOSAL and answers for the content it has been handed, so
+        /// there is nothing left over to forget and the controller can be kept. It is also the
+        /// supported width-constrained measurement, where `fittingSize` under a constraint is a
+        /// solver result that happens to agree.
         ///
-        /// The width is a required CONSTRAINT rather than a frame, because that is what makes
-        /// `fittingSize` solve the layout at that width instead of handing back the unwrapped
-        /// ideal width of a paragraph.
+        /// Timed on this Mac against the owner's session: 0.270ms a row for the fresh view, 0.103ms
+        /// for this. Nothing else about the measurement moves. `HostedRow` is untouched, because
+        /// the measuring copy and the drawing copy passing through identical modifiers is the whole
+        /// reason that type exists; `.id` is added here, which the drawing copy already had, so the
+        /// two are now closer rather than further apart, and it is what tells SwiftUI that the next
+        /// row is a different view rather than this one changing.
+        ///
+        /// The width is still `columnWidth`, carried in through `TranscriptRowHeights.measure`,
+        /// which is the TABLE's width and not the clip view's. See `columnWidth`, which carries
+        /// what measuring against the wrong one clipped.
         private func measure(_ entry: TranscriptTableEntry, at width: CGFloat) -> CGFloat {
             guard let rowEnvironment else { return 0 }
-            // The one place a hosting view is built to measure a row, so the one place worth
-            // counting. See `TranscriptHoldCensus`.
+            // The one place a row is hosted to measure it, so the one place worth counting. See
+            // `TranscriptHoldCensus`.
             TranscriptHoldCensus.measured()
-            let host = NSHostingView(rootView: AnyView(
+            sizer.rootView = AnyView(
                 HostedRow(content: entry.content(), report: { _ in }, fills: false)
+                    .id(entry.id)
                     .transcriptRowEnvironment(rowEnvironment)
-            ))
-            host.translatesAutoresizingMaskIntoConstraints = false
-            let constraint = host.widthAnchor.constraint(equalToConstant: width)
-            constraint.isActive = true
-            host.layoutSubtreeIfNeeded()
-            let height = host.fittingSize.height
-            constraint.isActive = false
+            )
+            // Unconstrained downwards, which is what `fills: false` is for: the measuring copy
+            // takes its own ideal height rather than filling a row it has not been given.
+            let height = sizer.sizeThatFits(
+                in: CGSize(width: width, height: .greatestFiniteMagnitude)
+            ).height
             // Nought is a real answer, and `TranscriptRowHeights` carries what pretending
             // otherwise cost.
             return height
@@ -615,13 +734,29 @@ struct TranscriptTable: NSViewRepresentable {
 
         /// **What the row turned out to be when it was drawn, which outranks anything measured off
         /// screen.** See `TranscriptRowHeights.note`.
-        private func noted(height: CGFloat, for entryID: TranscriptEntryID) {
+        ///
+        /// **A report carries the content it was measured for, and it used to carry only the id.**
+        /// An entry id is an ordinal within one conversation, so `.row(37)` in the workspace being
+        /// left and `.row(37)` in the one arriving are the same value, and a report landing after
+        /// the switch was filed under whatever the ARRIVING row's key is. Nothing would ever take
+        /// that number again: `measureExactly` skips a key the cache knows, the screen census sees
+        /// the table and the cache agreeing, and the repair confirms it rather than measuring. The
+        /// row is then drawn at another conversation's height until its key moves.
+        ///
+        /// Reasoned from the id rather than photographed, unlike the estimate this shipped beside.
+        /// The guard costs one comparison and closes the class: a height is about the content it
+        /// was taken from, so a report whose content has been replaced is not evidence about what
+        /// is there now.
+        private func noted(
+            height: CGFloat, of contentKey: TranscriptContentKey, for entryID: TranscriptEntryID
+        ) {
             // The tail goes on growing inside its frozen cell while a pane is dragged, and a
             // height taken from it would be filed against the entry list this pass is not
             // applying. It is remeasured when the hold lets go, with everything on screen.
             guard !isHeld else { return }
-            guard let row = index[entryID], entries.indices.contains(row) else { return }
-            guard heights.note(height, for: entries[row].contentKey) else { return }
+            guard let row = index[entryID], entries.indices.contains(row),
+                  entries[row].contentKey == contentKey else { return }
+            guard heights.note(height, for: contentKey) else { return }
             // **News to the cache is not always news to the table.** A row the table is already
             // drawing at this height needs no `noteHeightOfRows`, and the whole of a correction's
             // cost is that call: it moves the document's total and makes AppKit lay out every row
@@ -642,10 +777,17 @@ struct TranscriptTable: NSViewRepresentable {
         /// takes the queue out of flight, and if the hold turns out not to have changed the width
         /// then everything in it is still true and has to be said. See `holdEnded`.
         private func drainOwedHeights() {
-            guard owedWork == nil, !owedHeights.isEmpty else { return }
+            // A height correction moves the table's document and restoring the visible anchor
+            // moves the clip view. Both are correct while the view is still, but either one fights
+            // AppKit's own offset while a trackpad gesture or its momentum is in flight. Keep
+            // taking the measurements into the cache, then tell the table once the reader lets go.
+            guard owedWork == nil, !owedHeights.isEmpty, !isLiveScrolling else { return }
             owedWork = Task { @MainActor [weak self] in
                 guard let self else { return }
                 owedWork = nil
+                // The task begins on a later main-actor turn. A gesture can start between being
+                // scheduled and arriving here, so check again before taking the queue out.
+                guard !isLiveScrolling else { return }
                 let owed = owedHeights
                 owedHeights = []
                 // **Where each of them is NOW.** An id that has left the list is dropped, which is
@@ -741,7 +883,9 @@ struct TranscriptTable: NSViewRepresentable {
             //
             // On the settle only. It writes heights, which moves the document, and doing that on a
             // frame somebody is scrolling is the stutter rather than the cure.
-            if settled, wrong > 0 { repairTheScreen() }
+            if settled, TranscriptRowHeights.needsRepair(guessed: estimated, wrong: wrong) {
+                repairTheScreen()
+            }
             #if DEBUG
             // Which rows, once the screen has stopped moving, because a guess that is standing
             // there is worth naming and a guess mid flick is not.
@@ -766,6 +910,12 @@ struct TranscriptTable: NSViewRepresentable {
             guard !rows.isEmpty else { return }
             let wasAtEnd = isFollowingAlong
             let anchor = anchorEntry()
+            // **Measured before it is told, because re-telling a guess tells the table the guess
+            // again.** This used to hand the table whatever `assumed` said, which for a row nobody
+            // has measured is the running mean, so a screenful of guesses was reported by the
+            // census and then confirmed by the repair. `measureExactly` skips every key the cache
+            // knows, so on a screen that is already right this costs one lookup a row.
+            measureExactly(rows)
             noteHeights(rows)
             keepPlace(wasAtEnd: wasAtEnd, anchor: anchor)
             reportGeometry()
@@ -845,6 +995,12 @@ struct TranscriptTable: NSViewRepresentable {
             pendingUnfolds.insert(entryID)
         }
 
+        func willChangeFoldRows(_ entryID: TranscriptEntryID) {
+            pendingFoldRows = true
+            pendingFoldAnchor = anchorEntry(entryID)
+            aimingElsewhere()
+        }
+
         /// How long a fold takes, or nothing at all under Reduce Motion. Read from the row
         /// environment rather than from the setting, so the table and the rows inside it cannot
         /// disagree about whether this reader wants movement.
@@ -920,6 +1076,46 @@ struct TranscriptTable: NSViewRepresentable {
             return entries[range.location].id
         }
 
+        /// The row at the top of the pane and how far above its own top the pane starts, which is
+        /// the pair `TranscriptAnchor` restores a reader from.
+        ///
+        /// **A chain rather than the topmost entry alone, because four of the entries in this list
+        /// are not stored rows and have no sequence number at all.** A reader anywhere near the
+        /// live end has the streaming tail, the bubble being sent or a queued message at the top of
+        /// the pane, and `topmostEntry` named one of those: `seq` was nil, the pane wrote down no
+        /// anchor, and it fell back to a point measured against a content height that is a fact
+        /// about what has been measured rather than about the conversation. That is where the nil
+        /// anchors came from.
+        ///
+        /// Upwards first, to the last stored row above the fold, because that is what the delta is
+        /// for: it is normally negative anyway, and the row starting above the viewport restores
+        /// the same place exactly. Downwards only when there is nothing above, which is a reader at
+        /// the very top of a conversation with the setup log over it.
+        var topmostPlace: (seq: Int, delta: CGFloat)? {
+            guard let tableView, let scrollView else { return nil }
+            let visible = scrollView.contentView.documentVisibleRect
+            let range = tableView.rows(in: visible)
+            guard range.length > 0 else { return nil }
+            func place(_ row: Int) -> (seq: Int, delta: CGFloat)? {
+                guard entries.indices.contains(row), let seq = entries[row].id.seq else { return nil }
+                return (seq, CGFloat(TranscriptAnchor.delta(
+                    rowTop: tableView.rect(ofRow: row).minY, viewportTop: visible.minY
+                )))
+            }
+            for row in stride(from: range.location, through: 0, by: -1) {
+                if let found = place(row) { return found }
+            }
+            for row in stride(from: range.location + 1, to: entries.count, by: 1) {
+                if let found = place(row) { return found }
+            }
+            return nil
+        }
+
+        func isAboveViewport(_ entryID: TranscriptEntryID) -> Bool? {
+            guard let tableView, let scrollView, let row = index[entryID] else { return nil }
+            return tableView.rect(ofRow: row).maxY <= scrollView.contentView.bounds.minY
+        }
+
         // MARK: The end, and holding it
 
         func goToEnd() {
@@ -949,13 +1145,19 @@ struct TranscriptTable: NSViewRepresentable {
 
         func releaseEnd() {
             holdsEnd = false
+            isSettlingResizeAtEnd = false
             endWork?.cancel()
             endWork = nil
         }
 
-        func followerTookOver() {
+        func followerTookOver() -> Bool {
+            // Read before releasing the standing instruction. A response can add more than the
+            // near-end threshold in one pass, but a view the table was holding at the end still
+            // belongs to the follower rather than to a reader who moved away.
+            let ownedEnd = holdsEnd || isFollowingAlong
             isFollowerDriving = true
             releaseEnd()
+            return ownedEnd
         }
 
         func followerHandedBack() {
@@ -1017,6 +1219,31 @@ struct TranscriptTable: NSViewRepresentable {
             put(target(), in: scrollView)
         }
 
+        /// The same as above, aimed by a delta rather than by a `UnitPoint`, and it says itself
+        /// twice for the same reason.
+        func scroll(to entryID: TranscriptEntryID, delta: CGFloat) {
+            aimingElsewhere()
+            put(at: entryID, delta: delta)
+            reaimWork?.cancel()
+            reaimWork = Task { @MainActor [weak self] in
+                await Task.yield()
+                guard !Task.isCancelled, let self else { return }
+                reaimWork = nil
+                put(at: entryID, delta: delta)
+            }
+        }
+
+        private func put(at entryID: TranscriptEntryID, delta: CGFloat) {
+            guard let tableView, let scrollView, let row = index[entryID] else { return }
+            func target() -> CGFloat {
+                CGFloat(TranscriptAnchor.offset(
+                    rowTop: tableView.rect(ofRow: row).minY, delta: delta
+                ))
+            }
+            measureLanding(at: target())
+            put(target(), in: scrollView)
+        }
+
         func scroll(toY y: CGFloat) {
             aimingElsewhere()
             guard let scrollView else { return }
@@ -1056,24 +1283,36 @@ struct TranscriptTable: NSViewRepresentable {
         /// next `sample` can tell them apart**. An earlier profile put `apply` at 47.7 per cent of
         /// the main thread with `NSHostingView` under it and `measure` at half a per cent, which
         /// only means a reload rebuilding cells if the shape really was `.rebuilt`.
-        private func rowsArrived(head: Range<Int>, tail: Range<Int>, in tableView: NSTableView) {
+        private func rowsArrived(
+            head: Range<Int>, tail: Range<Int>, fading: Bool, in tableView: NSTableView
+        ) {
+            NSAnimationContext.beginGrouping()
+            NSAnimationContext.current.duration = fading ? Motion.hoverSeconds : 0
             tableView.beginUpdates()
             // The head first, so that the indices the tail is named by are the indices the table
             // has by the time it hears about them. Both are indices into the NEW list, which is
             // what `TranscriptEntryChange` promises and what its own test checks by rebuilding the
             // list from them.
-            if !head.isEmpty { tableView.insertRows(at: IndexSet(integersIn: head), withAnimation: []) }
-            if !tail.isEmpty { tableView.insertRows(at: IndexSet(integersIn: tail), withAnimation: []) }
+            let animation: NSTableView.AnimationOptions = fading ? .effectFade : []
+            if !head.isEmpty { tableView.insertRows(at: IndexSet(integersIn: head), withAnimation: animation) }
+            if !tail.isEmpty { tableView.insertRows(at: IndexSet(integersIn: tail), withAnimation: animation) }
             tableView.endUpdates()
+            NSAnimationContext.endGrouping()
         }
 
-        private func rowsLeft(head: Range<Int>, tail: Range<Int>, in tableView: NSTableView) {
+        private func rowsLeft(
+            head: Range<Int>, tail: Range<Int>, fading: Bool, in tableView: NSTableView
+        ) {
+            NSAnimationContext.beginGrouping()
+            NSAnimationContext.current.duration = fading ? Motion.hoverSeconds : 0
             tableView.beginUpdates()
             // And the tail first here, for the same reason turned around: both are indices into
             // the OLD list, so the later run has to go before the earlier one moves it.
-            if !tail.isEmpty { tableView.removeRows(at: IndexSet(integersIn: tail), withAnimation: []) }
-            if !head.isEmpty { tableView.removeRows(at: IndexSet(integersIn: head), withAnimation: []) }
+            let animation: NSTableView.AnimationOptions = fading ? .effectFade : []
+            if !tail.isEmpty { tableView.removeRows(at: IndexSet(integersIn: tail), withAnimation: animation) }
+            if !head.isEmpty { tableView.removeRows(at: IndexSet(integersIn: head), withAnimation: animation) }
             tableView.endUpdates()
+            NSAnimationContext.endGrouping()
         }
 
         /// Every cell thrown away and the visible ones built again. A session being replaced, and
@@ -1093,6 +1332,21 @@ struct TranscriptTable: NSViewRepresentable {
                 id,
                 CGFloat(TranscriptAnchor.delta(
                     rowTop: tableView.rect(ofRow: row).minY, viewportTop: visible.minY
+                ))
+            )
+        }
+
+        /// The clicked disclosure row at its current visual position. Unlike `anchorEntry()`,
+        /// this keeps the control itself under the pointer while rows open or close beneath it.
+        private func anchorEntry(
+            _ entryID: TranscriptEntryID
+        ) -> (id: TranscriptEntryID, delta: CGFloat)? {
+            guard let tableView, let scrollView, let row = index[entryID] else { return nil }
+            return (
+                entryID,
+                CGFloat(TranscriptAnchor.delta(
+                    rowTop: tableView.rect(ofRow: row).minY,
+                    viewportTop: scrollView.contentView.bounds.origin.y
                 ))
             )
         }
@@ -1118,7 +1372,13 @@ struct TranscriptTable: NSViewRepresentable {
             // must still be able to scroll up and stay there. So the position itself is the last
             // word: if the view is no longer at the end and this file did not put it there, then
             // nobody is holding it any more.
-            if holdsEnd, !isPutting, !currentGeometry.isAtEnd { releaseEnd() }
+            if holdsEnd, !isPutting, !isSettlingResizeAtEnd, !currentGeometry.isAtEnd {
+                releaseEnd()
+            }
+            // The reader is moving, so whatever was being prepared for them is now on their frame.
+            // Started again by the settle when they stop. See `warmAhead`.
+            warmWork?.cancel()
+            warmWork = nil
             reportGeometry()
             scheduleSettle()
         }
@@ -1136,14 +1396,54 @@ struct TranscriptTable: NSViewRepresentable {
         /// Belt to the braces above. AppKit posts this for every step of a user-initiated scroll,
         /// and a gesture that somehow began without a `willStartLiveScroll` still has to take the
         /// hold down on the frame it reaches here.
+        ///
+        /// **And a gesture that begins here can end without anything saying so, which used to
+        /// latch the hold on for good.** `isLiveScrolling` refuses `goToEnd` and pauses the
+        /// follower, so a step arriving after its own gesture's `didEndLiveScroll` turned both
+        /// mechanisms off and nothing turned them back on until the next cleanly completed
+        /// gesture. That is the "sometimes it just stops following" shape, and it survives a whole
+        /// session because nothing else clears the flag: the settle that would notice is itself
+        /// gated on it.
+        ///
+        /// So the belt watches for quiet, and only when it is the belt that started the gesture. A
+        /// step inside an ordinary one does no more than stamp the clock.
         @objc private func liveScrolled() {
+            lastLiveScroll = CACurrentMediaTime()
+            guard !isLiveScrolling else { return }
             liveScrollBegan()
+            watchForQuiet()
+        }
+
+        /// How long without a step of a gesture nothing announced counts as that gesture being
+        /// over. Comfortably longer than a frame at any rate this app runs at, and shorter than
+        /// the settle, so a hold that was never taken down is gone before the place is written.
+        private static let quietSeconds: Double = 0.2
+
+        private func watchForQuiet() {
+            quietWork?.cancel()
+            quietWork = Task { @MainActor [weak self] in
+                while true {
+                    try? await Task.sleep(for: .seconds(Self.quietSeconds))
+                    guard !Task.isCancelled, let self, isLiveScrolling else { return }
+                    guard CACurrentMediaTime() - lastLiveScroll >= Self.quietSeconds else { continue }
+                    // Cleared before the call rather than after, so the cancellation inside it is
+                    // not this task cancelling itself.
+                    quietWork = nil
+                    return liveScrollEnded()
+                }
+            }
         }
 
         @objc private func liveScrollEnded() {
+            quietWork?.cancel()
+            quietWork = nil
             guard isLiveScrolling else { return }
             isLiveScrolling = false
             onLiveScrollChange?(false)
+            // Rows first seen during the gesture have reported their exact heights, but applying
+            // those reports was held so the content could not be pushed against the reader's
+            // movement. Apply them now as one anchored correction.
+            drainOwedHeights()
             // Not the settle itself. Where the reader ends up is written down when the view has
             // stopped moving, and a flick that ends with momentum still running has not.
             scheduleSettle()
@@ -1161,9 +1461,105 @@ struct TranscriptTable: NSViewRepresentable {
                 try? await Task.sleep(for: .milliseconds(150))
                 guard !Task.isCancelled, let self, !isLiveScrolling else { return }
                 settleWork = nil
+                if isSettlingResizeAtEnd {
+                    putEnd()
+                    reportGeometry()
+                    isSettlingResizeAtEnd = false
+                }
                 censusOfTheScreen(settled: true)
                 onSettled?()
+                warmAhead()
             }
+        }
+
+        /// **Pays a row's first build before the reader arrives at it.**
+        ///
+        /// The one thing every build of a long night agreed on, and the reader found it himself of
+        /// four of them: "for the items that i've already scrolled over, it's butter smooth". A row
+        /// costs once. Nothing that made a row cheaper moved that, and nothing that changed the
+        /// window moved it either, because the cost is not in the window or in the row, it is in
+        /// the FIRST time a row is asked for. So it is asked for early, while the reader is still.
+        ///
+        /// Started on the settle, which is the only moment there is main thread time nobody is
+        /// waiting on. Cancelled by the first movement of the clip view, and given up between rows
+        /// rather than between passes, so a hand on the trackpad interrupts it within one row.
+        ///
+        /// **A pass that prepares anything schedules the next one, and that is deliberate.**
+        /// Telling the table about rows above the reader moves the document, which moves the clip
+        /// view, which settles again a moment later. So a reader who stops walks the preparation
+        /// further up the conversation, sixty rows at a time, until a band two screens tall is
+        /// entirely known. It stops there rather than running on: a pass that finds every row in
+        /// the band already measured tells the table nothing, and nothing settles again.
+        private func warmAhead() {
+            warmWork?.cancel()
+            warmWork = Task { @MainActor [weak self] in
+                await self?.warmTheRowsAbove()
+            }
+        }
+
+        /// Measures the rows just above the screen, one at a time, until the reader moves.
+        ///
+        /// **Measured rather than drawn, and that is the safety of it.** `measure` builds a
+        /// hosting view of its own, reads a height and throws it away; it does not go through
+        /// `viewFor`, so it cannot put a cell on the screen, cannot make a row draw before its
+        /// turn, and cannot leave anything behind that a later pass would treat as a drawn row.
+        /// What it buys is everything except the graph: the parse caches are filled, the height is
+        /// exact when the reader arrives, and the correction that would have moved the document
+        /// under them has already happened while nothing was moving.
+        private func warmTheRowsAbove() async {
+            guard let tableView, let scrollView, heights.isReady,
+                  let sizing = heights.measure else { return }
+            let visible = scrollView.contentView.documentVisibleRect
+            let reach = TranscriptWarming.reach(viewport: Double(visible.height))
+            let top = max(0, visible.minY - reach)
+            let band = CGRect(x: 0, y: top, width: 1, height: visible.minY - top)
+            guard band.height > 1 else { return }
+            let found = tableView.rows(in: band)
+            guard found.length > 0 else { return }
+            let rows = TranscriptWarming.worthWarming(
+                found.location..<(found.location + found.length)
+            )
+            var moved = IndexSet()
+            // Nearest first: a reader scrolling up meets the bottom of the band, so a pass that
+            // ran the other way would prepare the rows they reach last.
+            for row in rows.reversed() where entries.indices.contains(row) {
+                guard !Task.isCancelled, !isHeld, !isLiveScrolling else { break }
+                let entry = entries[row]
+                // **The streaming tail must never be measured here.** It draws nothing between
+                // turns, and a nought filed against it is the one number that would silence it:
+                // `viewFor` hands back no view for a row measured at nothing, and a running turn
+                // would have nowhere to appear. The other three that re-render themselves are
+                // excluded for the same reason. See `TranscriptEntryID.redrawsItself`.
+                guard !entry.id.redrawsItself else { continue }
+                let key = entry.contentKey
+                guard heights.height(for: key) == nil || heights.isStale(key) else { continue }
+                if heights.note(measure(entry, at: CGFloat(sizing.width)), for: key) {
+                    moved.insert(row)
+                }
+                // Between rows rather than after all of them, so the cost of being interrupted is
+                // one row rather than sixty.
+                await Task.yield()
+            }
+            guard !moved.isEmpty, !isHeld else { return }
+            // `willStartLiveScroll` can arrive after the final yielded measurement and before this
+            // point, while `clipMoved` has not yet had a chance to cancel the warming task. Keep
+            // every height already learned, but hand its table correction to the same queue drawn
+            // rows use so background preparation never moves the document under a hand.
+            if Task.isCancelled || isLiveScrolling {
+                for row in moved where entries.indices.contains(row) {
+                    owedHeights.insert(entries[row].id)
+                }
+                drainOwedHeights()
+                return
+            }
+            // The heights of rows ABOVE the reader, so telling the table moves everything below
+            // them, which is the whole document under the screen. Anchored, exactly as a
+            // correction landing during a scroll is, and cheaper here because nothing is moving.
+            let wasAtEnd = isFollowingAlong
+            let anchor = anchorEntry()
+            noteHeights(moved)
+            keepPlace(wasAtEnd: wasAtEnd, anchor: anchor)
+            reportGeometry()
         }
 
         /// A width change that was NOT held.
@@ -1209,6 +1605,9 @@ struct TranscriptTable: NSViewRepresentable {
             // Queued against the width being left behind, and picked up again by `rewidth`.
             resizeWork?.cancel()
             resizeWork = nil
+            // Measured against a width this pane is about to stop being.
+            warmWork?.cancel()
+            warmWork = nil
             // **Taken out of flight and KEPT, and throwing it away was a bug the reader could
             // see.** These are heights the cache has already taken from rows that were drawn: the
             // table is the only thing that has not been told. Dropping them left it believing a
@@ -1285,6 +1684,14 @@ struct TranscriptTable: NSViewRepresentable {
             holdView = view
             guard shownSession != session else { return }
             shownSession = session
+            // Nothing in the reuse pool belongs to this conversation, whatever key it says it
+            // holds. See `cellGeneration`.
+            cellGeneration += 1
+            // **And nothing the conversation being left measured says how tall this one's rows
+            // are.** The heights themselves stay, which is what makes coming back free; the mean
+            // taken from them does not. See `TranscriptRowHeights.showing`, which carries the
+            // eight screens of blank a prose conversation left behind it.
+            heights.showing(session)
             view.hold(.nothing)
         }
 
@@ -1331,7 +1738,11 @@ struct TranscriptTable: NSViewRepresentable {
             // height a turn or two later. Reported as "sometimes I get placed a little higher and
             // can't reach the bottom anymore". The instruction is self-releasing, so a reader who
             // scrolls away in the next moment is not pinned: see `clipMoved`.
-            if wasAtEnd, !isFollowerDriving, !isLiveScrolling { holdsEnd = true }
+            if wasAtEnd, !isFollowerDriving, !isLiveScrolling {
+                holdsEnd = true
+                isSettlingResizeAtEnd = true
+                scheduleSettle()
+            }
             keepPlace(wasAtEnd: wasAtEnd, anchor: anchor)
             reportGeometry()
             // And once more on the next turn, for the reason `goToEnd` says the end twice: a table
@@ -1351,16 +1762,24 @@ struct TranscriptTable: NSViewRepresentable {
 
         /// Measures these rows now, at the width the cache is for, and says which of them moved.
         ///
-        /// A row is measured here if nobody has measured it at all, or if what is held for it was
-        /// taken at another width. Everything else is already the answer.
+        /// A row is measured here if nobody has measured it at all, if what is held for it was
+        /// taken at another width, or if it is one of the entries whose key cannot say what it
+        /// draws. Everything else is already the answer, and the rule for which is which is
+        /// `TranscriptRowHeights.needsMeasuring`, which carries the blank this used to leave under
+        /// the newest row.
+        ///
+        /// Over any sequence of row indices rather than a range, because a pass with a handful of
+        /// changed keys has an `IndexSet` and its rows are not next to each other.
         @discardableResult
-        private func measureExactly(_ rows: Range<Int>) -> IndexSet {
+        private func measureExactly(_ rows: some Sequence<Int>) -> IndexSet {
             guard let sizing = heights.measure else { return IndexSet() }
             var moved = IndexSet()
             for row in rows where entries.indices.contains(row) {
-                let key = entries[row].contentKey
-                guard heights.height(for: key) == nil || heights.isStale(key) else { continue }
-                if heights.note(measure(entries[row], at: CGFloat(sizing.width)), for: key) {
+                let entry = entries[row]
+                guard heights.needsMeasuring(
+                    entry.contentKey, redrawsItself: entry.id.redrawsItself
+                ) else { continue }
+                if heights.note(measure(entry, at: CGFloat(sizing.width)), for: entry.contentKey) {
                     moved.insert(row)
                 }
             }
@@ -1449,7 +1868,11 @@ private struct HostedRow: View {
         // three or four of them between two one line Bash rows is the hundred points of blank this
         // was reported for. A stack is a container and lays out at nothing, which is a height.
         let measured = VStack(alignment: .leading, spacing: 0) { content }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // One centred reading column for every row kind. The content inside can still align
+            // leading or trailing, but it does so inside the same measure as the rest of the
+            // conversation. On a narrow pane this frame naturally shrinks to the available width.
+            .frame(maxWidth: TranscriptLayout.conversationMeasure, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
             .fixedSize(horizontal: false, vertical: true)
             .background(
                 GeometryReader { proxy in
@@ -1473,6 +1896,41 @@ private struct HostedRow: View {
     }
 }
 
+/// The one root type every cell's hosting view holds.
+///
+/// **`NSHostingView<AnyView>` was a different underlying type per row kind.** `entry.content()` is
+/// an `AnyView` over `TranscriptRowView`, `TurnFooterView`, `UserTurnRowView`,
+/// `PendingTurnRowView`, `WorkspaceEventsView`, `StreamingTailView` or `TranscriptFoldRowView`,
+/// and assigning a root view of a different underlying type is a different view arriving rather
+/// than the same view with new inputs, so a recycled cell tore its whole graph down and built
+/// another instead of updating the one it had. Timed on the census's own clock: 0.114ms a rebuild
+/// against 0.066ms with the outer type held still.
+///
+/// The `AnyView` INSIDE stays, and has to: no concrete type spans those seven, and the closure that
+/// builds one of them is what keeps a pass over four thousand entries to four thousand closures.
+/// What this fixes is the type SwiftUI reads to decide what kind of update it is making.
+///
+/// Every field is optional because a cell exists before it holds a row, and a cell holding no row
+/// draws nothing at all.
+private struct TranscriptCellRoot: View {
+    var content: AnyView?
+    var id: TranscriptEntryID?
+    var environment: TranscriptRowEnvironment?
+    var report: (@MainActor (CGFloat) -> Void)?
+
+    var body: some View {
+        if let content, let id, let environment {
+            HostedRow(content: content, report: { height in report?(height) })
+                // A recycled cell is handed an unrelated row, and without an identity SwiftUI
+                // treats that as the same view changing rather than a different view arriving,
+                // which is what gives it something to animate between. It is also what makes
+                // `onAppear` fire for the arrival settle. See `HostedRow`.
+                .id(id)
+                .transcriptRowEnvironment(environment)
+        }
+    }
+}
+
 /// One row of the table: an `NSHostingView` and the key of what is in it.
 ///
 /// The hosting view is exactly the row, so there is no second opinion about its height. What the
@@ -1490,15 +1948,35 @@ private struct HostedRow: View {
 /// risk rather than on evidence, and the evidence is a build with this line changed and nothing
 /// else. If that build overlaps too, the fault is older than the mask and this can come back.
 final class TranscriptTableCell: NSView {
-    private let host: NSHostingView<AnyView>
+    private let host: NSHostingView<TranscriptCellRoot>
     private var appliedKey: TranscriptContentKey?
+    /// Which generation of the table's cells this one is from. Nothing to start with, so a cell
+    /// built here is always behind and is always applied. See `Coordinator.cellGeneration`.
+    private var appliedGeneration: Int?
     private var unclip: Task<Void, Never>?
-    var onHeightChange: (@MainActor (TranscriptEntryID, CGFloat) -> Void)?
+    /// The content a height was measured for goes back with it, because an entry id alone does
+    /// not say which conversation it belongs to. See `Coordinator.noted`.
+    var onHeightChange: (@MainActor (TranscriptEntryID, TranscriptContentKey, CGFloat) -> Void)?
 
     init(identifier: NSUserInterfaceItemIdentifier) {
-        host = NSHostingView(rootView: AnyView(EmptyView()))
+        host = NSHostingView(rootView: TranscriptCellRoot())
         super.init(frame: .zero)
         self.identifier = identifier
+        // **The window's safe area is not a transcript row's.** A hosting view resolves the safe
+        // area from wherever it is, so a cell near the top of the pane could be laid out inside an
+        // inset the row it is drawing knows nothing about, while the copy that measured that row
+        // has no window and therefore no inset at all. Two answers for one row is the whole class
+        // of bug this file is about. `safeAreaRegions` is the supported way to say it, and it is
+        // what `_disableSafeArea` was reached for before there was one.
+        host.safeAreaRegions = []
+        // **Nothing here needs the hosting view's own size**, and each option it is asked for is a
+        // layout measurement it has to perform: its own documentation says so. The cell pins this
+        // view to its four edges below and the table decides the height, so an intrinsic content
+        // size, a minimum and a maximum are three answers nobody reads. The height a row reports
+        // does not come from here either: it comes from the geometry reader inside `HostedRow`,
+        // over the content at its own ideal size. `DetailSplitViewController` and `TitleBarStrip`
+        // make the same call for the same reason.
+        host.sizingOptions = []
         host.translatesAutoresizingMaskIntoConstraints = false
         addSubview(host)
         NSLayoutConstraint.activate([
@@ -1515,25 +1993,31 @@ final class TranscriptTableCell: NSView {
     /// Returns whether the root view had to be replaced, which is the expensive half and the only
     /// half worth timing. See `TranscriptHoldCensus.cellSeconds`.
     @discardableResult
-    func apply(entry: TranscriptTableEntry, environment: TranscriptRowEnvironment) -> Bool {
+    func apply(
+        entry: TranscriptTableEntry, environment: TranscriptRowEnvironment, generation: Int
+    ) -> Bool {
         // The recycling. A cell that already holds this content is left exactly as it is, which
         // is what a table buys over a stack that rebuilds every realised row on every pass. The
         // three entries that re-render themselves are NOT excepted, and used to be: handing the
         // streaming tail a new root view on every pass rebuilt it several times a second.
-        guard appliedKey != entry.contentKey else { return false }
+        //
+        // **The key alone was not enough, and both ways it was not enough were bugs the reader
+        // could see.** See `Coordinator.cellGeneration`: a cell from the conversation the pane has
+        // left can come back for the same singleton key, and a cell built in an environment that
+        // has since moved is what a reload was supposed to replace.
+        guard appliedKey != entry.contentKey || appliedGeneration != generation else { return false }
         appliedKey = entry.contentKey
+        appliedGeneration = generation
         let id = entry.id
-        host.rootView = AnyView(
-            HostedRow(
-                content: entry.content(),
-                report: { [weak self] height in self?.onHeightChange?(id, height) }
-            )
-            // A recycled cell is handed an unrelated row, and without an identity SwiftUI treats
-            // that as the same view changing rather than a different view arriving, which is what
-            // gives it something to animate between. It is also what makes `onAppear` fire for the
-            // arrival settle. See `HostedRow`.
-            .id(id)
-            .transcriptRowEnvironment(environment)
+        // Captured beside the id, so a height that arrives late says what it was measured for
+        // rather than only which row reported it. See `Coordinator.noted`.
+        let key = entry.contentKey
+        // One concrete root type, whatever the row is. See `TranscriptCellRoot`.
+        host.rootView = TranscriptCellRoot(
+            content: entry.content(),
+            id: id,
+            environment: environment,
+            report: { [weak self] height in self?.onHeightChange?(id, key, height) }
         )
         return true
     }

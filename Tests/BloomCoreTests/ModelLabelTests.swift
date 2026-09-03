@@ -17,6 +17,7 @@ struct ModelLabelTests {
     func singleVersionPart() {
         #expect(ModelLabel.readable("claude-opus-5") == "Opus 5")
         #expect(ModelLabel.readable("claude-fable-5") == "Fable 5")
+        #expect(ModelLabel.readable("claude-fable-5-1") == "Fable 5.1")
     }
 
     /// A context window is not a version part, and "5.1m" would read as a version this model does
@@ -51,7 +52,8 @@ struct ModelLabelTests {
 
     @Test("a part that does not start with a letter is not capitalised into nonsense")
     func nonLettersAreLeftAlone() {
-        #expect(ModelLabel.readable("gpt-5-codex") == "Gpt 5 Codex")
+        #expect(ModelLabel.readable("gpt-5-codex") == "GPT 5 Codex")
+        #expect(ModelLabel.readable("gpt-5-6-luna") == "GPT 5.6 Luna")
         #expect(ModelLabel.readable("o3-mini") == "O3 Mini")
     }
 }

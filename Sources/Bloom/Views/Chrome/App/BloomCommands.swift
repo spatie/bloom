@@ -27,10 +27,20 @@ struct BloomCommands: Commands {
 
     /// Landing the branch, published by the pull request band because that is where the
     /// confirmation lives. Nil whenever that band is not on screen, which greys the item.
-    @FocusedValue(\.mergeAction) private var mergeAction: MergeAction?
+    @FocusedValue(\.mergeAction) private var mergeAction
+    @FocusedValue(\.isTypingProse) private var isTypingProse: Bool?
+
+    /// Opens the project settings window, which is a scene rather than a sheet.
+    @Environment(\.openWindow) private var openWindow
 
     init(model: AppModel) {
         self.model = model
+    }
+
+    /// Which project the settings item opens: the selected workspace's, or the only sensible
+    /// fallback, which is the first one.
+    private var projectSettingsRepo: Repo? {
+        model.selectedWorkspace.flatMap(model.repo(for:)) ?? model.repos.first
     }
 
     var body: some Commands {
@@ -66,16 +76,16 @@ struct BloomCommands: Commands {
 
         CommandGroup(replacing: .newItem) {
             MenuCommand(.newWorkspace) {
-                // The sheet lives in RootView, and the sidebar and Home already open it this
-                // way. Setting a flag on the model instead would leave it stuck true with no
-                // sheet.
+                // `RootView` opens the window, and the sidebar and Home already ask for it this
+                // way. It is not `openWindow` from here because which project is meant depends on
+                // what the main window has selected. See `RootView.openCreateWindow`.
                 NotificationCenter.default.post(name: .bloomNewWorkspace, object: nil)
             }
             .disabled(model.repos.isEmpty)
 
             // Directly under New Workspace, because it starts one, and at the top level of File
             // rather than nowhere. Opening a workspace on somebody else's pull request was a whole
-            // feature that could only be found by opening the create sheet, opening its "Start
+            // feature that could only be found by opening the create window, opening its "Start
             // from" control and reading down past a list of branches: two levels in, behind a
             // control most people never press, which is the same as not shipping it.
             //
@@ -88,6 +98,19 @@ struct BloomCommands: Commands {
                 )
             }
             .disabled(model.repos.isEmpty)
+
+            // Third in File, which is where `MenuBarCatalogue` says it is. It used to be a
+            // `Button` with its own title and its own key in a `Commands` body of its own,
+            // contributed `after: .newItem`, which put it LAST in the menu: the table's stated
+            // ordering was false for exactly one row, and the row was the one the table could not
+            // see. In File rather than beside Settings in the app menu, for the reason that
+            // separate body already gave: an item added after `.appSettings` reads better and is
+            // also where a second Settings item invites the wrong click.
+            MenuCommand(.projectSettings) {
+                guard let repo = projectSettingsRepo else { return }
+                openWindow(id: RepoSettingsWindow.id, value: repo.id)
+            }
+            .disabled(projectSettingsRepo == nil)
 
             MenuCommand(.newSession) {
                 guard let workspace = model.selectedModel else { return }
@@ -177,13 +200,12 @@ struct BloomCommands: Commands {
 
             Divider()
 
-            // Two doors rather than one, and the words are the whole point of the pair: New
-            // makes a folder and a repository for somebody with an idea, Add takes a repository
-            // that already exists. See `NewProjectSheet`.
-            MenuCommand(.newProject) {
+            // One door. It was two, and both of them ended in a project in the sidebar, which is
+            // why the second one is gone rather than reworded: whether a folder is added, made or
+            // tracked is worked out from the folder. See `StartProjectView`.
+            MenuCommand(.startProject) {
                 NotificationCenter.default.post(name: .bloomNewProject, object: nil)
             }
-            MenuCommand(.addProjectFolder, perform: addProjectFolder)
         }
 
         // The item this file used to say did not exist. Two views bind Cmd+S (the project settings
@@ -350,10 +372,12 @@ struct BloomCommands: Commands {
             }
             .disabled(model.selection == .home)
 
-            // No key equivalent, deliberately. Every letter that would read as this one is taken
-            // by something in front of it, and a menu item is discoverable without one where a
-            // second binding on a key the composer already uses is not.
-            Button("Go to Ask Bloom") {
+            // The title and the key come from the table, like every other row in the bar. Written
+            // here as a `Button` with its own string, it was a title nothing could check and a
+            // keylessness nothing could compare against the rest of the bar, which is what
+            // `MenuCommand`'s header calls the whole point of it. The argument for no key is on
+            // the row itself now.
+            MenuCommand(.goToAsk) {
                 model.selection = .ask
             }
             .disabled(model.selection == .ask)
@@ -435,11 +459,17 @@ struct BloomCommands: Commands {
             }
             .disabled(mergeAction?.isEnabled != true)
 
+            // **Greyed while somebody is typing, and that is not tidiness.** Command-Backspace
+            // deletes to the start of the line in every text box on macOS, and AppKit checks a
+            // menu's key equivalents before the responder chain sees the key, so the text view
+            // never gets the chance to refuse it. A user reached for it mid-prompt and archived
+            // the workspace he was writing in. The item stands down instead; see
+            // `FocusedValues.isTypingProse`.
             MenuCommand(.archive) {
                 guard let workspace = workspace(for: .archive) else { return }
                 archive(workspace)
             }
-            .disabled(workspace(for: .archive) == nil)
+            .disabled(workspace(for: .archive) == nil || isTypingProse == true)
 
             // The way back, which the menu bar had no item for at all. Before this the only path
             // to `restoreArchived` in the whole app was the undo registered by the archive that
@@ -456,7 +486,7 @@ struct BloomCommands: Commands {
 
             MenuCommand(.openInEditor) {
                 guard let workspace = workspace(for: .openInEditor) else { return }
-                Reveal.inEditor(workspace.path)
+                Reveal.inEditor(workspace.path, repo: workspace.repoID)
             }
             .disabled(workspace(for: .openInEditor) == nil)
 
@@ -526,7 +556,7 @@ struct BloomCommands: Commands {
             // Option+Command+F rather than Command+F, which belongs to finding in the pane in
             // front. Feedback keeps this key: it is the one somebody already knows.
             // The sheets themselves are raised from `RootView`, through `FeedbackPresenter`, for
-            // the reason the create sheet is: a menu item cannot present anything, and the draft
+            // the reason the create window is: a menu item cannot present anything, and the draft
             // has to outlive the sheet it was typed into.
             MenuCommand(.sendFeedback) {
                 FeedbackPresenter.shared.open(.report)
@@ -898,13 +928,6 @@ struct BloomCommands: Commands {
             return
         }
         FindInPlace.perform(action)
-    }
-
-    private func addProjectFolder() {
-        Task {
-            guard let path = await ProjectFolderPicker.choose() else { return }
-            await model.addRepository(at: path)
-        }
     }
 
     // MARK: - What the Workspace menu is about

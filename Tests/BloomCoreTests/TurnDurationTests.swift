@@ -20,6 +20,19 @@ struct TurnDurationTests {
     }
 
     @Test(
+        "the footer form rounds to whole seconds",
+        arguments: [
+            (0, "0s"),
+            (600, "1s"),
+            (59_600, "1m 0s"),
+            (317_000, "5m 17s"),
+        ]
+    )
+    func wholeSeconds(milliseconds: Int, expected: String) {
+        #expect(TurnDuration.wholeSeconds(milliseconds) == expected)
+    }
+
+    @Test(
         "under a minute reads in tenths of a second",
         arguments: [
             (0, "0.0s"),

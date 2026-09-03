@@ -75,10 +75,10 @@ struct RetryRowView: View {
         .background {
             if isRaised {
                 RoundedRectangle(cornerRadius: Metrics.corner)
-                    .fill(Palette.warning.opacity(0.07))
+                    .fill(Palette.cautionWash)
                     .overlay {
                         RoundedRectangle(cornerRadius: Metrics.corner)
-                            .strokeBorder(Palette.warning.opacity(0.28), lineWidth: Metrics.hairline)
+                            .strokeBorder(Palette.cautionBorder, lineWidth: Metrics.outline)
                     }
             }
         }

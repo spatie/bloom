@@ -67,10 +67,11 @@ extension AppModel {
         }
         guard removed > 0 else { return .deleted(0) }
 
-        // Home, which is where every unresolvable selection in this app lands. It used to be the
-        // Archive screen, which was the list the delete was made from; the delete is made from
-        // Settings > Storage now, in another window, so the main window's selection has nowhere
-        // to go but back to the list of everything.
+        // Home, which is where every unresolvable selection in this app lands, and which is also
+        // the list the delete is now made from: its Archived chip. That is a round trip rather
+        // than a fall back, and it is the right one. A window sitting on the record that has just
+        // been destroyed has nowhere else to be, and the list it returns to is the one that no
+        // longer has the row in it.
         if let open = selection.archivedWorkspaceID, ids.contains(open) {
             selection = .home
         }

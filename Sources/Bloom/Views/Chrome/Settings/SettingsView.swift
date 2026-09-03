@@ -19,6 +19,8 @@ enum AppearancePreference {
 
 /// Collects global and repository preferences in one window so configuration stays discoverable.
 struct SettingsView: View {
+    @Environment(AppModel.self) private var app
+
     /// Enough for the widest form row without the window feeling like a second main window. Its
     /// own numbers, rather than the sidebar and inspector widths that happened to add up to
     /// something plausible.
@@ -31,6 +33,14 @@ struct SettingsView: View {
     private static let minSize = CGSize(width: 640, height: 420)
 
     @MainActor private static var minWidth: CGFloat { max(minSize.width, SettingsTabRow.width) }
+
+    /// Whether there is anything to revoke, which is whether the Approvals tab is drawn at all.
+    ///
+    /// Read once when the window opens rather than polled: a grant is made by pressing a button in
+    /// the main window, so the answer changes at moments this window is not even on screen, and
+    /// the tab appearing the next time Settings is opened is soon enough. See `ApprovalSettingsView`
+    /// for why the pane has to exist at all.
+    @State private var hasGrants = false
 
     /// Which tab is showing. An enum rather than an index, so the value says what it selects.
     ///
@@ -54,10 +64,13 @@ struct SettingsView: View {
                 NotificationSettingsView()
             }
 
-            Tab(SettingsTab.projects.title, systemImage: "folder", value: SettingsTab.projects) {
-                ProjectSettingsView()
-            }
-
+            // **No Projects tab.** It held two things and both live somewhere better. Adding and
+            // removing a project is the sidebar's job, where the list you are changing is the list
+            // you are looking at; a second copy in a window you had to open first was a list of
+            // paths with a minus button. And a project's effective settings already have a window
+            // of their own, off the gear on its row in that sidebar, which knows which project you
+            // meant because you pressed it on that project. What was here needed a selector before
+            // it could say anything, and the selector was the panel nobody needed.
             Tab(SettingsTab.models.title, systemImage: "sparkle", value: SettingsTab.models) {
                 ModelSettingsView()
             }
@@ -70,10 +83,18 @@ struct SettingsView: View {
                 PromptSettingsView()
             }
 
-            // Beside Tools rather than inside General: it holds state the user created, one row
-            // per decision, and it is the thing that makes granting a rule forever safe to offer.
-            Tab(SettingsTab.approvals.title, systemImage: "hand.raised", value: SettingsTab.approvals) {
-                ApprovalSettingsView()
+            // **Only once there is something to revoke.** It holds state the user created, one
+            // row per "always allow" they have ever pressed, and it is the thing that makes
+            // granting a rule forever safe to offer at all: a grant nobody can find is a grant
+            // nobody can take back. But until the first one exists it is a tab explaining a list
+            // that is empty, and this window has spent tonight losing exactly those.
+            //
+            // It appears the moment a grant does. `grantCount` is read once when the window opens
+            // and again whenever the store says the grants moved, rather than polled.
+            if hasGrants {
+                Tab(SettingsTab.approvals.title, systemImage: "hand.raised", value: SettingsTab.approvals) {
+                    ApprovalSettingsView()
+                }
             }
 
             // Grouped only to get under `TabView`'s builder limit, which is ten children and was
@@ -81,9 +102,10 @@ struct SettingsView: View {
             // so this changes the tab bar not at all, and it is where a new pane goes now that
             // the limit is spent.
             Group {
-                Tab(SettingsTab.tools.title, systemImage: "wrench.and.screwdriver", value: SettingsTab.tools) {
-                    ToolSettingsView()
-                }
+            // **No Tools tab.** It listed the absolute paths of git and gh, read-only, which
+            // answers "which git is Bloom using" and nothing else. That is a real question and a
+            // rare one, and a tool that is missing is already said where it matters rather than
+            // filed behind a tab beside Models and Prompts.
 
                 // After Tools rather than beside Agents: the Agents pane is about the CLIs Bloom
                 // launches, and this is the one arrangement where a CLI Bloom did not launch
@@ -92,21 +114,27 @@ struct SettingsView: View {
                     CommandLineSettingsView()
                 }
 
-                // Last of the panes that are about the machine rather than about the agents,
-                // which is where a Mac puts this one: System Settings > General > Storage sits
-                // at the foot of General, and Xcode's Components is the last of its tools. It is
-                // also the only pane in this window that can destroy something, so it is nowhere
-                // near the panes somebody opens to change a preference.
-                Tab(SettingsTab.storage.title, systemImage: "internaldrive", value: SettingsTab.storage) {
-                    StorageSettingsView()
-                }
+                // **There was a Storage pane here and it has gone into Home.** It listed every
+                // archived workspace with its project, its branch, its age and its size, which is
+                // the list Home's Archived chip was already drawing with everything but the size
+                // on it: the same objects on two screens with different columns. Home carries the
+                // size, the order and both totals now, and this window has no pane that can
+                // destroy anything.
             }
 
-            Tab(SettingsTab.about.title, systemImage: "info.circle", value: SettingsTab.about) {
-                AboutSettingsView()
-            }
+            // **No About tab.** `AboutWindow` is the About, it is what the Bloom menu opens, and
+            // `BloomCommands` goes to the trouble of `replacing: .appInfo` to make sure of it. A
+            // second one in Settings said the same four facts a scroll away from the first.
+            //
+            // One row here was not about the app: the GitHub account. It has moved to General,
+            // which is where a fact about the person using Bloom belongs rather than filed under
+            // the app's version and its maker.
         }
         .frame(minWidth: Self.minWidth, minHeight: Self.minSize.height)
+        .task {
+            guard let store = app.store else { return }
+            hasGrants = !((try? await store.permissionGrants()) ?? []).isEmpty
+        }
         // No tint. The selected tab is the last system-accent control in this window, and
         // `.tint(Palette.accent)` on this TabView was tried and measured: the label came out
         // `#397CE1` with it and `#397CE1` without it, identical pixels in the same capture. The
@@ -145,17 +173,35 @@ private struct GeneralSettingsView: View {
             InstallPingSettingsSection()
 
             SettingsRow("New workspaces") {
-                HStack(spacing: Metrics.gutter) {
-                    Text(WorkspaceManager.workspacesRoot.path)
-                        .font(Typo.codeSmall)
-                        .foregroundStyle(Palette.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                    HStack(spacing: Metrics.gutter) {
+                        Text(WorkspaceManager.workspacesRoot.path)
+                            .font(Typo.codeSmall)
+                            .foregroundStyle(Palette.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
 
-                    Button("Reveal in Finder") {
-                        Reveal.inFinder(WorkspaceManager.workspacesRoot.path)
+                        Button("Reveal in Finder") {
+                            Reveal.inFinder(WorkspaceManager.workspacesRoot.path)
+                        }
                     }
+
+                    // One sentence, and no notice anywhere else. An install that already has a
+                    // root gets none of the indexing benefit and can only find that out from the
+                    // row that names its folder; an install that has the new one is being told
+                    // why its path looks like that. Neither is worth a banner or a migration.
+                    Text(WorkspacesRoot.note(for: WorkspaceManager.workspacesRoot))
+                        .settingsFootnote()
                 }
+            }
+
+            // From the About pane, which has gone. It was the one row there that was not about
+            // the app: who Bloom is talking to GitHub as, which is a fact about the person using
+            // it rather than about the version or its maker.
+            SettingsRow("GitHub user") {
+                Text(GitHubIdentity.cachedUsername ?? "Not resolved")
+                    .font(Typo.codeSmall)
+                    .foregroundStyle(Palette.textSecondary)
             }
         }
         .settingsForm()
@@ -366,7 +412,10 @@ private struct EffectiveSettingsView: View {
         Group {
             SettingsRow("Configuration") {
                 Button("Open Project Settings") {
-                    Reveal.inEditor((repo.path as NSString).appendingPathComponent(".conductor/settings.toml"))
+                    Reveal.inEditor(
+                        (repo.path as NSString).appendingPathComponent(".conductor/settings.toml"),
+                        repo: repo.id
+                    )
                 }
             }
 
@@ -445,104 +494,6 @@ private struct ScriptValue: View {
         .multilineTextAlignment(.leading)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, Metrics.spacingSmall)
-    }
-}
-
-/// Surfaces missing command-line tools before an operation fails without a useful explanation.
-///
-/// The agent CLIs themselves moved to the Agents tab, which detects far more about them than a
-/// path. What is left is the plumbing Bloom shells out to on its own behalf.
-private struct ToolSettingsView: View {
-    /// Resolved once when the tab opens. `which` walks the PATH, and a walk per render is work
-    /// the answer does not change fast enough to deserve; the empty section until it lands is
-    /// one frame, where rows built from nil would flash the missing-tool warning first.
-    @State private var paths: [(name: String, path: String?)] = []
-
-    var body: some View {
-        Form {
-            Section("Command-line tools") {
-                ForEach(paths, id: \.name) { tool in
-                    ToolPathRow(name: tool.name, path: tool.path)
-                }
-            }
-        }
-        .settingsForm()
-        .task {
-            paths = [("git", Shell.which("git")), ("gh", Shell.which("gh"))]
-        }
-    }
-}
-
-/// Distinguishes a resolved executable from an actionable missing-tool warning.
-private struct ToolPathRow: View {
-    let name: String
-    let path: String?
-
-    var body: some View {
-        SettingsRow(name) {
-            if let path {
-                Text(path)
-                    .font(Typo.codeSmall)
-                    .foregroundStyle(Palette.textSecondary)
-                    .textSelection(.enabled)
-            } else {
-                Label("Not found on PATH", systemImage: "exclamationmark.triangle.fill")
-                    .font(Typo.label)
-                    .foregroundStyle(Palette.negative)
-            }
-        }
-    }
-}
-
-/// Gives the settings window a stable identity without hard-coding release metadata.
-private struct AboutSettingsView: View {
-    /// Two lines of the row's own type, which is where an icon beside a name belongs.
-    private static let iconSize: CGFloat = 32
-
-    /// The same line the About window prints, and for the same reason it is not the raw key: the
-    /// fallback below it used to read "Development", which never fired, because
-    /// `Resources/Info.plist` always carries a version. See `BuildIdentity`.
-    private var version: String {
-        BuildIdentity.read(from: .main).value
-    }
-
-    var body: some View {
-        Form {
-            Section {
-                SettingsRow("Application") {
-                    HStack(spacing: Metrics.spacing) {
-                        // The app's own icon, read out of the running bundle. It used to be an SF
-                        // Symbol of three connected dots, which was a stand-in from before Bloom
-                        // had a mark of its own and stopped being true the moment it did.
-                        Image(nsImage: NSApp.applicationIconImage)
-                            .resizable()
-                            .frame(width: Self.iconSize, height: Self.iconSize)
-                            .accessibilityHidden(true)
-                        Text(verbatim: "Bloom")
-                            .font(Typo.title)
-                            .foregroundStyle(Palette.textPrimary)
-                    }
-                }
-                SettingsRow("Version", value: version)
-                SettingsRow("Purpose", value: "Parallel coding agents in isolated git worktrees")
-                SettingsRow("Website") {
-                    Link("runbloom.app", destination: URL(string: "https://runbloom.app")!)
-                }
-            }
-
-            Section("Made by") {
-                SpatieCredit()
-            }
-
-            Section("Account") {
-                SettingsRow("GitHub user") {
-                    Text(GitHubIdentity.cachedUsername ?? "Not resolved")
-                        .font(Typo.codeSmall)
-                        .foregroundStyle(Palette.textSecondary)
-                }
-            }
-        }
-        .settingsForm()
     }
 }
 

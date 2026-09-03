@@ -46,10 +46,17 @@ public struct WorkspaceManager: Sendable {
     /// three and running `git worktree repair`, and getting any part of it wrong strands work
     /// that only exists in that checkout. So `~/baton/workspaces` keeps every worktree already in
     /// it, forever, and only new ones land here.
-    public static var workspacesRoot: URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return home.appendingPathComponent("bloom/workspaces", isDirectory: true)
-    }
+    ///
+    /// Which folder that is depends on what is already on disk, and `WorkspacesRoot` is the rule
+    /// and the argument for it: a new installation gets a name ending `.noindex`, which is the
+    /// only thing measured to keep Spotlight out of the `vendor` and `.build` folders inside
+    /// every worktree, and an installation that already has a root keeps it.
+    ///
+    /// Resolved once per launch rather than on every read. The two `stat` calls cost nothing; an
+    /// answer that could change while the app is running does, because a folder appearing at
+    /// midday would put the afternoon's worktrees somewhere the morning's are not, and the
+    /// Settings row would stop naming the directory the last workspace went into.
+    public static let workspacesRoot: URL = WorkspacesRoot.resolve()
 
     // MARK: - Repositories
 
@@ -89,7 +96,7 @@ public struct WorkspaceManager: Sendable {
     /// asking first, so there is one place that reads the row and one place that writes it.
     ///
     /// **The row is read again here rather than taken from the `Repo` the caller is holding.**
-    /// That value can be minutes old, because it came off the sidebar, out of a create sheet
+    /// That value can be minutes old, because it came off the sidebar, out of a create window
     /// somebody left open, or through the bridge from a `project_list` earlier in the same turn,
     /// and `project_hide` can have landed on the real row since. A stale copy would answer this
     /// question about a project as it used to be.
@@ -139,7 +146,7 @@ public struct WorkspaceManager: Sendable {
     /// the whole of that and is what a route calls.
     ///
     /// **Internal, and that is the point.** It was public, and every route that reached it grew
-    /// its own half of the orchestration around it: the create sheet had all of it, the `bloom://`
+    /// its own half of the orchestration around it: the create window had all of it, the `bloom://`
     /// link and the Services menu had none of it, and the Shortcuts intent could not reach it at
     /// all and polled the database instead. Internal means the app target cannot call this, so the
     /// compiler holds the line for every route outside the core, and `Tools/house-rules.sh` holds
@@ -263,7 +270,7 @@ public struct WorkspaceManager: Sendable {
         // detached worktree, ran `gh pr checkout`, and got back "fatal:
         // 'freekmurze/figma-mcp-check' is already used by worktree at
         // '/Users/freek/conductor/workspaces/there-there/adelaide'" with "failed to run git: exit
-        // status 128" on the end, which reached a dialogue as it stood. The create sheet asks the
+        // status 128" on the end, which reached a dialogue as it stood. The create window asks the
         // same question before Create is pressed, so this is the second of two agreeing
         // mechanisms rather than the only one: every other way in, the bridge and a `bloom://`
         // link included, arrives here without having asked anything.
@@ -328,7 +335,13 @@ public struct WorkspaceManager: Sendable {
             baseBranch: checkout.baseBranch(default: repo.defaultBranch),
             setupState: settings.setupScript == nil ? .skipped : .pending,
             sortOrder: try await store.nextWorkspaceSortOrder(repoID: repo.id),
-            origin: origin
+            origin: origin,
+            // Written now rather than waited for. A review workspace knows its pull request before
+            // anything has been checked out, and it is the workspace most likely to outlive its
+            // branch: merging one is what deletes the head. Left to a poll, the number would be
+            // recorded only if the app happened to look before the merge. See
+            // `Workspace.pullRequestNumber`.
+            pullRequestNumber: checkout.pullRequestNumber
         )
         return try await store.upsert(workspace)
     }

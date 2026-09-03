@@ -13,6 +13,8 @@ struct DetailColumn: View {
     var body: some View {
         if !app.isLoaded {
             LoadingView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Palette.windowBackground)
         } else {
             switch app.selection {
             case .home:
@@ -21,6 +23,8 @@ struct DetailColumn: View {
                 AskView()
             case .workspace(let id):
                 workspace(id)
+            case .crew(let workspaceID, let sessionID):
+                crew(sessionID, in: workspaceID)
             case .subagent(let workspaceID, let subagentID):
                 subagent(subagentID, in: workspaceID)
             case .archived(let id):
@@ -46,6 +50,30 @@ struct DetailColumn: View {
     private func subagent(_ id: SubagentID, in workspaceID: WorkspaceID) -> some View {
         if let model = app.existingModel(for: workspaceID) {
             SubagentOutputView(model: model, subagentID: id)
+        } else {
+            workspace(workspaceID)
+        }
+    }
+
+    /// A crew member gets the centre column and nothing else, which is the rule `.subagent` above
+    /// already keeps and for the same reason: `SidebarSelection.crew` answers `workspaceID` with
+    /// the parent, so the terminal is still the worktree's terminal, the diff is still the
+    /// worktree's diff and the inspector is still about the branch all of these agents are working
+    /// on. What changes is the one pane that was showing a conversation.
+    ///
+    /// **The tab strip is deliberately not drawn.** A crew member is not a tab of its workspace
+    /// (see `TabSet.tabbable`), so a strip here would either be the parent's strip, which selects
+    /// away from the row you just clicked, or a strip of one, which is a control that does
+    /// nothing. The sidebar row IS this conversation's tab.
+    ///
+    /// A member with no model or no transcript yet lands on the parent workspace, which is where
+    /// `.subagent` lands for the same reason: the workspace is still selected as far as every
+    /// other pane is concerned, so falling back to Home would take the window somewhere nobody
+    /// asked to go.
+    @ViewBuilder
+    private func crew(_ id: SessionID, in workspaceID: WorkspaceID) -> some View {
+        if let model = app.existingModel(for: workspaceID) {
+            CrewChatColumn(model: model, sessionID: id)
         } else {
             workspace(workspaceID)
         }
@@ -94,6 +122,50 @@ struct DetailColumn: View {
             CenterColumnView(model: model)
         } else {
             HomeView()
+        }
+    }
+}
+
+/// One crew member's conversation, filling the centre column.
+///
+/// Its own view rather than a `@ViewBuilder` on the column, because building a transcript is an
+/// observable write and a body may not make one: the `.task` below is where it happens, which is
+/// exactly what `CenterPaneView.prepare` does for a pane pointed at a chat. Everything under it is
+/// the ordinary `ChatPaneView`, so a crew member's transcript, composer, attachments and text size
+/// are the app's and not a second conversation view.
+private struct CrewChatColumn: View {
+    var model: WorkspaceModel
+    var sessionID: SessionID
+
+    var body: some View {
+        Group {
+            if let transcript = model.existingTranscript(for: sessionID) {
+                // The pane name is the session's own, and it is what remembers where the reader had
+                // got to in this conversation. It must not be one of the centre column's pane ids:
+                // those are places in a tab's split arrangement, and this chat is in none.
+                ChatPaneView(transcript: transcript, model: model, pane: "crew:" + sessionID.rawValue)
+            } else {
+                // The same surface a pane waiting for a transcript draws, and no sentence: this
+                // gap is one turn of the run loop on almost every selection, and words drawn for
+                // it flicker. See `CenterPaneView.waitingSurface`.
+                Palette.windowBackground
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task(id: sessionID) {
+            // The store has to have answered first, and on this path it very often has not. A
+            // crew member's row is drawn from `AppModel.crewRows`, which is read out of the
+            // database, so the pane shows one under a workspace this launch has never opened and
+            // clicking it is the first thing that happens to that workspace. `prepareTranscript`
+            // looks the session up in `WorkspaceModel.sessions`, which would still be empty, and
+            // the column would sit on its waiting surface for ever.
+            //
+            // `reloadSessions` and not `onAppear`: what this column needs is the session list.
+            // The rest of an arrival marks the parent workspace's turn read and goes to GitHub
+            // for its pull request, and reading what a crew member said is not reading the
+            // conversation that unread mark is about.
+            if !model.hasReadSessions { await model.reloadSessions() }
+            model.prepareTranscript(for: sessionID)
         }
     }
 }

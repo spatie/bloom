@@ -43,10 +43,16 @@ struct TodoListView: View {
         }
     }
 
+    /// The item being worked on is `running`, not the accent.
+    ///
+    /// Those two used to be one value, so a finished item and the one in hand were the same colour
+    /// in the same list and only the box's shape told them apart. That is the report `Palette.running`
+    /// carries, met here for the same reason it was met in the sidebar: this is a plan being worked
+    /// through, and which line is being worked on is the thing the list is read for.
     private static func tint(_ status: String) -> Color {
         switch status {
         case "completed": Palette.positive
-        case "in_progress": Palette.accent
+        case "in_progress": Palette.running
         default: Palette.textTertiary
         }
     }

@@ -50,7 +50,7 @@ struct SlashCommandCard: View {
     /// out of the conversation the reader is answering: at the file preview's twenty four the name
     /// and the description went off the top of the sheet and the card was all prose and no
     /// heading. Sixteen leaves the whole thing on screen with the path still under it.
-    private static let lines = SourceHead.lines
+    private static let lines = TextHead.lines
     /// What the name, the description, the rules and the path under them come to, near enough.
     /// Deliberately generous: it is better to show a line fewer than to lose the heading.
     private static let chrome: CGFloat = 150
@@ -162,7 +162,7 @@ struct SlashCommandCard: View {
         // Read off the main actor, so the limits have to be captured here: a `View` is main actor
         // isolated and so are its own statics.
         let limit = Self.lines
-        let columns = SourceHead.columns
+        let columns = TextHead.columns
         let found = await Task.detached(priority: .userInitiated) {
             SlashCommandIndex.documentation(of: path, lines: limit, columns: columns)
         }.value

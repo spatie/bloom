@@ -62,39 +62,39 @@ struct FixConflictsPromptTests {
         #expect(render.text.contains("feature/glyphs"))
     }
 
-    /// What this turn may and may not do, asserted rather than trusted.
+    /// What this turn may and may not do, asserted rather than trusted, and asserted in the half
+    /// that carries it now.
     ///
     /// The push is the point: a conflict resolved in a worktree nobody has pushed is still a
     /// conflict to GitHub, and the button is called Fix merge conflicts. The merge is still the
-    /// reader's, and a rewritten history needs the lease, or a push lands on top of somebody.
-    @Test("the default prompt pushes the resolution and merges nothing")
+    /// reader's, and that limit stays in the message rather than only in the file, because a
+    /// transcript read months later has to be able to say what the turn was not allowed to do
+    /// without opening a file the worktree may have taken with it.
+    @Test("the message pushes the resolution and merges nothing")
     func pushesButDoesNotMerge() {
         let text = PromptRegistry.definition(for: .fixConflicts).defaultTemplate
 
-        #expect(text.contains("Then push it."))
-        #expect(text.contains("--force-with-lease"))
+        #expect(text.contains("push {{branch}}"))
         #expect(text.contains("Do not merge the pull request"))
         #expect(!text.contains("gh pr merge"))
     }
 
-    /// The half of the instruction that keeps a bad resolution off the server. An agent that is
-    /// guessing has to stop, and the sentence that tells it so has to survive an edit of the rest.
-    @Test("the default prompt tells an agent that is unsure not to push")
-    func uncertaintyStops() {
-        let text = PromptRegistry.definition(for: .fixConflicts).defaultTemplate
-
-        #expect(text.contains("Do not push if you are not sure."))
-    }
-
-    /// The direction of the merge is the one thing in this prompt that must not be guessed, so
-    /// both branches are named and the sentence says which way round they go.
-    @Test("the default prompt brings the base in rather than the other way round")
-    func namesTheDirection() {
+    /// The message is the record of what was asked, so it has to be readable on its own: which
+    /// pull request, which two branches, and what happens to them. Everything past that is the
+    /// file's, and the wall of text this replaced is what happens when it is not.
+    @Test("the message says what was asked without the steps that say how")
+    func messageIsTheRecordAndNotTheProcedure() {
         let render = context().render(
             template: PromptRegistry.definition(for: .fixConflicts).defaultTemplate
         )
 
-        #expect(render.text.contains("It goes into this branch and never the other way round."))
+        #expect(render.text.contains("#42"))
+        #expect(render.text.contains("feature/glyphs"))
+        #expect(render.text.contains("main"))
+        // The mechanics moved out, and this is what says they did rather than were dropped.
+        #expect(!render.text.contains("--force-with-lease"))
+        #expect(ConflictInstructions.defaultMarkdown.contains("--force-with-lease"))
+        #expect(render.text.count < 500)
     }
 
     /// A workspace whose branch was never recorded still has a button to press, and a sentence
@@ -124,6 +124,154 @@ struct FixConflictsPromptTests {
             number: 42,
             branch: "feature/glyphs",
             baseBranch: "main"
+        )
+    }
+}
+
+/// Bloom's own steps for resolving a conflict, and the file they go in.
+///
+/// The turn changed shape rather than wording: what used to be eight paragraphs in the chat is two
+/// sentences and a path now, so everything that can go wrong with it is about the file. It has to
+/// be there when the sentence names it, git has to stay blind to it, it must not land on the path
+/// the project's own spilled settings already use, and a worktree that cannot be written to still
+/// has to get the steps.
+@Suite("Conflict instructions", .tags(.git), .scratchDirectory)
+struct ConflictInstructionsTests {
+    @Test("the steps go into the shielded scratch folder and the sentence names them")
+    func writesIntoTheScratchFolder() throws {
+        let worktree = try emptyWorktree()
+
+        let turn = ConflictInstructions.asking("Resolve #42.", in: worktree)
+
+        #expect(WorktreeScratch.isShielded(ConflictInstructions.scratchPath))
+        #expect(read(ConflictInstructions.scratchPath, in: worktree)
+            == ConflictInstructions.defaultMarkdown)
+        #expect(turn == """
+        Resolve #42.
+
+        Follow the instructions in `\(ConflictInstructions.scratchPath)`.
+        """)
+        // And it reads back as one attachment, in the same form as a file somebody dropped into
+        // the composer, so the transcript draws a chip for it without being told anything.
+        #expect(AttachmentDraft.parse(turn).paths == [ConflictInstructions.scratchPath])
+    }
+
+    /// The path this file must not have, asserted because the collision would be silent.
+    /// `ProjectInstructions` already writes `.bloom/scratch/conflict-instructions.md` for the
+    /// project's settings field spilled out as a file, and one press composes both: two writers on
+    /// one path would have each overwrite the other and point both sentences at whichever won.
+    @Test("Bloom's file and the project's spilled settings are two different files")
+    func doesNotCollideWithTheSpilledSettings() throws {
+        let worktree = try emptyWorktree()
+
+        let turn = ProjectInstructions.turn(
+            ConflictInstructions.asking("Resolve #42.", in: worktree),
+            for: .fixConflicts,
+            adding: ProjectInstructions.resolve(
+                .fixConflicts, in: worktree, stated: "Regenerate the lock file."
+            )
+        )
+
+        let spilled = ProjectInstructions.scratchPath(for: .fixConflicts)
+        #expect(ConflictInstructions.scratchPath != spilled)
+        #expect(read(ConflictInstructions.scratchPath, in: worktree)
+            == ConflictInstructions.defaultMarkdown)
+        #expect(read(spilled, in: worktree) == "Regenerate the lock file.\n")
+        // Both are named, in the order the agent reads them, and the project's is the one that
+        // wins where the two disagree.
+        #expect(AttachmentDraft.parse(turn).paths == [ConflictInstructions.scratchPath, spilled])
+        #expect(turn.contains("where they disagree with anything above, they win"))
+    }
+
+    /// The bug the shield exists for, asserted against the real git binary, because the turn that
+    /// carries this file is the one that tells the agent to commit the resolution, and an agent
+    /// doing that reaches for `git add -A`.
+    @Test("an agent told to commit the resolution cannot commit Bloom's file")
+    func surviveAddEverything() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+
+        _ = ConflictInstructions.asking("Resolve #42.", in: repo.path)
+
+        try await Shell.check("git", ["add", "-A"], cwd: repo.path)
+        let staged = try await Shell.check(
+            "git", ["diff", "--cached", "--name-only"], cwd: repo.path
+        )
+        #expect(staged.trimmed.isEmpty, "git staged \(staged.trimmed)")
+
+        let status = try await Shell.check("git", ["status", "--porcelain"], cwd: repo.path)
+        #expect(status.trimmed.isEmpty, "git reported \(status.trimmed)")
+    }
+
+    /// Rewritten rather than kept, which is the rule `ProjectInstructions.spill` follows and the
+    /// opposite of the one `PullRequestInstructions` follows. That one may keep its copy because
+    /// its copy is a constant; this one is written from whatever the caller handed in, and a kept
+    /// copy would be an agent following a wording that had already changed.
+    @Test("a second press replaces the copy the first one left")
+    func isNeverStale() throws {
+        let worktree = try emptyWorktree()
+
+        _ = ConflictInstructions.asking("Resolve #42.", in: worktree, contents: "First.")
+        _ = ConflictInstructions.asking("Resolve #42.", in: worktree, contents: "Second.")
+
+        #expect(read(ConflictInstructions.scratchPath, in: worktree) == "Second.")
+    }
+
+    /// A read-only checkout is a reason to say it differently, not a reason for the button to stop
+    /// working. The message is a wall of text again in that case, which is the right trade: the
+    /// steps reaching the agent matters more than the bubble being short.
+    @Test("a worktree that cannot be written to still carries the steps")
+    func fallsBackToTheMessage() {
+        let turn = ConflictInstructions.asking("Resolve #42.", in: "/dev/null/nowhere")
+
+        #expect(turn.hasPrefix("Resolve #42.\n\n"))
+        #expect(turn.contains(ConflictInstructions.defaultMarkdown))
+        #expect(!turn.contains(ConflictInstructions.scratchPath))
+        #expect(ConflictInstructions.ensure(in: "/dev/null/nowhere") == nil)
+    }
+
+    /// The steps are the same in every workspace, so a branch name in them would be wrong for all
+    /// but one, and a `{{token}}` left in them would reach the agent unrendered.
+    @Test("the steps name no branch and no pull request")
+    func nameNoFacts() {
+        let text = ConflictInstructions.defaultMarkdown
+
+        #expect(!text.contains(PromptTemplate.open))
+        #expect(!text.contains("#42"))
+        #expect(text.contains("the base branch"))
+    }
+
+    /// The three lines no shorter version of this file may lose, because each of them is a way
+    /// this turn can make somebody's day worse.
+    @Test("the steps keep the direction, the lease and the stop")
+    func keepsWhatMatters() {
+        let text = ConflictInstructions.defaultMarkdown
+
+        #expect(text.contains("It goes into this branch and never the other way round."))
+        #expect(text.contains("--force-with-lease"))
+        #expect(text.contains("Do not push if you are not sure."))
+        #expect(text.contains("Do not merge the pull request"))
+    }
+
+    /// A file git will not report is a file nobody finds by accident, and this one is overwritten
+    /// on every press, so it has to say where an edit that lasts goes instead.
+    @Test("the steps say which file a project writes instead of editing this one")
+    func pointsAtTheProjectsOwnFile() {
+        #expect(ConflictInstructions.defaultMarkdown
+            .contains(ProjectInstructions.projectPath(for: .fixConflicts)))
+    }
+
+    // MARK: - Support
+
+    private func emptyWorktree() throws -> String {
+        let path = TestScratch.unique("worktree")
+        try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        return path
+    }
+
+    private func read(_ relative: String, in worktree: String) -> String? {
+        try? String(
+            contentsOfFile: (worktree as NSString).appendingPathComponent(relative), encoding: .utf8
         )
     }
 }

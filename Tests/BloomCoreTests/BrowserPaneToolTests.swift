@@ -8,7 +8,7 @@ import Testing
 /// decides anything is a pure function or a value, and the closure the tools are built with stands
 /// in for the app. So every refusal a model can be handed is asserted on, and so is the shape of
 /// each answer, without a `WKWebView` existing.
-@Suite("Seeing a browser pane")
+@Suite("Seeing a browser pane", .scratchDirectory)
 struct BrowserPaneToolTests {
     private func report(
         _ number: Int, address: String = "http://localhost:3000", name: String = "Bloom"

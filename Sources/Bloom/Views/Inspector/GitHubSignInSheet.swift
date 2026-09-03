@@ -114,7 +114,8 @@ struct GitHubSignInSheet: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
         .overlay(
-            RoundedRectangle(cornerRadius: Metrics.corner).strokeBorder(Palette.border)
+            RoundedRectangle(cornerRadius: Metrics.corner)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         )
     }
 
@@ -190,8 +191,7 @@ struct GitHubSignInSheet: View {
         .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
     }
 
-    /// Tinted explicitly, like every other prominent button in the app: untinted it follows the
-    /// system accent and renders as grey glass on macOS 26.
+    /// Explicit so every primary action reads from the shared semantic token.
     @ViewBuilder
     private var primaryButton: some View {
         switch phase {
@@ -199,28 +199,28 @@ struct GitHubSignInSheet: View {
             if access == .notInstalled, !canBrew {
                 Button("Open cli.github.com") { GitHubBridge.open(Self.downloadURL) }
                     .buttonStyle(.borderedProminent)
-                    .tint(Palette.accentFill)
+                    .tint(Palette.controlAccent)
                     .keyboardShortcut(.defaultAction)
             } else {
                 Button(primaryTitle, systemImage: "play.fill") { start() }
                     .buttonStyle(.borderedProminent)
-                    .tint(Palette.accentFill)
+                    .tint(Palette.controlAccent)
                     .keyboardShortcut(.defaultAction)
             }
         case .running, .checking:
             Button(primaryTitle, systemImage: "play.fill") {}
                 .buttonStyle(.borderedProminent)
-                .tint(Palette.accentFill)
+                .tint(Palette.controlAccent)
                 .disabled(true)
         case .connected:
             Button("Continue") { onFinish(true) }
                 .buttonStyle(.borderedProminent)
-                .tint(Palette.accentFill)
+                .tint(Palette.controlAccent)
                 .keyboardShortcut(.defaultAction)
         case .failed:
             Button("Try again", systemImage: "arrow.clockwise") { start() }
                 .buttonStyle(.borderedProminent)
-                .tint(Palette.accentFill)
+                .tint(Palette.controlAccent)
                 .keyboardShortcut(.defaultAction)
         }
     }

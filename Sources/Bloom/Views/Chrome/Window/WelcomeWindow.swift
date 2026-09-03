@@ -24,6 +24,20 @@ import BloomCore
 enum WelcomeWindow {
     private static var window: NSWindow?
     private static var inspection: SetupInspection?
+    private static var registration: CommandLineRegistration?
+
+    /// The running state, handed over by `BloomAppDelegate` once the scene exists, and used for
+    /// exactly one thing: the bridge the command line step offers to point a terminal at.
+    ///
+    /// Weak and explicit, the same bargain `RunningApp` and `BloomServicesProvider` make. This
+    /// window is not in the app's environment, because it is an `NSWindow` of its own opened from
+    /// a menu item and from the app delegate, and reaching the model any other way would be a
+    /// second owner of the state rather than a borrower of it.
+    private static weak var app: AppModel?
+
+    static func attach(_ model: AppModel) {
+        app = model
+    }
 
     /// Opens it, or brings the one already open forward and looks again.
     ///
@@ -43,6 +57,9 @@ enum WelcomeWindow {
         // is still ordered in, so it is there when they come back.
         if mayActivate || NSApp.isActive { NSApp.activate() }
         inspection?.start()
+        // Asked again for the same reason the probes are: somebody who came back may have run the
+        // command in between, and a window that kept offering it would not have noticed.
+        registration?.resolve()
     }
 
     static func close() {
@@ -52,6 +69,13 @@ enum WelcomeWindow {
     private static func make(trigger: OnboardingTrigger) -> NSWindow {
         let model = SetupInspection(rehearsal: SetupRehearsal.report)
         inspection = model
+
+        // Read through a closure rather than captured, because the socket is bound in
+        // `AppModel.bootstrap` and a first run opens this window before that has finished. See
+        // `CommandLineRegistration.wait`. Nothing asks it here: `show` is the only caller and it
+        // asks a line later, on this open and on every later one.
+        let offer = CommandLineRegistration(source: { app?.bridge?.ownerAttachment() })
+        registration = offer
 
         // Where the sequence opens is `OnboardingFlow.firstStep`, in the core with its tests: a
         // first run is greeted, and the Help menu and a later broken launch open straight onto the
@@ -75,6 +99,7 @@ enum WelcomeWindow {
         // the content on every frame now, rather than of the two moments somebody measured it.
         let host = NSHostingController(rootView: WelcomeView(
             inspection: model,
+            registration: offer,
             start: OnboardingFlow.firstStep(trigger: trigger),
             onFinish: { close() }
         ))

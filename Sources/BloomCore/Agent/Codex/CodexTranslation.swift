@@ -429,6 +429,7 @@ public struct CodexTranslation: Sendable {
                 cwd: context.cwd,
                 model: context.model,
                 permissionMode: context.permissionMode,
+                agentKind: .codex,
                 version: context.version,
                 raw: Self.initLine(sessionID: threadID, context: context)
             ))]

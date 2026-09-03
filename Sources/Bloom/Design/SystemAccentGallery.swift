@@ -6,17 +6,10 @@ import BloomCore
 ///     Bloom --snapshot-gallery <dir> --gallery system-accent
 ///
 /// Every other page in this folder photographs something in `Sources/Bloom`. This one photographs
-/// AppKit, on purpose, because the thing under review is a colour the app hands over and never
-/// touches again. `Palette.accent` overrode `controlAccentColor` for everything Bloom drew itself,
-/// and a `.tint` reaches none of these: a switch, a tick box, a radio dot, a slider's track, a
-/// stepper, a focus ring and the ground under selected text are all drawn by the system off the
-/// accent it resolves for the process. So the window held Bloom's blue and the user's at once, and
-/// no test in this repository could see it, because the pixels are AppKit's.
-///
-/// `NSAccentColorName` in `Resources/Info.plist` is what changed that, and the only honest way to
-/// review it is a picture: the ratio tests can hold a floor over the two colours AppKit DERIVES
-/// (see `PaletteInk.accentTextSelection`) and can say nothing at all about whether a switch came
-/// out teal.
+/// AppKit beside Bloom's custom interactive surfaces. Both now resolve through
+/// `controlAccentColor`: the bundle accent supplies Bloom's default under Multicolour, and an
+/// explicit accent in System Settings wins everywhere. A picture is the only honest check that
+/// native controls and custom selections still agree.
 ///
 /// **What this page cannot show, said here rather than left to be wondered about.** All three
 /// have the same cause: an accented control, a focus ring and a text selection are all drawn in a
@@ -31,8 +24,8 @@ import BloomCore
 /// The last row is the segmented control, and it is the one thing on this page that this page
 /// cannot answer. It is drawn without the `controlActiveState` override the column beside it gets,
 /// so it is photographed in the inactive grey every accented control drops to, exactly as the
-/// switch above it is. In a key window it carries `controlAccentColor`, which this process resolves
-/// to Bloom's own `accentFill`. See `InspectorToolbar`, where the same correction is written down.
+/// switch above it is. In a key window it carries `controlAccentColor`. See `InspectorToolbar`,
+/// where the same inactive-window behaviour is written down.
 struct SystemAccentGallery: View {
     var app: AppModel
 
@@ -67,7 +60,11 @@ struct SystemAccentGallery: View {
             VStack(alignment: .leading, spacing: Metrics.pane) {
                 captioned("What AppKit derives from it") {
                     VStack(alignment: .leading, spacing: Metrics.spacingWide) {
-                        swatch("controlAccentColor", Color(nsColor: .controlAccentColor), ink: .white)
+                        swatch(
+                            "controlAccentColor",
+                            Palette.controlAccent,
+                            ink: Palette.selectedEmphasizedText
+                        )
                         swatch(
                             "keyboardFocusIndicatorColor",
                             Palette.focusRing,
@@ -86,8 +83,13 @@ struct SystemAccentGallery: View {
                     }
                 }
 
-                captioned("What Bloom draws itself, for comparison") {
+                captioned("What Bloom draws itself") {
                     VStack(alignment: .leading, spacing: Metrics.spacingWide) {
+                        swatch(
+                            "Palette.selectedEmphasized",
+                            Palette.selectedEmphasized,
+                            ink: Palette.selectedEmphasizedText
+                        )
                         swatch("Palette.accentFill", Palette.accentFill, ink: Palette.textInverted)
                         swatch("Palette.selected", Palette.selected, ink: Palette.textPrimary)
                         HStack(spacing: Metrics.spacingWide) {

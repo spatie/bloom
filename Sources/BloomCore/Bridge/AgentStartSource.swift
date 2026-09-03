@@ -1,10 +1,10 @@
 import Foundation
 
-/// Where a workspace an agent asked for starts: a fresh branch cut from one, or a branch that
-/// already exists carried on.
+/// Where a workspace an agent asked for starts: a fresh branch cut from one, or existing work
+/// carried on as a branch or pull request.
 ///
-/// **The choice is the create sheet's, and it is reused rather than restated.** The sheet puts it
-/// in a tab strip, `WorkspaceSourceTab`: "Create new branch", where commits land on a new branch
+/// **The choice is the create window's, and it is reused rather than restated.** That window puts
+/// it in a tab strip, `WorkspaceSourceTab`: "Create new branch", where commits land on a new branch
 /// and merge into the branch you picked, and "Continue on existing branch", where they land on the
 /// branch you picked and merge when it does. Over the bridge the same choice is two arguments, and
 /// everything below is the translation between them. The verbs, the sentence each one carries, the
@@ -18,25 +18,21 @@ import Foundation
 /// diff and useless for the job. That is the bug `docs/start-from.html` was written about, arriving
 /// a second time through the other door.
 ///
-/// **A pull request is not offered here, and that is a decision.** The sheet's second tab lists
-/// them beside the branches, but resolving one costs a `gh` call and a network round trip on a
-/// path that so far spends only local git, and an agent that wants a pull request's code can name
-/// its head branch, which is what the picker draws a listed pull request by anyway. The case is
-/// already carried by `WorkspaceCheckout`, so the day it is wanted it is an argument rather than a
-/// mechanism.
 public enum AgentStartSource: Sendable, Hashable {
     /// Cut a fresh branch off a named ref. Nil is the project's default branch, which is what a
     /// call that says nothing gets and what this tool did before there was a choice at all.
     case newBranch(from: String?)
     /// Carry on a branch somebody has already written on.
     case existingBranch(ExistingBranch)
+    /// Open a pull request through the same checkout path as the create window.
+    case pullRequest(PullRequestListing)
 
     /// Which of the sheet's two tabs this is. The tool's description is written out of these, so
     /// an agent reading the tool list and a person reading the tab strip are told the same thing.
     public var tab: WorkspaceSourceTab {
         switch self {
         case .newBranch: .newBranch
-        case .existingBranch: .existingBranch
+        case .existingBranch, .pullRequest: .existingBranch
         }
     }
 
@@ -45,7 +41,7 @@ public enum AgentStartSource: Sendable, Hashable {
     public var baseBranch: String? {
         switch self {
         case .newBranch(let ref): ref
-        case .existingBranch: nil
+        case .existingBranch, .pullRequest: nil
         }
     }
 
@@ -55,6 +51,7 @@ public enum AgentStartSource: Sendable, Hashable {
         switch self {
         case .newBranch: nil
         case .existingBranch(let branch): .branch(branch)
+        case .pullRequest(let request): .pullRequest(request)
         }
     }
 
@@ -67,6 +64,7 @@ public enum AgentStartSource: Sendable, Hashable {
         switch self {
         case .newBranch(let ref): ref
         case .existingBranch(let branch): branch.name
+        case .pullRequest(let request): request.headRefName
         }
     }
 
@@ -82,6 +80,7 @@ public enum AgentStartSource: Sendable, Hashable {
         switch self {
         case .newBranch(let ref): [ref ?? ""]
         case .existingBranch(let branch): ["", "on\u{0}" + branch.name]
+        case .pullRequest(let request): ["", "pr\u{0}" + String(request.number)]
         }
     }
 }
@@ -94,6 +93,8 @@ public enum AgentStartRequest: Sendable, Equatable {
     case newBranch(from: String?)
     /// The name as the caller wrote it. Nothing has been looked up yet.
     case existingBranch(String)
+    /// A number or GitHub URL as the caller wrote it. Resolution happens after the project is known.
+    case pullRequest(String)
     case refused(String)
 
     /// Which verb `base_branch` and `existing_branch` name between them.
@@ -101,19 +102,28 @@ public enum AgentStartRequest: Sendable, Equatable {
     /// Naming both is refused rather than resolved to whichever was read first. They are one
     /// keystroke apart in intent and opposite in effect, which is the whole reason the sheet draws
     /// them as two tabs, and a call that asked for both has not decided which it wants.
-    public static func read(baseBranch: String?, existingBranch: String?) -> AgentStartRequest {
-        switch (baseBranch, existingBranch) {
-        case let (base?, existing?):
+    public static func read(
+        baseBranch: String?, existingBranch: String?, pullRequest: String? = nil
+    ) -> AgentStartRequest {
+        let named = [baseBranch, existingBranch, pullRequest].compactMap { $0 }
+        guard named.count <= 1 else {
+            let arguments = [
+                baseBranch.map { "base_branch '\($0)'" },
+                existingBranch.map { "existing_branch '\($0)'" },
+                pullRequest.map { "pull_request '\($0)'" },
+            ].compactMap { $0 }.joined(separator: ", ")
             return .refused(
-                "workspace_start takes base_branch or existing_branch, and this call named both: "
-                    + "'\(base)' and '\(existing)'. base_branch cuts a new branch from the branch "
-                    + "you name, and your commits merge back into it. existing_branch puts the "
-                    + "workspace on the branch you name, and your commits land on that branch "
-                    + "itself. Ask again with the one you meant."
+                "workspace_start takes only one source, and this call named \(arguments). Ask "
+                    + "again with only base_branch, existing_branch or pull_request."
             )
-        case let (_, existing?):
+        }
+
+        switch (baseBranch, existingBranch, pullRequest) {
+        case let (_, _, request?):
+            return .pullRequest(request)
+        case let (_, existing?, _):
             return .existingBranch(existing)
-        case let (base, nil):
+        case let (base, nil, nil):
             return .newBranch(from: base)
         }
     }

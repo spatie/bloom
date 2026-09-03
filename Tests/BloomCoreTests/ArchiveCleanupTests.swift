@@ -159,9 +159,8 @@ struct ArchiveCleanupTests {
     /// Written because the screen had a route that lost three quarters of a delete between the
     /// list and the confirmation, and because the two halves that route runs through, the
     /// composition and the delete, were each correct on their own. This joins them: the ids that
-    /// reach `deleteArchivedWorkspaces` are the ids `ArchiveCleanup.target` produced, the
-    /// confirmation's totals are read off the same list, and what the database holds afterwards is
-    /// checked row by row rather than by counting.
+    /// reach `deleteArchivedWorkspaces` are the ids the confirmation was built from, and what the
+    /// database holds afterwards is checked row by row rather than by counting.
     @Test("deleting a selection of several takes exactly those rows and no others")
     func deletesExactlyTheSelection() async throws {
         let store = try makeTestStore("archive-selection")
@@ -183,12 +182,9 @@ struct ArchiveCleanupTests {
             )
         }
 
-        let cleanup = ArchiveCleanup(footprints: try await store.archivedFootprints())
+        let footprints = try await store.archivedFootprints()
         let selection: Set<WorkspaceID> = [alpha.id, bravo.id, charlie.id]
-
-        // As the row menu now asks: aimed at one row, answered with the selection it sits in.
-        let target = cleanup.target(bravo.id, selection: selection, order: .largest)
-        #expect(Set(target.map(\.id)) == selection)
+        let target = footprints.filter { selection.contains($0.id) }
         #expect(ArchiveDeletion(target).title == "Delete everything Bloom kept about 3 archived workspaces?")
 
         let removed = try await store.deleteArchivedWorkspaces(ids: target.map(\.id))
@@ -241,101 +237,27 @@ struct ArchiveCleanupTests {
         #expect(onDisk < before.totalBytes / 2)
     }
 
-    // MARK: - Ordering
+    // MARK: - What it adds up to
 
-    @Test("largest first puts the row worth deleting at the top")
-    func ordersByBytes() {
+    /// **The ordering and the multi-selection rules that were here have gone with the screen that
+    /// had them.** `ArchiveCleanup` sorted Largest/Oldest and reconciled a right-clicked row with
+    /// a tick-box selection, for a Settings pane that listed the archived workspaces a second
+    /// time. Home draws that list now, orders it itself (`HomeListTests`, "ordered by size"),
+    /// and is single-selection, so a delete is always the one row that was clicked.
+    ///
+    /// The rule worth reading before anyone writes another is `ArchiveCleanup.target` in the
+    /// history, along with the destructive bug in its doc comment: a confirmation that counted
+    /// one workspace over a selection of three.
+    @Test("the total is what the rows hold between them")
+    func totalsTheRows() {
         let cleanup = ArchiveCleanup(footprints: [
             footprint(name: "small", bytes: 10, archivedAt: 100),
             footprint(name: "huge", bytes: 10_000, archivedAt: 300),
             footprint(name: "middling", bytes: 500, archivedAt: 200),
         ])
-        #expect(cleanup.ordered(by: .largest).map(\.workspace.name) == ["huge", "middling", "small"])
-        #expect(cleanup.ordered(by: .oldest).map(\.workspace.name) == ["small", "middling", "huge"])
         #expect(cleanup.totalBytes == 10_510)
-    }
-
-    /// Two workspaces archived by the same script in the same second are a tie, and a list that
-    /// reshuffles them between two refreshes is a list somebody clicks the wrong row in.
-    @Test("equal rows keep a stable order")
-    func breaksTiesStably() {
-        let cleanup = ArchiveCleanup(footprints: [
-            footprint(name: "b", bytes: 100, archivedAt: 50, id: "id-b"),
-            footprint(name: "a", bytes: 100, archivedAt: 50, id: "id-a"),
-        ])
-        #expect(cleanup.ordered(by: .largest).map(\.workspace.name) == ["a", "b"])
-        #expect(cleanup.ordered(by: .oldest).map(\.workspace.name) == ["a", "b"])
-    }
-
-    @Test("a selection is listed the way the list showed it")
-    func selectsInOrder() {
-        let cleanup = ArchiveCleanup(footprints: [
-            footprint(name: "small", bytes: 10, archivedAt: 100, id: "s"),
-            footprint(name: "huge", bytes: 10_000, archivedAt: 300, id: "h"),
-            footprint(name: "middling", bytes: 500, archivedAt: 200, id: "m"),
-        ])
-        let selected = cleanup.selected([WorkspaceID("s"), WorkspaceID("h")], order: .largest)
-        #expect(selected.map(\.workspace.name) == ["huge", "small"])
-    }
-
-    /// The regression this file was reopened for.
-    ///
-    /// The Archive screen's row menu passed the row it had been opened on and nothing else, so a
-    /// right click on one of three selected workspaces confirmed one and deleted one while the
-    /// strip above it went on counting three. The core was already plural and already refused
-    /// anything that was not archived; what was missing was the rule saying which rows a command
-    /// aimed at one row is actually aimed at, and it was missing because it was written inside a
-    /// button where nothing could reach it. These two cases are that rule, and they fail on the
-    /// composition rather than on the delete, because the delete was never wrong.
-    @Test("a command on a row inside the selection is a command on the whole selection")
-    func targetsTheWholeSelection() {
-        let cleanup = ArchiveCleanup(footprints: [
-            footprint(name: "small", bytes: 10, archivedAt: 100, id: "s"),
-            footprint(name: "huge", bytes: 10_000, archivedAt: 300, id: "h"),
-            footprint(name: "middling", bytes: 500, archivedAt: 200, id: "m"),
-        ])
-        let selection: Set<WorkspaceID> = [WorkspaceID("s"), WorkspaceID("h")]
-
-        let target = cleanup.target(WorkspaceID("s"), selection: selection, order: .largest)
-        #expect(target.map(\.workspace.name) == ["huge", "small"])
-        // The number the strip shows and the number the confirmation shows, from one list.
-        #expect(ArchiveDeletion(target).totalBytes == cleanup.selected(selection, order: .largest)
-            .reduce(0) { $0 + $1.totalBytes })
-        #expect(ArchiveDeletion(target).title == "Delete everything Bloom kept about 2 archived workspaces?")
-    }
-
-    /// The other half, and the half that keeps this safe: a row outside the selection takes itself
-    /// and nothing else. Widening a delete to rows the person never pointed at would be a worse
-    /// bug than the one being fixed, so this asserts the answer is exactly one row and that the
-    /// singular wording, which is good copy, still arrives.
-    @Test("a command on a row outside the selection takes that row alone")
-    func targetsOnlyTheRowClicked() {
-        let cleanup = ArchiveCleanup(footprints: [
-            footprint(name: "small", bytes: 10, archivedAt: 100, id: "s", messages: 2, sessions: 1),
-            footprint(name: "huge", bytes: 10_000, archivedAt: 300, id: "h"),
-            footprint(name: "middling", bytes: 500, archivedAt: 200, id: "m"),
-        ])
-
-        let target = cleanup.target(
-            WorkspaceID("s"), selection: [WorkspaceID("h"), WorkspaceID("m")], order: .largest
-        )
-        #expect(target.map(\.workspace.name) == ["small"])
-        #expect(ArchiveDeletion(target).title == "Delete everything Bloom kept about \u{201C}small\u{201D}?")
-        #expect(ArchiveDeletion(target).cancelLabel == "Keep the record")
-
-        // And with nothing selected at all, which is the ordinary way the menu is used.
-        let alone = cleanup.target(WorkspaceID("m"), selection: [], order: .largest)
-        #expect(alone.map(\.workspace.name) == ["middling"])
-    }
-
-    /// A selection built from a list one refresh out of date. The id is not there any more, so
-    /// there is nothing to delete and nothing is invented to stand in for it.
-    @Test("a row that is no longer in the list targets nothing")
-    func targetsNothingForAVanishedRow() {
-        let cleanup = ArchiveCleanup(footprints: [
-            footprint(name: "small", bytes: 10, archivedAt: 100, id: "s"),
-        ])
-        #expect(cleanup.target(WorkspaceID("gone"), selection: [], order: .largest).isEmpty)
+        #expect(!cleanup.isEmpty)
+        #expect(ArchiveCleanup(footprints: []).isEmpty)
     }
 
     // MARK: - What the confirmation says
@@ -420,6 +342,45 @@ struct ArchiveCleanupTests {
         #expect(loaded.isWorthCompacting)
         #expect(loaded.freeBytes == 16_384_000)
         #expect(loaded.usedBytes == 24_576_000)
+    }
+
+    // MARK: - What a record is made of
+
+    /// The line Home's row shows in its tooltip, which is where the message and chat counts and
+    /// the branch standing went when the pane that had columns for them was folded into a list
+    /// that has three columns and no room for a fourth.
+    @Test("what a record is made of reads as one line, and says nothing it was not told")
+    func describesItsContents() {
+        let bare = footprint(name: "a", bytes: 1_500_000, archivedAt: 1)
+        #expect(bare.contents == ArchiveDeletion.bytes(1_500_000))
+
+        var talkative = footprint(
+            name: "b", bytes: 1_500_000, archivedAt: 1, messages: 312, sessions: 6
+        )
+        // Nil, not false: nobody has asked git, and a screen has no business promising a branch
+        // is gone out of a question it never put.
+        #expect(talkative.branchIsLocal == nil)
+        #expect(
+            talkative.contents
+                == "\(ArchiveDeletion.bytes(1_500_000)) \u{00B7} 312 transcript messages in 6 chats"
+        )
+
+        talkative.branchIsLocal = true
+        #expect(
+            talkative.contents
+                == "\(ArchiveDeletion.bytes(1_500_000)) \u{00B7} 312 transcript messages in 6 chats"
+        )
+
+        talkative.branchIsLocal = false
+        #expect(talkative.contents.hasSuffix("\u{00B7} branch not on this Mac"))
+    }
+
+    /// The paragraph a one-line status bar cannot hold, on the button it explains.
+    @Test("the compaction offer says why the file is bigger than what is in it")
+    func explainsCompaction() {
+        let size = DatabaseSize(pageSize: 4_096, pageCount: 10_000, freePageCount: 4_000)
+        #expect(size.compactionHelp.hasPrefix("\(ArchiveDeletion.bytes(16_384_000)) inside the database"))
+        #expect(size.compactionHelp.contains("stops everything else while it runs"))
     }
 
     // MARK: - Helpers

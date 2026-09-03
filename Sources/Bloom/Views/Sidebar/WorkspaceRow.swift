@@ -19,9 +19,10 @@ import BloomCore
 /// project line up with each other and with the notice that stands in for them when a project is
 /// empty, instead of the three columns the hand-built stack produced.
 ///
-/// The whole row is then indented one chevron gutter by `SidebarWorkspaceRow`, which is what
-/// puts it under the project it belongs to rather than under Home and Search. See
-/// `SidebarMetrics.rowIndent`.
+/// The whole row is then indented to the project's tile by `SidebarWorkspaceRow`, which is what
+/// puts it under the project it belongs to rather than under Home and Search: the mark lands in
+/// the tile's column and the name on the project's own. See `SidebarMetrics.rowIndent` and
+/// `SidebarMetrics.nameColumn`.
 ///
 /// The row draws no background of its own. It lives in a `List` with `.listStyle(.sidebar)`, and
 /// that list already draws AppKit selection: the accent colour while the list has the keyboard, a
@@ -134,7 +135,12 @@ struct WorkspaceRow: View {
                     if workspace.pinned {
                         Image(systemName: "pin.fill")
                             .font(Typo.micro)
-                            .foregroundStyle(.tertiary)
+                            // The palette's rung rather than AppKit's third, which `textTertiary`
+                            // was retuned away from: the system's is 1.9 to 1 and means a disabled
+                            // control. Home draws the same pin and always did it this way.
+                            .foregroundStyle(
+                                isEmphasized ? Palette.textInverted : Palette.textTertiary
+                            )
                             .accessibilityLabel("Pinned")
                     }
 
@@ -181,18 +187,27 @@ struct WorkspaceRow: View {
         // list, or it does not travel with the row when a project folds.
         .labelStyle(SidebarRowLabelStyle())
         // The glyph is the row's whole state in one mark, so VoiceOver has to be told what it
-        // means rather than being handed an unlabelled image, and a pointer resting on it gets the
-        // same sentence. Both sit on the row: the icon of a `Label` is not a hit target of its own.
+        // means rather than being handed an unlabelled image. It sits on the row: the icon of a
+        // `Label` is not a hit target of its own.
+        //
+        // **No `.help` here, and that is a removal rather than an omission.** It carried the same
+        // sentence as `accessibilityValue`, and the hover card says all of it and more: the
+        // branch, the diff, the pull request, the checks and the age. So resting on a row raised
+        // a system tooltip and our own card at once, a few points apart, one repeating a line of
+        // the other. The card is the better of the two and it is the one that stays; a reader who
+        // cannot see it still has the accessibility value, which is what that line was really for.
         .accessibilityValue(statusDescription)
-        .help(statusDescription)
         .contentShape(Rectangle())
+        // Command-Backspace is delete-to-start-of-line in a text box, and the menu bar had it
+        // for Archive Workspace. See `FocusedValues.isTypingProse`.
+        .focusedValue(\.isTypingProse, fieldFocused)
         .onHover { isHovered = $0 }
         // Only rows that exist ask GitHub anything, and the id carries the branch and whether
         // there is any work at all, because both change what is worth asking about.
         .task(id: PullRequestQuestion(
             workspace: workspace.id, branch: workspace.branch, hasDiff: workspace.hasDiff
         )) {
-            await WorkspacePullRequests.shared.track(workspace)
+            await WorkspacePullRequests.shared.track(workspace, store: app.store)
         }
         // The list inverts the row's text for us, but a label that carries its own colour, such as
         // the green plus count, has to be told. This is the same signal the inspector's lists send.
@@ -377,8 +392,11 @@ struct WorkspaceRow: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(isEmphasized ? Palette.textInverted : Palette.textSecondary)
-        // The shortcut is named the way Conductor names its own, with ours rather than theirs.
-        .help("Archive workspace  ⌘⌫")
+        // One notation for a shortcut in a tooltip, everywhere: the glyphs, in brackets, after
+        // the sentence. The app had three, and this row was the one that wrote two spaces and
+        // no brackets. The other two were `SidebarProjectsHeader`, which already reads this
+        // way, and `ComposerStopButton`, which spelled the keys out in words.
+        .help("Archive workspace (⌘⌫)")
         .accessibilityLabel("Archive \(workspace.name)")
     }
 
@@ -417,7 +435,7 @@ private struct PullRequestQuestion: Hashable, Sendable {
 /// a number. The same shape the subagent rows use, at the same size the diff stat beside it uses.
 private struct SubagentFailureLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Metrics.spacingTight) {
             configuration.icon
             configuration.title
         }

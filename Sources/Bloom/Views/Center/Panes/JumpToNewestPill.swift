@@ -70,17 +70,14 @@ struct JumpToNewestPill: View {
                 // The hover response, on the ground rather than on the label, so the words do not
                 // change weight under the pointer.
                 .overlay(Capsule().fill(isHovering ? Palette.hover : .clear))
-                .overlay(Capsule().strokeBorder(Palette.border, lineWidth: Metrics.hairline))
+                .overlay(Capsule().strokeBorder(Palette.border, lineWidth: Metrics.outline))
         }
         .clipShape(Capsule())
-        // Black rather than the label colour, which would be a white glow in dark mode. It grows
-        // on hover because that is what says the thing is floating: a control that only changed
-        // its fill reads as a patch of the transcript lighting up.
-        .shadow(
-            color: .black.opacity(isHovering ? 0.28 : 0.18),
-            radius: isHovering ? Metrics.gutter : Metrics.spacingSmall,
-            y: isHovering ? Metrics.spacingSmall : Metrics.spacingTight
-        )
+        // It grows on hover because that is what says the thing is floating: a control that only
+        // changed its fill reads as a patch of the transcript lighting up. The two states are the
+        // two rungs of `Elevation` rather than six numbers written here, which is where the
+        // window's third and fourth shadow recipes came from.
+        .elevation(isHovering ? .lifted : .resting)
         .onHover { isHovering = $0 }
         // One length for the whole response, and it is the window's hover speed rather than a
         // literal of this file's own: the shadow, the wash and the arrow are one gesture and must

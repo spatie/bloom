@@ -162,20 +162,16 @@ final class WorkspaceModel {
     /// tall, so a notice added under the strip was drawn into a band with no room for it and cut
     /// off mid sentence. See `TitleBarStrip` and `InspectorView`.
     var pullRequestNotice: PullRequestNotice?
-    /// How many times a turn started by Create pull request has ended with no pull request.
+    /// The branch this workspace was carried on to when its pull request merged, while the strip
+    /// is still drawing that branch and nothing has been committed to it.
     ///
-    /// The button cannot itself fail. It succeeds the moment the turn is handed to the agent, and
-    /// everything that decides whether a pull request exists happens minutes later and somewhere
-    /// else. A run whose shell calls were denied ended with the strip quietly back at "No pull
-    /// request yet", no error and no toast, and the only trace of it a hundred rows up the
-    /// transcript. Somebody who presses a button is owed the answer to it where they pressed it.
-    ///
-    /// A count rather than a flag, because two attempts that both come to nothing are two things
-    /// to be told and a flag set twice is one. `PullRequestBar` watches it.
-    private(set) var pullRequestShortfalls = 0
-
-    /// Whether the turn now in flight was started by that button, so the count above is only ever
-    /// bumped for a turn somebody did ask for a pull request in.
+    /// Set by `AppModel.continueAfterMerge` and never cleared, because it does not need to be:
+    /// `ContinuedBranch.line` checks the branch it names against the branch being drawn, so it
+    /// stops applying by itself the moment the worktree moves on. The reasoning for holding it in
+    /// memory rather than on the row is on the type.
+    var continued: ContinuedBranch?
+    /// Whether the turn now in flight was started by Create pull request, so that the refresh
+    /// after it is waited on rather than fired and forgotten. See `onTurnFinished`.
     private var isExpectingPullRequest = false
     /// What this worktree is holding that the remote has not got, refreshed alongside the changed
     /// file list. Nil until the first refresh has answered, which is what stops the strip from
@@ -311,6 +307,10 @@ final class WorkspaceModel {
 
     private var changesTask: Task<Result<ChangesAnswer, GitFailure>, Never>?
     private var pullRequestTask: Task<PullRequest?, Never>?
+    /// One repository settings read at a time. A request that arrives during a read is remembered,
+    /// so the burst ends with one fresh read rather than silently keeping the older answer.
+    @ObservationIgnored private var settingsRefresh = RefreshDemand()
+    @ObservationIgnored private var settingsTask: Task<Void, Never>?
     /// A setup script can run for minutes (`composer install`, `npm ci`). Without a handle,
     /// archiving mid-setup cannot stop it and it outlives the app.
     private var setupTask: Task<Void, Never>?
@@ -335,7 +335,8 @@ final class WorkspaceModel {
     /// Nothing waits for it: the menu shows the previous answer until this one lands, and on the
     /// first launch of a workspace that is an empty one for a few milliseconds.
     func refreshSettings() {
-        Task { [weak self] in await self?.reloadSettings() }
+        guard settingsRefresh.request() else { return }
+        settingsTask = Task { [weak self] in await self?.drainSettingsRefreshes() }
     }
 
     /// The same read, awaited, for the one caller that cannot carry on without the answer.
@@ -345,12 +346,20 @@ final class WorkspaceModel {
     /// call above, which returns immediately and lets the menu show the previous answer until this
     /// one lands.
     func reloadSettings() async {
-        guard let path = repo?.path else { return }
-        let loaded = await Task.detached(priority: .utility) {
-            SettingsLoader.load(repo: path)
-        }.value
-        guard settings != loaded else { return }
-        settings = loaded
+        refreshSettings()
+        await settingsTask?.value
+    }
+
+    private func drainSettingsRefreshes() async {
+        repeat {
+            if let path = repo?.path {
+                let loaded = await Task.detached(priority: .utility) {
+                    SettingsLoader.load(repo: path)
+                }.value
+                if settings != loaded { settings = loaded }
+            }
+        } while settingsRefresh.complete()
+        settingsTask = nil
     }
 
     var store: Store? { app.store }
@@ -509,6 +518,283 @@ final class WorkspaceModel {
         transcript(for: session)
     }
 
+    // MARK: - Crew
+
+    /// Starts a crew member in this worktree, for the chat that asked for one.
+    ///
+    /// A crew member is an ordinary `Session` row with `parentSessionID` set, and that one column
+    /// is the whole of what makes it one. It shares this workspace's worktree and its branch, so
+    /// everything an orchestrator and its crew do lands in a single diff. `Crew`'s head argues why
+    /// that is a different thing from `workspace_start`, which is what a caller expecting several
+    /// pull requests wants instead.
+    ///
+    /// **The name goes straight into `title`.** `PaneNaming.nextTitle` is what a chat the owner
+    /// opened gets, and it would turn "cascade-read" into "Chat 3": this name is the address the
+    /// other two crew tools take, so it has to be the one the orchestrator chose.
+    ///
+    /// **The nesting rule is checked here as well as in the tool, and only the nesting rule.**
+    /// This method is a second door into the same act, and a door that trusted its caller to have
+    /// checked would be one refactor away from a ring of agents in one worktree. The ceiling and
+    /// the name's uniqueness stay `AgentStartTool`'s alone, weighed there against the same rows a
+    /// moment earlier: which sessions count as running is `CrewCensus`, which the app target
+    /// cannot see, and a second opinion about that would be worse than one. The name goes back
+    /// through `Crew.normalisedName` because that is the same pure function the tool used, so the
+    /// two cannot come out with different strings.
+    func startCrewMember(
+        _ order: CrewOrder, reportingTo parentID: SessionID
+    ) async -> CrewStartOutcome {
+        guard let store else { return .refused(Self.crewWithoutStore) }
+        guard let parent = try? await store.session(id: parentID) else {
+            return .refused("The chat that asked for this subagent is not in Bloom any more.")
+        }
+        guard parent.parentSessionID == nil else {
+            return .refused(Crew.sentence(for: .notAnOrchestrator))
+        }
+        guard let name = Crew.normalisedName(order.name) else {
+            return .refused(Crew.sentence(for: .noName))
+        }
+
+        // Whatever the orchestrator is itself on, unless the order named otherwise, which is the
+        // same inheritance `startWorkspaceForBridge` spells out: an agent splitting up its own
+        // work wants help from the thing it already trusts. The backend and the permission mode
+        // come across for a second reason as well, that a crew member is meant to be able to do
+        // what the chat above it can do without a person being asked twice for the same grant.
+        let member = Session(
+            workspaceID: workspace.id,
+            parentSessionID: parentID,
+            title: name,
+            model: order.model ?? parent.model,
+            effort: order.effort ?? parent.effort,
+            agentKind: parent.agentKind,
+            permissionMode: parent.permissionMode,
+            sortOrder: sessions.count
+        )
+        // `upsert` is right here and nowhere else on this path: the row is being created, out of a
+        // value built three lines up, which is the one shape the head of `Store.upsert(_ session:)`
+        // allows it in.
+        guard let stored = try? await store.upsert(member) else {
+            return .refused("Bloom could not open a chat for that subagent.")
+        }
+
+        // The brief joins the queue rather than being sent, exactly as a workspace's opening
+        // prompt does, so there is one ordered route into every conversation in the app. See
+        // `enqueueOpening` and the head of `Delivery`.
+        //
+        // As a crew message rather than a plain body, so the first row of this agent's chat says
+        // who set the task rather than reading as though the owner typed it. `CrewMessage.brief`
+        // is the one that is deliberately not wrapped: it is the instruction this agent exists to
+        // follow, and fencing it off would leave it with no task at all.
+        _ = try? await store.enqueueDelivery(
+            Delivery(
+                targetSessionID: stored.id,
+                sourceWorkspaceID: workspace.id,
+                kind: .message,
+                crew: CrewMessage.brief(from: parent.title, task: order.task)
+            )
+        )
+
+        // `activeSessionID` is deliberately left alone, which is the rule `select: false` holds
+        // for a workspace the bridge starts: an agent appearing while somebody is typing in
+        // another chat must not take the centre column away from them.
+        await reloadSessions()
+
+        // The part that actually spawns a CLI. Without the drain the row and its queued brief
+        // would sit there until a person opened the chat and said something, which is a subagent
+        // that was started and never ran.
+        let transcript = transcript(for: stored)
+        await transcript.refreshQueue()
+        await transcript.drain()
+
+        return .started(
+            "Started subagent \"\(name)\" in this workspace. Talk to it with agent_say, and Bloom "
+                + "will tell you here when it stops, with the last thing it said."
+        )
+    }
+
+    /// Says something into another agent's chat, in whichever direction the caller is talking.
+    ///
+    /// `name` is a crew member when an orchestrator is talking down and nil when a crew member is
+    /// talking up, because a crew member has exactly one place to talk and naming it would be a
+    /// second way to say the same thing. See `CrewSaying`.
+    ///
+    /// **Both directions are wrapped, and each names who is speaking.** What a subagent says back
+    /// is a model reporting on files it has been reading, which is data; what an orchestrator says
+    /// down is another model's words too, and the agent reading them is entitled to know they came
+    /// from the chat above it rather than from the person it works for. Only the brief a subagent
+    /// is started with is unwrapped, because that one is its task. `CrewMessage.said` holds both
+    /// wordings and `BridgeUntrustedText` states the threat.
+    func sayToCrew(
+        _ text: String, to name: String?, from callerID: SessionID
+    ) async -> CrewSayOutcome {
+        guard let store else { return .refused(Self.crewWithoutStore) }
+        // Read once, at the top, because both directions need the caller's own row now: the
+        // message is headed with the name of the agent that sent it, whichever way it is going,
+        // so an agent is told which chat is talking to it rather than merely that one is.
+        guard let caller = try? await store.session(id: callerID) else {
+            return .refused("The chat that said that is not in Bloom any more.")
+        }
+
+        let target: Session
+        let message: CrewMessage
+        if let name {
+            // `crew(of:)` and not `crew(inWorkspace:)`, which is what keeps an orchestrator to its
+            // own crew: two chats in one worktree may each have a subagent, and neither of them
+            // may talk into the other's.
+            let crew = (try? await store.crew(of: callerID)) ?? []
+            switch CrewLookup.find(name, among: crew) {
+            case .found(let member): target = member
+            case .unknown: return .refused(Self.noCrewMember(name, among: crew.map(\.title)))
+            case .ambiguous: return .refused(Self.ambiguousCrewMember(name))
+            }
+            message = CrewMessage.said(from: caller.title, text: text, sender: .orchestrator)
+        } else {
+            guard let parentID = caller.parentSessionID,
+                  let parent = try? await store.session(id: parentID) else {
+                return .refused(
+                    "No agent started this chat, so there is nobody above it to talk to. Name the "
+                        + "subagent you meant to say that to."
+                )
+            }
+            // `session(id:)` answers for an archived row where `sessions(workspaceID:)` and
+            // `crew(of:)` do not, and `closeSession` archives a chat while leaving the crew it
+            // started running. Without this the message went into a chat the owner had closed:
+            // the drain below built that session a fresh transcript, minted it a bridge token and
+            // started a turn in a conversation that is in no tab strip, no session list and no
+            // sidebar row. An agent nobody can see, spending money.
+            guard parent.archivedAt == nil else {
+                return .refused(
+                    "The chat that started you has been closed, so there is nobody above you to "
+                        + "talk to any more. Finish what you can on your own and stop."
+                )
+            }
+            target = parent
+            message = CrewMessage.said(from: caller.title, text: text, sender: .subagent)
+        }
+
+        _ = try? await store.enqueueDelivery(
+            Delivery(
+                targetSessionID: target.id,
+                sourceWorkspaceID: workspace.id,
+                kind: .message,
+                crew: message
+            )
+        )
+
+        // Enqueued first and drained after, never sent: the chat being spoken to is very often mid
+        // turn, and `DeliveryHold` is what decides whether this goes now or when that turn ends.
+        let transcript = transcript(for: target)
+        await transcript.refreshQueue()
+        await transcript.drain()
+
+        if name == nil {
+            return .delivered(
+                "Passed that to the agent that started you. If it is mid turn it will read it when "
+                    + "that turn ends."
+            )
+        }
+        return .delivered(
+            "Passed that to subagent \"\(target.title)\". If it is mid turn it will read it when "
+                + "that turn ends, and Bloom will tell you here when it stops."
+        )
+    }
+
+    /// Stops a crew member: the agent ends, its row leaves the sidebar, and its conversation
+    /// stays where it is.
+    ///
+    /// **Archived, never deleted.** agent_stop means "I am finished with this one", which is three
+    /// things at once: the process ends, the row goes out of the sidebar, and the bridge token it
+    /// was minted stops being a key into this app. What it must not mean is that the conversation
+    /// goes: an orchestrator's account of what its crew did is often the only record of an hour's
+    /// work, and the owner reads it after the fact. `closeSession` is exactly that act and it is
+    /// what the owner's own close button does, so a stopped subagent and a closed chat leave the
+    /// same shape behind rather than two.
+    ///
+    /// The name comes free again with the row, because `Store.crew(of:)` excludes an archived one
+    /// and that read is what `AgentStartTool` weighs a new name against. That is the point rather
+    /// than a side effect: an orchestrator that has finished with "tests" and wants a fresh one
+    /// should not have to invent "tests-2".
+    func stopCrewMember(named name: String, startedBy callerID: SessionID) async -> CrewStopOutcome {
+        guard let store else { return .refused(Self.crewWithoutStore) }
+        let crew = (try? await store.crew(of: callerID)) ?? []
+        let member: Session
+        switch CrewLookup.find(name, among: crew) {
+        case .found(let found): member = found
+        case .unknown: return .refused(Self.noCrewMember(name, among: crew.map(\.title)))
+        case .ambiguous: return .refused(Self.ambiguousCrewMember(name))
+        }
+
+        // `closeSession` and not a `terminateNow` beside an archive of our own. It tears the
+        // transcript down (which terminates the runner and stops the event pump), writes the one
+        // column, retires the bridge registration and reloads the strip, in that order. A member
+        // this launch never built a transcript for has no process to end and the rest still
+        // applies, which is why there is no early return for it.
+        await closeSession(member)
+
+        return .stopped(
+            "Stopped subagent \"\(member.title)\" and closed its chat. Its conversation is still "
+                + "here to read, and the name is free to use again."
+        )
+    }
+
+    /// The owner stopping a subagent from its row in the sidebar.
+    ///
+    /// **The orchestrator has to be told, and that is the whole reason this is not just
+    /// `closeSession`.** An agent that is waiting on a crew member it can no longer reach is the
+    /// failure this design exists to prevent, and the owner reaching into the sidebar is the one
+    /// way a member can vanish without the agent above it doing anything. The sentence says who
+    /// did it as well as what happened, because "the person you work for took it away" and "it
+    /// finished" call for different next moves. See `Crew.stoppedByOwnerSentence`.
+    ///
+    /// Told before it is closed, so the report is enqueued while the row is still whole, and
+    /// through the same queue everything else uses so a busy orchestrator reads it when its own
+    /// turn ends rather than mid sentence.
+    func closeCrewMember(_ member: Session) async {
+        guard let store else { return }
+
+        if let parentID = member.parentSessionID,
+           let parent = try? await store.session(id: parentID), parent.archivedAt == nil {
+            _ = try? await store.enqueueDelivery(
+                Delivery(
+                    targetSessionID: parent.id,
+                    sourceWorkspaceID: workspace.id,
+                    kind: .report,
+                    crew: CrewMessage.stoppedByOwner(name: member.title)
+                )
+            )
+
+            let transcript = transcript(for: parent)
+            await transcript.refreshQueue()
+            await transcript.drain()
+        }
+
+        await closeSession(member)
+    }
+
+    /// The one sentence every crew method says when the database never opened, so three refusals
+    /// cannot describe one absence three ways.
+    private static let crewWithoutStore =
+        "Bloom's database is not open, so it cannot run a subagent right now."
+
+    /// Two members whose names differ only in case. Refused rather than resolved to whichever was
+    /// started first, which is `CrewLookup`'s own rule: acting on the agent the caller did not name
+    /// is the one outcome these three methods must not have.
+    private static func ambiguousCrewMember(_ name: String) -> String {
+        "Two of your subagents are called \"\(name)\", differing only in case, so Bloom will not "
+            + "guess which you meant. Stop one of them, or say it again with the exact name "
+            + "agent_list prints."
+    }
+
+    /// A name that answers to nothing, said with what does answer, because a model told only "no"
+    /// tries the same name again.
+    private static func noCrewMember(_ name: String, among known: [String]) -> String {
+        guard !known.isEmpty else {
+            return "You have no subagents, so there is no \"\(name)\" here. Start one with "
+                + "agent_start."
+        }
+        let list = known.map { "\"\($0)\"" }.joined(separator: ", ")
+        return "You have no subagent called \"\(name)\". Yours are: \(list)."
+    }
+
     /// Whether any chat here has an agent mid turn.
     ///
     /// The rule is `AgentTurns`, which is the same rule `isRunning(_ session:)` above answers
@@ -547,6 +833,20 @@ final class WorkspaceModel {
     /// app model's to know. See `SubagentRetention`.
     var activeSubagentRoster: SubagentRoster? {
         activeTranscript?.subagents
+    }
+
+    /// Every line this subagent has produced, as Bloom stored it off the parent's own stream.
+    ///
+    /// The nested rows the transcript already draws behind a hairline: a line from inside a
+    /// subagent carries that subagent's `tool_use_id` as its `parent_tool_use_id`. It is what the
+    /// output pane reads while the subagent is running, because the CLI names its file only on
+    /// the line that ends it. See `SubagentTranscript.live(streamLines:)`.
+    ///
+    /// The payloads and not a parse of them: parsing is the core's, and it is done off the main
+    /// actor by the caller.
+    func subagentStreamLines(forToolUseID toolUseID: String) -> [Data] {
+        guard !toolUseID.isEmpty, let transcript = activeTranscript else { return [] }
+        return transcript.rows.filter { $0.parentToolUseID == toolUseID }.map(\.payload)
     }
 
     /// The shell line a backgrounded command was given, found by the tool call that started it.
@@ -695,7 +995,12 @@ final class WorkspaceModel {
                     message: SetupFailure.instruction
                 )
                 NotificationService.shared.setupFailed(workspace: workspace)
-                return
+                // And then on, rather than back: the agent starts and the opening prompt goes.
+                // This used to return, which left the workspace silent for good, because the
+                // queue moves on an event and a failed setup produces no further events. The
+                // argument for stopping was that dependencies might be missing; the answer is
+                // that the agent is the one thing in the worktree that can read the log and
+                // install them. See `DeliveryHold`, where the matching hold was taken out.
             }
         }
 
@@ -1362,6 +1667,10 @@ final class WorkspaceModel {
         // The deliberate clear is `WorkspacePullRequests.forget`, which `adopt` calls when a
         // merge moves the worktree to a fresh branch.
         if let fresh, pullRequest != fresh { pullRequest = fresh }
+        // The number, written where a deleted branch cannot take it. This is the path the band
+        // polls on, so it is the one that fills the column in for a workspace whose pull request
+        // an agent opened rather than the create sheet. See `Workspace.pullRequestNumber`.
+        await PullRequestNumber.record(fresh, for: asked, in: store)
         isLoadingPullRequest = false
         SwitchTrace.mark("pullRequest.loaded", workspace: workspace.id)
     }
@@ -1494,25 +1803,33 @@ final class WorkspaceModel {
         )
         let render = context.render(template: overrides.template(for: .mergePullRequest))
 
+        let text = await turn(render.text, for: .merge)
         activeSessionID = session.id
-        await transcript(for: session).submit(mergeTurn(text: render.text))
+        await transcript(for: session).submit(text)
         return nil
     }
 
-    /// The merge turn, with the instructions named in it.
+    /// One of Bloom's own turns about landing a branch, with Bloom's rules under it and the
+    /// project's own instructions attached when it has any.
     ///
-    /// Synchronous where `pullRequestTurn` is not, because `MergeInstructions` has no reclaim step
-    /// to await. See the note on that type for why it does not have one.
+    /// Merge and Fix merge conflicts go through this same call, because the two differ only in
+    /// which subject they name. What each subject contributes is `ProjectInstructions`, in the
+    /// core, where what an agent is about to be told can be asserted without a worktree.
     ///
-    /// When the file cannot be written the instructions go into the message itself, which matters
-    /// more here than it does for creating a pull request: this is the turn whose instructions say
-    /// what not to do to somebody's repository, and a read-only checkout is not a reason to send
-    /// it without them.
-    private func mergeTurn(text: String) -> String {
-        if let path = MergeInstructions.ensure(in: workspace.path) {
-            return MergeInstructions.asking(text, toFollow: path)
-        }
-        return text + "\n\n" + MergeInstructions.defaultMarkdown
+    /// The settings are re-read rather than taken from the copy this model holds. That copy is
+    /// refreshed when the workspace is selected, and the sequence that has to work is typing an
+    /// instruction in the project settings window and pressing Merge in the window behind it
+    /// without touching the sidebar in between.
+    private func turn(_ text: String, for subject: ProjectInstructions.Subject) async -> String {
+        await reloadSettings()
+        let stated = ProjectInstructions.stated(subject, in: settings)
+        let path = workspace.path
+        // Off the main actor: it reads a file in the worktree and may write one, and this runs on
+        // a button press with a sheet dismissing over it.
+        let extra = await Task.detached(priority: .userInitiated) {
+            ProjectInstructions.resolve(subject, in: path, stated: stated)
+        }.value
+        return ProjectInstructions.turn(text, for: subject, adding: extra)
     }
 
     /// Asks the workspace's agent to bring the base branch in and resolve the conflicts.
@@ -1521,11 +1838,16 @@ final class WorkspaceModel {
     /// already said the branch does not apply to its base, so the only thing that press could
     /// produce was the agent running `gh pr merge` and reading the refusal back out.
     ///
-    /// The same route as the other three buttons in the strip, with two
-    /// differences that are both about what this turn does NOT do. There is no instructions file,
-    /// because nothing here acts on a server and the project's conventions for resolving a
-    /// conflict are already in front of the agent; and there is no confirmation in front of it,
-    /// for the reason written out at `PullRequestSummary.fixConflictsButton`.
+    /// The same route as the other three buttons in the strip, with one difference: there is no
+    /// confirmation in front of it, for the reason written out at
+    /// `PullRequestSummary.fixConflictsButton`.
+    ///
+    /// The turn is composed in two passes, and the order they run in is the order the agent reads
+    /// them in. `ConflictInstructions` puts Bloom's own steps in a file and names it, which is what
+    /// keeps this bubble to two sentences instead of the eight paragraphs it used to be; then
+    /// `turn(_:for:)` adds the project's own words after that and says they win. A project that has
+    /// nothing to say still gets Bloom's file, which is the difference from Merge, where Bloom's
+    /// words are in the message and only the project's are ever attached.
     ///
     /// Returns nil on success, or the sentence to put in front of the user.
     func requestFixConflicts(
@@ -1546,8 +1868,15 @@ final class WorkspaceModel {
         )
         let render = context.render(template: overrides.template(for: .fixConflicts))
 
+        let path = workspace.path
+        let rendered = render.text
+        // Off the main actor: it writes a file into the worktree, and this runs on a button press.
+        let asked = await Task.detached(priority: .userInitiated) {
+            ConflictInstructions.asking(rendered, in: path)
+        }.value
+        let text = await turn(asked, for: .fixConflicts)
         activeSessionID = session.id
-        await transcript(for: session).submit(render.text)
+        await transcript(for: session).submit(text)
         return nil
     }
 
@@ -1673,9 +2002,6 @@ final class WorkspaceModel {
         }
         isExpectingPullRequest = false
         await refreshPullRequest()
-        if pullRequest == nil {
-            pullRequestShortfalls += 1
-        }
     }
 }
 

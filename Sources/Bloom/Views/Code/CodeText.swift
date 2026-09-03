@@ -35,19 +35,39 @@ struct CodeText: View {
     }
 
     var body: some View {
-        Text(attributed)
-            .font(Typo.code)
-            .textSelection(.enabled)
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
+        Text(
+            Self.attributed(
+                line: line,
+                language: language,
+                carry: carry,
+                emphasis: emphasis,
+                emphasisColor: emphasisColor
+            )
+        )
+        .font(Typo.code)
+        .textSelection(.enabled)
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
-    private var attributed: AttributedString {
+    /// One line, highlighted, with its word level diff spans painted on top.
+    ///
+    /// Lifted out of `body` so that `CodeRunText` builds a whole run out of the same call this
+    /// draws a single line with. Two answers to "what does a line of code look like" is how the
+    /// per line rows and the run beside them would drift into two colour schemes for one file,
+    /// and the run is only ever some of the rows: see `DiffRunGrouping`.
+    static func attributed(
+        line: String,
+        language: Language,
+        carry: LexState,
+        emphasis: [Range<String.Index>] = [],
+        emphasisColor: Color = .clear
+    ) -> AttributedString {
         var value = SyntaxCache.attributed(line: line, language: language, carry: carry)
         guard !emphasis.isEmpty else { return value }
 
         for range in emphasis {
-            guard let mapped = Self.attributedRange(for: range, of: line, in: value) else { continue }
+            guard let mapped = attributedRange(for: range, of: line, in: value) else { continue }
             value[mapped].backgroundColor = emphasisColor
         }
         return value

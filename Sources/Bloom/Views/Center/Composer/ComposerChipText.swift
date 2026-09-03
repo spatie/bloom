@@ -2,6 +2,70 @@ import AppKit
 import SwiftUI
 import BloomCore
 
+@MainActor
+enum ComposerInlineChipLayout {
+    static let horizontalPadding: CGFloat = 5
+    static let gap: CGFloat = 4
+    static let cornerRadius: CGFloat = 4
+
+    static func labelFont(for lineFont: NSFont) -> NSFont {
+        NSFont.systemFont(ofSize: max(lineFont.pointSize - 1, 9))
+    }
+
+    static func iconSize(for lineFont: NSFont) -> CGFloat {
+        ceil(labelFont(for: lineFont).pointSize) + 2
+    }
+
+    static func height(for lineFont: NSFont) -> CGFloat {
+        ceil(NSLayoutManager().defaultLineHeight(for: lineFont)) + 2
+    }
+}
+
+/// What one chip drawn inside a line of text stands for.
+///
+/// **One chip type that takes either a file or a body**, and the reason is a report about the two
+/// turns Bloom composes itself. A pull request turn names a file in its sentence and the reader can
+/// point at the pill and see what is in it; a merge turn carries its rules in the message, because
+/// `MergeInstructions` argues at length that they must not be a file, so it had a button under the
+/// bubble with a popover behind a click instead. The same kind of thing, drawn twice, and only one
+/// of the two drawings answered the pointer.
+///
+/// The chip is the object; what it stands for is the variable. A path resolves to a card showing
+/// the file, a body resolves to a card showing the words, and everything between the two, the
+/// plate, the icon slot, the truncation, the hover delay and the card it opens into, is written
+/// once. See `SentTurn`, which is where a stored turn is cut into these.
+enum InlineChip: Equatable, Sendable {
+    case file(path: String)
+    /// Words Bloom put in the message itself. Carried whole rather than as a key into a lookup, so
+    /// a chip drawn from a transcript read back out of the database knows what it stands for
+    /// without asking anything that only the press which composed the turn could answer.
+    case instructions(InjectedInstruction)
+
+    /// What the chip reads.
+    var label: String {
+        switch self {
+        case .file(let path): (path as NSString).lastPathComponent
+        case .instructions(let block): block.title
+        }
+    }
+
+    /// The literal text this chip occupies in the turn, which is what a copy of a selection has to
+    /// put back. A file is written inside backticks, the way `AttachmentDraft` writes every path in
+    /// a prompt; a block of instructions is its own words.
+    var text: String {
+        switch self {
+        case .file(let path): AttachmentDraft.token(for: path)
+        case .instructions(let block): block.body
+        }
+    }
+
+    /// The path, for the two things only a file can do: open in a tab, and come off a draft.
+    var path: String? {
+        guard case .file(let path) = self else { return nil }
+        return path
+    }
+}
+
 /// The two directions between a draft and what the text view holds: a path in the draft is one
 /// chip in the storage, and one chip in the storage is that path again.
 ///
@@ -17,9 +81,18 @@ import BloomCore
 /// own undo covers all three because from where it stands nothing unusual happened.
 @MainActor
 enum ComposerChipText {
-    /// The attribute the path is carried on, beside the attachment that draws it. Read rather than
-    /// the cell, so flattening asks the storage a question about text rather than about drawing.
-    static let pathKey = NSAttributedString.Key("bloom.attachment.path")
+    /// What the chip at `index` stands for, or nothing where that character is not one.
+    ///
+    /// Asked of the attachment rather than of a `pathKey` attribute carried beside it, which is
+    /// what this was. That key held a `String`, so it could only ever answer for a file, and a
+    /// second key next to it for the other kind would leave both readable only by knowing which to
+    /// ask for first. The attachment is the chip: it is what draws it, what makes it one character,
+    /// and now what says which of the two it is.
+    static func subject(of storage: NSAttributedString, at index: Int) -> InlineChip? {
+        guard index >= 0, index < storage.length else { return nil }
+        let attachment = storage.attribute(.attachment, at: index, effectiveRange: nil)
+        return (attachment as? InlineChipAttachment)?.subject
+    }
 
     /// The draft as the text view should hold it: words as words, files as chips.
     static func storage(
@@ -34,29 +107,26 @@ enum ComposerChipText {
             case .text(let text):
                 result.append(NSAttributedString(string: text, attributes: attributes))
             case .attachment(let path):
-                result.append(chip(for: path, font: font))
+                result.append(chip(for: .file(path: path), font: font))
             }
         }
         return result
     }
 
-    /// One file, as the single character that stands for it.
+    /// One file, or one block of instructions, as the single character that stands for it.
     ///
     /// The ground is named by the caller because the same chip is now drawn on two very different
     /// ones: the composer's sunken grey, and the accent fill of a sent turn. See
     /// `AttachmentChipCell.Ground`, which is where the second one's numbers and their measurements
     /// are written down.
     static func chip(
-        for path: String, font: NSFont, ground: AttachmentChipCell.Ground = .composer
+        for subject: InlineChip, font: NSFont, ground: AttachmentChipCell.Ground = .composer
     ) -> NSAttributedString {
-        let attachment = FileChipAttachment(path: path, font: font, ground: ground)
-        attachment.attachmentCell = AttachmentChipCell(path: path, font: font, ground: ground)
+        let attachment = InlineChipAttachment(subject: subject, font: font, ground: ground)
+        attachment.attachmentCell = AttachmentChipCell(subject: subject, font: font, ground: ground)
 
         let chip = NSMutableAttributedString(attachment: attachment)
-        chip.addAttributes(
-            [pathKey: path, .font: font],
-            range: NSRange(location: 0, length: chip.length)
-        )
+        chip.addAttributes([.font: font], range: NSRange(location: 0, length: chip.length))
         return chip
     }
 
@@ -66,7 +136,7 @@ enum ComposerChipText {
         forEachRun(in: storage) { run in
             switch run {
             case .text(let string): text += string
-            case .attachment(let path, _): text += AttachmentDraft.token(for: path)
+            case .chip(let subject, _): text += subject.text
             }
         }
         return text
@@ -99,9 +169,9 @@ enum ComposerChipText {
                     draft += offset - seen
                     seen = offset
                 }
-            case .attachment(let path, _):
+            case .chip(let subject, _):
                 guard seen < offset else { return }
-                draft += (AttachmentDraft.token(for: path) as NSString).length
+                draft += (subject.text as NSString).length
                 seen += 1
             }
         }
@@ -130,8 +200,8 @@ enum ComposerChipText {
                     draft += length
                     position += length
                 }
-            case .attachment(let path, _):
-                let length = (AttachmentDraft.token(for: path) as NSString).length
+            case .chip(let subject, _):
+                let length = (subject.text as NSString).length
                 if draft + length > offset, draft >= offset {
                     answer = position
                 } else if draft + length >= offset {
@@ -149,10 +219,14 @@ enum ComposerChipText {
 
     enum Run {
         case text(String)
-        case attachment(path: String, at: Int)
+        case chip(InlineChip, at: Int)
     }
 
     /// One pass over the storage, in order, with runs of words handed over whole.
+    ///
+    /// Walked by the attachment rather than by an attribute carried beside it. An attachment that
+    /// is not one of ours is words, which is what it was before as well: anything AppKit put in the
+    /// storage itself has no subject to report and no text of its own to write back.
     static func forEachRun(in storage: NSAttributedString, _ body: (Run) -> Void) {
         let string = storage.string as NSString
         var pending = NSRange(location: 0, length: 0)
@@ -164,18 +238,18 @@ enum ComposerChipText {
         }
 
         storage.enumerateAttribute(
-            pathKey, in: NSRange(location: 0, length: storage.length)
+            .attachment, in: NSRange(location: 0, length: storage.length)
         ) { value, range, _ in
-            guard let path = value as? String else {
+            guard let subject = (value as? InlineChipAttachment)?.subject else {
                 if pending.length == 0 { pending.location = range.location }
                 pending.length += range.length
                 return
             }
             flush()
             // One character each, however many of them landed in this run: a paste of two chips
-            // arrives as one range carrying one path, and each character is still one file.
+            // arrives as one range carrying one attachment, and each character is still one chip.
             for offset in 0..<range.length {
-                body(.attachment(path: path, at: range.location + offset))
+                body(.chip(subject, at: range.location + offset))
             }
             pending.location = range.location + range.length
         }
@@ -183,17 +257,21 @@ enum ComposerChipText {
     }
 
     /// Every file in the storage, with the single character that stands for it.
+    ///
+    /// Files alone, because every caller is the composer asking what the draft is carrying, and a
+    /// draft never holds the other kind: instructions are added when a turn is composed, which is
+    /// after the composer has let go of it.
     static func attachments(in storage: NSAttributedString) -> [(path: String, offset: Int)] {
         var found: [(String, Int)] = []
         forEachRun(in: storage) { run in
-            guard case .attachment(let path, let offset) = run else { return }
+            guard case .chip(let subject, let offset) = run, let path = subject.path else { return }
             found.append((path, offset))
         }
         return found
     }
 }
 
-/// A chip that is equal to another chip for the same file, drawn the same way.
+/// A chip that is equal to another chip for the same subject, drawn the same way.
 ///
 /// **Nothing here is about drawing, and it is not optional.** `NSAttributedString.isEqual(to:)`
 /// compares the attachment objects in the two strings, and `NSObject`'s answer to that is identity,
@@ -204,15 +282,19 @@ enum ComposerChipText {
 /// the storage takes the reader's selection with it. A turn with a path in it could not be
 /// selected while the agent was answering.
 ///
-/// Equal means the same file at the same size on the same ground, which is exactly the set of
+/// Equal means the same subject at the same size on the same ground, which is exactly the set of
 /// things that changes what is drawn.
-final class FileChipAttachment: NSTextAttachment {
-    let path: String
+///
+/// It is also what the storage is asked about: `ComposerChipText.subject(of:at:)` reads the subject
+/// straight off this object, so the chip's identity and the chip's meaning are one thing rather than
+/// an attachment and an attribute that could disagree.
+final class InlineChipAttachment: NSTextAttachment {
+    let subject: InlineChip
     private let font: NSFont
     private let ground: AttachmentChipCell.Ground
 
-    init(path: String, font: NSFont, ground: AttachmentChipCell.Ground) {
-        self.path = path
+    init(subject: InlineChip, font: NSFont, ground: AttachmentChipCell.Ground) {
+        self.subject = subject
         self.font = font
         self.ground = ground
         super.init(data: nil, ofType: nil)
@@ -223,19 +305,20 @@ final class FileChipAttachment: NSTextAttachment {
     }
 
     override func isEqual(_ object: Any?) -> Bool {
-        guard let other = object as? FileChipAttachment else { return false }
-        return other.path == path && other.font == font && other.ground == ground
+        guard let other = object as? InlineChipAttachment else { return false }
+        return other.subject == subject && other.font == font && other.ground == ground
     }
 
     override var hash: Int {
         var hasher = Hasher()
-        hasher.combine(path)
+        hasher.combine(subject.text)
         hasher.combine(font)
         return hasher.finalize()
     }
 }
 
-/// A file drawn where a word would be: the icon Finder gives its kind, then its name, on a plate.
+/// A file, or a block of instructions, drawn where a word would be: an icon, then a name, on a
+/// plate.
 ///
 /// Deliberately the same object as the chip that used to sit above the box, in everything the eye
 /// checks: the same icon slot, the same corner radius, the same raised plate on the same hairline
@@ -296,7 +379,7 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         )
     }
 
-    let path: String
+    let subject: InlineChip
     private let ground: Ground
     /// The font of the line the chip sits on, which is what it is sized against. Not `font`: an
     /// `NSCell` already has one of those and it means something else.
@@ -321,18 +404,14 @@ final class AttachmentChipCell: NSTextAttachmentCell {
     private nonisolated let iconSize: CGFloat
     private nonisolated let nameWidth: CGFloat
 
-    /// Room either side of the contents, and between the icon and the name.
-    private static let padding: CGFloat = 5
-    private static let gap: CGFloat = 4
     /// As wide as a name gets before it is cut in the middle. Enough for
     /// `Pasted 2026-08-20 at 22.29.20.png` to stay recognisable.
     private static let maxNameWidth: CGFloat = 170
-    private static let cornerRadius: CGFloat = 4
 
-    init(path: String, font: NSFont, ground: Ground = .composer) {
-        let nameFont = Self.nameFont(for: font)
-        let name = (path as NSString).lastPathComponent
-        let iconSize = ceil(nameFont.pointSize) + 2
+    init(subject: InlineChip, font: NSFont, ground: Ground = .composer) {
+        let nameFont = ComposerInlineChipLayout.labelFont(for: font)
+        let name = subject.label
+        let iconSize = ComposerInlineChipLayout.iconSize(for: font)
         let nameWidth = min(
             ceil((name as NSString).size(withAttributes: [.font: nameFont]).width),
             Self.maxNameWidth
@@ -340,15 +419,20 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         // Unrounded, because the plate is rounded up off it and the difference between the two is
         // what centres the plate below.
         let lineHeight = NSLayoutManager().defaultLineHeight(for: font)
-        let height = ceil(lineHeight) + 2
+        let height = ComposerInlineChipLayout.height(for: font)
 
-        self.path = path
+        self.subject = subject
         self.lineFont = font
         self.ground = ground
         self.iconSize = iconSize
         self.nameWidth = nameWidth
         self.chipSize = NSSize(
-            width: ceil(Self.padding * 2 + iconSize + Self.gap + nameWidth),
+            width: ceil(
+                ComposerInlineChipLayout.horizontalPadding * 2
+                    + iconSize
+                    + ComposerInlineChipLayout.gap
+                    + nameWidth
+            ),
             height: height
         )
         // Where the plate sits against the baseline of the line it is on. The cell is drawn from
@@ -363,20 +447,13 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         fatalError("init(coder:) has not been implemented")
     }
 
-    var filename: String { (path as NSString).lastPathComponent }
-
-    /// The name, at the size the rest of the line is set at but a little smaller, which is what
-    /// keeps a chip from being the tallest thing on its line. Static, because init has to ask it
-    /// before there is a `self` to ask.
-    private static func nameFont(for lineFont: NSFont) -> NSFont {
-        NSFont.systemFont(ofSize: max(lineFont.pointSize - 1, 9))
-    }
+    var label: String { subject.label }
 
     private var nameAttributes: [NSAttributedString.Key: Any] {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingMiddle
         return [
-            .font: Self.nameFont(for: lineFont),
+            .font: ComposerInlineChipLayout.labelFont(for: lineFont),
             .foregroundColor: ground.ink,
             .paragraphStyle: paragraph,
         ]
@@ -398,7 +475,11 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         withFrame cellFrame: NSRect, in controlView: NSView?, characterIndex: Int
     ) {
         let frame = cellFrame.insetBy(dx: 0, dy: 0.5)
-        let plate = NSBezierPath(roundedRect: frame, xRadius: Self.cornerRadius, yRadius: Self.cornerRadius)
+        let plate = NSBezierPath(
+            roundedRect: frame,
+            xRadius: ComposerInlineChipLayout.cornerRadius,
+            yRadius: ComposerInlineChipLayout.cornerRadius
+        )
 
         ground.plate.setFill()
         plate.fill()
@@ -408,30 +489,51 @@ final class AttachmentChipCell: NSTextAttachmentCell {
 
         let side = iconSize
         let iconRect = NSRect(
-            x: frame.minX + Self.padding,
+            x: frame.minX + ComposerInlineChipLayout.horizontalPadding,
             y: frame.midY - side / 2,
             width: side,
             height: side
         )
-        // The file's own icon, unless the pointer is on the chip, in which case the slot is the
-        // close control instead. A symbol that would not load falls back to the icon rather than
-        // to an empty slot.
-        let mark = (isRemovable(from: controlView, at: characterIndex) ? close : nil)
-            ?? FileTypeIcon.icon(for: filename)
-        mark.draw(
+        // The chip's own icon, unless the pointer is on it, in which case the slot is the close
+        // control instead. A symbol that would not load draws nothing rather than leaving the
+        // wrong glyph in the slot: `icon` already falls back to the file's icon where there is a
+        // file, and for a block of instructions there is no second answer to fall back to.
+        let mark = (isRemovable(from: controlView, at: characterIndex) ? close : nil) ?? icon
+        mark?.draw(
             in: iconRect, from: .zero, operation: .sourceOver, fraction: 1,
             respectFlipped: true, hints: nil
         )
 
-        let name = NSAttributedString(string: filename, attributes: nameAttributes)
+        let name = NSAttributedString(string: label, attributes: nameAttributes)
         let height = name.size().height
         let nameRect = NSRect(
-            x: iconRect.maxX + Self.gap,
+            x: iconRect.maxX + ComposerInlineChipLayout.gap,
             y: frame.midY - height / 2,
             width: nameWidth,
             height: height
         )
         name.draw(with: nameRect, options: [.usesLineFragmentOrigin])
+    }
+
+    /// The mark in the slot before the name.
+    ///
+    /// A file gets the icon its kind is drawn with everywhere else in this window. A block of
+    /// instructions has no kind and no file for `FileTypeIcon` to answer about, so it gets a symbol
+    /// in the ground's own ink: the same `doc.text` the button under the bubble used to carry, kept
+    /// so that a reader who knew that chip still recognises this one.
+    ///
+    /// Built per draw rather than held, exactly as `close` is. One chip in a turn is one of these,
+    /// and it is a glyph.
+    private var icon: NSImage? {
+        switch subject {
+        case .file:
+            return FileTypeIcon.icon(for: label)
+        case .instructions:
+            let size = NSImage.SymbolConfiguration(pointSize: iconSize - 3, weight: .regular)
+            let colour = NSImage.SymbolConfiguration(paletteColors: [ground.ink])
+            return NSImage(systemSymbolName: "doc.text", accessibilityDescription: label)?
+                .withSymbolConfiguration(size.applying(colour))
+        }
     }
 
     // MARK: - Taking it off
@@ -451,16 +553,31 @@ final class AttachmentChipCell: NSTextAttachmentCell {
     /// name nothing, keeps the chip exactly the width it had so the line does not reflow under the
     /// pointer, and is what `AttachmentChip` and `SlashCommandChip` already do above the box.
     ///
-    /// `.secondaryLabelColor` because it is only ever drawn on the composer's own ground; the
-    /// bubble's ink is not reached through here, because a sent turn is never removable.
+    /// **A drawn X on a plate, not `xmark.circle.fill`.** That symbol knocks its X out of a filled
+    /// disc, so the X is a hole showing whatever is behind the chip: grey on grey at eleven
+    /// points, which is a smudge rather than a control.
     ///
-    /// Built per draw rather than held: one chip shows it, only while the pointer is on it, and
-    /// SF Symbols does its own caching underneath.
+    /// That was found and fixed on `AttachmentChip`, and this chip kept the smudge, because the
+    /// two are the same object drawn by two renderers and only one of them is a view. The chip
+    /// above the box was the one read; the chip *inside* the box, which is the one a file dropped
+    /// into the composer actually becomes, was the one complained about. They read one set of
+    /// numbers now: see `ChipRemoveMark`, and `ChipRemoveImage` for the drawing.
+    ///
+    /// The composer's own ground, because a sent turn is never removable: `isRemovable` wants a
+    /// `ComposerTextView` and the bubble is not one. So the disc is `Palette.surface` under a
+    /// `surfaceRaised` chip, which is the step `AttachmentChip` takes, and it is not a fourth
+    /// member of `Ground` because the other ground would have to invent a value it can never draw.
+    ///
+    /// Built per draw rather than held: one chip shows it, only while the pointer is on it, and it
+    /// is a disc with a glyph on it.
     private var close: NSImage? {
-        let size = NSImage.SymbolConfiguration(pointSize: iconSize, weight: .regular)
-        let ink = NSImage.SymbolConfiguration(paletteColors: [.secondaryLabelColor])
-        return NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Remove")?
-            .withSymbolConfiguration(size.applying(ink))
+        ChipRemoveImage.of(
+            diameter: iconSize,
+            ink: ground.ink,
+            plate: NSColor(Palette.surface),
+            border: ground.border,
+            label: "Remove \(label)"
+        )
     }
 
     /// Where a click takes the file off rather than opening it: the icon's slot and the padding
@@ -471,7 +588,9 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         NSRect(
             x: frame.minX,
             y: frame.minY,
-            width: Self.padding + iconSize + Self.gap / 2,
+            width: ComposerInlineChipLayout.horizontalPadding
+                + iconSize
+                + ComposerInlineChipLayout.gap / 2,
             height: frame.height
         )
     }
@@ -488,9 +607,9 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         atCharacterIndex charIndex: Int,
         untilMouseUp flag: Bool
     ) -> Bool {
-        guard event.clickCount >= 1, let composer = controlView as? ComposerTextView else {
-            return false
-        }
+        guard event.clickCount >= 1, let composer = controlView as? ComposerTextView,
+              let path = subject.path
+        else { return false }
         // Only where the control is actually showing. Without that, the click that makes an
         // inactive window key would remove a file whose X the reader never saw: the tracking area
         // is `.activeInKeyWindow`, so nothing has hovered yet.

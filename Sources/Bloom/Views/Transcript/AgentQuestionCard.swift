@@ -62,7 +62,7 @@ struct AgentQuestionCard: View {
             RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
                 .strokeBorder(
                     isOpen ? Palette.questionBorder : Palette.border,
-                    lineWidth: Metrics.hairline
+                    lineWidth: Metrics.outline
                 )
         )
         .padding(.vertical, TranscriptLayout.tight)
@@ -248,6 +248,9 @@ struct AgentQuestionCard: View {
             }
             .padding(.vertical, Metrics.spacing)
             .padding(.horizontal, Metrics.spacingWide)
+            // Command-Backspace is delete-to-start-of-line in a text box, and the menu bar had it
+            // for Archive Workspace. See `FocusedValues.isTypingProse`.
+            .focusedValue(\.isTypingProse, otherFocus != nil)
         } else if isOpen {
             Button {
                 isWritingOther.insert(question.id)
@@ -270,9 +273,8 @@ struct AgentQuestionCard: View {
         HStack(spacing: TranscriptLayout.tight) {
             Button("Send answer") { send() }
                 .buttonStyle(.borderedProminent)
-                // Bloom's fill rather than the system accent, as every other prominent
-                // button in the app carries. See `EmptyStateView`.
-                .tint(Palette.accentFill)
+                // The shared system control accent for a primary action.
+                .tint(Palette.controlAccent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!isComplete)
 

@@ -19,16 +19,37 @@ public struct HomeRow: Identifiable, Hashable, Sendable {
     /// Nil outside a search, and nil when the name itself matched, because then the row is already
     /// showing it.
     public var match: String?
+    /// What this archived record still holds, when the list is showing that at all.
+    ///
+    /// Nil on every live row, always, and nil on an archived row under a chip that does not draw
+    /// sizes: measuring is a database read and a `git for-each-ref` per project, so it is asked
+    /// for under the Archived chip and nowhere else. See `HomeScope.showsFootprints`.
+    ///
+    /// The whole footprint rather than the byte count on its own, because the row has two other
+    /// uses for it and both are words rather than a column: what the record is made of, and
+    /// whether the branch that holds the commits is still on this Mac. See
+    /// `ArchivedWorkspaceFootprint.contents`.
+    public var footprint: ArchivedWorkspaceFootprint?
 
-    public init(workspace: Workspace, repo: Repo? = nil, match: String? = nil) {
+    public init(
+        workspace: Workspace,
+        repo: Repo? = nil,
+        match: String? = nil,
+        footprint: ArchivedWorkspaceFootprint? = nil
+    ) {
         self.workspace = workspace
         self.repo = repo
         self.match = match
+        self.footprint = footprint
     }
 
     public var id: WorkspaceID { workspace.id }
 
     public var isArchived: Bool { workspace.state != .active }
+
+    /// What deleting this record would stop the database from holding, or nil when nobody has
+    /// measured.
+    public var bytes: Int? { footprint?.totalBytes }
 }
 
 /// One date heading and the rows under it.
@@ -56,22 +77,6 @@ public struct HomeGroup: Identifiable, Hashable, Sendable {
 /// number, and they are worked out in this one pass rather than in five more.
 public struct HomeListing: Sendable {
     public var groups: [HomeGroup]
-    /// The most recent finished work, drawn under the live list and capped.
-    ///
-    /// **Why the resting page carries any archived rows at all, having just defaulted them off.**
-    /// `HomeScope.live` is the right subject for Home and it is not the whole of what a person
-    /// wants on landing: the thing they finished an hour ago is the second question, and a screen
-    /// that answers only the first is a screen with three rows and half a window of ground under
-    /// them. So the archive is present as a tail rather than as the page: `HomeList.tailLimit`
-    /// rows under a heading of their own that says how many of how many, ending in a way through
-    /// to the rest. Three rows that matter above six that do not, instead of three above
-    /// seventeen.
-    ///
-    /// Empty in every other scope, and empty in a search, because in both of those the archive is
-    /// what was asked for rather than context around the answer.
-    public var tail: [HomeRow] = []
-    /// How much finished work the tail is a sample of, which is what its heading counts against.
-    public var tailTotal = 0
     /// The transcripts that matched, one entry per workspace. Empty outside a search, because the
     /// index is only asked when there is something to ask it.
     public var transcripts: [TranscriptWorkspaceMatches]
@@ -87,22 +92,25 @@ public struct HomeListing: Sendable {
     public var archived: Int
     /// Rows in the list that are archived.
     public var shownArchived: Int
+    /// What the rows in the list hold between them, and nought whenever nobody measured.
+    ///
+    /// Over the rows rather than over the machine, which is the same rule the rest of these
+    /// counts follow now that they are read at the foot of the list rather than beside the chips:
+    /// a total that ignored the project filter would sit under eleven rows describing thirty.
+    public var shownBytes: Int
 
     public init(
         groups: [HomeGroup],
-        tail: [HomeRow] = [],
-        tailTotal: Int = 0,
         transcripts: [TranscriptWorkspaceMatches] = [],
         counts: HomeScopeCounts = HomeScopeCounts(),
         isSearching: Bool = false,
         shown: Int,
         considered: Int,
         archived: Int,
-        shownArchived: Int
+        shownArchived: Int,
+        shownBytes: Int = 0
     ) {
         self.groups = groups
-        self.tail = tail
-        self.tailTotal = tailTotal
         self.transcripts = transcripts
         self.counts = counts
         self.isSearching = isSearching
@@ -110,6 +118,7 @@ public struct HomeListing: Sendable {
         self.considered = considered
         self.archived = archived
         self.shownArchived = shownArchived
+        self.shownBytes = shownBytes
     }
 
     public static let empty = HomeListing(
@@ -141,14 +150,21 @@ public struct HomeFilter: Equatable, Sendable {
     /// scope rather than a switch of its own, because the switch was a second narrowing mechanism
     /// beside the field with its own state, its own empty state and its own clause in the summary
     /// line, all to answer a question the chips answer with a number attached.
-    public var scope: HomeScope = .live
+    public var scope: HomeScope = .all
+    /// Whether the list is in date order or in size order, which only the Archived chip offers
+    /// and only the Archived chip is asked about. See `HomeOrder`.
+    public var order: HomeOrder = .recent
 
     public init(
-        query: String = "", projects: Set<RepoID> = [], scope: HomeScope = .live
+        query: String = "",
+        projects: Set<RepoID> = [],
+        scope: HomeScope = .all,
+        order: HomeOrder = .recent
     ) {
         self.query = query
         self.projects = projects
         self.scope = scope
+        self.order = order
     }
 
     /// What was typed, trimmed and lowercased, which is what every match here is made against.
@@ -187,6 +203,9 @@ public enum HomeList {
     ///     the index query is a hop onto the store actor.
     ///   - activity: which agents are running and which have stopped to ask, so the "Needs you"
     ///     and "Running" chips can be counted here rather than by the view.
+    ///   - footprints: what each archived record holds, when somebody has measured. Empty under
+    ///     every chip but Archived, because that is the only one that draws a size; a row whose
+    ///     footprint is missing keeps a nil one and sorts as nought rather than to the top.
     public static func build(
         repos: [Repo],
         workspaces: [Workspace],
@@ -194,12 +213,22 @@ public enum HomeList {
         transcripts: [TranscriptWorkspaceMatches] = [],
         filter: HomeFilter,
         activity: HomeActivity = HomeActivity(),
+        footprints: ArchiveCleanup = ArchiveCleanup(footprints: []),
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> HomeListing {
         var byID: [RepoID: Repo] = [:]
         byID.reserveCapacity(repos.count)
         for repo in repos { byID[repo.id] = repo }
+
+        // Indexed once rather than searched per row, for the reason the repositories above are:
+        // this runs over every workspace on the machine and a linear scan per row would make it
+        // quadratic on exactly the install that has enough archived work to want the column.
+        var footprintOf: [WorkspaceID: ArchivedWorkspaceFootprint] = [:]
+        if filter.scope.showsFootprints {
+            footprintOf.reserveCapacity(footprints.footprints.count)
+            for footprint in footprints.footprints { footprintOf[footprint.id] = footprint }
+        }
 
         let needle = filter.needle
         let isSearching = filter.isSearching
@@ -221,7 +250,8 @@ public enum HomeList {
                 workspace: workspace,
                 repo: repo,
                 // Only when it was not the name, which the row already draws.
-                match: field == workspace.name ? nil : field
+                match: field == workspace.name ? nil : field,
+                footprint: footprintOf[workspace.id]
             )
             matched.append(row)
             if row.isArchived { counts.archived += 1 } else { counts.live += 1 }
@@ -254,60 +284,83 @@ public enum HomeList {
             }
             : []
 
-        // Recency, most recent first, and nothing else. Pinning is the sidebar's ordering, and a
-        // pinned workspace from three weeks ago hoisted to the top would land under a "Today"
-        // heading that is then a lie.
-        let ordered = filter.scope.showsWorkspaces
-            ? rows.sorted { $0.workspace.lastActivityAt > $1.workspace.lastActivityAt }
-            : []
+        // An order the strip is not offering is refused here rather than settled away in the
+        // filter, so a chip that cannot draw sizes cannot be sorted by them and the Archived chip
+        // is still on Largest when you come back to it. See `HomeOrder.applies`.
+        let order = HomeOrder.applies(scope: filter.scope, searching: isSearching)
+            ? filter.order
+            : .recent
+        let ordered = filter.scope.showsWorkspaces ? sorted(rows, by: order) : []
 
         // Searching, the date buckets go. A result list ordered by when the work last happened,
         // under headings that say "3 weeks ago", answers a question nobody asked: what was typed
         // is the question, and the heading over the answer says which KIND of thing matched. It
         // is still one `HomeGroup` in one `List`, which is what keeps the arrow keys and Return
         // working with one keyboard model rather than two.
-        let groups = isSearching
-            ? (ordered.isEmpty ? [] : [HomeGroup(id: "workspaces", title: "Workspaces", rows: ordered)])
-            : group(ordered, now: now, calendar: calendar)
+        //
+        // A size order flattens them the same way and for the same reason, and its heading is the
+        // one thing in the list saying the dates no longer decide the order. See `HomeOrder`.
+        let groups: [HomeGroup]
+        if isSearching {
+            groups = ordered.isEmpty
+                ? []
+                : [HomeGroup(id: "workspaces", title: "Workspaces", rows: ordered)]
+        } else if let heading = order.heading {
+            groups = ordered.isEmpty
+                ? []
+                : [HomeGroup(id: "order-\(order.rawValue)", title: heading, rows: ordered)]
+        } else {
+            groups = group(ordered, now: now, calendar: calendar)
+        }
 
         return HomeListing(
             groups: groups,
-            tail: tail(after: ordered, from: matched, scope: filter.scope, isSearching: isSearching),
-            tailTotal: counts.archived,
             transcripts: shownTranscripts,
             counts: counts,
             isSearching: isSearching,
             shown: ordered.count,
             considered: considered,
             archived: archived.count,
-            shownArchived: ordered.count { $0.isArchived }
+            shownArchived: ordered.count { $0.isArchived },
+            shownBytes: ordered.reduce(0) { $0 + ($1.bytes ?? 0) }
         )
     }
 
-    /// How many finished rows follow the live list. Six: enough to fill the ground under three
-    /// live workspaces on a 1440 by 900 window, few enough that the eye reads it as a sample
-    /// rather than as the list starting again.
-    public static let tailLimit = 6
-
-    /// The recent archive drawn under a live list, newest first.
+    /// The one place the list's order is decided.
     ///
-    /// Only under `live`, and only when the live list has something in it. On a machine where
-    /// nothing is live the pane raises `HomeEmptyState.emptyScope(.live)`, which says every
-    /// workspace here has been archived and carries the button that shows them; six rows of
-    /// archive under that sentence would be the sentence contradicting itself.
-    private static func tail(
-        after ordered: [HomeRow],
-        from matched: [HomeRow],
-        scope: HomeScope,
-        isSearching: Bool
-    ) -> [HomeRow] {
-        guard !isSearching, scope == .live, !ordered.isEmpty else { return [] }
-        return matched
-            .filter(\.isArchived)
-            .sorted { $0.workspace.lastActivityAt > $1.workspace.lastActivityAt }
-            .prefix(tailLimit)
-            .map { $0 }
+    /// Recency is most recent first and nothing else. Pinning is the sidebar's ordering, and a
+    /// pinned workspace from three weeks ago hoisted to the top would land under a "Today"
+    /// heading that is then a lie.
+    ///
+    /// Size is largest first, with the tie broken on the identifier, because a list that
+    /// reshuffles equal rows between two refreshes is a list somebody clicks the wrong row in:
+    /// every workspace archived in the same second by the same script is such a tie, and so is
+    /// every pair of rows before the measurement has arrived.
+    private static func sorted(_ rows: [HomeRow], by order: HomeOrder) -> [HomeRow] {
+        switch order {
+        case .recent:
+            return rows.sorted { $0.workspace.lastActivityAt > $1.workspace.lastActivityAt }
+        case .largest:
+            return rows.sorted { first, second in
+                let left = first.bytes ?? 0
+                let right = second.bytes ?? 0
+                if left != right { return left > right }
+                return first.id.rawValue < second.id.rawValue
+            }
+        }
     }
+
+    // **Where "Recently archived" went.** A live list used to be followed by a tail: the six most
+    // recent archived rows under a quiet heading, ending in a row that moved the chip to Archived.
+    // It existed to make resting on `live` honest, because a page that hid the finished work while
+    // showing three live rows on a 1440 by 900 window left half the window empty and said nothing
+    // about the seventeen workspaces it was not drawing.
+    //
+    // It went because the strip lost its Live chip. `HomeScope.offered(searching:)` browses with
+    // `all` and `archived` alone now, and the tail was built under `live` and nowhere else, so
+    // nothing could reach it. Under `all` it would have been the same rows twice: the archived work
+    // is already in the list, in date order, above and below the live rows rather than below all of
+    // them. If a Live chip ever comes back, this comes back with it.
 
     /// The transcript results the project menu leaves standing.
     ///
@@ -461,12 +514,23 @@ public enum HomeList {
     /// Down at the foot of the list it is beside the rows instead, so it has to be about the
     /// rows: narrowed to Archived it counts archived work, not the machine.
     ///
+    /// **It carries what the archive costs, and how big the database is, because those were a
+    /// header and a footer on a Settings pane that has gone.** Both are facts about the whole of
+    /// something rather than about a row, which is what this line is for, and they are two halves
+    /// of one question: the archived work holds 7.6 MB and the file it is in is 44.3 MB, and
+    /// reading either one without the other tells you nothing about whether tidying up is worth
+    /// the afternoon. They appear under the Archived chip alone, which is the chip that measured
+    /// them.
+    ///
     /// Empty when there is nothing to describe. On a machine with no project there is nothing to
     /// count and no bar is drawn.
+    /// - Parameter database: how big the file is, once somebody has asked. Nil until then, and
+    ///   nil forever under a chip that never asks.
     public static func summary(
         listing: HomeListing,
         filter: HomeFilter,
-        projects: Int
+        projects: Int,
+        database: DatabaseSize? = nil
     ) -> String {
         guard listing.considered > 0 || listing.archived > 0 else { return "" }
 
@@ -480,7 +544,10 @@ public enum HomeList {
 
         if !filter.projects.isEmpty {
             let total = ArchiveDeletion.count(listing.considered, "workspace")
-            return "Showing \(listing.shown) of \(total)"
+            return storage(
+                on: "Showing \(listing.shown) of \(total)",
+                listing: listing, filter: filter, database: database
+            )
         }
 
         let counts = listing.counts
@@ -492,9 +559,10 @@ public enum HomeList {
         case .running:
             return counts.running == 0 ? "Nothing running" : "\(counts.running) running"
         case .archived:
-            return counts.archived == 0
+            let head = counts.archived == 0
                 ? "Nothing archived"
                 : "\(counts.archived) archived\(inProjects(projects))"
+            return storage(on: head, listing: listing, filter: filter, database: database)
         case .live:
             // The archived half is the pointer to the chip that shows it, and the one clause that
             // keeps the default scope honest: a page about live work says out loud how much
@@ -513,6 +581,43 @@ public enum HomeList {
             }
             return text
         }
+    }
+
+    /// What the archive costs and how big the file holding it is, appended to whatever the line
+    /// already said.
+    ///
+    /// **Appended rather than written into one branch of the switch**, because the project menu
+    /// answers before the chip does. Narrowed to one project the line reads "Showing 11 of 312
+    /// workspaces" and never reaches the `archived` case at all, while the rows above it are
+    /// still drawing a size each. A total that appeared and vanished with the project filter
+    /// would be the one number on this screen that could not be trusted.
+    ///
+    /// The count comes before the file, because that is the order they can be acted on in and
+    /// because this line truncates at the tail on a narrow window: what survives is what a person
+    /// tidying up is reading.
+    private static func storage(
+        on head: String, listing: HomeListing, filter: HomeFilter, database: DatabaseSize?
+    ) -> String {
+        guard filter.scope.showsFootprints else { return head }
+        var text = head
+        if listing.shownBytes > 0 {
+            text += ", holding \(ArchiveDeletion.bytes(listing.shownBytes))"
+        }
+        if let database { text += " \u{00B7} " + databaseClause(database) }
+        return text
+    }
+
+    /// How big the file is, and how much of it nothing is using.
+    ///
+    /// **The second half appears only when a compaction is on offer**, because it is the only
+    /// thing that can act on it and because a person who cannot do anything about 400 kB of free
+    /// list does not need to be told it is there. When the offer is up, the button beside this
+    /// text needs a number to be about; see `DatabaseSize.compactionHelp` for the rest of the
+    /// explanation, which is a paragraph and lives on the control rather than in this one line.
+    private static func databaseClause(_ size: DatabaseSize) -> String {
+        let total = "Bloom\u{2019}s database is \(ArchiveDeletion.bytes(size.totalBytes))"
+        guard size.isWorthCompacting else { return total }
+        return "\(total), \(ArchiveDeletion.bytes(size.freeBytes)) of it unused"
     }
 
     /// The clause naming how many projects a count is spread over, and nothing at all on a machine

@@ -100,7 +100,7 @@ struct SourceEditor: NSViewRepresentable {
         // with and the gutter is drawn on top of the first few characters of every line.
         let ruler = LineNumberRuler(scrollView: scrollView, textView: textView)
         ruler.fill = resolvedGround
-        ruler.rule = NSColor(Palette.border)
+        ruler.numberColor = NSColor(Palette.textTertiary)
         scrollView.verticalRulerView = ruler
         scrollView.hasVerticalRuler = true
         scrollView.rulersVisible = true
@@ -125,7 +125,7 @@ struct SourceEditor: NSViewRepresentable {
         scrollView.backgroundColor = ground
         if let ruler = scrollView.verticalRulerView as? LineNumberRuler {
             ruler.fill = ground
-            ruler.rule = NSColor(Palette.border)
+            ruler.numberColor = NSColor(Palette.textTertiary)
             ruler.needsDisplay = true
         }
 
@@ -326,9 +326,13 @@ final class CodeTextView: NSTextView {
         super.draw(dirtyRect)
 
         guard string.isEmpty, !placeholder.isEmpty else { return }
+        // `.placeholderTextColor`, which is what AppKit gives a field's own placeholder, and not
+        // the tertiary label: `Palette.textPlaceholder`'s doc says a placeholder set at the
+        // tertiary rung reads as a disabled control rather than as a prompt, and this box is
+        // editable whenever it shows one.
         let attributes: [NSAttributedString.Key: Any] = [
             .font: CodeMetrics.font,
-            .foregroundColor: NSColor.tertiaryLabelColor,
+            .foregroundColor: NSColor.placeholderTextColor,
         ]
         let origin = textContainerOrigin
         let padding = textContainer?.lineFragmentPadding ?? 0

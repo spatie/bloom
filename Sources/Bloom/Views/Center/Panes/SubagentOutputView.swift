@@ -17,6 +17,12 @@ import BloomCore
 /// other is what used to leave this pane with a title and a single sentence in it. Bloom does not
 /// own the file, so every way of failing to read it is a sentence.
 ///
+/// **And what it reads before that file exists**, which is the whole of a running subagent: the
+/// path is named on the line that ENDS the task, so until then there is nothing on disk to open.
+/// The lines the subagent produced came past on the parent's own stream carrying its
+/// `parent_tool_use_id` and Bloom stored every one of them, so the pane falls back to those. See
+/// `SubagentTranscript.live(streamLines:)` and `WorkspaceModel.subagentStreamLines(forToolUseID:)`.
+///
 /// **It stays live while the subagent works**, which is the case it is most often opened in. The
 /// brief is known the moment the task starts, so it is on screen immediately; the output file
 /// grows under the CLI's hand, so it is re-read on `SubagentPane.refreshSeconds`. The version
@@ -85,7 +91,23 @@ struct SubagentOutputView: View {
         // to be, and this now runs once a second rather than once.
         let path = subagent?.outputFile
         let kind = kind
-        let result = await Task.detached { SubagentOutput.read(path: path, kind: kind) }.value
+        // Read on the main actor, parsed off it. These are rows the transcript owns.
+        let lines = kind == .agent ? model.subagentStreamLines(forToolUseID: toolUseID) : []
+        let result = await Task.detached {
+            switch SubagentOutput.read(path: path, kind: kind) {
+            case .success(let parsed):
+                return Result<SubagentTranscript, SubagentOutput.Failure>.success(parsed)
+            case .failure(let reason):
+                // **What Bloom saw, when the CLI has not written anything to read.** This is the
+                // whole of a running subagent's pane: the file is named on the line that ends it,
+                // so for the length of the run the read above can only fail. Falling back rather
+                // than replacing, because once the file is there it is the CLI's own record of
+                // the task and this is a copy of what went past. See
+                // `SubagentTranscript.live(streamLines:)`.
+                let live = SubagentTranscript.live(streamLines: lines)
+                return live.isEmpty ? .failure(reason) : .success(live)
+            }
+        }.value
         switch result {
         case .success(let parsed):
             transcript = parsed
@@ -95,6 +117,9 @@ struct SubagentOutputView: View {
             failure = reason
         }
     }
+
+    /// The Task call this subagent hangs off, which is how its nested rows are found.
+    private var toolUseID: String { subagent?.toolUseID ?? "" }
 
     // MARK: - Parts
 
@@ -156,7 +181,9 @@ struct SubagentOutputView: View {
     @ViewBuilder
     private var output: some View {
         if let failure {
-            Text(failure.sentence(kind))
+            Text(SubagentPane.nothingToShow(
+                failure, kind: kind, isRunning: subagent?.state == .running
+            ))
                 .font(Typo.body)
                 .foregroundStyle(Palette.textSecondary)
         } else if let transcript {

@@ -311,7 +311,13 @@ public extension PullRequest {
     private var openHeadline: String {
         switch checks {
         case .failing: return "Checks failing"
-        case .pending: return "Checks running"
+        // The headline has to agree with the line under it. `GitHub.rollup` tells a queued check
+        // from a running one and says which in the summary, so a headline fixed at "Checks
+        // running" would sit over the words "1 check queued". The summary is read back rather
+        // than recomputed because `rollup` is its only writer and `PullRequest` carries no
+        // rollup nodes to ask again. `WorkspaceStatusTests` pins the two lines together, in both
+        // vocabularies, so a change to one of them fails rather than drifting.
+        case .pending: return checksSummary.hasSuffix("queued") ? "Checks queued" : "Checks running"
         case .passing, .none: break
         }
         switch reviewDecision?.uppercased() {

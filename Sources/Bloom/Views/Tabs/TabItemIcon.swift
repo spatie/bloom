@@ -31,6 +31,8 @@ struct TabItemIconView: View {
     var icon: TabItemIcon
     var ink: Color
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     /// The square a page's mark is drawn in, and the square the globe is centred in. A point over
     /// `Metrics.glyph`: an icon with a ground of its own needs slightly more room than a stroked
     /// glyph before the two read as the same size.
@@ -58,8 +60,9 @@ struct TabItemIconView: View {
             .frame(width: Self.pageSize, height: Self.pageSize)
             .clipped()
             // One crossfade in a box that does not move, rather than a tab that relays out around
-            // the icon landing.
-            .animation(.easeInOut(duration: 0.12), value: image != nil)
+            // the icon landing. Dropped rather than slowed for Reduce Motion, which is what the
+            // rest of the window does with it: the icon still arrives, on the frame it decoded.
+            .animation(reduceMotion ? nil : Motion.hover, value: image != nil)
         }
     }
 }

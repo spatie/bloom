@@ -33,6 +33,11 @@ struct ChangedFileRow: View, Equatable {
     var depth: Int = 0
     var onSelect: () -> Void
     var onRevert: () -> Void
+    /// Opens this file as a page in the workspace's browser tab, and in the half a split opens.
+    /// Only a page is offered them, which `LocalPageItems` decides. Closures rather than the
+    /// model, so the row keeps comparing on its values alone: see `==` above.
+    var onOpenPage: @MainActor () -> Void
+    var onSplitPage: @MainActor (SplitAxis) -> Void
 
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
 
@@ -72,6 +77,10 @@ struct ChangedFileRow: View, Equatable {
         .contextMenu {
             OpenInItems(target: .file(fullPath))
             Button("Reveal in Finder") { Reveal.inFinder(fullPath) }
+            // With the two above rather than beside Copy path: all of them hand this row to
+            // something that opens it, and only the last is about the clipboard. The same grouping
+            // `FileTreeRow` puts `Open Terminal Tab Here` in.
+            LocalPageItems(path: fullPath, open: onOpenPage, split: onSplitPage)
             Button("Copy path", action: copyPath)
             Divider()
             Button("Revert this file", role: .destructive, action: onRevert)

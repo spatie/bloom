@@ -9,14 +9,16 @@ import BloomCore
 /// It is attached to the DETAIL column, never to the `NavigationSplitView`. See `RootView` for the
 /// crash that taught us the difference.
 ///
-/// There are no pane toggles here any more. A toolbar item sits above all three columns and so
-/// says nothing about which of them it moves, and on macOS 26 a `.button` toggle's on state is a
-/// saturated accent fill, which made two permanently-on panes read as two alarms. Both controls
-/// now live on the boundary they open: the inspector's on the end of the centre tab strip, the
-/// terminal panel's on the panel's own strip. The worktree's own menu went the same way and for
-/// the same reason: it is in the title bar over the column it describes, in `TitleBarStrip`. What
-/// is left is starting work, on the leading edge, and only while the sidebar is folded away. See
-/// `isSidebarCollapsed`.
+/// The navigation pane toggle lives here beside the traffic lights. The inspector control lives
+/// at the leading edge of `TitleBarStrip`, after the native search item and beside its own pane.
+/// Both use `WindowPaneToggle`, so their geometry and interaction remain a matched pair.
+///
+/// **Nor is there a `+` any more.** It appeared only while the sidebar was folded away, on the
+/// argument that nothing else in the window starts work in that state. What the owner saw was a
+/// split button with a bare caret beside the traffic lights, which is a control the eye has to
+/// stop on before it can be dismissed. Command N and Option Command N still start a workspace and
+/// a project from anywhere, in either state, so nothing is only reachable from a pointer that has
+/// folded the pane away.
 ///
 /// And the window's title, which is here because AppKit no longer draws it: a title of our own is
 /// what lets a double click on the NAME start a rename without stealing the double click on the
@@ -27,57 +29,23 @@ import BloomCore
 /// nothing teaches the user that the list is not to be trusted.
 struct BloomWindowToolbar: ToolbarContent {
     let app: AppModel
-
-    /// Whether the first column is folded away, which is the only state this toolbar draws
-    /// anything in.
-    ///
-    /// Both halves of the `+` are things the sidebar already offers, in the place they belong: a
-    /// project's own row carries the `+` that starts a workspace in it, and the Projects heading
-    /// carries the button that adds a project. Those two say WHICH project, which is the question
-    /// the toolbar's version has to ask in a sheet, so with the pane on screen the toolbar item
-    /// was a third way to reach two controls a few centimetres to its left.
-    ///
-    /// A collapsed sidebar is the case that is not a duplicate, and it is exactly the case where
-    /// the other two are gone: fold the pane away and nothing in the window starts work any more.
-    /// Home has a New Workspace button only while there are no workspaces at all, and the centre
-    /// column has none. So the control appears when it is the only one left and stands down when
-    /// it is not.
-    ///
-    /// Nothing is only here. New Workspace is Command N in the File menu and Add Project Folder is
-    /// Command Shift O beside it, so both keys work in either state, on Home and in a workspace,
-    /// whether or not this item is on screen. This is the pointer's way in, not the only way in.
-    let isSidebarCollapsed: Bool
+    let isSidebarVisible: Bool
+    let toggleSidebar: @MainActor @Sendable () -> Void
+    let startFreshAskConversation: () -> Void
 
     var body: some ToolbarContent {
-        if isSidebarCollapsed {
-            ToolbarItem(placement: .navigation) {
-                // A split button: the common case is one click, and the folder picker that used to
-                // hide in the account row lives behind the arrow.
-                // The titles are `MenuBarCatalogue`'s rather than three literals, so this menu
-                // and the File menu cannot end up naming one action two different ways.
-                Menu {
-                    Button(MenuBarCatalogue[.newWorkspace].title, action: presentCreate)
-                        .disabled(app.repos.isEmpty)
-                    Button(MenuBarCatalogue[.newProject].title, action: newProject)
-                    Button(MenuBarCatalogue[.addProjectFolder].title, action: addProject)
-                } label: {
-                    Label("New workspace", systemImage: "plus")
-                } primaryAction: {
-                    // With no projects there is no workspace to start, so the click does the
-                    // thing that needs nothing on disk. It used to open the file panel, which is
-                    // the right answer only for somebody who already has a repository.
-                    if app.repos.isEmpty { newProject() } else { presentCreate() }
-                }
-                .help("Start a workspace")
-                // The control had no accessibility label at all, which matters more now that it
-                // is the one pointer route to this in a window with no sidebar. Read back out of
-                // the running app's tree: the split button is an `AXPopUpButton` whose label was
-                // empty, and it now says this. Its two halves are SwiftUI's own and are not
-                // reachable from here: the `+` still answers "add", off the symbol rather than
-                // off the `Label`'s words, and the caret answers nothing.
-                .accessibilityLabel("Start a workspace")
-            }
+        // NavigationSplitView's default sidebar item offers a label-style context menu on macOS
+        // 26. Bloom always shows this control as an icon, so a choice between "Icon and Text" and
+        // "Icon Only" has no useful effect. RootView removes that default item and this image-only
+        // button keeps the native placement and action without advertising a setting Bloom ignores.
+        ToolbarItem(placement: .navigation) {
+            WindowPaneToggle(
+                edge: .leading,
+                isVisible: isSidebarVisible,
+                action: toggleSidebar
+            )
         }
+        .sharedBackgroundVisibility(.hidden)
 
         // The window's title, drawn by us rather than by AppKit.
         //
@@ -100,6 +68,16 @@ struct BloomWindowToolbar: ToolbarContent {
         // one. The switch is the one `WindowTitleControl`'s notes name: it turns the plate off
         // rather than dividing it, so the item still sits where it sat.
         .sharedBackgroundVisibility(.hidden)
+
+        if app.selection == .ask, app.ask.session != nil {
+            ToolbarItem(placement: .navigation) {
+                Button(action: startFreshAskConversation) {
+                    Image(systemName: "square.and.pencil")
+                }
+                .help("Start a new Ask Bloom conversation")
+                .accessibilityLabel("Start a new Ask Bloom conversation")
+            }
+        }
 
         // The elastic middle of the bar, and the whole reason the search field sits at the
         // window's trailing edge rather than beside the name.
@@ -127,19 +105,4 @@ struct BloomWindowToolbar: ToolbarContent {
         // and this band has to be as wide as the pane under it.
     }
 
-    // MARK: - Actions
-
-    /// Every entry point goes through the same notification so the sheet behaves identically
-    /// whether it came from the toolbar, the sidebar, Home or the menu bar.
-    private func presentCreate() {
-        NotificationCenter.default.post(name: .bloomNewWorkspace, object: nil)
-    }
-
-    private func addProject() {
-        Task { await app.addProjectByAsking() }
-    }
-
-    private func newProject() {
-        NotificationCenter.default.post(name: .bloomNewProject, object: nil)
-    }
 }
