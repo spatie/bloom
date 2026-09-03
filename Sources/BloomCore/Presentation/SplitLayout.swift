@@ -91,6 +91,23 @@ public struct SplitLayout: Codable, Sendable, Hashable {
     /// get back without knowing that a divider is hiding on the edge, so neither end is reachable.
     public static let minimumRatio: Double = 0.05
 
+    /// A ratio pinned into the range a divider may actually sit in.
+    ///
+    /// **One function because there were two, and only one of them survived a NaN.** `setRatio`
+    /// clamped a live drag and `SplitNode.repaired` clamped a decoded tree, in the same expression
+    /// with one term's difference: `repaired` asked `isFinite` first and `setRatio` did not.
+    /// `min` and `max` both return their NaN argument unchanged in Swift, so a drag whose ratio
+    /// came out of a division by a zero-height pane wrote NaN straight into the tree, and every
+    /// frame laid out from it put the divider nowhere. A restored layout was defended against a
+    /// hand-edited file and a live drag was not, which is the wrong way round: the drag is the one
+    /// that runs sixty times a second against a geometry that is briefly empty.
+    ///
+    /// A half rather than a minimum for the unusable value, because a split with no ratio worth
+    /// having is two panes of equal size, which is what a fresh one is.
+    static func clampedRatio(_ ratio: Double, minimum: Double = minimumRatio) -> Double {
+        min(max(ratio.isFinite ? ratio : 0.5, minimum), 1 - minimum)
+    }
+
     public init(pane: String) {
         root = .pane(pane)
         focus = pane
@@ -307,7 +324,7 @@ public struct SplitLayout: Codable, Sendable, Hashable {
     /// Moves one divider. Clamped at both ends so neither side can be dragged out of existence.
     @discardableResult
     public mutating func setRatio(_ ratio: Double, at path: [Int]) -> Bool {
-        let clamped = min(max(ratio, Self.minimumRatio), 1 - Self.minimumRatio)
+        let clamped = Self.clampedRatio(ratio)
         guard let updated = root.settingRatio(clamped, at: path) else { return false }
         root = updated
         return true
@@ -570,7 +587,7 @@ extension SplitNode {
         guard case .split(let axis, let ratio, let first, let second) = self else { return self }
         return .split(
             axis: axis,
-            ratio: min(max(ratio.isFinite ? ratio : 0.5, minimumRatio), 1 - minimumRatio),
+            ratio: SplitLayout.clampedRatio(ratio, minimum: minimumRatio),
             first: first.repaired(minimumRatio: minimumRatio),
             second: second.repaired(minimumRatio: minimumRatio)
         )
