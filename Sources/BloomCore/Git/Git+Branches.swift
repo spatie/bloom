@@ -112,19 +112,6 @@ extension Git {
         try await check(["checkout", "-b", branch, revision], in: directory)
     }
 
-    /// How many commits `head` has that `base` does not.
-    ///
-    /// Answers 0 rather than throwing when the range cannot be resolved. Every caller of this is
-    /// deciding whether something is safe, and "git could not tell me" has to be handled by the
-    /// caller as its own thing rather than arriving disguised as a number.
-    public static func commitsAhead(base: String, head: String = "HEAD", in directory: String) async throws -> Int {
-        try validate(ref: base, label: "base branch")
-        try validate(ref: head, label: "revision")
-        let result = try await run(["rev-list", "--count", "\(base)..\(head)"], in: directory)
-        guard result.ok else { return 0 }
-        return Int(result.trimmed) ?? 0
-    }
-
     /// The tracking branch configured for `branch`, or nil when there is none.
     public static func upstream(of branch: String, in directory: String) async throws -> String? {
         try validate(branch: branch)
