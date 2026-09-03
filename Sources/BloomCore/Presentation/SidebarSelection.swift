@@ -73,10 +73,19 @@ public enum SidebarSelection: Hashable, Sendable {
     /// start you somewhere no person put you.
     case crew(WorkspaceID, SessionID)
 
+    /// The workspace the window is about, which is the line the three cases above keep pointing at.
+    ///
+    /// **Written out on both sides, because the nil half is a decision rather than a leftover.**
+    /// It answered nil through a `default`, so a case added to this enum that carries a workspace
+    /// would have got the wrong answer with nothing to compile against, and the wrong answer is
+    /// exactly the one `.subagent` and `.crew` document at length: an empty inspector, a greyed
+    /// Workspace menu and a stopped composer, on a selection where nothing about the workspace
+    /// changed. `.archived` being nil is the other half of the same decision, argued on its own
+    /// case, and it now says so here too instead of falling through with `.home` and `.ask`.
     public var workspaceID: WorkspaceID? {
         switch self {
         case .workspace(let id), .subagent(let id, _), .crew(let id, _): id
-        default: nil
+        case .home, .ask, .archived: nil
         }
     }
 

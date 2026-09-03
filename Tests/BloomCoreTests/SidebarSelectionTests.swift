@@ -101,4 +101,23 @@ struct SidebarSelectionTests {
         #expect(SidebarSelection.subagent(workspace, subagent) != .subagent(workspace, other))
         #expect(SidebarSelection.subagent(workspace, subagent) != .workspace(workspace))
     }
+
+    /// `workspaceID` is what the terminal, the diff, the composer, the toolbar, the Workspace menu
+    /// and the session restore all hang off, so a case that carries a workspace and answers nil
+    /// empties every one of them. It answered nil through a `default`, which is the shape that
+    /// gets a new case wrong silently; both halves are written out now and this says which case is
+    /// on which side.
+    @Test("every selection answers for the workspace it is about, or says it is about none")
+    func everySelectionIsClassified() {
+        let carrying: [SidebarSelection] = [
+            .workspace(workspace), .subagent(workspace, subagent), .crew(workspace, crewMember),
+        ]
+        #expect(carrying.allSatisfy { $0.workspaceID == workspace })
+
+        // `.archived` is the deliberate nil: its worktree is gone, so everything that hangs off
+        // this hides or greys itself, which is the whole reason it is not a flag on `.workspace`.
+        let carryingNone: [SidebarSelection] = [.home, .ask, .archived(workspace)]
+        #expect(carryingNone.allSatisfy { $0.workspaceID == nil })
+        #expect(SidebarSelection.archived(workspace).archivedWorkspaceID == workspace)
+    }
 }

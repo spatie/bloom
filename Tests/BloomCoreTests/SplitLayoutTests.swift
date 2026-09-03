@@ -531,7 +531,17 @@ struct SplitLayoutTests {
         #expect(layout.ratio(at: []) == 0.5)
     }
 
-    @Test("no drag can take a pane to zero", arguments: [-4.0, 0, 0.001, 1, 40])
+    /// The last three are the ones this was not defending against. A divider's ratio is a
+    /// translation over a pane's own measure, and a pane briefly has no measure at all: during a
+    /// layout pass before the geometry has arrived, and on a window restored to a zero rectangle.
+    /// Both give a division that is not a number, `min` and `max` in Swift hand a NaN argument
+    /// straight back, and the value went into the tree. `SplitNode.repaired` had the `isFinite`
+    /// guard for a hand-edited defaults file and the live drag did not, which is the wrong way
+    /// round: this is the path that runs sixty times a second.
+    @Test(
+        "no drag can take a pane to zero, or off the number line",
+        arguments: [-4.0, 0, 0.001, 1, 40, .nan, .infinity, -.infinity]
+    )
     func resizeClamps(ratio: Double) throws {
         var layout = SplitLayout(pane: "a")
         layout.split("a", axis: .horizontal, into: "b")

@@ -134,12 +134,20 @@ public enum WorkspaceStatus: String, Sendable, Hashable, CaseIterable, Codable {
     }
 
     /// Whether this verdict came from GitHub rather than from the worktree.
+    ///
+    /// **Both halves are written out, and the `default` that used to stand for the second one is
+    /// the reason.** This is what decides whether `summary` and `detail` reach for a pull request
+    /// at all, so a state added to the GitHub block above and not added here is a state whose
+    /// tooltip silently loses the number the reader is hovering for. With a `default` the compiler
+    /// had nothing to say about that; listing the worktree states makes a new case a build error
+    /// in the one place that has to be told about it. `conflicted` was added to this enum after
+    /// the rest and is exactly the shape of case that would have been missed.
     public var describesPullRequest: Bool {
         switch self {
         case .merged, .closed, .conflicted, .checksFailing, .checksRunning, .checksPassed, .draft,
              .pullRequestOpen:
             true
-        default:
+        case .settingUp, .awaitingPermission, .running, .setupFailed, .unread, .changed, .clean:
             false
         }
     }

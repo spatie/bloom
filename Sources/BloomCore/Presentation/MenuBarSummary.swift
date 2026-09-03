@@ -71,10 +71,10 @@ public enum MenuBarSummary {
     public static func tooltip(waiting: Int, unread: Int) -> String {
         var lines: [String] = []
         if waiting > 0 {
-            lines.append(waiting == 1 ? "1 agent waiting on you" : "\(waiting) agents waiting on you")
+            lines.append("\(Counted.of(waiting, "agent")) waiting on you")
         }
         if unread > 0 {
-            lines.append(unread == 1 ? "1 unread result" : "\(unread) unread results")
+            lines.append(Counted.of(unread, "unread result"))
         }
         return lines.isEmpty ? idleTooltip : lines.joined(separator: ", ")
     }
@@ -103,7 +103,7 @@ public enum MenuBarSummary {
         }
         let others = board.all.count - 1
         if others > 0 {
-            sentence += others == 1 ? ". 1 other window" : ". \(others) other windows"
+            sentence += ". \(Counted.of(others, "other window"))"
         }
         return sentence
     }
@@ -172,9 +172,10 @@ public enum MenuBarSummary {
     ///
     /// Each workspace appears once, under the state the sidebar marks it with, because a row in
     /// two lists would contradict the single glyph beside it. `WorkspaceStatus` resolves waiting
-    /// ahead of running, so running drops the blocked ones; unread is `DockBadge.unreadCount`'s
-    /// own test written as a filter, which has to stay that way for the list to match the count,
-    /// and it needs no waiting term because a blocked agent is a running one.
+    /// ahead of running, so running drops the blocked ones; unread is `DockBadge.hasUnreadResult`,
+    /// called rather than restated, because the strip's number and the rows in the menu under it
+    /// are one judgement and a rule written twice is a rule that can disagree with itself about one
+    /// workspace. It needs no waiting term because a blocked agent is a running one.
     public static func sections(
         in workspaces: [Workspace],
         isRunning: (Workspace) -> Bool,
@@ -202,7 +203,7 @@ public enum MenuBarSummary {
             ))
         }
 
-        let unread = workspaces.filter { $0.unread && !isRunning($0) }
+        let unread = workspaces.filter { DockBadge.hasUnreadResult($0, isRunning: isRunning) }
         if !unread.isEmpty {
             sections.append(Section(
                 heading: unreadHeading,

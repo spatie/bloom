@@ -67,4 +67,43 @@ struct ContrastTests {
         #expect(abs(grey.a) < 0.01)
         #expect(abs(grey.b) < 0.01)
     }
+
+    /// **The reason there is now one transfer function where there were two.**
+    ///
+    /// `relativeLuminance` linearised a channel at WCAG's knee, 0.03928, and `lab` linearised it at
+    /// the sRGB standard's, 0.04045. Two nearly identical functions in one file with silently
+    /// different constants reads as a bug in one of them, and the honest answer is that both were
+    /// right for the standard each quoted and that neither said so.
+    ///
+    /// They also cannot disagree. A channel here is always an integer 0 to 255, and both knees fall
+    /// between 10/255 and 11/255, so every value lands on the same side of both. That is arithmetic
+    /// somebody would otherwise have to redo, so it is walked instead: all 256 values, against both
+    /// historical spellings, so that moving the shared number names the channel it broke.
+    @Test("both standards' knees classify every channel the same way")
+    func theTwoThresholdsAgreeEverywhere() {
+        func linear(_ channel: UInt32, knee: Double) -> Double {
+            let value = Double(channel) / 255
+            return value <= knee ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+
+        for channel in UInt32(0)...255 {
+            let wcag = linear(channel, knee: 0.03928)
+            let srgb = linear(channel, knee: 0.04045)
+            #expect(wcag == srgb, "channel \(channel)")
+
+            // And what the file actually calls, reached through the one public door it has.
+            let grey = channel << 16 | channel << 8 | channel
+            let luminance = Contrast.relativeLuminance(of: grey)
+            #expect(abs(luminance - srgb) < 1e-12, "channel \(channel)")
+        }
+    }
+
+    /// The unpack the two functions used to write out six times between them.
+    @Test("a colour comes apart into the channels it was written with")
+    func channelsAreUnpackedInWritingOrder() {
+        let (r, g, b) = Contrast.channels(of: 0x1A2B3C)
+        #expect((r, g, b) == (0x1A, 0x2B, 0x3C))
+        #expect(Contrast.channels(of: 0x000000) == (0, 0, 0))
+        #expect(Contrast.channels(of: 0xFFFFFF) == (255, 255, 255))
+    }
 }

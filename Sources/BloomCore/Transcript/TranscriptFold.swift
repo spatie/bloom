@@ -65,9 +65,16 @@ public enum TranscriptFold {
     public static let leastWork = 2
 
     /// What a fold says to accessibility and places that do not draw the count badge.
-    public static func label(hiding count: Int, showsMore: Bool) -> String {
-        let unit = count == 1 ? "action" : "actions"
-        return "\(count) \(unit)"
+    ///
+    /// `Counted` rather than a ternary of its own. It carried a `showsMore` parameter that no
+    /// branch here ever read, which is the shape of a rule that has been copied: the caller passes
+    /// what the other copy needs and this one quietly ignores it.
+    ///
+    /// **`TranscriptFoldRowView` does not call this yet, and should.** It draws the noun as a bare
+    /// `Text("actions")` beside the count in the glyph and labels the row
+    /// `"\(hiddenCount) actions"`, so a fold hiding one row is announced as "1 actions".
+    public static func label(hiding count: Int) -> String {
+        Counted.of(count, "action")
     }
 
     /// An opened live turn becomes a growing log again when another item arrives. At the live end,

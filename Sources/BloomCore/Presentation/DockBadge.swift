@@ -30,7 +30,23 @@ public enum DockBadge {
         in workspaces: [Workspace],
         isRunning: (Workspace) -> Bool
     ) -> Int {
-        workspaces.count { $0.unread && !isRunning($0) }
+        workspaces.count { hasUnreadResult($0, isRunning: isRunning) }
+    }
+
+    /// Whether one workspace is what the badge counts: a turn that finished and left something
+    /// nobody has read, in a workspace whose agent has not since started another one.
+    ///
+    /// **Named because the menu bar's "Finished" section is the same test and used to write it
+    /// out again.** `MenuBarSummary.sections` carried the predicate as a second literal with a
+    /// comment saying it "has to stay that way for the list to match the count", which is a rule
+    /// stated where nothing can enforce it: the number in the strip and the rows in the menu under
+    /// it are one judgement, and a badge saying three over a menu listing four is the kind of
+    /// disagreement a reader trusts neither half of afterwards. One test, two callers.
+    public static func hasUnreadResult(
+        _ workspace: Workspace,
+        isRunning: (Workspace) -> Bool
+    ) -> Bool {
+        workspace.unread && !isRunning(workspace)
     }
 
     /// How many workspaces have an agent blocked on a question nobody has answered.

@@ -109,6 +109,31 @@ struct MenuBarSummaryTests {
         #expect(listed?.workspaces.count == DockBadge.unreadCount(in: all) { $0.id == busy.id })
     }
 
+    /// The strip's number and the rows under it are one judgement, and it used to be written out
+    /// twice: `DockBadge.unreadCount` counted `unread && !isRunning` and `MenuBarSummary.sections`
+    /// filtered on the same words again, with a comment saying the two had to stay in step. They
+    /// both go through `DockBadge.hasUnreadResult` now. All four combinations rather than the one
+    /// fixture above, so the agreement cannot hold by accident.
+    @Test("the badge and the menu agree about every workspace, not just one")
+    func unreadRuleIsStatedOnce() {
+        for isUnread in [false, true] {
+            for isRunning in [false, true] {
+                let one = workspace(name: "W", unread: isUnread)
+                let running: (Workspace) -> Bool = { _ in isRunning }
+                let counted = DockBadge.unreadCount(in: [one], isRunning: running)
+                let sections = MenuBarSummary.sections(
+                    in: [one], isRunning: running, isAwaitingPermission: { _ in false }
+                )
+                let listed = sections
+                    .first { $0.heading == MenuBarSummary.unreadHeading }?
+                    .workspaces.count ?? 0
+
+                #expect(counted == listed, "unread \(isUnread), running \(isRunning)")
+                #expect(DockBadge.hasUnreadResult(one, isRunning: running) == (counted == 1))
+            }
+        }
+    }
+
     /// The headings are read four rows apart in a menu nobody studies. "Waiting on you" and
     /// "Waiting for you" were one preposition apart while meaning opposite things: an agent
     /// blocked on a question, and a turn that ended hours ago. Sharing no word at all is a
