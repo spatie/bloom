@@ -175,6 +175,27 @@ struct InspectorToolbar: View {
                                 )
                             }
                         }
+                        // **The slot is 32 points tall and the words are about 16 of them, and
+                        // without this the other 16 take no click.** Reported as "when i click on
+                        // the area under changes or all files in the right sidebar it doesn't
+                        // work. Make the entire div/column clickable."
+                        //
+                        // A `.plain` Button takes its clicks inside its LABEL, and a label is hit
+                        // where it draws rather than where it is laid out: neither `.padding` nor
+                        // `.frame` is a shape, so a point in the ten points of inset either side
+                        // of the title, or in the band above and below a 13 point line of
+                        // `Typo.label` in a `barHeight` row, went through the tab and hit nothing.
+                        // Only the glyphs answered.
+                        //
+                        // This is the same fault as `InspectorToggle`'s, one commit ago, wearing
+                        // its other face: there the frame and the shape had been put OUTSIDE the
+                        // Button, here the frame is in the right place and the shape was never
+                        // written at all. Both end with a target the size of the ink inside a slot
+                        // more than twice that, and both read as the control failing rather than
+                        // as a miss, because the selected tab draws its plate at the full slot the
+                        // whole time. `TabItemView` in the centre column is the one that had it
+                        // right, and it puts the shape in exactly this place, after the background.
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
