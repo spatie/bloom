@@ -220,8 +220,8 @@ enum SetupRehearsal {
 
     private static func make(
         git: SetupOutcome = .ready(detail: "2.51.0"),
-        claude: SetupOutcome = .ready(detail: "freek@spatie.be"),
-        codex: SetupOutcome = .ready(detail: "freek@spatie.be"),
+        claude: SetupOutcome = .ready(detail: "you@example.com"),
+        codex: SetupOutcome = .ready(detail: "you@example.com"),
         gitHub: SetupOutcome = .ready(detail: "Signed in")
     ) -> SetupReport {
         SetupReport(checks: [

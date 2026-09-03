@@ -30,11 +30,15 @@ import sys
 
 # lib.py is the app's own drawing library and is VENDORED beside this file, so
 # a round of icon work cannot be broken by somebody editing the app while it is
-# in progress and so this folder still builds after the app has moved on. The
-# app's copy is appended as a fallback and is byte for byte the same file.
+# in progress and so this folder still builds after the app has moved on.
+#
+# There was a second entry on this path, pointing at the same folder inside a
+# checkout called Baton, which is what this app was called before it was
+# renamed. It was a fallback for a copy that has not existed under that name for
+# a long time, on one person's machine, and it would have shipped an absolute
+# path to somebody else's home directory into a public repository.
 HERE_FIRST = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE_FIRST)
-sys.path.append("/Users/freek/dev/code/Baton/Tools/icon")
 import lib  # noqa: E402
 from lib import (C, contact, flat, sh_circle, sh_group, sh_move, sh_path,  # noqa: F401
                  sh_poly, sh_rect, shade, sheen, step, thick)  # noqa: F401

@@ -92,25 +92,25 @@ final class FeedbackPresenter {
             // A half-typed address, deliberately. This is the state the bug report was about, a
             // person partway through typing their own address, and the clean capture has to show
             // it standing unmarked.
-            if email.isEmpty { email = "freek@spatie." }
+            if email.isEmpty { email = "you@example." }
             open(.report)
         } else if arguments.contains("--prompt-sheet") {
             if prompt.isEmpty {
                 prompt = "Give the sidebar a way to group workspaces by the project they came from."
             }
-            if email.isEmpty { email = "freek@spatie." }
+            if email.isEmpty { email = "you@example." }
             open(.prompt)
         } else if arguments.contains("--feedback-problems") {
             // The refused state: a half-typed address and a Send already pressed, which is the
             // pair of screenshots the no-layout-shift rule is checked against. The sheet reads
             // the same flag to stand in for the press.
             if message.isEmpty { message = "The composer loses its place while I am typing." }
-            email = "freek@spatie."
+            email = "you@example."
             open(.report)
         } else if arguments.contains("--prompt-problems") {
             if prompt.isEmpty { prompt = "Group workspaces by the project they came from." }
-            name = "freek@spatie.be"
-            email = "freek@spatie."
+            name = "you@example.com"
+            email = "you@example."
             open(.prompt)
         } else if arguments.contains("--feedback-sent") {
             open(.reportSent)

@@ -37,7 +37,7 @@ struct ToolRowSnapshotGallery: View {
 
     /// A real worktree path, at a real length, because the rows below are about what happens to
     /// one. See `CommandDisplay`.
-    private static let worktree = "/Users/freek/bloom/workspaces/there-there/freekmurze-hibiki-sea"
+    private static let worktree = "/Users/you/bloom/workspaces/there-there/hibiki-sea"
 
     private var home: TranscriptHome {
         TranscriptHome(workspaceID: WorkspaceID("r1"), worktree: Self.worktree)
@@ -109,7 +109,7 @@ struct ToolRowSnapshotGallery: View {
                 ])
                 row("c3", "Bash", [
                     "description": .string("Check the other worktree"),
-                    "command": .string("cd /Users/freek/bloom/workspaces/bloom/main && git log --oneline -5"),
+                    "command": .string("cd /Users/you/bloom/workspaces/bloom/main && git log --oneline -5"),
                 ])
                 row("c4", "Bash", [
                     "description": .string("Show the current diff"),
