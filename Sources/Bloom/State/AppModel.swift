@@ -428,6 +428,9 @@ final class AppModel {
         startObservingSessions()
         startObservingQuotas()
         startPollingQuotas()
+        // After the bridge is bound, because it is the bridge that says what the entry should
+        // point at, and nothing waits for it. See `startOwnerRegistrationRepair`.
+        startOwnerRegistrationRepair()
         // Last, and nothing waits for it: the window is already drawn by the time this runs, and
         // every project it has anything to do is one that is drawing its initials meanwhile. See
         // `searchForMissingProjectIcons`.
@@ -456,6 +459,39 @@ final class AppModel {
         } catch {
             Log.bridge.error("could not start the workspace bridge: \(error.readableMessage, privacy: .public)")
             return nil
+        }
+    }
+
+    /// Puts the owner's own `~/.claude.json` entry back on this bundle's shim when the app has
+    /// been moved since it was written.
+    ///
+    /// The entry names an absolute path and is written once, so dragging Bloom from
+    /// `~/Applications` to `/Applications` left every agent the owner started from his own
+    /// terminal reporting a bridge that was down, at a path that no longer existed. The rule for
+    /// what may be rewritten, and the reasons it is as narrow as it is, are in
+    /// `BridgeUserRegistrationRepair`; nothing is decided here.
+    ///
+    /// Detached, because that file is Claude Code's own and carries every project the CLI has been
+    /// run in, so it reaches tens of megabytes and reading it on the main actor is a hitch on the
+    /// first frame. Nothing waits for it: an entry repaired a moment after launch is repaired in
+    /// time for the next terminal somebody opens, which is the only thing that reads it.
+    private func startOwnerRegistrationRepair() {
+        guard let attachment = bridge?.ownerAttachment() else { return }
+        let name = BridgeRegistration.ownerServerName
+        Task.detached(priority: .utility) {
+            switch BridgeUserRegistrationRepair.repairIfStale(serverNamed: name, matching: attachment) {
+            case .repaired(let from, let to):
+                // One interpolation, not two joined with `+`: an `OSLogMessage` is built by the
+                // compiler from a single literal and cannot be concatenated.
+                Log.bridge.info("""
+                    repointed \(name, privacy: .public) in ~/.claude.json \
+                    from \(from, privacy: .public) to \(to, privacy: .public)
+                    """)
+            case .couldNotWrite(let message):
+                Log.bridge.error("could not repair the \(name, privacy: .public) entry: \(message, privacy: .public)")
+            case .unchanged:
+                break
+            }
         }
     }
 

@@ -113,8 +113,9 @@ from the same table as the database directory means two builds can only collide 
 already sharing a database, in which case they share the token beside it too.
 
 Nothing rewrites an entry left over from before that change. Somebody who ran the older command
-still has `bloom-owner-bridge` in `~/.claude.json`, and Bloom does not edit that file. The Settings
-pane says so and offers `claude mcp remove --scope user bloom-owner-bridge`.
+still has `bloom-owner-bridge` in `~/.claude.json`, and no copy of Bloom answers to that name any
+more, so nothing here recognises it as its own. The Settings pane says so and offers
+`claude mcp remove --scope user bloom-owner-bridge`.
 
 A session already running does not pick the server up. Start a new one.
 
@@ -125,5 +126,28 @@ it, because nobody browses a settings tab they do not know exists, and the pane 
 back for it and where Regenerate lives. The step is offered only when there is something to offer:
 `BridgeUserRegistration` reads the `mcpServers` table at the top level of `~/.claude.json` and
 compares the entry under this copy's name against the shim path, socket and token it would hand
-out today. Anything but a match is offered, an unreadable file included. Nothing writes to that
-file, at any point.
+out today. Anything but a match is offered, an unreadable file included.
+
+### The one thing Bloom does write there
+
+The entry holds an absolute path to the shim inside the bundle, it is written once, and nothing
+re-derives it. The owner moved Bloom from `~/Applications` to `/Applications` and every agent
+started from his own terminal failed from that moment, saying the bridge was down and naming a
+path that no longer existed. Per-session registrations were fine throughout, because
+`BridgeRegistration.shimPath` derives the shim from the running executable each time; only the
+durable entry went stale.
+
+`BridgeUserRegistrationRepair` puts that one string back, on launch, and touches nothing else. It
+rewrites only an entry under **this copy's own** name whose `BLOOM_BRIDGE_SOCKET` and
+`BLOOM_BRIDGE_TOKEN` are exactly the pair this instance mints, whose `command` names a file called
+`bloom-bridge`, and where that path no longer exists. The socket and token pair is the proof of
+authorship: the socket comes from the database path through `TmuxSessions.fingerprint` and the
+token is minted beside that database, so no other copy of Bloom can produce it. Anything else,
+including the legacy `bloom-owner-bridge` entry, an entry somebody aimed at another Bloom on
+purpose, and an entry whose shim is still installed, is left exactly as it was. The write is
+atomic and puts the file's mode back, because it holds a live OAuth token.
+
+The token is not refreshed by the repair. A move cannot make it stale, and a token that disagrees
+means either that the entry was not minted here or that Regenerate was pressed and never
+re-pasted, which is a revocation to leave standing. Both of those already show up as
+`notRegistered`, so the command goes on being offered and one paste fixes them.
