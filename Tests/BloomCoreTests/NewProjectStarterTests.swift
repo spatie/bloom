@@ -178,6 +178,27 @@ struct NewProjectStarterTests {
         #expect(left.folderRemoved == false)
         #expect(FileManager.default.fileExists(atPath: target))
     }
+
+    /// A folder nobody can list is not a folder nobody put anything in.
+    ///
+    /// `isEmpty` coalesced a failed read to `[]`, which reads as empty, and empty is what lets
+    /// `discard` remove the whole folder. An unasked question must not arrive as the answer that
+    /// destroys something.
+    @Test("a folder that cannot be read is not treated as an empty one")
+    func anUnreadableFolderIsNotEmpty() throws {
+        let (location, name) = scratch()
+        let target = (location as NSString).appendingPathComponent(name)
+        try FileManager.default.createDirectory(atPath: target, withIntermediateDirectories: true)
+        #expect(NewProjectStarter.isEmpty(target))
+
+        // A directory with no search permission cannot be listed, which is the shape of every
+        // failure this guards: an unmount, a permission change, a folder that has gone.
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: target)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target) }
+
+        #expect(!NewProjectStarter.isEmpty(target))
+        #expect(!NewProjectStarter.isEmpty(target + "-never-made"))
+    }
 }
 
 /// Collects the progress callbacks, which arrive on the main actor and are read off it.

@@ -98,8 +98,18 @@ public enum NewProjectStarter {
     /// `.DS_Store` is ignored, because the Finder writes one into any folder somebody has so much
     /// as looked at, and refusing a folder for holding one would refuse the empty folder a person
     /// had just made in the file panel to put this project in.
+    ///
+    /// **A folder that cannot be listed is not empty, it is unanswered.** This used to coalesce a
+    /// failed read to `[]`, which `allSatisfy` calls empty, and `discard` reads empty as
+    /// permission to `removeItem` the whole folder. That is the same shape as the hole
+    /// `Git.safetyReport` throws over rather than returning zeroes for: an unasked question
+    /// arriving as the answer that destroys something. False leaves the folder alone, which is
+    /// what an unreadable folder deserves in both callers, since `inspect`'s verdict then treats
+    /// it as a folder with something in it.
     static func isEmpty(_ path: String) -> Bool {
-        let entries = (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: path) else {
+            return false
+        }
         return entries.allSatisfy { $0 == ".DS_Store" }
     }
 
