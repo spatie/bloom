@@ -106,11 +106,9 @@ public actor AgentRunner {
     private let grants: SessionGrants
     private var alive = false
     private var cancelled = false
-    /// Whether this run has already been stopped because its transcript was deleted underneath it.
-    /// See `stopBecauseTheTranscriptWentAway`.
-    private var transcriptWentAway = false
-    private var persistenceFailures = 0
-    private var lastFailure: String?
+    /// What the store has refused, and whether the transcript has gone. One type for both
+    /// runners: see `PersistenceTrouble`, which they held a copy of each.
+    private var trouble = PersistenceTrouble()
 
     /// What the model was last handed, from the newest `assistant` event of this turn.
     ///
@@ -319,10 +317,10 @@ public actor AgentRunner {
     /// The last thing that could not be written to disk, kept for as long as the runner lives.
     /// A transcript that only exists on screen is worth saying out loud, and an `.error` event
     /// scrolls away.
-    public var lastPersistenceFailure: String? { lastFailure }
+    public var lastPersistenceFailure: String? { trouble.lastSentence }
 
     /// How many rows never made it to the store.
-    public var persistenceFailureCount: Int { persistenceFailures }
+    public var persistenceFailureCount: Int { trouble.failures }
 
     /// Whether this run has been stopped. For the suite: what a write refused because its
     /// workspace was deleted has to do, beyond keeping quiet, is stop the agent.
@@ -652,28 +650,21 @@ public actor AgentRunner {
         Self.log.error("\(what, privacy: .public): \(error.readableMessage, privacy: .public)")
 
         let standing = await TranscriptStanding.of(sessionID: session.id, in: store)
-        guard let trouble = WorkspaceTrouble.recording(
+        switch trouble.record(WorkspaceTrouble.recording(
             transcript: standing, complaint: TranscriptStanding.complaint(about: error)
-        ) else {
-            stopBecauseTheTranscriptWentAway()
-            return
+        )) {
+        case .tell(let sentence):
+            sink.yield(.error(.storage(message: sentence)))
+        case .stop:
+            // The workspace this session belonged to has been removed, so there is nowhere for the
+            // write to go. Kill the process, because an agent still working in a worktree nobody is
+            // recording is the part that would be a fault, and say nothing: the owner's own gesture
+            // removed the transcript.
+            Self.log.info("the transcript for \(self.session.id.rawValue, privacy: .public) has been removed, so this run is being stopped without a word")
+            cancel()
+        case .alreadyStopped:
+            break
         }
-
-        persistenceFailures += 1
-        lastFailure = trouble.sentence
-        sink.yield(.error(.storage(message: trouble.sentence)))
-    }
-
-    /// The workspace this session belonged to has been removed. Stop the process and say nothing.
-    ///
-    /// Once, and guarded, because everything already in flight when the rows went will fail the
-    /// same way on its way through: the turn's remaining lines, the session save that cancelling
-    /// provokes, and any question still open. One cancel is enough for all of them.
-    private func stopBecauseTheTranscriptWentAway() {
-        guard !transcriptWentAway else { return }
-        transcriptWentAway = true
-        Self.log.info("the transcript for \(self.session.id.rawValue, privacy: .public) has been removed, so this run is being stopped without a word")
-        cancel()
     }
 
     private static let log = Logger(

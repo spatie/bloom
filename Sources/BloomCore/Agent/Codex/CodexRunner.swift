@@ -65,9 +65,9 @@ public actor CodexRunner: SessionRunner {
 
     /// Whether this run has already been stopped because its transcript was deleted underneath
     /// it. See `stopBecauseTheTranscriptWentAway`.
-    private var transcriptWentAway = false
-    private var persistenceFailures = 0
-    private var lastFailure: String?
+    /// What the store has refused, and whether the transcript has gone. The same type the Claude
+    /// Code side keeps, because the rule was the same and was written twice: `PersistenceTrouble`.
+    private var trouble = PersistenceTrouble()
 
     /// The workspace bridge this chat registers, or nil for none. Written once, by whoever built
     /// this runner, and read on every connect: `CodexClient.Configuration` is rebuilt per connect
@@ -115,9 +115,9 @@ public actor CodexRunner: SessionRunner {
 
     public var currentSession: Session { session }
 
-    public var lastPersistenceFailure: String? { lastFailure }
+    public var lastPersistenceFailure: String? { trouble.lastSentence }
 
-    public var persistenceFailureCount: Int { persistenceFailures }
+    public var persistenceFailureCount: Int { trouble.failures }
 
     /// Write one turn. Connects, and starts or resumes the thread, on first use.
     ///
@@ -454,7 +454,7 @@ public actor CodexRunner: SessionRunner {
         // agent stopped in <workspace>", so a chat whose workspace was archived, removed or simply
         // closed produced a modal saying the Codex process had ended: true, and the owner is the
         // one who ended it. Only a server that went away on its own is worth a word.
-        if case .closed = event, handle.wasCancelled || transcriptWentAway { return }
+        if case .closed = event, handle.wasCancelled || trouble.hasStopped { return }
 
         if case .approval(let request) = event {
             await ask(request)
@@ -660,31 +660,25 @@ public actor CodexRunner: SessionRunner {
         Self.log.error("\(what, privacy: .public): \(error.readableMessage, privacy: .public)")
 
         let standing = await TranscriptStanding.of(sessionID: session.id, in: store)
-        guard let trouble = WorkspaceTrouble.recording(
+        switch trouble.record(WorkspaceTrouble.recording(
             transcript: standing, complaint: TranscriptStanding.complaint(about: error)
-        ) else {
-            stopBecauseTheTranscriptWentAway()
-            return
+        )) {
+        case .tell(let sentence):
+            sink.yield(.error(.storage(message: sentence)))
+        case .stop:
+            // Kills the server rather than interrupting the turn, which is where the two backends
+            // part company: `cancelNow` here would leave `codex app-server` running in a worktree
+            // that is being deleted. See `SessionRunner.terminateNow`.
+            Self.log.info("the transcript for \(self.session.id.rawValue, privacy: .public) has been removed, so this run is being stopped without a word")
+            terminateNow()
+        case .alreadyStopped:
+            break
         }
-
-        persistenceFailures += 1
-        lastFailure = trouble.sentence
-        sink.yield(.error(.storage(message: trouble.sentence)))
-    }
-
-    /// The workspace this session belonged to has been removed. Stop the process and say nothing.
-    /// Guarded, and for the same reason as its twin: everything already in flight when the rows
-    /// went will be refused on its way through, and one stop answers all of it.
-    private func stopBecauseTheTranscriptWentAway() {
-        guard !transcriptWentAway else { return }
-        transcriptWentAway = true
-        Self.log.info("the transcript for \(self.session.id.rawValue, privacy: .public) has been removed, so this run is being stopped without a word")
-        terminateNow()
     }
 
     /// Whether this run has been stopped because its transcript was deleted underneath it. For
     /// the suite, and for the same reason as `AgentRunner.hasBeenCancelled`.
-    var transcriptWasRemoved: Bool { transcriptWentAway }
+    var transcriptWasRemoved: Bool { trouble.hasStopped }
 
     private static let log = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "be.spatie.bloom",
