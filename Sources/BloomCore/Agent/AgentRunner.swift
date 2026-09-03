@@ -100,7 +100,10 @@ public actor AgentRunner {
     /// which is the one moment the actor is least available and the one moment a pending ask
     /// absolutely has to be answered.
     private let pending = PendingAsks()
-    private var cachedRepoID: RepoID?
+
+    /// What this project has already approved, and the one place either runner asks it.
+    /// See `SessionGrants`, which this and `CodexRunner` used to hold four copies of between them.
+    private let grants: SessionGrants
     private var alive = false
     private var cancelled = false
     /// Whether this run has already been stopped because its transcript was deleted underneath it.
@@ -153,6 +156,7 @@ public actor AgentRunner {
         self.mcpConfigPath = mcpConfigPath
         self.shutdownBudget = shutdownBudget
         self.makeProcess = makeProcess
+        self.grants = SessionGrants(store: store, workspaceID: session.workspaceID)
     }
 
     /// The default factory. Separate so an injected one can replace it wholesale.
@@ -709,16 +713,16 @@ public actor AgentRunner {
         // there first takes the ask out of the pile, and the loser does nothing. Without it the
         // CLI receives two `control_response` lines for one request id and logs the second as a
         // mismatch. Found by running the real thing.
-        let grants = await matchingGrants(for: ask)
+        let matched = await grants.matching(ask)
 
-        if let grants, let claimed = pending.take(ask.requestID) {
-            await autoAllow(claimed, using: grants)
+        if let matched, let claimed = pending.take(ask.requestID) {
+            await autoAllow(claimed, using: matched)
             return
         }
 
         // Answered by a person while the lookup was running. Nothing left to do, and in particular
         // the session must not now be marked as waiting for a question that is already settled.
-        guard grants == nil, pending.contains(ask.requestID) else { return }
+        guard matched == nil, pending.contains(ask.requestID) else { return }
 
         // Nothing answers it, so somebody has to. This is the state that has to be visible from
         // outside the workspace: a process that is alive, costing nothing, and doing nothing.
@@ -726,28 +730,14 @@ public actor AgentRunner {
         await save(session)
     }
 
-    /// The project's granted rules, or nil when nothing there covers this ask.
-    ///
-    /// Read from the store on every ask rather than cached. That is what makes revoking a rule
-    /// take effect on the next question instead of on the next launch, and asks are rare enough
-    /// that one query each is not worth a cache that could go stale in the wrong direction.
-    private func matchingGrants(for ask: PermissionAsk) async -> [PermissionGrant]? {
-        guard ask.canWiden, let repoID = await repoID() else { return nil }
-        guard let grants = try? await store.permissionGrants(repoID: repoID) else { return nil }
-        return PermissionGrantIndex.match(ask: ask, grants: grants)
-    }
-
     /// Answer without troubling anybody, and say in the transcript that that is what happened.
     /// The ask must already have been claimed out of `pending` by the caller.
-    private func autoAllow(_ ask: PermissionAsk, using grants: [PermissionGrant]) async {
+    private func autoAllow(_ ask: PermissionAsk, using matched: [PermissionGrant]) async {
         // The wire form of project scope: the CLI is told to stop asking for the rest of this
         // session, and nothing is written to any settings file.
         await write(answerTo: ask, decision: .allow(scope: .project))
-        await close(ask, as: PermissionAskOutcome.auto, note: PermissionGrantIndex.note(for: grants))
-
-        for grant in grants {
-            try? await store.recordPermissionGrantUse(id: grant.id)
-        }
+        await close(ask, as: PermissionAskOutcome.auto, note: PermissionGrantIndex.note(for: matched))
+        await grants.recordUse(of: matched)
     }
 
     /// Answer one question, as a person. The turn resumes on the other side of this line.
@@ -763,12 +753,8 @@ public actor AgentRunner {
 
         // Granting is Bloom's own bookkeeping and happens after the CLI has been unblocked, so a
         // database that refuses the write cannot leave an agent hanging on a question that was
-        // already answered.
-        if let repoID = await repoID() {
-            for grant in PermissionGrant.all(granting: decision, from: ask, repoID: repoID) {
-                _ = try? await store.upsert(grant)
-            }
-        }
+        // already answered. See `SessionGrants.record`.
+        await grants.record(decision, from: ask)
     }
 
     /// Put the answer on stdin, and let the session go back to running if nothing else is waiting.
@@ -797,18 +783,6 @@ public actor AgentRunner {
             decision: decision,
             note: note
         )))
-    }
-
-    /// What this session's workspace belongs to. Looked up rather than held, because a runner
-    /// outlives any particular view and the answer never changes.
-    private func repoID() async -> RepoID? {
-        if let cachedRepoID { return cachedRepoID }
-        // Nil for a chat with no worktree, which is Ask Bloom: there is no project behind it, so
-        // there is no project scope to grant in it either. See `PermissionScopeOffer`.
-        guard let workspaceID = session.workspaceID,
-              let workspace = try? await store.workspace(id: workspaceID) else { return nil }
-        cachedRepoID = workspace.repoID
-        return cachedRepoID
     }
 
     /// Everything still waiting, so a view can draw the questions without asking the database.

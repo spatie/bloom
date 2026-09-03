@@ -27,7 +27,9 @@ public actor CodexRunner: SessionRunner {
     private var translation: CodexTranslation
     private var threadID: String?
     private var cancelled = false
-    private var cachedRepoID: RepoID?
+
+    /// What this project has already approved. One type for both backends: see `SessionGrants`.
+    private let grants: SessionGrants
 
     /// How large this chat's server was told the context window is, and therefore what the live
     /// connection was launched with. See `applyContextWindowChange`.
@@ -86,6 +88,7 @@ public actor CodexRunner: SessionRunner {
         self.store = store
         self.bridge = bridge
         self.makeClient = makeClient
+        self.grants = SessionGrants(store: store, workspaceID: session.workspaceID)
         self.translation = CodexTranslation(context: CodexTranslation.Context(
             model: ModelIdentifier.resolve(session.model).model,
             cwd: workspacePath,
@@ -242,12 +245,8 @@ public actor CodexRunner: SessionRunner {
 
         // Bloom's own bookkeeping, and it happens after the agent has been unblocked, so a
         // database that refuses the write cannot leave a turn hanging on a question that was
-        // already answered.
-        if let repoID = await repoID() {
-            for grant in PermissionGrant.all(granting: decision, from: ask, repoID: repoID) {
-                _ = try? await store.upsert(grant)
-            }
-        }
+        // already answered. See `SessionGrants.record`.
+        await grants.record(decision, from: ask)
     }
 
     /// Ends the connection and the pump, and files every question that can now never be answered.
@@ -532,26 +531,18 @@ public actor CodexRunner: SessionRunner {
         // view before the question it decides leaves the view with no row to settle.
         sink.yield(.permissionAsk(ask))
 
-        let grants = await matchingGrants(for: ask)
-        if let grants, let claimed = pending.take(ask.requestID) {
+        let matched = await grants.matching(ask)
+        if let matched, let claimed = pending.take(ask.requestID) {
             await write(answerTo: claimed, decision: .acceptForSession)
-            await close(claimed, as: PermissionAskOutcome.auto, note: PermissionGrantIndex.note(for: grants))
-            for grant in grants {
-                try? await store.recordPermissionGrantUse(id: grant.id)
-            }
+            await close(claimed, as: PermissionAskOutcome.auto, note: PermissionGrantIndex.note(for: matched))
+            await grants.recordUse(of: matched)
             return
         }
 
-        guard grants == nil, pending.contains(ask.requestID) else { return }
+        guard matched == nil, pending.contains(ask.requestID) else { return }
 
         session.apply(.blocked)
         await save(session)
-    }
-
-    private func matchingGrants(for ask: PermissionAsk) async -> [PermissionGrant]? {
-        guard ask.canWiden, let repoID = await repoID() else { return nil }
-        guard let grants = try? await store.permissionGrants(repoID: repoID) else { return nil }
-        return PermissionGrantIndex.match(ask: ask, grants: grants)
     }
 
     /// Say why, in the only place this protocol has room for it.
@@ -601,16 +592,6 @@ public actor CodexRunner: SessionRunner {
             decision: decision,
             note: note
         )))
-    }
-
-    private func repoID() async -> RepoID? {
-        if let cachedRepoID { return cachedRepoID }
-        // Nil for a chat with no worktree, which is Ask Bloom: there is no project behind it, so
-        // there is no project scope to grant in it either. See `PermissionScopeOffer`.
-        guard let workspaceID = session.workspaceID,
-              let workspace = try? await store.workspace(id: workspaceID) else { return nil }
-        cachedRepoID = workspace.repoID
-        return workspace.repoID
     }
 
     // MARK: - Storage
