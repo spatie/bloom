@@ -187,8 +187,12 @@ final class SearchPanelOverlayHost: NSHostingView<SearchPanelWindowOverlay> {
     /// The traffic lights are the second nil, and the head of `SearchPanelWindowOverlay` says why.
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard SearchPanelModel.shared.isOpen else { return nil }
-        let local = superview.map { convert(point, from: $0) } ?? point
-        if let lights = SearchPanelWindowGeometry.shared.trafficLights, lights.contains(local) {
+        // `point` arrives in the SUPERVIEW's coordinates and the buttons were measured in the
+        // superview's coordinates, so they are compared there and nothing is converted. Converting
+        // into this view would be the mistake: a hosting view is flipped, so the y would come out
+        // upside down, which is exactly how the cut-out ended up in the bottom of the sidebar the
+        // first time.
+        if let lights = SearchPanelWindowGeometry.shared.trafficLights, lights.contains(point) {
             return nil
         }
         return super.hitTest(point)
