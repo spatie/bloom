@@ -19,8 +19,8 @@ public enum SubagentState: String, Sendable, Hashable, CaseIterable, Codable {
     /// It stopped without answering. The API refusing it ten times running is this, and on the
     /// night this was measured it was all three subagents in the capture.
     case failed
-    /// Killed rather than finished: by the parent turn ending, by the owner, or by the CLI's own
-    /// limits. Kept apart from `failed` because nothing went wrong, and a cross beside a row
+    /// Killed rather than finished: by the agent process going away, by the owner, or by the
+    /// CLI's own limits. Kept apart from `failed` because nothing went wrong, and a cross beside a row
     /// nobody's code broke is a lie that costs somebody ten minutes.
     case stopped
 
@@ -41,10 +41,17 @@ public enum SubagentLifecycleEvent: Sendable, Hashable {
     /// the CLI spelled it. Reading it is `SubagentState.init(reported:)`'s job, and a word nobody
     /// recognises is refused rather than guessed at.
     case reported(status: String)
-    /// The turn that owned this subagent ended without the CLI saying what became of it. Sent by
-    /// the roster when a result line lands, so a row cannot breathe for ever behind a finished
-    /// turn: the process that would have told us is gone.
-    case turnEnded
+    /// The `claude` process died without the CLI saying what became of this subagent. Sent by
+    /// the roster when the agent exits, so a row cannot breathe for ever behind a session that
+    /// has gone: the process that would have told us is not there any more.
+    ///
+    /// **Not the end of a turn, and that rename is the bug.** It used to be sent on every result
+    /// line, on the reasoning that the reporter had gone away. The reporter had not: `claude`
+    /// runs for the length of the session and `AgentRunner.send` writes the next turn into the
+    /// same process, so a result says nothing about a subagent. An `Agent` call that comes back
+    /// with "the agent is working in the background" outlives the turn that made it by minutes,
+    /// and this event was marking it stopped seconds after it started.
+    case agentExited
 }
 
 extension SubagentState {
@@ -88,8 +95,8 @@ extension SubagentState {
     /// `running` likewise: the CLI sends `task_updated` for things other than an ending, and a
     /// machine that fired on the ordinary case is a machine somebody routes around.
     ///
-    /// `turnEnded` is the one event that is legal from `running` and says nothing about it having
-    /// worked, which is why it lands on `stopped` rather than on `failed`.
+    /// `agentExited` is the one event that is legal from `running` and says nothing about it
+    /// having worked, which is why it lands on `stopped` rather than on `failed`.
     public func transition(on event: SubagentLifecycleEvent) -> StateTransition<SubagentState> {
         switch event {
         case .spawned:
@@ -106,7 +113,7 @@ extension SubagentState {
             }
             return reported == .running ? .unchanged : .moves(to: reported)
 
-        case .turnEnded:
+        case .agentExited:
             guard self == .running else { return .unchanged }
             return .moves(to: .stopped)
         }

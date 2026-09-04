@@ -142,12 +142,21 @@ public struct Subagent: Sendable, Hashable, Identifiable {
     }
 }
 
-/// Every subagent this turn has spawned, in the order they were spawned, for the length of the
-/// turn and no longer.
+/// Every subagent this session has spawned that has not yet been accounted for, in the order they
+/// were spawned.
 ///
-/// **The clearing rule, which is the backstop.** A row appears on `task_started` and is removed at
-/// the latest when the NEXT turn starts. Not for ever, because then the sidebar accumulates a
-/// morning's worth of dead work under every workspace.
+/// **The clearing rule, which is the backstop.** A row appears on `task_started` and a FINISHED
+/// row is removed at the latest when the next turn starts. Not for ever, because then the sidebar
+/// accumulates a morning's worth of dead work under every workspace.
+///
+/// **A subagent that is still running survives the turn that spawned it, and that is the bug this
+/// paragraph records.** The `Agent` tool answers "Async agent launched successfully. The agent is
+/// working in the background", the turn's result line lands while the subagent is minutes from
+/// finishing, and `claude` keeps running for the whole session, so the ending still arrives on the
+/// same stream under the same `task_id`. Clearing a running subagent here threw away the only
+/// thing that could receive that line, and the sidebar drew a workspace with a spinner and no
+/// children while the transcript said two agents were still going. So finished rows are cleared
+/// and running ones are kept, and only the process going away ends one Bloom was not told about.
 ///
 /// Most rows go sooner than that: a tick is held briefly and then leaves, and only a failure, or a
 /// row somebody has opened, stays for the whole turn. That is `SubagentRetention`'s to decide and
@@ -157,7 +166,7 @@ public struct Subagent: Sendable, Hashable, Identifiable {
 ///
 /// **Nothing here is stored.** `Store`'s rule is that `upsert` creates and `update` modifies, and
 /// the question in front of it is whether a subagent should have a row at all. It should not. The
-/// longest a subagent's row is meant to live is one turn; the CLI's own record of it is on disk
+/// longest a subagent's row is meant to live is one session; the CLI's own record of it is on disk
 /// already and Bloom does not own that file; and a table would mean a migration, a delete pass and
 /// a decision about what a subagent row means once its session is closed. A relaunch clears the
 /// pane, which is what the rule says happens at the start of the next turn anyway, only sooner.
@@ -196,22 +205,29 @@ public struct SubagentRoster: Sendable, Hashable {
     /// to summarise the children it is drawing.
     public var isWorking: Bool { subagents.contains { $0.state == .running } }
 
-    /// The next turn has started, so the last turn's children go, rows and all. The backstop
-    /// under `SubagentRetention`, and the only thing that clears a failure.
+    /// The next turn has started, so the last turn's FINISHED children go, rows and all. The
+    /// backstop under `SubagentRetention`, and the only thing that clears a failure.
+    ///
+    /// Anything still running stays. It is not the last turn's child in any sense that matters:
+    /// it is work in flight, it is still going to report its own ending on this session's stream,
+    /// and the row is the only place anybody can see it. See the type's doc comment.
     public mutating func turnStarted() {
-        subagents = []
-        byToolUse = [:]
+        subagents.removeAll { $0.state.isFinished }
+        let living = Set(subagents.map(\.id))
+        byToolUse = byToolUse.filter { living.contains($0.value) }
         refusals = 0
     }
 
-    /// The turn ended. Anything still running was killed with it, whatever the last line said.
+    /// The agent process died. Anything still running was killed with it, whatever the last line
+    /// said.
     ///
-    /// Sent on the result line rather than inferred, because the process that would have reported
-    /// these endings is the one that just went away: without this a subagent whose notification
-    /// was lost breathes on the row until the owner sends the next message.
-    public mutating func turnEnded(now: Date = Date()) {
+    /// Sent when `claude` itself goes away rather than when a turn ends, because the process is
+    /// what reports these endings and it lives for the whole session: a turn finishing is not news
+    /// about a subagent. Without this a subagent whose notification can never arrive, because the
+    /// process that would have sent it was signalled, breathes on the row for ever.
+    public mutating func agentExited(now: Date = Date()) {
         for index in subagents.indices {
-            apply(.turnEnded, at: index, now: now)
+            apply(.agentExited, at: index, now: now)
         }
     }
 

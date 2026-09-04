@@ -242,11 +242,11 @@ import Foundation
         #expect(roster[SubagentID("1")]?.finishedAt == first)
     }
 
-    @Test func aTurnEndingTimesWhateverItStopped() {
+    @Test func theAgentExitingTimesWhateverItStopped() {
         var roster = SubagentRoster()
         roster.apply(.started(SubagentStart(id: SubagentID("1"), toolUseID: "t")), now: Self.start)
         let end = Self.start.addingTimeInterval(30)
-        roster.turnEnded(now: end)
+        roster.agentExited(now: end)
         #expect(roster[SubagentID("1")]?.state == .stopped)
         #expect(roster[SubagentID("1")]?.finishedAt == end)
     }
@@ -264,7 +264,6 @@ import Foundation
             now = now.addingTimeInterval(0.1)
             switch event {
             case .subagent(let signal): roster.apply(signal, now: now)
-            case .result: roster.turnEnded(now: now)
             default: break
             }
         }

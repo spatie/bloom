@@ -32,8 +32,10 @@ import Foundation
 /// seconds is a flicker of its own, and the tick is the confirmation that the work landed. See
 /// `lingerSeconds`.
 ///
-/// The backstop is unchanged and is what keeps all three bounded: `SubagentRoster.turnStarted`
-/// clears everything when the next turn begins.
+/// The backstop is what keeps all three bounded: `SubagentRoster.turnStarted` clears every
+/// finished subagent when the next turn begins. A subagent still working is not cleared and keeps
+/// its row across the turn boundary, because an `Agent` call launched into the background runs for
+/// minutes after the turn that made it has ended and the row is the only sign of it.
 public enum SubagentRetention: Sendable {
     /// How long a finished row is held before it leaves.
     ///

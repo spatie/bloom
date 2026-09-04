@@ -17,8 +17,9 @@ import Foundation
 /// - `system/task_notification` is the only line carrying `output_file`, and it arrives for a
 ///   failed subagent as readily as for one that worked.
 ///
-/// Nothing here is stored. A subagent lives for seconds and the row it draws is cleared by the
-/// next turn, so there is no table and nothing to migrate. See `SubagentRoster`.
+/// Nothing here is stored. A subagent outlives nothing but the session it was spawned in, and the
+/// row it draws is cleared once it has finished, so there is no table and nothing to migrate. See
+/// `SubagentRoster`.
 public enum SubagentSignal: Sendable, Hashable {
     case started(SubagentStart)
     case progressed(SubagentProgress)
