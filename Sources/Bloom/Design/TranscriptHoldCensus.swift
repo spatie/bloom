@@ -219,6 +219,20 @@ enum TranscriptHoldCensus {
     /// a report has to answer is not how many but which frame. `TranscriptRowInk` is what says
     /// the row was expected to draw: a row that claims to draw nothing measuring nothing is the
     /// design working and is not recorded here.
+    ///
+    /// **Every entry the first three probe runs produced has been explained, and none of them was
+    /// a fault.** Two were the entries that redraw themselves, which draw nothing between turns
+    /// and are measured on every pass; they are excluded now. The other five were `thinking` rows
+    /// whose thinking text is empty, a signature and nothing else, looked up by sequence number in
+    /// the database the run was driven against. `TranscriptRowInk` only answers for `system` rows,
+    /// so an empty thinking block is not CLAIMED to draw nothing, is estimated like any other row,
+    /// and then measures nothing when it is drawn. Recording nought for it and refusing it a view
+    /// is the design working.
+    ///
+    /// It stays because it is one comparison on a path that has just laid out a hosting view, and
+    /// because a real silence is invisible to everything else here: `isGuessed` does not count a
+    /// row the cache and the table agree about, even when what they agree on is nothing. Anything
+    /// it reports should be looked up before it is believed.
     static func silenced(_ silence: Silence) {
         silencedRows += 1
         guard silences.count < mostSilences else { return }
