@@ -165,14 +165,26 @@ public actor CodexClient {
     /// `initialize` is a request and `initialized` is a notification, in that order. Nothing else
     /// may be sent in between: the server rejects work before the handshake, and sending
     /// `initialized` without waiting for the reply races the connection's own setup.
+    ///
+    /// **Both streams are claimed here, and that is what launches the child.** They used to be
+    /// claimed inside the two tasks below, which reads as the same thing and is not: an
+    /// unstructured task made on an actor cannot run until the actor is free, and this one holds
+    /// the actor straight through `send`, whose continuation body writes the line. So the
+    /// handshake was written into a process nobody had started, every time, on the quota reader
+    /// and on a chat alike, and `StreamingProcess.write` used to take that write to a pipe with
+    /// nothing behind it. `AgentRunner.start` and `ClaudeCodeQuotaSource.read` have always done
+    /// it in this order and say why; this is the one that did not.
     public func start() async throws {
         guard process == nil else { return }
 
         let process = makeProcess(Self.launch(configuration))
         self.process = process
         live.attach(process)
-        readTask = Task { [weak self] in await self?.readLines(from: process) }
-        stderrTask = Task { [weak self] in await self?.readErrors(from: process) }
+
+        let errors = process.errorLines
+        let lines = process.lines
+        readTask = Task { [weak self] in await self?.readLines(from: lines) }
+        stderrTask = Task { [weak self] in await self?.readErrors(from: errors) }
 
         _ = try await send(
             "initialize",
@@ -421,9 +433,9 @@ public actor CodexClient {
 
     // MARK: Reading
 
-    private func readLines(from process: any AgentProcessing) async {
+    private func readLines(from lines: AsyncThrowingStream<String, Error>) async {
         do {
-            for try await line in process.lines {
+            for try await line in lines {
                 guard let frame = CodexFrame.decode(line: line) else { continue }
                 handle(frame)
             }
@@ -433,8 +445,8 @@ public actor CodexClient {
         }
     }
 
-    private func readErrors(from process: any AgentProcessing) async {
-        for await line in process.errorLines {
+    private func readErrors(from errors: AsyncStream<String>) async {
+        for await line in errors {
             stderrTail.append(line)
             if stderrTail.count > Self.stderrTailLimit { stderrTail.removeFirst() }
         }

@@ -21,7 +21,17 @@ public final class StreamingProcess: Sendable {
         var stderrBuffer = Data()
         var exitWaiters: [CheckedContinuation<Int32, Never>] = []
         var status: Int32?
+        /// Whether stdin may still be written to. A decision, and not the same thing as the
+        /// descriptor being gone: a write that met a dead child sets this without closing a
+        /// handle another writer may be holding.
         var stdinClosed = false
+        /// Whether the write end has actually been closed. This is what makes the close single
+        /// shot, because it is the flag the `close()` call itself is guarded by.
+        var stdinHandleClosed = false
+        /// How many writes are inside `FileHandle.write` this instant. A close asked for while
+        /// one is in flight is handed to that writer instead of happening under it. See
+        /// `write(_:)`.
+        var stdinWriters = 0
         var started = false
         /// Whether each pipe has reported end of file, which is the only trustworthy signal that
         /// the child is done writing to it.
@@ -193,14 +203,37 @@ public final class StreamingProcess: Sendable {
         }
     }
 
+    /// Writes to the child's stdin, and does nothing at all when there is no child to write to.
+    ///
+    /// **This is the segmentation fault the quota reader died of.** The guard used to be one flag
+    /// read under the lock, with the write itself outside it and no question asked about whether
+    /// a child existed, so `stdinPipe.fileHandleForWriting` was reached for in whatever state it
+    /// happened to be in. Two states it can be in are not writable and neither was checked: the
+    /// process has never been launched, which is how `CodexClient` used to send its handshake,
+    /// and `closeStdin` is closing that very handle from another thread, which is what
+    /// `CodexRunner.terminateNow` does from the main actor on Stop, close, archive and quit. A
+    /// `FileHandle` reached in either state faults inside `_NSFileHandleIsClosed` on a field read
+    /// off nothing, and it takes the whole app with it for the sake of a menu bar number.
+    ///
+    /// So a write claims the handle: it is refused unless the child was started and has not
+    /// exited and stdin is still open, and while it is in flight `closeStdin` records what it
+    /// wants rather than doing it. The claim is dropped and the deferred close performed on the
+    /// way out. Nothing is held across the write itself, because a full pipe blocks there until
+    /// the child reads or dies, and a closer waiting on that would be the quit path hanging.
     public func write(_ text: String) {
-        guard !state.withLock(\.stdinClosed) else { return }
+        let claimed = state.withLock { state -> Bool in
+            guard state.started, state.status == nil, !state.stdinClosed, !state.stdinHandleClosed
+            else { return false }
+            state.stdinWriters += 1
+            return true
+        }
+        guard claimed else { return }
+        defer { releaseWriter() }
 
-        let handle = stdinPipe.fileHandleForWriting
         let data = Data(text.utf8)
         // A dead child turns a write into SIGPIPE, which `write(_:)` turns into an exception.
         do {
-            try handle.write(contentsOf: data)
+            try stdinPipe.fileHandleForWriting.write(contentsOf: data)
         } catch {
             // The process went away. Nothing useful to do beyond stopping further writes.
             state.withLock { $0.stdinClosed = true }
@@ -211,13 +244,27 @@ public final class StreamingProcess: Sendable {
         write(text + "\n")
     }
 
-    public func closeStdin() {
-        let claimed = state.withLock { state -> Bool in
-            if state.stdinClosed { return false }
-            state.stdinClosed = true
+    /// Drops one writer's claim and performs a close that was waiting for it.
+    private func releaseWriter() {
+        let close = state.withLock { state -> Bool in
+            state.stdinWriters -= 1
+            guard state.stdinClosed, state.stdinWriters == 0, !state.stdinHandleClosed
+            else { return false }
+            state.stdinHandleClosed = true
             return true
         }
-        guard claimed else { return }
+        guard close else { return }
+        try? stdinPipe.fileHandleForWriting.close()
+    }
+
+    public func closeStdin() {
+        let close = state.withLock { state -> Bool in
+            state.stdinClosed = true
+            guard state.stdinWriters == 0, !state.stdinHandleClosed else { return false }
+            state.stdinHandleClosed = true
+            return true
+        }
+        guard close else { return }
         try? stdinPipe.fileHandleForWriting.close()
     }
 
