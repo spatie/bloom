@@ -128,12 +128,17 @@ struct SearchPanelView: View {
 
     /// The rows, or what the card says instead of them.
     ///
-    /// **A fixed height, not a ceiling.** It was `maxHeight`, so the card grew and shrank on the
-    /// keystroke that changed how many results there were: twelve rows, then one, then none. Two
-    /// separate reports on this branch were about the panel moving while somebody typed, and this
-    /// is the same complaint one level up from the chips. Raycast holds a fixed panel for exactly
-    /// this reason. The cost is a card taller than its content on a quiet machine, which is a
-    /// steady thing to look at rather than a moving one.
+    /// **A fixed height, not a ceiling, and the owner chose it knowing what it costs.** It was
+    /// `maxHeight`, so the card grew and shrank on the keystroke that changed how many results
+    /// there were: twelve rows, then one, then none. Two separate reports on this branch were
+    /// about the panel moving while somebody typed, and this is the same complaint one level up
+    /// from the chips. Raycast holds a fixed panel for exactly this reason.
+    ///
+    /// The cost is a card taller than its content on a quiet machine, and taller still when it is
+    /// empty: a fresh install opens this and gets three hundred points of card with one sentence
+    /// in it. That was put to him with a picture of it and he kept it, because the alternative is
+    /// a card that resizes under the pointer on nearly every keystroke. So it is a decision rather
+    /// than an oversight, and it is not to be quietly tidied away by the next reader.
     @ViewBuilder
     private var list: some View {
         Group {

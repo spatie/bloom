@@ -142,8 +142,16 @@ final class SearchPanelWindowGeometry {
     /// Nil before there is a window, and on a window whose buttons are gone.
     private(set) var trafficLights: CGRect?
 
-    /// How much of the window sits above its content view, which is the title bar and the toolbar
-    /// in it. The card is hung below this so it stays where it always sat.
+    /// How tall the title bar is, so the card can be hung below it rather than against it.
+    ///
+    /// **`WindowChrome` is the one writer, and that is the whole point.** Two other ways of asking
+    /// were tried in the picture and both were wrong. `contentLayoutRect` is what the title bar
+    /// leaves over AFTER its accessories, and Bloom puts a 52 point band up there, so it answered
+    /// 152 and the card hung a hundred points too low. The content view's own frame answered zero,
+    /// because a window with a transparent title bar gives its content the whole frame, and the
+    /// card then sat two points under the toolbar. The only honest measurement in this app is the
+    /// one `WindowChrome` already takes, before any accessory is in the bar, and it is the number
+    /// the strip itself is built at.
     private(set) var titleBarHeight: CGFloat = 0
 
     /// The window's frame height, held so the flip below needs nothing from the view drawing it.
@@ -160,8 +168,14 @@ final class SearchPanelWindowGeometry {
         )
     }
 
-    func setChrome(titleBarHeight: CGFloat, windowHeight: CGFloat, trafficLights: CGRect?) {
-        if self.titleBarHeight != titleBarHeight { self.titleBarHeight = titleBarHeight }
+    /// Called by `WindowChrome` with the height it measured for the title bar strip.
+    func setTitleBarHeight(_ height: CGFloat) {
+        guard titleBarHeight != height else { return }
+        titleBarHeight = height
+    }
+
+    /// Called by the overlay whenever the window moves under it.
+    func setChrome(windowHeight: CGFloat, trafficLights: CGRect?) {
         if self.windowHeight != windowHeight { self.windowHeight = windowHeight }
         if self.trafficLights != trafficLights { self.trafficLights = trafficLights }
     }
@@ -221,9 +235,7 @@ final class SearchPanelOverlayHost: NSHostingView<SearchPanelWindowOverlay> {
         // must NOT respect: it is the region it exists to cover.
         safeAreaRegions = []
         guard let window else {
-            SearchPanelWindowGeometry.shared.setChrome(
-                titleBarHeight: 0, windowHeight: 0, trafficLights: nil
-            )
+            SearchPanelWindowGeometry.shared.setChrome(windowHeight: 0, trafficLights: nil)
             return
         }
         if !isWatchingWindow {
@@ -276,19 +288,15 @@ final class SearchPanelOverlayHost: NSHostingView<SearchPanelWindowOverlay> {
         self.frame = frame.bounds
     }
 
-    /// The three numbers the overlay draws itself from, measured off the frame view.
+    /// The two numbers the overlay measures for itself, off the frame view. The third, the title
+    /// bar's height, is `WindowChrome`'s and is written down on the property.
     private func publishGeometry() {
         let geometry = SearchPanelWindowGeometry.shared
-        guard let window, let frame = superview, let content = window.contentView else {
-            geometry.setChrome(titleBarHeight: 0, windowHeight: 0, trafficLights: nil)
+        guard let window, let frame = superview else {
+            geometry.setChrome(windowHeight: 0, trafficLights: nil)
             return
         }
         let height = frame.bounds.height
-        // What sits ABOVE the content view, which is the title bar and the toolbar in it. Taken
-        // from the content view's own frame rather than from `contentLayoutRect`, because that
-        // rect is what the title bar leaves over after its accessories and Bloom puts a 52 point
-        // band in there: it answered 152 for a 52 point title bar. See `TitleBarStrip`.
-        let titleBar = max(0, height - content.frame.maxY)
 
         let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
             .compactMap { window.standardWindowButton($0) }
@@ -300,8 +308,6 @@ final class SearchPanelOverlayHost: NSHostingView<SearchPanelWindowOverlay> {
             }
             lights = union.insetBy(dx: -Self.trafficLightPadding, dy: -Self.trafficLightPadding)
         }
-        geometry.setChrome(
-            titleBarHeight: titleBar, windowHeight: height, trafficLights: lights
-        )
+        geometry.setChrome(windowHeight: height, trafficLights: lights)
     }
 }
