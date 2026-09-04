@@ -7,7 +7,7 @@ import BloomCore
 /// It deliberately carries the raw JSON rather than a decoded structure. The store keeps every
 /// event verbatim, so a renderer added later can show detail that was not decoded when the row
 /// was written, and a row costs nothing to hold until it scrolls into view.
-struct TranscriptRow: Identifiable, Hashable {
+struct TranscriptRow: Identifiable, Hashable, Sendable {
     var id: Int64
     var seq: Int
     var kind: MessageKind
@@ -414,6 +414,25 @@ final class TranscriptModel {
         if message.kind == .toolUse, let refID = message.refID {
             indexByRefID[refID] = rows.count - 1
         }
+    }
+
+    /// The same fold, over messages that were never stored.
+    ///
+    /// **The subagent pane draws a conversation and had grown a renderer of its own to do it.** A
+    /// subagent's lines come back from `SubagentTranscript` in the shape the store hands a message
+    /// back in, so they are folded with this rule rather than with a second one: which result
+    /// belongs to which call, what a refusal is and how long a call took are decided here for
+    /// every conversation in the window, and a second copy of that is a second copy to keep right.
+    ///
+    /// No decisions, because a subagent is never asked a permission question: the CLI puts those
+    /// on the parent's stream, where the transcript already answers them.
+    nonisolated static func rows(from messages: [Message]) -> [TranscriptRow] {
+        var built: [TranscriptRow] = []
+        var indexByRefID: [String: Int] = [:]
+        for message in messages {
+            Self.absorb(message, decisions: [:], into: &built, indexByRefID: &indexByRefID)
+        }
+        return built
     }
 
     /// The same fold, straight onto the model, for the rows that arrive while the session is open.

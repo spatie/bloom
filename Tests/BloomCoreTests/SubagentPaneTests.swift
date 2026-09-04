@@ -150,22 +150,23 @@ import Foundation
     @Test func aShortBriefIsNotHiddenBehindAClick() {
         let short = "Read a.txt and report its line count."
         #expect(!SubagentPane.briefCollapses(short))
-        #expect(SubagentPane.briefHead(short) == short)
     }
 
-    @Test func aLongBriefIsOfferedCollapsed() {
+    /// A handed-off brief runs to a page and a half. It used to open with the first 500 characters
+    /// of it, which together with the title, the subtitle and the summary filled the pane, so what
+    /// the subagent DID began below the fold of the one view somebody opens to find that out.
+    @Test func aLongBriefOpensShutRatherThanShowingItsHead() {
         let long = String(repeating: "word ", count: 400)
         #expect(SubagentPane.briefCollapses(long))
-        #expect(SubagentPane.briefHead(long).count <= SubagentPane.briefCollapseLimit)
     }
 
-    /// Cut on a line so a collapsed prompt does not stop mid-sentence and a collapsed command does
-    /// not stop mid-flag.
-    @Test func aCollapsedBriefStopsOnALine() {
-        let brief = String(repeating: "a paragraph of the brief\n", count: 40)
-        let head = SubagentPane.briefHead(brief)
-        #expect(head.hasSuffix("the brief"))
-        #expect(!head.hasSuffix("\n"))
+    /// The line that opens it says what is behind it. A shut brief draws no text at all, so "Show
+    /// all" would be offering to show the rest of nothing.
+    @Test func theLineThatOpensABriefNamesWhatItHides() {
+        #expect(SubagentPane.briefToggle(isExpanded: false, kind: .agent) == "Show the prompt")
+        #expect(SubagentPane.briefToggle(isExpanded: true, kind: .agent) == "Hide the prompt")
+        #expect(SubagentPane.briefToggle(isExpanded: false, kind: .command) == "Show the command")
+        #expect(SubagentPane.briefToggle(isExpanded: true, kind: .command) == "Hide the command")
     }
 
     // MARK: Finding what a command ran
@@ -195,6 +196,10 @@ import Foundation
 // MARK: - Reading two different files
 
 @Suite(.scratchDirectory) struct SubagentOutputReadingTests {
+    /// The parent's session, which is the one these lines came off. Carried because a `Message`
+    /// has one and for no other reason: nothing drawn from these rows reads it.
+    private static let session = SessionID("s1")
+
     /// In the running test's own directory, which is removed when it ends. It used to be a fresh
     /// directory under `NSTemporaryDirectory()` that nothing removed, and there were 1,007 of them
     /// on the machine this was found on. See `TestScratch`.
@@ -210,13 +215,12 @@ import Foundation
     /// nothing at all, which is exactly what the pane was showing.
     @Test func aCommandsStdoutIsNotParsedAsATranscript() throws {
         let path = try write("> build\nassets written in 1.2s\n")
-        let asTranscript = SubagentOutput.read(path: path, kind: .agent)
+        let asTranscript = SubagentOutput.read(path: path, kind: .agent, sessionID: Self.session)
         #expect(try asTranscript.get().isEmpty)
 
-        let printed = try SubagentOutput.read(path: path, kind: .command).get()
-        #expect(printed.entries.count == 1)
-        #expect(printed.entries[0].kind == .printed)
-        #expect(printed.entries[0].body == "> build\nassets written in 1.2s")
+        let printed = try SubagentOutput.read(path: path, kind: .command, sessionID: Self.session).get()
+        #expect(printed.messages.isEmpty)
+        #expect(printed.printed == "> build\nassets written in 1.2s")
     }
 
     @Test func anAgentsFileIsStillParsedAsNDJSON() throws {
@@ -224,13 +228,16 @@ import Foundation
         {"type":"user","message":{"role":"user","content":"Count the lines"}}
         {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"3"}]}}
         """)
-        let transcript = try SubagentOutput.read(path: path, kind: .agent).get()
-        #expect(transcript.entries.map(\.kind) == [.prompt, .text])
+        let transcript = try SubagentOutput.read(path: path, kind: .agent, sessionID: Self.session).get()
+        // The brief is not one of the rows. It is drawn above the conversation, and reading it back
+        // as something the subagent said is what drew it under "Answered" as well as under "Asked".
+        #expect(transcript.prompt == "Count the lines")
+        #expect(transcript.messages.map(\.kind) == [.assistantText])
     }
 
     @Test func aCommandThatPrintedNothingIsEmptyRatherThanABlankBlock() throws {
         let path = try write("   \n\n")
-        #expect(try SubagentOutput.read(path: path, kind: .command).get().isEmpty)
+        #expect(try SubagentOutput.read(path: path, kind: .command, sessionID: Self.session).get().isEmpty)
     }
 
     /// The failure sentences are worded per kind. "This subagent's output" said of a `git push`
@@ -257,17 +264,35 @@ import Foundation
     @Test func aRunningSubagentIsReadFromTheStreamBloomAlreadyStored() {
         let lines = [
             #"{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"role":"assistant","content":[{"type":"text","text":"Reading the diff"}]}}"#,
-            #"{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"/a/b.php"}}]}}"#,
-            #"{"type":"user","parent_tool_use_id":"toolu_1","message":{"role":"user","content":[{"type":"tool_result","content":"<?php"}]}}"#,
+            #"{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_2","name":"Read","input":{"file_path":"/a/b.php"}}]}}"#,
+            #"{"type":"user","parent_tool_use_id":"toolu_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_2","content":"<?php"}]}}"#,
         ].map { Data($0.utf8) }
 
-        let live = SubagentTranscript.live(streamLines: lines)
-        #expect(live.entries.map(\.kind) == [.text, .tool, .toolResult])
-        #expect(live.entries[0].body == "Reading the diff")
-        #expect(live.entries[1].title == "Read")
-        #expect(live.entries[2].body == "<?php")
+        let live = SubagentTranscript.live(streamLines: lines, sessionID: Self.session)
+        #expect(live.messages.map(\.kind) == [.assistantText, .toolUse, .toolResult])
+        // The bytes of the line itself, so every renderer downstream reads what it always read.
+        #expect(live.messages[0].payload == lines[0])
+        #expect(live.messages[2].refID == "toolu_2")
 
-        #expect(SubagentTranscript.live(streamLines: []).isEmpty)
+        #expect(SubagentTranscript.live(streamLines: [], sessionID: Self.session).isEmpty)
+    }
+
+    /// **The brief was on screen twice, under two headings, and this is why.**
+    ///
+    /// In the CLI's file it is a `user` line whose content is a bare string. On the parent's live
+    /// stream, which is what a RUNNING subagent's pane reads, it is a `user` line whose content is
+    /// an array holding one `text` block. The reader used to look at the block's type without
+    /// looking at whose message it was, so the brief came back as something the subagent had said.
+    @Test func theBriefOnTheLiveStreamIsNotReadBackAsAnAnswer() {
+        let lines = [
+            #"{"type":"user","parent_tool_use_id":"toolu_1","message":{"role":"user","content":[{"type":"text","text":"You are implementing Tasks 7 and 8 of a plan for Assign."}]}}"#,
+            #"{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"role":"assistant","content":[{"type":"text","text":"Both tasks are in."}]}}"#,
+        ].map { Data($0.utf8) }
+
+        let live = SubagentTranscript.live(streamLines: lines, sessionID: Self.session)
+        #expect(live.prompt == "You are implementing Tasks 7 and 8 of a plan for Assign.")
+        #expect(live.messages.count == 1)
+        #expect(live.messages[0].kind == .assistantText)
     }
 
     /// A subagent that has not spoken yet has not failed to write anything, and the reasons in
@@ -282,9 +307,12 @@ import Foundation
     }
 
     @Test func aFileThatIsNotThereIsASentenceRatherThanAThrow() {
-        #expect(SubagentOutput.read(path: "/no/such/file", kind: .command) == .failure(.missing))
-        #expect(SubagentOutput.read(path: "", kind: .command) == .failure(.noFile))
-        #expect(SubagentOutput.read(path: nil, kind: .agent) == .failure(.noFile))
+        #expect(SubagentOutput.read(path: "/no/such/file", kind: .command, sessionID: Self.session)
+            == .failure(.missing))
+        #expect(SubagentOutput.read(path: "", kind: .command, sessionID: Self.session)
+            == .failure(.noFile))
+        #expect(SubagentOutput.read(path: nil, kind: .agent, sessionID: Self.session)
+            == .failure(.noFile))
     }
 
     // MARK: Bounds
@@ -316,24 +344,16 @@ import Foundation
     }
 
     @Test func aTranscriptIsCappedAtWhatThePaneWillDraw() {
-        let line = """
-        {"type":"assistant","message":{"content":[{"type":"text","text":"step"}]}}
-        """
-        let many = Array(repeating: line, count: SubagentTranscript.entryLimit + 30)
-            .joined(separator: "\n")
-        let transcript = SubagentTranscript.parse(many)
-        #expect(transcript.entries.count == SubagentTranscript.entryLimit)
-        #expect(transcript.droppedEntries == 30)
-    }
-
-    @Test func aSingleEnormousEntryIsCutRatherThanHeldWhole() {
-        let huge = String(repeating: "z", count: SubagentTranscript.bodyLimit * 2)
-        let entry = SubagentTranscript.Entry(id: 0, kind: .toolResult, body: huge)
-        #expect(entry.body.count == SubagentTranscript.bodyLimit + 3)
-        #expect(entry.body.hasSuffix("..."))
+        // Numbered, so the rows are not all one payload and therefore not all one identity.
+        let many = (0..<(SubagentTranscript.rowLimit + 30)).map {
+            #"{"type":"assistant","uuid":"u\#($0)","message":{"content":[{"type":"text","text":"step"}]}}"#
+        }.joined(separator: "\n")
+        let transcript = SubagentTranscript.parse(many, sessionID: Self.session)
+        #expect(transcript.messages.count == SubagentTranscript.rowLimit)
+        #expect(transcript.droppedRows == 30)
     }
 
     @Test func anOrdinaryTranscriptReportsNothingDropped() {
-        #expect(SubagentTranscript.parse("").droppedEntries == 0)
+        #expect(SubagentTranscript.parse("", sessionID: Self.session).droppedRows == 0)
     }
 }

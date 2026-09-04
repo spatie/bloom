@@ -109,7 +109,7 @@ public struct SubagentRow: Sendable, Hashable, Identifiable {
         // `SubagentPane.refreshSeconds` unreachable: nothing could open the pane a live re-read
         // was written for. There is something to show from the first frame either way, because
         // `task_started` carries the whole prompt, and the pane falls back to the nested rows
-        // Bloom itself stored when there is no file. See `SubagentTranscript.live(streamLines:)`.
+        // Bloom itself stored when there is no file. See `SubagentTranscript.live(streamLines:sessionID:)`.
         //
         // A background command keeps the old gate. Its brief is lifted out of the parent's Bash
         // call and its output is plain stdout that only `output_file` holds, so with no file

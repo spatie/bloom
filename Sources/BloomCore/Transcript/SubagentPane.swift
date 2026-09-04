@@ -111,26 +111,36 @@ public enum SubagentPane: Sendable {
         kind == .command
     }
 
-    /// How many characters of a brief are shown before it is offered collapsed.
+    /// How long a brief may be before the pane opens with it shut.
     ///
     /// Shown in full when it is under this, because a two line prompt behind a disclosure arrow is
-    /// a click to read two lines. Past it the pane opens with the head and an arrow, because a
-    /// handed-off brief runs to a page and a half and the answer is what you came for. The number
-    /// is roughly what fits above the fold of the pane at its default height.
+    /// a click to read two lines.
+    ///
+    /// **Past it the pane now shows none of it, where it used to show the first 500 characters.**
+    /// That head was six or seven lines of a handed-off brief, on top of a title, a subtitle and
+    /// the CLI's own summary, and between them they filled the pane: what the subagent DID began
+    /// below the fold of the one view somebody opens to find out. The title and the summary
+    /// already say what it was asked for in a sentence, and the brief is the reader's own words,
+    /// which is the one thing in this pane they have read before. So it is a line to press, and
+    /// the conversation starts at the top.
     public static let briefCollapseLimit = 500
 
     public static func briefCollapses(_ brief: String) -> Bool {
         brief.count > briefCollapseLimit
     }
 
-    /// The head of a long brief, cut on a line boundary so a collapsed prompt does not stop
-    /// mid-sentence and a collapsed command does not stop mid-flag.
-    public static func briefHead(_ brief: String) -> String {
-        guard briefCollapses(brief) else { return brief }
-        let head = String(brief.prefix(briefCollapseLimit))
-        guard let line = head.lastIndex(of: "\n"), head.distance(from: line, to: head.endIndex) < 200
-        else { return head }
-        return String(head[head.startIndex..<line])
+    /// What the line that opens a long brief says.
+    ///
+    /// Named rather than `TextFold`'s "Show all", because there is nothing above it to be all of:
+    /// a shut brief draws no text at all, so a button offering to show the rest of nothing says
+    /// nothing about what is behind it.
+    public static func briefToggle(isExpanded: Bool, kind: SubagentKind) -> String {
+        switch (isExpanded, kind) {
+        case (false, .agent): "Show the prompt"
+        case (true, .agent): "Hide the prompt"
+        case (false, .command): "Show the command"
+        case (true, .command): "Hide the command"
+        }
     }
 
     /// The command line a background command was given.

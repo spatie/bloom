@@ -72,6 +72,7 @@ extension Snapshot {
         .statusColumn,
         .retries,
         .subagentRows,
+        .subagentOutput,
         .paneTabs,
         .sidebarSelection,
         .quickPrompts,
