@@ -877,13 +877,14 @@ extension View {
 enum Motion {
     static let pane: Animation = .easeOut(duration: 0.18)
 
-    /// The inspector column arriving and leaving, the pull request band arriving with it, and the
-    /// window's search field moving over to make room.
+    /// The inspector column arriving and leaving, and the pull request band arriving with it.
     ///
-    /// Three parts of one movement, and no two of them are drawn by the same thing. The column is
-    /// an `NSSplitViewItem` under AppKit's animator. The band along the top of it is a title bar
-    /// accessory, because it sits in the title bar rather than inside the pane. The field is an
-    /// `NSSearchToolbarItem`, packed by `NSToolbar` into whatever width that accessory leaves it.
+    /// It was three parts of one movement, drawn by three different things, and it is two now: the
+    /// window's search field was the third and it is a panel rather than a toolbar item. The
+    /// column is an `NSSplitViewItem` under AppKit's animator. The band along the top of it is a
+    /// title bar accessory, because it sits in the title bar rather than inside the pane. The
+    /// field was an `NSSearchToolbarItem`, packed by `NSToolbar` into whatever width that
+    /// accessory left it.
     /// That is why they used to arrive at different times: the band was drawn or it was not, with
     /// nothing in between, so it appeared whole on the frame the toolbar button was pressed while
     /// the column spent a quarter of a second sliding in underneath it (the owner's words were "bit

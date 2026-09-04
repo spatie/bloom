@@ -110,4 +110,24 @@ final class CreateWorkspaceOpening {
         wantsPullRequest = false
         return true
     }
+
+    /// A name to open the window with, set by the search panel's "start a workspace called this"
+    /// row and by nothing else.
+    ///
+    /// Somebody who searched for a workspace that does not exist has just said what they want it
+    /// called, and asking them to type it again is the panel throwing that away. It lands in the
+    /// name field, which the two modes that run no agent draw; chat mode has no such field because
+    /// it names the workspace from the prompt, so there this is what the field would have held if
+    /// they change their mind about the mode.
+    private(set) var suggestedName: String?
+
+    func askForName(_ name: String) {
+        suggestedName = name
+    }
+
+    /// Once, like the pull request ask above.
+    func consumeName() -> String? {
+        defer { suggestedName = nil }
+        return suggestedName
+    }
 }

@@ -16,15 +16,16 @@ import Foundation
 /// somebody who wants it from inside a terminal has a key that always means it.
 ///
 /// **The one thing that changed when the Search screen went.** The fall through lands in the
-/// window's own search field rather than on a sidebar destination. Nothing about either key
-/// moved: this enum already said "the pane in front, or the workspace search", and the workspace
-/// search is now a field in the toolbar and a state of Home rather than a screen beside it.
+/// window's own search rather than on a sidebar destination. Nothing about either key has moved
+/// since: this enum has always said "the pane in front, or the workspace search", and the
+/// workspace search has been a screen, then a field in the toolbar, and is a panel over the window
+/// now. Which of those it is is the app target's business; the rule is the same one either way.
 public enum FindCommand {
     public enum Target: Equatable, Sendable {
         /// The pane in front answers, through its own find bar.
         case findInPlace
-        /// The window's search field, which searches names, branches, projects and the full text
-        /// of every transcript on the machine.
+        /// The window's search, which reaches names, branches, projects and the full text of every
+        /// transcript on the machine. See `SearchPanelResults`.
         case workspaceSearch
     }
 
