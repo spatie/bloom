@@ -196,6 +196,15 @@ final class SearchPanelOverlayHost: NSHostingView<SearchPanelWindowOverlay> {
     /// panel is open, because a closed panel hit tests to nothing and this is never asked.
     override var mouseDownCanMoveWindow: Bool { false }
 
+    /// Whether the frame observer is already registered.
+    ///
+    /// Once, not once per move into a window. Deregistering and registering again would be the
+    /// obvious way to write this and SwiftLint refuses it, rightly: `notification_center_detachment`
+    /// exists because an object that removes itself outside `deinit` removes every observation
+    /// something else registered for it too. Registering once and letting `deinit` do the taking
+    /// off is the shape that has no such hazard.
+    private var isWatchingFrame = false
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         // No safe area at all. This view is a sibling of the content view rather than a descendant
@@ -203,21 +212,24 @@ final class SearchPanelOverlayHost: NSHostingView<SearchPanelWindowOverlay> {
         // must NOT respect: it is the region it exists to cover. Left on, SwiftUI would push the
         // dim down to where the content view starts, which is the bug over again.
         safeAreaRegions = []
-        NotificationCenter.default.removeObserver(self)
         guard window != nil else {
             SearchPanelWindowGeometry.shared.setTrafficLights(nil)
             return
         }
-        // The frame rather than the window: this view is pinned to the frame view by an
-        // autoresizing mask, so it hears about a resize, a full screen and a zoom alike, and it
-        // hears about them after the new size is in rather than during a layout pass of its own.
-        postsFrameChangedNotifications = true
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(frameChanged),
-            name: NSView.frameDidChangeNotification,
-            object: self
-        )
+        if !isWatchingFrame {
+            isWatchingFrame = true
+            // The frame rather than the window: this view is pinned to the frame view by an
+            // autoresizing mask, so it hears about a resize, a full screen and a zoom alike, and
+            // it hears about them after the new size is in rather than during a layout pass of
+            // its own.
+            postsFrameChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(frameChanged),
+                name: NSView.frameDidChangeNotification,
+                object: self
+            )
+        }
         publishGeometry()
     }
 
