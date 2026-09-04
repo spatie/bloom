@@ -57,16 +57,19 @@ struct SearchPanelResultsTests {
         archived: [Workspace] = [],
         transcripts: [TranscriptWorkspaceMatches] = [],
         scope: HomeScope = .all,
-        commands: [MenuBarItem] = []
+        commands: [MenuBarItem] = [],
+        repos: [Repo]? = nil,
+        reach: SearchPanelReach = .live
     ) -> SearchPanelListing {
         SearchPanelResults.build(
             query: query,
-            repos: [repo],
+            repos: repos ?? [repo],
             workspaces: workspaces,
             archived: archived,
             transcripts: transcripts,
             scope: scope,
-            commands: commands
+            commands: commands,
+            reach: reach
         )
     }
 
@@ -132,9 +135,11 @@ struct SearchPanelResultsTests {
         #expect(hit.match == "runbloom")
     }
 
-    /// Home's own counts, worked out in the same pass, so the two surfaces cannot disagree about
-    /// how much archived work there is.
-    @Test("the chips count workspaces and transcript matches, archived work in both")
+    /// **Each chip counts what pressing it would show, and no chip counts another chip's work.**
+    /// The three live chips used to carry archived work as well, so Everything read 3752 against
+    /// Archived 2317 on the owner's machine and more than half of Everything was work he had
+    /// finished with. See `SearchPanelReach`.
+    @Test("the live chips count live work and Archived counts the archive")
     func theChipCounts() {
         let listing = build(
             "docs",
@@ -145,12 +150,16 @@ struct SearchPanelResultsTests {
                 transcriptResult("docs import", matches: 8),
             ]
         )
-        #expect(listing.counts.workspaces == 2)
-        #expect(listing.counts.transcripts == 14)
-        #expect(listing.counts.transcriptWorkspaces == 2)
-        // One archived row plus the eight matches inside the archived workspace.
+        #expect(listing.counts.workspaces == 1)
+        #expect(listing.counts.transcripts == 6)
+        #expect(listing.counts.transcriptWorkspaces == 1)
+        // One archived row plus the eight matches inside the archived workspace. Counted even
+        // though none of it is drawn: a chip whose number went to nought whenever it was not lit
+        // is a chip nobody would ever press.
         #expect(listing.counts.archived == 9)
-        #expect(listing.counts.count(of: .all, searching: true) == 16)
+        #expect(listing.counts.count(of: .all, searching: true) == 7)
+        // And the rows are the live ones alone.
+        #expect(listing.rows.map(\.id) == ["workspace:docs chapters", "transcript:docs chapters"])
     }
 
     /// The chips split the answer by what kind of thing matched rather than filtering rows, which
@@ -297,11 +306,13 @@ struct SearchPanelResultsTests {
     /// shorter menu Home already draws for one. A command has no workspace at all.
     @Test("a row that names a workspace can be pushed into, whether or not it is archived")
     func whatCanBeDrilled() {
+        // Under the Archived chip, because that is the only place an archived row is drawn now.
         let listing = build(
             "docs",
             workspaces: [workspace("docs chapters")],
             archived: [workspace("docs import", state: .archived)],
-            transcripts: [transcriptResult("docs chapters", matches: 2)]
+            transcripts: [transcriptResult("docs chapters", matches: 2)],
+            reach: SearchPanelReach(archived: true)
         )
         let drillable = Dictionary(
             uniqueKeysWithValues: listing.rows.map { ($0.id, $0.drillable) }

@@ -26,13 +26,19 @@ public enum SearchPanelNothing: Equatable, Sendable {
     case nothingYet
     /// A search of workspaces, transcripts and commands that matched nothing.
     case noMatch(String)
+    /// Nothing in live work matched, but the archive holds workspaces that did.
+    ///
+    /// This is what makes the default reach safe rather than merely narrow. A panel that answers
+    /// over live work alone would otherwise refuse to find the archived workspace somebody is
+    /// searching for the name of, and say nothing about having refused. See `SearchPanelReach`.
+    case noLiveMatch(String, archived: Int)
     /// The menu bar, searched for something that is not in it.
     case noCommand(String)
 
     public var title: String {
         switch self {
         case .nothingYet: "Nothing to show yet"
-        case .noMatch: "No results"
+        case .noMatch, .noLiveMatch: "No results"
         case .noCommand: "No such command"
         }
     }
@@ -43,6 +49,14 @@ public enum SearchPanelNothing: Equatable, Sendable {
             "Add a project and start a workspace, and what you are working on turns up here."
         case .noMatch(let query):
             "Nothing in Bloom matches \(quoted(query))."
+        case .noLiveMatch(let query, let archived):
+            // The count and the noun, and no instruction after them. The chip that would show
+            // them is on the row above this card with the same number on it, so a sentence
+            // telling the reader to press it would be saying what they can already see. The two
+            // rows this replaced were exactly that mistake.
+            archived == 1
+                ? "Nothing in your live work matches \(quoted(query)). 1 archived workspace does."
+                : "Nothing in your live work matches \(quoted(query)). \(archived) archived workspaces do."
         case .noCommand(let query):
             "No menu item matches \(quoted(query))."
         }
@@ -56,7 +70,11 @@ public enum SearchPanelNothing: Equatable, Sendable {
     /// keyed on the flag rather than printed always. It belongs to `noMatch` alone: an empty
     /// install has nothing to index, and the menu bar is not in the index at all.
     public func indexNotice(isIndexing: Bool) -> String? {
-        guard isIndexing, case .noMatch = self else { return nil }
+        guard isIndexing else { return nil }
+        switch self {
+        case .noMatch, .noLiveMatch: break
+        case .nothingYet, .noCommand: return nil
+        }
         return "The transcript index is still building, so older conversations are not searchable yet."
     }
 

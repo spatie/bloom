@@ -34,9 +34,10 @@ public struct ProjectHideTool: BridgeToolHandling {
 
             This is a view preference and nothing more. It stops nothing, closes nothing and \
             deletes nothing: the project's agents keep running, its worktrees stay exactly where \
-            they are, and its workspaces still appear on Bloom's Home screen, in search, in the \
-            menu bar and in Shortcuts. The owner brings a hidden project back by turning on Show \
-            hidden projects in the sidebar's filter menu, or you can with project_unhide.
+            they are, and its workspaces still appear on Bloom's Home screen, in the menu bar \
+            and in Shortcuts. They are left out of the sidebar and of the Cmd+K search panel, \
+            which read the same preference. The owner brings a hidden project back by turning on \
+            Show hidden projects in the sidebar's filter menu, or you can with project_unhide.
 
             Hiding a project that is already hidden is not an error and changes nothing. A \
             project Bloom does not have is refused rather than added: project_add is what \
@@ -178,8 +179,8 @@ enum ProjectVisibilityCall {
             return "It is back in Bloom's sidebar, in the place in the list it already had. "
                 + ProjectVisibility.remainingSentence(visible: visible)
         }
-        return "Bloom's sidebar leaves it out now. Nothing stopped and nothing was deleted: its "
-            + "workspaces are running exactly as they were and are still on Home, in search and "
-            + "in the menu bar. " + ProjectVisibility.remainingSentence(visible: visible)
+        return "Bloom's sidebar and its search panel leave it out now. Nothing stopped and "
+            + "nothing was deleted: its workspaces are running exactly as they were and are still "
+            + "on Home and in the menu bar. " + ProjectVisibility.remainingSentence(visible: visible)
     }
 }

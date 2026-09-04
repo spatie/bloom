@@ -15,8 +15,12 @@ public struct Repo: Identifiable, Sendable, Hashable, Codable {
     /// Whether the sidebar leaves this project out of the list unless it is asked to show the
     /// hidden ones. See `ProjectVisibility`, which is the rule, and note what it is NOT: a
     /// hidden project keeps every workspace it has, and those workspaces keep running, keep
-    /// notifying, and keep turning up on Home, in search, in the menu bar and in Shortcuts. This
-    /// column narrows one list.
+    /// notifying, and keep turning up on Home, in the menu bar and in Shortcuts.
+    ///
+    /// It narrows two lists now rather than one: the sidebar, and the search panel, both off the
+    /// one switch. The search panel was on the list above until the owner asked for it to answer
+    /// over live, visible work by default; `SearchPanelReach` is that decision and says why the
+    /// argument for the original sentence still holds.
     ///
     /// On the project rather than on the project and the machine, which is the same choice
     /// `collapsed` and `sortOrder` already made. Bloom's database is per machine already: there

@@ -114,6 +114,20 @@ final class SearchPanelModel {
         rebuild(app: app)
     }
 
+    /// Whether the sidebar is showing the projects it has been told to hide.
+    ///
+    /// **Read off the same key the sidebar's own switch writes, and not duplicated as a second
+    /// preference.** Hiding a project is one answer to one question, "am I looking at this project
+    /// right now", and two switches for it would be two answers. Turning it on to find something
+    /// here also puts the project back in the sidebar, which is where somebody hunting for a
+    /// hidden project is going next. See `ProjectVisibility.showsHiddenKey` and `SearchPanelReach`.
+    ///
+    /// Read at rebuild rather than observed, because a rebuild already happens on every keystroke
+    /// and on every change the panel cares about, and the switch is in a menu the panel covers.
+    private static var showsHiddenProjects: Bool {
+        UserDefaults.standard.bool(forKey: ProjectVisibility.showsHiddenKey)
+    }
+
     // MARK: - Building the list
 
     /// One pass, on the same inputs Home builds its list from, called when those inputs move
@@ -122,13 +136,17 @@ final class SearchPanelModel {
         guard isOpen else { return }
         switch field.mode {
         case .things:
+            let reach = SearchPanelReach.reading(
+                scope: scope, showsHiddenProjects: Self.showsHiddenProjects
+            )
             listing = field.isEmpty
                 ? SearchPanelResting.build(
                     workspaces: app.workspaces,
                     repos: app.repos,
                     activity: HomeActivity(
                         running: app.runningWorkspaceIDs, waiting: app.waitingWorkspaceIDs
-                    )
+                    ),
+                    reach: reach
                 )
                 : SearchPanelResults.build(
                     query: field.query,
@@ -136,7 +154,8 @@ final class SearchPanelModel {
                     workspaces: app.workspaces,
                     archived: archived,
                     transcripts: app.transcriptResults,
-                    scope: scope
+                    scope: scope,
+                    reach: reach
                 )
         case .commands:
             let sections = SearchPanelCommands.sections(SearchPanelCommands.rank(field.query))
