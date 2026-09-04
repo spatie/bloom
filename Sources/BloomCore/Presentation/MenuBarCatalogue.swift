@@ -94,6 +94,16 @@ public enum MenuBarCatalogue {
         MenuBarItem(.find, in: .edit, "Find…", key: .command("f")),
         MenuBarItem(.findNext, in: .edit, "Find Next", key: .command("g")),
         MenuBarItem(.findPrevious, in: .edit, "Find Previous", key: .init("g", .command, .shift)),
+        // The panel, on the one Command key no Mac app has spent on anything else. Directly above
+        // Search because the two open the same card: this one on the resting list, Search with the
+        // Transcripts chip already chosen. See `SearchPanelMode`.
+        //
+        // **A terminal pane keeps Cmd+K, and that is deliberate rather than a gap.**
+        // `TerminalView.performKeyEquivalent` claims it to clear the scrollback, and AppKit offers
+        // a key equivalent to the key window's view tree before the main menu, so a shell with the
+        // keyboard answers it exactly as iTerm and Terminal do. Somebody inside a shell reaches
+        // the panel with Shift+Cmd+F, which already means the whole search and always has.
+        MenuBarItem(.quickSearch, in: .edit, "Quick Search…", key: .command("k")),
         MenuBarItem(.search, in: .edit, "Search", key: .init("f", .command, .shift), availability: .needsProject),
 
         // MARK: View
@@ -220,6 +230,7 @@ public enum MenuBarAction: String, CaseIterable, Sendable {
     case find
     case findNext
     case findPrevious
+    case quickSearch
     case search
 
     case splitRight

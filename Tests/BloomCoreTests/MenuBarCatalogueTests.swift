@@ -164,8 +164,11 @@ struct MenuBarCatalogueTests {
             // review, and nothing in the app says which you are about to get.
             MenuShortcut("d", .command): nil,
             MenuShortcut("d", .command, .shift): .showChanges,
-            // It clears itself with this one, which nothing in the bar claims and no menu shows.
-            MenuShortcut("k", .command): nil,
+            // Deliberate, and the shape the search panel was designed around: a shell clears its
+            // scrollback with this, which is iTerm's binding and Terminal's, and the panel opens
+            // on it everywhere else. Somebody inside a shell reaches the panel with Shift+Cmd+F,
+            // which already means the whole search.
+            MenuShortcut("k", .command): .quickSearch,
             // Deliberate: the pane in a shell, the tab everywhere else.
             MenuShortcut("w", .command): .closeTab,
             // Deliberate: the same action reached two ways.
