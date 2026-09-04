@@ -205,6 +205,15 @@ final class SearchPanelOverlayHost: NSHostingView<SearchPanelWindowOverlay> {
     /// a shape and starts being the absence of one. Lower than three would begin to clip the
     /// pointer's reach at the edge of a circle, which is the failure this padding exists to
     /// prevent, so this is the bottom of the useful range rather than a step on the way down.
+    ///
+    /// **How to measure it off a capture, since both of those numbers were.** The obvious detector
+    /// is wrong and cost an hour: asking which pixels differ from the dim selects every antialiased
+    /// glyph in a title bar that is dithered rather than flat. The slot is a hole rather than a
+    /// mark, so the honest question is which pixels are the ground with NO scrim over them. Count
+    /// the ones within about 6 of `#F1F5F6` in light or 3 of `#0E202D` in dark, inside the top left
+    /// 240 by 120 points, and take the bounding box. Nothing else in that corner sits on the
+    /// undimmed ground, and antialiasing never lands on it in bulk, so it needs no tuning: it read
+    /// 72 by 26 at six points of padding and 66 by 20 at three, on every capture, first time.
     private static let trafficLightPadding: CGFloat = 3
 
     /// Nothing at all while the panel is closed.
