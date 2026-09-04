@@ -4,13 +4,15 @@ import Foundation
 
 @Suite("What holds a queued message")
 struct DeliveryHoldTests {
-    @Test("a running setup script holds everything behind it")
+    @Test("a running setup script holds everything behind it, on every backend")
     func setupWins() {
         let hold = DeliveryHold.of(
             isRunningSetup: true, isTurnRunning: true, isAwaitingQuestion: true
         )
         #expect(hold == .setup)
-        #expect(!hold.allowsDelivery)
+        for agent in AgentKind.allCases {
+            #expect(!hold.allowsDelivery(on: agent))
+        }
     }
 
     @Test("a question is named before the turn it is holding open")
@@ -23,13 +25,53 @@ struct DeliveryHoldTests {
         #expect(hold == .question)
     }
 
-    @Test("a running turn holds the queue")
-    func turnHolds() {
+    /// **The half that did not change, and the half that did.** A running turn is still a running
+    /// turn, because `WorkspaceMergeTool` asks for the case and a busy worktree is no safer to
+    /// merge into on a backend that can hear a sentence. What it holds is now the backend's
+    /// answer.
+    @Test("a running turn is still named as one, whatever the backend does about it")
+    func turnIsStillNamed() {
         let hold = DeliveryHold.of(
             isRunningSetup: false, isTurnRunning: true, isAwaitingQuestion: false
         )
         #expect(hold == .turn)
-        #expect(!hold.allowsDelivery)
+    }
+
+    /// **This assertion used to read `!hold.allowsDelivery` for every backend at once**, and it
+    /// was the whole of what this change is about: a message typed during a turn waited for a turn
+    /// that would have taken it. See `AgentKind.acceptsMidTurnMessage` for the measurement behind
+    /// each answer below.
+    @Test("a running turn holds the queue only where a line cannot be written into one")
+    func turnHoldsPerBackend() {
+        let hold = DeliveryHold.turn
+        #expect(hold.allowsDelivery(on: .claudeCode))
+        #expect(hold.allowsDelivery(on: .codex))
+        #expect(!hold.allowsDelivery(on: .cursor))
+        #expect(!hold.allowsDelivery(on: .openCode))
+        for agent in AgentKind.allCases {
+            #expect(hold.allowsDelivery(on: agent) == agent.acceptsMidTurnMessage)
+        }
+    }
+
+    /// The two that are not about a protocol, so no backend gets to answer them differently. A
+    /// worktree with nothing installed has nothing to work with, and a turn blocked on a
+    /// permission answer is not reading anything else, which `SessionLifecycle` says again by
+    /// refusing `turnStarted` from `waiting`.
+    @Test("a question and a setup script hold on every backend, including the two that take a message mid turn")
+    func questionAndSetupHoldEverywhere() {
+        for agent in AgentKind.allCases {
+            #expect(!DeliveryHold.question.allowsDelivery(on: agent))
+            #expect(!DeliveryHold.setup.allowsDelivery(on: agent))
+        }
+    }
+
+    @Test("only a runnable backend claims to take a message mid turn")
+    func onlyRunnableBackendsAccept() {
+        // Not a judgement about Cursor or OpenCode: neither has a runner, so there is no turn to
+        // write into. A backend that grows one has to measure this rather than inherit it.
+        for agent in AgentKind.allCases where agent.acceptsMidTurnMessage {
+            #expect(agent.canRunWorkspaces)
+        }
     }
 
     @Test("a setup script that failed holds nothing, so the queue still moves")
@@ -41,26 +83,120 @@ struct DeliveryHoldTests {
             isRunningSetup: false, isTurnRunning: false, isAwaitingQuestion: false
         )
         #expect(hold == .none)
-        #expect(hold.allowsDelivery)
+        #expect(hold.allowsDelivery(on: .claudeCode))
     }
 
-    @Test("an idle session lets the queue move")
+    @Test("an idle session lets the queue move, on every backend")
     func idleDelivers() {
         let hold = DeliveryHold.of(
             isRunningSetup: false, isTurnRunning: false, isAwaitingQuestion: false
         )
         #expect(hold == .none)
-        #expect(hold.allowsDelivery)
+        for agent in AgentKind.allCases {
+            #expect(hold.allowsDelivery(on: agent))
+        }
     }
 
-    @Test("every hold that is holding something says what, and only one lets a message go")
+    /// **A caption may not promise a wait that is not happening.** The sentences are pinned here
+    /// rather than in a view precisely so one cannot quietly start lying, and the one that could
+    /// have is "Goes when this turn ends" on a backend where the drain no longer waits for it.
+    @Test("everything that is holding something says what, and nothing else says anything")
     func everyHoldSpeaks() {
-        for hold in DeliveryHold.allCases where hold != .none {
-            #expect(hold.sentence?.isEmpty == false)
+        for agent in AgentKind.allCases {
+            for hold in DeliveryHold.allCases {
+                if hold.allowsDelivery(on: agent) {
+                    #expect(hold.sentence(on: agent) == nil)
+                } else {
+                    #expect(hold.sentence(on: agent)?.isEmpty == false)
+                }
+            }
         }
-        // Nothing to wait on, so nothing to say. See `DeliveryHold.sentence`.
-        #expect(DeliveryHold.none.sentence == nil)
-        #expect(DeliveryHold.allCases.filter(\.allowsDelivery) == [.none])
+    }
+
+    @Test("a running turn says nothing where the message goes into it")
+    func aTurnThatHoldsNothingSaysNothing() {
+        #expect(DeliveryHold.turn.sentence(on: .claudeCode) == nil)
+        #expect(DeliveryHold.turn.sentence(on: .codex) == nil)
+        #expect(DeliveryHold.turn.sentence(on: .cursor) == "Goes when this turn ends.")
+    }
+
+    @Test("the two that hold everywhere say the same thing everywhere")
+    func heldSentencesDoNotVaryByBackend() {
+        for agent in AgentKind.allCases {
+            #expect(DeliveryHold.setup.sentence(on: agent) == "Goes as soon as setup finishes.")
+            #expect(
+                DeliveryHold.question.sentence(on: agent)
+                    == "Goes once you have answered the question above."
+            )
+        }
+        // Nothing to wait on, so nothing to say. See `DeliveryHold.sentence(on:)`.
+        for agent in AgentKind.allCases {
+            #expect(DeliveryHold.none.sentence(on: agent) == nil)
+        }
+    }
+}
+
+/// **What immediate delivery does to the order things were asked for, which is the promise the
+/// table exists to keep.** The rule chosen: the front of the queue always goes first, and the
+/// backend decides only how many may leave in one pass. Nothing typed during a turn can overtake
+/// something queued before it on any backend.
+@Suite("How much of the queue may go at once")
+struct DeliveryDeliverableTests {
+    private func waiting(_ bodies: String...) -> [Delivery] {
+        bodies.map { Delivery(targetSessionID: SessionID("s"), body: $0) }
+    }
+
+    @Test("a hold that holds lets nothing go, whatever the backend")
+    func heldLetsNothingGo() {
+        let queue = waiting("first", "second")
+        for agent in AgentKind.allCases {
+            for hold in DeliveryHold.allCases where !hold.allowsDelivery(on: agent) {
+                #expect(Delivery.deliverable(from: queue, hold: hold, on: agent).isEmpty)
+                #expect(Delivery.next(from: queue, hold: hold, on: agent) == nil)
+            }
+        }
+    }
+
+    /// The old rule, kept where its reason still holds: handing over the front starts a turn, and
+    /// on a backend that will not read a line written into one, that turn holds the rest.
+    @Test("a backend that cannot take a message mid turn hands over one")
+    func oneAtATimeWhereATurnHolds() {
+        let queue = waiting("first", "second", "third")
+        let going = Delivery.deliverable(from: queue, hold: .none, on: .cursor)
+        #expect(going.map(\.body) == ["first"])
+        #expect(Delivery.deliverable(from: queue, hold: .turn, on: .cursor).isEmpty)
+    }
+
+    /// **And why it does not survive on a backend that takes one.** Holding the second message
+    /// back would put it under "Goes when this turn ends", and the owner's next sentence would
+    /// falsify it: `submit` drains, the drain takes the front, and the front would go mid turn.
+    @Test("a backend that takes a message mid turn empties the queue, in the order it was asked for")
+    func theQueueEmptiesInOrder() {
+        let queue = waiting("first", "second", "third")
+        for agent in AgentKind.allCases where agent.acceptsMidTurnMessage {
+            #expect(
+                Delivery.deliverable(from: queue, hold: .none, on: agent).map(\.body)
+                    == ["first", "second", "third"]
+            )
+            #expect(
+                Delivery.deliverable(from: queue, hold: .turn, on: agent).map(\.body)
+                    == ["first", "second", "third"]
+            )
+        }
+    }
+
+    /// The invariant behind the whole table, stated over every backend and every hold: whatever
+    /// may go goes in the order it was asked for, and `next` is the head of it.
+    @Test("what may go is always a prefix of the queue, in its own order")
+    func alwaysAPrefixInOrder() {
+        let queue = waiting("first", "second", "third")
+        for agent in AgentKind.allCases {
+            for hold in DeliveryHold.allCases {
+                let going = Delivery.deliverable(from: queue, hold: hold, on: agent)
+                #expect(going.map(\.id) == queue.prefix(going.count).map(\.id))
+                #expect(Delivery.next(from: queue, hold: hold, on: agent)?.id == going.first?.id)
+            }
+        }
     }
 }
 
@@ -141,17 +277,26 @@ struct DeliveryStoreTests {
 
         // Nothing goes anywhere while the worktree is still being built, whoever asked.
         let duringSetup = try await store.pendingDeliveries(sessionID: session.id)
-        #expect(Delivery.next(from: duringSetup, hold: .setup) == nil)
+        for agent in AgentKind.allCases {
+            #expect(Delivery.next(from: duringSetup, hold: .setup, on: agent) == nil)
+        }
 
         // The script finishes, and the first thing asked for is the first thing sent.
-        let first = try #require(Delivery.next(from: duringSetup, hold: .none))
+        let first = try #require(Delivery.next(from: duringSetup, hold: .none, on: .claudeCode))
         #expect(first.body == "list the technologies used")
         try await store.markDelivered(id: first.id)
 
-        // Then the turn it started holds the rest, and the rest is what was typed second.
+        // And the rest is what was typed second, whenever it goes.
+        //
+        // **This used to assert that a running turn held it back on every backend**, which was the
+        // coarse answer this change removed: on Claude Code and Codex the turn the first one
+        // started takes the second as well. What the bug was ever about is the line below it,
+        // which is unchanged and is the whole promise: the second thing typed is the second thing
+        // handed over.
         let duringTurn = try await store.pendingDeliveries(sessionID: session.id)
-        #expect(Delivery.next(from: duringTurn, hold: .turn) == nil)
-        #expect(Delivery.next(from: duringTurn, hold: .none)?.body == "test")
+        #expect(Delivery.next(from: duringTurn, hold: .turn, on: .cursor) == nil)
+        #expect(Delivery.next(from: duringTurn, hold: .turn, on: .claudeCode)?.body == "test")
+        #expect(Delivery.next(from: duringTurn, hold: .none, on: .claudeCode)?.body == "test")
     }
 
     @Test("a delivered message leaves the queue and stays out of it")
@@ -294,14 +439,28 @@ struct DeliveryEchoTests {
 
     @Test("a message typed into an idle chat has gone, so it is drawn as one that has")
     func idleGoesAtOnce() {
-        #expect(Delivery.goesImmediately(behind: [], hold: .none))
+        for agent in AgentKind.allCases {
+            #expect(Delivery.goesImmediately(behind: [], hold: .none, on: agent))
+        }
     }
 
     @Test("a message typed while anything is holding the queue is drawn as waiting")
     func heldIsDrawnAsWaiting() {
-        for hold in DeliveryHold.allCases where !hold.allowsDelivery {
-            #expect(!Delivery.goesImmediately(behind: [], hold: hold))
+        for agent in AgentKind.allCases {
+            for hold in DeliveryHold.allCases where !hold.allowsDelivery(on: agent) {
+                #expect(!Delivery.goesImmediately(behind: [], hold: hold, on: agent))
+            }
         }
+    }
+
+    /// **The bubble the owner asked about.** He typed while a turn was running and read "Goes when
+    /// this turn ends" under it. On a backend that takes a message mid turn it does not wait, so
+    /// it is drawn as said, and no bubble promises anything on its behalf.
+    @Test("a message typed during a turn has gone, where the turn can take it")
+    func typedDuringATurnGoesAtOnce() {
+        #expect(Delivery.goesImmediately(behind: [], hold: .turn, on: .claudeCode))
+        #expect(Delivery.goesImmediately(behind: [], hold: .turn, on: .codex))
+        #expect(!Delivery.goesImmediately(behind: [], hold: .turn, on: .cursor))
     }
 
     @Test("a message typed behind one that is still waiting waits too")
@@ -309,20 +468,39 @@ struct DeliveryEchoTests {
         // Nothing is holding this session, and the message still does not go: the one in front of
         // it does. Drawing it as sent would be the transcript claiming an order the drain will
         // not honour.
-        #expect(!Delivery.goesImmediately(behind: waiting("first"), hold: .none))
+        #expect(!Delivery.goesImmediately(behind: waiting("first"), hold: .none, on: .claudeCode))
+    }
+
+    /// **The ordering promise, on the backend that changed.** Immediate delivery is not a
+    /// reordering: a message typed during a turn still joins the back of a queue that already has
+    /// something in it, and the drain still takes the front.
+    @Test("nothing typed during a turn overtakes what was queued before it")
+    func nothingOvertakes() {
+        let queued = waiting("asked for first")
+        for agent in AgentKind.allCases where agent.acceptsMidTurnMessage {
+            #expect(!Delivery.goesImmediately(behind: queued, hold: .turn, on: agent))
+            #expect(Delivery.next(from: queued, hold: .turn, on: agent)?.body == "asked for first")
+        }
     }
 
     @Test("the bubble and the drain never disagree about what goes next")
     func echoAgreesWithTheDrain() {
-        // The invariant, stated over every shape the queue can be in: what the transcript draws as
-        // sent is exactly what the drain would hand to the runner. Asked of `next`, which is the
-        // ordering rule itself, so a change to that rule cannot leave this behind.
+        // The invariant, stated over every shape the queue can be in and every backend: what the
+        // transcript draws as sent is exactly what the drain would hand to the runner. Asked of
+        // `next`, which is the ordering rule itself, so a change to that rule cannot leave this
+        // behind.
         let queues = [waiting(), waiting("first"), waiting("first", "second")]
-        for hold in DeliveryHold.allCases {
-            for queue in queues {
-                let typed = Delivery(targetSessionID: SessionID("s"), body: "just typed")
-                let goesNext = Delivery.next(from: queue + [typed], hold: hold)?.id == typed.id
-                #expect(Delivery.goesImmediately(behind: queue, hold: hold) == goesNext)
+        for agent in AgentKind.allCases {
+            for hold in DeliveryHold.allCases {
+                for queue in queues {
+                    let typed = Delivery(targetSessionID: SessionID("s"), body: "just typed")
+                    let goesNext = Delivery.next(
+                        from: queue + [typed], hold: hold, on: agent
+                    )?.id == typed.id
+                    #expect(
+                        Delivery.goesImmediately(behind: queue, hold: hold, on: agent) == goesNext
+                    )
+                }
             }
         }
     }
@@ -453,17 +631,34 @@ struct DeliverySteerTests {
         )
     }
 
-    @Test("offered only while there is a turn to interrupt")
+    /// **This used to be offered on every backend while a turn ran.** It still is on one that
+    /// cannot take a message mid turn, where stopping the turn is the only way to be heard. Where
+    /// the message can simply go, spending the turn to make room for it buys nothing and costs
+    /// whatever that turn had done, so the button is not offered and Stop keeps the job under its
+    /// own name. See `DeliverySteer.canSteer`.
+    @Test("offered only while there is a turn to interrupt, and only where interrupting is the way in")
     func onlyDuringATurn() {
         let one = typed("one")
         for hold in DeliveryHold.allCases {
-            #expect(DeliverySteer.canSteer(one, hold: hold) == (hold == .turn))
+            #expect(!DeliverySteer.canSteer(one, hold: hold, on: .claudeCode))
+            #expect(!DeliverySteer.canSteer(one, hold: hold, on: .codex))
+            #expect(DeliverySteer.canSteer(one, hold: hold, on: .cursor) == (hold == .turn))
+        }
+    }
+
+    /// Stated as the rule rather than as a list, so a backend that grows the capability loses the
+    /// button by answering one question.
+    @Test("a backend that takes a message mid turn never offers it")
+    func midTurnBackendsNeverSteer() {
+        let one = typed("one")
+        for agent in AgentKind.allCases where agent.acceptsMidTurnMessage {
+            #expect(!DeliverySteer.canSteer(one, hold: .turn, on: agent))
         }
     }
 
     @Test("a message that has already gone cannot be steered")
     func deliveredCannotSteer() {
-        #expect(!DeliverySteer.canSteer(typed("gone", delivered: true), hold: .turn))
+        #expect(!DeliverySteer.canSteer(typed("gone", delivered: true), hold: .turn, on: .cursor))
     }
 
     /// Interrupting an agent is a person's decision. A crew message is drawn in its own row and
@@ -477,7 +672,7 @@ struct DeliverySteerTests {
             kind: .message,
             crew: CrewMessage.said(from: "indexer", text: "done", sender: .subagent)
         )
-        #expect(!DeliverySteer.canSteer(fromAnAgent, hold: .turn))
+        #expect(!DeliverySteer.canSteer(fromAnAgent, hold: .turn, on: .cursor))
     }
 
     /// Where Steer parts company with Edit. Nothing is being turned back into text, so a body the
@@ -486,7 +681,7 @@ struct DeliverySteerTests {
     func attachmentsCanStillSteer() {
         let attached = typed(AttachmentTrailer.compose(text: "look at this", paths: ["a.png"]))
         #expect(!PendingMessageEdit.canEdit(attached))
-        #expect(DeliverySteer.canSteer(attached, hold: .turn))
+        #expect(DeliverySteer.canSteer(attached, hold: .turn, on: .cursor))
     }
 
     /// The ordering rule, stated over every position in the queue: one message leaves, and what is
@@ -506,7 +701,7 @@ struct DeliverySteerTests {
     @Test("steering the front leaves what the drain would have left")
     func steeringTheFrontMatchesTheDrain() throws {
         let queue = [typed("first"), typed("second"), typed("third")]
-        let front = try #require(Delivery.next(from: queue, hold: .none))
+        let front = try #require(Delivery.next(from: queue, hold: .none, on: .cursor))
         #expect(DeliverySteer.queue(after: front, from: queue).map(\.body) == ["second", "third"])
     }
 }

@@ -21,6 +21,13 @@ import Foundation
 /// is still said in four other places, none of which this changes: the red setup row with its
 /// log, the alert, the notification, and `WorkspaceStatus.setupFailed` in the sidebar.
 ///
+/// **A hold and a refusal are two different things, and this type now holds both.** `of` says what
+/// the session is doing; `allowsDelivery(on:)` says whether that stops a delivery, and it needs the
+/// backend to answer, because a running turn stops one on a CLI that will not read a line written
+/// into it and stops nothing on the two that will. Keeping the case and the refusal apart is what
+/// lets `WorkspaceMergeTool` go on refusing to merge a worktree an agent is writing into while the
+/// composer goes on talking to it.
+///
 /// Here rather than in the view for the usual reason: the precedence between these is a decision,
 /// the drain reads the same answer the bubble does, and the test target cannot see a view. The
 /// sentences are here too, so the promise the transcript makes is pinned by the suite rather than
@@ -33,6 +40,10 @@ public enum DeliveryHold: Equatable, Sendable, CaseIterable {
     /// blocked on an answer is the mid-turn injection every backend is unhappy about.
     case question
     /// The agent is mid turn.
+    ///
+    /// **Whether that holds anything is the backend's answer, not this case's.** See
+    /// `allowsDelivery(on:)`: Claude Code and Codex both take a message into a turn that is
+    /// already running, so on those two this names a fact about the session and holds nothing.
     case turn
     /// Nothing in the session is holding it.
     ///
@@ -49,6 +60,14 @@ public enum DeliveryHold: Equatable, Sendable, CaseIterable {
     /// still marked running: `TranscriptModel` only clears that flag on a result. Answering
     /// `.turn` there would be true and useless, since what the reader has to do is answer the
     /// question above the composer.
+    ///
+    /// **It still answers `.turn` for a backend that would take the message anyway, and that is
+    /// deliberate.** A hold describes the session; whether it stops a delivery is
+    /// `allowsDelivery(on:)`, and the two are kept apart because they have different readers.
+    /// `WorkspaceMergeTool` asks for the case, and a running turn is a refusal there whatever the
+    /// backend does with a sentence: merging a worktree an agent is writing into is unsafe for
+    /// reasons that have nothing to do with whether it can hear you. Collapsing `.turn` into
+    /// `.none` for Claude Code would have told that tool a busy workspace was quiet.
     public static func of(
         isRunningSetup: Bool,
         isTurnRunning: Bool,
@@ -61,7 +80,23 @@ public enum DeliveryHold: Equatable, Sendable, CaseIterable {
     }
 
     /// Whether a drain triggered right now may hand the next delivery to the runner.
-    public var allowsDelivery: Bool { self == .none }
+    ///
+    /// **The backend is asked because only the backend knows.** `.turn` refused on every one of
+    /// them, so a message typed during a turn waited for a turn that would have accepted it. It
+    /// now refuses only where writing into a live turn is not a thing the CLI does: see
+    /// `AgentKind.acceptsMidTurnMessage`, which carries the measurement for each of the four.
+    ///
+    /// `.setup` and `.question` refuse everywhere and are not asked. A worktree that is still
+    /// being built has nothing installed to work with, and a turn blocked on a permission answer
+    /// is not reading anything else, which `SessionLifecycle` says a second time by refusing
+    /// `turnStarted` from `waiting`. Neither is a fact about a protocol.
+    public func allowsDelivery(on agent: AgentKind) -> Bool {
+        switch self {
+        case .none: true
+        case .turn: agent.acceptsMidTurnMessage
+        case .setup, .question: false
+        }
+    }
 
     /// What the pending bubble says under itself, or nothing when nothing is holding it.
     ///
@@ -74,12 +109,19 @@ public enum DeliveryHold: Equatable, Sendable, CaseIterable {
     /// the three sentences above are worth reading because each names a specific thing to wait on,
     /// and a fourth explaining that there is nothing to wait on made the other three look like
     /// decoration.
-    public var sentence: String? {
+    ///
+    /// **A running turn says nothing on a backend that would take the message anyway.** "Goes
+    /// when this turn ends" is a promise the drain no longer keeps there: on Claude Code and
+    /// Codex the queue empties into the turn rather than behind it, so the caption would be
+    /// describing a wait that is not happening. Nothing is holding it, so it says what nothing
+    /// holding it has always said, which is nothing. See `Delivery.deliverable(from:hold:on:)`.
+    public func sentence(on agent: AgentKind) -> String? {
+        guard !allowsDelivery(on: agent) else { return nil }
         switch self {
-        case .setup: "Goes as soon as setup finishes."
-        case .question: "Goes once you have answered the question above."
-        case .turn: "Goes when this turn ends."
-        case .none: nil
+        case .setup: return "Goes as soon as setup finishes."
+        case .question: return "Goes once you have answered the question above."
+        case .turn: return "Goes when this turn ends."
+        case .none: return nil
         }
     }
 }

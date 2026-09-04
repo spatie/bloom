@@ -162,7 +162,12 @@ struct WorkspaceListToolTests {
             Repo(name: "flare", path: "/tmp/flare", defaultBranch: "main")
         )
         let workspace = try await store.upsert(Workspace(
-            repoID: repo.id, name: "busy", branch: "b", path: "/tmp/w", baseBranch: "main"
+            repoID: repo.id,
+            name: "busy",
+            branch: "b",
+            path: "/tmp/w",
+            baseBranch: "main",
+            setupState: .running
         ))
         var session = Session(workspaceID: workspace.id, title: "First chat")
         session.apply(.turnStarted)
@@ -177,10 +182,37 @@ struct WorkspaceListToolTests {
 
         #expect(row["queued_messages"]?.intValue == 1)
         #expect(chat["queued_messages"]?.intValue == 1)
-        #expect(chat["hold_note"]?.stringValue == DeliveryHold.turn.sentence)
+        #expect(chat["hold_note"]?.stringValue == DeliveryHold.setup.sentence(on: .claudeCode))
         #expect(chat["state"]?.stringValue == "running")
         #expect(chat["title"]?.stringValue == "First chat")
         #expect(chat["agent"]?.stringValue == AgentKind.claudeCode.rawValue)
+    }
+
+    /// **This test used to assert the opposite**, with a running turn producing "Goes when this
+    /// turn ends". It does not any more, and the note going quiet is the honest half: a message a
+    /// caller sends into a running Claude Code chat goes into that turn rather than waiting behind
+    /// it, so a note telling the caller to wait would be this tool asking for a delay it does not
+    /// need. `queued_messages` still says what is in front of it.
+    @Test("a running turn holds nothing to say on a backend that takes a message mid turn")
+    func aRunningTurnSaysNothing() async throws {
+        let store = try makeTestStore("list-hold-mid-turn")
+        let repo = try await store.upsert(
+            Repo(name: "flare", path: "/tmp/flare", defaultBranch: "main")
+        )
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id, name: "busy", branch: "b", path: "/tmp/w", baseBranch: "main"
+        ))
+        var session = Session(workspaceID: workspace.id, title: "First chat")
+        session.apply(.turnStarted)
+        _ = try await store.upsert(session)
+
+        let result = await WorkspaceListTool().call(request(), as: .owner, store: store)
+        let row = try named("busy", in: result)
+        let chat = try #require(row["sessions"]?[0])
+
+        #expect(chat["state"]?.stringValue == "running")
+        #expect(chat["hold_note"] == nil)
+        #expect(AgentKind.claudeCode.acceptsMidTurnMessage)
     }
 
     /// A workspace stopped on a question is the one state that gets worse the longer it is left,

@@ -27,8 +27,17 @@ public enum DeliverySteer {
     /// person's decision rather than another agent's. A body carrying chips or attachments is fine
     /// here, unlike Edit, because nothing is being turned back into text: the message goes to the
     /// agent exactly as it would have gone when its turn came.
-    public static func canSteer(_ delivery: Delivery, hold: DeliveryHold) -> Bool {
-        guard hold == .turn else { return false }
+    ///
+    /// **And not offered at all on a backend that takes a message mid turn**, which is a decision
+    /// rather than a consequence. Talking over an agent and stopping one are two different acts,
+    /// and only the second is what this button does: it cancels the turn and spends whatever that
+    /// turn had done. Where the message can simply go, spending the turn to make room for it buys
+    /// nothing and costs the work. There is also nothing left to draw it on, because a message
+    /// that goes at once is never a pending bubble (`Delivery.goesImmediately`) and the queue does
+    /// not sit behind a running turn there (`Delivery.deliverable(from:hold:on:)`). Interrupting
+    /// is still one press away, under the name it deserves, which is Stop.
+    public static func canSteer(_ delivery: Delivery, hold: DeliveryHold, on agent: AgentKind) -> Bool {
+        guard hold == .turn, !agent.acceptsMidTurnMessage else { return false }
         return delivery.isPending && delivery.kind == .owner && delivery.crewPayload == nil
     }
 

@@ -18,11 +18,16 @@ import SwiftUI
 /// `ComposerIntent`.
 struct ComposerSendButton: View {
     var intent: ComposerIntent = .send
-    /// Whether a turn is running, which changes nothing about whether this may be pressed and
-    /// everything about what pressing it means. A message sent now goes into the queue in front of
-    /// the agent rather than to the agent, and the tooltip is where that is said, because the
-    /// bubble that appears afterwards is the honest version of the answer. See `DeliveryHold`.
-    var isRunning: Bool = false
+    /// Whether pressing this queues the message rather than handing it over, which changes nothing
+    /// about whether it may be pressed and everything about what pressing it means. The tooltip is
+    /// where that is said, because the bubble that appears afterwards is the honest version of the
+    /// answer.
+    ///
+    /// **Not "is a turn running", which is what it used to be.** A running turn holds the queue on
+    /// a backend that will not read a line written into one and holds nothing on the two that
+    /// will, so the tooltip was offering to queue messages that were about to go straight out.
+    /// `TranscriptModel.queuesNextMessage` is the same function `submit` asks. See `DeliveryHold`.
+    var queues: Bool = false
     var canSend: Bool
     var onSend: @MainActor () -> Void
 
@@ -71,6 +76,9 @@ struct ComposerSendButton: View {
         // The system control accent keeps this primary action consistent with every native control.
         .tint(Palette.controlAccent)
         .disabled(!canSend)
-        .help(isRunning ? "Queue this message. It goes when the turn ends (Return)" : intent.help)
+        // "When the queue moves" rather than "when the turn ends", because a turn is no longer the
+        // only thing it can be waiting for and was never the only thing it could be waiting for:
+        // the bubble that appears underneath names the specific one. See `DeliveryHold.sentence`.
+        .help(queues ? "Queue this message. It goes when the queue moves (Return)" : intent.help)
     }
 }

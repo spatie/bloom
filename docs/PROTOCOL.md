@@ -45,6 +45,28 @@ One JSON object, one line:
 {"type":"user","message":{"role":"user","content":[{"type":"text","text":"do the thing"}]}}
 ```
 
+### Sending into a turn that is already running
+
+Measured on `claude 2.1.260` on 4 September 2026, driving the invocation above with a cheap model.
+A second user line was written to stdin four seconds into a running turn. It was **accepted**: no
+error, nothing lost, and the CLI did not close the pipe.
+
+What it did with it depends on what the turn had left to do. The probe's turn was prose with no
+tool call after the injection, and the CLI finished it, emitted its `result`, then emitted a
+**second `init`** and ran the injected line as a turn of its own. The other landing is in the CLI's
+own copy: a message whose origin is the person is framed as "The user sent a new message while you
+were working", with a paragraph under it saying that is how Claude Code surfaces a mid-turn
+message, within the running turn and often alongside the next tool result rather than as a separate
+turn. So a turn with a tool boundary left in it takes the message inside the turn, and a turn
+without one runs it next.
+
+Both are landings Bloom already handles. `AgentRunner.ingest` applies `turnStarted` on an `init`,
+which is the fix written for the CLI's habit of starting turns of its own (see `StrayResult`), so a
+second `init` puts the chat back to running rather than leaving it drawn as idle through a turn.
+
+`AgentKind.acceptsMidTurnMessage` is where this is written down as a fact the app reads, and
+`DeliveryHold.allowsDelivery(on:)` is what it decides.
+
 ## Output events
 
 Every line has `type`. Every line except a few carries `uuid` and `session_id`.

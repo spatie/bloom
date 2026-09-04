@@ -331,8 +331,10 @@ public struct WorkspaceListTool: BridgeToolHandling {
 
         // Absent when nothing is holding the queue, which is the same answer the transcript gives
         // by drawing no sentence: a note saying a message goes with the next message tells a
-        // caller nothing `state` has not already said.
-        if let note = hold.sentence {
+        // caller nothing `state` has not already said. Asked of the chat's own backend, because a
+        // running turn holds nothing on one that reads a line written into it, and a note saying
+        // otherwise would be this tool telling a caller to wait for nothing.
+        if let note = hold.sentence(on: session.agentKind) {
             answer["hold_note"] = .string(note)
         }
 

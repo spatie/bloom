@@ -681,20 +681,21 @@ final class WorkspaceModel {
         )
 
         // Enqueued first and drained after, never sent: the chat being spoken to is very often mid
-        // turn, and `DeliveryHold` is what decides whether this goes now or when that turn ends.
+        // turn, and `DeliveryHold` is what decides whether this goes into that turn, waits for it
+        // to end, or waits for something else.
         let transcript = transcript(for: target)
         await transcript.refreshQueue()
         await transcript.drain()
 
+        // `Crew`'s words rather than this file's, because what happens to a message mid turn is
+        // the backend's answer and a sentence stating it here would be a second copy to drift.
+        let when = Crew.deliverySentence(to: target.agentKind)
         if name == nil {
-            return .delivered(
-                "Passed that to the agent that started you. If it is mid turn it will read it when "
-                    + "that turn ends."
-            )
+            return .delivered("Passed that to the agent that started you. \(when)")
         }
         return .delivered(
-            "Passed that to subagent \"\(target.title)\". If it is mid turn it will read it when "
-                + "that turn ends, and Bloom will tell you here when it stops."
+            "Passed that to subagent \"\(target.title)\". \(when) Bloom will tell you here when "
+                + "it stops."
         )
     }
 

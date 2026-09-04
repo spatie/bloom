@@ -41,7 +41,7 @@ struct PendingDeleteSnapshotGallery: View {
             group("At rest") {
                 PendingTurnRowView(
                     delivery: Self.delivery(Self.typed),
-                    hold: .question,
+                    holdSentence: DeliveryHold.question.sentence(on: .claudeCode),
                     onEdit: {},
                     onDelete: {}
                 )
@@ -50,7 +50,7 @@ struct PendingDeleteSnapshotGallery: View {
             group("Under the pointer") {
                 PendingTurnRowView(
                     delivery: Self.delivery(Self.typed),
-                    hold: .question,
+                    holdSentence: DeliveryHold.question.sentence(on: .claudeCode),
                     onEdit: {},
                     onDelete: {},
                     pointerInside: true
@@ -64,20 +64,20 @@ struct PendingDeleteSnapshotGallery: View {
                 VStack(spacing: 0) {
                     PendingTurnRowView(
                         delivery: Self.delivery("Also check the migration."),
-                        hold: nil,
+                        holdSentence: nil,
                         onEdit: {},
                         onDelete: {}
                     )
                     PendingTurnRowView(
                         delivery: Self.delivery(Self.typed),
-                        hold: nil,
+                        holdSentence: nil,
                         onEdit: {},
                         onDelete: {},
                         pointerInside: true
                     )
                     PendingTurnRowView(
                         delivery: Self.delivery("And run the tests when you are done."),
-                        hold: .turn,
+                        holdSentence: DeliveryHold.setup.sentence(on: .claudeCode),
                         onEdit: {},
                         onDelete: {}
                     )
@@ -91,7 +91,7 @@ struct PendingDeleteSnapshotGallery: View {
                     delivery: Self.delivery(
                         "Look at this \(AttachmentDraft.token(for: ".bloom/attachments/2UCGb6/shot.png"))"
                     ),
-                    hold: .turn,
+                    holdSentence: DeliveryHold.setup.sentence(on: .claudeCode),
                     onEdit: {},
                     onDelete: {},
                     pointerInside: true
