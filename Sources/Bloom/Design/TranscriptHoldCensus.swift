@@ -40,6 +40,11 @@ enum TranscriptHoldCensus {
     private(set) static var measurements = 0
     /// Rows a reflow left holding an estimate rather than measuring. What the hold buys.
     private(set) static var estimatedRows = 0
+    /// **Rows expected to draw something that measured nothing.** See `silenced(_:)`, which
+    /// carries why one of these is a row the reader never sees again. `silences` is the log, up to
+    /// `mostSilences` of them, and `silencedRows` is the count of all of them.
+    private(set) static var silencedRows = 0
+    private(set) static var silences: [Silence] = []
     /// **The check that a row is the height it draws at.** Rows that reported the height they
     /// drew at, and how many of those the table was still drawing at another height a turn after
     /// it was told. See `TranscriptTable.Coordinator.checkCorrected`, which carries the bug.
@@ -201,6 +206,39 @@ enum TranscriptHoldCensus {
         entriesBuilt += count
     }
 
+    /// **A row that was expected to draw something turned out to measure nothing.**
+    ///
+    /// The blank transcript a composer drag leaves, watched rather than reasoned about. A height
+    /// of nought is remembered as an answer: `TranscriptRowHeights.measuredNothing` then refuses
+    /// the row a view for ever, `needsMeasuring` refuses to ask again, and `isGuessed` does not
+    /// even count it, because the cache and the table agree perfectly about nothing. A row
+    /// silenced by one bad measurement is gone until the pane changes width, which is the one
+    /// thing that marks every key stale.
+    ///
+    /// So this records each one WITH the geometry of the pass that took it, because the question
+    /// a report has to answer is not how many but which frame. `TranscriptRowInk` is what says
+    /// the row was expected to draw: a row that claims to draw nothing measuring nothing is the
+    /// design working and is not recorded here.
+    static func silenced(_ silence: Silence) {
+        silencedRows += 1
+        guard silences.count < mostSilences else { return }
+        silences.append(silence)
+    }
+
+    /// One row, and the pane it was measured against.
+    struct Silence: Sendable {
+        var row: Int
+        var source: String
+        var shape: String
+        var columnWidth: Double
+        var viewportWidth: Double
+        var viewportHeight: Double
+    }
+
+    /// A run that silences a thousand rows should not write a thousand of these into a report
+    /// nobody can read. `silencedRows` still counts them all.
+    private static let mostSilences = 200
+
     /// One batch of corrections, and the ones that did not take.
     static func corrected(rows: Int, uncorrected: Int) {
         correctedRows += rows
@@ -235,6 +273,8 @@ enum TranscriptHoldCensus {
         noteWorstMs = 0
         entryPasses = 0
         entriesBuilt = 0
+        silencedRows = 0
+        silences = []
     }
 
     static func summary() -> [String: Double] {
@@ -266,6 +306,7 @@ enum TranscriptHoldCensus {
             "noteWorstMs": noteWorstMs,
             "entryPasses": Double(entryPasses),
             "entriesBuilt": Double(entriesBuilt),
+            "silencedRows": Double(silencedRows),
         ]
     }
 }
