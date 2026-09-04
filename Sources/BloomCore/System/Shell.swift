@@ -196,7 +196,14 @@ public enum Shell {
         errReader.start()
 
         if let inPipe, let stdin {
-            inPipe.fileHandleForWriting.write(Data(stdin.utf8))
+            // The same SIGPIPE that `StreamingProcess.init` and `UnixSocketConnection` guard
+            // against, on the only other descriptor in the tree Bloom writes a child on. A child
+            // that exited between `run()` above and this line leaves nobody reading, and the
+            // default disposition of the signal that raises is to kill Bloom. `Git.run` passes a
+            // commit message and a patch through here, so the child dying early is a bad
+            // invocation rather than a hypothetical.
+            _ = fcntl(inPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+            try? inPipe.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
             try? inPipe.fileHandleForWriting.close()
         }
 
