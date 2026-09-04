@@ -142,7 +142,9 @@ public enum SearchPanelResults {
             )
         }
 
+        var summaryLine: String?
         if sections.isEmpty {
+            summaryLine = SearchPanelFallback.summary(for: query)
             let rows = SearchPanelFallback.rows(for: query, hasProjects: hasProjects)
             if !rows.isEmpty {
                 sections.append(
@@ -151,7 +153,9 @@ public enum SearchPanelResults {
             }
         }
 
-        return SearchPanelListing(sections: sections, counts: counts, isSearching: true)
+        return SearchPanelListing(
+            sections: sections, counts: counts, isSearching: true, summaryLine: summaryLine
+        )
     }
 
     /// The few commands a search of things is allowed to show.

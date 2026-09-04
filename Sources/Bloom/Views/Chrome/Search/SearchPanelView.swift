@@ -122,6 +122,15 @@ struct SearchPanelView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    if let summary = panel.listing.summaryLine {
+                        Text(summary)
+                            .font(Typo.caption)
+                            .foregroundStyle(Palette.textSecondary)
+                            .padding(.horizontal, Metrics.inset)
+                            .padding(.top, Metrics.spacingWide)
+                            .padding(.bottom, Metrics.spacingSmall)
+                    }
+
                     ForEach(panel.listing.sections) { section in
                         if let title = section.title {
                             // In the scroll rather than stuck to the top, because a sticky heading
@@ -215,16 +224,6 @@ struct SearchPanelView: View {
     /// stated as a fact under the list rather than as a failure across it.
     @ViewBuilder
     private var notice: some View {
-        if panel.listing.isEmpty, !panel.field.isEmpty {
-            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                Text(SearchPanelFallback.summary(for: panel.field.query))
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textSecondary)
-            }
-            .padding(.horizontal, Metrics.inset)
-            .padding(.vertical, Metrics.spacingWide)
-        }
-
         if !panel.field.isEmpty, panel.field.mode == .things,
            let sentence = SearchPanelFallback.indexNotice(isIndexing: app.isTranscriptIndexIncomplete) {
             Label(sentence, systemImage: "clock")

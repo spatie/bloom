@@ -27,10 +27,14 @@ public enum SearchPanelRow: Equatable, Sendable, Identifiable {
     /// The workspace this row would push into on Cmd+Return, or nothing when it has no menu of
     /// its own. A transcript hit answers with its workspace: the row names one, and the menu on it
     /// is the same menu the sidebar offers.
+    ///
+    /// **An archived workspace has one too**, and it is the shorter menu Home already draws for
+    /// one: Copy Name, Copy Branch Name, Restore. Which items that is is
+    /// `WorkspaceMenuSubject.allows`, so nothing here has to know that a worktree is gone.
     public var drillable: WorkspaceID? {
         switch self {
-        case .workspace(let hit): hit.isArchived ? nil : hit.workspace.id
-        case .transcript(let hit): hit.isArchived ? nil : hit.result.workspaceID
+        case .workspace(let hit): hit.workspace.id
+        case .transcript(let hit): hit.result.workspaceID
         case .command, .fallback: nil
         }
     }

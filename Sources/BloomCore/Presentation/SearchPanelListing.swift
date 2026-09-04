@@ -35,16 +35,25 @@ public struct SearchPanelListing: Equatable, Sendable {
     /// Whether there is a query behind this listing, which is what decides the chips on offer and
     /// whether the fallback rows can appear at all.
     public var isSearching: Bool
+    /// The sentence over the fallback rows, and nil whenever something matched.
+    ///
+    /// It is here rather than derived in the view from `rows.isEmpty`, because by the time the
+    /// fallbacks are in the list the list is not empty: the two rows ARE rows, arrowable and
+    /// openable like any other. Only the builder knows that nothing matched, so only the builder
+    /// can say so.
+    public var summaryLine: String?
 
     public init(
         sections: [SearchPanelSection],
         counts: HomeScopeCounts = HomeScopeCounts(),
-        isSearching: Bool = false
+        isSearching: Bool = false,
+        summaryLine: String? = nil
     ) {
         self.sections = sections
         self.rows = sections.flatMap(\.rows)
         self.counts = counts
         self.isSearching = isSearching
+        self.summaryLine = summaryLine
     }
 
     public static let empty = SearchPanelListing(sections: [])

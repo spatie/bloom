@@ -171,6 +171,9 @@ struct RootView: View {
             // Debug builds only, and only when asked for on the command line: raises one of the two
             // Help menu sheets so a capture run can look at it. See `FeedbackPresenter`.
             .task { FeedbackPresenter.shared.presentIfRequested() }
+            // The same, for the search panel, which is otherwise reachable only by a key
+            // equivalent and a glyph. See `SearchPanelModel.presentIfRequested`.
+            .task { presentSearchPanelIfRequested() }
             // Send Feedback and Submit a Prompt, raised from the Help menu. Here rather than at the
             // menu item, because a `Commands` body is not a view and cannot present anything, and
             // because what was typed into either of them belongs to the app rather than to the sheet:
@@ -304,13 +307,18 @@ struct RootView: View {
                 // explanation. See `AppModel.open(workspaceID:)`.
                 Task { await app.open(workspaceID: id) }
             }
-            // Shift+Cmd+F, and Cmd+F where nothing in front can find. A `Commands` body is not a view
-            // and cannot reach a `@FocusState`, so the menu item posts and this listens.
-            //
-            // The centre pane goes to Home with it. The field is in the toolbar, so it is on screen
-            // while a workspace is open, and a search whose answer is drawn in a pane nobody is
-            // looking at would be a field that does nothing.
+            // Shift+Cmd+F, and Cmd+F where nothing in front can find, are handled in
+            // `windowWiring` below, and they open the panel rather than putting a keyboard
+            // anywhere in the window.
         )
+    }
+
+    /// Debug builds only. In a method of its own so `body` carries one call rather than a
+    /// conditional compilation block, which the type checker in there can do without.
+    private func presentSearchPanelIfRequested() {
+        #if DEBUG
+        SearchPanelModel.shared.presentIfRequested(app: app)
+        #endif
     }
 
     /// The window's notification wiring, in a method rather than in `body`.

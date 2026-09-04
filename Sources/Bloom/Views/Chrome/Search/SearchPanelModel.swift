@@ -167,6 +167,57 @@ final class SearchPanelModel {
 
     // MARK: - The keyboard
 
+    #if DEBUG
+    /// Opens the panel for a capture run, which cannot press a key equivalent.
+    ///
+    /// Debug builds only, and it draws nothing on its own: it is how `--snapshot-window` gets the
+    /// window into the state this feature is about, exactly as `--create-sheet` does for the
+    /// window that starts a workspace. Without it the panel is reachable only by Cmd+K and by a
+    /// glyph in the title bar, and a synthetic press of either is an event sent to whatever the
+    /// owner is really looking at.
+    ///
+    ///     Bloom --snapshot-window /tmp/panel.png [--search-panel-query docs]
+    ///           [--search-panel-scope transcripts] [--search-panel-drill] --search-panel
+    ///
+    /// **`--search-panel` goes last, after every flag that carries a value**, and that is not a
+    /// style preference. A bare token left over at the end of argv is taken by AppKit as a file to
+    /// open, and the app then never brings its window up at all: `--search-panel --window-size
+    /// 1400x900` is fine, `--search-panel --search-panel-query review` leaves `review` stray and
+    /// the capture reports "no window to capture" with nothing else to go on. Snapshot's own
+    /// `--settings` carries the same warning for the neighbouring reason.
+    ///
+    /// The wait is for the same beat every capture flag waits for: the sidebar is drawn from the
+    /// database and the resting list is the workspaces that database has not loaded yet.
+    func presentIfRequested(app: AppModel) {
+        let arguments = CommandLine.arguments
+        guard arguments.contains("--search-panel") else { return }
+
+        func value(_ flag: String) -> String? {
+            guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else {
+                return nil
+            }
+            return arguments[index + 1]
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            let scope = value("--search-panel-scope").flatMap(HomeScope.init(rawValue:)) ?? .all
+            open(scope: scope, app: app)
+            if let query = value("--search-panel-query") {
+                type(query, app: app)
+                // The transcript half is a hop onto the store behind a debounce, so a picture
+                // taken before it lands is a picture of the fast half alone.
+                try? await Task.sleep(for: .seconds(2))
+                rebuild(app: app)
+            }
+            if arguments.contains("--search-panel-drill") {
+                highlighted = 0
+                drill(app: app)
+            }
+        }
+    }
+    #endif
+
     var keyContext: SearchPanelKeyContext {
         SearchPanelKeyContext(
             mode: field.mode,

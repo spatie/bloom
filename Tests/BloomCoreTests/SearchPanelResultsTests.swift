@@ -216,6 +216,12 @@ struct SearchPanelResultsTests {
         }
         #expect(start.title == "Start a workspace called houdini")
         #expect(start.action == .newWorkspace)
+        // Said by the builder rather than derived from an empty list, because by the time the
+        // fallbacks are in the list the list is not empty.
+        #expect(listing.summaryLine == "No workspace, transcript or command matches houdini.")
+
+        let matched = build("docs", workspaces: [workspace("docs chapters")])
+        #expect(matched.summaryLine == nil)
     }
 
     /// With no project added there is nothing to cut a worktree from, so the row would be a
@@ -271,9 +277,10 @@ struct SearchPanelResultsTests {
         #expect(listing.summary == "2 results")
     }
 
-    /// A workspace's own menu acts on a worktree that is there. An archived row has none, and a
-    /// command has no workspace at all.
-    @Test("only a live workspace's row can be pushed into")
+    /// Every row that names a workspace can be pushed into, archived ones included: what an
+    /// archived workspace can be asked to do is `WorkspaceMenuSubject.allows`, and it is the same
+    /// shorter menu Home already draws for one. A command has no workspace at all.
+    @Test("a row that names a workspace can be pushed into, whether or not it is archived")
     func whatCanBeDrilled() {
         let listing = build(
             "docs",
@@ -285,7 +292,7 @@ struct SearchPanelResultsTests {
             uniqueKeysWithValues: listing.rows.map { ($0.id, $0.drillable) }
         )
         #expect(drillable["workspace:docs chapters"] == WorkspaceID("docs chapters"))
-        #expect(drillable["workspace:docs import"] == .some(nil))
+        #expect(drillable["workspace:docs import"] == WorkspaceID("docs import"))
         #expect(drillable["transcript:docs chapters"] == WorkspaceID("docs chapters"))
     }
 }
