@@ -302,3 +302,86 @@ struct BranchPrefixTests {
         #expect(suggested == WorkspaceNaming.prefixedBranch("dark-mode", prefix: "freek"))
     }
 }
+
+/// A prefix ending in a slash used to be joined to the slug with another one. Typing `feature/`
+/// into a project's Branch prefix field and then `test` into the create window printed
+/// `feature//test` under the box, and Create failed with "'feature//test' is not a valid branch
+/// name", because git takes no empty path component in a ref. The trailing slash is now trimmed
+/// off the prefix instead, so a prefix means the same thing whether or not the separator was
+/// typed with it, and a prefix already saved in a `.bloom/settings.toml` is forgiven rather than
+/// needing to be edited.
+@Suite("Branch prefix separators")
+struct BranchPrefixSeparatorTests {
+    @Test("a prefix that already ends in a slash does not get a second one")
+    func trailingSlash() {
+        #expect(Git.prefixed("test", with: "feature/") == "feature/test")
+        #expect(Git.prefixed("test", with: "feature//") == "feature/test")
+        #expect(Git.prefixed("test", with: "feature") == "feature/test")
+    }
+
+    /// A prefix pasted from a ref somebody copied, which reads as a leading slash git refuses too.
+    @Test("a prefix that starts with a slash loses it")
+    func leadingSlash() {
+        #expect(Git.prefixed("test", with: "/feature") == "feature/test")
+        #expect(Git.prefixed("test", with: "/feature/") == "feature/test")
+    }
+
+    /// A nested prefix is a real thing to want, and only the ends are touched.
+    @Test("slashes inside a prefix are left alone")
+    func nestedPrefix() {
+        #expect(Git.prefixed("test", with: "team/feature/") == "team/feature/test")
+    }
+
+    @Test("a prefix of nothing but slashes or whitespace is no prefix")
+    func emptyAfterTrimming() {
+        #expect(Git.prefixed("test", with: "") == "test")
+        #expect(Git.prefixed("test", with: nil) == "test")
+        #expect(Git.prefixed("test", with: "/") == "test")
+        #expect(Git.prefixed("test", with: "///") == "test")
+        #expect(Git.prefixed("test", with: "   ") == "test")
+        #expect(Git.prefixed("test", with: " / ") == "test")
+    }
+
+    /// The field is typed into by hand, and a trailing space survived the old join as surely as a
+    /// trailing slash did. Both ends, and both characters, in one pass.
+    @Test("whitespace around a prefix comes off with the slashes")
+    func surroundingWhitespace() {
+        #expect(Git.prefixed("test", with: " feature ") == "feature/test")
+        #expect(Git.prefixed("test", with: " feature/ ") == "feature/test")
+        #expect(Git.prefixed("test", with: "\tfeature/\n") == "feature/test")
+    }
+
+    /// The whole complaint, end to end: what the create window prints under the name box and what
+    /// `WorkspaceManager.cut` hands to git are the one string, and git will now take it.
+    @Test("the branch a prefix with a slash produces is one git accepts")
+    func gitAcceptsTheResult() {
+        let stem = Git.branchStem(prompt: "test", prefix: "feature/")
+
+        #expect(stem == "feature/test")
+        #expect(Git.isValidBranchName(stem))
+        // The string the alert quoted, so the test fails if `isValidBranchName` ever stops
+        // minding it and this suite starts proving nothing.
+        #expect(!Git.isValidBranchName("feature//test"))
+    }
+
+    /// The two names that come from somewhere other than the prompt take the same route, so a
+    /// model's suggestion and a claimed sea are forgiven the same trailing slash.
+    @Test("a suggested branch and a sea's slug are forgiven the same slash")
+    func suggestionsAgree() throws {
+        #expect(WorkspaceNaming.prefixedBranch("dark-mode", prefix: "feature/") == "feature/dark-mode")
+
+        let suggested = try #require(WorkspaceNaming.cleanBranch("dark mode", prefix: "feature/"))
+        #expect(suggested == "feature/dark-mode")
+    }
+
+    /// Deliberately not fixed here, and recorded so the next person knows it was a decision. A
+    /// prefix with a space or a colon in it is a prefix git refuses, and the answer to that is
+    /// either to say so at the settings field or to rewrite the owner's text, which is a larger
+    /// change than repairing a separator this function was going to supply anyway.
+    @Test("a prefix git refuses for a reason other than the separator still refuses")
+    func middleOfThePrefixIsUntouched() {
+        #expect(Git.prefixed("test", with: "my feature") == "my feature/test")
+        #expect(!Git.isValidBranchName(Git.prefixed("test", with: "my feature")))
+        #expect(WorkspaceNaming.prefixedBranch("test", prefix: "my feature") == nil)
+    }
+}
