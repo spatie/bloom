@@ -33,7 +33,14 @@ import BloomCore
 /// that cannot be closed, zoomed or minimised while a search card is up would be a worse bug than
 /// the one this fixes, and a dimmed close button is a control saying it is unavailable when it is
 /// not. They are cut out of the dim with an even-odd fill and out of the hit test by
-/// `SearchPanelOverlayHost`, so a click there reaches AppKit exactly as it always did.
+/// `SearchPanelOverlayHost`, so a click there reaches AppKit exactly as it always did. How much
+/// air the cut-out leaves around them is `trafficLightPadding`, and it was judged against a
+/// picture.
+///
+/// **How far the window goes down is `Palette.panelScrim`, and it is two numbers.** A black scrim
+/// has far less to take out of Bloom's dark ramp than out of its light one, so one opacity read as
+/// a grey page in light and as nothing at all in dark. `SearchPanelLayout.dimDark` carries the
+/// measurement and the argument.
 ///
 /// # What a click outside does
 ///
@@ -87,7 +94,7 @@ struct SearchPanelWindowOverlay: View {
                 )
             }
         }
-        .fill(Color.black.opacity(SearchPanelLayout.dim), style: FillStyle(eoFill: true))
+        .fill(Palette.panelScrim, style: FillStyle(eoFill: true))
         // The click outside, taken here rather than by the window under it. See the head of this
         // file for what that is protecting.
         .contentShape(Rectangle())
@@ -189,7 +196,16 @@ final class SearchPanelWindowGeometry {
 final class SearchPanelOverlayHost: NSHostingView<SearchPanelWindowOverlay> {
     /// The air left around the three buttons, so the cut-out is a rounded slot they sit in rather
     /// than three rectangles traced tightly enough to catch a click on the edge of one.
-    private static let trafficLightPadding: CGFloat = 6
+    ///
+    /// **Three, down from six, and it was judged against a picture rather than argued.** At six
+    /// the undimmed slot was 71 by 25 around three 14 point circles, and on a light window with an
+    /// empty sidebar behind it that read as a bright pill somebody had drawn on the corner: the
+    /// loudest thing in the frame, on the one control the dim is not about. At three it is 65 by
+    /// 19, which is a button's own width of air rather than half as much again, and it stops being
+    /// a shape and starts being the absence of one. Lower than three would begin to clip the
+    /// pointer's reach at the edge of a circle, which is the failure this padding exists to
+    /// prevent, so this is the bottom of the useful range rather than a step on the way down.
+    private static let trafficLightPadding: CGFloat = 3
 
     /// Nothing at all while the panel is closed.
     ///
