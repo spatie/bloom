@@ -60,33 +60,16 @@ struct SlashCommandRow: View {
     /// The name, with the characters the query actually matched carried at full weight and colour
     /// and the rest stepped back.
     ///
-    /// Ranges rather than characters, so a run reads as a word: typing `revi` lights the `revi`
-    /// inside `security-review` rather than the stray `r` of `secu(r)ity`, because the matcher
-    /// reports the run it scored rather than the first letters it could reach.
-    ///
-    /// Built by interpolating one styled `Text` per run, which is what macOS 26 leaves once `+` on
-    /// two `Text`s is deprecated. An `AttributedString` would be the shorter spelling and is the
-    /// wrong one here: its SwiftUI scope carries `font` and no `fontWeight`, so bolding a run
-    /// would mean naming a whole font and the row would stop inheriting the menu's own.
+    /// The drawing itself is `MatchedRuns`, because the search panel draws a workspace name and a
+    /// command title exactly the same way and two copies of it would be two answers to "which
+    /// characters matched". What stays here is the `/`, which is this menu's alone, and the two
+    /// colours, which depend on whether the row is a skill.
     private var name: Text {
         var runs = LocalizedStringKey.StringInterpolation(literalCapacity: 0, interpolationCount: 0)
         runs.appendInterpolation(Text("/").foregroundStyle(quiet))
-        guard !match.highlights.isEmpty else {
-            runs.appendInterpolation(Text(command.name).foregroundStyle(loud))
-            return Text(LocalizedStringKey(stringInterpolation: runs))
-        }
-
-        let characters = Array(command.name)
-        let hits = Set(match.highlights)
-        var index = 0
-        while index < characters.count {
-            let isHit = hits.contains(index)
-            var end = index
-            while end < characters.count, hits.contains(end) == isHit { end += 1 }
-            let run = Text(String(characters[index..<end]))
-            runs.appendInterpolation(isHit ? run.fontWeight(.bold).foregroundStyle(loud) : run.foregroundStyle(quiet))
-            index = end
-        }
+        MatchedRuns.append(
+            command.name, highlights: match.highlights, loud: loud, quiet: quiet, to: &runs
+        )
         return Text(LocalizedStringKey(stringInterpolation: runs))
     }
 

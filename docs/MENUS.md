@@ -62,6 +62,7 @@ contribute for free.
 | Find > Find… | `⌘F` | falls through to Search when nothing in front can find |
 | Find > Find Next | `⌘G` | |
 | Find > Find Previous | `⇧⌘G` | |
+| Quick Search… | `⌘K` | always, but a focused terminal keeps the key |
 | Search | `⇧⌘F` | a project exists |
 
 ### View
@@ -161,7 +162,7 @@ of an item that has a submenu. That trick is the one the View menu should borrow
 | Action | Key | Anywhere in a menu |
 | --- | --- | --- |
 | Focus pane left / right / up / down | `⌥⌘←→↑↓` | **no** |
-| Clear the shell and its scrollback | `⌘K` | **no** |
+| Clear the shell and its scrollback | `⌘K` | **no**, and it beats Edit's Quick Search |
 | Copy, Paste | `⌘C` `⌘V` | Edit menu's, but the terminal answers them itself |
 | Terminal text bigger / smaller / actual | `⌘+` `⌘-` `⌘0` | View menu's Zoom trio, resolved onto the terminal |
 
@@ -318,7 +319,7 @@ a menu item.
 | `⌥⌘←→` | none | terminal moves pane focus | terminal |
 | `⌥⌘↑↓` | Previous / Next Workspace | terminal moves pane focus | **terminal, silently** |
 | `⌘W` | Close Tab | terminal closes the pane | terminal, deliberately |
-| `⌘K` | none | terminal clears the shell | terminal |
+| `⌘K` | Quick Search… | terminal clears the shell | terminal, deliberately |
 | `⌘C` `⌘V` | Edit's own | terminal copies and pastes | terminal |
 | `⌘+` `⌘-` `⌘0` | Zoom In / Out / Actual Size | terminal text size | terminal, and both act on the same shell |
 | `⌘F` `⌘G` `⇧⌘G` | Find submenu | browser finds in the page | browser, when the page has the keyboard |

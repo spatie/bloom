@@ -27,9 +27,6 @@ struct RootView: View {
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isStartingFreshAskConversation = false
-    /// Whether the window's search field has the keyboard. Shift+Cmd+F, and Cmd+F where nothing in
-    /// front can find, put it here. See `FindCommand`.
-    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         @Bindable var app = app
@@ -98,43 +95,22 @@ struct RootView: View {
                     // title item is not a thing reading the interface settles. The window came up
                     // wearing its name twice once already. Both, until a picture says which one did it.
                     .toolbar(removing: .title)
-                    // The window's search field, on the trailing edge of the toolbar, which is where
-                    // Finder and Mail publish search on this platform.
+                    // **There is no `.searchable` here any more, and the reason is a defect rather
+                    // than a matter of taste.** The window carried an `NSSearchToolbarItem`, 206
+                    // points of the system's glass with the system's drop shadow, packed against
+                    // the toolbar's trailing end by a flexible spacer and sharing an edge with
+                    // nothing. That was survivable. What was not is that typing one character into
+                    // it set the selection to Home: a search that takes the page away from you is
+                    // a search people stop using, and getting back meant clearing the field and
+                    // clicking the workspace again.
                     //
-                    // Which edge it lands on is not this modifier's to say. `SearchFieldPlacement` on
-                    // macOS offers `automatic`, `toolbar`, `toolbarPrincipal` and `sidebar`, and none
-                    // of them names an edge: the item is appended after the toolbar's own items and
-                    // goes wherever the packing leaves it. What puts it at the end is the
-                    // `ToolbarSpacer` in `BloomWindowToolbar`, and without that it sits against the
-                    // window's name a third of the way across.
-                    //
-                    // `.searchable` rather than the hand built field this replaced, and that is the
-                    // whole reason it moved. An `NSSearchToolbarItem` is compact at rest, expands over
-                    // the toolbar when it is focused, draws the system's glass and the system's focus
-                    // ring, and answers Escape, none of which a `TextField` in a `RoundedRectangle`
-                    // with a hand drawn stroke ever quite did.
-                    //
-                    // `HomeBar` used to argue against exactly this, on the grounds that a field in the
-                    // toolbar would look like it searched the transcript and the inspector too. That
-                    // was right while the field was a filter for one list. It searches every workspace
-                    // on the Mac and the full text of every transcript now, so the objection became
-                    // the case for it: this belongs to the window rather than to a column. Finding a
-                    // word in what you are reading is still Cmd+F and still the pane's own, which is
-                    // Xcode's split. See `FindCommand`.
-                    .searchable(
-                        text: $app.homeFilter.query,
-                        placement: .toolbar,
-                        prompt: Text("Search")
-                    )
-                    .searchFocused($isSearchFocused)
+                    // The same search is a panel now, opened on Cmd+K and from the magnifying
+                    // glass in the title bar, and it moves nothing: no selection, no scroll, no
+                    // column. Nothing it could reach was taken away with the field, which is the
+                    // whole point of relocating it rather than replacing it. See `SearchPanelView`
+                    // for the card and `SearchToolbarButton` for the glyph.
                     .onChange(of: app.selectedWorkspace != nil, initial: true) { _, available in
                         InspectorGeometry.shared.setWorkspaceAvailable(available)
-                    }
-                    // Published to the model, because the pane that needs the answer cannot see a
-                    // `@FocusState` declared up here and Home's list was taking the keyboard off this
-                    // field mid word. See `HomeListKeyboard` for the sequence that did it.
-                    .onChange(of: isSearchFocused) { _, focused in
-                        app.isSearchFieldFocused = focused
                     }
             }
             // As well as heading the toolbar (see BloomApp), the title names the window in the
@@ -195,6 +171,9 @@ struct RootView: View {
             // Debug builds only, and only when asked for on the command line: raises one of the two
             // Help menu sheets so a capture run can look at it. See `FeedbackPresenter`.
             .task { FeedbackPresenter.shared.presentIfRequested() }
+            // The same, for the search panel, which is otherwise reachable only by a key
+            // equivalent and a glyph. See `SearchPanelModel.presentIfRequested`.
+            .task { presentSearchPanelIfRequested() }
             // Send Feedback and Submit a Prompt, raised from the Help menu. Here rather than at the
             // menu item, because a `Commands` body is not a view and cannot present anything, and
             // because what was typed into either of them belongs to the app rather than to the sheet:
@@ -328,13 +307,18 @@ struct RootView: View {
                 // explanation. See `AppModel.open(workspaceID:)`.
                 Task { await app.open(workspaceID: id) }
             }
-            // Shift+Cmd+F, and Cmd+F where nothing in front can find. A `Commands` body is not a view
-            // and cannot reach a `@FocusState`, so the menu item posts and this listens.
-            //
-            // The centre pane goes to Home with it. The field is in the toolbar, so it is on screen
-            // while a workspace is open, and a search whose answer is drawn in a pane nobody is
-            // looking at would be a field that does nothing.
+            // Shift+Cmd+F, and Cmd+F where nothing in front can find, are handled in
+            // `windowWiring` below, and they open the panel rather than putting a keyboard
+            // anywhere in the window.
         )
+    }
+
+    /// Debug builds only. In a method of its own so `body` carries one call rather than a
+    /// conditional compilation block, which the type checker in there can do without.
+    private func presentSearchPanelIfRequested() {
+        #if DEBUG
+        SearchPanelModel.shared.presentIfRequested(app: app)
+        #endif
     }
 
     /// The window's notification wiring, in a method rather than in `body`.
@@ -349,22 +333,28 @@ struct RootView: View {
     /// `@State` and `@FocusState`, and a modifier is a separate type that can see neither.
     private func windowWiring(_ content: some View) -> some View {
         content
-        .onReceive(NotificationCenter.default.publisher(for: .bloomFocusSearch)) { _ in
-            app.selection = .home
-            isSearchFocused = true
-        }
-        // Typing into the field is the same act as pressing the key that focuses it, so it lands
-        // in the same place. Only on the way IN: clearing the field must not navigate anywhere,
-        // because clearing it is how somebody gets back to the list they were reading.
+        // The search panel, over the whole window rather than over one column: it reaches every
+        // workspace on the Mac and the full text of every transcript, so it belongs to the window.
+        .searchPanel(app: app)
+        // Shift+Cmd+F, and Cmd+F wherever nothing in front can find. Both have always meant "the
+        // whole search", and both open the panel on the Transcripts chip, because what neither of
+        // them can be is find-in-place: that is the pane's own and stays there.
         //
-        // The scope settles here too, because this is where the two sets of chips cross. See
-        // `HomeScope.settle`.
+        // **Nothing here navigates any more.** This used to set the selection to Home and put the
+        // keyboard in the toolbar's field, which is what took the reader off the conversation they
+        // were in. The panel opens over the window and closes leaving it exactly where it was.
+        .onReceive(NotificationCenter.default.publisher(for: .bloomFocusSearch)) { _ in
+            SearchPanelModel.shared.open(scope: .transcripts, app: app)
+        }
+        // The scope settles when Home's own query moves, because that is where the two sets of
+        // chips cross. See `HomeScope.settle`. It no longer navigates: the only thing that writes
+        // this query now is the panel's "search Home for this" row, which is already on its way to
+        // Home, and clearing it is how somebody gets back to the list they were reading.
         .onChange(of: app.homeFilter.query) { old, new in
             let was = !WorkspaceSearch.needle(old).isEmpty
             let now = !WorkspaceSearch.needle(new).isEmpty
             guard was != now else { return }
             app.homeFilter.scope = HomeScope.settle(app.homeFilter.scope, searching: now)
-            if now { app.selection = .home }
         }
         .onReceive(NotificationCenter.default.publisher(for: .bloomToggleSidebar)) { _ in
             toggleSidebar()
@@ -482,9 +472,12 @@ extension Notification.Name {
     // its own name private so nothing can post an id down it untyped. These two carry no id and
     // are only ever posted by views, so they live here.
     static let bloomToggleSidebar = Notification.Name("bloom.toggleSidebar")
-    /// Puts the keyboard in the window's search field. Posted by the Edit menu's Search item and
-    /// by Cmd+F falling through, neither of which can reach a `@FocusState` from a `Commands`
-    /// body.
+    /// Opens the search panel on the Transcripts chip. Posted by the Edit menu's Search item and
+    /// by Cmd+F falling through, both of which mean "the whole search" rather than find-in-place.
+    ///
+    /// The name is older than the panel and is kept rather than churned: it is the same door, and
+    /// what it used to open was a field in the toolbar. It no longer puts a keyboard anywhere in
+    /// the window, which is the defect the panel exists to fix.
     static let bloomFocusSearch = Notification.Name("bloom.focusSearch")
     /// Asks for the create window. Still a notification rather than an `openWindow` at each of
     /// the four controls that can ask, because which project is meant depends on what this window

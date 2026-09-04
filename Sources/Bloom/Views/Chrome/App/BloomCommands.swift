@@ -275,6 +275,19 @@ struct BloomCommands: Commands {
             // which is what somebody in a terminal needs it to mean. Cmd+F still lands here
             // whenever nothing in front can find, so the key that used to open the Search screen
             // still reaches the search.
+            // The panel, on a key nothing else in the bar spends. Directly above Search because
+            // the two open the same card: this one on the resting list, Search with the
+            // Transcripts chip already chosen.
+            //
+            // A shell keeps Cmd+K to clear its scrollback, which is iTerm's binding and
+            // Terminal's, and a focused view is offered a key equivalent before the menu bar is.
+            // That is deliberate rather than a gap: somebody inside a terminal reaches the panel
+            // with Shift+Cmd+F, which has always meant the whole search. See
+            // `MenuBarCatalogueTests.theKeysTheViewsOwn`, which records every such overlap.
+            MenuCommand(.quickSearch) {
+                SearchPanelModel.shared.open(app: model)
+            }
+
             MenuCommand(.search) {
                 NotificationCenter.default.post(name: .bloomFocusSearch, object: nil)
             }

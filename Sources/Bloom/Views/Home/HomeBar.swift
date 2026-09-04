@@ -4,12 +4,17 @@ import BloomCore
 /// The one strip of chrome above Home's list: which chip is lit, and which projects are listed.
 ///
 /// **What came off it.** It used to hold a hand built search field with a hand drawn focus ring, a
-/// project menu, a "Hide archived" toggle and a readout of what the list added up to. The field is
-/// gone: the window has a real `NSSearchToolbarItem` in its toolbar, which is where Finder and Mail
-/// publish search. The toggle is gone into `HomeScope.live`, because a narrowing switch beside a
-/// set of narrowing chips is two mechanisms for one question. And the readout is gone down to
-/// `HomeStatusBar` at the foot of the pane: a count belongs beside the thing it counts, and this
-/// bar was carrying five chips, a picker and a sentence at one weight, so nothing on it led.
+/// project menu, a "Hide archived" toggle and a readout of what the list added up to. The field
+/// went to the window's toolbar as a real `NSSearchToolbarItem`, and then off the toolbar
+/// altogether: the search is a panel on Cmd+K now, because typing into a field in the title bar
+/// set the selection to Home and took the reader off whatever they were reading. The toggle is
+/// gone into `HomeScope.live`, because a narrowing switch beside a set of narrowing chips is two
+/// mechanisms for one question. And the readout is gone down to `HomeStatusBar` at the foot of the
+/// pane: a count belongs beside the thing it counts, and this bar was carrying five chips, a
+/// picker and a sentence at one weight, so nothing on it led.
+///
+/// What arrived with the panel is `queryChip`, which is the one thing the strip has to say now
+/// that no field on screen holds the query.
 ///
 /// **What went on it.** One control, and only under the Archived chip: whether that list is in
 /// date order or in size order. It is the last piece of the Settings > Storage pane, whose
@@ -52,6 +57,8 @@ struct HomeBar: View {
                 .fixedSize()
                 .help("Choose which work Home lists")
 
+                queryChip
+
                 Spacer(minLength: Metrics.gutter)
 
                 HStack(spacing: Metrics.spacing) {
@@ -79,6 +86,53 @@ struct HomeBar: View {
     private func accessibilityLabel(for scope: HomeScope) -> String {
         let label = scope.label(searching: isSearching)
         return counts.badge(of: scope, searching: isSearching).map { "\(label), \($0)" } ?? label
+    }
+
+    // MARK: - The query
+
+    /// What Home is being searched for, as a chip that can be taken off.
+    ///
+    /// **The strip needs this because the field that used to hold the query is gone.** It was an
+    /// `NSSearchToolbarItem` in the window's toolbar, and it went with the search panel: the
+    /// panel's "search Home for this" row is the one thing left that writes `HomeFilter.query`. A
+    /// list narrowed by a query with no control on screen saying so is how somebody files a bug
+    /// about their workspaces having disappeared, and it is the exact failure `projectLabel` a few
+    /// lines down exists to prevent for the other filter.
+    ///
+    /// Absent when there is nothing to say, rather than an empty field kept for symmetry: the
+    /// strip is two chips and a menu most of the time, and a permanently empty box on it would be
+    /// a thing to read past on every visit to the first screen the app opens.
+    @ViewBuilder
+    private var queryChip: some View {
+        if isSearching {
+            HStack(spacing: Metrics.spacingSmall) {
+                Image(systemName: "magnifyingglass")
+                    .font(Typo.micro)
+                    .imageScale(.small)
+
+                Text(filter.query)
+                    .font(Typo.caption)
+                    .lineLimit(1)
+
+                Button {
+                    filter.query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(Typo.micro)
+                        .imageScale(.medium)
+                }
+                .buttonStyle(.plain)
+                .help("Clear the search")
+                .accessibilityLabel("Clear the search")
+            }
+            .foregroundStyle(Palette.textSecondary)
+            .padding(.horizontal, Metrics.chipInsetH)
+            .padding(.vertical, Metrics.chipInsetV)
+            .background(Palette.hover, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+            .padding(.leading, Metrics.spacing)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Searching for \(filter.query)")
+        }
     }
 
     // MARK: - Order

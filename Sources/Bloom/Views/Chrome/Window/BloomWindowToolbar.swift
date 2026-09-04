@@ -79,21 +79,19 @@ struct BloomWindowToolbar: ToolbarContent {
             }
         }
 
-        // The elastic middle of the bar, and the whole reason the search field sits at the
-        // window's trailing edge rather than beside the name.
+        // The elastic middle of the bar. It was put here for the search field, which used to be
+        // the last item in the toolbar: `.searchable` contributed an `NSSearchToolbarItem` after
+        // everything written above, and an `NSToolbar` packs from the leading edge with no gap
+        // unless something between the items can stretch. What usually stretches is AppKit's own
+        // title item, and `RootView` takes that away with `.toolbar(removing: .title)` because the
+        // name is drawn here instead, so removing the second title also removed the toolbar's only
+        // slack. Measured offscreen at 1440 points: without this the field's capsule started at
+        // x=416, a third of the way across the bar, and with it at x=727.
         //
-        // `.searchable` contributes an `NSSearchToolbarItem` after everything written here, and an
-        // `NSToolbar` packs its items from the leading edge with no gap unless something between
-        // them can stretch. What usually stretches is AppKit's own title item, and `RootView`
-        // takes that away with `.toolbar(removing: .title)` because the name is drawn here
-        // instead, so removing the second title also removed the toolbar's only piece of slack.
-        //
-        // Measured in an offscreen window 1440 points wide, with the same 380 point accessory:
-        // without this the field's capsule starts at x=416, eight points from the title's own and
-        // a third of the way across the bar, which is what the owner was looking at; with it, at
-        // x=727, hard against the pull request band. The band is beyond the toolbar rather than
-        // in it, so the two do not compete for the edge: the field takes the toolbar's trailing
-        // end, the band takes the window's. See `TitleBarStrip`.
+        // **The field has gone to a panel and the spacer stays**, because what it does now is hold
+        // these items against the leading edge rather than letting a toolbar with nothing at its
+        // other end lay them out somewhere else. The window's search is a glyph in the title bar
+        // accessory now: see `SearchToolbarButton` and `TitleBarStrip`.
         ToolbarSpacer(.flexible, placement: .navigation)
 
         // The worktree's menu is not here any more. It was a trailing toolbar item, pinned to the

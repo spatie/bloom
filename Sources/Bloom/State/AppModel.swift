@@ -178,26 +178,29 @@ final class AppModel {
     /// keystroke handler is a mid-update mutation this file avoids everywhere else.
     @ObservationIgnored var transcriptSearchTask: Task<Void, Never>?
     @ObservationIgnored var transcriptBackfillTask: Task<Void, Never>?
-    /// What Home's list is narrowed to: what was typed into the window's search field, which chip
-    /// is lit, which projects are listed.
+    /// What Home's list is narrowed to: the query, which chip is lit, which projects are listed.
     ///
     /// Here rather than in `HomeView`'s `@State`, because `HomeView` is destroyed and rebuilt
     /// every time the selection leaves Home and comes back, so a filter held in the view is
     /// silently cleared by opening any workspace at all. A user who narrows the list to one
     /// project, opens something from it and comes back to a list of everything has been overruled
-    /// by the app without being told. The query has the same problem twice over: the field is in
-    /// the window's toolbar and stays on screen when Home does not.
+    /// by the app without being told.
+    ///
+    /// **Only one thing writes the query now**, which is the search panel's "search Home for this"
+    /// row. There was a field in the window's toolbar and it is gone, because typing into it set
+    /// the selection to Home. What says the query is there at all is `HomeBar.queryChip`.
     ///
     /// Deliberately not persisted to disk. A scope is something you click to get through a long
     /// list, not a preference, and an app that starts up with a third of the machine's work
     /// missing because of something you did last Tuesday has to be worked out rather than read.
     var homeFilter = HomeFilter()
-    /// Whether the window's search field is first responder.
+    /// Whether a field in the window's chrome has the keyboard, which is the search panel's now
+    /// that the toolbar has no field.
     ///
-    /// Mirrored off `RootView`'s `@FocusState` because a `@FocusState` is private to the view that
-    /// declares it, and the pane that has to read this is Home's list, three view controllers down
-    /// inside the detail column. What it is read for is the one thing a list must never do, which
-    /// is take the keyboard off somebody who is mid word. See `HomeListKeyboard`.
+    /// Mirrored here because the pane that has to read it is Home's list, three view controllers
+    /// down inside the detail column, and the panel is an overlay on the window. What it is read
+    /// for is the one thing a list must never do, which is take the keyboard off somebody who is
+    /// mid word. See `HomeListKeyboard`, and `SearchPanelOverlay` for the one writer.
     var isSearchFieldFocused = false
     var isCreatingWorkspace = false
 
