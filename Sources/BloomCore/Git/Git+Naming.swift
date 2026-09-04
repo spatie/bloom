@@ -6,6 +6,10 @@ import Foundation
 /// tests drive them without a repository on disk. Whether the result is a name git will accept
 /// is a separate question, and `isValidBranchName` in `Git.swift` is what answers it.
 extension Git {
+    /// What is trimmed off both ends of a branch prefix. See `prefixed`.
+    private static let prefixEdges = CharacterSet.whitespacesAndNewlines
+        .union(CharacterSet(charactersIn: "/"))
+
     private static let stopWords: Set<String> = [
         "the", "a", "an", "and", "or", "but", "to", "of", "in", "on", "for", "with",
         "please", "can", "you", "i", "we", "it", "this", "that", "is", "are", "be",
@@ -111,13 +115,28 @@ extension Git {
     /// `WorkspaceNaming.cleanBranch` where a model's suggestion is prefixed, and in the app where
     /// a claimed sea's slug is. The third carried a comment saying it applied the same rule as the
     /// second, which it did by writing it out again, under a comment on this one warning about
-    /// exactly that. What a prefix means, which is a slash and no trimming, is decided here.
+    /// exactly that. What a prefix means is decided here, and only here.
     ///
     /// An empty prefix is no prefix. A project that has never set one and one that set it to ""
     /// are the same project.
+    ///
+    /// The prefix is normalised before the slash is added, because a prefix ending in one
+    /// produced `feature//test`, which the create window printed under the name box and which
+    /// `git branch` then refused with "'feature//test' is not a valid branch name": an empty
+    /// component between two slashes is not a ref. A prefix is a prefix whether or not somebody
+    /// wrote the separator themselves, and people write it, so whitespace and slashes at either
+    /// end come off and a prefix that was nothing but those is no prefix rather than a leading
+    /// slash. Normalising here rather than at the settings field is what matters: a `feature/`
+    /// already sitting in a project's `.bloom/settings.toml` is never seen by that field again.
+    ///
+    /// Only the edges. A prefix with a space or a colon in the middle of it is still a prefix git
+    /// will refuse, and silently rewriting the owner's own text into something else is a larger
+    /// decision than repairing a separator that was going to be supplied anyway.
     public static func prefixed(_ slug: String, with prefix: String?) -> String {
-        guard let prefix, !prefix.isEmpty else { return slug }
-        return "\(prefix)/\(slug)"
+        guard let prefix else { return slug }
+        let trimmed = prefix.trimmingCharacters(in: prefixEdges)
+        guard !trimmed.isEmpty else { return slug }
+        return "\(trimmed)/\(slug)"
     }
 
     public static func uniqueBranch(_ desired: String, taken: Set<String>) -> String {
