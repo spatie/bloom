@@ -246,6 +246,14 @@ final class TranscriptLiveEndFollower {
             guard document.isFlipped else { return endLink() }
 
             let clip = scrollView.contentView
+            // The same refusal `TranscriptTable.Coordinator.put` makes, because this is the other
+            // thing that writes the clip view and it runs at display rate for the whole of a turn,
+            // which is when a divider is most likely to be under a hand. See
+            // `TranscriptAnchor.canPlace`: `endOffset` against a pane of no height is the point
+            // below the last row.
+            guard TranscriptAnchor.canPlace(viewportHeight: Double(clip.bounds.height)) else {
+                return
+            }
             let now = CACurrentMediaTime()
             let frame = lastFrame > 0 ? now - lastFrame : 0
             lastFrame = now

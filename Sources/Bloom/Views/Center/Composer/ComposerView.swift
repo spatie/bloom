@@ -101,7 +101,13 @@ struct ComposerView: View {
         // moves the total on every frame and leaves the chrome exactly where it was, and writing
         // an unchanged value into `@State` still re-runs this body.
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { total in
-            let chrome = PaneMeasure.chrome(total - editorHeight)
+            // `knowing:` rather than bare, and the transcript going blank is what it is for. A
+            // chrome of nought is a pass that measured the composer before the editor inside it
+            // moved, not a composer with no chrome, and writing it lifts `maxEditorHeight` by the
+            // whole chrome: the floor below is then measured against a number that is short by
+            // exactly the thing it is supposed to leave room for. See
+            // `PaneMeasure.chrome(_:knowing:)`.
+            let chrome = PaneMeasure.chrome(total - editorHeight, knowing: chromeHeight)
             if chrome != chromeHeight { chromeHeight = chrome }
         }
     }
@@ -173,10 +179,12 @@ struct ComposerView: View {
     /// every render and not only while dragging, so shrinking the window shrinks the composer back
     /// rather than pushing the transcript off the top.
     private var maxEditorHeight: CGFloat {
-        let available = room.height
-        guard available > 0 else { return .greatestFiniteMagnitude }
-        let left = available - chromeHeight - Self.minTranscriptHeight
-        return max(left, ComposerTextEditor.lineHeight)
+        PaneMeasure.editorCap(
+            room: room.height,
+            chrome: chromeHeight,
+            floor: Self.minTranscriptHeight,
+            atLeast: ComposerTextEditor.lineHeight
+        )
     }
 
     /// The drag begins from whatever is on screen, so switching out of automatic sizing never jumps.

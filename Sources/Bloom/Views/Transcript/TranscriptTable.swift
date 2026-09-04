@@ -1268,6 +1268,17 @@ struct TranscriptTable: NSViewRepresentable {
 
         private func put(_ y: CGFloat, in scrollView: NSScrollView) {
             let clip = scrollView.contentView
+            // **Nothing at all is decided from a pane nobody has laid out**, and this is the
+            // blank transcript a composer divider left behind. The end of the content resolved
+            // against a viewport of no height is the whole content height, which is the point
+            // BELOW the last row, and the clamp below happily allows it: a reader sitting at the
+            // live end while the composer takes the pane's height for a pass is put there and
+            // cannot be brought back, because every recovery in this file needs a row on screen
+            // to start from. `measureLanding` refuses the same pane a few lines down. See
+            // `TranscriptAnchor.canPlace`, which is that rule where it can be tested.
+            guard TranscriptAnchor.canPlace(viewportHeight: Double(clip.bounds.height)) else {
+                return
+            }
             let target = TranscriptAnchor.clamped(
                 y,
                 contentHeight: Double(scrollView.documentView?.frame.height ?? 0),

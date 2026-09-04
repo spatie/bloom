@@ -37,6 +37,40 @@ public enum TranscriptAnchor {
         max(0, contentHeight - viewportHeight)
     }
 
+    /// The shortest viewport a placement may be resolved against.
+    ///
+    /// A point, for the reason `TranscriptRowHeights.narrowest` is a point across: a pane that has
+    /// not been laid out reports nought or one, and neither of those is a measurement of anything.
+    public static let laidOut: Double = 1
+
+    /// **Whether this pane has been laid out enough for a placement to mean anything.**
+    ///
+    /// **This is the blank transcript a composer divider left behind.** A pane of no height is not
+    /// a short pane, it is a pane nobody has laid out yet, and every number in this file answers
+    /// something absurd for one. `end(contentHeight:viewportHeight:)` comes out as the WHOLE
+    /// content height, which is the point BELOW the last row rather than the last screen of rows,
+    /// and `clamped` then lets a caller put the viewport exactly there. What is on screen
+    /// afterwards is the transcript's own ground and not one row of the conversation.
+    ///
+    /// **And it does not come back, which is why this is a refusal and not a clamp.** Once the
+    /// viewport is below the last row the table can see no rows at all, and every mechanism that
+    /// would put it right needs one to start from: there is no topmost entry, so the next
+    /// placement has no anchor and leaves the view where it is; the screen census counts nothing,
+    /// so nothing is repaired; and the warming pass finds no band to warm. A frame of bad layout
+    /// becomes a conversation that looks deleted.
+    ///
+    /// The pane really does have no height for a pass at a time, and `PaneMeasure.chrome` carries
+    /// why: the composer's cap is worked out from a chrome measured on the pass before the one
+    /// that moved the editor, so a divider dragged quickly can hand the editor the chrome as well
+    /// and squeeze the transcript past the floor meant to keep it.
+    ///
+    /// `TranscriptTable.Coordinator.measureLanding` already refuses a pane of no height, for the
+    /// smaller version of the same reason. This is the rule it was keeping, written where every
+    /// caller can keep it and where it can be tested.
+    public static func canPlace(viewportHeight: Double) -> Bool {
+        viewportHeight > laidOut
+    }
+
     /// A wanted offset brought inside the range the viewport can actually be at.
     ///
     /// Every scroll in the transcript goes through this, including the ones aimed at the end: a
