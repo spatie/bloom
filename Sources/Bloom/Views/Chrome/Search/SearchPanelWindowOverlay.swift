@@ -80,7 +80,7 @@ struct SearchPanelWindowOverlay: View {
     private func dim(in size: CGSize) -> some View {
         Path { path in
             path.addRect(CGRect(origin: .zero, size: size))
-            if let hole = geometry.trafficLightHole(inViewOfHeight: size.height) {
+            if let hole = geometry.trafficLightHole {
                 path.addRoundedRect(
                     in: hole,
                     cornerSize: CGSize(width: hole.height / 2, height: hole.height / 2)
@@ -117,8 +117,17 @@ struct SearchPanelWindowOverlay: View {
 /// Shared rather than passed, and for the reason `InspectorGeometry` next door is: Bloom is one
 /// window, the hosting view that measures this is made before the view that reads it, and an
 /// `NSHostingView`'s root view is a value that would have to be rebuilt to carry a new number.
-/// Both properties move with the window, so both are republished whenever the overlay's frame
-/// changes rather than read once.
+///
+/// **Every number here is measured against the window's frame view, and that is the whole point.**
+/// The first version of this asked the window for `contentLayoutRect` and asked the buttons to
+/// convert themselves into the overlay's own coordinates, and both answers were wrong in the
+/// picture. `contentLayoutRect` is what the title bar leaves over AFTER its accessories, and Bloom
+/// puts a 52 point band up there, so the title bar measured 152 and the card hung a hundred points
+/// too low. The buttons converted into a hosting view whose flippedness is SwiftUI's business, so
+/// the cut-out for the traffic lights came out mirrored and appeared as a bright slot in the bottom
+/// left of the sidebar. The frame view is neither: it is a plain unflipped `NSView` whose bounds
+/// are the window's frame, it is the superview a hit test arrives in, and it is the space the
+/// overlay itself is pinned to.
 @MainActor
 @Observable
 final class SearchPanelWindowGeometry {
@@ -126,38 +135,35 @@ final class SearchPanelWindowGeometry {
 
     private init() {}
 
-    /// The union of the close, minimise and zoom buttons with a little air around it, in the
-    /// overlay's own AppKit coordinates: origin at the bottom left, because that is the space the
-    /// window's frame view is in and the space a hit test arrives in.
+    /// The union of the close, minimise and zoom buttons with a little air around it, in the frame
+    /// view's coordinates: unflipped, origin at the window's bottom left. That is the space
+    /// `hitTest` is asked in, which is why it is the one held.
     ///
     /// Nil before there is a window, and on a window whose buttons are gone.
     private(set) var trafficLights: CGRect?
 
-    /// How much of the window the title bar takes, so the card can be hung below it.
+    /// How much of the window sits above its content view, which is the title bar and the toolbar
+    /// in it. The card is hung below this so it stays where it always sat.
     private(set) var titleBarHeight: CGFloat = 0
 
-    /// The same rectangle in SwiftUI's space, which is the flip of the above.
-    ///
-    /// The flip is done here rather than at the call site because the height it needs is the
-    /// overlay's own, and the overlay is the only thing that has it.
-    func trafficLightHole(inViewOfHeight height: CGFloat) -> CGRect? {
+    /// The window's frame height, held so the flip below needs nothing from the view drawing it.
+    private(set) var windowHeight: CGFloat = 0
+
+    /// The same rectangle in SwiftUI's space: down from the top of the window.
+    var trafficLightHole: CGRect? {
         guard let trafficLights else { return nil }
         return CGRect(
             x: trafficLights.minX,
-            y: height - trafficLights.maxY,
+            y: windowHeight - trafficLights.maxY,
             width: trafficLights.width,
             height: trafficLights.height
         )
     }
 
-    func setTrafficLights(_ rect: CGRect?) {
-        guard trafficLights != rect else { return }
-        trafficLights = rect
-    }
-
-    func setTitleBarHeight(_ height: CGFloat) {
-        guard titleBarHeight != height else { return }
-        titleBarHeight = height
+    func setChrome(titleBarHeight: CGFloat, windowHeight: CGFloat, trafficLights: CGRect?) {
+        if self.titleBarHeight != titleBarHeight { self.titleBarHeight = titleBarHeight }
+        if self.windowHeight != windowHeight { self.windowHeight = windowHeight }
+        if self.trafficLights != trafficLights { self.trafficLights = trafficLights }
     }
 }
 
@@ -196,76 +202,102 @@ final class SearchPanelOverlayHost: NSHostingView<SearchPanelWindowOverlay> {
     /// panel is open, because a closed panel hit tests to nothing and this is never asked.
     override var mouseDownCanMoveWindow: Bool { false }
 
-    /// Whether the frame observer is already registered.
+    /// Whether the window observers are already registered.
     ///
     /// Once, not once per move into a window. Deregistering and registering again would be the
     /// obvious way to write this and SwiftLint refuses it, rightly: `notification_center_detachment`
     /// exists because an object that removes itself outside `deinit` removes every observation
-    /// something else registered for it too. Registering once and letting `deinit` do the taking
-    /// off is the shape that has no such hazard.
-    private var isWatchingFrame = false
+    /// something else registered for it too.
+    private var isWatchingWindow = false
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         // No safe area at all. This view is a sibling of the content view rather than a descendant
         // of it, so the inset the window reports for its title bar is the one region this overlay
-        // must NOT respect: it is the region it exists to cover. Left on, SwiftUI would push the
-        // dim down to where the content view starts, which is the bug over again.
+        // must NOT respect: it is the region it exists to cover.
         safeAreaRegions = []
-        guard window != nil else {
-            SearchPanelWindowGeometry.shared.setTrafficLights(nil)
+        guard let window else {
+            SearchPanelWindowGeometry.shared.setChrome(
+                titleBarHeight: 0, windowHeight: 0, trafficLights: nil
+            )
             return
         }
-        if !isWatchingFrame {
-            isWatchingFrame = true
-            // The frame rather than the window: this view is pinned to the frame view by an
-            // autoresizing mask, so it hears about a resize, a full screen and a zoom alike, and
-            // it hears about them after the new size is in rather than during a layout pass of
-            // its own.
-            postsFrameChangedNotifications = true
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(frameChanged),
-                name: NSView.frameDidChangeNotification,
-                object: self
-            )
+        if !isWatchingWindow {
+            isWatchingWindow = true
+            let centre = NotificationCenter.default
+            for name in [
+                NSWindow.didResizeNotification,
+                NSWindow.didEndLiveResizeNotification,
+                NSWindow.didEnterFullScreenNotification,
+                NSWindow.didExitFullScreenNotification,
+            ] {
+                centre.addObserver(
+                    self, selector: #selector(windowGeometryChanged), name: name, object: window
+                )
+            }
+            if let frame = superview {
+                frame.postsFrameChangedNotifications = true
+                centre.addObserver(
+                    self,
+                    selector: #selector(windowGeometryChanged),
+                    name: NSView.frameDidChangeNotification,
+                    object: frame
+                )
+            }
         }
-        publishGeometry()
+        windowGeometryChanged()
     }
 
     deinit {
         NotificationCenter.default.removeObserver(self)
     }
 
-    @objc private func frameChanged() {
+    @objc private func windowGeometryChanged() {
+        matchTheFrameView()
         publishGeometry()
     }
 
-    /// The two numbers the overlay draws itself from, measured off the window.
+    /// Keeps this view exactly the size of the window.
     ///
-    /// The buttons are converted into this view's coordinates rather than read as window
-    /// coordinates, because this view is a sibling of the content view in the frame view and its
-    /// origin is the window's bottom left only for as long as that stays true.
+    /// **An autoresizing mask is not enough, and that was measured rather than assumed.** The
+    /// window's frame view is AppKit's own and it lays out the subviews it knows about; a view
+    /// somebody else added is not resized by it. The first capture of this branch proved it: the
+    /// overlay was installed at the window's restored height, the capture then set a different
+    /// content size, and the overlay kept the old one. Because the frame view is unflipped the
+    /// overlay stayed anchored to the BOTTOM and hung a hundred points off the top, which is what
+    /// put the traffic light cut-out down in the sidebar. The mask stays on because it is right
+    /// whenever AppKit does run it; this is what makes it true when AppKit does not.
+    private func matchTheFrameView() {
+        guard let frame = superview, self.frame != frame.bounds else { return }
+        self.frame = frame.bounds
+    }
+
+    /// The three numbers the overlay draws itself from, measured off the frame view.
     private func publishGeometry() {
         let geometry = SearchPanelWindowGeometry.shared
-        guard let window else {
-            geometry.setTrafficLights(nil)
+        guard let window, let frame = superview, let content = window.contentView else {
+            geometry.setChrome(titleBarHeight: 0, windowHeight: 0, trafficLights: nil)
             return
         }
-        // The same measurement `WindowChrome` takes to size the title bar accessory: what the
-        // title bar leaves over is the difference between the window and its content layout.
-        geometry.setTitleBarHeight(max(0, window.frame.height - window.contentLayoutRect.height))
+        let height = frame.bounds.height
+        // What sits ABOVE the content view, which is the title bar and the toolbar in it. Taken
+        // from the content view's own frame rather than from `contentLayoutRect`, because that
+        // rect is what the title bar leaves over after its accessories and Bloom puts a 52 point
+        // band in there: it answered 152 for a 52 point title bar. See `TitleBarStrip`.
+        let titleBar = max(0, height - content.frame.maxY)
 
         let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
             .compactMap { window.standardWindowButton($0) }
             .filter { !$0.isHidden }
-        guard let first = buttons.first else {
-            geometry.setTrafficLights(nil)
-            return
+        var lights: CGRect?
+        if let first = buttons.first {
+            let union = buttons.dropFirst().reduce(first.convert(first.bounds, to: frame)) {
+                $0.union($1.convert($1.bounds, to: frame))
+            }
+            lights = union.insetBy(dx: -Self.trafficLightPadding, dy: -Self.trafficLightPadding)
         }
-        let union = buttons.dropFirst().reduce(first.convert(first.bounds, to: self)) {
-            $0.union($1.convert($1.bounds, to: self))
-        }
-        geometry.setTrafficLights(union.insetBy(dx: -Self.trafficLightPadding, dy: -Self.trafficLightPadding))
+        geometry.setChrome(
+            titleBarHeight: titleBar, windowHeight: height, trafficLights: lights
+        )
     }
 }
