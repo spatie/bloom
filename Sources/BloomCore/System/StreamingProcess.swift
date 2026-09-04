@@ -110,6 +110,24 @@ public final class StreamingProcess: Sendable {
         linesContinuation.onTermination = { [weak self] reason in
             if case .cancelled = reason { self?.terminate() }
         }
+
+        // SIGPIPE, whose default disposition kills the process, and Bloom does not turn it off.
+        //
+        // Nothing in this tree sets the disposition process wide, which was checked rather than
+        // assumed, and `UnixSocketConnection` says the same thing in the other direction: it sets
+        // `SO_NOSIGPIPE` on every socket it owns and its comment is that without it Bloom would be
+        // taken down by an agent CLI exiting mid-call. A pipe to a child is the same hazard and
+        // was never given the same treatment, so `write(_:)` below could be killed rather than
+        // told, and the comment on it claiming a dead child turns a write into an exception was
+        // only ever true of a process that ignores the signal. It is now, for this descriptor:
+        // `F_SETNOSIGPIPE` makes a write to a pipe nobody is reading return EPIPE, which is what
+        // "the child went away" should look like.
+        //
+        // Per descriptor rather than a process wide `signal()` call, for the reason the socket
+        // took the same route: the policy belongs to the pipe this type owns, and a library that
+        // changes a signal disposition changes it for whoever linked it, including the test
+        // binary and the bridge shim.
+        _ = fcntl(stdinPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
     }
 
     public var isRunning: Bool {
@@ -231,7 +249,11 @@ public final class StreamingProcess: Sendable {
         defer { releaseWriter() }
 
         let data = Data(text.utf8)
-        // A dead child turns a write into SIGPIPE, which `write(_:)` turns into an exception.
+        // A dead child turns a write into EPIPE rather than into SIGPIPE, because `init` set
+        // `F_SETNOSIGPIPE` on this descriptor. Without that this line is not a throw, it is the
+        // process being killed, and the guard above cannot prevent it: `status` is only set once
+        // `settle` has waited out its quiet period, so there is a fifth of a second after a child
+        // dies in which the bookkeeping still says it is alive.
         do {
             try stdinPipe.fileHandleForWriting.write(contentsOf: data)
         } catch {

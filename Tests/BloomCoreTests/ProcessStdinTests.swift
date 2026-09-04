@@ -22,6 +22,18 @@ import Testing
 /// A quota reading is a background convenience. Nothing it does may take the app down, so the
 /// tests here write to processes that are not there rather than reasoning about whether anything
 /// would.
+///
+/// **The second way a dying child took Bloom down, found by this suite.** The first CI run of it
+/// killed the whole test binary with signal 13, SIGPIPE, part way through and named no failing
+/// test. Writing to a pipe nobody is reading raises that signal, its default disposition is to
+/// kill the process, and nothing in this tree turns it off: `UnixSocketConnection` sets
+/// `SO_NOSIGPIPE` on every socket it owns and says in as many words that without it an agent CLI
+/// exiting mid-call would take Bloom down, and the pipe to a child had never been given the same
+/// treatment. So the null handle and the signal were the same bug wearing two hats, and the guard
+/// in `write` cannot cover the second one: `status` is only set once `settle` has waited out its
+/// quiet period, leaving a window in which a child is dead and the bookkeeping says otherwise.
+/// `StreamingProcess.init` and `Shell.run` set `F_SETNOSIGPIPE` on the descriptors they write a
+/// child on, which turns that signal into the EPIPE the code already handled.
 @Suite("Writing to a process that is not there")
 struct ProcessStdinTests {
 
@@ -61,12 +73,33 @@ struct ProcessStdinTests {
         for _ in 0..<200 { process.writeLine("into the void") }
     }
 
+    @Test("a write to a pipe nobody is reading fails the write rather than the process", .timeLimit(.minutes(1)))
+    func aPipeWithNoReaderFailsTheWriteRatherThanTheProcess() throws {
+        // The option `StreamingProcess.init` puts on its stdin descriptor, asserted on a pipe
+        // this test owns, so the question is the descriptor's behaviour rather than whether a
+        // race with a dying child was won. Without the `fcntl` this does not throw, it ends the
+        // program, which is how the first CI run of this suite died. Pinned here rather than left
+        // implicit because the whole fix rests on the platform answering EPIPE.
+        let pipe = Pipe()
+        _ = fcntl(pipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        try pipe.fileHandleForReading.close()
+
+        #expect(throws: (any Error).self) {
+            try pipe.fileHandleForWriting.write(contentsOf: Data("nobody is reading".utf8))
+        }
+        try? pipe.fileHandleForWriting.close()
+    }
+
     @Test("stdin closing under a write does not fault", .timeLimit(.minutes(2)))
     func aCloseDoesNotLandUnderAWrite() async throws {
         // The crash, as directly as it can be provoked from a test: writers on the cooperative
         // pool and a close from beside them, repeated, because the window is a handful of
         // instructions wide. `closeStdin` used to close the handle whatever a writer was doing
         // with it.
+        //
+        // This is also the test that found the SIGPIPE. `terminate` kills the child while writers
+        // are still going, so some of those writes land on a pipe with no reader, and on CI that
+        // ended the test binary rather than any test in it.
         for _ in 0..<40 {
             let process = StreamingProcess(executable: "/bin/cat", arguments: [])
             _ = process.lines
