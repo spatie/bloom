@@ -205,32 +205,9 @@ struct TranscriptFoldTests {
         #expect(hides(work) == 0)
     }
 
-    /// A failed command remains visible and divides the surrounding activity into two compact
-    /// groups. It must not expose every ordinary action that follows it.
-    @Test("a failed call separates consecutive activity groups")
-    func aFailureSeparatesGroups() {
-        let facts = [user(0)] + (1..<10).map { tool($0, failed: $0 == 5) }
-        let folds = TranscriptFold.folds(in: facts)
-        #expect(folds.all.count == 2)
-        #expect(folds.all.map(\.rows.count) == [4, 4])
-        #expect(folds.all.map { hides($0) } == [4, 4])
-        #expect(folds.index(containing: 5) == nil)
-    }
-
-    @Test("many ordinary rows after consecutive failures form another group")
-    func activityAfterFailuresFoldsAgain() {
-        let facts = [user(0)]
-            + (1..<41).map { tool($0) }
-            + [tool(41, failed: true), tool(42, failed: true)]
-            + (43..<63).map { tool($0) }
-        let folds = TranscriptFold.folds(in: facts)
-        #expect(folds.all.map(\.rows.count) == [40, 20])
-        #expect(folds.all.map { hides($0) } == [40, 20])
-        #expect(folds.index(containing: 41) == nil)
-        #expect(folds.index(containing: 42) == nil)
-    }
-
-    /// An error row is the turn itself failing, and it is treated the same way.
+    /// **Rule 2.** An error row is the agent exiting in a way it did not choose, which is the one
+    /// failure nothing later in the turn will explain, so it stays out of the fold. A failed tool
+    /// call does not: `FoldingAnErroredActionTests` is that half.
     @Test("an error row stops the fold")
     func anErrorStopsTheFold() throws {
         let facts = [user(0), tool(1), tool(2), tool(3), tool(4), failure(5), tool(6)]
@@ -278,8 +255,8 @@ struct TranscriptFoldTests {
     func aFailureIsSettled() throws {
         let facts = [user(0)] + (1..<7).map { tool($0, failed: $0 == 6, settled: $0 != 6) }
         let work = try only(facts)
-        #expect(work.ready == 5)
-        #expect(hides(work) == 5)
+        #expect(work.ready == 6)
+        #expect(hides(work) == 6)
     }
 
     // MARK: The window

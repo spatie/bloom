@@ -375,14 +375,21 @@ struct TranscriptListView: View {
                 TranscriptFold.Fact(
                     seq: $0.seq,
                     kind: $0.kind,
-                    // A refusal travels as `is_error` too, and both are the same fact here: a call
-                    // that did not do what it was asked is a call the reader is looking for.
+                    // A refusal travels as `is_error` too, and both are the same fact here: a
+                    // call that did not do what it was asked has said everything it is going to
+                    // say, which is all the fold needs of it. It is not held out of the fold for
+                    // it; see rule 2 in `TranscriptFold`.
                     failed: $0.isError || $0.refusal != nil,
                     featured: MediaShowRow.isCall($0.payload)
                         || CodexImageViewRow.isCall($0.payload),
                     drawsNothing: TranscriptNoise.isHidden($0)
                         || TranscriptRowInk.drawsNothing(kind: $0.kind, payload: $0.payload),
-                    settled: settled($0)
+                    settled: settled($0),
+                    // Only a call has an id a subagent's rows can name. Every other kind carries
+                    // `refID` for something else, and a stray match here would make an ordinary
+                    // row the header of a run it has nothing to do with.
+                    toolUseID: $0.kind == .toolUse ? $0.refID : nil,
+                    parentToolUseID: $0.parentToolUseID
                 )
             },
             extending: previous
@@ -574,6 +581,9 @@ struct TranscriptListView: View {
                         hiding: hidden > 0 ? would : work.rows.count,
                         showsMore: hidden > 0 && would < work.rows.count,
                         isFolded: hidden > 0,
+                        // A subagent's line is drawn where its rows are, under the call that
+                        // started it. See `TranscriptFold`, which is where the grouping is.
+                        isNested: work.isNested,
                         // A turn with nothing to hide gets no line: a control that answers nothing
                         // when it is pressed is worse than no control. Its entry stays in the list
                         // all the same, drawing nothing, because an entry that came and went in
@@ -819,6 +829,7 @@ struct TranscriptListView: View {
         hiding: Int,
         showsMore: Bool,
         isFolded: Bool,
+        isNested: Bool,
         shows: Bool,
         session: SessionID
     ) -> TranscriptTableEntry {
@@ -831,6 +842,7 @@ struct TranscriptListView: View {
                 $0.combine(hiding)
                 $0.combine(showsMore)
                 $0.combine(isFolded)
+                $0.combine(isNested)
                 $0.combine(shows)
             },
             // Not a guess. This entry draws nothing because it has been told to draw nothing, so
@@ -849,6 +861,7 @@ struct TranscriptListView: View {
                         hiddenCount: hiding,
                         showsMore: showsMore,
                         isExpanded: !isFolded,
+                        isNested: isNested,
                         onToggle: { toggleFold(firstSeq) }
                     )
                     // The same two insets every row in this list carries: one here, and one inside
