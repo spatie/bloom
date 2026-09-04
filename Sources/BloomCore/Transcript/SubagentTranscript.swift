@@ -1,6 +1,6 @@
 import Foundation
 
-/// A subagent's own transcript, read off the file the CLI wrote for it.
+/// A subagent's own transcript, read as the rows the window already knows how to draw.
 ///
 /// **What `output_file` turned out to be**, because this was the one thing worth checking rather
 /// than assuming. `system/task_notification.output_file` is an absolute path to
@@ -13,88 +13,116 @@ import Foundation
 /// prompt, two attachment records and an assistant message carrying the API error. So there is no
 /// need for the fallback to Bloom's own nested rows, and this is the honest source.
 ///
+/// **Why it hands back `Message` values rather than a shape of its own, which is the whole of
+/// this file's design.** The version before this invented an `Entry` with a body of plain text,
+/// and the pane drew each one as a `Text`. That is a second renderer for a conversation, and it
+/// lost every argument the first one had already won: markdown arrived as literal asterisks, a
+/// Bash call arrived as pretty printed JSON with a space before the colon, and a page of tool
+/// input sat where the transcript would have drawn one line. A subagent's line and a stored
+/// transcript row are the same object, so this reads one into the other and the drawing is the
+/// drawing the transcript already does. Nothing here is stored: these messages belong to no
+/// `messages` row, and `id` says so by being negative.
+///
+/// **The prompt is a user turn on both sources and it arrives in two different shapes**, which is
+/// the bug that put it on screen twice. In the file it is a `user` line whose `content` is a bare
+/// string. On the parent's live stream it is a `user` line whose `content` is an ARRAY holding one
+/// `text` block, and the reader here used to look at the block's type without looking at whose
+/// message it was, so the brief was read back as something the subagent had said and drawn under
+/// "Answered" as well as under "Asked". A `text` block on a `user` line is the brief, on either
+/// source, and it is taken out of the rows and handed back as `prompt`.
+///
 /// Bloom does not own the file, which is why nothing here throws on a shape it does not know: a
 /// line that will not parse is skipped, a file that will not open is a sentence in the pane, and
-/// a format that changes under us degrades to fewer entries rather than to an empty pane.
-public struct SubagentTranscript: Sendable, Hashable {
-    public struct Entry: Sendable, Hashable, Identifiable {
-        public enum Kind: Sendable, Hashable {
-            /// The prompt the parent gave it. Always the first line of the file.
-            case prompt
-            case text
-            case thinking
-            case tool
-            case toolResult
-            /// An assistant message the CLI marked as an API error.
-            case failure
-            /// Bytes a background command printed. Not NDJSON and not parsed: a `local_bash`
-            /// task writes plain stdout to `tasks/<task_id>.output`, and the whole of what it
-            /// has to say is that text.
-            case printed
-        }
+/// a format that changes under us degrades to fewer rows rather than to an empty pane.
+public struct SubagentTranscript: Sendable, Equatable {
+    /// The conversation, oldest first, as the messages a transcript is built from.
+    ///
+    /// Deliberately not paired up here: a `tool_result` is its own message with the call's id in
+    /// `refID`, exactly as the store hands one back, so the window folds it onto its call with the
+    /// same rule it uses for every other transcript and the two cannot drift apart.
+    public let messages: [Message]
 
-        public let id: Int
-        public let kind: Kind
-        /// The tool's name, for a tool entry. Empty otherwise.
-        public let title: String
-        public let body: String
-
-        public init(id: Int, kind: Kind, title: String = "", body: String) {
-            self.id = id
-            self.kind = kind
-            self.title = title
-            // Cut here rather than in the pane, so no reader of this type can be handed a
-            // megabyte. The HEAD is kept, unlike the transcript's own cut above: a tool result
-            // says what it found in its first lines and a file dumped into one is the tail.
-            self.body = body.count > SubagentTranscript.bodyLimit
-                ? String(body.prefix(SubagentTranscript.bodyLimit)) + "..."
-                : body
-        }
-    }
-
-    public let entries: [Entry]
-    /// How many entries were dropped off the front to keep the pane bounded. Drawn as a line
+    /// How many messages were dropped off the front to keep the pane bounded. Drawn as a line
     /// saying so, because a transcript that silently starts in the middle is a lie about what
     /// the subagent did.
-    public let droppedEntries: Int
+    public let droppedRows: Int
 
-    public init(entries: [Entry] = [], droppedEntries: Int = 0) {
-        self.entries = entries
-        self.droppedEntries = droppedEntries
-    }
-
-    public var isEmpty: Bool { entries.isEmpty }
-
-    /// How many entries the pane will render.
+    /// The brief the subagent was handed, when the source carried one.
     ///
-    /// A fan-out agent that read forty files leaves eighty entries and a long one leaves many
-    /// more, and every one of them is a `Text` in a `ScrollView` that is laid out whether or not
-    /// it is on screen. The LAST of them are kept rather than the first: the answer is at the end,
-    /// and the prompt, which is the one early entry worth having, is drawn from
-    /// `task_started.prompt` above rather than from this file.
-    public static let entryLimit = 120
+    /// Read back even though `task_started` already carries it, because the two sources fail at
+    /// different moments: a pane opened on a turn that has since been replaced has no
+    /// `task_started` left to read, and the file has the brief in it either way.
+    public let prompt: String
 
-    /// How much of one entry is rendered. A tool result can be a whole file.
-    public static let bodyLimit = 4_000
+    /// What a background command printed. Empty for an agent.
+    ///
+    /// Not NDJSON and not parsed: a `local_bash` task writes plain stdout to
+    /// `tasks/<task_id>.output`, and the whole of what it has to say is that text.
+    public let printed: String
 
-    /// The last thing the subagent said, which is its answer. Nil when it never said anything.
-    public var answer: Entry? {
-        entries.last { $0.kind == .text || $0.kind == .failure }
+    public init(
+        messages: [Message] = [],
+        droppedRows: Int = 0,
+        prompt: String = "",
+        printed: String = ""
+    ) {
+        self.messages = messages
+        self.droppedRows = droppedRows
+        self.prompt = prompt
+        self.printed = printed
     }
 
-    /// Read one file of NDJSON.
+    public var isEmpty: Bool { messages.isEmpty && printed.isEmpty }
+
+    /// How many rows the pane will draw.
+    ///
+    /// The LAST of them are kept rather than the first: the answer is at the end, and the brief,
+    /// which is the one early row worth having, is drawn above the conversation rather than in it.
+    /// Higher than the 120 entries this replaced, because a row is now built only when it is
+    /// scrolled to and a tool call's payload is only decoded when it is opened, so the number no
+    /// longer stands for a screenful of laid out `Text` views.
+    public static let rowLimit = 500
+
+    /// Read one file, or one run of stored stream lines, of NDJSON.
     ///
     /// `attachment` records are skipped whole. In the capture two of every four lines were one,
     /// each carrying the subagent's entire deferred tool list, thousands of characters of it, and
     /// none of it is an account of what the subagent did.
-    public static func parse(_ text: String) -> SubagentTranscript {
-        var entries: [Entry] = []
-        for line in text.split(whereSeparator: \.isNewline) {
-            guard let json = JSONValue.parse(String(line)) else { continue }
-            entries.append(contentsOf: read(json, from: entries.count))
+    ///
+    /// - Parameter sessionID: the session these lines came off, which is the parent's. It is
+    ///   carried because a `Message` has one and for no other reason: nothing drawn from these
+    ///   rows reads it.
+    public static func parse(_ text: String, sessionID: SessionID) -> SubagentTranscript {
+        var messages: [Message] = []
+        var prompt = ""
+        var used = Set<Int64>()
+
+        for source in text.split(whereSeparator: \.isNewline) {
+            let raw = Data(source.utf8)
+            guard let json = JSONValue.parse(raw) else { continue }
+            for reading in read(json, raw: raw) {
+                switch reading {
+                case .brief(let brief):
+                    // The last one wins. A file holds exactly one; a run of stored stream lines
+                    // holds one per subagent and this is only ever handed one subagent's.
+                    prompt = brief
+                case .row(let kind, let payload, let refID):
+                    messages.append(Message(
+                        id: identifier(for: payload, avoiding: &used),
+                        sessionID: sessionID,
+                        seq: messages.count,
+                        kind: kind,
+                        payload: payload,
+                        refID: refID
+                    ))
+                }
+            }
         }
-        let dropped = max(0, entries.count - entryLimit)
-        return SubagentTranscript(entries: Array(entries.suffix(entryLimit)), droppedEntries: dropped)
+
+        let dropped = max(0, messages.count - rowLimit)
+        return SubagentTranscript(
+            messages: Array(messages.suffix(rowLimit)), droppedRows: dropped, prompt: prompt
+        )
     }
 
     /// The same reading, taken off Bloom's own stored rows rather than off the CLI's file.
@@ -116,87 +144,145 @@ public struct SubagentTranscript: Sendable, Hashable {
     /// task, and this is what Bloom happened to see while it was being written.
     ///
     /// - Parameter streamLines: the stored payloads of the nested rows, in the order they arrived.
-    public static func live(streamLines: [Data]) -> SubagentTranscript {
-        parse(streamLines.map { String(decoding: $0, as: UTF8.self) }.joined(separator: "\n"))
+    public static func live(streamLines: [Data], sessionID: SessionID) -> SubagentTranscript {
+        parse(streamLines.map { String(decoding: $0, as: UTF8.self) }.joined(separator: "\n"), sessionID: sessionID)
     }
 
-    /// What a background command printed, as the one entry it is.
+    /// What a background command printed, as the one block of text it is.
     ///
     /// No parsing, because there is nothing to parse: it is the bytes a program wrote to a
     /// terminal. Trimmed only, so an empty capture is an empty transcript and the pane can say
     /// "nothing yet" rather than draw a blank block.
-    public static func printed(_ text: String) -> SubagentTranscript {
-        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty else { return SubagentTranscript() }
-        return SubagentTranscript(entries: [Entry(id: 0, kind: .printed, body: body)])
+    public static func command(_ text: String) -> SubagentTranscript {
+        SubagentTranscript(printed: text.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    private static func read(_ json: JSONValue, from index: Int) -> [Entry] {
+    // MARK: - Identity
+
+    /// The id a row that was never stored is drawn under.
+    ///
+    /// **Negative, and that is not decoration.** The window caches how a tool call is drawn under
+    /// the row's id alone (`TranscriptPresentationCache`, whose whole argument is that a stored
+    /// payload is written once so a presentation taken from it cannot go stale). A `messages`
+    /// rowid is a positive `AUTOINCREMENT`, so a synthetic row numbered from zero would read the
+    /// label of whichever real row shared its number, in whichever workspace was open.
+    ///
+    /// Derived from the payload rather than from the position, because this pane re-reads once a
+    /// second and hands over from the live stream to the file the moment the subagent ends. Rows
+    /// numbered by position would be renumbered by either of those, which moves a cached
+    /// presentation onto the wrong call and closes whatever row the reader had opened.
+    ///
+    /// FNV-1a rather than `Hasher`, because `Hasher` is seeded per process and this wants the same
+    /// answer for the same bytes every time, including across the two sources.
+    public static func rowID(for payload: Data) -> Int64 {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in payload {
+            hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01b3
+        }
+        return -Int64(hash & 0x7fff_ffff_ffff_ffff) - 1
+    }
+
+    /// The same id, stepped down until it is one nothing else in this transcript is using.
+    ///
+    /// Two identical payloads would otherwise be two rows with one identity, which a list draws
+    /// in whatever order it pleases. Every real line carries a `uuid`, so this only ever fires on
+    /// a source that has repeated itself.
+    private static func identifier(for payload: Data, avoiding used: inout Set<Int64>) -> Int64 {
+        var id = rowID(for: payload)
+        while used.contains(id) { id -= 1 }
+        used.insert(id)
+        return id
+    }
+
+    // MARK: - Reading one line
+
+    /// What one content block turned out to be.
+    private enum Reading {
+        /// The brief, which is drawn above the conversation rather than inside it.
+        case brief(String)
+        case row(kind: MessageKind, payload: Data, refID: String?)
+    }
+
+    private static func read(_ json: JSONValue, raw: Data) -> [Reading] {
         guard let type = json["type"]?.stringValue else { return [] }
         guard type == "user" || type == "assistant" else { return [] }
         guard let message = json["message"] else { return [] }
-        let isError = json["isApiErrorMessage"]?.boolValue ?? false
+        let isUser = type == "user"
 
-        // The first user line of a subagent's file is the prompt it was handed, and it arrives as
-        // a bare string rather than as blocks.
+        // The first user line of a file is the brief, and it arrives as a bare string rather than
+        // as blocks. An assistant message shaped the same way is the thing it said.
         if let content = message["content"]?.stringValue {
             let body = content.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !body.isEmpty else { return [] }
-            return [Entry(id: index, kind: type == "user" ? .prompt : .text, body: body)]
+            guard !isUser else { return [.brief(body)] }
+            guard let payload = oneBlockLine(json, holding: .object([
+                "type": .string("text"), "text": .string(body),
+            ])) else { return [] }
+            return [.row(kind: .assistantText, payload: payload, refID: nil)]
         }
 
-        var entries: [Entry] = []
-        for block in message["content"]?.arrayValue ?? [] {
-            guard let entry = read(block: block, id: index + entries.count, isError: isError) else {
-                continue
-            }
-            entries.append(entry)
+        let blocks = message["content"]?.arrayValue ?? []
+        return blocks.compactMap { block in
+            read(block: block, in: json, raw: raw, isOnlyBlock: blocks.count == 1, isUser: isUser)
         }
-        return entries
     }
 
-    private static func read(block: JSONValue, id: Int, isError: Bool) -> Entry? {
+    private static func read(
+        block: JSONValue, in json: JSONValue, raw: Data, isOnlyBlock: Bool, isUser: Bool
+    ) -> Reading? {
+        // The bytes of the line itself wherever the line holds one block, which is every line in
+        // every capture measured. It is the payload every renderer downstream wants: the uuid,
+        // the model, the usage and `tool_result_meta` are all outside `content` and all of them
+        // are lost by rebuilding the line rather than keeping it.
+        func payload() -> Data? {
+            isOnlyBlock ? raw : oneBlockLine(json, holding: block)
+        }
+
         switch block["type"]?.stringValue {
         case "text":
             let body = (block["text"]?.stringValue ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !body.isEmpty else { return nil }
-            return Entry(id: id, kind: isError ? .failure : .text, body: body)
+            // A text block on a USER line is the brief, not an answer. See the type's header:
+            // reading it as an answer is what drew the prompt under both headings.
+            guard !isUser else { return .brief(body) }
+            guard let payload = payload() else { return nil }
+            return .row(kind: .assistantText, payload: payload, refID: nil)
 
         case "thinking":
-            let body = (block["thinking"]?.stringValue ?? "")
+            let thought = (block["thinking"]?.stringValue ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !body.isEmpty else { return nil }
-            return Entry(id: id, kind: .thinking, body: body)
+            guard !isUser, !thought.isEmpty, let payload = payload() else { return nil }
+            return .row(kind: .thinking, payload: payload, refID: nil)
 
         case "tool_use":
-            // The input verbatim. A subagent's transcript is read to find out what it actually
-            // did, and a summarised tool call is the half that gets summarised away.
-            return Entry(
-                id: id,
-                kind: .tool,
-                title: block["name"]?.stringValue ?? "",
-                body: (block["input"] ?? .null).prettyPrinted
-            )
+            guard !isUser, let payload = payload() else { return nil }
+            return .row(kind: .toolUse, payload: payload, refID: block["id"]?.stringValue)
 
         case "tool_result":
-            let body = text(ofResult: block["content"])
-            guard !body.isEmpty else { return nil }
-            return Entry(id: id, kind: .toolResult, body: body)
+            guard let payload = payload() else { return nil }
+            return .row(kind: .toolResult, payload: payload, refID: block["tool_use_id"]?.stringValue)
 
         default:
             return nil
         }
     }
 
-    /// A tool result is a string on some lines and an array of text blocks on others, and both
-    /// shapes appear in one file.
-    private static func text(ofResult content: JSONValue?) -> String {
-        guard let content else { return "" }
-        if let string = content.stringValue { return string }
-        return (content.arrayValue ?? [])
-            .compactMap { $0["text"]?.stringValue }
-            .joined(separator: "\n")
+    /// The same line with one block where its content was, for the message that carried several.
+    ///
+    /// One line means one row throughout Bloom, and `AgentEvent` reads the first block of a
+    /// message and no others, so a message with two blocks in it has to become two lines before
+    /// either can be drawn. Every key outside `content` is kept, which is what makes this safe to
+    /// do to a line Bloom does not own.
+    private static func oneBlockLine(_ json: JSONValue, holding block: JSONValue) -> Data? {
+        guard case .object(var top) = json, case .object(var message)? = json["message"] else {
+            return nil
+        }
+        message["content"] = .array([block])
+        top["message"] = .object(message)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        return try? encoder.encode(JSONValue.object(top))
     }
 }
 
@@ -221,7 +307,7 @@ public enum SubagentOutput: Sendable {
     /// The pane re-reads once a second while the subagent works (`SubagentPane.refreshSeconds`),
     /// and that is only affordable against a bound. It is the END that is read, because that is
     /// where the answer is and because the pane only renders the last
-    /// `SubagentTranscript.entryLimit` entries anyway. A quarter of a megabyte holds far more
+    /// `SubagentTranscript.rowLimit` rows anyway. A quarter of a megabyte holds far more
     /// than that many lines of anything the capture contained, so in practice this reads whole
     /// files and exists for the one that is not.
     public static let tailBytes = 256 * 1024
@@ -232,7 +318,7 @@ public enum SubagentOutput: Sendable {
     /// Claude Code's transcript shape; for a background command it is plain stdout, which is why
     /// the kind is asked for rather than sniffed. Parsing one as the other is what made a
     /// background command's pane empty.
-    public static func read(path: String?, kind: SubagentKind = .agent)
+    public static func read(path: String?, kind: SubagentKind = .agent, sessionID: SessionID)
         -> Result<SubagentTranscript, Failure> {
         guard let path, !path.isEmpty else { return .failure(.noFile) }
         let url = URL(fileURLWithPath: path)
@@ -240,8 +326,8 @@ public enum SubagentOutput: Sendable {
         do {
             let text = try tail(of: url)
             return .success(kind.writesTranscript
-                ? SubagentTranscript.parse(text)
-                : SubagentTranscript.printed(text))
+                ? SubagentTranscript.parse(text, sessionID: sessionID)
+                : SubagentTranscript.command(text))
         } catch {
             return .failure(.unreadable(error.localizedDescription))
         }

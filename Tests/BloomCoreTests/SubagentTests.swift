@@ -455,48 +455,123 @@ import Foundation
 // MARK: - Reading a subagent's own transcript
 
 @Suite struct SubagentTranscriptTests {
+    /// The parent's session, which is the one these lines came off.
+    private static let session = SessionID("s1")
+
     @Test func aFailedSubagentStillLeftAReadableFile() throws {
         let text = try bloomFixtureLines("subagent-output-529.jsonl").joined(separator: "\n")
-        let transcript = SubagentTranscript.parse(text)
+        let transcript = SubagentTranscript.parse(text, sessionID: Self.session)
         // Four lines in, two of them `attachment` records carrying the whole deferred tool list.
-        #expect(transcript.entries.count == 2)
-        #expect(transcript.entries.first?.kind == .prompt)
-        #expect(transcript.entries.first?.body.hasPrefix("Read the file a.txt") == true)
-        let answer = try #require(transcript.answer)
-        #expect(answer.kind == .failure)
-        #expect(answer.body.contains("529 Overloaded"))
+        // The brief is the first, and it is not one of the rows: it is drawn above them.
+        #expect(transcript.prompt.hasPrefix("Read the file a.txt"))
+        #expect(transcript.messages.map(\.kind) == [.assistantText])
+        let answer = try #require(transcript.messages.last)
+        #expect(String(decoding: answer.payload, as: UTF8.self).contains("529 Overloaded"))
     }
 
     @Test func toolCallsAndResultsAreKept() {
         // Synthetic, because every subagent in the capture died before it could call a tool.
         let text = """
-        {"type":"assistant","message":{"role":"assistant","content":[\
-        {"type":"thinking","thinking":"weighing it"},\
-        {"type":"tool_use","name":"Read","input":{"file_path":"/a.txt"}}]}}
-        {"type":"user","message":{"role":"user","content":[\
-        {"type":"tool_result","content":[{"type":"text","text":"three lines"}]}]}}
-        {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"3"}]}}
+        {"type":"assistant","uuid":"u1","message":{"role":"assistant","content":[\
+        {"type":"thinking","thinking":"weighing it"}]}}
+        {"type":"assistant","uuid":"u2","message":{"role":"assistant","content":[\
+        {"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"/a.txt"}}]}}
+        {"type":"user","uuid":"u3","message":{"role":"user","content":[\
+        {"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"text","text":"three lines"}]}]}}
+        {"type":"assistant","uuid":"u4","message":{"role":"assistant","content":[{"type":"text","text":"3"}]}}
         """
-        let transcript = SubagentTranscript.parse(text)
-        #expect(transcript.entries.map(\.kind) == [.thinking, .tool, .toolResult, .text])
-        #expect(transcript.entries[1].title == "Read")
-        #expect(transcript.entries[1].body.contains("/a.txt"))
-        #expect(transcript.entries[2].body == "three lines")
-        #expect(transcript.answer?.body == "3")
+        let transcript = SubagentTranscript.parse(text, sessionID: Self.session)
+        #expect(transcript.messages.map(\.kind) == [.thinking, .toolUse, .toolResult, .assistantText])
+        // The call and its result are filed under the same id, which is how the window folds the
+        // one onto the other. See `TranscriptModel.rows(from:)`.
+        #expect(transcript.messages[1].refID == "toolu_1")
+        #expect(transcript.messages[2].refID == "toolu_1")
+    }
+
+    /// Every row has to decode to the event its bucket promises, because that is what the window
+    /// dispatches on. A row filed as a tool call whose line decodes to something else draws
+    /// nothing at all.
+    @Test func everyRowDecodesToTheEventItsBucketPromises() throws {
+        let text = """
+        {"type":"assistant","uuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}
+        {"type":"assistant","uuid":"u2","message":{"role":"assistant","content":[\
+        {"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]}}
+        {"type":"user","uuid":"u3","message":{"role":"user","content":[\
+        {"type":"tool_result","tool_use_id":"toolu_1","content":"a.txt"}]}}
+        """
+        for message in SubagentTranscript.parse(text, sessionID: Self.session).messages {
+            let event = try #require(
+                AgentEvent.decode(line: String(decoding: message.payload, as: UTF8.self))
+            )
+            #expect(event.kind == message.kind)
+        }
+    }
+
+    /// One line means one row throughout Bloom, and `AgentEvent` reads the first block of a
+    /// message and no others, so a message carrying two has to become two lines first.
+    @Test func aMessageCarryingSeveralBlocksBecomesSeveralRows() throws {
+        let text = """
+        {"type":"assistant","uuid":"u1","session_id":"s","message":{"role":"assistant","content":[\
+        {"type":"text","text":"Reading it"},\
+        {"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"/a.txt"}}]}}
+        """
+        let transcript = SubagentTranscript.parse(text, sessionID: Self.session)
+        #expect(transcript.messages.map(\.kind) == [.assistantText, .toolUse])
+        for message in transcript.messages {
+            let json = try #require(JSONValue.parse(message.payload))
+            // Every key outside `content` survives the split, because the renderers read them.
+            #expect(json["uuid"]?.stringValue == "u1")
+            #expect(json["session_id"]?.stringValue == "s")
+            #expect(json["message"]?["content"]?.arrayValue?.count == 1)
+        }
     }
 
     @Test func aLineThatWillNotParseIsSkippedRatherThanEndingTheRead() {
-        // Bloom does not own this file, so a shape it does not know degrades to fewer entries.
+        // Bloom does not own this file, so a shape it does not know degrades to fewer rows.
         let transcript = SubagentTranscript.parse("""
         not json at all
         {"type":"summary","summary":"something new"}
+        {"type":"attachment","attachment":{"type":"skill_listing","content":"a page of skills"}}
         {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}
-        """)
-        #expect(transcript.entries.map(\.body) == ["ok"])
+        """, sessionID: Self.session)
+        #expect(transcript.messages.count == 1)
+        #expect(transcript.messages[0].kind == .assistantText)
     }
 
     @Test func anEmptyFileIsEmptyRatherThanAFailure() {
-        #expect(SubagentTranscript.parse("").isEmpty)
+        #expect(SubagentTranscript.parse("", sessionID: Self.session).isEmpty)
+    }
+
+    // MARK: Identity
+
+    /// **A row that was never stored is numbered below every row that was.** The window caches how
+    /// a tool call is drawn under the row's id alone, and a `messages` rowid is a positive
+    /// `AUTOINCREMENT`, so a synthetic row numbered from zero would read the label of whichever
+    /// real row shared its number.
+    @Test func aRowThatWasNeverStoredIsNumberedBelowEveryRowThatWas() {
+        let line = #"{"type":"assistant","uuid":"u1","message":{"content":[{"type":"text","text":"ok"}]}}"#
+        let transcript = SubagentTranscript.parse(line, sessionID: Self.session)
+        #expect(transcript.messages.allSatisfy { $0.id < 0 })
+    }
+
+    /// The same bytes get the same number every time, so a row stays itself across the re-read
+    /// that happens once a second and across the handover from the live stream to the file. Row
+    /// numbers taken from the position moved under both.
+    @Test func aRowKeepsItsNumberAcrossAReRead() {
+        let payload = Data(#"{"type":"assistant","uuid":"u1"}"#.utf8)
+        #expect(SubagentTranscript.rowID(for: payload) == SubagentTranscript.rowID(for: payload))
+        #expect(SubagentTranscript.rowID(for: payload) != SubagentTranscript.rowID(for: Data("x".utf8)))
+    }
+
+    /// Two identical lines are still two rows, and a list handed rows whose identifiers repeat
+    /// lays them out in whatever order it pleases.
+    @Test func twoIdenticalLinesStillGetTwoIdentities() {
+        let line = #"{"type":"assistant","message":{"content":[{"type":"text","text":"same"}]}}"#
+        let transcript = SubagentTranscript.parse(
+            [line, line].joined(separator: "\n"), sessionID: Self.session
+        )
+        #expect(transcript.messages.count == 2)
+        #expect(transcript.messages[0].id != transcript.messages[1].id)
     }
 }
 

@@ -841,7 +841,7 @@ final class WorkspaceModel {
     /// The nested rows the transcript already draws behind a hairline: a line from inside a
     /// subagent carries that subagent's `tool_use_id` as its `parent_tool_use_id`. It is what the
     /// output pane reads while the subagent is running, because the CLI names its file only on
-    /// the line that ends it. See `SubagentTranscript.live(streamLines:)`.
+    /// the line that ends it. See `SubagentTranscript.live(streamLines:sessionID:)`.
     ///
     /// The payloads and not a parse of them: parsing is the core's, and it is done off the main
     /// actor by the caller.
