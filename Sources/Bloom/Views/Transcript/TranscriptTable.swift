@@ -781,9 +781,9 @@ struct TranscriptTable: NSViewRepresentable {
             guard let row = index[entryID], entries.indices.contains(row),
                   entries[row].contentKey == contentKey else { return }
             // The other half of the same question `measureExactly` asks: a row the reader was
-            // being shown, reporting that it drew nothing after all. See
-            // `TranscriptHoldCensus.silenced`.
-            if height == 0, !entries[row].drawsNothing {
+            // being shown, reporting that it drew nothing after all. The three that redraw
+            // themselves are left out here for the reason they are left out there.
+            if height == 0, !entries[row].drawsNothing, !entryID.redrawsItself {
                 noteSilence(row: row, entry: entries[row], source: "drawn")
             }
             guard heights.note(height, for: contentKey, shape: entries[row].shape) else { return }
@@ -1825,7 +1825,13 @@ struct TranscriptTable: NSViewRepresentable {
                 // reader never sees again: nought is remembered as an answer, so `viewFor` will
                 // not build it and `needsMeasuring` will not ask again. See
                 // `TranscriptHoldCensus.silenced`, and `ComposerProbe`, which is reading it.
-                if height == 0, !entry.drawsNothing {
+                //
+                // **Not the three entries that redraw themselves**, and leaving them in was this
+                // instrument's own false positive: the streaming tail draws nothing between turns
+                // and is measured on every pass, so a probe run counted one silence per pass and
+                // read as a climbing fault. `viewFor` exempts them from the guard for the same
+                // reason, so nought is never held against them.
+                if height == 0, !entry.drawsNothing, !entry.id.redrawsItself {
                     noteSilence(row: row, entry: entry, source: "measureExactly")
                 }
                 let taken = heights.note(height, for: entry.contentKey, shape: entry.shape)

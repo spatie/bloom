@@ -43,7 +43,7 @@ import BloomCore
 /// width did it, which matters because `Coordinator.columnWidth` answers the TABLE's width and
 /// falls back to the clip view's, and with legacy scrollers those two differ by fifteen points.
 ///
-/// The four phases are what the two theories predict, so a run can falsify either:
+/// The four phases are what those theories predict, so a run can falsify either:
 ///
 /// - `afterTaller`: rows with `known` nought and `drawsNothing` false, `hasCell` false, and
 ///   `silencedRows` above nought, if rows are being silenced. `cached` at nothing, and rows with
@@ -52,6 +52,32 @@ import BloomCore
 ///   this phase is what separates them.
 /// - `afterWindowResize`: everything measured again either way, because `rewidth` marks every key
 ///   stale. A run where even this does not repair it says both theories are wrong.
+///
+/// # What the first run said, which was neither of them
+///
+/// **Both theories died and the bug was in the report anyway.** Against the owner's own
+/// conversation, 20,357 messages and 14,322 drawn rows: two lost rows before the drag and two
+/// after, so nothing was silenced; `cached` rose monotonically and `cacheWidth` never moved, so
+/// nothing was emptied. `reproduced` said false because it was asking about silences.
+///
+/// What the steps showed instead is the document's own length. 229,351 points at step 0, 885,212
+/// by step 13, 171,535 at step 14. The same 2,650 rows throughout, and nine new measurements
+/// across the thirteen steps that quadrupled it. The rows above the band, 2,242 of them and not
+/// one measured, were given 75 points each before the drag, 367 during it and 65 after the window
+/// resize: the region above the reader grew by 656,000 points and then collapsed by 678,000,
+/// while nothing about those rows changed.
+///
+/// That is `TranscriptRowHeights.estimate(for:)`, and the row tables say why. Of 408 rows in the
+/// band, 26 had ever been measured at more than nothing; their mean was 651 points and their
+/// largest was 10,806. `settleShapeAfter` is three, so three samples settle a shape's number for
+/// every unmeasured row of it, and one huge answer in a sample of five is what handed 54
+/// unmeasured `answer` rows 347 points each, three `message` rows 418, and, before it re-settled,
+/// four rows 6,025 points each. A viewport of 446 points inside rows drawn six thousand points
+/// tall is a blank pane, and a reader scrolling through them measures them one screen at a time,
+/// which is the recovery the owner filmed.
+///
+/// So `reproduced` asks about the length now. The silence keys stay because they are cheap and
+/// because the run that shows both is worth more than the run that shows either.
 ///
 /// **The driver is the stored height rather than a synthetic hand**, for `ResizeProbe`'s reason: a
 /// mouse driver needs this app in front and takes the owner's keyboard. `ComposerView` reads
@@ -377,6 +403,14 @@ enum ComposerProbe {
             // Rows in the table and none in the viewport is the placement theory; rows recorded at
             // nothing that were expected to draw is the silence.
             "isBlank": .bool(count > 0 && visible == 0),
+            // **What the document is actually made of.** The rows above the band are the ones
+            // nobody has measured, so the points they are given divided by their number is the
+            // estimate the transcript's whole length rests on. It is the number that moved.
+            "rowsAboveBand": .integer(facts.first?.row ?? 0),
+            "pointsAboveBand": .number(facts.first?.top ?? 0),
+            "pointsPerRowAboveBand": .number(
+                (facts.first?.row ?? 0) > 0 ? (facts.first?.top ?? 0) / Double(facts.first?.row ?? 1) : 0
+            ),
             "lostRows": .integer(lost.count),
             "bandRows": .integer(facts.count),
             "guessedRows": .integer(facts.filter { $0.known == nil && !$0.drawsNothing }.count),
@@ -481,6 +515,12 @@ enum ComposerProbe {
             guard case .integer(let count)? = phase["lostRows"] else { return -1 }
             return count
         }
+        // Every document length the drag went through, which is what the verdict is taken from.
+        let lengths: [Double] = samples.compactMap { sample in
+            guard case .object(let fields) = sample,
+                  case .number(let height)? = fields["contentHeight"] else { return nil }
+            return height
+        }
 
         let own: [String: JSONValue] = [
             "driver": .string("storedHeight"),
@@ -501,13 +541,28 @@ enum ComposerProbe {
             "steps": .array(samples),
             "silences": .array(TranscriptHoldCensus.silences.map { json(of: $0) }),
             "transcriptHold": .map(TranscriptHoldCensus.summary()),
-            // The answer, in four keys, so a run can be read without opening the tables. The
-            // hypothesis is that the drag loses rows, a scroll does not get them back, and a width
-            // change does.
+            // The answer, in a handful of keys, so a run can be read without opening the tables.
+            //
+            // **`reproduced` asks whether the document disagreed with itself, and it used to ask
+            // whether a row was silenced.** The first run of this probe reported false on a
+            // conversation where the document went from 229,351 points to 885,212 and back to
+            // 171,535 in twenty-eight steps, because the predicate was about the theory that had
+            // been written down rather than about the thing the owner can see. A transcript whose
+            // length moves by a factor of five while nothing about its rows changes is the bug,
+            // whatever else is or is not true.
+            "documentMin": .number(lengths.min() ?? 0),
+            "documentMax": .number(lengths.max() ?? 0),
+            "documentSwing": .number(
+                (lengths.min() ?? 0) > 0 ? (lengths.max() ?? 0) / (lengths.min() ?? 1) : 0
+            ),
+            "reproduced": .bool((lengths.min() ?? 0) > 0
+                && (lengths.max() ?? 0) / (lengths.min() ?? 1) >= 2),
+            // And the row level theory, kept because it is cheap and because a run that shows
+            // both is worth more than one that shows either.
             "lostAfterDrag": .integer(lost(afterTaller)),
             "lostAfterScrolling": .integer(lost(afterScrolling)),
             "lostAfterWindowResize": .integer(lost(afterWindowResize)),
-            "reproduced": .bool(lost(afterTaller) > lost(before)),
+            "lostBefore": .integer(lost(before)),
         ]
         return .object(own.merging(harness.conditions(window: window)) { mine, _ in mine })
     }
