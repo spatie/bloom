@@ -156,12 +156,12 @@ final class TranscriptModel {
     /// tomorrow has the duration and no explanation, which is where it was before any of this.
     private(set) var recoveredRuns: [Int: RetryRun] = [:]
 
-    /// The subagents this turn has spawned, in the order it spawned them.
+    /// The subagents this session has spawned and not yet accounted for, in spawn order.
     ///
     /// One roster per session rather than per workspace, because a workspace with four chats runs
     /// four turns and the sidebar draws the active chat's. It is deliberately not stored: see
     /// `SubagentRoster` for the argument, which is that the longest one of these is meant to live
-    /// is a single turn and the CLI's own record of it is already on disk.
+    /// is a single session and the CLI's own record of it is already on disk.
     private(set) var subagents = SubagentRoster() {
         didSet { if let id = workspace?.id { app.noteSubagentsChanged(workspaceID: id) } }
     }
@@ -830,12 +830,13 @@ final class TranscriptModel {
         turnStartedAt = Date()
         wasStoppedByHand = false
         hasReportedTurnEnded = false
-        // **The clearing rule.** The last turn's subagents go here, at the one place a turn
-        // starts, and nowhere else. Clearing them when they finish is the option that reads well
-        // in a screenshot and badly in use: three rows leaving one by one take everything below
-        // them up the pane while you are still reading the third. Clearing them here means a
+        // **The clearing rule.** The last turn's FINISHED subagents go here, at the one place a
+        // turn starts, and nowhere else. Clearing them when they finish is the option that reads
+        // well in a screenshot and badly in use: three rows leaving one by one take everything
+        // below them up the pane while you are still reading the third. Clearing them here means a
         // finished subagent keeps its place, with its tick or its cross and what it answered, for
-        // as long as the turn it belongs to is the last thing that happened.
+        // as long as the turn it belongs to is the last thing that happened. One still running is
+        // not cleared at all, because it is still running. See `SubagentRoster.turnStarted`.
         subagents.turnStarted()
         setRunning(true)
         statusLabel = "Starting"
@@ -1211,7 +1212,9 @@ final class TranscriptModel {
             await appendLatestMessages()
             setRunning(false)
             statusLabel = nil
-            subagents.turnEnded()
+            // The process is gone, so every subagent under it went with it and nothing is left to
+            // report their endings. This is the case `agentExited` is named for.
+            subagents.agentExited()
             await refreshSession()
             app.alert = BloomAlert(
                 title: "The agent stopped in \(workspaceNow?.name ?? AskConversation.title)",
@@ -1241,9 +1244,17 @@ final class TranscriptModel {
             fileRecoveredRun()
             setRunning(false)
             statusLabel = nil
-            // Anything still breathing was killed with the turn, whatever the last line about it
-            // said. The rows stay, marked as stopped; they go when the next turn starts.
-            subagents.turnEnded()
+            // **A result is not news about a subagent, and assuming it was is what hid them.**
+            // `claude` runs for the whole session and the next turn is written into the same
+            // process, so an `Agent` call that answered "the agent is working in the background"
+            // is still working after this line and still going to report its own ending here.
+            // Marking everything stopped took its row away seconds after it was spawned, and the
+            // clear at the next turn's start then made sure it never came back: a workspace with
+            // a spinner and no children under it while two agents were six minutes in.
+            //
+            // A turn the owner stopped is the other case, and there the process really was
+            // signalled, so the children genuinely died with it.
+            if wasStoppedByHand { subagents.agentExited() }
             // Token counts, cost and state are all written by the runner as part of handling the
             // same result. Reading them back keeps one writer and avoids double counting.
             await refreshSession()

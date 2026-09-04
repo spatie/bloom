@@ -23,7 +23,6 @@ import Foundation
         for event in try events() {
             switch event {
             case .subagent(let signal): roster.apply(signal)
-            case .result: roster.turnEnded()
             default: break
             }
         }
@@ -183,13 +182,13 @@ import Foundation
         #expect(SubagentState(reported: "in_progress") == .running)
     }
 
-    @Test func aTurnEndingStopsWhateverWasStillRunning() {
+    @Test func theAgentExitingStopsWhateverWasStillRunning() {
         // The process that would have reported the ending is the one that just went away.
         var roster = SubagentRoster()
         roster.apply(.started(SubagentStart(id: SubagentID("a"))))
         roster.apply(.started(SubagentStart(id: SubagentID("b"))))
         roster.apply(.reported(SubagentReport(id: SubagentID("b"), status: "completed")))
-        roster.turnEnded()
+        roster.agentExited()
         #expect(roster[SubagentID("a")]?.state == .stopped)
         #expect(roster[SubagentID("b")]?.state == .completed)
         #expect(!roster.isWorking)
@@ -204,7 +203,6 @@ import Foundation
         var roster = SubagentRoster()
         roster.apply(.started(SubagentStart(id: SubagentID("a"), description: "One")))
         roster.apply(.reported(SubagentReport(id: SubagentID("a"), status: "completed")))
-        roster.turnEnded()
         return roster
     }
 
@@ -225,6 +223,113 @@ import Foundation
         roster.turnStarted()
         roster.apply(.progressed(SubagentProgress(parentToolUseID: "", elapsedSeconds: 9)))
         #expect(roster.isEmpty)
+    }
+}
+
+// MARK: - Subagents that outlive the turn that spawned them
+
+/// **"Seems like some subagents are not displayed."** A workspace drew three subagent rows while
+/// its turn ran, and minutes later drew a spinner and no children at all while the transcript said
+/// two of them were still going, six minutes in.
+///
+/// Nothing was wrong with the parsing. The `Agent` tool answers "Async agent launched
+/// successfully. The agent is working in the background", so the turn's result line lands while
+/// the subagent has minutes left; `SubagentRoster.turnEnded` then marked every running subagent
+/// `stopped`, retention took the rows off two and a half seconds later, and the next turn's
+/// `turnStarted` emptied the roster, so the `task_notification` that would have ended them had
+/// nothing left to land on. `claude` runs for the whole session, which is why the ending was
+/// always still coming and why nothing had the right to declare these subagents finished.
+@Suite struct SubagentsOutlivingTheirTurnTests {
+    private func spawned() -> SubagentRoster {
+        var roster = SubagentRoster()
+        roster.apply(.started(SubagentStart(
+            id: SubagentID("live"), toolUseID: "toolu_live", description: "Prototype exploration",
+            isBackgrounded: true, taskType: "local_agent"
+        )))
+        roster.apply(.started(SubagentStart(
+            id: SubagentID("done"), toolUseID: "toolu_done", description: "Study conventions",
+            taskType: "local_agent"
+        )))
+        roster.apply(.reported(SubagentReport(
+            id: SubagentID("done"), status: "completed", summary: "Read it"
+        )))
+        return roster
+    }
+
+    @Test func aTurnEndingSaysNothingAboutASubagentStillWorking() {
+        // The result line used to stop everything. `claude` is still there and so is the subagent.
+        var roster = spawned()
+        roster.turnStarted()
+        #expect(roster[SubagentID("live")]?.state == .running)
+        #expect(roster.isWorking)
+    }
+
+    @Test func theNextTurnKeepsARunningRowAndDropsAFinishedOne() {
+        var roster = spawned()
+        roster.turnStarted()
+        #expect(roster.subagents.map(\.id) == [SubagentID("live")])
+
+        let rows = SubagentRetention.rows(roster, now: Date())
+        #expect(rows.map(\.title) == ["Prototype exploration"])
+        #expect(rows.first?.mark == .working)
+    }
+
+    @Test func theEndingStillLandsAfterTheTurnBoundary() {
+        // The whole point of keeping the row: the `task_notification` arrives in a later turn,
+        // under the same `task_id`, and there has to be something for it to land on.
+        var roster = spawned()
+        roster.turnStarted()
+        roster.apply(.reported(SubagentReport(
+            id: SubagentID("live"), status: "completed", summary: "Explored", outputFile: "/tmp/a"
+        )))
+        #expect(roster[SubagentID("live")]?.state == .completed)
+        #expect(roster[SubagentID("live")]?.outputFile == "/tmp/a")
+        #expect(roster.refusals == 0)
+    }
+
+    @Test func theToolUseMapSurvivesForTheRowsThatDo() {
+        // A tick names the subagent by its parent's `tool_use_id` and by nothing else, so a map
+        // cleared with the turn would leave a kept row unable to count.
+        var roster = spawned()
+        roster.turnStarted()
+        roster.apply(.progressed(SubagentProgress(parentToolUseID: "toolu_live", elapsedSeconds: 400)))
+        #expect(roster[SubagentID("live")]?.elapsedSeconds == 400)
+
+        // And the finished one's entry goes with it, or the next turn's ticks find a dead row.
+        roster.apply(.progressed(SubagentProgress(parentToolUseID: "toolu_done", elapsedSeconds: 9)))
+        #expect(roster[SubagentID("done")] == nil)
+        #expect(roster.subagents.count == 1)
+    }
+
+    @Test func onlyTheAgentGoingAwayStopsOne() {
+        var roster = spawned()
+        roster.turnStarted()
+        roster.agentExited()
+        #expect(roster[SubagentID("live")]?.state == .stopped)
+        #expect(!roster.isWorking)
+    }
+
+    @Test func aBackgroundAgentStillHasARowMinutesIntoALaterTurn() {
+        // The owner's own reading: three rows counting up while the turn ran, and a spinner with
+        // nothing under it once two more turns had been and gone.
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        var roster = SubagentRoster()
+        roster.apply(
+            .started(SubagentStart(
+                id: SubagentID("a"), toolUseID: "t", description: "there-there conventions sweep",
+                isBackgrounded: true, taskType: "local_agent"
+            )),
+            now: start
+        )
+        // Two turns end and two more begin while it works.
+        roster.turnStarted()
+        roster.turnStarted()
+
+        let sixMinutesIn = start.addingTimeInterval(6 * 60)
+        let rows = SubagentRetention.rows(roster, now: sixMinutesIn)
+        #expect(rows.count == 1)
+        #expect(rows.first?.detail == .elapsed(seconds: 360))
+        #expect(rows.first?.detail.text == "6m 0s")
     }
 }
 
