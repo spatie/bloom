@@ -248,16 +248,6 @@ struct CreateWorkspaceView: View {
             guard CreateWorkspaceOpening.shared.consumePullRequestAsk() else { return }
             raisePullRequestBox()
         }
-        // The name the search panel's fallback row was named after, taken once, the same shape as
-        // the flag above. See `CreateWorkspaceOpening.suggestedName`.
-        .task {
-            guard let suggested = CreateWorkspaceOpening.shared.consumeName() else { return }
-            typedName = suggested
-        }
-        .onChange(of: CreateWorkspaceOpening.shared.suggestedName) { _, _ in
-            guard let suggested = CreateWorkspaceOpening.shared.consumeName() else { return }
-            typedName = suggested
-        }
         // The already-open case. No `initial`, deliberately: a window built with the flag already
         // set sees no change and is served by the task above, which runs after `load` and so keeps
         // the keyboard the task would otherwise have taken back.
