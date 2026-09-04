@@ -296,14 +296,17 @@ struct TranscriptRowHeightsTests {
         #expect(heights.assumed(for: key("row.7")) == TranscriptRowHeights.assumedRowHeight)
     }
 
+    /// The MIDDLE of what has been measured, and it was the mean. See `Running.middle`: a
+    /// transcript's row heights run from nothing to ten thousand points, so a mean over a handful
+    /// of them is whatever the longest answer in the sample says.
     @Test("what has been measured is what the rest is assumed to be")
-    func assumesTheMeanOfWhatIsKnown() {
+    func assumesTheMiddleOfWhatIsKnown() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
         heights.note(100, for: key("row.1"))
         heights.note(200, for: key("row.2"))
-        #expect(heights.estimate == 150)
-        #expect(heights.assumed(for: key("row.99")) == 150)
+        #expect(heights.estimate == 100)
+        #expect(heights.assumed(for: key("row.99")) == 100)
         // And the measured ones are still themselves.
         #expect(heights.assumed(for: key("row.1")) == 100)
     }
@@ -405,7 +408,7 @@ struct TranscriptRowHeightsTests {
         heights.note(100, for: key("row.1"))
         heights.note(200, for: key("row.2"))
         for row in 0..<50 { heights.note(0, for: key("blank.\(row)")) }
-        #expect(heights.estimate == 150)
+        #expect(heights.estimate == 100)
         // The noughts are still remembered, and still nought.
         #expect(heights.height(for: key("blank.7")) == 0)
         #expect(heights.count == 52)
@@ -462,9 +465,11 @@ struct TranscriptRowHeightsTests {
         // leaves forty seven drawn rows against the twenty four it settled from.
         for row in 0..<23 { heights.note(20, for: key("row.\(row)")) }
         #expect(heights.estimate == 400)
-        // The forty eighth doubles it, and 210 is the mean of the two halves.
+        // The forty eighth doubles it, and twenty is what half the rows in this conversation
+        // actually are. The mean this used to take answered 210, which is a height no row in the
+        // sample has and which every unmeasured row would have been drawn at.
         heights.note(20, for: key("row.23"))
-        #expect(heights.estimate == 210)
+        #expect(heights.estimate == 20)
     }
 
     /// A number that is nearly right must not move, because the whole point of settling is that a
@@ -483,7 +488,11 @@ struct TranscriptRowHeightsTests {
     }
 
     /// Before it settles it still tracks, because the first screenful is all there is to go on and
-    /// a constant is worse than a mean of two real rows.
+    /// a constant is worse than two real rows.
+    ///
+    /// **What it no longer does is track the outlier.** A second row three times the first used to
+    /// move the answer to 200, a height neither row has; the middle of the two is the shorter one,
+    /// and the taller row is measured on its own account anyway.
     @Test("the estimate tracks until it settles")
     func tracksUntilItSettles() {
         var heights = TranscriptRowHeights()
@@ -491,7 +500,7 @@ struct TranscriptRowHeightsTests {
         heights.note(100, for: key("row.1"))
         #expect(heights.estimate == 100)
         heights.note(300, for: key("row.2"))
-        #expect(heights.estimate == 200)
+        #expect(heights.estimate == 100)
     }
 
     /// A width or a text size change empties the cache, and the number formed at the old one goes
@@ -520,7 +529,7 @@ struct TranscriptRowHeightsTests {
         #expect(heights.estimate == 100)
         heights.note(300, for: key("row.2"))
         // Two drawn rows is not a screenful, so it is still tracking.
-        #expect(heights.estimate == 200)
+        #expect(heights.estimate == 100)
     }
 
     /// The running total has to survive an overwrite, which is what every drawn row does to what
@@ -552,7 +561,7 @@ struct TranscriptRowHeightsTests {
         heights.note(100, for: key("row.1"))
         heights.note(200, for: key("row.2"))
         heights.rewidth(to: 600)
-        #expect(heights.estimate == 150)
+        #expect(heights.estimate == 100)
     }
 
     // MARK: - The estimate belongs to the conversation on screen
@@ -642,8 +651,9 @@ struct TranscriptRowHeightsTests {
         heights.reset(width: 800, scale: 1, leading: 1.7)
         heights.note(100, for: key("row.1"))
         for step in 1...20 { heights.note(Double(100 + step * 10), for: key("tail")) }
-        // The tail's last word and one other row: 300 and 100.
-        #expect(heights.estimate == 200)
+        // The tail's last word and one other row: 300 and 100, whose middle is 100. Counted per
+        // report rather than per row it would be a sample of twenty one tail heights.
+        #expect(heights.estimate == 100)
     }
 
     @Test("saying the same conversation again changes nothing")
@@ -833,7 +843,10 @@ struct TranscriptRowHeightsTests {
         for row in 0..<TranscriptRowHeights.settleAfter {
             heights.note(800, for: key("answer.\(row)"), shape: .answer)
         }
-        #expect(heights.estimate == 703.5)
+        // The bound, doing its job: the middle of this sample is the 800 point answer, and no row
+        // nobody has looked at may be told more than `mostEstimated`. See its own comment for why
+        // guessing high is the expensive direction.
+        #expect(heights.estimate == TranscriptRowHeights.mostEstimated)
         // The head grow: twelve folds nobody has measured, each of them truly 28 points.
         var blank = 0.0
         for fold in 3..<15 {
@@ -846,7 +859,10 @@ struct TranscriptRowHeightsTests {
         for fold in 3..<15 {
             wasBlank += heights.assumed(for: key("fold.\(fold)")) - 28
         }
-        #expect(wasBlank == 8_106)
+        // Five thousand points of blank, which is five screens of it. It was 8,106 before the
+        // estimate was bounded, and both numbers are the same fault: a fold's line given a
+        // paragraph's height because nothing had measured a fold.
+        #expect(wasBlank == 5_064)
     }
 
     /// A shape with too little evidence is not a shape yet, and the honest answer for one is the
@@ -860,8 +876,8 @@ struct TranscriptRowHeightsTests {
         // Two is not enough to speak for a kind of row. See `settleShapeAfter`.
         heights.note(28, for: key("fold.1"), shape: .fold)
         heights.note(28, for: key("fold.2"), shape: .fold)
-        // Ten answers and two folds, which is the conversation's own mean and not a fold's.
-        #expect(heights.estimate(for: .fold) == 2_056.0 / 12)
+        // Ten answers and two folds, which is the conversation's own number and not a fold's.
+        #expect(heights.estimate(for: .fold) == 200)
         // The third is.
         heights.note(28, for: key("fold.3"), shape: .fold)
         #expect(heights.estimate(for: .fold) == 28)
@@ -875,7 +891,7 @@ struct TranscriptRowHeightsTests {
         heights.reset(width: 831, scale: 1, leading: 1.7)
         heights.note(100, for: key("a"), shape: .tool)
         heights.note(300, for: key("b"), shape: .answer)
-        #expect(heights.estimate == 200)
+        #expect(heights.estimate == 100)
     }
 
     /// **`.other` keeps no sample of its own**, because it is the shape for a row nothing has
@@ -888,8 +904,10 @@ struct TranscriptRowHeightsTests {
         for row in 0..<10 { heights.note(40, for: key("tool.\(row)"), shape: .tool) }
         heights.note(900, for: key("tail"), shape: .other)
         #expect(heights.estimate(for: .other) == heights.estimate)
-        // And the unclassified row is in the conversation's mean like any other.
-        #expect(heights.estimate == 1_300.0 / 11)
+        // And the unclassified row is in the conversation's sample like any other. A mean would
+        // have answered 118 for a conversation of forty point rows, on the strength of the one
+        // tall row in it.
+        #expect(heights.estimate == 40)
     }
 
     /// A shape's number holds still for the reason the conversation's does: a table caches every
@@ -917,8 +935,9 @@ struct TranscriptRowHeightsTests {
         for row in 0..<3 { heights.note(300, for: key("tool.\(row)"), shape: .tool) }
         #expect(heights.estimate(for: .tool) == 300)
         for row in 3..<6 { heights.note(30, for: key("tool.\(row)"), shape: .tool) }
-        // Six against the three it settled from, and half the sample says thirty.
-        #expect(heights.estimate(for: .tool) == 165)
+        // Six against the three it settled from, and half the sample says thirty. The mean this
+        // used to take answered 165, which is a height no tool row in the sample has.
+        #expect(heights.estimate(for: .tool) == 30)
     }
 
     /// A shape that is nearly right must not move, for the same reason the conversation's number
@@ -953,8 +972,8 @@ struct TranscriptRowHeightsTests {
         for row in 0..<2 { heights.note(40, for: key("tool.\(row)"), shape: .tool) }
         heights.note(100, for: key("tool.0"), shape: .tool)
         heights.note(40, for: key("tool.2"), shape: .tool)
-        // 100, 40 and 40, rather than 40, 40, 100 and 40.
-        #expect(heights.estimate(for: .tool) == 60)
+        // 100, 40 and 40, rather than 40, 40, 100 and 40, and the middle of those three is 40.
+        #expect(heights.estimate(for: .tool) == 40)
     }
 
     /// A measured height belongs to a row and is kept for ever; every estimate formed from them
@@ -965,7 +984,10 @@ struct TranscriptRowHeightsTests {
         heights.reset(width: 831, scale: 1, leading: 1.7)
         heights.showing(SessionID("prose"))
         for row in 0..<3 { heights.note(900, for: key("answer.\(row)"), shape: .answer) }
-        #expect(heights.estimate(for: .answer) == 900)
+        // Nine hundred is what the sample says and `mostEstimated` is what an unmeasured row is
+        // allowed to be told, which is the point of the bound: those three rows are drawn at 900
+        // because they were measured, and the fourth is not.
+        #expect(heights.estimate(for: .answer) == TranscriptRowHeights.mostEstimated)
         heights.showing(SessionID("tools"))
         #expect(heights.estimate(for: .answer) == TranscriptRowHeights.assumedRowHeight)
     }
@@ -989,5 +1011,94 @@ struct TranscriptRowHeightsTests {
         for row in 0..<3 { heights.note(30, for: key("tool.\(row)"), shape: .tool) }
         heights.forget()
         #expect(heights.estimate(for: .tool) == TranscriptRowHeights.assumedRowHeight)
+    }
+
+    // MARK: - The blank transcript, which is what a guess out by an order of magnitude looks like
+
+    /// **The owner's own conversation, and the whole of why the estimate is not a mean.**
+    ///
+    /// `ComposerProbe` measured it: of 408 rows in one band, 26 had ever been measured at more
+    /// than nothing, their mean was 651 points and their largest was 10,806. `settleShapeAfter`
+    /// is three, so a sample of that shape settles a number for every unmeasured row of it. The
+    /// mean of this sample is 3,635 points a row. The middle of it is 60.
+    ///
+    /// A row nobody has looked at, drawn 3,635 points tall, is eight screens of white with a line
+    /// of text at the top. That is the transcript the reader filmed going blank.
+    @Test("one enormous row does not decide what every other row is")
+    func aTailDoesNotDecideTheEstimate() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 420, scale: 1, leading: 1.7)
+        heights.showing(SessionID("his"))
+        heights.note(40, for: key("answer.1"), shape: .answer)
+        heights.note(60, for: key("answer.2"), shape: .answer)
+        heights.note(10_806, for: key("answer.3"), shape: .answer)
+        #expect(heights.estimate(for: .answer) == 60)
+        #expect(heights.assumed(for: key("answer.unseen"), shape: .answer) == 60)
+        // And the row that really is ten thousand points tall is still ten thousand points tall.
+        #expect(heights.assumed(for: key("answer.3"), shape: .answer) == 10_806)
+    }
+
+    /// **What that costs a document, which is the number the reader actually feels.**
+    ///
+    /// The 2,242 rows above the band in the probe run, none of them measured. A mean over the
+    /// sample above hands them over eight million points. The middle hands them 134,520. The
+    /// truth, once every one of them had been measured, was 145,686.
+    @Test("the rows nobody has measured do not add up to a document of fiction")
+    func aDocumentOfEstimatesIsNotFiction() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 420, scale: 1, leading: 1.7)
+        heights.showing(SessionID("his"))
+        heights.note(40, for: key("answer.1"), shape: .answer)
+        heights.note(60, for: key("answer.2"), shape: .answer)
+        heights.note(10_806, for: key("answer.3"), shape: .answer)
+        var document = 0.0
+        for row in 0..<2_242 {
+            document += heights.assumed(for: key("above.\(row)"), shape: .answer)
+        }
+        #expect(document == 134_520)
+    }
+
+    // MARK: - What a row nobody has looked at may be told
+
+    /// **The bound, and the asymmetry behind it.** Guessing low costs a row that grows when it is
+    /// drawn, which is the design already. Guessing high costs a screenful of white a reader
+    /// cannot tell from a broken app, and that they cannot scroll out of, because the next screen
+    /// is more of the same row. See `mostEstimated`.
+    @Test("no row nobody has looked at may fill the screen on its own")
+    func theGuessIsBounded() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 420, scale: 1, leading: 1.7)
+        for row in 0..<TranscriptRowHeights.settleAfter {
+            heights.note(6_025, for: key("answer.\(row)"), shape: .answer)
+        }
+        #expect(heights.estimate == TranscriptRowHeights.mostEstimated)
+        #expect(heights.estimate(for: .answer) == TranscriptRowHeights.mostEstimated)
+        #expect(
+            heights.assumed(for: key("unseen"), shape: .answer)
+                == TranscriptRowHeights.mostEstimated
+        )
+    }
+
+    /// The bound is on the GUESS and never on a measurement. A row that has been measured at six
+    /// thousand points is drawn at six thousand points, because that is what it is.
+    @Test("a measured row is its own height however tall it is")
+    func theBoundIsOnlyOnTheGuess() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 420, scale: 1, leading: 1.7)
+        heights.note(6_025, for: key("answer.1"), shape: .answer)
+        #expect(heights.height(for: key("answer.1")) == 6_025)
+        #expect(heights.assumed(for: key("answer.1"), shape: .answer) == 6_025)
+    }
+
+    /// A conversation whose rows are genuinely short is not pushed up to the bound. It is a
+    /// ceiling rather than a number.
+    @Test("the bound does not touch an estimate that is already sensible")
+    func theBoundLeavesASensibleEstimateAlone() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 420, scale: 1, leading: 1.7)
+        for row in 0..<TranscriptRowHeights.settleAfter {
+            heights.note(24, for: key("row.\(row)"))
+        }
+        #expect(heights.estimate == 24)
     }
 }

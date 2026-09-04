@@ -31,8 +31,10 @@ import Foundation
 /// Building the four hundred `NSHostingView`s a window used to open with was the whole of "opening
 /// a workspace or a tab with a chat in it is slow", and none of them was for a row anybody saw.
 ///
-/// The estimate is the running mean of what HAS been measured here, which after one screen of a
-/// real conversation is a better number than any constant, and `assumedRowHeight` until then. What
+/// The estimate is the middle of what HAS been measured here, which after one screen of a real
+/// conversation is a better number than any constant, and `assumedRowHeight` until then. Never
+/// more than `mostEstimated`, because a guess that fills the screen on its own is worse than no
+/// rows at all: see `Running.middle` for the conversation that was drawn 885,212 points long. What
 /// keeps this honest is that no placement is ever resolved against an estimate: the caller
 /// measures the screen it is about to show, exactly, before it shows it.
 ///
@@ -83,11 +85,11 @@ import Foundation
 /// draws from its top down, so the difference is blank under every one of them.
 ///
 /// A conversation does not have one row height. It has a handful of clusters, and which cluster a
-/// row is in is known from the row before anything is drawn: see `TranscriptRowShape`. So the mean
-/// is kept per shape as well as over the whole conversation, and an unmeasured row is told its own
-/// shape's number as soon as there is one. `settleShapeAfter` is how much evidence "one" takes,
-/// and it is deliberately small, because rows of one shape cluster: three folds say more about the
-/// fourth fold than twenty-four paragraphs do.
+/// row is in is known from the row before anything is drawn: see `TranscriptRowShape`. So the
+/// number is kept per shape as well as over the whole conversation, and an unmeasured row is told
+/// its own shape's number as soon as there is one. `settleShapeAfter` is how much evidence "one"
+/// takes, and it is deliberately small, because rows of one shape cluster: three folds say more
+/// about the fourth fold than twenty-four paragraphs do.
 ///
 /// What this cannot do is remove the gap. A row nobody has measured is a guess whatever it is
 /// grouped with, and prose is genuinely unpredictable: two answers in the same conversation differ
@@ -175,6 +177,29 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// is deliberately nearer the short end. Guessing high would open every conversation with a
     /// document several times the height of its content and a scroller to match.
     public static let assumedRowHeight: Double = 64
+
+    /// **The most a row nobody has looked at may be told it is.**
+    ///
+    /// A ceiling on the GUESS and never on a measurement: a row that really is ten thousand points
+    /// tall is told ten thousand the moment anything measures it. This is only about what the
+    /// table is handed for the rows it has not asked about, which on a long conversation is nearly
+    /// all of them.
+    ///
+    /// **The asymmetry is the whole argument, and it is not symmetric at all.** Guessing low costs
+    /// a row that grows when it is drawn, which is the design already: every height is corrected
+    /// by `note` the moment the row is laid out, and the document gets longer under rows nobody is
+    /// looking at. Guessing high costs a screenful of white with nothing in it, which a reader
+    /// cannot tell from a broken app, and which they cannot get out of by scrolling because the
+    /// next screen is more of the same row.
+    ///
+    /// **The number is from the data rather than from taste.** Two `ComposerProbe` runs over the
+    /// owner's own conversation produced six settled shape estimates that were plausible (24,
+    /// 37.7, 303.2, 346.8, 361.3 and 417.7 points) and two that were the bug (790.7, and 6,025.3
+    /// for four rows at once). 450 is above every one of the first group and below both of the
+    /// second, and it is about one transcript pane at the height a dragged composer leaves it: the
+    /// probe's viewport was 446 points at the end of its drag. So the rule this states is that no
+    /// row nobody has looked at may fill the screen on its own.
+    public static let mostEstimated: Double = 450
 
     /// How many drawn rows it takes before the estimate stops moving.
     ///
@@ -285,12 +310,22 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// shape, and they are the same three decisions each time: what the mean is, when it stops
     /// moving, and when it is worth taking again.
     private struct Running: Equatable, Sendable {
-        /// The sum of the sampled heights, kept in step on every write so the mean costs nothing
-        /// to ask.
-        var total: Double = 0
-        /// How many of the sampled rows are more than nothing, which is what the mean divides by.
-        /// See `estimate` for why a mean over the rows that drew nothing was the wrong number.
+        /// How many of the sampled rows are more than nothing, which is what a rank is taken over.
+        /// See `middle` for why the rows that drew nothing are not in it.
         var inked = 0
+        /// **The sample, as a count per height, which is what makes a median affordable here.**
+        ///
+        /// A tally rather than a list, and the difference is what `absorb(_:replacing:)` needs: a
+        /// row that reports again has to come out of the sample it went into exactly, and a list
+        /// of recent values could not do that for the streaming tail, which reports on every frame
+        /// of a turn.
+        ///
+        /// Keyed on the height itself rather than on a band of them, because `note` has already
+        /// rounded every measurement up to a whole point: the key is what it stores, so the median
+        /// is the true one rather than a bucket's middle, and there is no width to justify. What
+        /// bounds this is the number of DISTINCT heights in a conversation, which is a few hundred
+        /// where the rows are tens of thousands.
+        var counts: [Int: Int] = [:]
         /// The estimate once it has stopped moving, or nothing while it is still being formed. See
         /// `settleAfter`, which carries what a drifting one costs.
         var settled: Double?
@@ -301,7 +336,40 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         /// What this says a row is worth, or nothing if it has nothing to say yet.
         var estimate: Double? {
             if let settled { return settled }
-            return inked == 0 ? nil : total / Double(inked)
+            return middle
+        }
+
+        /// **The median of the sample, and it was a mean.**
+        ///
+        /// The old argument for the mean is worth keeping and it was a cost one: the sum is held
+        /// as it is written, so asking is free, where a median would mean keeping the numbers
+        /// sorted. That is true, it lost to a correctness argument measured on the owner's own
+        /// conversation with `ComposerProbe`, and the cost turned out to be a tally of a few
+        /// hundred distinct heights sorted a handful of times a session. See `counts`.
+        ///
+        /// **A transcript's row heights are not a distribution a mean describes.** Of 408 rows in
+        /// one band, 26 had ever been measured at more than nothing; their mean was 651 points and
+        /// their largest was 10,806, against a typical row of a few dozen. `settleShapeAfter` is
+        /// three, so three samples settle a shape's number for every unmeasured row of it, and one
+        /// long answer in a sample of five is what handed 54 unmeasured rows 347 points each and,
+        /// before it re-settled, four rows 6,025 points each. Fourteen screens, for content nobody
+        /// had looked at. The document came out 885,212 points long against a true 172,208, and a
+        /// viewport inside rows drawn like that is the blank transcript the owner filmed.
+        ///
+        /// A median has none of that: one row of ten thousand points moves it by one rank. And it
+        /// errs SHORT on a distribution with a tail, which is the direction that costs nothing:
+        /// see `mostEstimated`.
+        ///
+        /// The lower median for an even sample, for the same reason.
+        var middle: Double? {
+            guard inked > 0 else { return nil }
+            let wanted = (inked - 1) / 2
+            var seen = 0
+            for height in counts.keys.sorted() {
+                seen += counts[height] ?? 0
+                if seen > wanted { return Double(height) }
+            }
+            return nil
         }
 
         /// Takes a measurement in, and the one it replaces out.
@@ -310,27 +378,38 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         /// frame of a turn and any row corrected after it was drawn, what it said before comes out
         /// again: the sample is one contribution per row, not one per report.
         mutating func absorb(_ height: Double, replacing previous: Double, settlingAfter: Int) {
-            total += height - previous
-            if previous > 0 { inked -= 1 }
-            if height > 0 { inked += 1 }
+            remove(previous)
+            add(height)
             settleIfItIsTime(settlingAfter: settlingAfter)
         }
 
         /// Takes a measurement back out, for a row that is moving to another shape's sample.
         mutating func release(_ height: Double) {
-            total -= height
-            if height > 0 { inked -= 1 }
+            remove(height)
+        }
+
+        private mutating func add(_ height: Double) {
+            guard height > 0 else { return }
+            counts[Int(height), default: 0] += 1
+            inked += 1
+        }
+
+        private mutating func remove(_ height: Double) {
+            guard height > 0 else { return }
+            let key = Int(height)
+            guard let count = counts[key] else { return }
+            if count <= 1 { counts[key] = nil } else { counts[key] = count - 1 }
+            inked -= 1
         }
 
         /// Takes the estimate, if there is enough to take it from and it is worth taking again.
         ///
         /// Once at `settlingAfter`, and after that only when the sample has doubled AND the
-        /// running mean disagrees with what is held by more than `resettleDrift`. Both of those,
+        /// running median disagrees with what is held by more than `resettleDrift`. Both of those,
         /// so that a good first sample settles the number for the whole session and a bad one is
         /// not permanent.
         private mutating func settleIfItIsTime(settlingAfter: Int) {
-            guard inked >= settlingAfter else { return }
-            let running = total / Double(inked)
+            guard inked >= settlingAfter, let running = middle else { return }
             guard let settled else { return take(running) }
             guard inked >= settledFrom * 2 else { return }
             guard abs(running - settled) > settled * TranscriptRowHeights.resettleDrift else {
@@ -502,16 +581,23 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         heights[contentKey] == 0
     }
 
-    /// The mean over the rows of THIS conversation that have been measured here and drew
-    /// something, or `assumedRowHeight` before there is one. See `showing(_:)` for why the
-    /// conversation is in that sentence.
+    /// The middle of the rows of THIS conversation that have been measured here and drew
+    /// something, or `assumedRowHeight` before there is one, and never more than `mostEstimated`.
+    /// See `showing(_:)` for why the conversation is in that sentence.
     ///
     /// **It is the fallback rather than the answer now.** What an unmeasured row is actually told
     /// is `estimate(for:)`, which is this number only while the row's own kind has too little
     /// evidence to speak for itself.
     ///
-    /// A mean rather than a median, because it is kept as a running total and a median would mean
-    /// holding the numbers sorted for an answer that is corrected the moment the row is drawn.
+    /// **It was a mean, and the argument for that was: kept as a running total, so asking is free,
+    /// where a median would mean holding the numbers sorted for an answer that is corrected the
+    /// moment the row is drawn.** That is a cost argument and it was true. It lost to a
+    /// correctness one, measured rather than argued: a transcript's row heights run from nothing
+    /// to ten thousand points, a mean over a handful of them is whatever the longest answer in the
+    /// sample says, and the document it produced was 885,212 points long against a true 172,208.
+    /// The cost the old argument was avoiding turned out to be a tally of the few hundred
+    /// DISTINCT heights a conversation has, sorted a handful of times a session. See
+    /// `Running.counts` and `Running.middle`, which carry the whole measurement.
     ///
     /// **The rows that drew nothing are deliberately not in it, and they used to be.** Most of a
     /// session is stream events that draw no view at all, so a mean over every measurement is a
@@ -520,21 +606,22 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// consulting this at all, so including them made the one number this still answers worse for
     /// no one's benefit.
     ///
-    /// **And it stops moving once a screenful has been drawn.** See `settleAfter`: a running mean
-    /// is the right answer to "how tall is a row I know nothing about" and the wrong answer to
-    /// "how tall is this document", and the second question is the one a reader feels.
+    /// **And it stops moving once a screenful has been drawn.** See `settleAfter`: a running
+    /// number is the right answer to "how tall is a row I know nothing about" and the wrong answer
+    /// to "how tall is this document", and the second question is the one a reader feels.
     public var estimate: Double {
-        overall.estimate ?? Self.assumedRowHeight
+        min(Self.mostEstimated, overall.estimate ?? Self.assumedRowHeight)
     }
 
     /// **What an unmeasured row OF THIS SHAPE is worth**, which is the answer a reader scrolling
     /// back sees and the whole of the second fix.
     ///
-    /// The shape's own mean once `settleShapeAfter` rows of it have been drawn, and the
-    /// conversation's mean until then. Falling back rather than waiting, because a shape with no
-    /// evidence yet is exactly the state the old single number was always in, so the fallback can
-    /// only be as wrong as today and the shape can only be better: the two clusters a shape
-    /// separates are separated by more than the noise inside either of them.
+    /// The shape's own number once `settleShapeAfter` rows of it have been drawn, and the
+    /// conversation's until then, and neither of them above `mostEstimated`. Falling back rather
+    /// than waiting, because a shape with no evidence yet is exactly the state the old single
+    /// number was always in, so the fallback can only be as wrong as today and the shape can only
+    /// be better: the two clusters a shape separates are separated by more than the noise inside
+    /// either of them.
     ///
     /// See `TranscriptRowShape` for why a fold's line is the case that settles this: the same
     /// height every time it is drawn, one per turn all the way back through the conversation, and
@@ -548,7 +635,9 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         guard shape != .other, let running = shapes[shape],
               running.inked >= Self.settleShapeAfter, let answer = running.estimate
         else { return estimate }
-        return answer
+        // Capped here as well as in `estimate`, because these are the two spellings of one
+        // question and a caller must not be able to reach the unbounded one. See `mostEstimated`.
+        return min(Self.mostEstimated, answer)
     }
 
     /// **The number to tell a table**: what is known, what is known to be nothing, or what is
