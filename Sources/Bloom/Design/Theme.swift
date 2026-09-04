@@ -1098,7 +1098,7 @@ struct Callout: View {
 /// first and wrote it down: a bare count goes through `formatted` rather than `String(value)`, so
 /// the digits are the reader's own on a machine that does not use Western ones, and it drops the
 /// grouping separator, because a separator on a number nobody is going to add up is noise.
-/// `CountBadge` arrived later and used a plain `.number`, which is the same decision taken the
+/// `CountLabel` arrived later and used a plain `.number`, which is the same decision taken the
 /// other way by not taking it, and the search panel's chips came out reading "Everything 3.752"
 /// on a machine whose separator is a full stop. Four digits that read as a decimal.
 ///
@@ -1144,46 +1144,50 @@ struct Chip: View {
     }
 }
 
-/// A number on a control, drawn in a round.
+/// A number set beside a control's label, for reading rather than for adding up.
 ///
-/// **Bloom had no way of doing this before, which is why it is here rather than in the one view
-/// that wanted it.** Home's scope strip prints its counts as part of a segmented control's own
-/// titles, which is a string and not a badge; the sidebar prints none at all; `PullRequestBadge`
-/// is a control with an arrow on it that opens GitHub. The search panel's chips are the first
-/// place in the app where a number sits ON a control and is read rather than pressed, and the
-/// owner asked for it in a round, so the round lives beside `Chip` where the next surface that
-/// needs one will find it.
+/// # It was a filled round, and macOS does not draw one here
 ///
-/// **Its width is reserved for three digits and does not move.** The counts change on nearly every
-/// keystroke, and a badge sized to its own content takes the chip, the row of chips and the eye
-/// with it: the owner's report was that the whole control jumped while he typed. Three digits of
-/// monospaced figures are laid out behind the number and hidden, so one, ten and a hundred are the
-/// same width and only a thousand grows.
+/// The owner asked for the count "in a round" and got one: a filled capsule inside the chip's own
+/// capsule. He then looked at it twice and said the chips do not feel native, that the number
+/// touches the border of the thing holding it, and to make it breathe. All three are the same
+/// fault. Two nested capsules is a web pill, not a Mac control, and the inner one had nowhere to
+/// sit because the outer one is only as tall as its text.
 ///
-/// **A nought is drawn rather than left out.** `HomeScopeCounts.badge` argues the other way for
-/// Home's resting strip and is right about it there: a strip that says "Needs you 0, Running 0"
-/// most of the time teaches the eye to skip the numbers. This is the other case. The badge only
-/// appears while a search is running, where "Transcripts 0" is a real answer and the reason not to
-/// press that chip, and a badge that disappeared at nought would be a fourth thing moving while
-/// somebody types.
-struct CountBadge: View {
+/// **A filled round on macOS means unread, not "how many".** Mail draws one in the sidebar for
+/// messages you have not read, and a notification badge is the same idiom: it is a thing wanting
+/// your attention. A count on a filter is a different sentence, "this is how much pressing me
+/// would show", and macOS sets that as a plain trailing number in a quieter ink, which is what a
+/// `List` row's own `badge` is and what a segmented control does when it puts a number in its
+/// title. So this is that: no fill, no shape, one step quieter than the label beside it.
+///
+/// # Its width is still reserved, because that complaint was separate and still stands
+///
+/// The counts change on nearly every keystroke, and a number sized to its own content takes the
+/// chip, the row of chips and the eye with it. Three digits of monospaced figures are laid out
+/// behind the number and hidden, so one, ten and a hundred are the same width and only a thousand
+/// grows. A nought is drawn rather than left out, for the reason `HomeScopeCounts.badge` argues
+/// the other way for Home's resting strip and which does not hold here: this only appears while a
+/// search is running, where "Transcripts 0" is a real answer and the reason not to press that
+/// chip, and a number that disappeared at nought would be a fourth thing moving while somebody
+/// types.
+struct CountLabel: View {
     var count: Int
-    /// Whether the control under it is drawn in the accent, which the ink and the fill both answer
-    /// to. Passed rather than read from `isOnEmphasizedSelection`, because a chip paints its own
-    /// selection rather than sitting inside a selected row.
+    /// Whether the control under it is drawn in the accent, which the ink answers to. Passed
+    /// rather than read from `isOnEmphasizedSelection`, because a chip paints its own selection
+    /// rather than sitting inside a selected row.
     var isOnSelection = false
 
-    /// What the badge is always at least as wide as. Three digits, in figures that are all one
-    /// width, so nothing under a thousand moves it.
-    ///
-    /// A thousand and over grows it by one digit and no more, because the number is set without a
-    /// thousands separator: see `Figures.count` for why, which is a defect this reserve was
-    /// quietly making worse. With a separator the first four digit count cost two glyphs rather
-    /// than one, so the row moved further than this comment claimed it could.
+    /// What the number is always at least as wide as. Three digits, in figures that are all one
+    /// width, so nothing under a thousand moves it. A thousand and over grows it by one digit and
+    /// no more, because it is set without a thousands separator: see `Figures.count`.
     private static let reserved = "000"
 
     var body: some View {
-        ZStack {
+        // Leading, so the digits sit against the label they belong to and the reserved slack falls
+        // at the end, inside the capsule where the padding already is. Trailing put a lone "3" two
+        // characters away from "Workspaces", reading as a number somebody had left there.
+        ZStack(alignment: .leading) {
             Text(verbatim: Self.reserved)
                 .monospacedDigit()
                 .hidden()
@@ -1191,13 +1195,11 @@ struct CountBadge: View {
                 .monospacedDigit()
                 .lineLimit(1)
         }
-        .font(Typo.micro)
-        .foregroundStyle(isOnSelection ? Palette.selectedEmphasizedText : Palette.textTertiary)
-        .padding(.horizontal, Metrics.chipInsetH)
-        .padding(.vertical, Metrics.spacingHair)
-        .background(
-            isOnSelection ? Palette.selectedEmphasizedText.opacity(0.2) : Palette.hover,
-            in: Capsule()
+        .font(Typo.caption)
+        // One step quieter than the label it follows, in both states, because it is the label's
+        // subordinate rather than a second thing to read.
+        .foregroundStyle(
+            isOnSelection ? Palette.selectedEmphasizedText.opacity(0.76) : Palette.textTertiary
         )
         .accessibilityHidden(true)
     }
@@ -1240,7 +1242,7 @@ struct DiffStatLabel: View {
     /// while nothing the reader can see has moved.
     ///
     /// The plain case is `Figures.count`, which is where the argument for it now lives: this
-    /// label made that decision first and `CountBadge` needed the same one, so it is one style
+    /// label made that decision first and `CountLabel` needed the same one, so it is one style
     /// read twice rather than two that can drift.
     private static let thousandsStyle = FloatingPointFormatStyle<Double>.number
         .precision(.fractionLength(1))

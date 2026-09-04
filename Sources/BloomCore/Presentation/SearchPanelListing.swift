@@ -34,6 +34,16 @@ public struct SearchPanelListing: Equatable, Sendable {
     public var counts: HomeScopeCounts
     /// Whether there is a query behind this listing, which is what decides the chips on offer.
     public var isSearching: Bool
+    /// The line at the right of the footer: how much there is.
+    ///
+    /// Stored rather than derived from `rows.count`, for the reason `nothing` below is: the row
+    /// count is not the answer in either of the two lists that fold or cap. Only the builder knows
+    /// which chip is lit, how many matches those rows stand for, and how many workspaces were left
+    /// off the resting list. See `SearchPanelSummary`, which holds the words and the argument.
+    ///
+    /// The default is the plain row count, which is right for the menu bar and for a workspace's
+    /// own actions: neither folds anything and neither caps.
+    public var summary: String?
     /// What the card says instead of rows, and nil whenever there are any.
     ///
     /// It is here rather than derived in the view from `rows.isEmpty`, because an empty list is
@@ -45,12 +55,14 @@ public struct SearchPanelListing: Equatable, Sendable {
         sections: [SearchPanelSection],
         counts: HomeScopeCounts = HomeScopeCounts(),
         isSearching: Bool = false,
+        summary: String? = nil,
         nothing: SearchPanelNothing? = nil
     ) {
         self.sections = sections
         self.rows = sections.flatMap(\.rows)
         self.counts = counts
         self.isSearching = isSearching
+        self.summary = summary ?? SearchPanelSummary.rows(self.rows.count)
         self.nothing = nothing
     }
 
@@ -64,13 +76,4 @@ public struct SearchPanelListing: Equatable, Sendable {
         return rows[index]
     }
 
-    /// The count in the footer, on the right, where it does not compete with the keys.
-    ///
-    /// Nil when there is nothing to count. It used to read "2 results" under a sentence saying
-    /// nothing matched, because the two fallback rows were rows: the panel contradicted itself in
-    /// one glance, and that is half of why those rows are gone.
-    public var summary: String? {
-        guard !rows.isEmpty else { return nil }
-        return rows.count == 1 ? "1 result" : "\(rows.count) results"
-    }
 }
