@@ -1184,7 +1184,10 @@ struct CountLabel: View {
     private static let reserved = "000"
 
     var body: some View {
-        ZStack(alignment: .trailing) {
+        // Leading, so the digits sit against the label they belong to and the reserved slack falls
+        // at the end, inside the capsule where the padding already is. Trailing put a lone "3" two
+        // characters away from "Workspaces", reading as a number somebody had left there.
+        ZStack(alignment: .leading) {
             Text(verbatim: Self.reserved)
                 .monospacedDigit()
                 .hidden()
