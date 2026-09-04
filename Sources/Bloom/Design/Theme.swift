@@ -1092,6 +1092,25 @@ struct Callout: View {
 }
 
 /// The small rounded label used for tool names, file chips, counts and states.
+/// How a whole number is set when it is read rather than calculated with.
+///
+/// **One rule, because there were two and one of them was wrong.** `DiffStatLabel` worked this out
+/// first and wrote it down: a bare count goes through `formatted` rather than `String(value)`, so
+/// the digits are the reader's own on a machine that does not use Western ones, and it drops the
+/// grouping separator, because a separator on a number nobody is going to add up is noise.
+/// `CountBadge` arrived later and used a plain `.number`, which is the same decision taken the
+/// other way by not taking it, and the search panel's chips came out reading "Everything 3.752"
+/// on a machine whose separator is a full stop. Four digits that read as a decimal.
+///
+/// So the style lives here and both of them read it, rather than each holding an opinion about
+/// figures. It is not a rule about badges: `DiffStatLabel`'s abbreviated form keeps a separator,
+/// `2,8k`, and is right to, because that one is a DECIMAL separator doing real work rather than a
+/// thousands separator being decorative.
+enum Figures {
+    /// A whole number, in the reader's own digits, with no thousands separator.
+    static let count = IntegerFormatStyle<Int>.number.grouping(.never)
+}
+
 struct Chip: View {
     var text: String
     var systemImage: String?
@@ -1156,6 +1175,11 @@ struct CountBadge: View {
 
     /// What the badge is always at least as wide as. Three digits, in figures that are all one
     /// width, so nothing under a thousand moves it.
+    ///
+    /// A thousand and over grows it by one digit and no more, because the number is set without a
+    /// thousands separator: see `Figures.count` for why, which is a defect this reserve was
+    /// quietly making worse. With a separator the first four digit count cost two glyphs rather
+    /// than one, so the row moved further than this comment claimed it could.
     private static let reserved = "000"
 
     var body: some View {
@@ -1163,7 +1187,7 @@ struct CountBadge: View {
             Text(verbatim: Self.reserved)
                 .monospacedDigit()
                 .hidden()
-            Text(count, format: .number)
+            Text(count, format: Figures.count)
                 .monospacedDigit()
                 .lineLimit(1)
         }
@@ -1215,10 +1239,9 @@ struct DiffStatLabel: View {
     /// rewrites that list every six seconds, so `abbreviate` runs a few hundred times a minute
     /// while nothing the reader can see has moved.
     ///
-    /// Not `String(value)` for the plain case, which is what it looks like it could be: `formatted`
-    /// is what makes the digits the reader's own, and a locale that does not use Western digits
-    /// would get Western ones out of the shortcut.
-    private static let plainStyle = IntegerFormatStyle<Int>.number.grouping(.never)
+    /// The plain case is `Figures.count`, which is where the argument for it now lives: this
+    /// label made that decision first and `CountBadge` needed the same one, so it is one style
+    /// read twice rather than two that can drift.
     private static let thousandsStyle = FloatingPointFormatStyle<Double>.number
         .precision(.fractionLength(1))
     private static let wholeThousandsStyle = FloatingPointFormatStyle<Double>.number
@@ -1231,7 +1254,7 @@ struct DiffStatLabel: View {
     /// gauge a few inches away already used `formatted`, so on a machine set to a comma decimal
     /// separator one number in this window read `174,0k` and the other `2.8k`.
     static func abbreviate(_ value: Int) -> String {
-        if value < 1_000 { return value.formatted(plainStyle) }
+        if value < 1_000 { return value.formatted(Figures.count) }
         let thousands = Double(value) / 1_000
         return thousands < 10
             ? "\(thousands.formatted(thousandsStyle))k"
