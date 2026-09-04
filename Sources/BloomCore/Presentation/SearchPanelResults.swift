@@ -193,22 +193,41 @@ public enum SearchPanelResults {
             // while the chips counted matches, and nothing on the card said they were answering
             // different questions. See `SearchPanelSummary`.
             summary: SearchPanelSummary.searching(scope: scope, counts: counts),
-            nothing: sections.isEmpty ? nothing(query, archived: archivedWorkspaces.count, reach: reach) : nil
+            nothing: sections.isEmpty
+                ? nothing(
+                    query,
+                    archived: archivedWorkspaces.count,
+                    // The projects, not what is in them: `ProjectVisibility` already counts these
+                    // for the sidebar's own toggle title, so the panel and that switch cannot
+                    // disagree about how many there are.
+                    hidden: ProjectVisibility.hiddenCount(repos),
+                    reach: reach
+                )
+                : nil
         )
     }
 
-    /// What the card says when the answer is empty, which is not one sentence any more.
+    /// What the card says when the answer is empty, which is three sentences now and one of them
+    /// at a time.
     ///
-    /// A search of live work alone would otherwise refuse to find the archived workspace somebody
-    /// is searching for the name of, and `HomeScope.settle` warns about exactly that. So an empty
-    /// live answer over a non-empty archive says how much is in the archive, and the narrowing is
-    /// only safe because it does. Under the Archived chip the reach already covers the archive, so
-    /// there is nothing left to point at and the plain sentence is the true one.
+    /// **Whatever the reach held back, the card names it.** A search of live work alone would
+    /// otherwise refuse to find the archived workspace somebody is searching for the name of, and
+    /// `HomeScope.settle` warns about exactly that; an answer that leaves out thirteen of
+    /// seventeen projects has the same fault one axis along. So the narrowing is only safe because
+    /// this function exists, and `.noMatch`'s "Nothing in Bloom matches" stays true because it is
+    /// only reached when nothing was held back at all.
+    ///
+    /// **The archive outranks the hidden projects when both apply, and it is not a coin toss.**
+    /// The archive's number counts matches that are known to exist, so pressing Archived is known
+    /// to help. The hidden number counts projects, not matches, because the panel deliberately
+    /// does not look inside them, so it names doors that may open on nothing. Given one sentence,
+    /// the one that names a certainty is worth more than the one that names a possibility.
     private static func nothing(
-        _ query: String, archived: Int, reach: SearchPanelReach
+        _ query: String, archived: Int, hidden: Int, reach: SearchPanelReach
     ) -> SearchPanelNothing {
-        guard !reach.archived, archived > 0 else { return .noMatch(query) }
-        return .noLiveMatch(query, archived: archived)
+        if !reach.archived, archived > 0 { return .noLiveMatch(query, archived: archived) }
+        if !reach.hidden, hidden > 0 { return .noHiddenMatch(query, hidden: hidden) }
+        return .noMatch(query)
     }
 
     /// The few commands a search of things is allowed to show.

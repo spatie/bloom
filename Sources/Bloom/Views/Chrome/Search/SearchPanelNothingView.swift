@@ -37,7 +37,7 @@ struct SearchPanelNothingView: View {
     private var glyph: String {
         switch nothing {
         case .nothingYet: "square.stack.3d.up.slash"
-        case .noMatch, .noLiveMatch, .noCommand: "magnifyingglass"
+        case .noMatch, .noLiveMatch, .noHiddenMatch, .noCommand: "magnifyingglass"
         }
     }
 

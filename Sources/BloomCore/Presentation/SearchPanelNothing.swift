@@ -32,13 +32,26 @@ public enum SearchPanelNothing: Equatable, Sendable {
     /// over live work alone would otherwise refuse to find the archived workspace somebody is
     /// searching for the name of, and say nothing about having refused. See `SearchPanelReach`.
     case noLiveMatch(String, archived: Int)
+    /// Nothing matched anywhere the panel is looking, and it is not looking everywhere: there are
+    /// projects the sidebar has been told to hide.
+    ///
+    /// **This is not a corner case on the machine it was written for.** Thirteen of the owner's
+    /// seventeen projects are hidden, so an answer that quietly leaves them out is leaving out most
+    /// of his machine, and without this nothing would say so.
+    ///
+    /// It says how many projects are out, and not how much is in them, because the panel does not
+    /// know: the count of hidden PROJECTS is a fact, and any count of matches inside them would be
+    /// one the reach was built to avoid computing. That is also why the archive outranks it below:
+    /// "12 archived workspaces do" names matches that exist, where this names doors that may open
+    /// on nothing.
+    case noHiddenMatch(String, hidden: Int)
     /// The menu bar, searched for something that is not in it.
     case noCommand(String)
 
     public var title: String {
         switch self {
         case .nothingYet: "Nothing to show yet"
-        case .noMatch, .noLiveMatch: "No results"
+        case .noMatch, .noLiveMatch, .noHiddenMatch: "No results"
         case .noCommand: "No such command"
         }
     }
@@ -48,7 +61,18 @@ public enum SearchPanelNothing: Equatable, Sendable {
         case .nothingYet:
             "Add a project and start a workspace, and what you are working on turns up here."
         case .noMatch(let query):
+            // "In Bloom", which is the whole app, and it stays true because this case is only
+            // reached when the panel really did look everywhere: `SearchPanelResults` sends the
+            // two cases below whenever something was held back. See the precedence there.
             "Nothing in Bloom matches \(quoted(query))."
+        case .noHiddenMatch(let query, let hidden):
+            // "Left out", not "not searched". They ARE searched: the store's index has no idea
+            // which projects the sidebar is showing, so the rows come back and the reach drops
+            // them from the answer and from every count. Saying they were not searched would be
+            // saying the untrue half of a true thing.
+            hidden == 1
+                ? "Nothing in your visible work matches \(quoted(query)). 1 hidden project is left out."
+                : "Nothing in your visible work matches \(quoted(query)). \(hidden) hidden projects are left out."
         case .noLiveMatch(let query, let archived):
             // The count and the noun, and no instruction after them. The chip that would show
             // them is on the row above this card with the same number on it, so a sentence
@@ -72,7 +96,7 @@ public enum SearchPanelNothing: Equatable, Sendable {
     public func indexNotice(isIndexing: Bool) -> String? {
         guard isIndexing else { return nil }
         switch self {
-        case .noMatch, .noLiveMatch: break
+        case .noMatch, .noLiveMatch, .noHiddenMatch: break
         case .nothingYet, .noCommand: return nil
         }
         return "The transcript index is still building, so older conversations are not searchable yet."

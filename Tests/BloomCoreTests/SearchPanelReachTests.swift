@@ -145,6 +145,61 @@ struct SearchPanelReachTests {
         #expect(message.contains("2 archived workspaces"))
     }
 
+    /// Thirteen of the owner's seventeen projects are hidden, so an answer that quietly leaves
+    /// them out is leaving out most of his machine. Without this nothing would say so.
+    @Test("an empty answer says how many projects it left out")
+    func theCardNamesTheHiddenProjects() {
+        let listing = SearchPanelResults.build(
+            query: "houdini",
+            repos: [visible, tidied],
+            workspaces: [workspace("docs here")],
+            archived: [],
+            transcripts: [],
+            scope: .all,
+            commands: []
+        )
+        #expect(listing.nothing == .noHiddenMatch("houdini", hidden: 1))
+        let message = listing.nothing?.message ?? ""
+        #expect(message.contains("houdini"))
+        #expect(message.contains("1 hidden project is left out"))
+        // Not "were not searched". The store's index has no idea which projects the sidebar is
+        // showing, so they are searched and then dropped from the answer and from every count.
+        #expect(!message.contains("searched"))
+    }
+
+    /// The archive names matches that are known to exist; the hidden count names projects that may
+    /// hold nothing. Given one sentence, the certainty is worth more than the possibility.
+    @Test("the archive outranks the hidden projects when both would speak")
+    func theArchiveOutranksTheHiddenProjects() {
+        let listing = SearchPanelResults.build(
+            query: "houdini",
+            repos: [visible, tidied],
+            workspaces: [workspace("docs here")],
+            archived: [workspace("houdini one", state: .archived)],
+            transcripts: [],
+            scope: .all,
+            commands: []
+        )
+        #expect(listing.nothing == .noLiveMatch("houdini", archived: 1))
+    }
+
+    /// Turning the sidebar's switch on leaves nothing held back on that axis, so the sentence goes
+    /// with it rather than reporting projects that are in the answer.
+    @Test("a widened reach has no hidden projects to name")
+    func nothingLeftOutIsNotNamed() {
+        let listing = SearchPanelResults.build(
+            query: "houdini",
+            repos: [visible, tidied],
+            workspaces: [workspace("docs here")],
+            archived: [],
+            transcripts: [],
+            scope: .all,
+            commands: [],
+            reach: SearchPanelReach(hidden: true)
+        )
+        #expect(listing.nothing == .noMatch("houdini"))
+    }
+
     /// Nothing anywhere is a different sentence from nothing live, and the archive is not offered
     /// when the reader is already looking at it.
     @Test("nothing anywhere, and nothing left to offer, say the plain thing")
@@ -158,6 +213,8 @@ struct SearchPanelReachTests {
             scope: .all,
             commands: []
         )
+        // `[visible]` alone, so nothing is held back on either axis and "Nothing in Bloom
+        // matches" is the true sentence rather than an overclaim.
         #expect(nowhere.nothing == .noMatch("houdini"))
 
         let alreadyThere = SearchPanelResults.build(
