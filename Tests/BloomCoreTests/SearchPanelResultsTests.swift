@@ -57,8 +57,7 @@ struct SearchPanelResultsTests {
         archived: [Workspace] = [],
         transcripts: [TranscriptWorkspaceMatches] = [],
         scope: HomeScope = .all,
-        commands: [MenuBarItem] = [],
-        hasProjects: Bool = true
+        commands: [MenuBarItem] = []
     ) -> SearchPanelListing {
         SearchPanelResults.build(
             query: query,
@@ -67,8 +66,7 @@ struct SearchPanelResultsTests {
             archived: archived,
             transcripts: transcripts,
             scope: scope,
-            commands: commands,
-            hasProjects: hasProjects
+            commands: commands
         )
     }
 
@@ -204,41 +202,53 @@ struct SearchPanelResultsTests {
         #expect(listing.counts.transcripts == 0)
     }
 
-    /// Somebody who searched for a workspace that does not exist has just told you what to call
-    /// it. Two rows and no more.
-    @Test("nothing matching gives exactly the two fallback rows")
-    func theFallbackRows() {
+    /// The owner looked at the two rows that used to be here and said no: say nothing was found,
+    /// and offer nothing.
+    @Test("a search that matches nothing draws no rows at all")
+    func nothingFound() {
         let listing = build("houdini", workspaces: [workspace("docs chapters")])
-        #expect(listing.rows.map(\.id) == ["fallback:start-workspace", "fallback:search-home"])
-        guard case .fallback(let start)? = listing.rows.first else {
-            Issue.record("expected a fallback row")
-            return
-        }
-        #expect(start.title == "Start a workspace called houdini")
-        #expect(start.action == .newWorkspace)
-        // Said by the builder rather than derived from an empty list, because by the time the
-        // fallbacks are in the list the list is not empty.
-        #expect(listing.summaryLine == "No workspace, transcript or command matches houdini.")
+        #expect(listing.rows.isEmpty)
+        #expect(listing.nothing == .noMatch("houdini"))
+        // The footer counted the two rows it used to draw, so a card saying nothing matched
+        // carried "2 results" beside it.
+        #expect(listing.summary == nil)
 
         let matched = build("docs", workspaces: [workspace("docs chapters")])
-        #expect(matched.summaryLine == nil)
+        #expect(matched.nothing == nil)
+        #expect(matched.summary == "1 result")
     }
 
-    /// With no project added there is nothing to cut a worktree from, so the row would be a
-    /// promise the app cannot keep.
-    @Test("the start row is absent when there is no project to start it in")
-    func noProjectMeansNoStartRow() {
-        let listing = build("houdini", hasProjects: false)
-        #expect(listing.rows.map(\.id) == ["fallback:search-home"])
+    /// A fresh install is the state nobody who builds this ever sees, and it is the one that
+    /// cannot be told apart from a search that missed unless the builder says which it is.
+    @Test("an empty install searching for anything is told apart from a query that missed")
+    func nothingFoundWithNothingInstalled() {
+        let listing = build("houdini")
+        #expect(listing.rows.isEmpty)
+        #expect(listing.nothing == .noMatch("houdini"))
+        #expect(listing.counts == HomeScopeCounts())
+    }
+
+    /// The query is the useful part of the message: somebody who typed nine characters wants to
+    /// see which nine.
+    @Test("the words say which of the three nothings this is, and quote the query")
+    func theWordsForNothing() {
+        #expect(SearchPanelNothing.noMatch("houdini").message.contains("houdini"))
+        #expect(SearchPanelNothing.noCommand("houdini").message.contains("houdini"))
+        #expect(SearchPanelNothing.noMatch("houdini").title != SearchPanelNothing.nothingYet.title)
+        #expect(SearchPanelNothing.noCommand("x").title != SearchPanelNothing.noMatch("x").title)
+        // Trimmed, so a trailing space typed before the search landed is not quoted back.
+        #expect(SearchPanelNothing.noMatch(" houdini ").message.contains("\u{201C}houdini\u{201D}"))
     }
 
     /// Only while the backfill is running. At any other time the same sentence would be an excuse
-    /// rather than a fact.
+    /// rather than a fact, and it belongs to a search that missed rather than to an empty install,
+    /// which has nothing to index.
     @Test("the incomplete index is stated only while it is being built")
     func theIndexNotice() {
-        #expect(SearchPanelFallback.indexNotice(isIndexing: false) == nil)
-        #expect(SearchPanelFallback.indexNotice(isIndexing: true)?.isEmpty == false)
-        #expect(SearchPanelFallback.summary(for: " houdini ") == "No workspace, transcript or command matches houdini.")
+        #expect(SearchPanelNothing.noMatch("x").indexNotice(isIndexing: false) == nil)
+        #expect(SearchPanelNothing.noMatch("x").indexNotice(isIndexing: true)?.isEmpty == false)
+        #expect(SearchPanelNothing.nothingYet.indexNotice(isIndexing: true) == nil)
+        #expect(SearchPanelNothing.noCommand("x").indexNotice(isIndexing: true) == nil)
     }
 
     /// A menu item is neither a workspace nor a transcript, so a command row under a chip that

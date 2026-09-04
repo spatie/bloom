@@ -37,7 +37,6 @@ struct SearchPanelCommandRow: View {
                     .lineLimit(1)
             }
             .searchPanelRowPadding()
-            .padding(.vertical, Metrics.spacingSmall)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

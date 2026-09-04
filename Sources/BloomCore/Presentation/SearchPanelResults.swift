@@ -24,8 +24,6 @@ public enum SearchPanelResults {
     ///   - transcripts: what the full text index said, already folded one row per workspace by
     ///     `TranscriptSearch.group`. Empty until the store answers, and empty when the query is
     ///     too short for it to be worth asking.
-    ///   - hasProjects: whether a workspace can be started, which decides one of the two fallback
-    ///     rows. See `SearchPanelFallback`.
     public static func build(
         query: String,
         repos: [Repo],
@@ -33,8 +31,7 @@ public enum SearchPanelResults {
         archived: [Workspace],
         transcripts: [TranscriptWorkspaceMatches],
         scope: HomeScope,
-        commands: [MenuBarItem] = MenuBarCatalogue.commands,
-        hasProjects: Bool
+        commands: [MenuBarItem] = MenuBarCatalogue.commands
     ) -> SearchPanelListing {
         let needle = WorkspaceSearch.needle(query)
         guard !needle.isEmpty else { return .empty }
@@ -142,19 +139,14 @@ public enum SearchPanelResults {
             )
         }
 
-        var summaryLine: String?
-        if sections.isEmpty {
-            summaryLine = SearchPanelFallback.summary(for: query)
-            let rows = SearchPanelFallback.rows(for: query, hasProjects: hasProjects)
-            if !rows.isEmpty {
-                sections.append(
-                    SearchPanelSection(id: "fallback", title: nil, rows: rows.map { .fallback($0) })
-                )
-            }
-        }
-
+        // Nothing is added under an empty answer. It used to be a sentence and two action rows,
+        // and the owner's reply to seeing them was to say nothing found and offer nothing: see
+        // `SearchPanelNothing`.
         return SearchPanelListing(
-            sections: sections, counts: counts, isSearching: true, summaryLine: summaryLine
+            sections: sections,
+            counts: counts,
+            isSearching: true,
+            nothing: sections.isEmpty ? .noMatch(query) : nil
         )
     }
 

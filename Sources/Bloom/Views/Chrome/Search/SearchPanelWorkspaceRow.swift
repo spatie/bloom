@@ -23,7 +23,7 @@ struct SearchPanelWorkspaceRow: View {
             HStack(spacing: Metrics.spacingWide) {
                 RepoIcon(repo: hit.repo)
 
-                VStack(alignment: .leading, spacing: Metrics.spacingHair) {
+                VStack(alignment: .leading, spacing: SearchPanelRowMetrics.lineGap) {
                     name
                         .font(Typo.bodyEmphasis)
                         .lineLimit(1)
@@ -36,7 +36,6 @@ struct SearchPanelWorkspaceRow: View {
                 Spacer(minLength: Metrics.spacingWide)
             }
             .searchPanelRowPadding()
-            .padding(.vertical, Metrics.spacingSmall)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

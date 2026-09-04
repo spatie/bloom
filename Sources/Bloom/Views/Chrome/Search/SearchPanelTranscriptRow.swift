@@ -26,7 +26,7 @@ struct SearchPanelTranscriptRow: View {
             HStack(alignment: .top, spacing: Metrics.spacingWide) {
                 RepoIcon(repo: hit.repo)
 
-                VStack(alignment: .leading, spacing: Metrics.spacingHair) {
+                VStack(alignment: .leading, spacing: SearchPanelRowMetrics.lineGap) {
                     HStack(spacing: Metrics.spacingSmall) {
                         Text(hit.workspace?.name ?? "Unknown workspace")
                             .font(Typo.bodyEmphasis)
@@ -51,7 +51,6 @@ struct SearchPanelTranscriptRow: View {
                 Spacer(minLength: Metrics.spacingWide)
             }
             .searchPanelRowPadding()
-            .padding(.vertical, Metrics.spacingSmall)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

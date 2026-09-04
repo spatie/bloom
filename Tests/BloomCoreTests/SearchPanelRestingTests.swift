@@ -108,11 +108,43 @@ struct SearchPanelRestingTests {
         #expect(!listing.isSearching)
     }
 
-    @Test("a machine with nothing on it draws nothing rather than an empty heading")
+    /// Every picture anybody has taken of this panel came off a machine with four projects on it.
+    /// A fresh install has none, and Cmd+K works from the moment the app opens.
+    @Test("a machine with nothing on it says so rather than drawing an empty card")
     func nothingAtAll() {
         let listing = SearchPanelResting.build(workspaces: [], repos: [], activity: HomeActivity())
         #expect(listing.isEmpty)
         #expect(listing.sections.isEmpty)
+        #expect(listing.nothing == .nothingYet)
+        // Nothing to count, so the footer says nothing rather than "0 results".
+        #expect(listing.summary == nil)
+    }
+
+    /// "You have nothing yet" and "your search matched nothing" are two different facts, and a
+    /// panel that said the same words to both would be declining to know which it was in.
+    @Test("an empty install is told apart from a search that missed")
+    func anEmptyInstallIsNotAMissedSearch() {
+        let resting = SearchPanelResting.build(workspaces: [], repos: [], activity: HomeActivity())
+        #expect(resting.nothing != SearchPanelNothing.noMatch(""))
+        #expect(resting.nothing?.title != SearchPanelNothing.noMatch("x").title)
+    }
+
+    /// The keyboard on a list with nothing in it. Every one of these is a nil the panel has to
+    /// swallow rather than a row to move to.
+    @Test("the keyboard does nothing rather than crashing on an empty list")
+    func theKeyboardOnAnEmptyList() {
+        let listing = SearchPanelResting.build(workspaces: [], repos: [], activity: HomeActivity())
+        #expect(listing.row(at: nil) == nil)
+        #expect(listing.row(at: 0) == nil)
+
+        let context = SearchPanelKeyContext(rowCount: listing.rows.count, highlighted: nil)
+        #expect(SearchPanelKeys.outcome(for: .down, in: context) == .handled)
+        #expect(SearchPanelKeys.outcome(for: .up, in: context) == .handled)
+        #expect(SearchPanelKeys.outcome(for: .returnKey, in: context) == .handled)
+        #expect(SearchPanelKeys.outcome(for: .commandReturn, in: context) == .handled)
+        // Tab still walks the chips, whose counts are all nought, rather than being swallowed.
+        #expect(SearchPanelKeys.outcome(for: .tab, in: context) == .scope(.workspaces))
+        #expect(HomeScopeCounts().count(of: .all, searching: true) == 0)
     }
 
     /// The project travels with the row because the panel is flat: a row is the only place its

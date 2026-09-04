@@ -2,16 +2,18 @@ import Foundation
 
 /// One line of the panel, whatever kind of thing it names.
 ///
-/// Four cases and one flat array, because the arrow keys walk the drawn order rather than four
+/// Three cases and one flat array, because the arrow keys walk the drawn order rather than three
 /// lists that would each need their own end. The section headings are not rows: they are not
 /// selectable, so putting them in the same array would mean every key handler skipping them, which
 /// is the rule `SearchPanelListing` keeps by holding both shapes rather than deriving one from the
 /// other.
+///
+/// There was a fourth, `fallback`, and it is gone with the two rows it drew. A search that matched
+/// nothing says so and offers nothing: see `SearchPanelNothing`.
 public enum SearchPanelRow: Equatable, Sendable, Identifiable {
     case workspace(SearchPanelWorkspaceHit)
     case transcript(SearchPanelTranscriptHit)
     case command(SearchPanelCommandHit)
-    case fallback(SearchPanelFallback)
 
     /// Namespaced by kind, because a workspace row and the transcript row for the same workspace
     /// are two rows in one list and a shared id would make a `ForEach` draw one of them twice.
@@ -20,7 +22,6 @@ public enum SearchPanelRow: Equatable, Sendable, Identifiable {
         case .workspace(let hit): "workspace:\(hit.workspace.id.rawValue)"
         case .transcript(let hit): "transcript:\(hit.result.workspaceID.rawValue)"
         case .command(let hit): "command:\(hit.item.action.rawValue)"
-        case .fallback(let fallback): "fallback:\(fallback.id)"
         }
     }
 
@@ -35,7 +36,7 @@ public enum SearchPanelRow: Equatable, Sendable, Identifiable {
         switch self {
         case .workspace(let hit): hit.workspace.id
         case .transcript(let hit): hit.result.workspaceID
-        case .command, .fallback: nil
+        case .command: nil
         }
     }
 }
