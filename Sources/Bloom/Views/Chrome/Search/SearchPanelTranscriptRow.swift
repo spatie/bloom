@@ -26,7 +26,7 @@ struct SearchPanelTranscriptRow: View {
             HStack(alignment: .top, spacing: Metrics.spacingWide) {
                 RepoIcon(repo: hit.repo)
 
-                VStack(alignment: .leading, spacing: Metrics.spacingHair) {
+                VStack(alignment: .leading, spacing: SearchPanelRowMetrics.lineGap) {
                     HStack(spacing: Metrics.spacingSmall) {
                         Text(hit.workspace?.name ?? "Unknown workspace")
                             .font(Typo.bodyEmphasis)
@@ -50,14 +50,13 @@ struct SearchPanelTranscriptRow: View {
 
                 Spacer(minLength: Metrics.spacingWide)
             }
-            .padding(.horizontal, Metrics.inset)
-            .padding(.vertical, Metrics.spacingSmall)
+            .searchPanelRowPadding()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint("Opens the workspace at this point in the transcript.")
-        .rowBackground(isSelected: isSelected, isHovered: isHovered, isFocused: true)
+        .searchPanelRowPlate(isSelected: isSelected, isHovered: isHovered)
         .onHoverChange { hovering in
             isHovered = hovering
             if hovering { onHover() }

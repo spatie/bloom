@@ -32,28 +32,26 @@ public struct SearchPanelListing: Equatable, Sendable {
     /// What each chip says, worked out in the same pass. Home's own counts, so the two surfaces
     /// cannot disagree about how much archived work there is.
     public var counts: HomeScopeCounts
-    /// Whether there is a query behind this listing, which is what decides the chips on offer and
-    /// whether the fallback rows can appear at all.
+    /// Whether there is a query behind this listing, which is what decides the chips on offer.
     public var isSearching: Bool
-    /// The sentence over the fallback rows, and nil whenever something matched.
+    /// What the card says instead of rows, and nil whenever there are any.
     ///
-    /// It is here rather than derived in the view from `rows.isEmpty`, because by the time the
-    /// fallbacks are in the list the list is not empty: the two rows ARE rows, arrowable and
-    /// openable like any other. Only the builder knows that nothing matched, so only the builder
-    /// can say so.
-    public var summaryLine: String?
+    /// It is here rather than derived in the view from `rows.isEmpty`, because an empty list is
+    /// not one fact: a fresh install has nothing yet, a query can miss, and the menu bar can be
+    /// asked for a command it does not have. Only the builder knows which of those it is.
+    public var nothing: SearchPanelNothing?
 
     public init(
         sections: [SearchPanelSection],
         counts: HomeScopeCounts = HomeScopeCounts(),
         isSearching: Bool = false,
-        summaryLine: String? = nil
+        nothing: SearchPanelNothing? = nil
     ) {
         self.sections = sections
         self.rows = sections.flatMap(\.rows)
         self.counts = counts
         self.isSearching = isSearching
-        self.summaryLine = summaryLine
+        self.nothing = nothing
     }
 
     public static let empty = SearchPanelListing(sections: [])
@@ -67,8 +65,12 @@ public struct SearchPanelListing: Equatable, Sendable {
     }
 
     /// The count in the footer, on the right, where it does not compete with the keys.
-    public var summary: String {
-        let count = rows.count
-        return count == 1 ? "1 result" : "\(count) results"
+    ///
+    /// Nil when there is nothing to count. It used to read "2 results" under a sentence saying
+    /// nothing matched, because the two fallback rows were rows: the panel contradicted itself in
+    /// one glance, and that is half of why those rows are gone.
+    public var summary: String? {
+        guard !rows.isEmpty else { return nil }
+        return rows.count == 1 ? "1 result" : "\(rows.count) results"
     }
 }

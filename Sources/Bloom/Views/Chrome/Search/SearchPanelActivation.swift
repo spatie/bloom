@@ -35,9 +35,6 @@ enum SearchPanelActivation {
 
         case .command(let hit):
             run(hit.item.action, mode: mode, panel: panel, app: app)
-
-        case .fallback(let fallback):
-            run(fallback, app: app)
         }
     }
 
@@ -73,26 +70,6 @@ enum SearchPanelActivation {
         // is validated against whatever is first responder when it fires.
         DispatchQueue.main.async {
             MainMenuActions.perform(action)
-        }
-    }
-
-    /// The two rows under a search that matched nothing.
-    ///
-    /// The start row carries the name through to the create window, so the row's own words are
-    /// true in the two modes that have a name field. Chat mode names a workspace from the prompt
-    /// the model is given, so there it is a starting point rather than the name.
-    private static func run(_ fallback: SearchPanelFallback, app: AppModel) {
-        switch fallback {
-        case .startWorkspace(let name):
-            CreateWorkspaceOpening.shared.askForName(name)
-            NotificationCenter.default.post(name: .bloomNewWorkspace, object: nil)
-
-        case .searchHome(let query):
-            // Home's own field is what this hands the query to, so a long browse carries on in the
-            // pane built for one. The scope settles the same way the field settled it.
-            app.homeFilter.query = query
-            app.homeFilter.scope = HomeScope.settle(app.homeFilter.scope, searching: true)
-            app.selection = .home
         }
     }
 }

@@ -70,6 +70,12 @@ struct WindowChrome: ViewModifier {
         let height = window.frame.height - window.contentLayoutRect.height
         guard height > 0 else { return }
 
+        // The search panel hangs its card below the title bar and needs this same number, and
+        // this is the one place in the app that measures it correctly: asked again once the strip
+        // is in, `contentLayoutRect` answers 152 for a 52 point bar, because an accessory is part
+        // of what the title bar leaves over. See `SearchPanelWindowGeometry.titleBarHeight`.
+        SearchPanelWindowGeometry.shared.setTitleBarHeight(height)
+
         let controller = TitleBarStripController(app: app, height: height)
         window.addTitlebarAccessoryViewController(controller)
         strip = controller

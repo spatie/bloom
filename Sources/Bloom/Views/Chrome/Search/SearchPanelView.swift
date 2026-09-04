@@ -9,20 +9,27 @@ import BloomCore
 ///
 /// **Pinned near the top of the window rather than centred on the display.** The panel acts on this
 /// window's contents, so it should visibly belong to this window; centring it on the screen is what
-/// a system service does and Bloom is not one. See `SearchPanelOverlay` for the dimming and the
-/// placement.
+/// a system service does and Bloom is not one. See `SearchPanelWindowOverlay` for the dimming, the
+/// click outside and the placement.
 struct SearchPanelView: View {
     var app: AppModel
     @Bindable var panel: SearchPanelModel
 
-    /// Wide enough for a workspace name, its project and an age on one line, and narrow enough that
-    /// the eye does not have to travel to read a row. The composer's slash menu is 440 and holds a
-    /// command name; this holds a sentence out of a transcript.
-    static let width: CGFloat = 560
+    /// How wide to draw, which is a fact about the window rather than about this view.
+    ///
+    /// It was a flat 560 here. `SearchPanelLayout.width(inWindow:)` is the decision now, in the
+    /// core where it can be tested, and the overlay measures the window and hands the answer down.
+    /// It is passed rather than measured here so that nothing about the query can move it: the
+    /// card must not resize while somebody types, for the same reason the chips must not.
+    var width: CGFloat
 
     /// Four rows and a bit, which is what a person reads before pressing Return. A taller list
     /// would be a pane, and a pane is Home.
     private static let listHeight: CGFloat = 310
+
+    /// How much of the foot of the list is faded out, so a row at the edge reads as "there is more
+    /// below" rather than as a row somebody has guillotined. See `fadeMask`.
+    private static let fade: CGFloat = 28
 
     var body: some View {
         MenuPanel {
@@ -40,10 +47,12 @@ struct SearchPanelView: View {
                 keys: SearchPanelKeys.footer(
                     for: panel.field.mode, isSearching: !panel.field.isEmpty
                 ),
-                summary: panel.listing.isEmpty ? nil : panel.listing.summary
+                // `summary` is nil on an empty list of its own now. It used to count the two
+                // fallback rows, so a card saying nothing matched carried "2 results" beside it.
+                summary: panel.listing.summary
             )
         }
-        .frame(width: Self.width)
+        .frame(width: width)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Quick Search")
     }
@@ -117,20 +126,37 @@ struct SearchPanelView: View {
 
     // MARK: - The list
 
+    /// The rows, or what the card says instead of them.
+    ///
+    /// **A fixed height, not a ceiling, and the owner chose it knowing what it costs.** It was
+    /// `maxHeight`, so the card grew and shrank on the keystroke that changed how many results
+    /// there were: twelve rows, then one, then none. Two separate reports on this branch were
+    /// about the panel moving while somebody typed, and this is the same complaint one level up
+    /// from the chips. Raycast holds a fixed panel for exactly this reason.
+    ///
+    /// The cost is a card taller than its content on a quiet machine, and taller still when it is
+    /// empty: a fresh install opens this and gets three hundred points of card with one sentence
+    /// in it. That was put to him with a picture of it and he kept it, because the alternative is
+    /// a card that resizes under the pointer on nearly every keystroke. So it is a decision rather
+    /// than an oversight, and it is not to be quietly tidied away by the next reader.
     @ViewBuilder
     private var list: some View {
+        Group {
+            if let nothing = panel.listing.nothing {
+                SearchPanelNothingView(
+                    nothing: nothing, isIndexing: app.isTranscriptIndexIncomplete
+                )
+            } else {
+                rows
+            }
+        }
+        .frame(height: Self.listHeight)
+    }
+
+    private var rows: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if let summary = panel.listing.summaryLine {
-                        Text(summary)
-                            .font(Typo.caption)
-                            .foregroundStyle(Palette.textSecondary)
-                            .padding(.horizontal, Metrics.inset)
-                            .padding(.top, Metrics.spacingWide)
-                            .padding(.bottom, Metrics.spacingSmall)
-                    }
-
+                LazyVStack(alignment: .leading, spacing: SearchPanelRowMetrics.gap) {
                     ForEach(panel.listing.sections) { section in
                         if let title = section.title {
                             // In the scroll rather than stuck to the top, because a sticky heading
@@ -141,7 +167,10 @@ struct SearchPanelView: View {
                                 .textCase(.uppercase)
                                 .tracking(Typo.microTracking)
                                 .padding(.horizontal, Metrics.inset)
-                                .padding(.top, Metrics.spacingWide)
+                                // More above than below, so a heading reads as belonging to what
+                                // is under it. The rows around it breathe now, so the gap that
+                                // used to say that at eight points has to say it at twelve.
+                                .padding(.top, Metrics.gutter)
                                 .padding(.bottom, Metrics.spacingTight)
                         }
 
@@ -150,13 +179,16 @@ struct SearchPanelView: View {
                                 .id(row.id)
                         }
                     }
-
-                    notice
                 }
-                .padding(.vertical, Metrics.spacingSmall)
+                .padding(.top, Metrics.spacingSmall)
+                // The fade below needs something to fade over, or it would eat the last row of a
+                // list that fits. With this, a list short enough to fit ends above the fade and
+                // nothing is faded at all; a long one scrolled to its end shows its last row
+                // whole.
+                .padding(.bottom, Self.fade)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxHeight: Self.listHeight)
+            .mask { fadeMask }
             // No anchor, so the arrows scroll the least they can get away with. Pinning would
             // throw the highlighted row to the far edge every time somebody stepped upwards, which
             // no Mac list does.
@@ -165,6 +197,26 @@ struct SearchPanelView: View {
                 proxy.scrollTo(row.id)
             }
         }
+    }
+
+    /// The row at the bottom edge is faded out rather than sliced through.
+    ///
+    /// The list is a fixed height and the rows are not all one height, so no arithmetic makes the
+    /// viewport land on a whole number of them: a heading, a one line command and a two line
+    /// transcript hit are three different heights in the same list, and a height that fitted five
+    /// workspaces would cut a transcript row instead. That is why the other answer, sizing the
+    /// list to whole rows, is not available here. A fade also says something the cut does not:
+    /// there is more below.
+    private var fadeMask: some View {
+        LinearGradient(
+            stops: [
+                .init(color: .black, location: 0),
+                .init(color: .black, location: 1 - Self.fade / Self.listHeight),
+                .init(color: .black.opacity(0), location: 1),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 
     @ViewBuilder
@@ -197,14 +249,6 @@ struct SearchPanelView: View {
                 onPick: { open(row) },
                 onHover: { panel.highlighted = index }
             )
-
-        case .fallback(let fallback):
-            SearchPanelFallbackRow(
-                fallback: fallback,
-                isSelected: isSelected,
-                onPick: { open(row) },
-                onHover: { panel.highlighted = index }
-            )
         }
     }
 
@@ -214,24 +258,6 @@ struct SearchPanelView: View {
     /// menu for that workspace keeps.
     private func isRunnable(_ hit: SearchPanelCommandHit) -> Bool {
         panel.field.mode.workspaceID != nil || panel.runnable.contains(hit.item.action)
-    }
-
-    /// The two things drawn under the list, and neither of them is an error.
-    ///
-    /// A search here cannot fail in a way worth drawing: `TranscriptSearch.matchExpression` quotes
-    /// every token before it reaches FTS5, so the store either answers or the task was cancelled by
-    /// the next keystroke. What is left is the one honest condition, the index still being built,
-    /// stated as a fact under the list rather than as a failure across it.
-    @ViewBuilder
-    private var notice: some View {
-        if !panel.field.isEmpty, panel.field.mode == .things,
-           let sentence = SearchPanelFallback.indexNotice(isIndexing: app.isTranscriptIndexIncomplete) {
-            Label(sentence, systemImage: "clock")
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .padding(.horizontal, Metrics.inset)
-                .padding(.vertical, Metrics.spacingSmall)
-        }
     }
 
     // MARK: - Bindings and keys

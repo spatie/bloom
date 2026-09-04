@@ -36,15 +36,14 @@ struct SearchPanelCommandRow: View {
                     .foregroundStyle(keyColour)
                     .lineLimit(1)
             }
-            .padding(.horizontal, Metrics.inset)
-            .padding(.vertical, Metrics.spacingSmall)
+            .searchPanelRowPadding()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
         .accessibilityLabel(hit.item.title)
         .accessibilityValue(hit.item.key == nil ? SearchPanelCommands.noKey : hit.item.keyText)
-        .rowBackground(isSelected: isSelected, isHovered: isHovered, isFocused: true)
+        .searchPanelRowPlate(isSelected: isSelected, isHovered: isHovered)
         .onHoverChange { hovering in
             isHovered = hovering
             if hovering { onHover() }

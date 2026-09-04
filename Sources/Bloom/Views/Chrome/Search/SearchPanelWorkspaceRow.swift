@@ -23,7 +23,7 @@ struct SearchPanelWorkspaceRow: View {
             HStack(spacing: Metrics.spacingWide) {
                 RepoIcon(repo: hit.repo)
 
-                VStack(alignment: .leading, spacing: Metrics.spacingHair) {
+                VStack(alignment: .leading, spacing: SearchPanelRowMetrics.lineGap) {
                     name
                         .font(Typo.bodyEmphasis)
                         .lineLimit(1)
@@ -35,15 +35,13 @@ struct SearchPanelWorkspaceRow: View {
 
                 Spacer(minLength: Metrics.spacingWide)
             }
-            .padding(.horizontal, Metrics.inset)
-            .padding(.vertical, Metrics.spacingSmall)
+            .searchPanelRowPadding()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
-        // Focused, because the panel's field really does hold the keyboard while the arrows walk
-        // this list, which is the one case AppKit paints in the accent.
-        .rowBackground(isSelected: isSelected, isHovered: isHovered, isFocused: true)
+        // Inset from the card's edges rather than run to them. See `SearchPanelRowPlate`.
+        .searchPanelRowPlate(isSelected: isSelected, isHovered: isHovered)
         .onHoverChange { hovering in
             isHovered = hovering
             if hovering { onHover() }

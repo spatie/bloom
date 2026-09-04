@@ -136,13 +136,16 @@ final class SearchPanelModel {
                     workspaces: app.workspaces,
                     archived: archived,
                     transcripts: app.transcriptResults,
-                    scope: scope,
-                    hasProjects: !app.repos.isEmpty
+                    scope: scope
                 )
         case .commands:
+            let sections = SearchPanelCommands.sections(SearchPanelCommands.rank(field.query))
             listing = SearchPanelListing(
-                sections: SearchPanelCommands.sections(SearchPanelCommands.rank(field.query)),
-                isSearching: !field.isEmpty
+                sections: sections,
+                isSearching: !field.isEmpty,
+                // Only when something was typed. A bare `>` is the whole menu bar and cannot be
+                // empty; a `>` and a word that is in no menu is a real miss and says so.
+                nothing: sections.isEmpty && !field.isEmpty ? .noCommand(field.query) : nil
             )
         case .actions(let id):
             listing = SearchPanelListing(sections: SearchPanelActions.sections(for: subject(id)))

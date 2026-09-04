@@ -79,7 +79,12 @@ public enum SearchPanelResting {
                 )
             )
         }
-        return SearchPanelListing(sections: sections)
+        // A machine with no workspaces on it at all, which is every fresh install and is the one
+        // state nobody who builds this ever sees. The card says so rather than drawing an empty
+        // rounded rectangle with a footer under it.
+        return SearchPanelListing(
+            sections: sections, nothing: sections.isEmpty ? .nothingYet : nil
+        )
     }
 
     /// Which of the two kinds of waiting a workspace is in, or neither.
