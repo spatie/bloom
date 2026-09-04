@@ -59,7 +59,7 @@ struct SearchPanelResultsTests {
         scope: HomeScope = .all,
         commands: [MenuBarItem] = [],
         repos: [Repo]? = nil,
-        reach: SearchPanelReach = .live
+        reach: SearchPanelReach? = nil
     ) -> SearchPanelListing {
         SearchPanelResults.build(
             query: query,
@@ -69,7 +69,11 @@ struct SearchPanelResultsTests {
             transcripts: transcripts,
             scope: scope,
             commands: commands,
-            reach: reach
+            // Derived from the chip unless a test says otherwise, which is what the panel itself
+            // does: `SearchPanelReach.reading` is the one place that rule lives, and a helper that
+            // defaulted to `.live` under the Archived chip would be modelling a pair the app never
+            // produces and would have every future test walk into it.
+            reach: reach ?? .reading(scope: scope, showsHiddenProjects: false)
         )
     }
 
