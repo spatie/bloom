@@ -53,10 +53,57 @@ public enum SearchPanelLayout {
     /// sat even though the dim now starts higher up.
     public static let topInset: CGFloat = 56
 
+    /// How far the window behind is taken down, in light.
+    ///
     /// Enough to say the window behind is not the thing being used, and not so much that a person
-    /// cannot read the workspace name they were looking at. Black in both appearances, because
-    /// what it does is take light out of the ground rather than tint it.
-    public static let dim: Double = 0.22
+    /// cannot read the workspace name they were looking at. It leaves the text behind at about ten
+    /// to one against its ground, where undimmed it is fifteen.
+    public static let dimLight: Double = 0.22
+
+    /// And in dark, where it has to be nearly twice as much to say the same thing.
+    ///
+    /// # Why this is two numbers and not one
+    ///
+    /// It was one, and the comment on it argued for one: black in both appearances, because what
+    /// the dim does is take light out of the ground rather than tint it. The ink is still right.
+    /// The amount was not, and the pictures said so: a capture in dark read as barely dimmed at
+    /// all, and the arithmetic behind that is not a matter of taste.
+    ///
+    /// At 22 per cent, the light ground loses 56 of its 255. The dark ground has no such light to
+    /// lose: `PaletteInk.surface` is `#0A1A25` in dark, whose brightest channel is 37, so **even
+    /// painting it solid black removes less than the light dim removes at 22 per cent.** No single
+    /// opacity of black can move both grounds by the same amount, because one of them is not there
+    /// to be moved. `SearchPanelLayoutTests` asserts exactly that, so the day the dark ramp
+    /// changes the suite says whether the argument still holds.
+    ///
+    /// # Why black is still the ink
+    ///
+    /// The obvious alternative in dark is a light scrim, and it is wrong here. It would raise the
+    /// ground towards the card, and the card standing above its ground is the whole of what the
+    /// dim buys in dark: the panel is `#22292F`-ish glass over a `#0A1A25` window, so lifting the
+    /// window costs the separation the scrim exists to create. Black keeps taking light out; there
+    /// is simply less of it to take, so it has to take a larger share.
+    ///
+    /// # Where the number comes from
+    ///
+    /// Not from a percentage that sounds right. It is the heaviest black that leaves the window
+    /// behind still readable, measured with `Contrast` against every ground this app draws text
+    /// on. `surfaceRaised` is the worst of the three, and there the text behind clears
+    /// `Contrast.textFloor` at 0.40 and does not at 0.45. So 0.40 it is, and the suite holds both
+    /// halves of that sentence.
+    ///
+    /// What it buys, against the 0.22 it replaces: the ground goes down 15 of its 37 rather than
+    /// 8, and the text that covers most of the window goes down 87 of its 218 rather than 48. The
+    /// two appearances do not do the same thing to the same pixels, and they are not meant to. In
+    /// light the ground goes grey and that is the signal; in dark the ground can barely move and
+    /// everything drawn on it dims by nearly half instead. Both read as "this is in front", which
+    /// is the only thing the dim has ever had to say.
+    public static let dimDark: Double = 0.40
+
+    /// The dim for one appearance.
+    public static func dim(isDark: Bool) -> Double {
+        isDark ? dimDark : dimLight
+    }
 
     /// The width to draw the card at in a window this wide.
     ///

@@ -97,6 +97,17 @@ enum Palette {
             : NSColor(white: 0, alpha: 0.04)
     }
 
+    /// The scrim the search panel puts over the window behind it.
+    ///
+    /// An appearance provider rather than two call sites, so it follows a switch between light and
+    /// dark without the panel being told about it, which is the same arrangement `hoverNSColor`
+    /// above and the title bar's paint both keep. It is black in both, and the two opacities are
+    /// `SearchPanelLayout`'s, where the measurement that forced two of them is written down.
+    static let panelScrim = Color(nsColor: NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        return NSColor(white: 0, alpha: SearchPanelLayout.dim(isDark: isDark))
+    })
+
     /// A selected row in a list that is not the key window's focus.
     ///
     /// Named rather than `unemphasizedSelectedContentBackgroundColor`, which is a neutral grey:
