@@ -284,7 +284,12 @@ struct SearchPanelResultsTests {
         #expect(listing.rows == listing.sections.flatMap(\.rows))
         #expect(listing.row(at: 1)?.id == "transcript:docs chapters")
         #expect(listing.row(at: 9) == nil)
-        #expect(listing.summary == "2 results")
+        // Two rows, and the footer says seven, which is the whole point of `SearchPanelSummary`:
+        // the second row is one workspace standing for six matches, so counting rows and counting
+        // what the chips count are two different questions. This used to say "2 results" under a
+        // chip saying seven.
+        #expect(listing.rows.count == 2)
+        #expect(listing.summary == "7 results")
     }
 
     /// Every row that names a workspace can be pushed into, archived ones included: what an
@@ -304,5 +309,69 @@ struct SearchPanelResultsTests {
         #expect(drillable["workspace:docs chapters"] == WorkspaceID("docs chapters"))
         #expect(drillable["workspace:docs import"] == WorkspaceID("docs import"))
         #expect(drillable["transcript:docs chapters"] == WorkspaceID("docs chapters"))
+    }
+}
+
+/// What the one line at the right of the footer says, and why it is not the row count.
+@Suite("Search panel summary")
+struct SearchPanelSummaryTests {
+    private func counts(workspaces: Int = 0, transcripts: Int = 0, archived: Int = 0) -> HomeScopeCounts {
+        var built = HomeScopeCounts()
+        built.workspaces = workspaces
+        built.transcripts = transcripts
+        built.archived = archived
+        return built
+    }
+
+    /// The bug this exists for: the chip said 3749 and the footer said 30, and neither was wrong.
+    /// A transcript row is one workspace folded out of many matches, so the two were counting
+    /// different things and nothing on the card said so.
+    @Test("a search answers the lit chip in the lit chip's own unit")
+    func theFooterAnswersTheChip() {
+        let found = counts(workspaces: 3, transcripts: 3_749)
+        #expect(SearchPanelSummary.searching(scope: .transcripts, counts: found) == "3749 matches")
+        #expect(SearchPanelSummary.searching(scope: .workspaces, counts: found) == "3 workspaces")
+        // `all` is workspaces plus matches, which is Home's definition and is two kinds of thing
+        // added together, so the vague noun is the only honest one for it.
+        #expect(SearchPanelSummary.searching(scope: .all, counts: found) == "3752 results")
+    }
+
+    @Test("one of anything is said in the singular")
+    func theSingular() {
+        #expect(SearchPanelSummary.searching(
+            scope: .workspaces, counts: counts(workspaces: 1)
+        ) == "1 workspace")
+        #expect(SearchPanelSummary.searching(
+            scope: .transcripts, counts: counts(transcripts: 1)
+        ) == "1 match")
+        #expect(SearchPanelSummary.rows(1) == "1 result")
+    }
+
+    /// Nothing to count is said by the card rather than by the footer. See `SearchPanelNothing`.
+    @Test("nothing found says nothing here")
+    func nothingIsSaidElsewhere() {
+        #expect(SearchPanelSummary.searching(scope: .all, counts: HomeScopeCounts()) == nil)
+        #expect(SearchPanelSummary.rows(0) == nil)
+        #expect(SearchPanelSummary.resting(shown: 0, of: 0) == nil)
+    }
+
+    /// The one place in the panel where a total really is withheld, and it had no number at all.
+    @Test("the resting list names the workspaces it is not showing")
+    func theRestingCap() {
+        #expect(SearchPanelSummary.resting(shown: 10, of: 43) == "10 of 43 workspaces")
+        // "10 of 10" is a worse sentence than "10 workspaces" and says nothing the first half did
+        // not, so the total is named only when it is bigger.
+        #expect(SearchPanelSummary.resting(shown: 10, of: 10) == "10 workspaces")
+        #expect(SearchPanelSummary.resting(shown: 1, of: 1) == "1 workspace")
+    }
+
+    /// A listing that says nothing about itself falls back to the plain row count, which is right
+    /// for the two lists that neither fold nor cap.
+    @Test("a plain list of rows counts its rows")
+    func thePlainCase() {
+        let listing = SearchPanelListing(sections: [
+            SearchPanelSection(id: "commands", title: nil, rows: []),
+        ])
+        #expect(listing.summary == nil)
     }
 }

@@ -83,7 +83,14 @@ public enum SearchPanelResting {
         // state nobody who builds this ever sees. The card says so rather than drawing an empty
         // rounded rectangle with a footer under it.
         return SearchPanelListing(
-            sections: sections, nothing: sections.isEmpty ? .nothingYet : nil
+            sections: sections,
+            // The one place in this panel where a total really is withheld: the two caps above
+            // mean a machine with forty-three live workspaces draws ten rows, and nothing used to
+            // say the other thirty-three were there. See `SearchPanelSummary.resting`.
+            summary: SearchPanelSummary.resting(
+                shown: waiting.count + opened.count, of: workspaces.count
+            ),
+            nothing: sections.isEmpty ? .nothingYet : nil
         )
     }
 

@@ -29,13 +29,23 @@ import BloomCore
 /// one, the window's name and three small controls: leaving that lit while everything under it
 /// goes down is exactly what the screenshot showed and it read as half a window.
 ///
-/// **The traffic lights are the one exception, in the paint and in the hit test alike.** A window
-/// that cannot be closed, zoomed or minimised while a search card is up would be a worse bug than
-/// the one this fixes, and a dimmed close button is a control saying it is unavailable when it is
-/// not. They are cut out of the dim with an even-odd fill and out of the hit test by
-/// `SearchPanelOverlayHost`, so a click there reaches AppKit exactly as it always did. How much
-/// air the cut-out leaves around them is `trafficLightPadding`, and it was judged against a
-/// picture.
+/// **The traffic lights are cut out of the HIT TEST and of nothing else, and the two halves of
+/// that are a decision each.** The window has to stay closable, zoomable and minimisable while a
+/// card is up, so `SearchPanelOverlayHost` answers nothing over them and the click reaches AppKit
+/// exactly as it always did. But they are painted over like everything else, because they are part
+/// of the window the panel is in front of. They were cut out of the paint as well for two
+/// versions, on the argument that a dimmed close button is a control claiming to be unavailable
+/// when it is not; the owner looked at that twice and did not want it, and he is right that the
+/// exception was louder than the thing it was protecting. The hole was the brightest object in an
+/// otherwise dimmed window, on the one corner nobody was looking at.
+///
+/// What that costs, said plainly because it is a real cost. AppKit draws the symbols in those
+/// buttons on hover, and the scrim is over the top, so the cross and the two dashes come up dimmed
+/// with everything else. Nothing is disturbed, because the buttons never learn about the scrim:
+/// their tracking area still gets the mouse, since the hit test passes through, and they still
+/// draw and still fire. A coloured button under a 22 to 40 per cent scrim also reads a little like
+/// an inactive window's grey, which is the one honest objection to this and is the owner's to
+/// weigh rather than mine.
 ///
 /// **How far the window goes down is `Palette.panelScrim`, and it is two numbers.** A black scrim
 /// has far less to take out of Bloom's dark ramp than out of its light one, so one opacity read as
@@ -66,7 +76,7 @@ struct SearchPanelWindowOverlay: View {
         GeometryReader { proxy in
             ZStack(alignment: .top) {
                 if panel.isOpen {
-                    dim(in: proxy.size)
+                    dim
                     card(inWindow: proxy.size.width)
                 }
             }
@@ -78,29 +88,20 @@ struct SearchPanelWindowOverlay: View {
         .environment(app)
     }
 
-    /// The dim, with a hole where the traffic lights are.
+    /// The dim, over the whole window and with nothing cut out of it.
     ///
-    /// One `Path` filled even-odd rather than a rectangle with a mask on it: the hole and the
-    /// ground are one shape, so there is no second view whose blend mode has to agree with the
-    /// first, and the rounded end of the cut-out is a `cornerSize` rather than a `Capsule` that
-    /// has to be positioned.
-    private func dim(in size: CGSize) -> some View {
-        Path { path in
-            path.addRect(CGRect(origin: .zero, size: size))
-            if let hole = geometry.trafficLightHole {
-                path.addRoundedRect(
-                    in: hole,
-                    cornerSize: CGSize(width: hole.height / 2, height: hole.height / 2)
-                )
-            }
-        }
-        .fill(Palette.panelScrim, style: FillStyle(eoFill: true))
-        // The click outside, taken here rather than by the window under it. See the head of this
-        // file for what that is protecting.
-        .contentShape(Rectangle())
-        .onTapGesture { panel.close(app: app) }
-        .accessibilityHidden(true)
-        .transition(.opacity)
+    /// It carried a hole where the traffic lights are for two versions. The hole is gone from the
+    /// paint and kept in the hit test, and the head of this file says why the two are not the same
+    /// question.
+    private var dim: some View {
+        Rectangle()
+            .fill(Palette.panelScrim)
+            // The click outside, taken here rather than by the window under it. See the head of
+            // this file for what that is protecting.
+            .contentShape(Rectangle())
+            .onTapGesture { panel.close(app: app) }
+            .accessibilityHidden(true)
+            .transition(.opacity)
     }
 
     /// The card itself, centred on the window because that is what this view is the size of.
@@ -161,20 +162,6 @@ final class SearchPanelWindowGeometry {
     /// the strip itself is built at.
     private(set) var titleBarHeight: CGFloat = 0
 
-    /// The window's frame height, held so the flip below needs nothing from the view drawing it.
-    private(set) var windowHeight: CGFloat = 0
-
-    /// The same rectangle in SwiftUI's space: down from the top of the window.
-    var trafficLightHole: CGRect? {
-        guard let trafficLights else { return nil }
-        return CGRect(
-            x: trafficLights.minX,
-            y: windowHeight - trafficLights.maxY,
-            width: trafficLights.width,
-            height: trafficLights.height
-        )
-    }
-
     /// Called by `WindowChrome` with the height it measured for the title bar strip.
     func setTitleBarHeight(_ height: CGFloat) {
         guard titleBarHeight != height else { return }
@@ -182,9 +169,9 @@ final class SearchPanelWindowGeometry {
     }
 
     /// Called by the overlay whenever the window moves under it.
-    func setChrome(windowHeight: CGFloat, trafficLights: CGRect?) {
-        if self.windowHeight != windowHeight { self.windowHeight = windowHeight }
-        if self.trafficLights != trafficLights { self.trafficLights = trafficLights }
+    func setChrome(trafficLights: CGRect?) {
+        guard self.trafficLights != trafficLights else { return }
+        self.trafficLights = trafficLights
     }
 }
 
@@ -194,26 +181,22 @@ final class SearchPanelWindowGeometry {
 /// belongs to this overlay at all, and whether a press on it moves the window. Both are wrong by
 /// default for a view that covers the whole window all the time.
 final class SearchPanelOverlayHost: NSHostingView<SearchPanelWindowOverlay> {
-    /// The air left around the three buttons, so the cut-out is a rounded slot they sit in rather
-    /// than three rectangles traced tightly enough to catch a click on the edge of one.
+    /// The air left around the three buttons in the HIT TEST hole, so a click at the edge of a
+    /// circle still reaches it rather than landing on the overlay and closing the panel.
     ///
-    /// **Three, down from six, and it was judged against a picture rather than argued.** At six
-    /// the undimmed slot was 71 by 25 around three 14 point circles, and on a light window with an
-    /// empty sidebar behind it that read as a bright pill somebody had drawn on the corner: the
-    /// loudest thing in the frame, on the one control the dim is not about. At three it is 65 by
-    /// 19, which is a button's own width of air rather than half as much again, and it stops being
-    /// a shape and starts being the absence of one. Lower than three would begin to clip the
-    /// pointer's reach at the edge of a circle, which is the failure this padding exists to
-    /// prevent, so this is the bottom of the useful range rather than a step on the way down.
+    /// It used to size a hole in the paint as well and was tuned against a capture for that: six
+    /// points read as a bright pill drawn on the corner, three as a halo. The paint has no hole
+    /// any more, so the number is only ever asked what the pointer can reach, and three points of
+    /// slop around a 14 point circle is generous for that and invisible either way.
     ///
-    /// **How to measure it off a capture, since both of those numbers were.** The obvious detector
-    /// is wrong and cost an hour: asking which pixels differ from the dim selects every antialiased
-    /// glyph in a title bar that is dithered rather than flat. The slot is a hole rather than a
-    /// mark, so the honest question is which pixels are the ground with NO scrim over them. Count
-    /// the ones within about 6 of `#F1F5F6` in light or 3 of `#0E202D` in dark, inside the top left
-    /// 240 by 120 points, and take the bounding box. Nothing else in that corner sits on the
-    /// undimmed ground, and antialiasing never lands on it in bulk, so it needs no tuning: it read
-    /// 72 by 26 at six points of padding and 66 by 20 at three, on every capture, first time.
+    /// **How to measure a hole in a capture, kept because it was hard won and the next person to
+    /// draw one will want it.** The obvious detector is wrong: asking which pixels differ from the
+    /// dim selects every antialiased glyph in a title bar that is dithered rather than flat. A hole
+    /// is an absence, so the question is which pixels are the ground with NO scrim over them.
+    /// Count the ones within about 6 of `#F1F5F6` in light or 3 of `#0E202D` in dark, inside the
+    /// top left 240 by 120 points, and take the bounding box. Nothing else in that corner sits on
+    /// the undimmed ground and antialiasing never lands on it in bulk, so it needs no tuning: it
+    /// read 72 by 26 at six points of padding and 66 by 20 at three, on every capture, first time.
     private static let trafficLightPadding: CGFloat = 3
 
     /// Nothing at all while the panel is closed.
@@ -260,7 +243,7 @@ final class SearchPanelOverlayHost: NSHostingView<SearchPanelWindowOverlay> {
         // must NOT respect: it is the region it exists to cover.
         safeAreaRegions = []
         guard let window else {
-            SearchPanelWindowGeometry.shared.setChrome(windowHeight: 0, trafficLights: nil)
+            SearchPanelWindowGeometry.shared.setChrome(trafficLights: nil)
             return
         }
         if !isWatchingWindow {
@@ -313,16 +296,14 @@ final class SearchPanelOverlayHost: NSHostingView<SearchPanelWindowOverlay> {
         self.frame = frame.bounds
     }
 
-    /// The two numbers the overlay measures for itself, off the frame view. The third, the title
-    /// bar's height, is `WindowChrome`'s and is written down on the property.
+    /// Where the window buttons are, measured off the frame view. The title bar's height is the
+    /// other number the overlay needs and it is `WindowChrome`'s, for the reason on the property.
     private func publishGeometry() {
         let geometry = SearchPanelWindowGeometry.shared
         guard let window, let frame = superview else {
-            geometry.setChrome(windowHeight: 0, trafficLights: nil)
+            geometry.setChrome(trafficLights: nil)
             return
         }
-        let height = frame.bounds.height
-
         let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
             .compactMap { window.standardWindowButton($0) }
             .filter { !$0.isHidden }
@@ -333,6 +314,6 @@ final class SearchPanelOverlayHost: NSHostingView<SearchPanelWindowOverlay> {
             }
             lights = union.insetBy(dx: -Self.trafficLightPadding, dy: -Self.trafficLightPadding)
         }
-        geometry.setChrome(windowHeight: height, trafficLights: lights)
+        geometry.setChrome(trafficLights: lights)
     }
 }

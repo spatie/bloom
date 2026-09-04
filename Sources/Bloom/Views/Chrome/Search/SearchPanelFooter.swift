@@ -35,6 +35,12 @@ struct SearchPanelFooter: View {
                 Text(summary)
                     .font(Typo.caption)
                     .foregroundStyle(Palette.textTertiary)
+                    // One line, always. The keys on the left are four fixed pairs and cannot
+                    // compress, so at the narrow end of `SearchPanelLayout` a long count would
+                    // wrap this strip to two lines rather than shorten itself. Nothing said here
+                    // is long enough today: measured at 560, the keys take about 330 points of the
+                    // 540 available and the longest count is under 90.
+                    .lineLimit(1)
             }
         }
         .padding(.horizontal, Metrics.inset)

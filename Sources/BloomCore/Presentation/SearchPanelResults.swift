@@ -146,6 +146,10 @@ public enum SearchPanelResults {
             sections: sections,
             counts: counts,
             isSearching: true,
+            // The lit chip's own number, in the lit chip's own unit. The footer used to count rows
+            // while the chips counted matches, and nothing on the card said they were answering
+            // different questions. See `SearchPanelSummary`.
+            summary: SearchPanelSummary.searching(scope: scope, counts: counts),
             nothing: sections.isEmpty ? .noMatch(query) : nil
         )
     }
