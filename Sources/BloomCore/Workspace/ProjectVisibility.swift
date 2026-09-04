@@ -4,15 +4,22 @@ import Foundation
 ///
 /// ## What hiding is
 ///
-/// A decluttering of one list. A project with nothing running in it this month is still a project
-/// the owner wants, and the sidebar is a column 260 points wide that has to be scannable at a
-/// glance. Hiding takes a project's header and its workspace rows out of that column and does
-/// nothing else at all.
+/// A decluttering of the lists that are about browsing. A project with nothing running in it this
+/// month is still a project the owner wants, and the sidebar is a column 260 points wide that has
+/// to be scannable at a glance. Hiding takes a project's header and its workspace rows out of that
+/// column, and out of what the search panel answers over, and does nothing else at all.
 ///
 /// **It is emphatically not archiving, and not closing.** The workspaces of a hidden project are
 /// untouched: their agents keep running, their turns keep landing, their notifications keep
-/// arriving, and they keep appearing on Home, in Search, in the menu bar summary, in the Shortcuts
-/// entities and in the `bloom://` links. Anything that would make a running agent disappear
+/// arriving, and they keep appearing on Home, in the menu bar summary, in the Shortcuts entities
+/// and in the `bloom://` links.
+///
+/// Search used to be in that list and is not any more, and the change is worth reading rather than
+/// noticing. The owner asked for the panel to answer over live, visible work by default, so it
+/// reads the same preference this file names, and a hidden project's workspaces are one switch
+/// away there exactly as they are in the sidebar. Nothing about the paragraph above is weakened by
+/// it: the point was that hiding must never be a way to LOSE work, and a list you can widen from a
+/// switch you already own is not that. See `SearchPanelReach`. Anything that would make a running agent disappear
 /// because a list was tidied would be a way to lose work, and this is a view preference. Two
 /// consequences follow and are deliberate: hiding the project of the workspace on screen does not
 /// change the selection or close anything, and the sidebar can be showing a project the pane is

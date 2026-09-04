@@ -34,14 +34,22 @@ public enum SearchPanelResting {
     ///   - activity: which agents are running and which have stopped to ask. Handed in for the
     ///     reason `HomeActivity` gives: it lives in the app's memory and moves without the row
     ///     moving.
+    ///   - reach: how far the panel is allowed to look. The resting list never holds archived
+    ///     work, so only the project half of it applies here, and it applies for the reason the
+    ///     search half does: the two lists have to agree about what exists, or the resting list
+    ///     would offer a workspace that typing its name then refuses to find.
     public static func build(
         workspaces: [Workspace],
         repos: [Repo],
-        activity: HomeActivity
+        activity: HomeActivity,
+        reach: SearchPanelReach = .live
     ) -> SearchPanelListing {
         var byID: [RepoID: Repo] = [:]
         byID.reserveCapacity(repos.count)
         for repo in repos { byID[repo.id] = repo }
+
+        let reachable = Set(reach.projects(repos).map(\.id))
+        let workspaces = workspaces.filter { reachable.contains($0.repoID) }
 
         // Most recent first in both sections, which is the order every other list of workspaces in
         // the app is in. Sorted once and split, rather than sorted twice.
