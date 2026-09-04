@@ -1,3 +1,4 @@
+import Observation
 import SwiftUI
 import BloomCore
 
@@ -23,14 +24,20 @@ struct AgentQuestionCard: View {
     var decision: String?
     var onAnswer: (PermissionDecision) -> Void = { _ in }
 
-    /// The chosen option labels, per question. A set even for a single-select question, so one code
-    /// path draws both and the difference is only in what a tap does.
-    @State private var chosen: [String: Set<String>] = [:]
-    /// What was typed into the Other row, per question.
-    @State private var other: [String: String] = [:]
-    /// Which questions have the Other row showing, per question. Separate from whether anything is
-    /// typed in it, so an empty Other row stays open while somebody thinks.
-    @State private var isWritingOther: Set<String> = []
+    /// The half-finished answer: what is ticked, what is typed, and which Other rows are open.
+    ///
+    /// **Not `@State`.** A transcript row cannot hold any: the table recycles one cell per row and
+    /// replaces its root view, so a card that scrolls out of the visible rect and back, or that is
+    /// on screen when the table reloads, loses everything held in the view. That is the bug this
+    /// card had, and `AgentQuestionDraft` documents it in full.
+    private var box: AgentQuestionDraftBox { AgentQuestionDraftStore.box(for: ask) }
+
+    /// The questions whose Other row was opened by THIS drawing of the card, and the one thing that
+    /// should still be lost when the cell is rebuilt. Now that the draft survives, an open Other row
+    /// comes back on every rebuild and on every scroll back into view, and taking focus there would
+    /// pull the keyboard out of the composer somebody is typing in. A rebuilt card gets a fresh
+    /// empty set and so takes no focus.
+    @State private var openedOther: Set<String> = []
     @FocusState private var otherFocus: String?
 
     /// The questions this card is about. See `AgentQuestionCache`, which is why asking for them
@@ -135,7 +142,7 @@ struct AgentQuestionCard: View {
     }
 
     private func optionRow(_ question: AgentQuestion, _ option: AgentQuestion.Option) -> some View {
-        let isChosen = chosen[question.id]?.contains(option.label) ?? false
+        let isChosen = box.draft.chosen[question.id]?.contains(option.label) ?? false
 
         return VStack(alignment: .leading, spacing: Metrics.spacingTight) {
             Button {
@@ -211,7 +218,7 @@ struct AgentQuestionCard: View {
     /// The free text row every question gets. See the head of this file for why.
     @ViewBuilder
     private func otherRow(_ question: AgentQuestion) -> some View {
-        if isWritingOther.contains(question.id) {
+        if box.draft.isWritingOther.contains(question.id) {
             HStack(alignment: .firstTextBaseline, spacing: TranscriptLayout.glyphGap) {
                 // Drawn chosen: the words being typed are the selection.
                 markView(
@@ -222,8 +229,8 @@ struct AgentQuestionCard: View {
                 TextField(
                     "Say what you would rather do…",
                     text: Binding(
-                        get: { other[question.id] ?? "" },
-                        set: { other[question.id] = $0 }
+                        get: { box.draft.other[question.id] ?? "" },
+                        set: { box.draft.other[question.id] = $0 }
                     ),
                     axis: .vertical
                 )
@@ -232,8 +239,12 @@ struct AgentQuestionCard: View {
                 .lineLimit(1...4)
                 .focused($otherFocus, equals: question.id)
                 .disabled(!isOpen)
-                // Focus moves here when the row appears, which it only does by being asked for.
-                .task { otherFocus = question.id }
+                // Focus moves here when the row appears, but only when it was this drawing of the
+                // card that asked for it. See `openedOther`.
+                .task {
+                    guard openedOther.contains(question.id) else { return }
+                    otherFocus = question.id
+                }
                 // Return sends, because the field is the last thing anybody touches before the
                 // answer goes and reaching for the mouse to finish a sentence is not how a Mac
                 // works. "Send answer" carries `.defaultAction`, but this field is on a vertical
@@ -253,10 +264,10 @@ struct AgentQuestionCard: View {
             .focusedValue(\.isTypingProse, otherFocus != nil)
         } else if isOpen {
             Button {
-                isWritingOther.insert(question.id)
-                // Answering in words replaces whatever was ticked: the two would otherwise be sent
-                // joined together as one string, which says two things at once.
-                chosen[question.id] = []
+                // Recorded before the draft, because it is what tells the row that appears next
+                // that this card is the one to take focus.
+                openedOther.insert(question.id)
+                box.draft.writeOther(on: question)
             } label: {
                 rowLabel(
                     mark: markName(isChosen: false, multiSelect: question.multiSelect),
@@ -326,32 +337,14 @@ struct AgentQuestionCard: View {
             + "and carry on without asking again."
 
     private var isComplete: Bool {
-        AgentQuestionnaire.isComplete(questions, answers: answers)
+        box.draft.isComplete(questions)
     }
 
     /// What each question would be answered with, as the protocol files it: one string per
-    /// question, keyed by the question's own text.
+    /// question, keyed by the question's own text. The rule itself is in the core, where a test
+    /// can reach it.
     private var answers: [String: String] {
-        var answers: [String: String] = [:]
-
-        for question in questions {
-            let typed = (other[question.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if !typed.isEmpty {
-                answers[question.id] = typed
-                continue
-            }
-
-            // In the order the asker offered them, not the order they were tapped: the asker put
-            // its recommendation first and an answer that reorders them says something it did not.
-            let picked = question.options.map(\.label).filter { chosen[question.id]?.contains($0) ?? false }
-
-            if !picked.isEmpty {
-                answers[question.id] = AgentQuestionnaire.joined(picked)
-            }
-        }
-
-        return answers
+        box.draft.answers(to: questions)
     }
 
     private func send() {
@@ -360,20 +353,7 @@ struct AgentQuestionCard: View {
     }
 
     private func toggle(_ question: AgentQuestion, _ label: String) {
-        // Typing and ticking are two answers to one question, so choosing an option puts the words
-        // away rather than sending both.
-        isWritingOther.remove(question.id)
-        other[question.id] = ""
-
-        var set = chosen[question.id] ?? []
-
-        if question.multiSelect {
-            if set.contains(label) { set.remove(label) } else { set.insert(label) }
-        } else {
-            set = set.contains(label) ? [] : [label]
-        }
-
-        chosen[question.id] = set
+        box.draft.toggle(label, on: question)
     }
 
     /// A circle for one of many, a square for any of many. The shapes AppKit uses for a radio
@@ -401,7 +381,7 @@ struct AgentQuestionCard: View {
         guard Self.forcesStates, isOpen else { return }
         for question in questions {
             if let first = question.options.first {
-                chosen[question.id] = [first.label]
+                box.draft.chosen[question.id] = [first.label]
             }
         }
         #endif
@@ -482,14 +462,10 @@ private struct QuestionOptionStyle: ButtonStyle {
 /// `AgentQuestionnaire.questions(in:)` walks the tool input and builds a question and its options
 /// out of it, and the card asks for the answer from `body`, from its header, from the completeness
 /// check, from the answers it would send and from the debug capture: six to eight reads in a pass.
-/// The card also holds three pieces of `@State`, so typing a word into an Other row re-runs all of
-/// them per keystroke.
+/// The card also reads its half-finished answer on every pass, so typing a word into an Other row
+/// re-runs all of them per keystroke.
 ///
-/// Keyed on the request id and the call it is about, which is what the CLI uses to identify one
-/// control request and what the answer is posted back against. The input behind that pair is what
-/// the agent sent once; nothing rewrites it. Both halves, because a request id is only promised to
-/// be unique within the session that issued it and a window holds several sessions at once, where a
-/// `tool_use` id is minted per call.
+/// Keyed through `askKey(_:)`, on the input that the agent sent once and that nothing rewrites.
 @MainActor
 private enum AgentQuestionCache {
     /// A transcript holds few of these, and a card that has scrolled away can afford to parse
@@ -501,8 +477,7 @@ private enum AgentQuestionCache {
     }()
 
     static func questions(in ask: PermissionAsk) -> [AgentQuestion] {
-        // A separator no id can hold, so two pairs cannot be spelled the same way round.
-        let key = "\(ask.requestID)\u{1}\(ask.toolUseID)" as NSString
+        let key = askKey(ask) as NSString
         if let cached = values.object(forKey: key) { return cached.value }
 
         let value = AgentQuestionnaire.questions(in: ask.input)
@@ -517,4 +492,62 @@ private final class AgentQuestionsBox {
     let value: [AgentQuestion]
 
     init(_ value: [AgentQuestion]) { self.value = value }
+}
+
+/// The key one ask is filed under, spelled once so the two stores below cannot disagree about it.
+///
+/// The request id and the call it is about: what the CLI uses to identify one control request, and
+/// what an answer is posted back against. Both halves, because a request id is only promised to be
+/// unique within the session that issued it and a window holds several sessions at once, where a
+/// `tool_use` id is minted per call. The separator is a character no id can hold, so two pairs
+/// cannot be spelled the same way round.
+private func askKey(_ ask: PermissionAsk) -> String {
+    "\(ask.requestID)\u{1}\(ask.toolUseID)"
+}
+
+/// Where a card's half-finished answer lives, because the card cannot hold it.
+///
+/// A transcript row is an `NSTableView` cell fetched under one shared identifier, so a row leaving
+/// the visible rect hands its cell to another row, and the cell replaces its hosting view's root
+/// view whenever the content key or the generation moves. That throws away the `@State` of what was
+/// in it, and while a session streams it happens constantly: the card scrolls out and back, the
+/// table reloads for a replaced session, the row environment moves. Ticks and typed words were
+/// being wiped out from under somebody answering a four question card. See `AgentQuestionDraft`.
+///
+/// One box per ask rather than one dictionary of drafts, because the box is `@Observable`: a
+/// keystroke in one card's Other row invalidates that card and nothing else on screen.
+@MainActor
+private enum AgentQuestionDraftStore {
+    /// Bounded, and evicted in the order the keys arrived. Not an `NSCache` like the parse cache
+    /// beside it, because that purges whenever it likes and what it would purge here is somebody's
+    /// unsent answer. What an eviction costs is a settled card, sixty-four asks back, drawing its
+    /// ticks again as unticked; a card being answered is one of the newest keys here, so it is
+    /// never what goes.
+    private static let limit = 64
+
+    private static var boxes: [String: AgentQuestionDraftBox] = [:]
+    private static var order: [String] = []
+
+    static func box(for ask: PermissionAsk) -> AgentQuestionDraftBox {
+        let key = askKey(ask)
+
+        if let box = boxes[key] { return box }
+
+        let box = AgentQuestionDraftBox()
+        boxes[key] = box
+        order.append(key)
+
+        while order.count > limit {
+            boxes.removeValue(forKey: order.removeFirst())
+        }
+
+        return box
+    }
+}
+
+/// One ask's draft, in a reference type so every rebuild of the card gets the same one back.
+@MainActor
+@Observable
+private final class AgentQuestionDraftBox {
+    var draft = AgentQuestionDraft()
 }
