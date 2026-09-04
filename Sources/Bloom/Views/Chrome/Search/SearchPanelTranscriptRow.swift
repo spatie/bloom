@@ -50,14 +50,14 @@ struct SearchPanelTranscriptRow: View {
 
                 Spacer(minLength: Metrics.spacingWide)
             }
-            .padding(.horizontal, Metrics.inset)
+            .searchPanelRowPadding()
             .padding(.vertical, Metrics.spacingSmall)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint("Opens the workspace at this point in the transcript.")
-        .rowBackground(isSelected: isSelected, isHovered: isHovered, isFocused: true)
+        .searchPanelRowPlate(isSelected: isSelected, isHovered: isHovered)
         .onHoverChange { hovering in
             isHovered = hovering
             if hovering { onHover() }

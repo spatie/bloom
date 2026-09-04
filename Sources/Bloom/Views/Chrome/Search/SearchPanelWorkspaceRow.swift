@@ -35,15 +35,14 @@ struct SearchPanelWorkspaceRow: View {
 
                 Spacer(minLength: Metrics.spacingWide)
             }
-            .padding(.horizontal, Metrics.inset)
+            .searchPanelRowPadding()
             .padding(.vertical, Metrics.spacingSmall)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
-        // Focused, because the panel's field really does hold the keyboard while the arrows walk
-        // this list, which is the one case AppKit paints in the accent.
-        .rowBackground(isSelected: isSelected, isHovered: isHovered, isFocused: true)
+        // Inset from the card's edges rather than run to them. See `SearchPanelRowPlate`.
+        .searchPanelRowPlate(isSelected: isSelected, isHovered: isHovered)
         .onHoverChange { hovering in
             isHovered = hovering
             if hovering { onHover() }

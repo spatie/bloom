@@ -34,13 +34,13 @@ struct SearchPanelFallbackRow: View {
                     .font(Typo.caption)
                     .foregroundStyle(quiet)
             }
-            .padding(.horizontal, Metrics.inset)
+            .searchPanelRowPadding()
             .padding(.vertical, Metrics.spacingSmall)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(fallback.title)
-        .rowBackground(isSelected: isSelected, isHovered: isHovered, isFocused: true)
+        .searchPanelRowPlate(isSelected: isSelected, isHovered: isHovered)
         .onHoverChange { hovering in
             isHovered = hovering
             if hovering { onHover() }

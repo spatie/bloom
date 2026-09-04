@@ -1114,6 +1114,60 @@ struct Chip: View {
     }
 }
 
+/// A number on a control, drawn in a round.
+///
+/// **Bloom had no way of doing this before, which is why it is here rather than in the one view
+/// that wanted it.** Home's scope strip prints its counts as part of a segmented control's own
+/// titles, which is a string and not a badge; the sidebar prints none at all; `PullRequestBadge`
+/// is a control with an arrow on it that opens GitHub. The search panel's chips are the first
+/// place in the app where a number sits ON a control and is read rather than pressed, and the
+/// owner asked for it in a round, so the round lives beside `Chip` where the next surface that
+/// needs one will find it.
+///
+/// **Its width is reserved for three digits and does not move.** The counts change on nearly every
+/// keystroke, and a badge sized to its own content takes the chip, the row of chips and the eye
+/// with it: the owner's report was that the whole control jumped while he typed. Three digits of
+/// monospaced figures are laid out behind the number and hidden, so one, ten and a hundred are the
+/// same width and only a thousand grows.
+///
+/// **A nought is drawn rather than left out.** `HomeScopeCounts.badge` argues the other way for
+/// Home's resting strip and is right about it there: a strip that says "Needs you 0, Running 0"
+/// most of the time teaches the eye to skip the numbers. This is the other case. The badge only
+/// appears while a search is running, where "Transcripts 0" is a real answer and the reason not to
+/// press that chip, and a badge that disappeared at nought would be a fourth thing moving while
+/// somebody types.
+struct CountBadge: View {
+    var count: Int
+    /// Whether the control under it is drawn in the accent, which the ink and the fill both answer
+    /// to. Passed rather than read from `isOnEmphasizedSelection`, because a chip paints its own
+    /// selection rather than sitting inside a selected row.
+    var isOnSelection = false
+
+    /// What the badge is always at least as wide as. Three digits, in figures that are all one
+    /// width, so nothing under a thousand moves it.
+    private static let reserved = "000"
+
+    var body: some View {
+        ZStack {
+            Text(verbatim: Self.reserved)
+                .monospacedDigit()
+                .hidden()
+            Text(count, format: .number)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .font(Typo.micro)
+        .foregroundStyle(isOnSelection ? Palette.selectedEmphasizedText : Palette.textTertiary)
+        .padding(.horizontal, Metrics.chipInsetH)
+        .padding(.vertical, Metrics.spacingHair)
+        .background(
+            isOnSelection ? Palette.selectedEmphasizedText.opacity(0.2) : Palette.hover,
+            in: Capsule()
+        )
+        .accessibilityHidden(true)
+    }
+}
+
 /// `+118 -4` as seen next to a workspace in the sidebar.
 struct DiffStatLabel: View {
     var additions: Int
