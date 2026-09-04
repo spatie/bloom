@@ -132,6 +132,7 @@ struct ComposerView: View {
                 onChange: apply(controls:),
                 context: transcript.contextUsage,
                 isRunning: transcript.isRunning,
+                queues: transcript.queuesNextMessage,
                 canSend: canSend,
                 project: transcript.cwd,
                 onAttach: actions.attach,

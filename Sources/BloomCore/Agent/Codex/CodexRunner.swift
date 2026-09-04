@@ -128,6 +128,12 @@ public actor CodexRunner: SessionRunner {
     /// Model, effort, approval policy and sandbox all travel **with the turn** rather than with
     /// the process, which is what makes changing a composer chip mid chat take effect on the next
     /// turn without restarting anything. Claude Code cannot do that: its equivalents are argv.
+    ///
+    /// **A turn that is already open takes the words instead of a second turn beside it.** This
+    /// backend has a call for exactly that, `turn/steer`, and what `turn/start` does to a thread
+    /// with an open turn is not measured, so it is not the thing to find out with somebody's
+    /// sentence. See `AgentKind.acceptsMidTurnMessage` for why a message reaches here mid turn at
+    /// all, and `steer(_:threadID:turnID:on:)` for the fall back when the turn has just ended.
     public func send(_ text: String, recording: Data? = nil) async throws {
         await applyContextWindowChange()
         let client = try await connected()
@@ -140,6 +146,18 @@ public actor CodexRunner: SessionRunner {
             await persist(kind: .crew, payload: recording)
         } else {
             await persist(kind: .user, payload: Self.userPayload(text))
+        }
+
+        // Absorbed into the running turn, so there is no new turn id to hold and no state to
+        // move: `turnStarted` is `unchanged` from `running` anyway. See `SessionLifecycle`.
+        //
+        // `steerableTurnID` rather than `turnID`, and the difference is a turn somebody stopped.
+        // Asked rather than left to the steer failing, because a state has to be guarded by asking:
+        // a turn the server has been told to abandon is not a turn a message belongs in, whatever
+        // the server answers about it.
+        if let turnID = handle.steerableTurnID,
+           await steer(text, threadID: threadID, turnID: turnID, on: client) {
+            return
         }
 
         let turn = try await client.startTurn(
@@ -547,6 +565,31 @@ public actor CodexRunner: SessionRunner {
         await save(session)
     }
 
+    /// Put the words into the turn that is already running, and say whether they landed.
+    ///
+    /// **A miss is not a failure, it is a turn that ended under the read.** `expectedTurnId` is a
+    /// precondition on this wire, so the server refuses a steer for a turn that is no longer the
+    /// active one, and the message wants an ordinary `turn/start` after all. `send` then carries
+    /// on down the path it always took.
+    ///
+    /// **This is a race guard and not a state guard, and the difference cost a regression.** It
+    /// only fires for a turn that finished between `handle.steerableTurnID` being read and this
+    /// request landing, because `end()` runs on the actor and this call suspends. A turn somebody
+    /// STOPPED is a state rather than a race: the id is still there, the server may well take the
+    /// steer, and nothing here would have said no. That is what `steerableTurnID` asks, before
+    /// this is reached.
+    private func steer(
+        _ text: String, threadID: String, turnID: String, on client: CodexClient
+    ) async -> Bool {
+        do {
+            _ = try await client.steerTurn(threadID: threadID, turnID: turnID, input: [.text(text)])
+            return true
+        } catch {
+            Self.log.info("a message missed the turn it was steered into, so it starts one")
+            return false
+        }
+    }
+
     /// Say why, in the only place this protocol has room for it.
     ///
     /// An approval is answered with a word: `accept`, `decline`, `cancel`. There is no field for
@@ -707,6 +750,24 @@ private final class TurnHandle: Sendable {
     private let state = Mutex(State())
 
     var turnID: String? { state.withLock(\.current) }
+
+    /// The turn a message may be **steered into**, which is one that is open and has not been
+    /// stopped.
+    ///
+    /// **A stopped turn keeps its id for a moment and is over all the same.** `end()` runs on the
+    /// `turn/completed` the interrupt produces, so between `cancelNow` and that notification
+    /// arriving `current` still names a turn nobody is running. Steering into it is the wrong call
+    /// whatever the server answers, and it cost the one thing Stop is for: the next message went
+    /// into the dead turn instead of starting a new one on the same connection, which is what
+    /// keeps the grants the person has already given. `CodexRunnerTests`
+    /// `stopInterruptsTheTurnAndLeavesTheServerRunning` is that bug written down, at one handshake
+    /// and two turns.
+    ///
+    /// Both fields under one lock, which is the whole reason this is a `Mutex<State>`: reading
+    /// them separately is two answers that can disagree about the same instant.
+    var steerableTurnID: String? {
+        state.withLock { $0.cancelled ? nil : $0.current }
+    }
 
     var wasCancelled: Bool { state.withLock(\.cancelled) }
 

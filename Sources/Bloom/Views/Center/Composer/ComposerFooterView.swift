@@ -14,7 +14,11 @@ struct ComposerFooterView: View {
     /// anything about the window. Absent rather than zero: a gauge reading 0% would be a claim.
     /// Always nil in the create window, where there is not yet anything to report.
     var context: ContextWindowUsage?
+    /// Whether a turn is running, which is what decides whether Stop is drawn.
     var isRunning: Bool = false
+    /// Whether Send would queue the message rather than hand it over. Not the same question as
+    /// `isRunning` any more: see `ComposerSendButton.queues`.
+    var queues: Bool = false
     var canSend: Bool
     /// What the button at the end of the row does. See `ComposerIntent`.
     var intent: ComposerIntent = .send
@@ -303,7 +307,7 @@ struct ComposerFooterView: View {
 
             ComposerSendButton(
                 intent: intent,
-                isRunning: isRunning,
+                queues: queues,
                 canSend: canSend,
                 onSend: onSend
             )

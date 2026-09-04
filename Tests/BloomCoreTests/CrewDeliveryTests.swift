@@ -263,3 +263,38 @@ struct CrewStopTests {
         #expect(started == .success("reader"))
     }
 }
+
+/// **What `agent_say` promises the caller about when the words will be read.** It used to say the
+/// message would be read when the current turn ended, which stopped being true the moment two of
+/// the four backends began taking a message into the turn they were running. A model told to wait
+/// for a wait that is not happening either polls or gives up, so the sentence is pinned here.
+@Suite("What a crew message's caller is told about when it lands")
+struct CrewDeliverySentenceTests {
+    @Test("a backend that takes a message mid turn is not described as making the caller wait")
+    func midTurnBackendsPromiseNoWait() {
+        for agent in AgentKind.allCases where agent.acceptsMidTurnMessage {
+            let sentence = Crew.deliverySentence(to: agent)
+            #expect(sentence.contains("inside the turn it is running"))
+            #expect(!sentence.contains("when that turn ends"))
+        }
+    }
+
+    @Test("a backend that cannot still says so, because there the wait is real")
+    func otherBackendsStillNameTheTurn() {
+        for agent in AgentKind.allCases where !agent.acceptsMidTurnMessage {
+            #expect(
+                Crew.deliverySentence(to: agent)
+                    == "If it is mid turn it will read this when that turn ends."
+            )
+        }
+    }
+
+    @Test("every backend gets a sentence, and it is one sentence")
+    func everyBackendSpeaks() {
+        for agent in AgentKind.allCases {
+            let sentence = Crew.deliverySentence(to: agent)
+            #expect(!sentence.isEmpty)
+            #expect(sentence.hasSuffix("."))
+        }
+    }
+}

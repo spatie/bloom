@@ -32,7 +32,11 @@ struct PendingTurnRowView: View {
     /// which is where it was: between two bubbles it read as a caption on the one below it, or as
     /// a divider somebody had left in. At the foot of the run it reads as what it is, which is a
     /// note about everything above it.
-    var hold: DeliveryHold?
+    ///
+    /// The sentence rather than the hold, because which of them a hold produces depends on the
+    /// chat's backend and a row is the wrong place to be asking that. `TranscriptModel.holdSentence`
+    /// is where it is worked out, off the same `DeliveryHold` the drain reads.
+    var holdSentence: String?
     /// Whether the message is at the front of an idle queue after a failed start.
     var canRetry = false
     /// Attempts this queued message again without adding a duplicate to the queue.
@@ -261,7 +265,7 @@ struct PendingTurnRowView: View {
     @ViewBuilder
     private var caption: some View {
         HStack(spacing: Metrics.gutter) {
-            if let sentence = hold?.sentence {
+            if let sentence = holdSentence {
                 Text(sentence)
                     .foregroundStyle(Palette.textTertiary)
             }

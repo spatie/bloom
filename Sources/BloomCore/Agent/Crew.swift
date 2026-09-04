@@ -123,6 +123,27 @@ public enum Crew {
         }
     }
 
+    /// What `agent_say` and `workspace_send` tell the caller about when the words will be read.
+    ///
+    /// **The old sentence promised a wait that no longer happens.** It said "If it is mid turn it
+    /// will read it when that turn ends", which was true while a running turn held every queue.
+    /// Two of the four backends take a message into the turn they are running, so the caller was
+    /// being told to expect a delay it will not see, and a model told to wait is a model that
+    /// polls or gives up. Here rather than in `WorkspaceModel` so the suite can hold it, for the
+    /// reason `DeliveryHold.sentence(on:)` is in the core.
+    ///
+    /// The clause about something being queued in front of it is the honest hedge, and it is
+    /// deliberately not spelled out into the three things that could be: a setup script, an
+    /// unanswered permission question, or simply an older message. `workspace_list` names each of
+    /// those in `hold_note`, and this is a confirmation that the words were taken rather than a
+    /// status report on the chat.
+    public static func deliverySentence(to agent: AgentKind) -> String {
+        agent.acceptsMidTurnMessage
+            ? "It reads this inside the turn it is running, or straight away if it is idle, "
+                + "unless something is queued in front of it."
+            : "If it is mid turn it will read this when that turn ends."
+    }
+
     /// The line Bloom puts in the orchestrator's chat when one of its subagents stops.
     ///
     /// **This is the whole point of the design, so it is worth saying why it exists.** Without it

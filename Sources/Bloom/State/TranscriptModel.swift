@@ -536,10 +536,10 @@ final class TranscriptModel {
         // bubble that goes on screen are one object with one id. Drawn twice under two ids is the
         // duplicate that would appear the moment the queue was read back.
         let delivery = Delivery(targetSessionID: session.id, body: body)
-        if Delivery.goesImmediately(behind: pendingDeliveries, hold: deliveryHold) {
-            sending = delivery
-        } else {
+        if queuesNextMessage {
             pendingDeliveries.append(delivery)
+        } else {
+            sending = delivery
         }
 
         // And the list is taken to it, on the same frame, for the same reason the bubble is drawn
@@ -604,10 +604,37 @@ final class TranscriptModel {
         )
     }
 
-    /// Hands the front of the queue to the agent, if anything is allowed to go.
+    /// Whether pressing Return right now puts the message in the queue rather than handing it over.
     ///
-    /// One at a time. The next one goes when this turn ends, which is what "never mid-turn" means
-    /// on both backends and what keeps the queue an ordered thing rather than a burst.
+    /// Read by `submit` to decide which bubble to draw and by the footer to decide what the Send
+    /// button's tooltip promises, so the caption over the button and the bubble under it cannot
+    /// say different things. It was `isRunning` in the footer, which stopped being the same
+    /// question the moment a running turn stopped holding the queue on two of the four backends:
+    /// the tooltip went on offering to queue a message that was about to go straight out.
+    var queuesNextMessage: Bool {
+        !Delivery.goesImmediately(
+            behind: pendingDeliveries, hold: deliveryHold, on: session.agentKind
+        )
+    }
+
+    /// What the last pending bubble says under itself, or nothing when nothing is holding it.
+    ///
+    /// Here rather than in the row because it needs the chat's backend, which the row has no
+    /// business knowing, and because a caption that disagrees with the drain is the one thing this
+    /// queue may not do: both read `DeliveryHold`. See `DeliveryHold.sentence(on:)`.
+    var holdSentence: String? { deliveryHold.sentence(on: session.agentKind) }
+
+    /// Hands the queue to the agent, from the front, for as long as it is allowed to go.
+    ///
+    /// **How many leave in one pass is the backend's answer and `Delivery.deliverable` is where it
+    /// is taken.** On a CLI that will not read a line written into a running turn this hands over
+    /// one, because the turn that one starts holds the rest, which is what it always did. On one
+    /// that will, a running turn holds nothing, so the queue empties in the order it was asked
+    /// for rather than one message per turn under a caption promising a wait that is not
+    /// happening.
+    ///
+    /// The hold is read again on every pass rather than once at the top. A permission question can
+    /// arrive between two sends, and nothing may be written into a turn that is blocked on one.
     ///
     /// Called from the three moments a queue is meant to move and from nowhere else: the setup
     /// script finishing, a turn ending of its own accord, and the owner submitting. Not on launch,
@@ -617,26 +644,42 @@ final class TranscriptModel {
     func drain() async {
         guard let store else { return }
         await refreshQueue()
-        guard let next = Delivery.next(from: pendingDeliveries, hold: deliveryHold) else { return }
 
-        // Drawn as said from here, whichever moment the queue is moving in: the owner submitting
-        // (where `submit` has already done it, to the same id), a setup script finishing, or the
-        // turn in front of it ending. Before the retire below, so there is no frame on which the
-        // sentence has left the queue and has not yet become a bubble. See `sending`.
-        sending = next
+        // The list is taken once and walked, rather than the queue being re-asked for a front
+        // each pass. A start that fails puts its delivery back at the front (see `abandon`), so a
+        // loop that asked again would hand the same message over for ever.
+        for next in Delivery.deliverable(
+            from: pendingDeliveries, hold: deliveryHold, on: session.agentKind
+        ) {
+            guard deliveryHold.allowsDelivery(on: session.agentKind) else { return }
+            // Deleted, or steered out, since the list was taken.
+            guard pendingDeliveries.contains(where: { $0.id == next.id }) else { continue }
 
-        // Retired before it is handed over, rather than after. The pending bubble and the real one
-        // are two drawings of the same sentence, and a delivery that is still pending while its
-        // turn is starting is drawn twice. `restoreDelivery` below is the one path back.
-        try? await store.markDelivered(id: next.id)
-        await refreshQueue()
+            // Drawn as said from here, whichever moment the queue is moving in: the owner
+            // submitting (where `submit` has already done it, to the same id), a setup script
+            // finishing, or the turn in front of it ending. Before the retire below, so there is
+            // no frame on which the sentence has left the queue and has not yet become a bubble.
+            // See `sending`.
+            sending = next
 
-        await deliver(next)
+            // Retired before it is handed over, rather than after. The pending bubble and the real
+            // one are two drawings of the same sentence, and a delivery that is still pending
+            // while its turn is starting is drawn twice. `restoreDelivery` is the one path back.
+            try? await store.markDelivered(id: next.id)
+            await refreshQueue()
+
+            // A turn that would not start stops the pass. Its delivery is back at the front of
+            // the queue with an error row under it, and pushing the next one into an agent that
+            // just refused would bury that.
+            guard await deliver(next) else { return }
+        }
     }
 
     /// Whether this delivery is at the front of an idle queue and can be attempted now.
     func canRetry(_ delivery: Delivery) -> Bool {
-        Delivery.next(from: pendingDeliveries, hold: deliveryHold)?.id == delivery.id
+        Delivery.next(
+            from: pendingDeliveries, hold: deliveryHold, on: session.agentKind
+        )?.id == delivery.id
     }
 
     /// Attempts the front of the queue again without changing its order or duplicating its text.
@@ -755,7 +798,7 @@ final class TranscriptModel {
 
     /// Whether this queued message may be sent in place of the turn that is running.
     func canSteer(_ delivery: Delivery) -> Bool {
-        DeliverySteer.canSteer(delivery, hold: deliveryHold)
+        DeliverySteer.canSteer(delivery, hold: deliveryHold, on: session.agentKind)
     }
 
     /// Stops the turn that is running and sends this queued message into the space it makes.
@@ -816,8 +859,13 @@ final class TranscriptModel {
         dropDiscardIfDelivered()
     }
 
-    /// The one place a turn starts, reached only from `drain`.
-    private func deliver(_ delivery: Delivery) async {
+    /// The one place a turn starts, reached only from `drain`, and now also the place a sentence
+    /// goes into a turn that has already started.
+    ///
+    /// Answers whether the sentence actually went out, because the drain hands over more than one
+    /// on a backend that takes a message mid turn and must stop at the first that did not.
+    @discardableResult
+    private func deliver(_ delivery: Delivery) async -> Bool {
         // A bare `return` used to stand here, and the sentence went nowhere: `drain` has already
         // retired this delivery from the queue and drawn it as sent, so a quiet return leaves a
         // bubble claiming to have been said to an agent that was never built. It takes a database
@@ -825,21 +873,34 @@ final class TranscriptModel {
         // disappearing without a word is not a thing to leave resting on that.
         guard let runner = ensureRunner() else {
             await abandon(delivery, saying: "Bloom could not open an agent for this chat.")
-            return
+            return false
         }
-        turnStartedAt = Date()
+        // The queue is moving, whether or not that begins a turn.
         wasStoppedByHand = false
-        hasReportedTurnEnded = false
-        // **The clearing rule.** The last turn's FINISHED subagents go here, at the one place a
-        // turn starts, and nowhere else. Clearing them when they finish is the option that reads
-        // well in a screenshot and badly in use: three rows leaving one by one take everything
-        // below them up the pane while you are still reading the third. Clearing them here means a
-        // finished subagent keeps its place, with its tick or its cross and what it answered, for
-        // as long as the turn it belongs to is the last thing that happened. One still running is
-        // not cleared at all, because it is still running. See `SubagentRoster.turnStarted`.
-        subagents.turnStarted()
-        setRunning(true)
-        statusLabel = "Starting"
+
+        // **Everything below is about a turn beginning, so it is asked whether one is.** On a
+        // backend that takes a message mid turn this is reached with a turn already running, and
+        // each of these lines is wrong there: the clock the footer counts from would restart in
+        // the middle of the turn it is timing, the label would put "Starting" over an agent that
+        // has been working for two minutes, and the roster clear would take the finished
+        // subagents of the turn being read out from under the reader. See
+        // `Delivery.deliverable(from:hold:on:)` for why a send arrives here at all.
+        let startsATurn = !isRunning
+        if startsATurn {
+            turnStartedAt = Date()
+            hasReportedTurnEnded = false
+            // **The clearing rule.** The last turn's FINISHED subagents go here, at the one place
+            // a turn starts, and nowhere else. Clearing them when they finish is the option that
+            // reads well in a screenshot and badly in use: three rows leaving one by one take
+            // everything below them up the pane while you are still reading the third. Clearing
+            // them here means a finished subagent keeps its place, with its tick or its cross and
+            // what it answered, for as long as the turn it belongs to is the last thing that
+            // happened. One still running is not cleared at all, because it is still running. See
+            // `SubagentRoster.turnStarted`.
+            subagents.turnStarted()
+            setRunning(true)
+            statusLabel = "Starting"
+        }
 
         do {
             // `sent` rather than `body`, and the payload beside it. They are the same string for
@@ -853,10 +914,16 @@ final class TranscriptModel {
             // echo, and `absorb` is what clears `sending` when the row lands, so the two drawings
             // of the sentence swap inside one synchronous pass and nothing on screen moves.
             await appendLatestMessages()
+            return true
         } catch {
-            setRunning(false)
-            statusLabel = nil
+            // Only what this call turned on. A send that failed into a turn somebody else started
+            // must not report that turn as over: it is still running and still writing rows.
+            if startsATurn {
+                setRunning(false)
+                statusLabel = nil
+            }
             await abandon(delivery, saying: error.readableMessage)
+            return false
         }
     }
 
@@ -1536,8 +1603,10 @@ final class TranscriptModel {
     ///
     /// It enqueues and only then drains, rather than sending. The orchestrator is very often mid
     /// turn at this moment, because a turn of its own is usually what started this agent, and
-    /// `DeliveryHold` is what decides: a held report goes when that turn ends, through the same
-    /// `drain` every other queued message goes through.
+    /// `DeliveryHold` is what decides. On a backend that takes a message mid turn the report goes
+    /// into that turn, which is what the orchestrator wanted anyway; on one that does not it goes
+    /// when the turn ends. Either way it is the same `drain` every other queued message goes
+    /// through, and it keeps its place in the same order.
     ///
     /// A chat nobody started returns on the first line, which is nearly every chat in the app.
     ///

@@ -8,7 +8,11 @@ import Foundation
 /// answer. The message typed four minutes ago went on sitting under the transcript, and the
 /// sentence beneath it had been saying "Goes when this turn ends." The turn ended. It did not go,
 /// and nothing on screen ever said so again, because a queue nothing is holding says nothing at
-/// all (`DeliveryHold.none.sentence`).
+/// all (`DeliveryHold.sentence(on:)` answers nil for a hold that is holding nothing).
+///
+/// **A backend that takes a message mid turn does not reopen this.** A running turn holds nothing
+/// there, so the queue empties into it rather than sitting under a promise; what is left after a
+/// Stop is the queue this type is about, under no sentence at all, exactly as before.
 ///
 /// So Stop hands the words back to the composer, where they are his to change, send again or
 /// throw away, and where no bubble is making a promise on their behalf. It is the move

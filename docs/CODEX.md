@@ -75,6 +75,13 @@ sentence saying the file should be named differently, it wrote the different nam
 the reason as a steer right behind the refusal, and a Codex denial says as much as a Claude Code
 one.
 
+That same call is why a queued message no longer waits for a turn to end on this backend.
+`CodexRunner.send` steers when `handle.turnID` names a live turn and starts a turn otherwise, and
+it starts one after a steer that missed, because the turn id can be a tenth of a second stale. It
+is deliberately not `turn/start` twice: what the server does with a second `turn/start` on a thread
+whose turn is open has never been measured here, and a person's sentence is not the thing to find
+that out with. See `AgentKind.acceptsMidTurnMessage`.
+
 **What is in `FileUpdateChange.diff`?** Not always a diff, which is the trap in the name:
 
 | Kind | What the field holds | Recorded |

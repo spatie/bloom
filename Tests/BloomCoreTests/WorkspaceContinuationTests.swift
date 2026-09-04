@@ -304,7 +304,9 @@ struct WorkspaceContinuationTests {
         try worktree.write("scratch.md", "half an idea for the next thing\n")
         try worktree.write("README.md", "hello\nedited after the merge\n")
 
-        let continuation = try await manager.continueOnNewBranch(
+        // Discarded on purpose: what this test is about is what the worktree still holds after
+        // the move, not what the move answered. The sibling tests above read the continuation.
+        _ = try await manager.continueOnNewBranch(
             workspace: workspace, branch: "dark-mode-next"
         )
 
