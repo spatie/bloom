@@ -71,16 +71,16 @@ public enum SearchPanelNothing: Equatable, Sendable {
             // them from the answer and from every count. Saying they were not searched would be
             // saying the untrue half of a true thing.
             hidden == 1
-                ? "Nothing in your visible work matches \(quoted(query)). 1 hidden project is left out."
-                : "Nothing in your visible work matches \(quoted(query)). \(hidden) hidden projects are left out."
+                ? "Nothing in your visible work matches \(quoted(query)). 1\u{00A0}hidden project is left out."
+                : "Nothing in your visible work matches \(quoted(query)). \(hidden)\u{00A0}hidden projects are left out."
         case .noLiveMatch(let query, let archived):
             // The count and the noun, and no instruction after them. The chip that would show
             // them is on the row above this card with the same number on it, so a sentence
             // telling the reader to press it would be saying what they can already see. The two
             // rows this replaced were exactly that mistake.
             archived == 1
-                ? "Nothing in your live work matches \(quoted(query)). 1 archived workspace does."
-                : "Nothing in your live work matches \(quoted(query)). \(archived) archived workspaces do."
+                ? "Nothing in your live work matches \(quoted(query)). 1\u{00A0}archived workspace does."
+                : "Nothing in your live work matches \(quoted(query)). \(archived)\u{00A0}archived workspaces do."
         case .noCommand(let query):
             "No menu item matches \(quoted(query))."
         }
@@ -102,6 +102,18 @@ public enum SearchPanelNothing: Equatable, Sendable {
         return "The transcript index is still building, so older conversations are not searchable yet."
     }
 
+    /// **The space after a count is `\u{00A0}` and not an ordinary one, in every sentence here.**
+    /// The card wraps, and at the width the panel is drawn at the hidden sentence broke as
+    /// "…matches “houdini”. 13" over "hidden projects are left out.", which puts a number on one
+    /// line and the thing it counts on the next. That reads as carelessness rather than as
+    /// wrapping, and it is the exact class of thing this panel has been reported for all day. The
+    /// archive sentence can break the same way at some other width, so it is tied too.
+    ///
+    /// Written as the escape rather than as the character, because an invisible byte in a string
+    /// literal is a thing the next reader cannot see and will delete by accident.
+    /// `SearchPanelNothingTests` proves the property over every sentence rather than matching
+    /// these two, so a fourth sentence with a count in it fails until it is tied as well.
+    ///
     /// Typographic quotes, because the query is quoted prose rather than code.
     private func quoted(_ query: String) -> String {
         "\u{201C}\(query.trimmingCharacters(in: .whitespacesAndNewlines))\u{201D}"

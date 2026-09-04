@@ -142,7 +142,10 @@ struct SearchPanelReachTests {
         #expect(listing.nothing == .noLiveMatch("houdini", archived: 2))
         let message = listing.nothing?.message ?? ""
         #expect(message.contains("houdini"))
-        #expect(message.contains("2 archived workspaces"))
+        // The count and the noun separately, so this does not depend on which space is
+        // between them: `SearchPanelNothingTests` is what holds that.
+        #expect(message.contains("2"))
+        #expect(message.contains("archived workspaces do"))
     }
 
     /// Thirteen of the owner's seventeen projects are hidden, so an answer that quietly leaves
@@ -161,7 +164,8 @@ struct SearchPanelReachTests {
         #expect(listing.nothing == .noHiddenMatch("houdini", hidden: 1))
         let message = listing.nothing?.message ?? ""
         #expect(message.contains("houdini"))
-        #expect(message.contains("1 hidden project is left out"))
+        #expect(message.contains("1"))
+        #expect(message.contains("hidden project is left out"))
         // Not "were not searched". The store's index has no idea which projects the sidebar is
         // showing, so they are searched and then dropped from the answer and from every count.
         #expect(!message.contains("searched"))
