@@ -9,16 +9,19 @@ import BloomCore
 ///
 /// **Pinned near the top of the window rather than centred on the display.** The panel acts on this
 /// window's contents, so it should visibly belong to this window; centring it on the screen is what
-/// a system service does and Bloom is not one. See `SearchPanelOverlay` for the dimming and the
-/// placement.
+/// a system service does and Bloom is not one. See `SearchPanelWindowOverlay` for the dimming, the
+/// click outside and the placement.
 struct SearchPanelView: View {
     var app: AppModel
     @Bindable var panel: SearchPanelModel
 
-    /// Wide enough for a workspace name, its project and an age on one line, and narrow enough that
-    /// the eye does not have to travel to read a row. The composer's slash menu is 440 and holds a
-    /// command name; this holds a sentence out of a transcript.
-    static let width: CGFloat = 560
+    /// How wide to draw, which is a fact about the window rather than about this view.
+    ///
+    /// It was a flat 560 here. `SearchPanelLayout.width(inWindow:)` is the decision now, in the
+    /// core where it can be tested, and the overlay measures the window and hands the answer down.
+    /// It is passed rather than measured here so that nothing about the query can move it: the
+    /// card must not resize while somebody types, for the same reason the chips must not.
+    var width: CGFloat
 
     /// Four rows and a bit, which is what a person reads before pressing Return. A taller list
     /// would be a pane, and a pane is Home.
@@ -43,7 +46,7 @@ struct SearchPanelView: View {
                 summary: panel.listing.isEmpty ? nil : panel.listing.summary
             )
         }
-        .frame(width: Self.width)
+        .frame(width: width)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Quick Search")
     }
