@@ -1926,7 +1926,8 @@ struct TranscriptTable: NSViewRepresentable {
                     ),
                     told: Double(tableView?.rect(ofRow: row).height ?? 0),
                     top: Double(tableView?.rect(ofRow: row).minY ?? 0),
-                    hasCell: tableView?.view(atColumn: 0, row: row, makeIfNecessary: false) != nil
+                    hasCell: tableView?.view(atColumn: 0, row: row, makeIfNecessary: false) != nil,
+                    redrawsItself: entry.id.redrawsItself
                 )
             }
         }
@@ -1969,6 +1970,11 @@ struct TranscriptTable: NSViewRepresentable {
             var top: Double
             /// Whether the table is holding a cell for it, which a silenced row never is.
             var hasCell: Bool
+            /// One of the three entries that re-render from their own observation. Nought is never
+            /// held against one of these: the streaming tail draws nothing between turns and is
+            /// measured on every pass, so a report that counted them counted one per pass. See
+            /// `viewFor`, which exempts them from the silence guard.
+            var redrawsItself: Bool
         }
     }
 }

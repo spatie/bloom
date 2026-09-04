@@ -93,9 +93,16 @@ import BloomCore
 /// mistake `ResizeProbe.arrange` learned about splits.
 ///
 ///     Bloom --composer-probe /tmp/composer.json --composer-workspace <id>
-///           [--composer-arrangement chat|chat+browser] [--composer-url file:///…]
-///           [--composer-travel 320] [--composer-step 24] [--composer-settle 1200]
-///           [--composer-band 400] [--window-size 1440x900] [--window-hidden]
+///           [--composer-pane-width 640] [--composer-arrangement chat|chat+browser]
+///           [--composer-url file:///…] [--composer-travel 320] [--composer-step 24]
+///           [--composer-settle 1200] [--composer-band 400]
+///           [--window-size 1440x900] [--window-hidden]
+///
+/// **A run states its pane width before anything else and refuses to run at another one.** Two
+/// batches of this probe were compared against each other before anybody noticed they had measured
+/// panes 420 and 747 points wide, on the same window size and the same arrangement, because the
+/// divider position is autosaved into the defaults domain. Width decides every row height there
+/// is, so those runs were never comparable. See `paneWidth` and `pin`.
 ///
 /// The per-step sample reads six numbers and one `rows(in:)` and walks nothing: see the head of
 /// `ProbeHarness` for the run that was read as a regression in the app because its census grew
@@ -132,6 +139,21 @@ enum ComposerProbe {
     /// on purpose: a row silenced while the pane was short is one the reader scrolls back to
     /// rather than one they are looking at.
     private static var band: Int { ProbeHarness.count("--composer-band", or: 400) }
+
+    /// **The width the transcript pane is put at before anything is measured.**
+    ///
+    /// A run that does not state this is a run that cannot be compared with another, and two
+    /// batches were spent finding that out. The pane came out 420 points wide in one batch and 747
+    /// in the next, on the same window size and the same arrangement, because
+    /// `DetailSplitViewController` autosaves its divider into the defaults domain and the pane is
+    /// whatever the last run or the last launch left. 420 is exactly `detailMinimum`, which is the
+    /// coincidence that gave it away.
+    ///
+    /// Width decides every row height in `TranscriptRowHeights`, so an uncontrolled width makes
+    /// every absolute figure in this report incomparable. `pin` puts it where the run asks and
+    /// ENDS THE RUN if it cannot, because a probe that quietly measures the wrong width is worse
+    /// than no probe.
+    private static var paneWidth: CGFloat { ProbeHarness.points("--composer-pane-width", or: 640) }
 
     /// The owner reproduced this with a browser beside the conversation and again with it closed,
     /// so the split is not the cause. `chat` is the default because it is the simpler window and
@@ -182,6 +204,10 @@ enum ComposerProbe {
             harness.fail("the hold view has no coordinator, so no row facts can be read")
         }
 
+        // **Before anything is measured**, because the width is what every row height is measured
+        // against and this is the variable two batches of this probe did not control.
+        await pin(window, pane: pane)
+
         // A known starting composer, so two runs are the same run. Restored at the end.
         let storedHeight = UserDefaults.standard.double(forKey: heightKey)
         UserDefaults.standard.set(0.0, forKey: heightKey)
@@ -199,8 +225,10 @@ enum ComposerProbe {
         harness.markStarted()
         let before = dump(pane)
 
-        // Taller, a step per vsync, which is the direction the bug is reported in.
-        var samples = await drive(from: 0, to: travel, by: step, pane: pane)
+        // Taller, a step per vsync, which is the direction the bug is reported in. Kept apart
+        // from the drag back down, because everything between them exists to remeasure and a
+        // verdict taken over both would be a verdict about the probe's own phases. See `report`.
+        let drag = await drive(from: 0, to: travel, by: step, pane: pane)
         try? await Task.sleep(for: .milliseconds(settleMs))
         let afterTaller = dump(pane)
 
@@ -219,17 +247,19 @@ enum ComposerProbe {
         let afterWindowResize = dump(pane)
 
         // And back down, so the run leaves the composer where it found it as well as the key.
-        samples += await drive(from: travel, to: 0, by: -step, pane: pane)
+        let dragBack = await drive(from: travel, to: 0, by: -step, pane: pane)
         UserDefaults.standard.set(storedHeight, forKey: heightKey)
 
         harness.write(report(
             window: window,
+            pane: pane,
             workspace: workspace,
             before: before,
             afterTaller: afterTaller,
             afterScrolling: afterScrolling,
             afterWindowResize: afterWindowResize,
-            samples: samples
+            drag: drag,
+            dragBack: dragBack
         ), echo: false)
         exit(0)
     }
@@ -267,6 +297,38 @@ enum ComposerProbe {
         guard arrangement != "chat" else { return }
         NewPane.open(.browser, in: workspace, url: pageURL) { content in
             tabs.split(tab: chat, axis: .horizontal, showing: content)
+        }
+    }
+
+    // MARK: - Pinning the width
+
+    /// **Puts the transcript pane at the width the run asked for, or ends the run.**
+    ///
+    /// The window is what moves, not the divider. `detailItem.holdingPriority` is `defaultLow`, so
+    /// the centre column is the one that absorbs a window resize while the inspector keeps the
+    /// width it was left at: growing the window by the shortfall is therefore working with the
+    /// split's own rule rather than against it, and it needs nothing private. The inspector's own
+    /// minimum and maximum, and the sidebar's width, are what can make a target unreachable.
+    ///
+    /// A loop rather than one step, because the split does not always hand the centre the whole
+    /// delta on the first pass, and a hard failure at the end of it, because the whole reason this
+    /// exists is that two batches of runs measured widths nobody had stated.
+    private static func pin(_ window: NSWindow, pane: Pane) async {
+        for _ in 0..<8 {
+            let current = pane.hold.bounds.width
+            let delta = paneWidth - current
+            guard abs(delta) > 1 else { return }
+            var frame = window.frame
+            frame.size.width += delta
+            window.setFrame(frame, display: true)
+            try? await Task.sleep(for: .milliseconds(400))
+        }
+        guard abs(pane.hold.bounds.width - paneWidth) <= 1 else {
+            harness.fail(
+                "the transcript pane is \(pane.hold.bounds.width) points wide and the run asked "
+                    + "for \(paneWidth). The window reached \(window.frame.width). Nothing "
+                    + "measured at another width is comparable, so this run is refused."
+            )
         }
     }
 
@@ -375,7 +437,13 @@ enum ComposerProbe {
         let count = pane.table?.numberOfRows ?? -1
         let visible = range?.length ?? -1
         let facts = rowFacts(pane)
-        let lost = facts.filter { $0.known == 0 && !$0.drawsNothing }
+        // **Not the three that redraw themselves.** The streaming tail and the bubble on its way
+        // out draw nothing between turns and are measured on every pass, so counting them made
+        // `lostRows` two before anything had gone wrong. `viewFor` exempts them from the silence
+        // guard for the same reason, so nought is never held against one.
+        let lost = facts.filter { $0.known == 0 && !$0.drawsNothing && !$0.redrawsItself }
+        let guesses = facts.filter { $0.known == nil }.map(\.assumed)
+        let measured = facts.compactMap(\.known)
 
         var out: [String: JSONValue] = [
             "offset": .number(offset),
@@ -411,6 +479,19 @@ enum ComposerProbe {
             "pointsPerRowAboveBand": .number(
                 (facts.first?.row ?? 0) > 0 ? (facts.first?.top ?? 0) / Double(facts.first?.row ?? 1) : 0
             ),
+            // **The largest height ever handed to a row nobody has looked at**, which is the one
+            // figure that says what this is all about and the one that does not depend on the
+            // width. It was 6,025 on the old estimator, fourteen screens for content nobody had
+            // seen, and 154 on the median.
+            "largestGuess": .number(guesses.max() ?? 0),
+            // What the rows that HAVE been measured come to, per row, counting the ones that
+            // measured nothing. The only truth this probe holds, and it is the truth about the
+            // band rather than about the document: see `report`, which is why the verdict does
+            // not lean on it.
+            "measuredPointsPerRow": .number(
+                measured.isEmpty ? 0 : measured.reduce(0, +) / Double(measured.count)
+            ),
+            "measuredRows": .integer(measured.count),
             "lostRows": .integer(lost.count),
             "bandRows": .integer(facts.count),
             "guessedRows": .integer(facts.filter { $0.known == nil && !$0.drawsNothing }.count),
@@ -457,6 +538,7 @@ enum ComposerProbe {
             "needsMeasuring": .bool(fact.needsMeasuring),
             "told": .number(fact.told),
             "top": .number(fact.top),
+            "redrawsItself": .bool(fact.redrawsItself),
             "hasCell": .bool(fact.hasCell),
         ])
     }
@@ -502,67 +584,104 @@ enum ComposerProbe {
 
     private static func report(
         window: NSWindow,
+        pane: Pane,
         workspace: WorkspaceModel,
         before: [String: JSONValue],
         afterTaller: [String: JSONValue],
         afterScrolling: [String: JSONValue],
         afterWindowResize: [String: JSONValue],
-        samples: [JSONValue]
+        drag: [JSONValue],
+        dragBack: [JSONValue]
     ) -> JSONValue {
         let tabs = WorkspaceTabsStore.shared
         let panes = tabs.selectedTab(in: workspace).map { tabs.layout(of: $0).paneCount } ?? 0
-        func lost(_ phase: [String: JSONValue]) -> Int {
-            guard case .integer(let count)? = phase["lostRows"] else { return -1 }
-            return count
+        func number(_ phase: [String: JSONValue], _ field: String) -> Double {
+            switch phase[field] {
+            case .number(let value)?: return value
+            case .integer(let value)?: return Double(value)
+            default: return 0
+            }
         }
-        // Every document length the drag went through, which is what the verdict is taken from.
-        let lengths: [Double] = samples.compactMap { sample in
+        // **The drag alone.** Everything between the two drags exists to remeasure: the scroll
+        // phase draws rows and the window resize marks every key stale, and both are supposed to
+        // move the document. A swing taken over them says nothing about the gesture.
+        let lengths = drag.compactMap { sample -> Double? in
             guard case .object(let fields) = sample,
                   case .number(let height)? = fields["contentHeight"] else { return nil }
             return height
         }
+        let low = lengths.min() ?? 0
+        let high = lengths.max() ?? 0
+        let swing = low > 0 ? high / low : 0
+        let grew = (lengths.last ?? 0) > (lengths.first ?? 0)
 
         let own: [String: JSONValue] = [
-            "driver": .string("storedHeight"),
+            // **What a run has to state before anything else**, because two batches of this probe
+            // produced numbers that could not be compared and nobody could tell until afterwards.
+            "paneWidth": .number(Double(pane.hold.bounds.width)),
+            "windowWidth": .number(Double(window.frame.width)),
+            "tableRows": .integer(pane.table?.numberOfRows ?? -1),
+            "sessionRows": .integer(workspace.activeTranscript?.rows.count ?? 0),
             "arrangement": .string(arrangement),
+            "panes": .integer(panes),
+            "version": .string(
+                Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+            ),
+            "build": .string(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"),
             "workspace": .string(workspace.workspace.id.rawValue),
             "workspaceName": .string(workspace.workspace.name),
-            "sessionRows": .integer(workspace.activeTranscript?.rows.count ?? 0),
+            "driver": .string("storedHeight"),
             "drawnRows": .integer(TranscriptDrawn.rows),
-            "panes": .integer(panes),
             "travel": .number(Double(travel)),
             "step": .number(Double(step)),
             "band": .integer(band),
             "settleMs": .integer(settleMs),
+
+            // **The one figure that says what this is about, and the one that does not depend on
+            // the width.** The tallest thing a row nobody has looked at was told it is.
+            "largestGuess": .number(max(
+                number(before, "largestGuess"),
+                max(number(afterTaller, "largestGuess"), number(afterScrolling, "largestGuess"))
+            )),
+
+            // **The verdict: did the document run away during the DRAG.**
+            //
+            // Two of the earlier verdicts here were wrong and both are worth remembering. The
+            // first asked whether a row had been silenced, which was the theory that had been
+            // written down rather than the thing the owner can see. The second asked about the
+            // whole run, so it counted the scroll and the resize phases, whose job is to move the
+            // document, and it counted an estimate improving as evidence arrives as a fault.
+            //
+            // **The direction is reported rather than judged.** A document converging on the truth
+            // is the system working and one running away from it is the bug, but this probe cannot
+            // tell those apart on its own: it knows the true height of the rows that have been
+            // MEASURED and not of the document, and on a conversation where most rows have never
+            // been measured those are different questions. `measuredPointsPerRow` and
+            // `largestGuess` are what a reader judges the direction with.
+            //
+            // Two, because a document that doubles under a hand is a document the reader is
+            // somewhere else in, and because the old estimator's own drag swung by 3.86 while the
+            // median's swung by 1.74 on the same gesture.
+            "documentSwingDuringDrag": .number(swing),
+            "documentAtDragStart": .number(lengths.first ?? 0),
+            "documentAtDragEnd": .number(lengths.last ?? 0),
+            "documentMinDuringDrag": .number(low),
+            "documentMaxDuringDrag": .number(high),
+            "documentGrewDuringDrag": .bool(grew),
+            "reproduced": .bool(swing >= 2),
+
             "before": .object(before),
             "afterTaller": .object(afterTaller),
             "afterScrolling": .object(afterScrolling),
             "afterWindowResize": .object(afterWindowResize),
-            "steps": .array(samples),
+            "steps": .array(drag),
+            "stepsBack": .array(dragBack),
             "silences": .array(TranscriptHoldCensus.silences.map { json(of: $0) }),
             "transcriptHold": .map(TranscriptHoldCensus.summary()),
-            // The answer, in a handful of keys, so a run can be read without opening the tables.
-            //
-            // **`reproduced` asks whether the document disagreed with itself, and it used to ask
-            // whether a row was silenced.** The first run of this probe reported false on a
-            // conversation where the document went from 229,351 points to 885,212 and back to
-            // 171,535 in twenty-eight steps, because the predicate was about the theory that had
-            // been written down rather than about the thing the owner can see. A transcript whose
-            // length moves by a factor of five while nothing about its rows changes is the bug,
-            // whatever else is or is not true.
-            "documentMin": .number(lengths.min() ?? 0),
-            "documentMax": .number(lengths.max() ?? 0),
-            "documentSwing": .number(
-                (lengths.min() ?? 0) > 0 ? (lengths.max() ?? 0) / (lengths.min() ?? 1) : 0
-            ),
-            "reproduced": .bool((lengths.min() ?? 0) > 0
-                && (lengths.max() ?? 0) / (lengths.min() ?? 1) >= 2),
-            // And the row level theory, kept because it is cheap and because a run that shows
-            // both is worth more than one that shows either.
-            "lostAfterDrag": .integer(lost(afterTaller)),
-            "lostAfterScrolling": .integer(lost(afterScrolling)),
-            "lostAfterWindowResize": .integer(lost(afterWindowResize)),
-            "lostBefore": .integer(lost(before)),
+            "lostBefore": .integer(Int(number(before, "lostRows"))),
+            "lostAfterDrag": .integer(Int(number(afterTaller, "lostRows"))),
+            "lostAfterScrolling": .integer(Int(number(afterScrolling, "lostRows"))),
+            "lostAfterWindowResize": .integer(Int(number(afterWindowResize, "lostRows"))),
         ]
         return .object(own.merging(harness.conditions(window: window)) { mine, _ in mine })
     }

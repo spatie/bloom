@@ -199,6 +199,13 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// second, and it is about one transcript pane at the height a dragged composer leaves it: the
     /// probe's viewport was 446 points at the end of its drag. So the rule this states is that no
     /// row nobody has looked at may fill the screen on its own.
+    ///
+    /// **No run has exercised it, and a later reader should not think it has been validated.** On
+    /// the probe run that followed the median landing, the largest number handed to an unmeasured
+    /// row was 154 points, so this never fired: the median alone did the work and this stood
+    /// behind it. What would exercise it is a conversation whose rows genuinely are tall, and
+    /// there is no such run. 450 is a reasoned ceiling rather than a measured one, and what would
+    /// move it is a session where a shape's honest middle is above it.
     public static let mostEstimated: Double = 450
 
     /// How many drawn rows it takes before the estimate stops moving.
