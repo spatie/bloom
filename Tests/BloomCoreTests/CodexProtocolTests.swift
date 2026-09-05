@@ -408,6 +408,42 @@ private func events(_ name: String) throws -> [CodexEvent] {
         let models = CodexModel.decodeList(try codexFixtureJSON("codex-model-list.json"))
         #expect(models.filter(\.acceptsImages).count == models.count)
     }
+
+    // MARK: - A generation that arrived after this code was written
+
+    /// `codex-model-list-astra.json` is the same call answered by codex-cli 0.153.0 on this
+    /// machine on 2026-09-05, the day after GPT-6 Astra reached most accounts. The capture above
+    /// it is codex-cli 0.147.0 from 2026-08-21, and both are kept, because the pair is the
+    /// evidence for the decision `CodexModelCatalog` was written on: a whole generation arrived,
+    /// took over as the account default and brought its own reasoning levels, and nothing in
+    /// Bloom had to be edited to offer it. A hardcoded list would have missed all of it.
+    @Test func readsAGenerationOfModelsNothingHereHadHeardOf() throws {
+        let models = CodexModel.decodeList(try codexFixtureJSON("codex-model-list-astra.json"))
+        let astra = try #require(models.first { $0.id == "gpt-6-astra" })
+
+        // The name the picker draws is the server's, so a model Bloom has never heard of is still
+        // offered under the vendor's own spelling rather than a tidied id.
+        #expect(astra.displayName == "GPT-6-Astra")
+        #expect(astra.isDefault)
+        #expect(astra.acceptsImages)
+        // Six levels, which is the set `gpt-5.5` does not have: the flat picker would have hidden
+        // `ultra` and `max` from the account's own default model.
+        #expect(astra.effortIDs == ["low", "medium", "high", "xhigh", "max", "ultra"])
+        // Its own default rather than Bloom's `high`, which is why the model carries one.
+        #expect(astra.defaultEffort == "medium")
+        #expect(astra.resolvedEffort(preferring: "ultra") == "ultra")
+    }
+
+    /// What somebody opening the model menu actually sees: the new generation at the top, and
+    /// everything it supersedes underneath in the order the server sent.
+    @Test func offersTheNewGenerationAboveEverythingItSupersedes() throws {
+        let models = CodexModel.decodeList(try codexFixtureJSON("codex-model-list-astra.json"))
+        #expect(CodexModelRank.ordered(models).map(\.id) == [
+            "gpt-6-astra",
+            "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+            "gpt-5.5", "gpt-5.4-mini", "gpt-5.3-codex-spark",
+        ])
+    }
 }
 
 @Suite struct CodexModelCatalogTests {

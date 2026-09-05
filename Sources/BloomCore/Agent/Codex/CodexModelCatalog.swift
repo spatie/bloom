@@ -13,6 +13,24 @@ import Foundation
 /// five, and `gpt-5.5` and `gpt-5.2` four. A flat five-entry picker is wrong for three of the five
 /// models on offer, in both directions: it hides a level two models have and offers levels three
 /// models do not.
+///
+/// **Re-measured against codex-cli 0.153.0 on 2026-09-05, and every part of that list had moved.**
+/// `gpt-6-astra` is there, as the account default, with the same six levels and a default of
+/// `medium`; `gpt-5.2` has gone; `gpt-5.4-mini` and `gpt-5.3-codex-spark` have arrived with four
+/// each. Not one line of Bloom changed to offer any of it, which is the whole case for fetching:
+/// a generation nobody here had heard of was named, ranked and given its own effort picker on the
+/// strength of what the CLI said. Both captures are kept as fixtures, and
+/// `Tests/fixtures/codex-model-list-astra.json` is the newer one.
+///
+/// **What is on the wire and deliberately not read here.** Every model in that capture also
+/// carries `serviceTiers` and `additionalSpeedTiers`: a `priority` tier the CLI calls "Fast",
+/// worth 2x speed on `gpt-6-astra` and 1.5x on the `gpt-5.6` family, for more of the account's
+/// usage allowance. `turn/start` takes it as `serviceTier` and `serviceTierForTurn`, so it is a
+/// real control rather than an unreachable field, and Bloom sends neither, so every Codex turn
+/// runs at standard speed. It is left out on purpose and not for want of a place to put it: it
+/// spends the user's allowance faster, and Bloom's own "Fast mode" switch is already a different
+/// thing on the other backend (Claude Code's `--thinking disabled`, see `AgentRunner`), so a
+/// second control by that name needs a decision about both rather than a field being decoded.
 public struct CodexModel: Sendable, Hashable, Identifiable {
     public let id: String
     public let displayName: String

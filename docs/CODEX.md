@@ -1,8 +1,9 @@
 # Codex in Bloom
 
 Ground truth plus the plan for the rest of the work. Everything under "Verified" was measured
-against `codex-cli 0.147.0` on this machine, driving the real binary, on 2026-08-21. Everything
-under "Plan" is a decision, not a measurement, and is meant to be argued with.
+against `codex-cli 0.147.0` on this machine, driving the real binary, on 2026-08-21, except where
+a section dates itself against a later build. Everything under "Plan" is a decision, not a
+measurement, and is meant to be argued with.
 
 Related: `AGENTS-INTEGRATION.md` (how the four CLIs are detected), `PROTOCOL.md` (Claude Code's
 stream-json), `PLAN.md`.
@@ -110,6 +111,41 @@ before anyone signs in. What it returned:
 wrong for three of these five, in both directions: it hides `ultra`, which two models take, and it
 offers `max` to two models that do not. Conductor hardcodes its list and is already stale: it names
 `gpt-5.4`, which no longer exists, and has none of the three `gpt-5.6` models. **Fetch it.**
+
+#### The same call again on 2026-09-05, against `codex-cli 0.153.0`
+
+A fortnight later, the day after GPT-6 Astra reached most paying accounts. Every part of the list
+had moved:
+
+| Model | Default | Reasoning efforts | Default effort |
+| --- | --- | --- | --- |
+| `gpt-6-astra` | yes | low, medium, high, xhigh, max, **ultra** | medium |
+| `gpt-5.6-sol` | | low, medium, high, xhigh, max, **ultra** | low |
+| `gpt-5.6-terra` | | low, medium, high, xhigh, max, **ultra** | medium |
+| `gpt-5.6-luna` | | low, medium, high, xhigh, max | medium |
+| `gpt-5.5` | | low, medium, high, xhigh | medium |
+| `gpt-5.4-mini` | | low, medium, high, xhigh | medium |
+| `gpt-5.3-codex-spark` | | low, medium, high, xhigh | high |
+
+`gpt-5.2` has gone. `includeHidden: true` adds two the picker never shows, `gpt-reserve` and
+`codex-auto-review`. `gpt-5.4-mini` now carries an `upgradeInfo` block naming `gpt-5.6-luna` and a
+retirement date, which nothing here reads yet.
+
+**Nothing in Bloom changed to offer the new generation.** It was fetched, drawn under the
+`displayName` the server sent, put at the head of the picker by `CodexModelRank` because 6 is above
+5.6, and given its own six-level effort list with its own default of `medium`. That is the whole
+return on fetching rather than hardcoding, and `Tests/fixtures/codex-model-list-astra.json` is the
+capture the tests read.
+
+**Fast mode is a service tier. It is not a model id and it is not a reasoning effort.** Every
+model in that capture carries `serviceTiers` and `additionalSpeedTiers` beside its efforts: one
+tier, `priority`, which the CLI labels "Fast" and describes as "2x speed, increased usage" on
+`gpt-6-astra` and "1.5x speed, increased usage" on the `gpt-5.6` family. `TurnStartParams` takes it
+two ways, `serviceTier` for this turn and the ones after it and `serviceTierForTurn` for this turn
+alone, with `"default"` meaning standard speed. **Bloom sends neither**, so every Codex turn runs
+at standard speed. Adding it is a decision about spending somebody's usage allowance faster, and
+about the name, because the composer's footer already has a Fast mode switch and that one is Claude
+Code's `--thinking disabled`.
 
 ---
 
