@@ -507,6 +507,13 @@ enum ComposerProbe {
             "viewportWidth": .number(Double(clip.bounds.width)),
             "scrollAlpha": .number(Double(pane.scroll.alphaValue)),
             "scrollFrame": rect(pane.scroll.frame),
+            // The running counts at this phase, so two phases bracket when something happened
+            // without anybody cross-referencing the step arrays to find it.
+            "widthMismatches": .integer(TranscriptHoldCensus.widthMismatches),
+            "silenced": .integer(TranscriptHoldCensus.silencedRows),
+            "cellsBuilt": .integer(TranscriptHoldCensus.cellsBuilt),
+            "screenEstimated": .integer(TranscriptHoldCensus.screenEstimated),
+            "screensSeen": .integer(TranscriptHoldCensus.screensSeen),
             "holdBounds": rect(pane.hold.bounds),
             "held": .string(name(of: pane.hold.held)),
             // `frozen` is private to `TranscriptHoldView`, and this is the same question: a scroll
@@ -750,6 +757,15 @@ enum ComposerProbe {
             // that emptied the owner's transcript, and it is refused now rather than believed.
             // Nought here on every run would mean the account of it is wrong.
             "widthMismatches": .integer(TranscriptHoldCensus.widthMismatches),
+            // Meaningless without this beside it: two refused reports out of forty nine cells
+            // built is a rate, and two out of two thousand would be a different finding.
+            "cellsBuilt": .integer(TranscriptHoldCensus.cellsBuilt),
+            // **The signature of a starved cache**, which is what refusing reports would cost if
+            // the guard were wrong: rows on screen, after the view has stopped moving, drawn at a
+            // height nobody has measured. `repairTheScreen` is what stands behind it.
+            "screenEstimated": .integer(TranscriptHoldCensus.screenEstimated),
+            "screenEstimatedSettled": .integer(TranscriptHoldCensus.screenEstimatedSettled),
+            "screensSeen": .integer(TranscriptHoldCensus.screensSeen),
             "mismatches": .array(TranscriptHoldCensus.mismatches.map { json(of: $0) }),
             "silences": .array(TranscriptHoldCensus.silences.map { json(of: $0) }),
             "transcriptHold": .map(TranscriptHoldCensus.summary()),
@@ -768,6 +784,7 @@ enum ComposerProbe {
             "reportedWidth": .number(mismatch.reportedWidth),
             "cacheWidth": .number(mismatch.cacheWidth),
             "columnWidth": .number(mismatch.columnWidth),
+            "cellWidth": .number(mismatch.cellWidth),
             "reportedHeight": .number(mismatch.reportedHeight),
             "knownHeight": .number(mismatch.knownHeight),
         ])

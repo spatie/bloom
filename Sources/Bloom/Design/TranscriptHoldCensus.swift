@@ -271,6 +271,17 @@ enum TranscriptHoldCensus {
     /// of its width for a pass. A count that is non-zero on every run is what says the fault is
     /// ordinary rather than a once-in-four accident, and the widths recorded beside it are where
     /// somebody picks the thread up.
+    ///
+    /// **What the first run with this in it caught, which was not what was predicted.** Two
+    /// reports out of forty nine cells built, both at 747 against a table of 420, and 747 is the
+    /// width that pane had before the run pinned it. So the reports came from a layout at a width
+    /// the run had left behind, which is what a reuse pool holds after a width change: a cell is
+    /// taken from it, handed a new row, and reports before the table has resized it. Neither did
+    /// any harm, because a stale WIDER frame under-states a height, 32 points against a true 54.
+    /// A stale narrower one over-states it enormously, which is the same mechanism with the sign
+    /// turned round and is what a blank transcript is made of. `cellWidth` is recorded to tell
+    /// those two apart: a stale SwiftUI pass inside a correctly framed cell, or a cell AppKit has
+    /// not resized yet.
     static func reportedAtAnotherWidth(_ mismatch: Mismatch) {
         widthMismatches += 1
         guard mismatches.count < mostMismatches else { return }
@@ -287,6 +298,13 @@ enum TranscriptHoldCensus {
         var cacheWidth: Double
         /// The table's own width now, which is what the cache is told on the next pass.
         var columnWidth: Double
+        /// **The cell's own frame width at the moment of the report**, which is what tells a
+        /// stale SwiftUI layout from a cell AppKit has not resized yet. If this agrees with
+        /// `columnWidth` while `reportedWidth` does not, the cell was the right size and SwiftUI
+        /// answered from an older pass. If it agrees with `reportedWidth`, the cell itself was
+        /// still the size it had in a previous life, which is what a reuse pool holds after a
+        /// width change. Nought when the table is holding no cell for the row.
+        var cellWidth: Double
         var reportedHeight: Double
         /// What was already known for this content, or -1 for nothing.
         var knownHeight: Double

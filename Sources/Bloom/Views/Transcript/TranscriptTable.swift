@@ -797,6 +797,10 @@ struct TranscriptTable: NSViewRepresentable {
                     reportedWidth: Double(size.width),
                     cacheWidth: heights.measure?.width ?? 0,
                     columnWidth: Double(columnWidth),
+                    cellWidth: Double(
+                        tableView?.view(atColumn: 0, row: row, makeIfNecessary: false)?
+                            .frame.width ?? 0
+                    ),
                     reportedHeight: Double(height),
                     knownHeight: heights.height(for: contentKey) ?? -1
                 ))
