@@ -229,6 +229,10 @@ struct DefaultBackendTests {
         #expect(ClaudeModelRank.recognises("claude-opus-5[1m]"))
         #expect(ClaudeModelRank.recognises("opus-5-1m"))
         #expect(!ClaudeModelRank.recognises("gpt-5.6-sol"))
+        // A Codex generation newer than anything written down here. It must stay unrecognised,
+        // because "recognised" means Claude Code and a GPT model opened there runs on the wrong
+        // CLI's default.
+        #expect(!ClaudeModelRank.recognises("gpt-6-astra"))
         #expect(!ClaudeModelRank.recognises("internal-preview-3"))
     }
 

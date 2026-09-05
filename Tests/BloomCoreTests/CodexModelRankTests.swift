@@ -65,6 +65,19 @@ struct CodexModelRankTests {
         #expect(ordered.map(\.id) == ["gpt-5.4", "codex-preview"])
     }
 
+    /// The shape a whole new generation arrives in: a major number with no minor after it at all.
+    /// `gpt-6-astra` is read as 6.0 and leads the list, above every `gpt-5.6` variant. The rule is
+    /// worth a test of its own because the failure is silent and total: a parser that insisted on
+    /// a dot would read no version at all, and the newest model on the account would be offered
+    /// under every model it replaces.
+    @Test("a version with no minor number is still a version")
+    func majorWithNoMinor() {
+        let ordered = CodexModelRank.ordered([
+            model("gpt-5.6-sol"), model("gpt-6-astra"), model("gpt-5.6-terra"),
+        ])
+        #expect(ordered.map(\.id) == ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"])
+    }
+
     /// `isReduced` matches whole words, so a name that merely contains the letters is not demoted.
     @Test("a word inside another word is not a size")
     func wordBoundary() {

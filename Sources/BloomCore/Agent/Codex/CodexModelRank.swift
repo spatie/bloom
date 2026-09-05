@@ -13,7 +13,10 @@ import Foundation
 ///
 /// 1. **Version, descending.** `gpt-5.6` above `gpt-5.5` above `gpt-5.4`. Parsed as numbers rather
 ///    than compared as text, because `gpt-5.10` sorts below `gpt-5.9` as a string and above it as
-///    a version, and the string answer is wrong.
+///    a version, and the string answer is wrong. A major with no minor after it is that major and
+///    zero, which is how `gpt-6-astra` came to lead the list the day it appeared without anything
+///    here being told about it. That is the case worth protecting: read a bare major as no version
+///    at all and the newest model on the account is offered below every model it replaces.
 /// 2. **Full models above cut-down ones at the same version.** `gpt-5.4` above `gpt-5.4-mini`.
 ///    The suffixes are the vendor's own words for a smaller model, and a smaller model is the
 ///    thing you pick on purpose rather than the thing you are offered first.
