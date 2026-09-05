@@ -48,6 +48,20 @@ struct ChatPaneView: View {
     /// conversation and is scoped with the other two.
     @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.standard
 
+    /// What the transcript has nothing to draw for, and nil the moment its rows are on screen.
+    ///
+    /// Here rather than in `CenterPaneView`, which owns the pane's other waits, because this one
+    /// belongs to the transcript and not to the pane: while a conversation is being read the
+    /// composer underneath is already drawn and already usable, so it is not part of what is
+    /// missing. Hung off the pane, the spinner was centred in the transcript and the composer
+    /// together and therefore sat half the composer's height below the middle of the transcript,
+    /// which is 174 points low with the divider dragged out to 348, and it moved on every drag of
+    /// that divider. Centred in the transcript it is a relationship to the pane rather than a
+    /// distance from an edge, so dragging the divider cannot move it off the middle again.
+    private var waiting: PaneWait? {
+        transcript.isLoaded ? nil : .conversation(transcript.session.id)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             TranscriptView(
@@ -56,6 +70,16 @@ struct ChatPaneView: View {
                 memory: TranscriptPaneMemory(model: model, pane: pane)
             ) { isTranscriptScrolledUp = $0 }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // The wait, over the transcript alone: see `waiting` above. It is the same overlay
+            // `TranscriptListView` hangs its empty placeholder off, on the same frame, so the two
+            // things a pane says about having no rows are said in the same place.
+            //
+            // Nothing to hit, because the composer below is not covered and the transcript under
+            // it still takes clicks.
+            .overlay {
+                SlowLoadingView(subject: waiting, label: waiting?.label)
+                    .allowsHitTesting(false)
+            }
             // On the transcript, not on the composer, and that is the whole of the change.
             //
             // The pill is a claim about the transcript ("there is more of this below, come and
