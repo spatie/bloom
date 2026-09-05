@@ -78,6 +78,14 @@ struct BloomApp: App {
         // only one of the family that measures the case where nothing is happening. See `IdleProbe`.
         if IdleProbe.isRequested { IdleProbe.schedule() }
 
+        // **Not a probe, and it ships.** `kill -USR1` on this process writes everything the
+        // transcript believes about itself to a file in the temporary directory, so a pane that is
+        // wrong can be read while it is wrong rather than reasoned about afterwards. The blank
+        // transcript has been fixed three times from readings taken by a probe launched
+        // afterwards, and not once from the app it happened in. See `TranscriptStateDump`, which
+        // carries what the file says and why the order of the two lines inside `listen` matters.
+        TranscriptStateDump.listen()
+
         // And two last ones. `Bloom --menu-probe <out.png>` opens one of the centre pane's split
         // submenus and photographs it, which nothing else can; `Bloom --menu-action <title>`
         // performs a real item of a real menu and reports the windows either side of it, which is

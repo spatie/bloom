@@ -196,10 +196,10 @@ enum ComposerProbe {
         guard let scroll = ProbeHarness.transcriptScrollView(in: contentView) else {
             harness.fail("no transcript NSScrollView found")
         }
-        guard let hold = holdView(in: contentView) else {
+        guard let hold = TranscriptStateDump.holdView(in: contentView) else {
             harness.fail("no TranscriptHoldView found, so this is not the transcript's pane")
         }
-        let pane = Pane(
+        let pane = TranscriptStateDump.Pane(
             scroll: scroll,
             hold: hold,
             table: scroll.documentView as? NSTableView,
@@ -269,14 +269,6 @@ enum ComposerProbe {
         exit(0)
     }
 
-    /// The four things a phase is read off, gathered once so no phase can pick up a different one.
-    private struct Pane {
-        var scroll: NSScrollView
-        var hold: TranscriptHoldView
-        var table: NSTableView?
-        var coordinator: TranscriptTable.Coordinator?
-    }
-
     // MARK: - The arrangement
 
     /// A browser beside the conversation, in the same tab, when the run asks for one.
@@ -325,7 +317,7 @@ enum ComposerProbe {
     ///
     /// A hard failure at the end, naming every width involved, because the whole reason this
     /// exists is that two batches of runs measured panes nobody had stated.
-    private static func pin(_ window: NSWindow, pane: Pane, in root: NSView) async {
+    private static func pin(_ window: NSWindow, pane: TranscriptStateDump.Pane, in root: NSView) async {
         if let raw = ProbeHarness.value(for: "--window-size"),
            let size = ProbeStats.windowSize(raw) {
             window.setContentSize(size)
@@ -375,7 +367,7 @@ enum ComposerProbe {
         var best: (view: NSSplitView, depth: Int)?
         func walk(_ view: NSView, _ depth: Int) {
             if let split = view as? NSSplitView, split.arrangedSubviews.count == 2,
-               let first = split.arrangedSubviews.first, holdView(in: first) != nil {
+               let first = split.arrangedSubviews.first, TranscriptStateDump.holdView(in: first) != nil {
                 if best == nil || depth > (best?.depth ?? 0) { best = (split, depth) }
             }
             for subview in view.subviews { walk(subview, depth + 1) }
@@ -395,7 +387,7 @@ enum ComposerProbe {
         from start: CGFloat,
         to finish: CGFloat,
         by step: CGFloat,
-        pane: Pane
+        pane: TranscriptStateDump.Pane
     ) async -> [JSONValue] {
         guard step != 0 else { return [] }
         var samples: [JSONValue] = []
@@ -418,7 +410,7 @@ enum ComposerProbe {
     /// Through `scrollWheel` rather than by writing the clip view's bounds, because a bounds write
     /// is not a scroll and none of the settle, the census or the repair is on that path. See
     /// `ProbeHarness.wheel`.
-    private static func scrollAbout(_ pane: Pane) async {
+    private static func scrollAbout(_ pane: TranscriptStateDump.Pane) async {
         let screen = pane.scroll.contentView.bounds.height
         guard screen > 1 else { return }
         for _ in 0..<6 {
@@ -453,7 +445,7 @@ enum ComposerProbe {
     ///
     /// `silenced` is the column to read down: the step it first moves on is the frame that lost a
     /// row, and `viewportHeight` on that line is the pane it was measured against.
-    private static func sample(at height: CGFloat, pane: Pane) -> JSONValue {
+    private static func sample(at height: CGFloat, pane: TranscriptStateDump.Pane) -> JSONValue {
         let clip = pane.scroll.contentView
         let visible = pane.table.map { $0.rows(in: clip.documentVisibleRect).length } ?? -1
         return .object([
@@ -471,7 +463,7 @@ enum ComposerProbe {
             "cached": .integer(pane.coordinator?.heightCacheCount ?? -1),
             "cacheWidth": .number(pane.coordinator?.heightCacheWidth ?? 0),
             "scrollAlpha": .number(Double(pane.scroll.alphaValue)),
-            "held": .string(name(of: pane.hold.held)),
+            "held": .string(TranscriptStateDump.name(of: pane.hold.held)),
         ])
     }
 
@@ -479,172 +471,19 @@ enum ComposerProbe {
 
     /// Everything worth knowing about a transcript that is standing still, in one object.
     ///
-    /// Taken four times, while nothing is moving. `lostRows` is the verdict: rows the cache has
-    /// recorded at nothing that `TranscriptRowInk` expected to draw something. Those are the rows
-    /// the reader cannot see and cannot get back.
-    private static func dump(_ pane: Pane) -> [String: JSONValue] {
-        let clip = pane.scroll.contentView
-        let offset = Double(clip.bounds.origin.y)
-        let end = Double(pane.scroll.endOffset)
-        let range = pane.table.map { $0.rows(in: clip.documentVisibleRect) }
-        let count = pane.table?.numberOfRows ?? -1
-        let visible = range?.length ?? -1
-        let facts = rowFacts(pane)
-        // **Not the three that redraw themselves.** The streaming tail and the bubble on its way
-        // out draw nothing between turns and are measured on every pass, so counting them made
-        // `lostRows` two before anything had gone wrong. `viewFor` exempts them from the silence
-        // guard for the same reason, so nought is never held against one.
-        let lost = facts.filter { $0.known == 0 && !$0.drawsNothing && !$0.redrawsItself }
-        let guesses = facts.filter { $0.known == nil }.map(\.assumed)
-        let measured = facts.compactMap(\.known)
-
-        var out: [String: JSONValue] = [
-            "offset": .number(offset),
-            "endOffset": .number(end),
-            "overshoot": .number(offset - end),
-            "contentHeight": .number(Double(pane.scroll.documentView?.frame.height ?? 0)),
-            "viewportHeight": .number(Double(clip.bounds.height)),
-            "viewportWidth": .number(Double(clip.bounds.width)),
-            "scrollAlpha": .number(Double(pane.scroll.alphaValue)),
-            "scrollFrame": rect(pane.scroll.frame),
-            // The running counts at this phase, so two phases bracket when something happened
-            // without anybody cross-referencing the step arrays to find it.
-            "widthMismatches": .integer(TranscriptHoldCensus.widthMismatches),
-            "silenced": .integer(TranscriptHoldCensus.silencedRows),
-            "cellsBuilt": .integer(TranscriptHoldCensus.cellsBuilt),
-            "screenEstimated": .integer(TranscriptHoldCensus.screenEstimated),
-            "screensSeen": .integer(TranscriptHoldCensus.screensSeen),
-            "holdBounds": rect(pane.hold.bounds),
-            "held": .string(name(of: pane.hold.held)),
-            // `frozen` is private to `TranscriptHoldView`, and this is the same question: a scroll
-            // view sitting at anything other than its host's bounds is a frozen one.
-            "scrollIsFrozen": .bool(pane.scroll.frame != pane.hold.bounds),
-            "cached": .integer(pane.coordinator?.heightCacheCount ?? -1),
-            "cacheWidth": .number(pane.coordinator?.heightCacheWidth ?? 0),
-            "cacheIsReady": .bool(pane.coordinator?.heightCacheIsReady ?? false),
-            "numberOfRows": .integer(count),
-            "visibleRows": .integer(visible),
-            "firstVisibleRow": .integer(range.map { $0.length > 0 ? $0.location : -1 } ?? -1),
-            "rowViews": .integer(pane.table?.subviews.count ?? -1),
-            "hostedRows": .integer(hostingViewCount(in: pane.table)),
-            // The two verdicts, said by the probe rather than left to whoever reads the file.
-            // Rows in the table and none in the viewport is the placement theory; rows recorded at
-            // nothing that were expected to draw is the silence.
-            "isBlank": .bool(count > 0 && visible == 0),
-            // **What the document is actually made of.** The rows above the band are the ones
-            // nobody has measured, so the points they are given divided by their number is the
-            // estimate the transcript's whole length rests on. It is the number that moved.
-            "rowsAboveBand": .integer(facts.first?.row ?? 0),
-            "pointsAboveBand": .number(facts.first?.top ?? 0),
-            "pointsPerRowAboveBand": .number(
-                (facts.first?.row ?? 0) > 0 ? (facts.first?.top ?? 0) / Double(facts.first?.row ?? 1) : 0
-            ),
-            // **The largest height ever handed to a row nobody has looked at**, which is the one
-            // figure that says what this is all about and the one that does not depend on the
-            // width. It was 6,025 on the old estimator, fourteen screens for content nobody had
-            // seen, and 154 on the median.
-            "largestGuess": .number(guesses.max() ?? 0),
-            // What the rows that HAVE been measured come to, per row, counting the ones that
-            // measured nothing. The only truth this probe holds, and it is the truth about the
-            // band rather than about the document: see `report`, which is why the verdict does
-            // not lean on it.
-            "measuredPointsPerRow": .number(
-                measured.isEmpty ? 0 : measured.reduce(0, +) / Double(measured.count)
-            ),
-            "measuredRows": .integer(measured.count),
-            "lostRows": .integer(lost.count),
-            "bandRows": .integer(facts.count),
-            "guessedRows": .integer(facts.filter { $0.known == nil && !$0.drawsNothing }.count),
-            "cellsHeld": .integer(facts.filter(\.hasCell).count),
-            "rows": .array(facts.map { json(of: $0) }),
-        ]
-        out["lost"] = .array(lost.prefix(40).map { json(of: $0) })
-        return out
-    }
-
-    /// The rows either side of the ones on screen, which is where a row lost mid drag is.
-    private static func rowFacts(_ pane: Pane) -> [TranscriptTable.Coordinator.RowFact] {
-        guard let coordinator = pane.coordinator else { return [] }
-        let visible = coordinator.visibleRowRange
-        let count = pane.table?.numberOfRows ?? 0
-        // A visible range of nothing is the blank itself, so the band is taken from whatever row
-        // is under the offset instead of from a range that has collapsed. `row(at:)` answers -1
-        // for a point past the last row, which is the parking case, and the band then starts at
-        // the end of the table.
-        let middle: Int
-        if visible.isEmpty {
-            let under = pane.table?.row(
-                at: NSPoint(x: 0, y: pane.scroll.contentView.bounds.origin.y)
-            ) ?? -1
-            middle = under >= 0 ? under : max(0, count - band)
-        } else {
-            middle = visible.lowerBound
-        }
-        let lower = max(0, middle - band)
-        let upper = min(count, max(visible.upperBound, middle) + band)
-        guard lower < upper else { return [] }
-        return coordinator.rowFacts(for: lower..<upper)
-    }
-
-    private static func json(of fact: TranscriptTable.Coordinator.RowFact) -> JSONValue {
-        .object([
-            "row": .integer(fact.row),
-            "entry": .string(fact.name),
-            "shape": .string(fact.shape),
-            "drawsNothing": .bool(fact.drawsNothing),
-            "known": fact.known.map { JSONValue.number($0) } ?? .null,
-            "assumed": .number(fact.assumed),
-            "measuredNothing": .bool(fact.measuredNothing),
-            "needsMeasuring": .bool(fact.needsMeasuring),
-            "told": .number(fact.told),
-            "top": .number(fact.top),
-            "redrawsItself": .bool(fact.redrawsItself),
-            "hasCell": .bool(fact.hasCell),
-        ])
-    }
-
-    private static func name(of held: TranscriptHoldView.Held?) -> String {
-        guard let held else { return "none" }
-        switch held {
-        case .nothing: return "nothing"
-        case .whatIsDrawn: return "whatIsDrawn"
-        }
-    }
-
-    private static func rect(_ rect: CGRect) -> JSONValue {
-        .object([
-            "x": .number(Double(rect.origin.x)), "y": .number(Double(rect.origin.y)),
-            "w": .number(Double(rect.width)), "h": .number(Double(rect.height)),
-        ])
-    }
-
-    /// How many views under the table are hosting a SwiftUI graph, which is the number the three
-    /// minute hang is quadratic in. By class name, because `NSHostingView` is generic and a probe
-    /// has no business naming the row's view type.
-    private static func hostingViewCount(in table: NSTableView?) -> Int {
-        guard let table else { return -1 }
-        var found = 0
-        func walk(_ view: NSView) {
-            if String(describing: type(of: view)).hasPrefix("NSHostingView") { found += 1 }
-            for subview in view.subviews { walk(subview) }
-        }
-        walk(table)
-        return found
-    }
-
-    private static func holdView(in root: NSView) -> TranscriptHoldView? {
-        if let found = root as? TranscriptHoldView { return found }
-        for subview in root.subviews {
-            if let found = holdView(in: subview) { return found }
-        }
-        return nil
+    /// **`TranscriptStateDump` is where this lives**, because the app writes the same reading
+    /// when a pane goes blank in ordinary use and two readings of one thing that can disagree are
+    /// worth less than one that cannot. The probe asks for a wider band, because a run is read by
+    /// a script and a live file is read by a person.
+    private static func dump(_ pane: TranscriptStateDump.Pane) -> [String: JSONValue] {
+        TranscriptStateDump.state(of: pane, band: band)
     }
 
     // MARK: - Reporting
 
     private static func report(
         window: NSWindow,
-        pane: Pane,
+        pane: TranscriptStateDump.Pane,
         workspace: WorkspaceModel,
         before: [String: JSONValue],
         afterTaller: [String: JSONValue],
@@ -766,8 +605,8 @@ enum ComposerProbe {
             "screenEstimated": .integer(TranscriptHoldCensus.screenEstimated),
             "screenEstimatedSettled": .integer(TranscriptHoldCensus.screenEstimatedSettled),
             "screensSeen": .integer(TranscriptHoldCensus.screensSeen),
-            "mismatches": .array(TranscriptHoldCensus.mismatches.map { json(of: $0) }),
-            "silences": .array(TranscriptHoldCensus.silences.map { json(of: $0) }),
+            "mismatches": .array(TranscriptHoldCensus.mismatches.map { TranscriptStateDump.json(of: $0) }),
+            "silences": .array(TranscriptHoldCensus.silences.map { TranscriptStateDump.json(of: $0) }),
             "transcriptHold": .map(TranscriptHoldCensus.summary()),
             "lostBefore": .integer(Int(number(before, "lostRows"))),
             "lostAfterDrag": .integer(Int(number(afterTaller, "lostRows"))),
@@ -775,29 +614,5 @@ enum ComposerProbe {
             "lostAfterWindowResize": .integer(Int(number(afterWindowResize, "lostRows"))),
         ]
         return .object(own.merging(harness.conditions(window: window)) { mine, _ in mine })
-    }
-
-    private static func json(of mismatch: TranscriptHoldCensus.Mismatch) -> JSONValue {
-        .object([
-            "row": .integer(mismatch.row),
-            "shape": .string(mismatch.shape),
-            "reportedWidth": .number(mismatch.reportedWidth),
-            "cacheWidth": .number(mismatch.cacheWidth),
-            "columnWidth": .number(mismatch.columnWidth),
-            "cellWidth": .number(mismatch.cellWidth),
-            "reportedHeight": .number(mismatch.reportedHeight),
-            "knownHeight": .number(mismatch.knownHeight),
-        ])
-    }
-
-    private static func json(of silence: TranscriptHoldCensus.Silence) -> JSONValue {
-        .object([
-            "row": .integer(silence.row),
-            "source": .string(silence.source),
-            "shape": .string(silence.shape),
-            "columnWidth": .number(silence.columnWidth),
-            "viewportWidth": .number(silence.viewportWidth),
-            "viewportHeight": .number(silence.viewportHeight),
-        ])
     }
 }

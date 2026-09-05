@@ -1537,6 +1537,22 @@ struct TranscriptTable: NSViewRepresentable {
                     isSettlingResizeAtEnd = false
                 }
                 censusOfTheScreen(settled: true)
+                // **A transcript with rows in it and none of them on screen, once it has stopped
+                // moving.** The blank pane has been chased three times from mechanisms caught
+                // under instrumentation and never once from a reading taken while it was
+                // happening. This is where that reading is taken, because the settle is the
+                // moment the view has been still long enough for the state to mean something.
+                // Nothing is written on a healthy pane: see `TranscriptStateDump.tripIfBlank`,
+                // which costs two integer comparisons here and is capped for the life of the
+                // process.
+                if let scrollView, let holdView {
+                    TranscriptStateDump.tripIfBlank(TranscriptStateDump.Pane(
+                        scroll: scrollView,
+                        hold: holdView,
+                        table: tableView,
+                        coordinator: self
+                    ))
+                }
                 onSettled?()
                 warmAhead()
             }
