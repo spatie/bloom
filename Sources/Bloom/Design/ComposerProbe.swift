@@ -153,7 +153,12 @@ enum ComposerProbe {
     /// every absolute figure in this report incomparable. `pin` puts it where the run asks and
     /// ENDS THE RUN if it cannot, because a probe that quietly measures the wrong width is worse
     /// than no probe.
-    private static var paneWidth: CGFloat { ProbeHarness.points("--composer-pane-width", or: 640) }
+    /// **420 by default, because that is the only width the fault has ever been seen at.**
+    /// It is `DetailSplitViewController.detailMinimum` exactly, which is what a 1440 window gives
+    /// the centre column when the inspector is at its 760 maximum, and it is near what the owner's
+    /// own layout produces with a browser pane taking half his window. At 640 the estimator this
+    /// replaces behaves perfectly well: a run there proves nothing about a fix for a run here.
+    private static var paneWidth: CGFloat { ProbeHarness.points("--composer-pane-width", or: 420) }
 
     /// The owner reproduced this with a browser beside the conversation and again with it closed,
     /// so the split is not the cause. `chat` is the default because it is the simpler window and
@@ -206,7 +211,7 @@ enum ComposerProbe {
 
         // **Before anything is measured**, because the width is what every row height is measured
         // against and this is the variable two batches of this probe did not control.
-        await pin(window, pane: pane)
+        await pin(window, pane: pane, in: contentView)
 
         // A known starting composer, so two runs are the same run. Restored at the end.
         let storedHeight = UserDefaults.standard.double(forKey: heightKey)
@@ -304,32 +309,79 @@ enum ComposerProbe {
 
     /// **Puts the transcript pane at the width the run asked for, or ends the run.**
     ///
-    /// The window is what moves, not the divider. `detailItem.holdingPriority` is `defaultLow`, so
-    /// the centre column is the one that absorbs a window resize while the inspector keeps the
-    /// width it was left at: growing the window by the shortfall is therefore working with the
-    /// split's own rule rather than against it, and it needs nothing private. The inspector's own
-    /// minimum and maximum, and the sidebar's width, are what can make a target unreachable.
+    /// **The divider is the lever, not the window, and the first spelling of this had it wrong.**
+    /// Growing the window looked right, because the centre column holds at `defaultLow` and is the
+    /// item that absorbs a resize. It cannot reach the widths that matter: the pane cannot go below
+    /// `DetailSplitViewController.detailMinimum` however small the window gets, the window has a
+    /// minimum of its own that it hits first, and a run asking for 640 refused at a pane of 810 in
+    /// a window of 1,122. What makes the pane narrow is a WIDE INSPECTOR, which is why batch 24
+    /// landed on exactly 420: the inspector was at its 760 maximum and 1440 less 760 less a 260
+    /// sidebar is the centre column's floor.
     ///
-    /// A loop rather than one step, because the split does not always hand the centre the whole
-    /// delta on the first pass, and a hard failure at the end of it, because the whole reason this
-    /// exists is that two batches of runs measured widths nobody had stated.
-    private static func pin(_ window: NSWindow, pane: Pane) async {
-        for _ in 0..<8 {
+    /// So the window is set first, because `--window-size` is applied before `arrange` and the
+    /// arrangement moves it afterwards, and because the dev app's saved window state lives in its
+    /// own preferences domain and survives a reinstall, so two runs asking for 1440x900 reached
+    /// 1,333 and 1,122. Then the divider is driven until the pane is where the run asked.
+    ///
+    /// A hard failure at the end, naming every width involved, because the whole reason this
+    /// exists is that two batches of runs measured panes nobody had stated.
+    private static func pin(_ window: NSWindow, pane: Pane, in root: NSView) async {
+        if let raw = ProbeHarness.value(for: "--window-size"),
+           let size = ProbeStats.windowSize(raw) {
+            window.setContentSize(size)
+            window.layoutIfNeeded()
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        guard let split = detailSplitView(in: root) else {
+            harness.fail("no split view holds the transcript, so its width cannot be pinned")
+        }
+        // **Both levers, in that order.** The divider is the one that matters, because a wide
+        // inspector is what makes the pane narrow. It runs out: the inspector has a maximum of 760
+        // and the sidebar takes what it takes, so at some window widths the centre column cannot
+        // be squeezed to the target however the divider is set. A pass that moves the divider and
+        // finds the pane exactly where it was is that limit, and the window is what is left to
+        // move.
+        for _ in 0..<12 {
             let current = pane.hold.bounds.width
-            let delta = paneWidth - current
-            guard abs(delta) > 1 else { return }
+            guard abs(current - paneWidth) > 1 else { return }
+            let column = split.arrangedSubviews[0].frame.width
+            split.setPosition(column + (paneWidth - current), ofDividerAt: 0)
+            window.layoutIfNeeded()
+            try? await Task.sleep(for: .milliseconds(250))
+            guard abs(pane.hold.bounds.width - current) < 1 else { continue }
             var frame = window.frame
-            frame.size.width += delta
+            frame.size.width += paneWidth - pane.hold.bounds.width
             window.setFrame(frame, display: true)
-            try? await Task.sleep(for: .milliseconds(400))
+            window.layoutIfNeeded()
+            try? await Task.sleep(for: .milliseconds(250))
         }
-        guard abs(pane.hold.bounds.width - paneWidth) <= 1 else {
-            harness.fail(
-                "the transcript pane is \(pane.hold.bounds.width) points wide and the run asked "
-                    + "for \(paneWidth). The window reached \(window.frame.width). Nothing "
-                    + "measured at another width is comparable, so this run is refused."
-            )
+        let widths = split.arrangedSubviews.map { Int($0.frame.width) }
+        harness.fail(
+            "the transcript pane is \(Int(pane.hold.bounds.width)) points wide and the run asked "
+                + "for \(Int(paneWidth)). The window is \(Int(window.frame.width)) and the split "
+                + "is \(widths). Nothing measured at another width is comparable, so this run is "
+                + "refused."
+        )
+    }
+
+    /// The split view whose FIRST arranged half holds the transcript, which is
+    /// `DetailSplitViewController`'s and not the window's own.
+    ///
+    /// The deepest match, because the transcript is inside both: the window's split has the
+    /// sidebar beside the whole detail half, and this one has the centre column beside the
+    /// inspector. Two arranged subviews, because that is what the detail split has and the sidebar
+    /// one may not.
+    private static func detailSplitView(in root: NSView) -> NSSplitView? {
+        var best: (view: NSSplitView, depth: Int)?
+        func walk(_ view: NSView, _ depth: Int) {
+            if let split = view as? NSSplitView, split.arrangedSubviews.count == 2,
+               let first = split.arrangedSubviews.first, holdView(in: first) != nil {
+                if best == nil || depth > (best?.depth ?? 0) { best = (split, depth) }
+            }
+            for subview in view.subviews { walk(subview, depth + 1) }
         }
+        walk(root, 0)
+        return best?.view
     }
 
     // MARK: - Driving
@@ -637,8 +689,14 @@ enum ComposerProbe {
             "band": .integer(band),
             "settleMs": .integer(settleMs),
 
-            // **The one figure that says what this is about, and the one that does not depend on
-            // the width.** The tallest thing a row nobody has looked at was told it is.
+            // **The tallest thing a row nobody has looked at was told it is.**
+            //
+            // **It depends on the width, and it was promoted here on the belief that it does
+            // not.** The same estimator answered 6,025 at a 420 point pane and 170.67 at a 640
+            // point one, on the same conversation, which makes sense the moment it is said out
+            // loud: a narrow pane wraps prose into tall rows, and a tall row in a small sample is
+            // exactly what a mean cannot survive. So this is a figure to read BESIDE the pane
+            // width at the top of the report, never across runs at different ones.
             "largestGuess": .number(max(
                 number(before, "largestGuess"),
                 max(number(afterTaller, "largestGuess"), number(afterScrolling, "largestGuess"))
@@ -662,6 +720,16 @@ enum ComposerProbe {
             // Two, because a document that doubles under a hand is a document the reader is
             // somewhere else in, and because the old estimator's own drag swung by 3.86 while the
             // median's swung by 1.74 on the same gesture.
+            // **The guess against what a measured row of this conversation actually is**, which
+            // is the closest thing here to a figure that survives a change of width: both halves
+            // of it move with the pane. Measured on the same conversation: 70 with the mean at a
+            // 420 point pane, 6.1 with the mean at 640, 5.6 with the median at 747. The pathology
+            // is the first of those and nothing else here separates it as cleanly.
+            "guessRatio": .number(
+                number(before, "measuredPointsPerRow") > 0
+                    ? number(before, "largestGuess") / number(before, "measuredPointsPerRow")
+                    : 0
+            ),
             "documentSwingDuringDrag": .number(swing),
             "documentAtDragStart": .number(lengths.first ?? 0),
             "documentAtDragEnd": .number(lengths.last ?? 0),
