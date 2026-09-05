@@ -656,8 +656,8 @@ struct TranscriptTable: NSViewRepresentable {
             let identifier = NSUserInterfaceItemIdentifier("bloom.transcript.cell")
             let cell = tableView.makeView(withIdentifier: identifier, owner: self)
                 as? TranscriptTableCell ?? TranscriptTableCell(identifier: identifier)
-            cell.onHeightChange = { [weak self] id, key, height in
-                self?.noted(height: height, of: key, for: id)
+            cell.onMeasured = { [weak self] id, key, size in
+                self?.noted(size: size, of: key, for: id)
             }
             // **Every row in the visible rect gets one of these, and this is where a row's SwiftUI
             // graph is actually built.** It is outside the pane's own layout pass, so
@@ -771,8 +771,12 @@ struct TranscriptTable: NSViewRepresentable {
         /// The guard costs one comparison and closes the class: a height is about the content it
         /// was taken from, so a report whose content has been replaced is not evidence about what
         /// is there now.
+        /// **And it carries the width it was laid out at**, because a height is a fact about a
+        /// width and this is the path that had no guard on one. See
+        /// `TranscriptRowHeights.isEvidence`, and `TranscriptHoldCensus.reportedAtAnotherWidth`,
+        /// which counts what this refuses so the reason a cell was laid out narrow can be found.
         private func noted(
-            height: CGFloat, of contentKey: TranscriptContentKey, for entryID: TranscriptEntryID
+            size: CGSize, of contentKey: TranscriptContentKey, for entryID: TranscriptEntryID
         ) {
             // The tail goes on growing inside its frozen cell while a pane is dragged, and a
             // height taken from it would be filed against the entry list this pass is not
@@ -780,13 +784,35 @@ struct TranscriptTable: NSViewRepresentable {
             guard !isHeld else { return }
             guard let row = index[entryID], entries.indices.contains(row),
                   entries[row].contentKey == contentKey else { return }
+            let height = size.height
+            // Counted before it is refused, and counted whatever the height was: what is being
+            // watched for is a cell laid out at a width the table is not, and a report that
+            // happens to agree about the height is the same event.
+            if !TranscriptRowHeights.isEvidence(
+                measuredAt: Double(size.width), forCacheAt: heights.measure?.width
+            ) {
+                TranscriptHoldCensus.reportedAtAnotherWidth(TranscriptHoldCensus.Mismatch(
+                    row: row,
+                    shape: String(describing: entries[row].shape),
+                    reportedWidth: Double(size.width),
+                    cacheWidth: heights.measure?.width ?? 0,
+                    columnWidth: Double(columnWidth),
+                    reportedHeight: Double(height),
+                    knownHeight: heights.height(for: contentKey) ?? -1
+                ))
+            }
             // The other half of the same question `measureExactly` asks: a row the reader was
             // being shown, reporting that it drew nothing after all. The three that redraw
             // themselves are left out here for the reason they are left out there.
             if height == 0, !entries[row].drawsNothing, !entryID.redrawsItself {
                 noteSilence(row: row, entry: entries[row], source: "drawn")
             }
-            guard heights.note(height, for: contentKey, shape: entries[row].shape) else { return }
+            guard heights.note(
+                height,
+                for: contentKey,
+                shape: entries[row].shape,
+                measuredAt: Double(size.width)
+            ) else { return }
             // **News to the cache is not always news to the table.** A row the table is already
             // drawing at this height needs no `noteHeightOfRows`, and the whole of a correction's
             // cost is that call: it moves the document's total and makes AppKit lay out every row
@@ -1572,7 +1598,11 @@ struct TranscriptTable: NSViewRepresentable {
                 let key = entry.contentKey
                 guard heights.height(for: key) == nil || heights.isStale(key) else { continue }
                 let taken = heights.note(
-                    measure(entry, at: CGFloat(sizing.width)), for: key, shape: entry.shape
+                    measure(entry, at: CGFloat(sizing.width)),
+                    for: key,
+                    shape: entry.shape,
+                    // The sizer is handed the cache's own width, so this always is evidence.
+                    measuredAt: sizing.width
                 )
                 if taken { moved.insert(row) }
                 // Between rows rather than after all of them, so the cost of being interrupted is
@@ -1834,7 +1864,9 @@ struct TranscriptTable: NSViewRepresentable {
                 if height == 0, !entry.drawsNothing, !entry.id.redrawsItself {
                     noteSilence(row: row, entry: entry, source: "measureExactly")
                 }
-                let taken = heights.note(height, for: entry.contentKey, shape: entry.shape)
+                let taken = heights.note(
+                    height, for: entry.contentKey, shape: entry.shape, measuredAt: sizing.width
+                )
                 if taken { moved.insert(row) }
             }
             return moved
@@ -2006,7 +2038,7 @@ struct TranscriptTable: NSViewRepresentable {
 /// the", session `369a630d`, file chips in user bubbles at seq 387 and 948.
 private struct HostedRow: View {
     let content: AnyView
-    let report: @MainActor (CGFloat) -> Void
+    let report: @MainActor (CGSize) -> Void
     /// Whether this copy is the one in a cell, which has a row's height to fill, or the one being
     /// measured, which has none. Everything else about the two is identical on purpose: a
     /// measurement taken through a different set of modifiers from the one that draws is a
@@ -2030,8 +2062,14 @@ private struct HostedRow: View {
             .background(
                 GeometryReader { proxy in
                     Color.clear
-                        .onChange(of: proxy.size.height, initial: true) { _, height in
-                            report(height)
+                        // **The size and not the height, because a height is a fact about a
+                        // width.** A report taken from a pass that laid this row out narrow says
+                        // nothing about how tall it is at the width the cache is for, and two of
+                        // them are what emptied the owner's transcript. See
+                        // `TranscriptRowHeights.isEvidence`. Still woken by the height alone: a
+                        // width that moves without the height moving changes no answer.
+                        .onChange(of: proxy.size.height, initial: true) { _, _ in
+                            report(proxy.size)
                         }
                 }
             )
@@ -2069,11 +2107,11 @@ private struct TranscriptCellRoot: View {
     var content: AnyView?
     var id: TranscriptEntryID?
     var environment: TranscriptRowEnvironment?
-    var report: (@MainActor (CGFloat) -> Void)?
+    var report: (@MainActor (CGSize) -> Void)?
 
     var body: some View {
         if let content, let id, let environment {
-            HostedRow(content: content, report: { height in report?(height) })
+            HostedRow(content: content, report: { size in report?(size) })
                 // A recycled cell is handed an unrelated row, and without an identity SwiftUI
                 // treats that as the same view changing rather than a different view arriving,
                 // which is what gives it something to animate between. It is also what makes
@@ -2109,7 +2147,7 @@ final class TranscriptTableCell: NSView {
     private var unclip: Task<Void, Never>?
     /// The content a height was measured for goes back with it, because an entry id alone does
     /// not say which conversation it belongs to. See `Coordinator.noted`.
-    var onHeightChange: (@MainActor (TranscriptEntryID, TranscriptContentKey, CGFloat) -> Void)?
+    var onMeasured: (@MainActor (TranscriptEntryID, TranscriptContentKey, CGSize) -> Void)?
 
     init(identifier: NSUserInterfaceItemIdentifier) {
         host = NSHostingView(rootView: TranscriptCellRoot())
@@ -2170,7 +2208,7 @@ final class TranscriptTableCell: NSView {
             content: entry.content(),
             id: id,
             environment: environment,
-            report: { [weak self] height in self?.onHeightChange?(id, key, height) }
+            report: { [weak self] size in self?.onMeasured?(id, key, size) }
         )
         return true
     }

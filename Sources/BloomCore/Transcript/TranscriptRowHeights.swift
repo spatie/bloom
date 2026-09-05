@@ -157,6 +157,42 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         abs(one - other) <= 0.5
     }
 
+    /// **Whether a height taken at this width is evidence about the width the cache is for.**
+    ///
+    /// A height is a fact about a width. `reset` and `rewidth` have both refused a width they
+    /// cannot use since the day they were written, and `narrowest`'s own comment says why: a table
+    /// that has not been laid out reports a width of nought or one, and a row measured against
+    /// that is a row one point tall. That guard was on the measuring path and missing from the
+    /// REPORTING one, which is the authoritative half: `note`'s own comment says a report from a
+    /// row that has actually been drawn outranks anything measured off screen.
+    ///
+    /// **What that cost, measured on the owner's own conversation.** Two rows reported heights
+    /// from a layout pass during a composer drag and then reported the truth again afterwards:
+    /// a three line paragraph whose height is 54 points reported 1,972, and a user message whose
+    /// height is 444 reported 10,806. Both ratios are a row wrapped into a column about fifteen
+    /// points wide. The 10,806 settled the `message` shape's estimate at 6,025 points, which was
+    /// then handed to every unmeasured row of that shape in a 2,650 row table, and the document
+    /// came out 885,212 points long against a true 172,208. That is the blank transcript the owner
+    /// filmed: a viewport inside rows drawn thousands of points tall.
+    ///
+    /// **What is known and what is not.** That it happened is measured, from four probe runs where
+    /// exactly one shows the two spikes and three do not. WHY a cell was laid out at a fraction of
+    /// its width for a pass is not known, and this rule does not answer it: it stops the app
+    /// believing the answer, which is a different thing from understanding the question.
+    /// `TranscriptHoldCensus.reportedAtAnotherWidth` counts them so the thread can be picked up.
+    ///
+    /// **Refusing costs nothing**, which is what makes this safe rather than a trade. A row whose
+    /// report is refused stays unmeasured for another pass and is drawn from its estimate, which
+    /// is the state every row in a conversation starts in; it is laid out again at the right width
+    /// on the next pass and reports again, and that is the same mechanism that repairs every wrong
+    /// height in this file today. What it cannot do is leave a row unmeasured for ever: the width
+    /// the cache is for comes from `columnWidth`, which is the table's own width, and a cell is
+    /// laid out inside that table, so the two agree except across the pass that changes them.
+    public static func isEvidence(measuredAt width: Double, forCacheAt cacheWidth: Double?) -> Bool {
+        guard let cacheWidth else { return false }
+        return isSameWidth(cacheWidth, width)
+    }
+
     /// The most rows remembered before the cache is emptied and started again.
     ///
     /// **A pane keeps the heights of every conversation it has drawn**, which is what makes
@@ -683,9 +719,15 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// which is what every row was told before there were shapes at all.
     @discardableResult
     public mutating func note(
-        _ height: Double, for contentKey: TranscriptContentKey, shape: TranscriptRowShape = .other
+        _ height: Double,
+        for contentKey: TranscriptContentKey,
+        shape: TranscriptRowShape = .other,
+        measuredAt width: Double
     ) -> Bool {
-        guard measure != nil else { return false }
+        // **A height is a fact about a width**, and one taken at another width is not news about
+        // this one. See `isEvidence`, which carries the two rows that reported 1,972 and 10,806
+        // points from a pass that laid them out fifteen points wide.
+        guard Self.isEvidence(measuredAt: width, forCacheAt: measure?.width) else { return false }
         // Before the news test below, so a row that turns out to be exactly as tall as it was at
         // the old width still stops being owed a measurement.
         stale.remove(contentKey)

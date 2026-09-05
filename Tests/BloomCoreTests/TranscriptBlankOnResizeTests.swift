@@ -127,8 +127,8 @@ struct TranscriptBlankOnResizeTests {
         var heights = TranscriptRowHeights()
         let first = heights.reset(width: 900, scale: 1, leading: 1.7)
         #expect(first)
-        heights.note(240, for: key("row.7"), shape: .answer)
-        heights.note(22, for: key("row.8"), shape: .fold)
+        heights.note(240, for: key("row.7"), shape: .answer, measuredAt: 900)
+        heights.note(22, for: key("row.8"), shape: .fold, measuredAt: 900)
 
         // The pane is half as tall as it was. Nothing above changed, so nothing here may.
         let again = heights.reset(width: 900, scale: 1, leading: 1.7)
@@ -144,7 +144,7 @@ struct TranscriptBlankOnResizeTests {
     func rewidthIsAWidthQuestion() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 900, scale: 1, leading: 1.7)
-        heights.note(240, for: key("row.7"), shape: .answer)
+        heights.note(240, for: key("row.7"), shape: .answer, measuredAt: 900)
 
         let moved = heights.rewidth(to: 900)
         #expect(!moved)
@@ -159,7 +159,7 @@ struct TranscriptBlankOnResizeTests {
     func staysReady() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 900, scale: 1, leading: 1.7)
-        heights.note(240, for: key("row.7"), shape: .answer)
+        heights.note(240, for: key("row.7"), shape: .answer, measuredAt: 900)
         heights.forget()
         #expect(heights.isReady)
         let refused = heights.reset(width: 0.5, scale: 1, leading: 1.7)
@@ -176,8 +176,8 @@ struct TranscriptBlankOnResizeTests {
     func silencesNothing() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 900, scale: 1, leading: 1.7)
-        heights.note(240, for: key("row.7"), shape: .answer)
-        heights.note(0, for: key("row.8"), shape: .notice)
+        heights.note(240, for: key("row.7"), shape: .answer, measuredAt: 900)
+        heights.note(0, for: key("row.8"), shape: .notice, measuredAt: 900)
 
         let same = heights.reset(width: 900, scale: 1, leading: 1.7)
         #expect(!same)

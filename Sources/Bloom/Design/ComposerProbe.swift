@@ -465,6 +465,7 @@ enum ComposerProbe {
             "overshoot": .number(Double(clip.bounds.origin.y - pane.scroll.endOffset)),
             "visibleRows": .integer(visible),
             "silenced": .integer(TranscriptHoldCensus.silencedRows),
+            "widthMismatches": .integer(TranscriptHoldCensus.widthMismatches),
             // The number that tells an emptied cache from a missed row. See
             // `Coordinator.heightCacheCount`.
             "cached": .integer(pane.coordinator?.heightCacheCount ?? -1),
@@ -744,6 +745,12 @@ enum ComposerProbe {
             "afterWindowResize": .object(afterWindowResize),
             "steps": .array(drag),
             "stepsBack": .array(dragBack),
+            // **The count that says whether the cause is ordinary or a once-in-four accident.**
+            // A height reported from a pass that laid the row out at another width is the fault
+            // that emptied the owner's transcript, and it is refused now rather than believed.
+            // Nought here on every run would mean the account of it is wrong.
+            "widthMismatches": .integer(TranscriptHoldCensus.widthMismatches),
+            "mismatches": .array(TranscriptHoldCensus.mismatches.map { json(of: $0) }),
             "silences": .array(TranscriptHoldCensus.silences.map { json(of: $0) }),
             "transcriptHold": .map(TranscriptHoldCensus.summary()),
             "lostBefore": .integer(Int(number(before, "lostRows"))),
@@ -752,6 +759,18 @@ enum ComposerProbe {
             "lostAfterWindowResize": .integer(Int(number(afterWindowResize, "lostRows"))),
         ]
         return .object(own.merging(harness.conditions(window: window)) { mine, _ in mine })
+    }
+
+    private static func json(of mismatch: TranscriptHoldCensus.Mismatch) -> JSONValue {
+        .object([
+            "row": .integer(mismatch.row),
+            "shape": .string(mismatch.shape),
+            "reportedWidth": .number(mismatch.reportedWidth),
+            "cacheWidth": .number(mismatch.cacheWidth),
+            "columnWidth": .number(mismatch.columnWidth),
+            "reportedHeight": .number(mismatch.reportedHeight),
+            "knownHeight": .number(mismatch.knownHeight),
+        ])
     }
 
     private static func json(of silence: TranscriptHoldCensus.Silence) -> JSONValue {

@@ -16,7 +16,7 @@ struct TranscriptRowHeightsTests {
     func remembersAHeight() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7|assistant"))
+        heights.note(120, for: key("row.7|assistant"), measuredAt: 800)
         #expect(heights.height(for: key("row.7|assistant")) == 120)
     }
 
@@ -24,7 +24,7 @@ struct TranscriptRowHeightsTests {
     func contentIsPartOfTheKey() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7|folded"))
+        heights.note(120, for: key("row.7|folded"), measuredAt: 800)
         #expect(heights.height(for: key("row.7|unfolded")) == nil)
     }
 
@@ -34,7 +34,7 @@ struct TranscriptRowHeightsTests {
     func widthInvalidates() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7"))
+        heights.note(120, for: key("row.7"), measuredAt: 800)
         // Called before the expectation rather than inside it: `reset` is mutating, and `#expect`
         // rewrites its argument into a closure that takes the value immutably.
         let invalidated = heights.reset(width: 600, scale: 1, leading: 1.7)
@@ -47,7 +47,7 @@ struct TranscriptRowHeightsTests {
     func scaleInvalidates() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7"))
+        heights.note(120, for: key("row.7"), measuredAt: 800)
         let invalidated = heights.reset(width: 800, scale: 1.3, leading: 1.7)
         #expect(invalidated)
         #expect(heights.height(for: key("row.7")) == nil)
@@ -60,7 +60,7 @@ struct TranscriptRowHeightsTests {
     func leadingInvalidates() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7"))
+        heights.note(120, for: key("row.7"), measuredAt: 800)
         let invalidated = heights.reset(width: 800, scale: 1, leading: 1.4)
         #expect(invalidated)
         #expect(heights.height(for: key("row.7")) == nil)
@@ -85,9 +85,9 @@ struct TranscriptRowHeightsTests {
     func doesNotHoldEveryWidthItHasSeen() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7"))
+        heights.note(120, for: key("row.7"), measuredAt: 800)
         heights.reset(width: 600, scale: 1, leading: 1.7)
-        heights.note(180, for: key("row.7"))
+        heights.note(180, for: key("row.7"), measuredAt: 600)
         heights.reset(width: 800, scale: 1, leading: 1.7)
         #expect(heights.count == 0)
     }
@@ -99,7 +99,7 @@ struct TranscriptRowHeightsTests {
     func toleratesAFraction() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 831.5, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7"))
+        heights.note(120, for: key("row.7"), measuredAt: 831.5)
         let invalidated = heights.reset(width: 831.75, scale: 1, leading: 1.7)
         #expect(!invalidated)
         #expect(heights.height(for: key("row.7")) == 120)
@@ -132,7 +132,9 @@ struct TranscriptRowHeightsTests {
     @Test("nothing is remembered before a width has arrived")
     func refusesHeightsWithoutAWidth() {
         var heights = TranscriptRowHeights()
-        let changed = heights.note(120, for: key("row.7"))
+        // A report at a perfectly good width, refused because the cache is for no width at all
+        // and a height is a fact about one. See `isEvidence`.
+        let changed = heights.note(120, for: key("row.7"), measuredAt: 800)
         #expect(!changed)
         #expect(heights.height(for: key("row.7")) == nil)
     }
@@ -155,8 +157,8 @@ struct TranscriptRowHeightsTests {
     func aDrawnRowWins() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7"))
-        let changed = heights.note(340, for: key("row.7"))
+        heights.note(120, for: key("row.7"), measuredAt: 800)
+        let changed = heights.note(340, for: key("row.7"), measuredAt: 800)
         #expect(changed)
         #expect(heights.height(for: key("row.7")) == 340)
     }
@@ -167,12 +169,12 @@ struct TranscriptRowHeightsTests {
     func ignoresAnUnchangedHeight() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        let changed = heights.note(120, for: key("row.7"))
+        let changed = heights.note(120, for: key("row.7"), measuredAt: 800)
         #expect(changed)
-        let changedAgain = heights.note(120, for: key("row.7"))
+        let changedAgain = heights.note(120, for: key("row.7"), measuredAt: 800)
         #expect(!changedAgain)
         // Rounds up to the same 120, so a fraction of a point of drift says nothing either.
-        let changedByAFraction = heights.note(119.6, for: key("row.7"))
+        let changedByAFraction = heights.note(119.6, for: key("row.7"), measuredAt: 800)
         #expect(!changedByAFraction)
     }
 
@@ -182,7 +184,7 @@ struct TranscriptRowHeightsTests {
     func nothingIsAnAnswer() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        let changed = heights.note(0, for: key("row.7"))
+        let changed = heights.note(0, for: key("row.7"), measuredAt: 800)
         #expect(changed)
         #expect(heights.height(for: key("row.7")) == 0)
     }
@@ -203,7 +205,7 @@ struct TranscriptRowHeightsTests {
     func rewidthEstimates() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7"))
+        heights.note(120, for: key("row.7"), measuredAt: 800)
         let moved = heights.rewidth(to: 600)
         #expect(moved)
         #expect(heights.height(for: key("row.7")) == 120)
@@ -216,9 +218,9 @@ struct TranscriptRowHeightsTests {
     func measuringClearsTheDebt() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7"))
+        heights.note(120, for: key("row.7"), measuredAt: 800)
         heights.rewidth(to: 600)
-        heights.note(180, for: key("row.7"))
+        heights.note(180, for: key("row.7"), measuredAt: 600)
         #expect(!heights.isStale(key("row.7")))
         #expect(heights.staleCount == 0)
     }
@@ -230,9 +232,9 @@ struct TranscriptRowHeightsTests {
     func anUnchangedHeightStillSettlesTheDebt() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7"))
+        heights.note(120, for: key("row.7"), measuredAt: 800)
         heights.rewidth(to: 600)
-        let changed = heights.note(120, for: key("row.7"))
+        let changed = heights.note(120, for: key("row.7"), measuredAt: 600)
         #expect(!changed)
         #expect(!heights.isStale(key("row.7")))
     }
@@ -241,7 +243,7 @@ struct TranscriptRowHeightsTests {
     func rewidthToTheSameWidth() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7"))
+        heights.note(120, for: key("row.7"), measuredAt: 800)
         let rewidened = heights.rewidth(to: 800.25)
         #expect(!rewidened)
         #expect(!heights.isStale(key("row.7")))
@@ -265,7 +267,7 @@ struct TranscriptRowHeightsTests {
     func resetClearsTheDebt() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7"))
+        heights.note(120, for: key("row.7"), measuredAt: 800)
         heights.rewidth(to: 600)
         heights.reset(width: 600, scale: 1.3, leading: 1.7)
         #expect(heights.staleCount == 0)
@@ -276,7 +278,7 @@ struct TranscriptRowHeightsTests {
     func forgettingClearsTheDebt() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7"))
+        heights.note(120, for: key("row.7"), measuredAt: 800)
         heights.rewidth(to: 600)
         heights.forget()
         #expect(heights.staleCount == 0)
@@ -303,8 +305,8 @@ struct TranscriptRowHeightsTests {
     func assumesTheMiddleOfWhatIsKnown() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(100, for: key("row.1"))
-        heights.note(200, for: key("row.2"))
+        heights.note(100, for: key("row.1"), measuredAt: 800)
+        heights.note(200, for: key("row.2"), measuredAt: 800)
         #expect(heights.estimate == 100)
         #expect(heights.assumed(for: key("row.99")) == 100)
         // And the measured ones are still themselves.
@@ -321,7 +323,7 @@ struct TranscriptRowHeightsTests {
     func measuredNothingIsNothing() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(0, for: key("blank"))
+        heights.note(0, for: key("blank"), measuredAt: 800)
         #expect(heights.measuredNothing(key("blank")))
     }
 
@@ -344,8 +346,8 @@ struct TranscriptRowHeightsTests {
     func somethingIsNotNothing() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(24, for: key("row.1"))
-        heights.note(0.4, for: key("row.2"))
+        heights.note(24, for: key("row.1"), measuredAt: 800)
+        heights.note(0.4, for: key("row.2"), measuredAt: 800)
         #expect(!heights.measuredNothing(key("row.1")))
         #expect(!heights.measuredNothing(key("row.2")))
         #expect(heights.height(for: key("row.2")) == 1)
@@ -358,7 +360,7 @@ struct TranscriptRowHeightsTests {
     func gainingContentMissesTheCache() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(0, for: key("row.7.empty"))
+        heights.note(0, for: key("row.7.empty"), measuredAt: 800)
         #expect(heights.measuredNothing(key("row.7.empty")))
         // The same row, now with something in it, and therefore a different content key.
         #expect(!heights.measuredNothing(key("row.7.full")))
@@ -370,7 +372,7 @@ struct TranscriptRowHeightsTests {
     func forgettingUnsilencesEverything() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(0, for: key("blank"))
+        heights.note(0, for: key("blank"), measuredAt: 800)
         heights.forget()
         #expect(!heights.measuredNothing(key("blank")))
     }
@@ -383,7 +385,7 @@ struct TranscriptRowHeightsTests {
     func assumesNothingForABlankRow() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(100, for: key("row.1"))
+        heights.note(100, for: key("row.1"), measuredAt: 800)
         #expect(heights.assumed(for: key("blank"), drawsNothing: true) == 0)
         #expect(heights.assumed(for: key("blank")) == 100)
     }
@@ -394,7 +396,7 @@ struct TranscriptRowHeightsTests {
     func measurementBeatsTheClaim() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(42, for: key("row.1"))
+        heights.note(42, for: key("row.1"), measuredAt: 800)
         #expect(heights.assumed(for: key("row.1"), drawsNothing: true) == 42)
     }
 
@@ -405,9 +407,9 @@ struct TranscriptRowHeightsTests {
     func noughtsAreNotInTheMean() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(100, for: key("row.1"))
-        heights.note(200, for: key("row.2"))
-        for row in 0..<50 { heights.note(0, for: key("blank.\(row)")) }
+        heights.note(100, for: key("row.1"), measuredAt: 800)
+        heights.note(200, for: key("row.2"), measuredAt: 800)
+        for row in 0..<50 { heights.note(0, for: key("blank.\(row)"), measuredAt: 800) }
         #expect(heights.estimate == 100)
         // The noughts are still remembered, and still nought.
         #expect(heights.height(for: key("blank.7")) == 0)
@@ -420,9 +422,9 @@ struct TranscriptRowHeightsTests {
     func aRowThatEmptiesLeavesTheMean() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(100, for: key("row.1"))
-        heights.note(300, for: key("row.2"))
-        heights.note(0, for: key("row.2"))
+        heights.note(100, for: key("row.1"), measuredAt: 800)
+        heights.note(300, for: key("row.2"), measuredAt: 800)
+        heights.note(0, for: key("row.2"), measuredAt: 800)
         #expect(heights.estimate == 100)
     }
 
@@ -435,14 +437,14 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
         for row in 0..<TranscriptRowHeights.settleAfter {
-            heights.note(100, for: key("row.\(row)"))
+            heights.note(100, for: key("row.\(row)"), measuredAt: 800)
         }
         #expect(heights.estimate == 100)
         // Everything after this is measured on its own account and changes nothing for the rows
         // nobody has drawn, until the sample it was formed from has doubled. Twenty three of these
         // is forty seven drawn rows against the twenty four it settled from, so it holds even
         // though every one of them disagrees.
-        for row in 0..<23 { heights.note(900, for: key("late.\(row)")) }
+        for row in 0..<23 { heights.note(900, for: key("late.\(row)"), measuredAt: 800) }
         #expect(heights.estimate == 100)
         #expect(heights.assumed(for: key("never.drawn")) == 100)
     }
@@ -457,18 +459,18 @@ struct TranscriptRowHeightsTests {
         heights.reset(width: 800, scale: 1, leading: 1.7)
         // The tail: a screenful of tall rows, which settles it at 400.
         for row in 0..<TranscriptRowHeights.settleAfter {
-            heights.note(400, for: key("tail.\(row)"))
+            heights.note(400, for: key("tail.\(row)"), measuredAt: 800)
         }
         #expect(heights.estimate == 400)
         // The conversation behind it, which is what the session is really made of. Nothing moves
         // until the sample has doubled, however wrong the held number is: twenty three of these
         // leaves forty seven drawn rows against the twenty four it settled from.
-        for row in 0..<23 { heights.note(20, for: key("row.\(row)")) }
+        for row in 0..<23 { heights.note(20, for: key("row.\(row)"), measuredAt: 800) }
         #expect(heights.estimate == 400)
         // The forty eighth doubles it, and twenty is what half the rows in this conversation
         // actually are. The mean this used to take answered 210, which is a height no row in the
         // sample has and which every unmeasured row would have been drawn at.
-        heights.note(20, for: key("row.23"))
+        heights.note(20, for: key("row.23"), measuredAt: 800)
         #expect(heights.estimate == 20)
     }
 
@@ -479,11 +481,11 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
         for row in 0..<TranscriptRowHeights.settleAfter {
-            heights.note(100, for: key("row.\(row)"))
+            heights.note(100, for: key("row.\(row)"), measuredAt: 800)
         }
         #expect(heights.estimate == 100)
         // A tenth out over hundreds of rows, which is inside the drift this tolerates.
-        for row in 0..<400 { heights.note(110, for: key("more.\(row)")) }
+        for row in 0..<400 { heights.note(110, for: key("more.\(row)"), measuredAt: 800) }
         #expect(heights.estimate == 100)
     }
 
@@ -497,9 +499,9 @@ struct TranscriptRowHeightsTests {
     func tracksUntilItSettles() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(100, for: key("row.1"))
+        heights.note(100, for: key("row.1"), measuredAt: 800)
         #expect(heights.estimate == 100)
-        heights.note(300, for: key("row.2"))
+        heights.note(300, for: key("row.2"), measuredAt: 800)
         #expect(heights.estimate == 100)
     }
 
@@ -510,11 +512,11 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
         for row in 0..<TranscriptRowHeights.settleAfter {
-            heights.note(100, for: key("row.\(row)"))
+            heights.note(100, for: key("row.\(row)"), measuredAt: 800)
         }
         heights.forget()
         #expect(heights.estimate == TranscriptRowHeights.assumedRowHeight)
-        heights.note(40, for: key("fresh"))
+        heights.note(40, for: key("fresh"), measuredAt: 800)
         #expect(heights.estimate == 40)
     }
 
@@ -524,10 +526,10 @@ struct TranscriptRowHeightsTests {
     func noughtsDoNotSettleIt() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        for row in 0..<200 { heights.note(0, for: key("blank.\(row)")) }
-        heights.note(100, for: key("row.1"))
+        for row in 0..<200 { heights.note(0, for: key("blank.\(row)"), measuredAt: 800) }
+        heights.note(100, for: key("row.1"), measuredAt: 800)
         #expect(heights.estimate == 100)
-        heights.note(300, for: key("row.2"))
+        heights.note(300, for: key("row.2"), measuredAt: 800)
         // Two drawn rows is not a screenful, so it is still tracking.
         #expect(heights.estimate == 100)
     }
@@ -538,8 +540,8 @@ struct TranscriptRowHeightsTests {
     func meanFollowsAnOverwrite() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(100, for: key("row.1"))
-        heights.note(300, for: key("row.1"))
+        heights.note(100, for: key("row.1"), measuredAt: 800)
+        heights.note(300, for: key("row.1"), measuredAt: 800)
         #expect(heights.estimate == 300)
     }
 
@@ -547,7 +549,7 @@ struct TranscriptRowHeightsTests {
     func meanIsEmptiedWithTheCache() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(400, for: key("row.1"))
+        heights.note(400, for: key("row.1"), measuredAt: 800)
         heights.forget()
         #expect(heights.estimate == TranscriptRowHeights.assumedRowHeight)
     }
@@ -558,8 +560,8 @@ struct TranscriptRowHeightsTests {
     func meanSurvivesAResize() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(100, for: key("row.1"))
-        heights.note(200, for: key("row.2"))
+        heights.note(100, for: key("row.1"), measuredAt: 800)
+        heights.note(200, for: key("row.2"), measuredAt: 800)
         heights.rewidth(to: 600)
         #expect(heights.estimate == 100)
     }
@@ -578,7 +580,7 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.showing(SessionID("prose"))
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        for row in 0..<2_000 { heights.note(400, for: key("prose.\(row)")) }
+        for row in 0..<2_000 { heights.note(400, for: key("prose.\(row)"), measuredAt: 800) }
         #expect(heights.estimate == 400)
 
         let switched = heights.showing(SessionID("tools"))
@@ -594,10 +596,10 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.showing(SessionID("prose"))
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        for row in 0..<2_000 { heights.note(400, for: key("prose.\(row)")) }
+        for row in 0..<2_000 { heights.note(400, for: key("prose.\(row)"), measuredAt: 800) }
         heights.showing(SessionID("tools"))
         for row in 0..<TranscriptRowHeights.settleAfter {
-            heights.note(24, for: key("tools.\(row)"))
+            heights.note(24, for: key("tools.\(row)"), measuredAt: 800)
         }
         #expect(heights.estimate == 24)
         #expect(heights.assumed(for: key("tools.never.drawn")) == 24)
@@ -611,7 +613,7 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.showing(SessionID("one"))
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("one.row.7"))
+        heights.note(120, for: key("one.row.7"), measuredAt: 800)
         heights.showing(SessionID("two"))
         #expect(heights.height(for: key("one.row.7")) == 120)
         let back = heights.showing(SessionID("one"))
@@ -629,7 +631,7 @@ struct TranscriptRowHeightsTests {
         heights.showing(SessionID("one"))
         heights.reset(width: 800, scale: 1, leading: 1.7)
         for row in 0..<TranscriptRowHeights.settleAfter {
-            heights.note(300, for: key("one.\(row)"))
+            heights.note(300, for: key("one.\(row)"), measuredAt: 800)
         }
         heights.showing(SessionID("two"))
         let back = heights.showing(SessionID("one"))
@@ -637,7 +639,7 @@ struct TranscriptRowHeightsTests {
         #expect(heights.estimate == TranscriptRowHeights.assumedRowHeight)
         // The screen the reader lands on, reporting what it has always been.
         for row in 0..<TranscriptRowHeights.settleAfter {
-            heights.note(300, for: key("one.\(row)"))
+            heights.note(300, for: key("one.\(row)"), measuredAt: 800)
         }
         #expect(heights.estimate == 300)
     }
@@ -649,8 +651,8 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.showing(SessionID("one"))
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(100, for: key("row.1"))
-        for step in 1...20 { heights.note(Double(100 + step * 10), for: key("tail")) }
+        heights.note(100, for: key("row.1"), measuredAt: 800)
+        for step in 1...20 { heights.note(Double(100 + step * 10), for: key("tail"), measuredAt: 800) }
         // The tail's last word and one other row: 300 and 100, whose middle is 100. Counted per
         // report rather than per row it would be a sample of twenty one tail heights.
         #expect(heights.estimate == 100)
@@ -662,7 +664,7 @@ struct TranscriptRowHeightsTests {
         heights.showing(SessionID("one"))
         heights.reset(width: 800, scale: 1, leading: 1.7)
         for row in 0..<TranscriptRowHeights.settleAfter {
-            heights.note(300, for: key("one.\(row)"))
+            heights.note(300, for: key("one.\(row)"), measuredAt: 800)
         }
         let again = heights.showing(SessionID("one"))
         #expect(!again)
@@ -678,10 +680,10 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
         for row in 0..<TranscriptRowHeights.mostRows {
-            heights.note(Double(row % 400) + 1, for: key("row.\(row)"))
+            heights.note(Double(row % 400) + 1, for: key("row.\(row)"), measuredAt: 800)
         }
         #expect(heights.count == TranscriptRowHeights.mostRows)
-        heights.note(120, for: key("one.too.many"))
+        heights.note(120, for: key("one.too.many"), measuredAt: 800)
         #expect(heights.count == 1)
         #expect(heights.height(for: key("one.too.many")) == 120)
         // The width is kept, because the pane is still the width it was.
@@ -693,9 +695,9 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
         for row in 0..<TranscriptRowHeights.mostRows {
-            heights.note(Double(row % 400) + 1, for: key("row.\(row)"))
+            heights.note(Double(row % 400) + 1, for: key("row.\(row)"), measuredAt: 800)
         }
-        heights.note(999, for: key("row.0"))
+        heights.note(999, for: key("row.0"), measuredAt: 800)
         #expect(heights.count == TranscriptRowHeights.mostRows)
         #expect(heights.height(for: key("row.0")) == 999)
     }
@@ -708,11 +710,11 @@ struct TranscriptRowHeightsTests {
         #expect(!TranscriptRowHeights.isSameHeight(24, 25))
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(24, for: key("row.1"))
+        heights.note(24, for: key("row.1"), measuredAt: 800)
         // Rounded up to 25, which is a point away and therefore news.
-        let news = heights.note(24.4, for: key("row.1"))
+        let news = heights.note(24.4, for: key("row.1"), measuredAt: 800)
         #expect(news)
-        let again = heights.note(25, for: key("row.1"))
+        let again = heights.note(25, for: key("row.1"), measuredAt: 800)
         #expect(!again)
     }
 
@@ -735,7 +737,7 @@ struct TranscriptRowHeightsTests {
     func aMeasuredRowIsNotOwed() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7"))
+        heights.note(120, for: key("row.7"), measuredAt: 800)
         #expect(!heights.needsMeasuring(key("row.7"), redrawsItself: false))
     }
 
@@ -744,7 +746,7 @@ struct TranscriptRowHeightsTests {
     func aStaleRowIsOwed() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7"))
+        heights.note(120, for: key("row.7"), measuredAt: 800)
         let moved = heights.rewidth(to: 600)
         #expect(moved)
         #expect(heights.needsMeasuring(key("row.7"), redrawsItself: false))
@@ -759,7 +761,7 @@ struct TranscriptRowHeightsTests {
     func anEntryThatRedrawsItselfIsAlwaysOwed() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(480, for: key("streaming.session-a"))
+        heights.note(480, for: key("streaming.session-a"), measuredAt: 800)
         #expect(heights.height(for: key("streaming.session-a")) == 480)
         #expect(heights.needsMeasuring(key("streaming.session-a"), redrawsItself: true))
     }
@@ -777,7 +779,7 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
         let fold = TranscriptEntryID.fold(41)
-        heights.note(0, for: key("fold.41|shows-nothing"))
+        heights.note(0, for: key("fold.41|shows-nothing"), measuredAt: 800)
         #expect(!fold.redrawsItself)
         #expect(!heights.needsMeasuring(key("fold.41|shows-nothing"), redrawsItself: fold.redrawsItself))
     }
@@ -817,7 +819,7 @@ struct TranscriptRowHeightsTests {
     func forgets() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 800, scale: 1, leading: 1.7)
-        heights.note(120, for: key("row.7"))
+        heights.note(120, for: key("row.7"), measuredAt: 800)
         heights.forget()
         #expect(heights.height(for: key("row.7")) == nil)
         #expect(heights.isReady)
@@ -839,9 +841,9 @@ struct TranscriptRowHeightsTests {
         heights.reset(width: 831, scale: 1, leading: 1.7)
         heights.showing(SessionID("chat"))
         // The arrival: three folds and a screenful of the answer the pane opened on.
-        for fold in 0..<3 { heights.note(28, for: key("fold.\(fold)"), shape: .fold) }
+        for fold in 0..<3 { heights.note(28, for: key("fold.\(fold)"), shape: .fold, measuredAt: 831) }
         for row in 0..<TranscriptRowHeights.settleAfter {
-            heights.note(800, for: key("answer.\(row)"), shape: .answer)
+            heights.note(800, for: key("answer.\(row)"), shape: .answer, measuredAt: 831)
         }
         // The bound, doing its job: the middle of this sample is the 800 point answer, and no row
         // nobody has looked at may be told more than `mostEstimated`. See its own comment for why
@@ -872,14 +874,14 @@ struct TranscriptRowHeightsTests {
     func tooLittleOfAShapeFallsBack() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 831, scale: 1, leading: 1.7)
-        for row in 0..<10 { heights.note(200, for: key("answer.\(row)"), shape: .answer) }
+        for row in 0..<10 { heights.note(200, for: key("answer.\(row)"), shape: .answer, measuredAt: 831) }
         // Two is not enough to speak for a kind of row. See `settleShapeAfter`.
-        heights.note(28, for: key("fold.1"), shape: .fold)
-        heights.note(28, for: key("fold.2"), shape: .fold)
+        heights.note(28, for: key("fold.1"), shape: .fold, measuredAt: 831)
+        heights.note(28, for: key("fold.2"), shape: .fold, measuredAt: 831)
         // Ten answers and two folds, which is the conversation's own number and not a fold's.
         #expect(heights.estimate(for: .fold) == 200)
         // The third is.
-        heights.note(28, for: key("fold.3"), shape: .fold)
+        heights.note(28, for: key("fold.3"), shape: .fold, measuredAt: 831)
         #expect(heights.estimate(for: .fold) == 28)
     }
 
@@ -889,8 +891,8 @@ struct TranscriptRowHeightsTests {
     func shapesStillFeedTheWholeConversation() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 831, scale: 1, leading: 1.7)
-        heights.note(100, for: key("a"), shape: .tool)
-        heights.note(300, for: key("b"), shape: .answer)
+        heights.note(100, for: key("a"), shape: .tool, measuredAt: 831)
+        heights.note(300, for: key("b"), shape: .answer, measuredAt: 831)
         #expect(heights.estimate == 100)
     }
 
@@ -901,8 +903,8 @@ struct TranscriptRowHeightsTests {
     func otherIsTheConversation() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 831, scale: 1, leading: 1.7)
-        for row in 0..<10 { heights.note(40, for: key("tool.\(row)"), shape: .tool) }
-        heights.note(900, for: key("tail"), shape: .other)
+        for row in 0..<10 { heights.note(40, for: key("tool.\(row)"), shape: .tool, measuredAt: 831) }
+        heights.note(900, for: key("tail"), shape: .other, measuredAt: 831)
         #expect(heights.estimate(for: .other) == heights.estimate)
         // And the unclassified row is in the conversation's sample like any other. A mean would
         // have answered 118 for a conversation of forty point rows, on the strength of the one
@@ -917,13 +919,13 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 831, scale: 1, leading: 1.7)
         for row in 0..<TranscriptRowHeights.settleShapeAfter {
-            heights.note(30, for: key("tool.\(row)"), shape: .tool)
+            heights.note(30, for: key("tool.\(row)"), shape: .tool, measuredAt: 831)
         }
         #expect(heights.estimate(for: .tool) == 30)
         // Two more, which is five drawn tool rows against the three it settled from. Not doubled,
         // so it holds however wrong it now is.
-        heights.note(300, for: key("tool.wide.1"), shape: .tool)
-        heights.note(300, for: key("tool.wide.2"), shape: .tool)
+        heights.note(300, for: key("tool.wide.1"), shape: .tool, measuredAt: 831)
+        heights.note(300, for: key("tool.wide.2"), shape: .tool, measuredAt: 831)
         #expect(heights.estimate(for: .tool) == 30)
     }
 
@@ -932,9 +934,9 @@ struct TranscriptRowHeightsTests {
     func aShapeResettles() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 831, scale: 1, leading: 1.7)
-        for row in 0..<3 { heights.note(300, for: key("tool.\(row)"), shape: .tool) }
+        for row in 0..<3 { heights.note(300, for: key("tool.\(row)"), shape: .tool, measuredAt: 831) }
         #expect(heights.estimate(for: .tool) == 300)
-        for row in 3..<6 { heights.note(30, for: key("tool.\(row)"), shape: .tool) }
+        for row in 3..<6 { heights.note(30, for: key("tool.\(row)"), shape: .tool, measuredAt: 831) }
         // Six against the three it settled from, and half the sample says thirty. The mean this
         // used to take answered 165, which is a height no tool row in the sample has.
         #expect(heights.estimate(for: .tool) == 30)
@@ -946,8 +948,8 @@ struct TranscriptRowHeightsTests {
     func aShapeDoesNotResettleForSmallDrift() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 831, scale: 1, leading: 1.7)
-        for row in 0..<3 { heights.note(100, for: key("fold.\(row)"), shape: .fold) }
-        for row in 3..<40 { heights.note(105, for: key("fold.\(row)"), shape: .fold) }
+        for row in 0..<3 { heights.note(100, for: key("fold.\(row)"), shape: .fold, measuredAt: 831) }
+        for row in 3..<40 { heights.note(105, for: key("fold.\(row)"), shape: .fold, measuredAt: 831) }
         #expect(heights.estimate(for: .fold) == 100)
     }
 
@@ -957,8 +959,8 @@ struct TranscriptRowHeightsTests {
     func noughtsDoNotFormAShape() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 831, scale: 1, leading: 1.7)
-        for row in 0..<50 { heights.note(0, for: key("blank.\(row)"), shape: .tool) }
-        for row in 0..<3 { heights.note(40, for: key("tool.\(row)"), shape: .tool) }
+        for row in 0..<50 { heights.note(0, for: key("blank.\(row)"), shape: .tool, measuredAt: 831) }
+        for row in 0..<3 { heights.note(40, for: key("tool.\(row)"), shape: .tool, measuredAt: 831) }
         #expect(heights.estimate(for: .tool) == 40)
     }
 
@@ -969,9 +971,9 @@ struct TranscriptRowHeightsTests {
     func aShapeFollowsAnOverwrite() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 831, scale: 1, leading: 1.7)
-        for row in 0..<2 { heights.note(40, for: key("tool.\(row)"), shape: .tool) }
-        heights.note(100, for: key("tool.0"), shape: .tool)
-        heights.note(40, for: key("tool.2"), shape: .tool)
+        for row in 0..<2 { heights.note(40, for: key("tool.\(row)"), shape: .tool, measuredAt: 831) }
+        heights.note(100, for: key("tool.0"), shape: .tool, measuredAt: 831)
+        heights.note(40, for: key("tool.2"), shape: .tool, measuredAt: 831)
         // 100, 40 and 40, rather than 40, 40, 100 and 40, and the middle of those three is 40.
         #expect(heights.estimate(for: .tool) == 40)
     }
@@ -983,7 +985,7 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 831, scale: 1, leading: 1.7)
         heights.showing(SessionID("prose"))
-        for row in 0..<3 { heights.note(900, for: key("answer.\(row)"), shape: .answer) }
+        for row in 0..<3 { heights.note(900, for: key("answer.\(row)"), shape: .answer, measuredAt: 831) }
         // Nine hundred is what the sample says and `mostEstimated` is what an unmeasured row is
         // allowed to be told, which is the point of the bound: those three rows are drawn at 900
         // because they were measured, and the fourth is not.
@@ -998,7 +1000,7 @@ struct TranscriptRowHeightsTests {
     func shapesSurviveAResize() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 831, scale: 1, leading: 1.7)
-        for row in 0..<3 { heights.note(30, for: key("tool.\(row)"), shape: .tool) }
+        for row in 0..<3 { heights.note(30, for: key("tool.\(row)"), shape: .tool, measuredAt: 831) }
         heights.rewidth(to: 600)
         #expect(heights.estimate(for: .tool) == 30)
     }
@@ -1008,9 +1010,92 @@ struct TranscriptRowHeightsTests {
     func forgettingEmptiesTheShapes() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 831, scale: 1, leading: 1.7)
-        for row in 0..<3 { heights.note(30, for: key("tool.\(row)"), shape: .tool) }
+        for row in 0..<3 { heights.note(30, for: key("tool.\(row)"), shape: .tool, measuredAt: 831) }
         heights.forget()
         #expect(heights.estimate(for: .tool) == TranscriptRowHeights.assumedRowHeight)
+    }
+
+    // MARK: - A height is a fact about a width
+
+    /// **The two rows that emptied the owner's transcript**, from the one probe run of four that
+    /// caught them. A three line paragraph whose height is 54 points reported 1,972, and a user
+    /// message whose height is 444 reported 10,806, both only during a composer drag and both
+    /// correct again afterwards. Both ratios are a row wrapped into a column about fifteen points
+    /// wide: reports taken from a layout pass at a width the table was not.
+    ///
+    /// `reset` and `rewidth` have refused a width they cannot use since they were written. This is
+    /// the same rule on the REPORTING path, which is the authoritative one.
+    @Test("a height reported at another width is not news about this one")
+    func aReportAtAnotherWidthIsRefused() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 420, scale: 1, leading: 1.7)
+        heights.note(54, for: key("row.19554"), measuredAt: 420)
+        // The spike, from a pass that laid the row out fifteen points wide.
+        let took = heights.note(1_972, for: key("row.19554"), measuredAt: 15)
+        #expect(!took)
+        #expect(heights.height(for: key("row.19554")) == 54)
+    }
+
+    /// And the row that did the real damage: 444 points of user message reported as 10,806, which
+    /// settled its shape's estimate at 6,025 and was then handed to every unmeasured row of that
+    /// shape in a 2,650 row table.
+    @Test("a spike from a narrow pass does not reach the estimate either")
+    func aReportAtAnotherWidthDoesNotMoveTheEstimate() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 420, scale: 1, leading: 1.7)
+        for row in 0..<3 {
+            heights.note(444, for: key("message.\(row)"), shape: .message, measuredAt: 420)
+        }
+        #expect(heights.estimate(for: .message) == 444)
+        heights.note(10_806, for: key("message.3"), shape: .message, measuredAt: 17)
+        #expect(heights.estimate(for: .message) == 444)
+        #expect(heights.assumed(for: key("message.unseen"), shape: .message) == 444)
+    }
+
+    /// A report at the width the cache is for is evidence, which is the ordinary case and the one
+    /// everything else in this file depends on.
+    @Test("a height reported at this width is news")
+    func aReportAtThisWidthIsKept() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 420, scale: 1, leading: 1.7)
+        let took = heights.note(120, for: key("row.7"), measuredAt: 420)
+        #expect(took)
+        #expect(heights.height(for: key("row.7")) == 120)
+    }
+
+    /// Half a point, the same tolerance a resize is judged by, because a clip view's own
+    /// arithmetic lands on fractions and a row laid out at 419.75 is the same row.
+    @Test("a fraction of a point is the same width")
+    func aFractionIsTheSameWidth() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 420, scale: 1, leading: 1.7)
+        let took = heights.note(120, for: key("row.7"), measuredAt: 419.75)
+        #expect(took)
+    }
+
+    /// **Refusing costs a pass, not a measurement**, which is the whole reason this is safe. The
+    /// row is laid out again at the right width and reports again, and that is the same mechanism
+    /// that repairs every wrong height in this file today.
+    @Test("a refused row is measured by the next report at the right width")
+    func aRefusedRowIsMeasuredOnTheNextPass() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 420, scale: 1, leading: 1.7)
+        heights.note(9_000, for: key("row.7"), measuredAt: 15)
+        #expect(heights.height(for: key("row.7")) == nil)
+        heights.note(120, for: key("row.7"), measuredAt: 420)
+        #expect(heights.height(for: key("row.7")) == 120)
+    }
+
+    /// The rule on its own, without a cache, because the decision is what is being tested and a
+    /// caller should be able to ask it.
+    @Test("the rule, said on its own")
+    func theEvidenceRule() {
+        #expect(TranscriptRowHeights.isEvidence(measuredAt: 420, forCacheAt: 420))
+        #expect(TranscriptRowHeights.isEvidence(measuredAt: 419.75, forCacheAt: 420))
+        #expect(!TranscriptRowHeights.isEvidence(measuredAt: 15, forCacheAt: 420))
+        #expect(!TranscriptRowHeights.isEvidence(measuredAt: 420, forCacheAt: 747))
+        // A cache that is for no width at all cannot be told anything.
+        #expect(!TranscriptRowHeights.isEvidence(measuredAt: 420, forCacheAt: nil))
     }
 
     // MARK: - The blank transcript, which is what a guess out by an order of magnitude looks like
@@ -1029,9 +1114,9 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 420, scale: 1, leading: 1.7)
         heights.showing(SessionID("his"))
-        heights.note(40, for: key("answer.1"), shape: .answer)
-        heights.note(60, for: key("answer.2"), shape: .answer)
-        heights.note(10_806, for: key("answer.3"), shape: .answer)
+        heights.note(40, for: key("answer.1"), shape: .answer, measuredAt: 420)
+        heights.note(60, for: key("answer.2"), shape: .answer, measuredAt: 420)
+        heights.note(10_806, for: key("answer.3"), shape: .answer, measuredAt: 420)
         #expect(heights.estimate(for: .answer) == 60)
         #expect(heights.assumed(for: key("answer.unseen"), shape: .answer) == 60)
         // And the row that really is ten thousand points tall is still ten thousand points tall.
@@ -1048,9 +1133,9 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 420, scale: 1, leading: 1.7)
         heights.showing(SessionID("his"))
-        heights.note(40, for: key("answer.1"), shape: .answer)
-        heights.note(60, for: key("answer.2"), shape: .answer)
-        heights.note(10_806, for: key("answer.3"), shape: .answer)
+        heights.note(40, for: key("answer.1"), shape: .answer, measuredAt: 420)
+        heights.note(60, for: key("answer.2"), shape: .answer, measuredAt: 420)
+        heights.note(10_806, for: key("answer.3"), shape: .answer, measuredAt: 420)
         var document = 0.0
         for row in 0..<2_242 {
             document += heights.assumed(for: key("above.\(row)"), shape: .answer)
@@ -1069,7 +1154,7 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 420, scale: 1, leading: 1.7)
         for row in 0..<TranscriptRowHeights.settleAfter {
-            heights.note(6_025, for: key("answer.\(row)"), shape: .answer)
+            heights.note(6_025, for: key("answer.\(row)"), shape: .answer, measuredAt: 420)
         }
         #expect(heights.estimate == TranscriptRowHeights.mostEstimated)
         #expect(heights.estimate(for: .answer) == TranscriptRowHeights.mostEstimated)
@@ -1085,7 +1170,7 @@ struct TranscriptRowHeightsTests {
     func theBoundIsOnlyOnTheGuess() {
         var heights = TranscriptRowHeights()
         heights.reset(width: 420, scale: 1, leading: 1.7)
-        heights.note(6_025, for: key("answer.1"), shape: .answer)
+        heights.note(6_025, for: key("answer.1"), shape: .answer, measuredAt: 420)
         #expect(heights.height(for: key("answer.1")) == 6_025)
         #expect(heights.assumed(for: key("answer.1"), shape: .answer) == 6_025)
     }
@@ -1097,7 +1182,7 @@ struct TranscriptRowHeightsTests {
         var heights = TranscriptRowHeights()
         heights.reset(width: 420, scale: 1, leading: 1.7)
         for row in 0..<TranscriptRowHeights.settleAfter {
-            heights.note(24, for: key("row.\(row)"))
+            heights.note(24, for: key("row.\(row)"), measuredAt: 420)
         }
         #expect(heights.estimate == 24)
     }

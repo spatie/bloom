@@ -45,6 +45,10 @@ enum TranscriptHoldCensus {
     /// `mostSilences` of them, and `silencedRows` is the count of all of them.
     private(set) static var silencedRows = 0
     private(set) static var silences: [Silence] = []
+    /// **Heights reported from a pass that laid the row out at another width.** See
+    /// `reportedAtAnotherWidth`, which carries the two that emptied the owner's transcript.
+    private(set) static var widthMismatches = 0
+    private(set) static var mismatches: [Mismatch] = []
     /// **The check that a row is the height it draws at.** Rows that reported the height they
     /// drew at, and how many of those the table was still drawing at another height a turn after
     /// it was told. See `TranscriptTable.Coordinator.checkCorrected`, which carries the bug.
@@ -253,6 +257,43 @@ enum TranscriptHoldCensus {
     /// nobody can read. `silencedRows` still counts them all.
     private static let mostSilences = 200
 
+    /// **A drawn row reported its height from a pass that laid it out at another width.**
+    ///
+    /// The one instrument here that was written for a fault already found rather than for a
+    /// suspicion. Two rows in one probe run reported 1,972 points for a three line paragraph whose
+    /// height is 54, and 10,806 for a row whose height is 444, both only during a composer drag
+    /// and both correct again afterwards. Both ratios are a row wrapped into a column about
+    /// fifteen points wide, and the second settled an estimate at 6,025 points which was then
+    /// handed to every unmeasured row of its kind.
+    ///
+    /// `TranscriptRowHeights.isEvidence` refuses those reports now, and this counts them, because
+    /// **the refusal is not the explanation.** Nobody knows why a cell is laid out at a fraction
+    /// of its width for a pass. A count that is non-zero on every run is what says the fault is
+    /// ordinary rather than a once-in-four accident, and the widths recorded beside it are where
+    /// somebody picks the thread up.
+    static func reportedAtAnotherWidth(_ mismatch: Mismatch) {
+        widthMismatches += 1
+        guard mismatches.count < mostMismatches else { return }
+        mismatches.append(mismatch)
+    }
+
+    /// One report, and the two widths that disagreed about it.
+    struct Mismatch: Sendable {
+        var row: Int
+        var shape: String
+        /// What the cell was laid out at when it reported.
+        var reportedWidth: Double
+        /// What the cache believes every height in it was taken at.
+        var cacheWidth: Double
+        /// The table's own width now, which is what the cache is told on the next pass.
+        var columnWidth: Double
+        var reportedHeight: Double
+        /// What was already known for this content, or -1 for nothing.
+        var knownHeight: Double
+    }
+
+    private static let mostMismatches = 200
+
     /// One batch of corrections, and the ones that did not take.
     static func corrected(rows: Int, uncorrected: Int) {
         correctedRows += rows
@@ -289,6 +330,8 @@ enum TranscriptHoldCensus {
         entriesBuilt = 0
         silencedRows = 0
         silences = []
+        widthMismatches = 0
+        mismatches = []
     }
 
     static func summary() -> [String: Double] {
@@ -321,6 +364,7 @@ enum TranscriptHoldCensus {
             "entryPasses": Double(entryPasses),
             "entriesBuilt": Double(entriesBuilt),
             "silencedRows": Double(silencedRows),
+            "widthMismatches": Double(widthMismatches),
         ]
     }
 }
