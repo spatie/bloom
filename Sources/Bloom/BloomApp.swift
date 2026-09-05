@@ -66,6 +66,12 @@ struct BloomApp: App {
         // and reports how far short of it the view came to rest. See `JumpProbe`.
         if JumpProbe.isRequested { JumpProbe.schedule() }
 
+        // And the one that catches a bug rather than timing a gesture: `Bloom --composer-probe
+        // <out.json>` drags the composer's divider and reports, row by row, what the height cache
+        // and the table each believe before it, after it, after a scroll and after a window
+        // resize. It is how somebody finally watches the transcript go blank. See `ComposerProbe`.
+        if ComposerProbe.isRequested { ComposerProbe.schedule() }
+
         // And the one that answers "the battery menu says Bloom is using significant energy":
         // `Bloom --idle-probe <out.json> --idle-worktrees <list>` runs the diff stat pass the six
         // second loop runs and reports what it cost in process time and in subprocesses. It is the

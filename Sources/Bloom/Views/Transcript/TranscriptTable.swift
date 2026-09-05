@@ -529,21 +529,31 @@ struct TranscriptTable: NSViewRepresentable {
 
             // **Rows in and out rather than `reloadData()`, and this is the whole of the scroll
             // stall.** See `TranscriptEntryChange`, which carries the measurement.
-            switch change {
-            case .same:
+            //
+            // **One edit, never two**, and `TranscriptTableUpdate` carries the three minute beach
+            // ball that came of making both. A moved environment used to stage the rows out AND
+            // then reload on top of them, so the reload had every staged row view to tear off the
+            // window as well as the ones on screen, at O(n²) in the observers each one removes.
+            let plan = TranscriptTableUpdate.plan(change: change, environmentMoved: environmentMoved)
+            switch plan {
+            case .nothing:
                 break
-            case .grew(let head, let tail):
-                rowsArrived(head: head, tail: tail, fading: fadesFoldRows, in: tableView)
-            case .shrank(let head, let tail):
-                rowsLeft(head: head, tail: tail, fading: fadesFoldRows, in: tableView)
-            case .rebuilt:
-                rebuiltEverything(in: tableView)
+            case .rows(let rowChange):
+                switch rowChange {
+                case .grew(let head, let tail):
+                    rowsArrived(head: head, tail: tail, fading: fadesFoldRows, in: tableView)
+                case .shrank(let head, let tail):
+                    rowsLeft(head: head, tail: tail, fading: fadesFoldRows, in: tableView)
+                case .same, .rebuilt:
+                    // Neither reaches here: `plan` answers `.nothing` and `.reload` for them.
+                    break
+                }
+            case .reload:
+                // Every cell thrown away and the visible ones built again. A session being
+                // replaced, and the environment the cells were built in having moved, and nothing
+                // else should ever reach here.
+                tableView.reloadData()
             }
-
-            // Every cell holds values from the environment it was built in, so one that has moved
-            // is every cell, whether or not a single height moved with it. Not after a `.rebuilt`,
-            // which has just reloaded the table on its own account.
-            if environmentMoved, change != .rebuilt { tableView.reloadData() }
 
             if remeasured {
                 // **The screen first, exactly.** A reset empties the cache under cells that are
@@ -555,7 +565,15 @@ struct TranscriptTable: NSViewRepresentable {
             } else if !changed.isEmpty {
                 // The cells first, so that a row whose height is about to travel already holds
                 // what it is travelling to show. See `noteHeights(_:over:)`.
-                tableView.reloadData(forRowIndexes: changed, columnIndexes: IndexSet(integer: 0))
+                //
+                // Not after a reload, which has just rebuilt every one of these cells. Rebuilding
+                // them a second time in the same pass is the second half of the same mistake the
+                // plan above exists to stop; the measuring below still has to happen either way.
+                if plan != .reload {
+                    tableView.reloadData(
+                        forRowIndexes: changed, columnIndexes: IndexSet(integer: 0)
+                    )
+                }
                 // **A key that has just moved is a key nothing has measured, and this pass is the
                 // cheapest moment to take it.** It used to go straight to `noteHeights`, which
                 // tells the table what the cache holds, and for a new key the cache holds nothing:
@@ -638,8 +656,8 @@ struct TranscriptTable: NSViewRepresentable {
             let identifier = NSUserInterfaceItemIdentifier("bloom.transcript.cell")
             let cell = tableView.makeView(withIdentifier: identifier, owner: self)
                 as? TranscriptTableCell ?? TranscriptTableCell(identifier: identifier)
-            cell.onHeightChange = { [weak self] id, key, height in
-                self?.noted(height: height, of: key, for: id)
+            cell.onMeasured = { [weak self] id, key, size in
+                self?.noted(size: size, of: key, for: id)
             }
             // **Every row in the visible rect gets one of these, and this is where a row's SwiftUI
             // graph is actually built.** It is outside the pane's own layout pass, so
@@ -753,8 +771,12 @@ struct TranscriptTable: NSViewRepresentable {
         /// The guard costs one comparison and closes the class: a height is about the content it
         /// was taken from, so a report whose content has been replaced is not evidence about what
         /// is there now.
+        /// **And it carries the width it was laid out at**, because a height is a fact about a
+        /// width and this is the path that had no guard on one. See
+        /// `TranscriptRowHeights.isEvidence`, and `TranscriptHoldCensus.reportedAtAnotherWidth`,
+        /// which counts what this refuses so the reason a cell was laid out narrow can be found.
         private func noted(
-            height: CGFloat, of contentKey: TranscriptContentKey, for entryID: TranscriptEntryID
+            size: CGSize, of contentKey: TranscriptContentKey, for entryID: TranscriptEntryID
         ) {
             // The tail goes on growing inside its frozen cell while a pane is dragged, and a
             // height taken from it would be filed against the entry list this pass is not
@@ -762,7 +784,41 @@ struct TranscriptTable: NSViewRepresentable {
             guard !isHeld else { return }
             guard let row = index[entryID], entries.indices.contains(row),
                   entries[row].contentKey == contentKey else { return }
-            guard heights.note(height, for: contentKey, shape: entries[row].shape) else { return }
+            let height = size.height
+            // Counted before it is refused, and counted whatever the height was: what is being
+            // watched for is a cell laid out at a width the table is not, and a report that
+            // happens to agree about the height is the same event.
+            if !TranscriptRowHeights.isEvidence(
+                measuredAt: Double(size.width), forCacheAt: heights.measure?.width
+            ) {
+                TranscriptHoldCensus.reportedAtAnotherWidth(TranscriptHoldCensus.Mismatch(
+                    row: row,
+                    shape: String(describing: entries[row].shape),
+                    reportedWidth: Double(size.width),
+                    cacheWidth: heights.measure?.width ?? 0,
+                    columnWidth: Double(columnWidth),
+                    // Minus one for "the table is holding no view for this row", which is a
+                    // different fact from a view that is nought wide and was conflated with it
+                    // the first time this was written. See `Mismatch.cellWidth`.
+                    cellWidth: tableView?
+                        .view(atColumn: 0, row: row, makeIfNecessary: false)
+                        .map { Double($0.frame.width) } ?? -1,
+                    reportedHeight: Double(height),
+                    knownHeight: heights.height(for: contentKey) ?? -1
+                ))
+            }
+            // The other half of the same question `measureExactly` asks: a row the reader was
+            // being shown, reporting that it drew nothing after all. The three that redraw
+            // themselves are left out here for the reason they are left out there.
+            if height == 0, !entries[row].drawsNothing, !entryID.redrawsItself {
+                noteSilence(row: row, entry: entries[row], source: "drawn")
+            }
+            guard heights.note(
+                height,
+                for: contentKey,
+                shape: entries[row].shape,
+                measuredAt: Double(size.width)
+            ) else { return }
             // **News to the cache is not always news to the table.** A row the table is already
             // drawing at this height needs no `noteHeightOfRows`, and the whole of a correction's
             // cost is that call: it moves the document's total and makes AppKit lay out every row
@@ -1298,10 +1354,11 @@ struct TranscriptTable: NSViewRepresentable {
             isPutting = false
         }
 
-        /// The three ways the table is told rows moved, each with a name of its own **so that the
-        /// next `sample` can tell them apart**. An earlier profile put `apply` at 47.7 per cent of
-        /// the main thread with `NSHostingView` under it and `measure` at half a per cent, which
-        /// only means a reload rebuilding cells if the shape really was `.rebuilt`.
+        /// The two ways the table is told rows moved, each with a name of its own **so that the
+        /// next `sample` can tell them apart** and from the third way, which is `reloadData` at
+        /// the call site above. An earlier profile put `apply` at 47.7 per cent of the main thread
+        /// with `NSHostingView` under it and `measure` at half a per cent, which only means a
+        /// reload rebuilding cells if the plan really was `.reload`.
         private func rowsArrived(
             head: Range<Int>, tail: Range<Int>, fading: Bool, in tableView: NSTableView
         ) {
@@ -1332,12 +1389,6 @@ struct TranscriptTable: NSViewRepresentable {
             if !head.isEmpty { tableView.removeRows(at: IndexSet(integersIn: head), withAnimation: animation) }
             tableView.endUpdates()
             NSAnimationContext.endGrouping()
-        }
-
-        /// Every cell thrown away and the visible ones built again. A session being replaced, and
-        /// nothing else should ever reach here.
-        private func rebuiltEverything(in tableView: NSTableView) {
-            tableView.reloadData()
         }
 
         /// The row at the top of the pane and how far above it the viewport starts, so a growth
@@ -1553,7 +1604,11 @@ struct TranscriptTable: NSViewRepresentable {
                 let key = entry.contentKey
                 guard heights.height(for: key) == nil || heights.isStale(key) else { continue }
                 let taken = heights.note(
-                    measure(entry, at: CGFloat(sizing.width)), for: key, shape: entry.shape
+                    measure(entry, at: CGFloat(sizing.width)),
+                    for: key,
+                    shape: entry.shape,
+                    // The sizer is handed the cache's own width, so this always is evidence.
+                    measuredAt: sizing.width
                 )
                 if taken { moved.insert(row) }
                 // Between rows rather than after all of them, so the cost of being interrupted is
@@ -1799,10 +1854,24 @@ struct TranscriptTable: NSViewRepresentable {
                 guard heights.needsMeasuring(
                     entry.contentKey, redrawsItself: entry.id.redrawsItself
                 ) else { continue }
+                let height = measure(entry, at: CGFloat(sizing.width))
+                // **A row that was expected to draw something and came out at nothing.** Recorded
+                // rather than refused, because refusing it is a change to what the cache believes
+                // and this is here to find out what is happening first. One of these is a row the
+                // reader never sees again: nought is remembered as an answer, so `viewFor` will
+                // not build it and `needsMeasuring` will not ask again. See
+                // `TranscriptHoldCensus.silenced`, and `ComposerProbe`, which is reading it.
+                //
+                // **Not the three entries that redraw themselves**, and leaving them in was this
+                // instrument's own false positive: the streaming tail draws nothing between turns
+                // and is measured on every pass, so a probe run counted one silence per pass and
+                // read as a climbing fault. `viewFor` exempts them from the guard for the same
+                // reason, so nought is never held against them.
+                if height == 0, !entry.drawsNothing, !entry.id.redrawsItself {
+                    noteSilence(row: row, entry: entry, source: "measureExactly")
+                }
                 let taken = heights.note(
-                    measure(entry, at: CGFloat(sizing.width)),
-                    for: entry.contentKey,
-                    shape: entry.shape
+                    height, for: entry.contentKey, shape: entry.shape, measuredAt: sizing.width
                 )
                 if taken { moved.insert(row) }
             }
@@ -1846,6 +1915,105 @@ struct TranscriptTable: NSViewRepresentable {
         private func reportGeometry() {
             onGeometry?(currentGeometry)
         }
+
+        // MARK: - What a probe is allowed to ask
+
+        /// One row silenced, with the pane it was measured against.
+        ///
+        /// The geometry rather than the count, because "how many" is a number that says a bug
+        /// happened and "at what viewport" is the one that says which frame did it. Two reads of
+        /// the clip view, on a path that has just laid out a hosting view, so the cost is not a
+        /// thing to weigh.
+        private func noteSilence(row: Int, entry: TranscriptTableEntry, source: String) {
+            let clip = scrollView?.contentView
+            TranscriptHoldCensus.silenced(TranscriptHoldCensus.Silence(
+                row: row,
+                source: source,
+                shape: String(describing: entry.shape),
+                columnWidth: Double(columnWidth),
+                viewportWidth: Double(clip?.bounds.width ?? 0),
+                viewportHeight: Double(clip?.bounds.height ?? 0)
+            ))
+        }
+
+        /// **What the cache and the table each believe about these rows.**
+        ///
+        /// For `ComposerProbe` and for nothing else. The transcript going blank is rows silenced
+        /// one at a time rather than a pane that went dark, so the report that can answer it is a
+        /// row by row table and no counter is a substitute for one. A row with `known` nought and
+        /// `drawsNothing` false is a row the reader has lost.
+        ///
+        /// Nothing here is a measurement: every field is a lookup or a rect the table already
+        /// holds. It is called twice per run, while the pane is standing still.
+        func rowFacts(for rows: some Sequence<Int>) -> [RowFact] {
+            rows.compactMap { row in
+                guard entries.indices.contains(row) else { return nil }
+                let entry = entries[row]
+                return RowFact(
+                    row: row,
+                    name: String(describing: entry.id),
+                    shape: String(describing: entry.shape),
+                    drawsNothing: entry.drawsNothing,
+                    known: heights.height(for: entry.contentKey),
+                    assumed: heights.assumed(
+                        for: entry.contentKey, shape: entry.shape, drawsNothing: entry.drawsNothing
+                    ),
+                    measuredNothing: heights.measuredNothing(entry.contentKey),
+                    needsMeasuring: heights.needsMeasuring(
+                        entry.contentKey, redrawsItself: entry.id.redrawsItself
+                    ),
+                    told: Double(tableView?.rect(ofRow: row).height ?? 0),
+                    top: Double(tableView?.rect(ofRow: row).minY ?? 0),
+                    hasCell: tableView?.view(atColumn: 0, row: row, makeIfNecessary: false) != nil,
+                    redrawsItself: entry.id.redrawsItself
+                )
+            }
+        }
+
+        /// **How many heights the cache is holding, and what it is holding them for.**
+        ///
+        /// The number that tells an emptying from a miss. `forget` and `reset` take every measured
+        /// height away in one go, and afterwards every row is answered from the mean, which is a
+        /// document of the wrong length rather than a cache with a hole in it. A step of a drag
+        /// where this falls to nothing is a step that emptied it, and the width beside it says
+        /// which of the two did.
+        var heightCacheCount: Int { heights.count }
+        var heightCacheWidth: Double { heights.measure?.width ?? 0 }
+        var heightCacheIsReady: Bool { heights.isReady }
+
+        /// The rows the pane can see, for a probe that has no business knowing how that is worked
+        /// out. See `visibleRows`.
+        var visibleRowRange: Range<Int> { visibleRows }
+
+        /// One row, as a probe reads it.
+        struct RowFact: Sendable {
+            var row: Int
+            /// The entry id as text, for a person reading the report. Not an id: nothing looks a
+            /// row up by it, which is why it is not `TranscriptEntryID`.
+            var name: String
+            var shape: String
+            /// What `TranscriptRowInk` expected before anything was drawn.
+            var drawsNothing: Bool
+            /// What has been measured, or nothing if nobody has measured it. Nought here with
+            /// `drawsNothing` false is the silence.
+            var known: Double?
+            /// What the table is told, which is `known` when there is one.
+            var assumed: Double
+            var measuredNothing: Bool
+            var needsMeasuring: Bool
+            /// What the table is actually drawing the row at now.
+            var told: Double
+            /// Where the row starts in the document, so a report can add the heights up against
+            /// what the reader can see. A document taller than the content it draws is the gap.
+            var top: Double
+            /// Whether the table is holding a cell for it, which a silenced row never is.
+            var hasCell: Bool
+            /// One of the three entries that re-render from their own observation. Nought is never
+            /// held against one of these: the streaming tail draws nothing between turns and is
+            /// measured on every pass, so a report that counted them counted one per pass. See
+            /// `viewFor`, which exempts them from the silence guard.
+            var redrawsItself: Bool
+        }
     }
 }
 
@@ -1876,7 +2044,7 @@ struct TranscriptTable: NSViewRepresentable {
 /// the", session `369a630d`, file chips in user bubbles at seq 387 and 948.
 private struct HostedRow: View {
     let content: AnyView
-    let report: @MainActor (CGFloat) -> Void
+    let report: @MainActor (CGSize) -> Void
     /// Whether this copy is the one in a cell, which has a row's height to fill, or the one being
     /// measured, which has none. Everything else about the two is identical on purpose: a
     /// measurement taken through a different set of modifiers from the one that draws is a
@@ -1900,8 +2068,14 @@ private struct HostedRow: View {
             .background(
                 GeometryReader { proxy in
                     Color.clear
-                        .onChange(of: proxy.size.height, initial: true) { _, height in
-                            report(height)
+                        // **The size and not the height, because a height is a fact about a
+                        // width.** A report taken from a pass that laid this row out narrow says
+                        // nothing about how tall it is at the width the cache is for, and two of
+                        // them are what emptied the owner's transcript. See
+                        // `TranscriptRowHeights.isEvidence`. Still woken by the height alone: a
+                        // width that moves without the height moving changes no answer.
+                        .onChange(of: proxy.size.height, initial: true) { _, _ in
+                            report(proxy.size)
                         }
                 }
             )
@@ -1939,11 +2113,11 @@ private struct TranscriptCellRoot: View {
     var content: AnyView?
     var id: TranscriptEntryID?
     var environment: TranscriptRowEnvironment?
-    var report: (@MainActor (CGFloat) -> Void)?
+    var report: (@MainActor (CGSize) -> Void)?
 
     var body: some View {
         if let content, let id, let environment {
-            HostedRow(content: content, report: { height in report?(height) })
+            HostedRow(content: content, report: { size in report?(size) })
                 // A recycled cell is handed an unrelated row, and without an identity SwiftUI
                 // treats that as the same view changing rather than a different view arriving,
                 // which is what gives it something to animate between. It is also what makes
@@ -1979,7 +2153,7 @@ final class TranscriptTableCell: NSView {
     private var unclip: Task<Void, Never>?
     /// The content a height was measured for goes back with it, because an entry id alone does
     /// not say which conversation it belongs to. See `Coordinator.noted`.
-    var onHeightChange: (@MainActor (TranscriptEntryID, TranscriptContentKey, CGFloat) -> Void)?
+    var onMeasured: (@MainActor (TranscriptEntryID, TranscriptContentKey, CGSize) -> Void)?
 
     init(identifier: NSUserInterfaceItemIdentifier) {
         host = NSHostingView(rootView: TranscriptCellRoot())
@@ -2040,7 +2214,7 @@ final class TranscriptTableCell: NSView {
             content: entry.content(),
             id: id,
             environment: environment,
-            report: { [weak self] height in self?.onHeightChange?(id, key, height) }
+            report: { [weak self] size in self?.onMeasured?(id, key, size) }
         )
         return true
     }

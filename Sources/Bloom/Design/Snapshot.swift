@@ -394,7 +394,7 @@ enum Snapshot {
     static var isDrivingTheWindow: Bool {
         isRequested || isWindowCaptureRequested || isGalleryCaptureRequested
             || FrameProbe.isRequested || SwitchProbe.isRequested || ScrollProbe.isRequested
-            || ResizeProbe.isRequested || TabProbe.isRequested
+            || ResizeProbe.isRequested || TabProbe.isRequested || ComposerProbe.isRequested
             || CommandLine.arguments.contains("--menu-probe")
     }
 
