@@ -56,40 +56,30 @@ struct CenterPaneView: View {
         return tabs.layout(of: tab).panes.map { tabs.content(of: $0, in: tab) }
     }
 
-    /// What a pane with nothing to draw is waiting for.
-    ///
-    /// Two of them, and they are two different moments of the same switch. Which one the user
-    /// actually meets depends on whether this launch has been here before, which is why neither
-    /// could be left out.
-    private enum Wait: Equatable, Sendable {
-        /// The store has not yet said which conversations this workspace has. The first visit of a
-        /// launch only, since `WorkspaceModel.hasReadSessions` stays true afterwards.
-        case sessions(WorkspaceID)
-        /// The conversation is known and its rows are not on screen yet: either this launch has
-        /// never built its transcript, or the transcript exists and is still reading.
-        case conversation(SessionID)
-
-        /// In the register the file loader already uses: what is being read.
-        var label: String {
-            switch self {
-            case .sessions: "Opening the workspace"
-            case .conversation: "Reading the conversation"
-            }
-        }
-    }
-
     /// Nil whenever the pane has something to draw, which is the ordinary case and the one this
     /// must be cheap in.
     ///
-    /// `existingTranscript` is a plain dictionary lookup, and `isLoaded` is the one observed
-    /// property read here, so a pane that is drawing a conversation depends on nothing that moves
-    /// until that conversation is read.
-    private var waiting: Wait? {
+    /// **A transcript that exists and is still reading is deliberately not here, and that is a fix
+    /// rather than a tidying.** This is drawn as an overlay on the whole pane, and a pane drawing
+    /// a conversation is a transcript with a composer under it, so the wait was centred in the two
+    /// together: it sat half the composer's height below the middle of the transcript, which with
+    /// the divider dragged out to 348 points put it 174 points low and a couple of inches off the
+    /// bottom rule. Worse, it moved every time that divider did. `ChatPaneView` draws that one
+    /// over its own transcript now, which is where the missing content is. What is left here is a
+    /// pane with nothing in it at all, and the whole pane is exactly what that wait is about.
+    ///
+    /// `existingTranscript` is a plain dictionary lookup and `isLoaded` is not read here at all
+    /// any more, so a pane that is drawing a conversation depends on nothing that moves.
+    private var waiting: PaneWait? {
         switch showing {
         case .chat(let sessionID):
-            if let transcript = model.existingTranscript(for: sessionID) {
-                return transcript.isLoaded ? nil : .conversation(sessionID)
-            }
+            // The transcript exists, so the pane has a composer to draw and the wait belongs to
+            // the transcript rather than to the pane. See `ChatPaneView.waiting`.
+            //
+            // Handing one wait to the other costs nothing that can be seen: `prepare` builds the
+            // transcript on the next turn of the run loop, which is well inside the half second
+            // either of them stays quiet for, so only one of the two is ever drawn.
+            if model.existingTranscript(for: sessionID) != nil { return nil }
             if model.sessions.contains(where: { $0.id == sessionID }) {
                 return .conversation(sessionID)
             }
@@ -114,6 +104,10 @@ struct CenterPaneView: View {
             // Over the content rather than in place of it, so the pane that is being built keeps
             // its background, its size and its place in the hierarchy while the wait is drawn.
             // Nothing to hit: it is a readout, and the pane underneath still takes clicks.
+            //
+            // The whole pane is the right frame for the waits that are left here, because every
+            // one of them is a pane with nothing in it: `waitingSurface` fills it edge to edge and
+            // has no composer of its own. A conversation being read is not one of them any more.
             .overlay {
                 SlowLoadingView(subject: waiting, label: waiting?.label)
                     .allowsHitTesting(false)
