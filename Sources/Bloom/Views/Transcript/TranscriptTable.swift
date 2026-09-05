@@ -797,10 +797,12 @@ struct TranscriptTable: NSViewRepresentable {
                     reportedWidth: Double(size.width),
                     cacheWidth: heights.measure?.width ?? 0,
                     columnWidth: Double(columnWidth),
-                    cellWidth: Double(
-                        tableView?.view(atColumn: 0, row: row, makeIfNecessary: false)?
-                            .frame.width ?? 0
-                    ),
+                    // Minus one for "the table is holding no view for this row", which is a
+                    // different fact from a view that is nought wide and was conflated with it
+                    // the first time this was written. See `Mismatch.cellWidth`.
+                    cellWidth: tableView?
+                        .view(atColumn: 0, row: row, makeIfNecessary: false)
+                        .map { Double($0.frame.width) } ?? -1,
                     reportedHeight: Double(height),
                     knownHeight: heights.height(for: contentKey) ?? -1
                 ))

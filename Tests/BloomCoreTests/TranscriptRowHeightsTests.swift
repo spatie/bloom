@@ -1052,6 +1052,30 @@ struct TranscriptRowHeightsTests {
         #expect(heights.assumed(for: key("message.unseen"), shape: .message) == 444)
     }
 
+    /// **The one caught with the instrument watching, which is the argument for the rule.**
+    ///
+    /// Row 2593 of the owner's conversation, an `answer`, reported 2,568 points against a known 75
+    /// from a layout 24 points wide, by a cell the table was holding no view for. A cell that
+    /// misses the reuse pool is built at `frame: .zero` and handed its content before the table
+    /// frames it, so its graph lays out against a proposal of nothing and the content bottoms out
+    /// at its own minimum. Thirty four times the truth, from a row three lines long.
+    ///
+    /// Four such reports in fifty one cells built, about eight per cent, and two of those four
+    /// were harmless because they came from a stale WIDER frame: a wider layout under-states a
+    /// height and draws a row short, where a narrower one over-states it by an order of magnitude
+    /// and empties the screen. The rate and the sign both belong here: somebody reading this in six
+    /// months should know it is common and know why only half of it is visible.
+    @Test("the row that was caught: 2,568 points from a layout 24 points wide")
+    func theRowThatWasCaught() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 420, scale: 1, leading: 1.7)
+        heights.note(75, for: key("row.2593"), shape: .answer, measuredAt: 420)
+        let took = heights.note(2_568, for: key("row.2593"), shape: .answer, measuredAt: 24)
+        #expect(!took)
+        #expect(heights.height(for: key("row.2593")) == 75)
+        #expect(heights.estimate(for: .answer) == 75)
+    }
+
     /// A report at the width the cache is for is evidence, which is the ordinary case and the one
     /// everything else in this file depends on.
     @Test("a height reported at this width is news")

@@ -272,16 +272,37 @@ enum TranscriptHoldCensus {
     /// ordinary rather than a once-in-four accident, and the widths recorded beside it are where
     /// somebody picks the thread up.
     ///
-    /// **What the first run with this in it caught, which was not what was predicted.** Two
-    /// reports out of forty nine cells built, both at 747 against a table of 420, and 747 is the
-    /// width that pane had before the run pinned it. So the reports came from a layout at a width
-    /// the run had left behind, which is what a reuse pool holds after a width change: a cell is
-    /// taken from it, handed a new row, and reports before the table has resized it. Neither did
-    /// any harm, because a stale WIDER frame under-states a height, 32 points against a true 54.
-    /// A stale narrower one over-states it enormously, which is the same mechanism with the sign
-    /// turned round and is what a blank transcript is made of. `cellWidth` is recorded to tell
-    /// those two apart: a stale SwiftUI pass inside a correctly framed cell, or a cell AppKit has
-    /// not resized yet.
+    /// # What it is, which the runs answered in two goes
+    ///
+    /// **The harmless half is a reuse pool holding cells from before a width change.** Two reports
+    /// out of forty nine cells built, both at 747 against a table of 420, where 747 is the width
+    /// that pane had before the run pinned it. A cell comes out of the pool, is handed a new row,
+    /// and reports before the table has resized it.
+    ///
+    /// **The half that does the damage is a cell that has no frame yet**, and it was caught with
+    /// this watching: row 2593, an `answer`, reporting **2,568 points against a known 75** from a
+    /// layout **24 points wide**, with no view held for the row at all. That is the same shape as
+    /// the 1,972 and the 10,806 that emptied the owner's transcript.
+    ///
+    /// It is ours and it is in `viewFor`. A cell that misses the reuse pool is built by
+    /// `TranscriptTableCell(identifier:)`, which is `super.init(frame: .zero)`; `onMeasured` is
+    /// wired to it, and `apply` then installs the root view. All of that happens BEFORE `viewFor`
+    /// returns the cell, so the table has not framed it and is holding no view for the row, which
+    /// is the minus one. A SwiftUI graph laid out against a proposal of nought does not come out
+    /// nought wide: the content bottoms out at its own minimum, which is the 24, and a paragraph
+    /// wrapped into 24 points is 34 times taller than the same paragraph at 420.
+    ///
+    /// **So the sign is the whole difference in consequence.** A stale WIDER frame under-states a
+    /// height, 32 points against a true 54, and draws a row short. A frame with no width at all
+    /// over-states it by an order of magnitude, and that is what a blank transcript is made of.
+    ///
+    /// **The rate, measured rather than assumed: four in fifty one cells built, about eight per
+    /// cent, of which two were harmless for the reason above.** It is not rare and it is not the
+    /// probe's doing: the pane was 420 points wide at every step of every run in which it happened.
+    ///
+    /// **What this file does about it is refuse to believe the report, which is not the same as
+    /// fixing it.** The upstream fix is to give a cell the width it is about to be drawn at before
+    /// handing it content to measure, in `viewFor`, and it is not made here.
     static func reportedAtAnotherWidth(_ mismatch: Mismatch) {
         widthMismatches += 1
         guard mismatches.count < mostMismatches else { return }
@@ -298,12 +319,13 @@ enum TranscriptHoldCensus {
         var cacheWidth: Double
         /// The table's own width now, which is what the cache is told on the next pass.
         var columnWidth: Double
-        /// **The cell's own frame width at the moment of the report**, which is what tells a
-        /// stale SwiftUI layout from a cell AppKit has not resized yet. If this agrees with
-        /// `columnWidth` while `reportedWidth` does not, the cell was the right size and SwiftUI
-        /// answered from an older pass. If it agrees with `reportedWidth`, the cell itself was
-        /// still the size it had in a previous life, which is what a reuse pool holds after a
-        /// width change. Nought when the table is holding no cell for the row.
+        /// **The cell's own frame width at the moment of the report, or minus one when the table
+        /// is holding no view for the row at all.**
+        ///
+        /// Those are different facts and the first spelling of this conflated them, which is how
+        /// the answer was nearly missed: a report arriving with no cell behind it reads as a cell
+        /// of no width, and it is neither. See `reportedAtAnotherWidth` for what minus one turned
+        /// out to mean.
         var cellWidth: Double
         var reportedHeight: Double
         /// What was already known for this content, or -1 for nothing.

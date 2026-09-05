@@ -169,17 +169,23 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     /// **What that cost, measured on the owner's own conversation.** Two rows reported heights
     /// from a layout pass during a composer drag and then reported the truth again afterwards:
     /// a three line paragraph whose height is 54 points reported 1,972, and a user message whose
-    /// height is 444 reported 10,806. Both ratios are a row wrapped into a column about fifteen
-    /// points wide. The 10,806 settled the `message` shape's estimate at 6,025 points, which was
-    /// then handed to every unmeasured row of that shape in a 2,650 row table, and the document
-    /// came out 885,212 points long against a true 172,208. That is the blank transcript the owner
-    /// filmed: a viewport inside rows drawn thousands of points tall.
+    /// height is 444 reported 10,806. The 10,806 settled the `message` shape's estimate at 6,025
+    /// points, which was then handed to every unmeasured row of that shape in a 2,650 row table,
+    /// and the document came out 885,212 points long against a true 172,208. That is the blank
+    /// transcript the owner filmed: a viewport inside rows drawn thousands of points tall.
     ///
-    /// **What is known and what is not.** That it happened is measured, from four probe runs where
-    /// exactly one shows the two spikes and three do not. WHY a cell was laid out at a fraction of
-    /// its width for a pass is not known, and this rule does not answer it: it stops the app
-    /// believing the answer, which is a different thing from understanding the question.
-    /// `TranscriptHoldCensus.reportedAtAnotherWidth` counts them so the thread can be picked up.
+    /// **And the case caught with the instrument watching, which is what says where they come
+    /// from.** Row 2593, an `answer`, reported **2,568 points against a known 75, from a layout 24
+    /// points wide, by a cell the table was holding no view for**. A cell that misses the reuse
+    /// pool is built at `frame: .zero` and is handed its content before the table frames it, so
+    /// its graph is laid out against a proposal of nothing and the content bottoms out at its own
+    /// minimum of 24 points. A paragraph wrapped into 24 points is 34 times taller than the same
+    /// paragraph at 420. See `TranscriptHoldCensus.reportedAtAnotherWidth`, which carries the
+    /// reading, the rate of four in fifty one cells built, and why two of those four were harmless.
+    ///
+    /// **This rule refuses the report. It does not stop the report being made**, and the two are
+    /// worth keeping apart: the cause is a cell asked to measure before it has a width, and the
+    /// fix for that is upstream in `TranscriptTable`'s `viewFor` rather than here.
     ///
     /// **Refusing costs nothing**, which is what makes this safe rather than a trade. A row whose
     /// report is refused stays unmeasured for another pass and is drawn from its estimate, which
