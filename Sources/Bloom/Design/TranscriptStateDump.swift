@@ -167,6 +167,9 @@ enum TranscriptStateDump {
         let count = pane.table?.numberOfRows ?? -1
         let visible = range?.length ?? -1
         let facts = rowFacts(pane, band: band)
+        let displacements = facts.compactMap { fact in
+            fact.drawnTop.map { abs($0 - fact.top) }
+        }
         // **Not the three that redraw themselves.** The streaming tail and the bubble on its way
         // out draw nothing between turns and are measured on every pass, so counting them made
         // `lostRows` two before anything had gone wrong. `viewFor` exempts them from the silence
@@ -209,6 +212,8 @@ enum TranscriptStateDump {
             "silences": .array(TranscriptHoldCensus.silences.map { json(of: $0) }),
             "numberOfRows": .integer(count),
             "visibleRows": .integer(visible),
+            "misplacedCells": .integer(displacements.filter { $0 > 0.5 }.count),
+            "largestCellDisplacement": .number(displacements.max() ?? 0),
             "firstVisibleRow": .integer(range.map { $0.length > 0 ? $0.location : -1 } ?? -1),
             "rowViews": .integer(pane.table?.subviews.count ?? -1),
             "hostedRows": .integer(hostingViewCount(in: pane.table)),
@@ -319,6 +324,8 @@ enum TranscriptStateDump {
             "needsMeasuring": .bool(fact.needsMeasuring),
             "told": .number(fact.told),
             "top": .number(fact.top),
+            "drawnTop": fact.drawnTop.map(JSONValue.number) ?? .null,
+            "drawnHeight": fact.drawnHeight.map(JSONValue.number) ?? .null,
             "redrawsItself": .bool(fact.redrawsItself),
             "hasCell": .bool(fact.hasCell),
         ])

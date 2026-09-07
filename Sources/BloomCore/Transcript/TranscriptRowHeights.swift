@@ -458,9 +458,12 @@ public struct TranscriptRowHeights: Equatable, Sendable {
         /// so that a good first sample settles the number for the whole session and a bad one is
         /// not permanent.
         private mutating func settleIfItIsTime(settlingAfter: Int) {
-            guard inked >= settlingAfter, let running = middle else { return }
+            guard inked >= settlingAfter else { return }
+            // A settled sample cannot change until it doubles. Avoid sorting every distinct
+            // height on each streamed report while the answer is guaranteed to stay the same.
+            if settled != nil, inked < settledFrom * 2 { return }
+            guard let running = middle else { return }
             guard let settled else { return take(running) }
-            guard inked >= settledFrom * 2 else { return }
             guard abs(running - settled) > settled * TranscriptRowHeights.resettleDrift else {
                 return
             }
@@ -626,8 +629,9 @@ public struct TranscriptRowHeights: Equatable, Sendable {
     ///
     /// Exactly nought rather than `isSameHeight`, because `note` rounds a height UP: a row that
     /// drew four tenths of a point is remembered as one and is not this.
+    /// A stale measurement cannot silence a view: it needs a chance to report at the new width.
     public func measuredNothing(_ contentKey: TranscriptContentKey) -> Bool {
-        heights[contentKey] == 0
+        heights[contentKey] == 0 && !stale.contains(contentKey)
     }
 
     /// The middle of the rows of THIS conversation that have been measured here and drew

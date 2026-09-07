@@ -327,6 +327,35 @@ struct TranscriptRowHeightsTests {
         #expect(heights.measuredNothing(key("blank")))
     }
 
+    @Test("a stale empty measurement cannot prevent a row being drawn after resizing")
+    func staleNothingIsNotEvidence() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1, leading: 1.7)
+        heights.note(0, for: key("row"), measuredAt: 800)
+        heights.rewidth(to: 600)
+        #expect(!heights.measuredNothing(key("row")))
+        #expect(heights.needsMeasuring(key("row"), redrawsItself: false))
+
+        // A delayed report from the old layout cannot silence the row again.
+        heights.note(0, for: key("row"), measuredAt: 800)
+        #expect(!heights.measuredNothing(key("row")))
+        heights.note(24, for: key("row"), measuredAt: 600)
+        #expect(heights.height(for: key("row")) == 24)
+        #expect(!heights.needsMeasuring(key("row"), redrawsItself: false))
+    }
+
+    @Test("a row still empty at the new width can be silenced again")
+    func confirmsNothingAtTheNewWidth() {
+        var heights = TranscriptRowHeights()
+        heights.reset(width: 800, scale: 1, leading: 1.7)
+        heights.note(0, for: key("row"), measuredAt: 800)
+        heights.rewidth(to: 600)
+        let changed = heights.note(0, for: key("row"), measuredAt: 600)
+        #expect(!changed)
+        #expect(heights.measuredNothing(key("row")))
+        #expect(!heights.isStale(key("row")))
+    }
+
     /// **The one that keeps the gaps from coming back.** A row nobody has measured is not known to
     /// draw nothing, whatever `TranscriptRowInk` guessed about it: it is built, it reports, and
     /// that report is what would catch the guess being wrong.
