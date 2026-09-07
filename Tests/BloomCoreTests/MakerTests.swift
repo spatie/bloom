@@ -7,6 +7,11 @@ import Testing
 /// should be a deliberate change to what the app says about its makers, not a drive-by.
 @Suite("Maker")
 struct MakerTests {
+    @Test("Help links to support, not the retired documentation")
+    func helpDestination() {
+        #expect(AppSite.helpURL.absoluteString == "https://runbloom.app/support")
+    }
+
     @Test("The email's products, in the email's order")
     func productsMatchTheEmail() {
         #expect(Maker.products.map(\.name) == ["Flare", "Mailcoach", "There There"])

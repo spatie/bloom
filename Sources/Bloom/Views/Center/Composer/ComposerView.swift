@@ -65,6 +65,7 @@ struct ComposerView: View {
     /// column on `Session`, so the composer is where the chat's copy of it lives.
     @State private var codexContextWindow = CodexContextWindow.modelDefault
     @State private var draftSaveTask: Task<Void, Never>?
+    @State private var isClearingChat = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -390,6 +391,11 @@ struct ComposerView: View {
         guard canSend else { return }
         draftSaveTask?.cancel()
 
+        if ChatClearCommand.matches(transcript.draft) {
+            startFreshChat()
+            return
+        }
+
         // A file can be moved or deleted between being attached and the prompt going, and naming a
         // path that is not there any more only teaches the agent that Bloom lies about paths. The
         // chip carries a warning while it is on screen; this is the last check before it matters,
@@ -493,6 +499,28 @@ struct ComposerView: View {
                 return
             }
             await model.transcript(for: session).submit(text)
+        }
+    }
+
+    private func startFreshChat() {
+        guard !isClearingChat else { return }
+        isClearingChat = true
+        let previous = transcript
+        let controls = controls
+        Task { @MainActor in
+            defer { isClearingChat = false }
+            if let model {
+                guard await model.createSession(controls: controls) != nil else { return }
+            } else {
+                await app.ask.startFresh(controls: controls)
+                guard let current = app.ask.session, current.id != previous.session.id else { return }
+            }
+            // Only remove the command after the new conversation exists. Previous messages,
+            // pending attachments and review comments are not discarded by this action.
+            if ChatClearCommand.matches(previous.draft) {
+                previous.draft = ""
+                await previous.saveDraft()
+            }
         }
     }
 

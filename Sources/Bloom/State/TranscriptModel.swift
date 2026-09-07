@@ -164,7 +164,10 @@ final class TranscriptModel {
     /// `SubagentRoster` for the argument, which is that the longest one of these is meant to live
     /// is a single session and the CLI's own record of it is already on disk.
     private(set) var subagents = SubagentRoster() {
-        didSet { if let id = workspace?.id { app.noteSubagentsChanged(workspaceID: id) } }
+        didSet {
+            if let id = workspace?.id { app.noteSubagentsChanged(workspaceID: id) }
+            if oldValue.isWorking != subagents.isWorking { app.noteAgentTurnsChanged() }
+        }
     }
 
     var draft = ""
@@ -252,6 +255,11 @@ final class TranscriptModel {
     private(set) var composerFocusRequests = 0
 
     private var runner: (any SessionRunner)?
+
+    func codexSubagentTranscript(for id: SubagentID) async -> SubagentTranscript? {
+        guard let codex = runner as? CodexRunner else { return nil }
+        return await codex.subagentTranscript(for: id)
+    }
     private var pumpTask: Task<Void, Never>?
     /// Preferences are captured when a runner is created. Comparing them at delivery time avoids
     /// reusing a process after the picker changed, even when persistence is still catching up.

@@ -77,6 +77,7 @@ struct BloomApp: App {
         if ArchiveFailureProbe.isRequested { ArchiveFailureProbe.schedule() }
         if StreamingRenderingProbe.isRequested { StreamingRenderingProbe.schedule() }
         if MergeContrastProbe.isRequested { MergeContrastProbe.schedule() }
+        if WelcomeRestartProbe.isRequested { WelcomeRestartProbe.schedule() }
 
         // And the one that answers "the battery menu says Bloom is using significant energy":
         // `Bloom --idle-probe <out.json> --idle-worktrees <list>` runs the diff stat pass the six

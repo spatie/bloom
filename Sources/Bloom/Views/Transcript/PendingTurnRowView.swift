@@ -133,10 +133,11 @@ struct PendingTurnRowView: View {
         CappedWidth(width: bubbleWidth?.cap ?? UserTurnRowView.uncappedFallback) {
             VStack(alignment: .leading, spacing: TranscriptLayout.block) {
                 if !displayText.isEmpty {
+                    let font = Typo.body.resolvedNSFont(scale: fontScale, face: chatFont)
                     TranscriptTextView(
                         text: TranscriptLink.attributedString(
                             sent: displayText,
-                            font: Typo.body.resolvedNSFont(scale: fontScale, face: chatFont),
+                            font: font,
                             color: NSColor(Palette.textSecondary),
                             lineSpacing: TranscriptLayout.proseLeading(
                                 Typo.body,
@@ -148,6 +149,7 @@ struct PendingTurnRowView: View {
                         ),
                         linkColor: NSColor(Palette.link),
                         selectionColor: .selectedTextBackgroundColor,
+                        alignsBubbleInk: true,
                         actions: linkActions.opening(file: open, hovering: { hovered = $0 })
                     )
                     .background { chipProbe }

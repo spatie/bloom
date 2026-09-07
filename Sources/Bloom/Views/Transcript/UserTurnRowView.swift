@@ -177,6 +177,7 @@ struct UserTurnRowView: View {
             // A prompt of nothing but attachments is a turn in its own right, and an empty `Text`
             // above the chips would put a blank line inside the bubble.
             if !text.isEmpty {
+                let font = Typo.body.resolvedNSFont(scale: fontScale, face: chatFont)
                 // Written text, not markdown. A question with a `*` in it is a question with a
                 // `*` in it, and two things only are lifted out of it: an address, found by
                 // `LinkScan`, and a file, found by `FileMention`. Both rules live in the core
@@ -187,10 +188,10 @@ struct UserTurnRowView: View {
                 // `TranscriptTextView` exists: a link inside a selectable `Text` is decoration.
                 // Measured on a real window, the cursor over one was an I-beam and a press routed
                 // nothing at all. See the note on that type.
-                TranscriptTextView(
+                    TranscriptTextView(
                     text: TranscriptLink.attributedString(
                         sent: text,
-                        font: Typo.body.resolvedNSFont(scale: fontScale, face: chatFont),
+                        font: font,
                         // White, the same ink a selected row uses on the same fill. Measured 5.2
                         // to 1 on Spatie Blue, which passes AA for body text in both appearances.
                         color: .alternateSelectedControlTextColor,
@@ -207,6 +208,7 @@ struct UserTurnRowView: View {
                     // muted slate that sits clearly on Spatie Blue and leaves white text alone.
                     // AppKit cannot read the `colorScheme` this bubble sets, so it is named.
                     selectionColor: Palette.bubbleTextSelection,
+                    alignsBubbleInk: true,
                     actions: linkActions.opening(file: open, hovering: { hovered = $0 })
                 )
                 .background { chipProbe }

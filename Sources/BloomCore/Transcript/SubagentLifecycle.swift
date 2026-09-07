@@ -37,6 +37,8 @@ public enum SubagentState: String, Sendable, Hashable, CaseIterable, Codable {
 public enum SubagentLifecycleEvent: Sendable, Hashable {
     /// `system/task_started` arrived for this subagent.
     case spawned
+    /// A backend explicitly started another turn on this same child thread.
+    case resumed
     /// A status word off `system/task_updated`'s patch or `system/task_notification`, exactly as
     /// the CLI spelled it. Reading it is `SubagentState.init(reported:)`'s job, and a word nobody
     /// recognises is refused rather than guessed at.
@@ -102,6 +104,8 @@ extension SubagentState {
         case .spawned:
             guard self == .running else { return .refused }
             return .unchanged
+        case .resumed:
+            return self == .running ? .unchanged : .moves(to: .running)
 
         case .reported(let status):
             guard let reported = SubagentState(reported: status) else { return .refused }

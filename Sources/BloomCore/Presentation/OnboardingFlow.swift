@@ -107,10 +107,9 @@ public enum OnboardingStep: String, Sendable, Hashable, CaseIterable, Identifiab
 ///
 /// Two interesting rules. `firstStep` is where it opens: a first run gets the greeting, because
 /// that is the whole reason the greeting exists and a warm second is what somebody who has just
-/// double clicked a fresh app is owed. Every other way this window opens is somebody who has been
-/// here before, so the Help menu and a later broken launch open on the checks; greeting them again
-/// would be the app not remembering them. Back is still offered from there, so the greeting is
-/// never a screen that has been taken away.
+/// double clicked a fresh app is owed. The Help menu deliberately replays that first-run sequence.
+/// A later broken launch opens on the checks instead. Back is still offered from there, so the
+/// greeting is never a screen that has been taken away.
 ///
 /// `steps` is which screens exist for this window at all, and it is a list rather than a constant
 /// because the command line offer is only worth a screen when it has something to offer. Every

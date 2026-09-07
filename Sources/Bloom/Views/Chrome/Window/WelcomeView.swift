@@ -82,6 +82,7 @@ struct WelcomeView: View {
         }
         .frame(width: Self.width)
         .background(Palette.surface)
+        .accessibilityIdentifier("welcome-step-\(flow.step.rawValue)")
         // The answer comes off the disk, so it lands after the window is already up. Applied as it
         // arrives rather than read at the moment the checks footer draws, because a `body` that
         // asked would be asking on every redraw of a screen with four probes settling on it.

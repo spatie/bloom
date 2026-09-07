@@ -136,7 +136,7 @@ struct AgentQuestionCard: View {
                     optionRow(question, option)
                 }
 
-                otherRow(question)
+                if question.allowsOther { otherRow(question) }
             }
         }
     }
@@ -218,7 +218,7 @@ struct AgentQuestionCard: View {
     /// The free text row every question gets. See the head of this file for why.
     @ViewBuilder
     private func otherRow(_ question: AgentQuestion) -> some View {
-        if box.draft.isWritingOther.contains(question.id) {
+        if question.options.isEmpty || box.draft.isWritingOther.contains(question.id) {
             HStack(alignment: .firstTextBaseline, spacing: TranscriptLayout.glyphGap) {
                 // Drawn chosen: the words being typed are the selection.
                 markView(
@@ -226,14 +226,17 @@ struct AgentQuestionCard: View {
                     isChosen: true
                 )
 
-                TextField(
-                    "Say what you would rather do…",
-                    text: Binding(
+                let answer = Binding(
                         get: { box.draft.other[question.id] ?? "" },
                         set: { box.draft.other[question.id] = $0 }
-                    ),
-                    axis: .vertical
                 )
+                Group {
+                    if question.isSecret {
+                        SecureField("Your answer", text: answer)
+                    } else {
+                        TextField("Your answer", text: answer, axis: .vertical)
+                    }
+                }
                 .textFieldStyle(.roundedBorder)
                 .font(Typo.label)
                 .lineLimit(1...4)

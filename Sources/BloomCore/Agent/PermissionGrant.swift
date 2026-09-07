@@ -172,10 +172,12 @@ public enum PermissionAskOutcome {
     public static let abandoned = "abandoned"
     /// Written when a stored project grant answered it without troubling anybody.
     public static let auto = "allow-project-auto"
+    /// The server closed or timed out a question before the person submitted an answer.
+    public static let resolved = "resolved-by-agent"
 
     /// Whether this outcome means nobody ever actually answered.
     public static func wentUnanswered(_ decision: String) -> Bool {
-        [quit, stopped, abandoned].contains(decision)
+        [quit, stopped, abandoned, resolved].contains(decision)
     }
 
     /// What a row says about an ask that was never answered. No buttons, and no suggestion that
@@ -185,6 +187,7 @@ public enum PermissionAskOutcome {
         case quit: "Bloom closed this session before the question was answered."
         case stopped: "The turn was stopped before this was answered."
         case abandoned: "Bloom was not running when this was asked, so it went unanswered."
+        case resolved: "The agent closed this question before it was answered."
         default: ""
         }
     }

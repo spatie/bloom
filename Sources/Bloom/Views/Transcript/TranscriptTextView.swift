@@ -107,6 +107,7 @@ struct TranscriptTextView: NSViewRepresentable {
     /// What paints behind a selection. Handed in because the bubble is a dark surface whatever
     /// the page around it is doing, and AppKit cannot read the SwiftUI environment that says so.
     var selectionColor: NSColor
+    var alignsBubbleInk = false
     var actions = TranscriptLinkActions()
 
     func makeCoordinator() -> Coordinator { Coordinator(actions: actions) }
@@ -176,6 +177,7 @@ struct TranscriptTextView: NSViewRepresentable {
     private func apply(to view: LinkTextView) {
         if view.textStorage?.isEqual(to: text) != true {
             view.textStorage?.setAttributedString(text)
+            view.bubbleAlignmentWidth = nil
         }
         view.linkColor = linkColor
         // No underline at rest. The pointing hand is asked for here and set for real in
@@ -218,6 +220,15 @@ struct TranscriptTextView: NSViewRepresentable {
         let wanted = CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
         if container.containerSize != wanted { container.containerSize = wanted }
         layout.ensureLayout(for: container)
+        if alignsBubbleInk {
+            if nsView.bubbleAlignmentWidth != width {
+                nsView.bubbleInkOffset = BubbleTextAlignment.offset(layout: layout, container: container)
+                nsView.bubbleAlignmentWidth = width
+            }
+        } else {
+            nsView.bubbleInkOffset = 0
+            nsView.bubbleAlignmentWidth = nil
+        }
         let used = layout.usedRect(for: container)
         let size = TranscriptTextMeasure.size(
             widestLine: Double(widestLine(layout, in: container)),
@@ -287,6 +298,18 @@ struct TranscriptTextView: NSViewRepresentable {
 
 /// The text view itself: hover, and the menu over a link.
 final class LinkTextView: NSTextView {
+    var bubbleAlignmentWidth: CGFloat?
+    var bubbleInkOffset: CGFloat = 0 {
+        didSet {
+            if oldValue != bubbleInkOffset { needsDisplay = true }
+        }
+    }
+
+    override var textContainerOrigin: NSPoint {
+        let origin = super.textContainerOrigin
+        return NSPoint(x: origin.x, y: origin.y + bubbleInkOffset)
+    }
+
     var actions = TranscriptLinkActions()
     var linkColor: NSColor = .linkColor
 

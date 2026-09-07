@@ -406,14 +406,21 @@ final class WorkspaceModel {
     ///   when the chat is being opened FOR something and the name says which, as the pull request
     ///   and merge buttons do. See `PaneNaming` for why a chat is never named after its content.
     @discardableResult
-    func createSession(title: String? = nil) async -> Session? {
-        guard let store else { return nil }
-        let session = Session(
+    func createSession(title: String? = nil, controls: ComposerControls? = nil) async -> Session? {
+        guard !app.isArchiving(workspace.id), let store else { return nil }
+        var session = Session(
             workspaceID: workspace.id,
             title: title ?? PaneNaming.nextTitle(base: PaneNaming.chat, taken: sessions.map(\.title)),
             sortOrder: sessions.count
         )
+        if let controls {
+            session.model = controls.model
+            session.effort = controls.effort
+            session.agentKind = controls.agentKind
+            session.permissionMode = controls.permissionMode
+        }
         guard let stored = try? await store.upsert(session) else { return nil }
+        if let controls { await controls.store(sessionID: stored.id, in: store) }
         await reloadSessions()
         activeSessionID = stored.id
         return stored
@@ -458,6 +465,7 @@ final class WorkspaceModel {
     /// and the sidebar's mirror cannot come to three different conclusions about one chat.
     func isRunning(_ session: Session) -> Bool {
         AgentTurns.session(.running, state: session.state, live: liveTurn(for: session.id))
+            || transcripts[session.id]?.subagents.isWorking == true
     }
 
     func closeSession(_ session: Session) async {
@@ -820,7 +828,7 @@ final class WorkspaceModel {
         return AgentTurns.Live(
             sessionID: sessionID,
             workspaceID: workspace.id,
-            isRunning: transcript.isRunning,
+            isRunning: transcript.isRunning || transcript.subagents.isWorking,
             isAwaitingPermission: transcript.isAwaitingPermission
         )
     }

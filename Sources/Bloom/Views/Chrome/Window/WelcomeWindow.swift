@@ -50,9 +50,12 @@ enum WelcomeWindow {
     /// - Parameter mayActivate: whether Bloom is allowed to pull itself in front of whatever the
     ///   owner is doing. True for a menu item, which is somebody asking; false for the launch
     ///   probe, which is not.
-    static func show(trigger: OnboardingTrigger = .none, mayActivate: Bool = true) {
-        let existing = window ?? make(trigger: trigger)
-        window = existing
+    static func show(
+        trigger: OnboardingTrigger = .none,
+        mayActivate: Bool = true,
+        restarting: Bool = false
+    ) {
+        let existing = prepare(trigger: trigger, restarting: restarting)
         existing.makeKeyAndOrderFront(nil)
         // Only when Bloom is already the front application, or when somebody asked for this
         // window by name. `NSApp.activate()` was unconditional, and the caller behind it is an
@@ -64,6 +67,27 @@ enum WelcomeWindow {
         // Asked again for the same reason the probes are: somebody who came back may have run the
         // command in between, and a window that kept offering it would not have noticed.
         registration?.resolve()
+    }
+
+    /// Preparing is separate from presentation so the lifecycle can be exercised offscreen.
+    static func prepare(trigger: OnboardingTrigger, restarting: Bool = false) -> NSWindow {
+        if restarting {
+            // A retained hosting view also retains the wizard's SwiftUI state. Merely ordering
+            // it front cannot replay it. Dispose of this presentation, including an open login,
+            // without marking the wizard completed or changing the owner's saved preferences.
+            if let closeWatch { NotificationCenter.default.removeObserver(closeWatch) }
+            closeWatch = nil
+            inspection?.cancel()
+            registration?.cancel()
+            window?.close()
+            window?.contentViewController = nil
+            window = nil
+            inspection = nil
+            registration = nil
+        }
+        let existing = window ?? make(trigger: trigger)
+        window = existing
+        return existing
     }
 
     static func close() {
@@ -85,9 +109,8 @@ enum WelcomeWindow {
         registration = offer
 
         // Where the sequence opens is `OnboardingFlow.firstStep`, in the core with its tests: a
-        // first run is greeted, and the Help menu and a later broken launch open straight onto the
-        // checks, because somebody who came back came back for the checks. Back is offered from
-        // there either way, so the greeting is never a screen that has been taken away.
+        // first run and an explicit wizard replay are greeted. A later broken launch opens
+        // straight onto the checks so the person sees what needs attention.
         // A controller, not a bare `NSHostingView`, and that is the whole of the sizing.
         //
         // This was a hosting view with `.preferredContentSize` and one `setContentSize` at the
