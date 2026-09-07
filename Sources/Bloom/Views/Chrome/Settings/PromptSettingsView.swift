@@ -33,13 +33,6 @@ struct PromptSettingsView: View {
                             }
 
                             Spacer(minLength: 0)
-
-                            // Native selection can fade when focus moves to the editor. Keep a
-                            // shape as well as colour so the prompt being edited stays apparent.
-                            Image(systemName: "checkmark")
-                                .font(Typo.captionEmphasis)
-                                .opacity(selection == prompt.id ? 1 : 0)
-                                .accessibilityHidden(true)
                         }
                         .padding(.vertical, Metrics.spacingSmall)
                         .tag(prompt.id)
