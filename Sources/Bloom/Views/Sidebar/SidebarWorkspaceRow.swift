@@ -22,12 +22,19 @@ struct SidebarWorkspaceRow: View {
     /// See `body`, and `RepoHeaderRow.name` for why this is words rather than an outline level.
     var projectName: String
     @Binding var renaming: WorkspaceID?
+    @Binding var archivePresentation: SidebarArchivePresentation
 
     @Environment(AppModel.self) private var app
 
     /// Where this row is on screen, for the card that opens beside it. Held rather than reported:
     /// see `HoverCardAnchor`.
     @State private var anchor = HoverCardAnchor()
+    private typealias ArchiveSource = SidebarArchivePresentation.Source
+
+    private var isArchiveActive: Bool {
+        archivePresentation.workspaceID == workspace.id
+            && (archivePresentation.request != nil || archivePresentation.isRequesting)
+    }
 
     var body: some View {
         WorkspaceRow(
@@ -35,7 +42,12 @@ struct SidebarWorkspaceRow: View {
             isRunning: app.isRunning(workspace),
             isAwaitingPermission: app.isAwaitingPermission(workspace),
             renaming: $renaming,
-            onArchive: confirmRowArchive
+            onArchive: confirmRowArchive,
+            onMenuArchive: { archive(from: .menu) },
+            isArchiveActive: isArchiveActive,
+            archiveRequest: archiveBinding(for: .button),
+            menuArchiveRequest: archiveBinding(for: .menu),
+            onConfirmArchive: confirmArchive
         )
         // Innermost, on the drawing alone. Everything below this line is what the list is told
         // about the row, and a workspace that is fading in is still selectable, draggable and
@@ -81,7 +93,9 @@ struct SidebarWorkspaceRow: View {
         }
         // A row that leaves the pane while its card is up: archived from the menu bar, filtered
         // out, or its project folded. The pointer never leaves, so no exit ever arrives.
+        .onAppear { archivePresentation.rowAppeared(workspace.id) }
         .onDisappear {
+            archivePresentation.rowDisappeared(workspace.id, isArchiving: app.isArchiving(workspace.id))
             WorkspaceHoverCardPresenter.shared.pointerExited(.workspaceRow(workspace.id))
         }
         // Every item in it is `WorkspaceMenuItems`, which Home's rows draw from as well. It used
@@ -90,7 +104,12 @@ struct SidebarWorkspaceRow: View {
         //
         // The row's own hover ellipsis draws the same view, so a press and a right click on one
         // row cannot come up with different menus. See `WorkspaceRow.moreMenu`.
-        .contextMenu { WorkspaceMenuItems(workspace: workspace) { renaming = $0 } }
+        .contextMenu {
+            WorkspaceMenuItems(workspace: workspace, onArchive: { archive(from: .row) }) {
+                renaming = $0
+            }
+        }
+        .archiveConfirmation(archiveBinding(for: .row), arrowEdge: .leading, onConfirm: confirmArchive)
     }
 
     /// What the row's archive button does instead of archiving.
@@ -111,7 +130,47 @@ struct SidebarWorkspaceRow: View {
     /// is now said as an argument, and the one dialog that appears is the one that knows what is
     /// at stake. See `AppModel.archive(_:deleteBranch:alwaysConfirm:)`.
     private func confirmRowArchive(_ workspace: Workspace) {
-        Task { await app.archive(workspace, alwaysConfirm: true) }
+        archive(from: .button, alwaysConfirm: true)
+    }
+
+    private func archiveBinding(for source: ArchiveSource) -> Binding<ArchiveRequest?> {
+        Binding(
+            get: {
+                guard archivePresentation.workspaceID == workspace.id,
+                      archivePresentation.source == source else { return nil }
+                return archivePresentation.request
+            },
+            set: { request in
+                guard request == nil, archivePresentation.workspaceID == workspace.id,
+                      archivePresentation.source == source else { return }
+                archivePresentation.dismissRequest()
+            }
+        )
+    }
+
+    private func archive(from source: ArchiveSource, alwaysConfirm: Bool = false) {
+        let generation = beginArchive(from: source)
+        Task {
+            defer { archivePresentation.finish(generation: generation) }
+            await app.archive(workspace, alwaysConfirm: alwaysConfirm) { request in
+                archivePresentation.present(request, generation: generation)
+            }
+        }
+    }
+
+    private func confirmArchive(_ request: ArchiveRequest) {
+        let generation = beginArchive(from: archivePresentation.source)
+        Task {
+            defer { archivePresentation.finish(generation: generation) }
+            await app.confirmArchive(request) { fresh in
+                archivePresentation.present(fresh, generation: generation)
+            }
+        }
+    }
+
+    private func beginArchive(from source: ArchiveSource) -> UUID {
+        WorkspaceHoverCardPresenter.shared.pointerExited(.workspaceRow(workspace.id))
+        return archivePresentation.begin(workspaceID: workspace.id, source: source)
     }
 
     /// What the card says, built at the moment it opens rather than on every redraw.
@@ -125,7 +184,7 @@ struct SidebarWorkspaceRow: View {
     /// card over the window showing the name being replaced is a card about a fact that is in the
     /// middle of changing.
     private func hoverCard() -> WorkspaceHoverCard? {
-        guard renaming != workspace.id else { return nil }
+        guard renaming != workspace.id, !isArchiveActive else { return nil }
         return WorkspaceHoverCard.make(
             workspace: workspace,
             isRunning: app.isRunning(workspace),

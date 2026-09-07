@@ -93,6 +93,8 @@ struct WorkspaceMenuItems: View {
 
     var workspace: Workspace
     var scope: Scope = .row
+    /// A visible source can keep the safety question attached to its own control.
+    var onArchive: (() -> Void)?
     /// Raised to the list, which owns the one rename field that can be open at a time.
     var onRename: (WorkspaceID) -> Void
 
@@ -126,7 +128,11 @@ struct WorkspaceMenuItems: View {
         // The sidebar row's own hover archive button DOES ask every time, and that is not a
         // disagreement with this. See `SidebarWorkspaceRow.confirmRowArchive`.
         Button("Archive", role: .destructive) {
-            Task { await app.archive(workspace) }
+            if let onArchive {
+                onArchive()
+            } else {
+                Task { await app.archive(workspace) }
+            }
         }
     }
 

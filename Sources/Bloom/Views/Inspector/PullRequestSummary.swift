@@ -400,26 +400,11 @@ struct PullRequestSummary: View {
 
     private var archiveControl: some View {
         Button("Archive", systemImage: "archivebox", action: onArchive)
-            .popover(item: $archiveRequest, arrowEdge: .top) { request in
-                ConfirmationPopover(
-                    title: "Archive this workspace?",
-                    confirmLabel: request.confirmLabel,
-                    tint: request.isDestructive ? Palette.negative : Palette.mergedFill,
-                    canConfirm: branchActions.isAllowed && !isWorking,
-                    onConfirm: { onConfirmArchive(request) },
-                    onCancel: dismissConfirmation,
-                    width: 380
-                ) {
-                    ViewThatFits(in: .vertical) {
-                        Text(request.message).fixedSize(horizontal: false, vertical: true)
-                        ScrollView {
-                            Text(request.message).frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .scrollBounceBehavior(.basedOnSize)
-                    }
-                    .frame(maxHeight: 440)
-                }
-            }
+            .archiveConfirmation(
+                $archiveRequest,
+                canConfirm: branchActions.isAllowed && !isWorking,
+                onConfirm: onConfirmArchive
+            )
             .buttonStyle(.borderedProminent)
             .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
             .tint(status.tone.fill)
