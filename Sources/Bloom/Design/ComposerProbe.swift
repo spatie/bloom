@@ -583,7 +583,9 @@ enum ComposerProbe {
             "documentMinDuringDrag": .number(low),
             "documentMaxDuringDrag": .number(high),
             "documentGrewDuringDrag": .bool(grew),
-            "reproduced": .bool(swing >= 2),
+            // Height agreement alone misses realised rows displaced beyond the scrollable end.
+            "reproduced": .bool(swing >= 2 || [before, afterTaller, afterScrolling, afterWindowResize]
+                .contains { number($0, "misplacedCells") > 0 }),
 
             "before": .object(before),
             "afterTaller": .object(afterTaller),

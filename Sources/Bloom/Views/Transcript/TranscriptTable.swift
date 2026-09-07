@@ -202,7 +202,7 @@ struct TranscriptTable: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> TranscriptHoldView {
-        let table = NSTableView()
+        let table = TranscriptTableView()
         table.headerView = nil
         table.style = .plain
         table.rowSizeStyle = .custom
@@ -1037,6 +1037,7 @@ struct TranscriptTable: NSViewRepresentable {
         /// change in this file that somebody asked for. See `unfoldSeconds`.
         private func noteHeights(_ rows: IndexSet, over seconds: Double = 0) {
             guard let tableView, !rows.isEmpty else { return }
+            (tableView as? TranscriptTableView)?.deferRowAlignment(for: seconds)
             if seconds > 0 {
                 // Only while the row travels, and only the rows travelling. A cell is exactly its
                 // row, and its content is already at the height it is growing towards, so without
@@ -1385,6 +1386,7 @@ struct TranscriptTable: NSViewRepresentable {
         private func rowsArrived(
             head: Range<Int>, tail: Range<Int>, fading: Bool, in tableView: NSTableView
         ) {
+            (tableView as? TranscriptTableView)?.deferRowAlignment(for: fading ? Motion.hoverSeconds : 0)
             NSAnimationContext.beginGrouping()
             NSAnimationContext.current.duration = fading ? Motion.hoverSeconds : 0
             tableView.beginUpdates()
@@ -1402,6 +1404,7 @@ struct TranscriptTable: NSViewRepresentable {
         private func rowsLeft(
             head: Range<Int>, tail: Range<Int>, fading: Bool, in tableView: NSTableView
         ) {
+            (tableView as? TranscriptTableView)?.deferRowAlignment(for: fading ? Motion.hoverSeconds : 0)
             NSAnimationContext.beginGrouping()
             NSAnimationContext.current.duration = fading ? Motion.hoverSeconds : 0
             tableView.beginUpdates()
@@ -1558,6 +1561,7 @@ struct TranscriptTable: NSViewRepresentable {
                     reportGeometry()
                     isSettlingResizeAtEnd = false
                 }
+                (tableView as? TranscriptTableView)?.alignRowOrigins()
                 censusOfTheScreen(settled: true)
                 // **A transcript with rows in it and none of them on screen, once it has stopped
                 // moving.** The blank pane has been chased three times from mechanisms caught
@@ -1721,6 +1725,7 @@ struct TranscriptTable: NSViewRepresentable {
                 // Layout must finish before measuring the newly exposed rows. In particular,
                 // never place the reader against a transient zero-height clip view.
                 keepPlace(wasAtEnd: place.wasAtEnd, anchor: place.anchor)
+                (tableView as? TranscriptTableView)?.alignRowOrigins()
                 viewportPlace = nil
                 reportGeometry()
                 scheduleSettle()
@@ -2034,6 +2039,8 @@ struct TranscriptTable: NSViewRepresentable {
             rows.compactMap { row in
                 guard entries.indices.contains(row) else { return nil }
                 let entry = entries[row]
+                let cell = tableView?.view(atColumn: 0, row: row, makeIfNecessary: false)
+                let drawn = cell.map { $0.convert($0.bounds, to: tableView) }
                 return RowFact(
                     row: row,
                     name: String(describing: entry.id),
@@ -2049,7 +2056,9 @@ struct TranscriptTable: NSViewRepresentable {
                     ),
                     told: Double(tableView?.rect(ofRow: row).height ?? 0),
                     top: Double(tableView?.rect(ofRow: row).minY ?? 0),
-                    hasCell: tableView?.view(atColumn: 0, row: row, makeIfNecessary: false) != nil,
+                    drawnTop: drawn.map { Double($0.minY) },
+                    drawnHeight: drawn.map { Double($0.height) },
+                    hasCell: cell != nil,
                     redrawsItself: entry.id.redrawsItself
                 )
             }
@@ -2091,6 +2100,10 @@ struct TranscriptTable: NSViewRepresentable {
             /// Where the row starts in the document, so a report can add the heights up against
             /// what the reader can see. A document taller than the content it draws is the gap.
             var top: Double
+            /// The actual cell in document coordinates. AppKit can report the correct row rect
+            /// while leaving its realised view at an older origin, beyond the scrollable end.
+            var drawnTop: Double?
+            var drawnHeight: Double?
             /// Whether the table is holding a cell for it, which a silenced row never is.
             var hasCell: Bool
             /// One of the three entries that re-render from their own observation. Nought is never

@@ -4,7 +4,8 @@ import Observation
 import SwiftUI
 
 /// Exercises the real table and hosting views with deterministic rows. Unlike the core tests,
-/// this catches disagreement between SwiftUI's measurements and AppKit's cached row rectangles.
+/// this checks both SwiftUI's measurements and the realised positions against AppKit's row
+/// rectangles. Correct cached heights alone missed content drawn beyond the scrollable end.
 /// Run in an isolated app with --transcript-layout-probe <report.json> --window-hidden.
 @MainActor
 enum TranscriptLayoutProbe {
@@ -83,7 +84,42 @@ enum TranscriptLayoutProbe {
                 return abs(row.told - max(0.01, known)) <= 0.5
                     && (row.redrawsItself || !row.needsMeasuring)
             }, "\(phase): visible row has a gap, overlap or stale measurement")
+            check(rows.allSatisfy { row in
+                guard let top = row.drawnTop, let height = row.drawnHeight else { return true }
+                return abs(top - row.top) <= 0.5 && abs(height - row.told) <= 0.5
+            }, "\(phase): rendered cell disagrees with its scrollable row rectangle")
         }
+
+        // The live report had correct cached heights but every realised row was 92 points
+        // below rect(ofRow:). Reproduce that state explicitly: ordinary layout and notifying
+        // the same row heights did not repair it in the running app.
+        guard let scroll = controller.scrollView,
+              let table = scroll.documentView as? NSTableView else { harness.fail("no scroll view") }
+        table.enumerateAvailableRowViews { row, _ in
+            row.setFrameOrigin(NSPoint(x: row.frame.minX, y: row.frame.minY + 92))
+        }
+        var displaced = false
+        table.enumerateAvailableRowViews { row, index in
+            if abs(row.frame.minY - table.rect(ofRow: index).minY) > 90 { displaced = true }
+        }
+        check(displaced, "failed to reproduce displaced row views")
+        table.needsLayout = true
+        table.layoutSubtreeIfNeeded()
+        checkRows("after repairing displaced rows")
+
+        guard let alignedTable = table as? TranscriptTableView else { harness.fail("no aligned table") }
+        alignedTable.deferRowAlignment(for: 0.2)
+        table.enumerateAvailableRowViews { row, _ in
+            row.setFrameOrigin(NSPoint(x: row.frame.minX, y: row.frame.minY + 20))
+        }
+        alignedTable.alignRowOrigins()
+        var keptAnimation = false
+        table.enumerateAvailableRowViews { row, index in
+            if abs(row.frame.minY - table.rect(ofRow: index).minY) > 19 { keptAnimation = true }
+        }
+        check(keptAnimation, "row repair interrupted a deliberate animation")
+        await settle(window)
+        checkRows("after animation")
 
         for height in [180.0, 420, 1, 300, 600] {
             window.setContentSize(NSSize(width: 640, height: height))
@@ -112,8 +148,6 @@ enum TranscriptLayoutProbe {
 
         controller.goToEnd()
         await settle(window)
-        guard let scroll = controller.scrollView,
-              let table = scroll.documentView as? NSTableView else { harness.fail("no scroll view") }
         // Keep the gesture open while an already visible row changes size. The former queue
         // refused every height correction until didEndLiveScroll, leaving 180 points of blank.
         NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
