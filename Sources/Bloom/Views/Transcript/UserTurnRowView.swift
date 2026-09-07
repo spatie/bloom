@@ -114,7 +114,6 @@ struct UserTurnRowView: View {
             CappedWidth(width: maxWidth) {
                 bubble.padding(Self.padding)
             }
-            .padding(.trailing, OutgoingBubbleShape.tailWidth)
             .padding(.bottom, OutgoingBubbleShape.tailDrop)
             .background(Palette.accentFill, in: OutgoingBubbleShape(cornerRadius: Self.corner))
             // No stroke around the fill. A border on a filled shape is a control's outline,

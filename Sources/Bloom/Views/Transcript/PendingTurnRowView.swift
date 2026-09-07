@@ -173,7 +173,6 @@ struct PendingTurnRowView: View {
             // takes the width they actually use, matching the sent bubble above it.
             .padding(Self.padding)
         }
-        .padding(.trailing, OutgoingBubbleShape.tailWidth)
         .padding(.bottom, OutgoingBubbleShape.tailDrop)
         .background(Palette.surfaceRaised, in: OutgoingBubbleShape(cornerRadius: Self.corner))
         .overlay {
