@@ -52,9 +52,9 @@ struct ArchivedWorkspaceView: View {
     /// The same three settings the live conversation is drawn with, scoped to the same subtree,
     /// so a transcript does not change size or line height when it is read from here instead of
     /// from there.
-    @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.standard
+    @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.defaultChoice
     @AppStorage(ChatFont.defaultsKey) private var chatFontID = ChatFont.standardID
-    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.standard
+    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.defaultChoice
 
     private var workspace: Workspace { model.workspace }
 

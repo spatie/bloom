@@ -172,5 +172,5 @@ extension EnvironmentValues {
     /// Here rather than beside `ChatLineHeight` the way `chatFont` sits beside `ChatFont`, because
     /// that type is in the core and the core imports no UI framework. This file is how a view
     /// reaches the leading rule, and an environment value is exactly that.
-    @Entry var chatLineHeight: ChatLineHeight = .standard
+    @Entry var chatLineHeight: ChatLineHeight = .defaultChoice
 }

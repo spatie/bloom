@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import BloomCore
 
 /// What the View menu's Zoom In, Zoom Out and Actual Size act on.
 ///
@@ -22,14 +23,14 @@ enum TextZoom {
 
     static func zoomOut() { adjust(by: -1) }
 
-    /// Home for each: `standard` for the conversation, no override at all for a terminal, which is
+    /// Home for each: the default choice for the conversation, no override for a terminal, which is
     /// how a shell goes back to following the size in the user's Ghostty config rather than to
     /// some number Bloom picked.
     static func actualSize() {
         if focusedTerminal != nil {
             TerminalTextSize.override = nil
         } else {
-            ChatTextSize.current = .standard
+            ChatTextSize.current = .defaultChoice
         }
     }
 
@@ -39,7 +40,7 @@ enum TextZoom {
 
     static var canResetSize: Bool {
         if focusedTerminal != nil { return TerminalTextSize.override != nil }
-        return ChatTextSize.current != .standard
+        return ChatTextSize.current != .defaultChoice
     }
 
     private static func adjust(by steps: Int) {

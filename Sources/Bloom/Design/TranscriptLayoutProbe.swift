@@ -39,7 +39,7 @@ enum TranscriptLayoutProbe {
                 shape: .answer,
                 content: {
                     AnyView(Text(String(repeating: "A transcript row that wraps when resized. ", count: row % 9 + 1))
-                        .font(.system(size: 15)).padding(8))
+                        .font(Typo.body).proseLeading().padding(8))
                 }
             )
         }
@@ -49,11 +49,11 @@ enum TranscriptLayoutProbe {
         ))
         let view = TranscriptTable(
             entries: entries, session: SessionID("layout-probe"), controller: controller,
-            scale: 1,
+            scale: ChatTextSize.defaultChoice.scale,
             rowEnvironment: TranscriptRowEnvironment(
                 app: app, hoverHost: TranscriptHoverHost(), bubbleWidth: TranscriptBubbleWidth(),
-                linkActions: TranscriptLinkActions(), fontScale: 1, chatFont: .standard,
-                lineHeight: .standard, reduceMotion: true
+                linkActions: TranscriptLinkActions(), fontScale: ChatTextSize.defaultChoice.scale,
+                chatFont: .standard, lineHeight: .defaultChoice, reduceMotion: true
             ),
             onGeometryChange: { _ in }, onSettled: {}, onLiveScrollChange: { _ in }
         )

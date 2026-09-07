@@ -23,9 +23,9 @@ struct TextLeadingTests {
         }
     }
 
-    @Test("the default chat size gets six points where it used to get three")
+    @Test("the new 15 point default adds five points to its native line box")
     func theDefaultMoves() {
-        #expect(TextLeading.overPointSize(lineHeight: 16, pointSize: 13) == 6)
+        #expect(TextLeading.overPointSize(lineHeight: 18, pointSize: 15) == 5)
     }
 
     @Test("a fixed three points is what the ratio is not")
@@ -80,10 +80,10 @@ struct TextLeadingTests {
 
     @Test("code is measured against its box and prose against its size, and they do not agree")
     func theTwoDenominatorsAreNotOneDecision() {
-        // A guard against somebody folding the two ratios together later: at the same eleven
+        // A guard against somebody folding the two ratios together later: at the same thirteen
         // point rung the two rules answer differently, and that is the point of there being two.
-        let prose = TextLeading.overPointSize(lineHeight: 13, pointSize: 11)
-        let code = TextLeading.overLineBox(lineHeight: 13)
+        let prose = TextLeading.overPointSize(lineHeight: 16, pointSize: 13)
+        let code = TextLeading.overLineBox(lineHeight: 16)
         #expect(prose != code)
     }
 }

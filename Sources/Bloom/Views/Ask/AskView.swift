@@ -24,9 +24,9 @@ struct AskView: View {
     @State private var isTranscriptScrolledUp = false
     @State private var room = ComposerRoom()
 
-    @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.standard
+    @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.defaultChoice
     @AppStorage(ChatFont.defaultsKey) private var chatFontID = ChatFont.standardID
-    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.standard
+    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.defaultChoice
 
     var body: some View {
         VStack(spacing: 0) {
