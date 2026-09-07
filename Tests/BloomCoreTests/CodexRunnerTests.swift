@@ -59,8 +59,8 @@ private let turnStartReply = JSONValue.object([
     ]),
 ])
 
-private func scriptedBox() -> ProcessBox {
-    let box = ProcessBox()
+private func scriptedBox(onWrite: @escaping @Sendable (String) -> Void = { _ in }) -> ProcessBox {
+    let box = ProcessBox(onWrite: onWrite)
     box.reply(to: "thread/start", with: threadStartReply)
     box.reply(to: "thread/resume", with: threadStartReply)
     box.reply(to: "turn/start", with: turnStartReply)
@@ -136,14 +136,19 @@ private func eventually(
         await runner.shutdown()
     }
 
-    @Test(arguments: ["initialize", "thread/start", "turn/start"])
+    @Test(.timeLimit(.minutes(1)), arguments: ["initialize", "thread/start", "turn/start"])
     func stopWhileStartingCannotBeLost(_ delayed: String) async throws {
         let store = try makeTestStore("codex-start-stop")
         let (session, _) = try await makeCodexSession(store)
-        let box = scriptedBox()
+        // Buffer the request itself: a polling deadline can expire before the send task is
+        // scheduled when the full suite is running thousands of tests concurrently.
+        let (requests, requestSink) = AsyncStream<String>.makeStream()
+        defer { requestSink.finish() }
+        let box = scriptedBox { requestSink.yield($0) }
         box.ignore(delayed)
         let runner = makeRunner(store: store, session: session, box: box)
         let sending = Task {
+            defer { requestSink.finish() }
             do {
                 try await runner.send("do not run after Stop")
                 Issue.record("a cancelled send returned success")
@@ -153,10 +158,8 @@ private func eventually(
                 Issue.record("unexpected send error: \(error)")
             }
         }
-        await eventually("delayed request", within: 20) {
-            box.processes.first?.sentMethods.contains(delayed) == true
-        }
-        let request = try #require(box.process.sentFrame { $0["method"]?.stringValue == delayed })
+        let frame = await requests.first { JSONValue.parse($0)?["method"]?.stringValue == delayed }
+        let request = try #require(frame.flatMap(JSONValue.parse))
         let id = try #require(request["id"])
         runner.cancelNow()
         let reply: JSONValue = switch delayed {
