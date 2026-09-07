@@ -59,6 +59,7 @@ struct ComposerTextEditor: NSViewRepresentable {
     var onOpenAttachment: @MainActor (String) -> Void = { _ in }
     /// The chip the pointer has settled on, which is the card that is up.
     var onHoverAttachment: @MainActor (String?) -> Void = { _ in }
+    var attachmentRoot: String = ""
     /// The way in for the one edit the composer makes that the user did not type: a file arriving
     /// after it has been copied. See `ComposerEditorHandle`.
     var handle: ComposerEditorHandle?
@@ -159,6 +160,10 @@ struct ComposerTextEditor: NSViewRepresentable {
         }
         textView.hoverAttachment = { [weak coordinator = context.coordinator] path in
             coordinator?.parent.onHoverAttachment(path)
+        }
+        textView.previewAttachment = { [weak coordinator = context.coordinator] path in
+            guard let coordinator else { return nil }
+            return PromptAttachment.sent(path: path).url(in: coordinator.parent.attachmentRoot)
         }
         // A text view already accepts a file drag, which is exactly the behaviour being replaced:
         // it writes the path into the text. Registering the type explicitly means the drop is

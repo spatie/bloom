@@ -54,6 +54,7 @@ struct TranscriptLinkActions: Sendable, Equatable {
     /// The pointer moved onto a chip inside the run, or off one. Set by the same row and for the
     /// same reason: the card needs the workspace to know which worktree a path is under.
     var hoverFile: @MainActor @Sendable (FileChipHover?) -> Void = { _ in }
+    var previewFile: @MainActor @Sendable (String) -> URL? = { _ in nil }
 
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.identity == rhs.identity }
 }
@@ -297,7 +298,17 @@ struct TranscriptTextView: NSViewRepresentable {
 }
 
 /// The text view itself: hover, and the menu over a link.
-final class LinkTextView: NSTextView {
+final class LinkTextView: NSTextView, HoverQuickLookSource {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        HoverQuickLookController.shared.update(self)
+    }
+
+    func quickLookURL(at point: NSPoint) -> URL? {
+        guard let path = fileChip(at: point)?.subject.path else { return nil }
+        return actions.previewFile(path)
+    }
+
     var bubbleAlignmentWidth: CGFloat?
     var bubbleInkOffset: CGFloat = 0 {
         didSet {

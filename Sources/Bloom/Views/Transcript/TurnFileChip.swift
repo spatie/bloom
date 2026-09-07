@@ -26,6 +26,7 @@ struct TurnFileChip: View {
         // `TurnFooterView` decides how many chips there is room for; a chip that is drawn is drawn
         // whole.
         .fixedSize()
+        .background(HoverQuickLook(url: PromptAttachment.sent(path: file.path).url(in: worktree)))
         // Said once, in the form the rest of the window says it in.
         //
         // It was said three times: `.help` gives a tooltip AND an accessibility help string, and

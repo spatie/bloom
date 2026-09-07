@@ -75,6 +75,9 @@ struct FileTreeRow: View, Equatable {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .background {
+            if !item.node.isDirectory { HoverQuickLook(url: URL(fileURLWithPath: fullPath)) }
+        }
         // Folders included: dragging a directory out of a worktree is the same gesture in Finder,
         // and the provider carries whichever of the two this row is.
         .fileDrag(path: fullPath)

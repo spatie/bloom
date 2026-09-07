@@ -150,7 +150,10 @@ struct PendingTurnRowView: View {
                         linkColor: NSColor(Palette.link),
                         selectionColor: .selectedTextBackgroundColor,
                         alignsBubbleInk: true,
-                        actions: linkActions.opening(file: open, hovering: { hovered = $0 })
+                        actions: linkActions.opening(
+                            file: open, hovering: { hovered = $0 },
+                            previewing: { PromptAttachment.sent(path: $0).url(in: home.worktree) }
+                        )
                     )
                     .background { chipProbe }
                 }

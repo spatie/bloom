@@ -70,6 +70,9 @@ struct SlashCommandChip: View {
                 .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         }
         .contentShape(RoundedRectangle(cornerRadius: ComposerInlineChipLayout.cornerRadius))
+        .background {
+            if let path { HoverQuickLook(url: URL(fileURLWithPath: path)) }
+        }
         .onHover(perform: hover(_:))
         .help(helpText)
         .contextMenu { menu }
@@ -137,6 +140,7 @@ struct SlashCommandChip: View {
     @ViewBuilder
     private var menu: some View {
         if let path {
+            Button("Quick Look") { HoverQuickLookController.shared.show(URL(fileURLWithPath: path)) }
             OpenInItems(target: .file(path), noun: "Skill")
             Divider()
             Button("Reveal in Finder") { Reveal.inFinder(path) }

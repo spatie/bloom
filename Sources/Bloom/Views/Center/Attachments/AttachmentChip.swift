@@ -151,6 +151,7 @@ struct AttachmentChip: View {
                 .strokeBorder(stroke, lineWidth: Metrics.outline)
         }
         .background { probe }
+        .background(HoverQuickLook(url: url))
         .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
         // The double click is declared FIRST, which is what makes both gestures possible on one
         // chip: SwiftUI matches the higher count before it falls back to the single tap, and
@@ -182,6 +183,7 @@ struct AttachmentChip: View {
         if let onOpenInNewTab {
             Button("Open in New Tab", action: onOpenInNewTab)
         }
+        Button("Quick Look") { HoverQuickLookController.shared.show(url) }
         Button("Reveal in Finder") { Reveal.inFinder(url.path) }
         Button("Copy path") { Clipboard.copy(attachment.path) }
     }
