@@ -41,14 +41,14 @@ struct InstallPingTests {
 
     // MARK: - What is in the body
 
-    @Test("sends five fields and no sixth")
+    @Test("omits optional metrics when unavailable")
     func bodyHasExactlyTheAgreedKeys() throws {
         let json = try object(payload())
 
         #expect(Set(json.keys) == ["token", "app_version", "macos_version", "agent", "theme"])
     }
 
-    @Test("sends the five facts as the endpoint expects them")
+    @Test("sends the base fields as the endpoint expects them")
     func bodyValues() throws {
         let json = try object(payload(agent: "codex", theme: .dark))
 
@@ -59,9 +59,6 @@ struct InstallPingTests {
         #expect(json["theme"] as? String == "dark")
     }
 
-    /// The body is built from a struct with five stored properties, so the only way a path, a
-    /// branch or a prompt could reach it is by somebody adding a field. This is the test that
-    /// fails when they do.
     @Test("cannot carry anything about the user or their work")
     func bodyCarriesNothingElse() throws {
         let data = try InstallPing.body(payload(theme: .light))
@@ -78,6 +75,59 @@ struct InstallPingTests {
 
         #expect(data.count < 300)
         #expect(data.count < InstallPing.maximumBodyBytes)
+    }
+
+    @Test("encodes only the agreed setup metrics and rounds display dimensions")
+    func setupMetrics() throws {
+        let value = InstallPing.Payload(
+            token: "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
+            appVersion: "0.4.0", macOSVersion: "26.1.0", agent: "claude", theme: .dark,
+            appBuild: "42", architecture: .arm64, translated: false,
+            screenWidth: 1512, screenHeight: 982, displayScale: 2, displayCount: 2,
+            memoryBucket: .upTo32GiB
+        )
+        let json = try object(value)
+        #expect(Set(json.keys) == [
+            "token", "app_version", "macos_version", "agent", "theme", "app_build",
+            "architecture", "translated", "screen_width", "screen_height", "display_scale",
+            "display_count", "memory_bucket",
+        ])
+        #expect(json["app_build"] as? String == "42")
+        #expect(json["architecture"] as? String == "arm64")
+        #expect(json["translated"] as? Bool == false)
+        #expect(json["screen_width"] as? Int == 1500)
+        #expect(json["screen_height"] as? Int == 1000)
+        #expect(json["display_scale"] as? Double == 2)
+        #expect(json["display_count"] as? Int == 2)
+        #expect(json["memory_bucket"] as? String == "up_to_32_gib")
+        #expect(try InstallPing.body(value).count < InstallPing.maximumBodyBytes)
+    }
+
+    @Test("drops invalid optional metrics without losing the install report")
+    func invalidSetupMetrics() throws {
+        let value = InstallPing.Payload(
+            token: "3F2504E0-4F89-11D3-9A0C-0305E82C3301",
+            appVersion: "0.4.0", macOSVersion: "26.1.0", agent: "claude", theme: .dark,
+            appBuild: "/Users/someone", translated: true,
+            screenWidth: .infinity, screenHeight: 1000, displayScale: .nan, displayCount: 0
+        )
+        #expect(Set(try object(value).keys) == ["token", "app_version", "macos_version", "agent", "theme"])
+        #expect(InstallPing.roundedScreenDimension(-1) == nil)
+        #expect(InstallPing.roundedScreenDimension(20_001) == nil)
+        #expect(InstallPing.roundedScreenDimension(20_000) == 20_000)
+    }
+
+    @Test("groups memory at the documented boundaries")
+    func memoryRanges() {
+        let gib: UInt64 = 1_073_741_824
+        #expect(InstallPing.MemoryBucket(bytes: 0) == nil)
+        #expect(InstallPing.MemoryBucket(bytes: 8 * gib) == .upTo8GiB)
+        #expect(InstallPing.MemoryBucket(bytes: 8 * gib + 1) == .upTo16GiB)
+        #expect(InstallPing.MemoryBucket(bytes: 16 * gib) == .upTo16GiB)
+        #expect(InstallPing.MemoryBucket(bytes: 24 * gib) == .upTo32GiB)
+        #expect(InstallPing.MemoryBucket(bytes: 32 * gib) == .upTo32GiB)
+        #expect(InstallPing.MemoryBucket(bytes: 64 * gib) == .upTo64GiB)
+        #expect(InstallPing.MemoryBucket(bytes: 64 * gib + 1) == .over64GiB)
     }
 
     // MARK: - Every field matches what the endpoint validates
@@ -429,15 +479,15 @@ struct InstallPingTests {
         #expect(InstallPing.isEnabled(in: defaults))
     }
 
-    /// The same five things the privacy page names, in the switch itself.
     @Test("says in the switch itself what leaves the machine")
     func copyDescribesThePayload() {
-        for word in ["install token", "version", "macOS", "coding agent", "appearance"] {
+        for word in ["install token", "version", "build", "macOS", "agents", "theme", "architecture", "Rosetta", "display", "memory"] {
             #expect(InstallPing.settingDetail.localizedCaseInsensitiveContains(word))
         }
-        #expect(InstallPing.settingFooter.contains("random"))
-        #expect(InstallPing.settingFooter.contains("repository"))
-        #expect(InstallPing.settingFooter.contains("IP address"))
+        #expect(InstallPing.settingDetail.contains("random"))
+        #expect(InstallPing.settingFooter.contains("100 points"))
+        #expect(InstallPing.settingFooter.contains("account details"))
+        #expect(InstallPing.settingFooter.contains("email"))
     }
 
     // MARK: - Which builds may send

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import BloomCore
 
@@ -112,7 +113,6 @@ final class InstallPingService {
         return outcome
     }
 
-    /// The five facts, and nothing that is not one of them.
     private func currentPayload(token: String) async -> InstallPing.Payload {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
         let system = ProcessInfo.processInfo.operatingSystemVersion
@@ -125,6 +125,8 @@ final class InstallPingService {
             AgentCatalog.installedKinds(overrides: overrides)
         }.value
 
+        let screen = NSScreen.main ?? NSScreen.screens.first
+
         return InstallPing.Payload(
             token: token,
             appVersion: version ?? InstallPing.unknownVersion,
@@ -134,7 +136,15 @@ final class InstallPingService {
                 patch: system.patchVersion
             ),
             agent: InstallPing.agentName(installed: installed),
-            theme: InstallPing.Theme()
+            theme: InstallPing.Theme(),
+            appBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+            architecture: FeedbackEnvironment.architecture(),
+            translated: FeedbackEnvironment.isTranslated(),
+            screenWidth: screen.map { Double($0.frame.width) },
+            screenHeight: screen.map { Double($0.frame.height) },
+            displayScale: screen.map { Double($0.backingScaleFactor) },
+            displayCount: NSScreen.screens.count,
+            memoryBucket: InstallPing.MemoryBucket(bytes: ProcessInfo.processInfo.physicalMemory)
         )
     }
 

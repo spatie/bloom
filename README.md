@@ -275,3 +275,22 @@ instead of using the issue tracker.
 ## License
 
 The MIT License (MIT). Please see [License File](LICENSE.md) for more information.
+
+## Usage reports
+
+Release builds report a random installation token, app version and build, macOS version,
+installed agents, theme, process architecture, Rosetta status, display dimensions and scale,
+connected display count, and a broad memory range to `https://runbloom.app/api/install-reports`.
+Display dimensions are logical points rounded to the nearest 100. Display count is capped at
+16, and memory ranges are up to 8, 16, 32 or 64 GiB, or above 64 GiB.
+
+The token stays in UserDefaults across launches and app updates. It counts installations,
+not unique people across devices. Reports contain no names, hardware identifiers, account
+details or project content. Feedback uses the same token, so an email included with feedback
+can identify an installation.
+
+Settings > General > Share daily usage reports turns reporting off. The existing 24-hour
+first-launch grace period and roughly daily schedule still apply. Development and master
+builds send nothing unless `BLOOM_PING_URL` explicitly points at a testing endpoint.
+
+Deploy the corresponding runbloom.app migration before releasing a build with these metrics.

@@ -6,7 +6,7 @@ import BloomCore
 /// A section of its own for the same reason `SleepSettingsSection` and `UpdateSettingsSection`
 /// are: it is a switch that cannot be understood from its title alone. A person reading a row
 /// about sending anything anywhere wants the list of what is sent, in the row, not in a privacy
-/// page they would have to go and find. So the five fields are named underneath the switch and the
+/// page they would have to go and find. So the reported metrics are named underneath the switch and the
 /// footer answers the question behind the question, which is whether any of their work is in it.
 ///
 /// The default lives on `InstallPing.isOnByDefault` and is registered in `SystemDefaults`. An

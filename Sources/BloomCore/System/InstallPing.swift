@@ -1,36 +1,8 @@
 import Foundation
 
-/// The one thing Bloom ever says about itself to a server: that this copy exists, roughly once a
-/// day, in five fields.
-///
-/// Bloom is distributed outside the App Store, so nothing else in the app can answer "how many
-/// people run this, and which versions are they on". The updater deliberately cannot answer it
-/// either: the appcast is meant to stay a static, cacheable file behind a CDN, and counting
-/// installs off the back of it would turn every cache hit into a lost install and every cache miss
-/// into a request that has to be logged. So the count is its own small POST instead, and this type
-/// owns everything about it that is a judgement rather than a passthrough: what goes in the body,
-/// what may never go in it, when it is due, where the token lives, and which builds are allowed to
-/// send at all.
-///
-/// In the core rather than in the app target for the reason `SleepPrevention` and `SoftwareUpdate`
-/// are: the whole of it is decidable without a network, and every one of those decisions is the
-/// kind that is worth pinning in a test.
-///
-/// **What is in the body, and nothing else.** An install token, the app version, the macOS
-/// version, which coding agent Bloom runs, and the appearance setting. `Payload` has five stored
-/// properties and no dictionary, so there is no shape of this type that carries a sixth fact, and
-/// every one of the five is either an enum or a string that has been checked against the pattern
-/// the endpoint validates it with.
-///
-/// **What is deliberately absent.** No path, no repository, no branch, no workspace or project
-/// name, no prompt, no diff, no hostname, no username, no serial number, no hardware identifier,
-/// no credential, and nothing read out of `~/.claude.json` or `~/.codex/auth.json`. Those two
-/// files hold live tokens; the ping never opens them. "Which AI" is answered by whether the CLI
-/// resolves on `PATH`, which is a fact about the machine's `PATH` and not about an account.
-///
-/// **The endpoint's rules are its own.** It validates strictly and fails a whole request rather
-/// than coercing a field, so the patterns it enforces are restated here and everything is checked
-/// against them before it is sent. See `Payload`.
+/// Reports distinct installations and coarse setup metrics about once a day.
+/// No paths, prompts, account details, serial numbers or hardware identifiers are collected.
+/// The random token identifies an installation, not a person or a physical Mac.
 public enum InstallPing {
     // MARK: - Where the state lives
 
@@ -47,22 +19,7 @@ public enum InstallPing {
     /// When the last ping the server handled was sent. See `isDue(firstSeenAt:lastSentAt:now:)`.
     public static let lastSentKey = "installPing.lastSentAt"
 
-    /// On unless it is turned off.
-    ///
-    /// The trade is stated in the switch's own words rather than hidden behind a default: five
-    /// fields, none of which describes the user or their work, against a number that is the only
-    /// way anyone finds out whether a release broke launching for a whole macOS version. A count
-    /// that only the people who go looking for a switch contribute to is not a count of anything,
-    /// so an opt-in default would be a way of shipping this feature without shipping it.
-    ///
-    /// It is a real switch rather than a courtesy, and it is what the whole thing rests on: the
-    /// server keeps no IP address, the privacy page names these five fields, and a visible toggle
-    /// in the app is the part that makes that a choice rather than an announcement. Nothing is
-    /// sent before it has been there to find, either. See `firstLaunchGrace`.
-    ///
-    /// Stated once, here, and read by every binding. An `@AppStorage` literal that disagreed with
-    /// the registered default is exactly how the menu bar switch once drew off while the item it
-    /// controls was plainly in the menu bar.
+    /// Enabled by default, with a Settings switch and a first-launch grace period.
     public static let isOnByDefault = true
 
     // MARK: - Where it goes
@@ -327,16 +284,7 @@ public enum InstallPing {
 
     // MARK: - The body
 
-    /// Everything that is sent, and the only thing that is sent.
-    ///
-    /// Five stored properties, each one checked against the pattern the endpoint validates it
-    /// with. That check is not politeness: the endpoint fails the whole request rather than
-    /// coercing a field, and a 422 is not worth retrying, so a body that would be refused is a
-    /// day's count thrown away. Anything that does not match is replaced by a value that does and
-    /// that obviously means "we could not tell", rather than by something plausible.
-    ///
-    /// Adding a field here is the only way to change what leaves the machine, which is the
-    /// property the whole design is arranged around.
+    /// A closed set of fields. Optional metrics are omitted when unavailable or invalid.
     public struct Payload: Sendable, Equatable, Encodable {
         /// The install token. See `installToken(in:)`.
         public let token: String
@@ -353,19 +301,45 @@ public enum InstallPing {
 
         /// The appearance setting.
         public let theme: Theme
+        public let appBuild: String?
+        public let architecture: String?
+        public let translated: Bool?
+        public let screenWidth: Int?
+        public let screenHeight: Int?
+        public let displayScale: Double?
+        public let displayCount: Int?
+        public let memoryBucket: MemoryBucket?
 
         public init(
             token: String,
             appVersion: String,
             macOSVersion: String,
             agent: String,
-            theme: Theme
+            theme: Theme,
+            appBuild: String? = nil,
+            architecture: Feedback.Architecture = .unknown,
+            translated: Bool? = nil,
+            screenWidth: Double? = nil,
+            screenHeight: Double? = nil,
+            displayScale: Double? = nil,
+            displayCount: Int? = nil,
+            memoryBucket: MemoryBucket? = nil
         ) {
             self.token = InstallPing.matches(token, InstallPing.tokenPattern) ? token : InstallPing.newToken()
             self.appVersion = InstallPing.checked(appVersion, InstallPing.appVersionPattern, or: InstallPing.unknownVersion)
             self.macOSVersion = InstallPing.checked(macOSVersion, InstallPing.systemVersionPattern, or: InstallPing.unknownVersion)
             self.agent = InstallPing.checked(agent, InstallPing.namePattern, or: InstallPing.unknownName)
             self.theme = theme
+            self.appBuild = appBuild.flatMap { InstallPing.matches($0, #"^[A-Za-z0-9.]{1,16}$"#) ? $0 : nil }
+            self.architecture = architecture.wireName
+            self.translated = architecture == .unknown ? nil : translated
+            let width = InstallPing.roundedScreenDimension(screenWidth)
+            let height = InstallPing.roundedScreenDimension(screenHeight)
+            self.screenWidth = height == nil ? nil : width
+            self.screenHeight = width == nil ? nil : height
+            self.displayScale = displayScale.flatMap { [1.0, 2.0, 3.0, 4.0].contains($0) ? $0 : nil }
+            self.displayCount = displayCount.flatMap { $0 > 0 ? min($0, 16) : nil }
+            self.memoryBucket = memoryBucket
         }
 
         /// snake_case, because the application receiving this is a Laravel app and this is the
@@ -376,7 +350,40 @@ public enum InstallPing {
             case macOSVersion = "macos_version"
             case agent
             case theme
+            case appBuild = "app_build"
+            case architecture
+            case translated
+            case screenWidth = "screen_width"
+            case screenHeight = "screen_height"
+            case displayScale = "display_scale"
+            case displayCount = "display_count"
+            case memoryBucket = "memory_bucket"
         }
+    }
+
+    public enum MemoryBucket: String, Sendable, Equatable, Encodable, CaseIterable {
+        case upTo8GiB = "up_to_8_gib"
+        case upTo16GiB = "up_to_16_gib"
+        case upTo32GiB = "up_to_32_gib"
+        case upTo64GiB = "up_to_64_gib"
+        case over64GiB = "over_64_gib"
+
+        public init?(bytes: UInt64) {
+            guard bytes > 0 else { return nil }
+            let gib: UInt64 = 1_073_741_824
+            switch bytes {
+            case ...(UInt64(8) * gib): self = .upTo8GiB
+            case ...(UInt64(16) * gib): self = .upTo16GiB
+            case ...(UInt64(32) * gib): self = .upTo32GiB
+            case ...(UInt64(64) * gib): self = .upTo64GiB
+            default: self = .over64GiB
+            }
+        }
+    }
+
+    public static func roundedScreenDimension(_ points: Double?) -> Int? {
+        guard let points, points.isFinite, (100...20_000).contains(points) else { return nil }
+        return Int((points / 100).rounded()) * 100
     }
 
     // MARK: - The endpoint's own rules, restated
@@ -518,15 +525,11 @@ public enum InstallPing {
 
     // MARK: - The Settings row
 
-    public static let settingTitle = "Send an anonymous daily ping"
+    public static let settingTitle = "Share daily usage reports"
 
-    /// Names the five fields, in the order they are in the body and in the same words the privacy
-    /// page uses. A switch about sending data that does not say what it sends is asking for trust
-    /// it has not earned.
     public static let settingDetail =
-        "Once a day Bloom sends a random install token, its own version, your macOS version, which coding agent it runs, and your appearance setting. Nothing else."
+        "Help improve Bloom by sharing a random install token, app version and build, macOS version, installed agents, theme, processor architecture, Rosetta status, rounded display dimensions, display scale and count, and memory range."
 
-    /// The part that answers "what about my work", which is the actual question behind the switch.
     public static let settingFooter =
-        "The token is a random number generated on this Mac and is not derived from you or your hardware. No project, repository, branch, path, prompt or account detail is ever included, and your IP address is not stored. This is how Bloom's author knows how many people use it and which versions to keep supporting."
+        "Reports start a day after first launch and count installations. Display dimensions are rounded to 100 points and memory is grouped into broad ranges. Reports contain no names, account details, hardware identifiers, project paths or prompts. Feedback uses the same token, so an email you include with feedback can identify that installation."
 }
