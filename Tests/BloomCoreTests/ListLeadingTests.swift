@@ -4,6 +4,38 @@ import Foundation
 
 @Suite("The gap a markdown list puts between its items")
 struct ListLeadingTests {
+    @Test("prose list items have breathing room at the current defaults")
+    func proseDefault() {
+        let tight = ListLeading.betweenProseItems(
+            tight: true, lineHeight: 18, pointSize: 15, ratio: ChatLineHeight.defaultChoice.ratio
+        )
+        let loose = ListLeading.betweenProseItems(
+            tight: false, lineHeight: 18, pointSize: 15, ratio: ChatLineHeight.defaultChoice.ratio
+        )
+        #expect(tight == 8)
+        #expect(loose == 13)
+    }
+
+    @Test("prose gaps follow every size and line-height preference without tightening wrapped lines")
+    func prosePreferences() {
+        for step in Self.bodySteps {
+            for tight in [true, false] {
+                var previous = 0.0
+                for choice in ChatLineHeight.allCases {
+                    let leading = TextLeading.overPointSize(
+                        lineHeight: step.box, pointSize: step.size, ratio: choice.ratio
+                    )
+                    let gap = ListLeading.betweenProseItems(
+                        tight: tight, lineHeight: step.box, pointSize: step.size, ratio: choice.ratio
+                    )
+                    #expect(gap > leading)
+                    #expect(gap >= previous)
+                    previous = gap
+                }
+            }
+        }
+    }
+
     /// The five steps of `ChatTextSize` resolved against the body rung on macOS 26: the point size
     /// San Francisco comes out at, and the line box `NSLayoutManager` lays it out in. The same
     /// table `ChatLineHeightTests` and `TextLeadingTests` measured, and measured rather than

@@ -28,6 +28,19 @@ import Foundation
 /// because a reader asks for it by name; at that step the lines inside an item are a point apart
 /// as well, and a list as dense as the prose around it is exactly what was asked for.
 public enum ListLeading {
+    /// Paragraph-like bullets and numbered items keep prose leading, plus a small separation
+    /// between ideas. Add rather than clamp so every line-height preference still reaches the
+    /// gap. Checklists retain `betweenItems` and their compact rhythm.
+    public static func betweenProseItems(
+        tight: Bool, lineHeight: Double, pointSize: Double, ratio: Double
+    ) -> Double {
+        let leading = TextLeading.overPointSize(
+            lineHeight: lineHeight, pointSize: pointSize, ratio: ratio
+        )
+        let separation = (pointSize * 0.2).rounded()
+        return leading * (tight ? 1 : 2) + separation
+    }
+
     /// - Parameters:
     ///   - tight: markdown's own flag for a list whose items are not separated by blank lines. A
     ///     task list carries no such flag and is always tight, the way it is written.

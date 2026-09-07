@@ -181,6 +181,11 @@ private struct MarkdownBlockView: View {
     @Environment(\.markdownLineSpacingOverride) private var lineSpacingOverride
 
     private var markerWidth: CGFloat { MarkdownMetrics.markerWidth * fontScale }
+    private var proseListLineSpacing: CGFloat {
+        TranscriptLayout.proseLeading(
+            Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight
+        )
+    }
     private var listLineSpacing: CGFloat {
         TranscriptLayout.proseLeading(
             Typo.body,
@@ -190,11 +195,11 @@ private struct MarkdownBlockView: View {
         )
     }
 
-    /// The same rhythm `listLineSpacing` sets an item's own lines in, applied between the items.
-    /// See `ListLeading`, which holds why the two are one number.
-    private func listItemGap(tight: Bool) -> CGFloat {
+    /// Prose lists separate ideas; checklists keep their tighter scanning rhythm.
+    private func listItemGap(tight: Bool, prose: Bool = false) -> CGFloat {
         TranscriptLayout.listItemGap(
-            Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight, tight: tight
+            Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight,
+            tight: tight, prose: prose
         )
     }
 
@@ -257,7 +262,9 @@ private struct MarkdownBlockView: View {
     /// for the second or two its sentence is being written, and it becomes pressable the moment
     /// the turn settles, which nobody will ever notice.
     @ViewBuilder
-    private func inlineText(_ inline: [MarkdownInline], rung: ScaledFont, color: Color) -> some View {
+    private func inlineText(
+        _ inline: [MarkdownInline], rung: ScaledFont, color: Color, spacing: CGFloat? = nil
+    ) -> some View {
         let font = rung.resolved(scale: fontScale, face: chatFont)
         if !isStreaming, InlineNSAttributes.hasLink(inline) {
             TranscriptTextView(
@@ -271,7 +278,7 @@ private struct MarkdownBlockView: View {
                     // number through the environment; asking for a heading's own here would set
                     // a heading with a link in it differently from the heading beside it and
                     // change what the row measures at.
-                    lineSpacing: lineSpacingOverride ?? TranscriptLayout.proseLeading(
+                    lineSpacing: spacing ?? lineSpacingOverride ?? TranscriptLayout.proseLeading(
                         Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight
                     )
                 ),
@@ -304,15 +311,15 @@ private struct MarkdownBlockView: View {
     }
 
     private func list(items: [[MarkdownBlock]], start: Int?, tight: Bool) -> some View {
-        VStack(alignment: .leading, spacing: listItemGap(tight: tight)) {
+        VStack(alignment: .leading, spacing: listItemGap(tight: tight, prose: true)) {
             ForEach(items.indices, id: \.self) { offset in
                 // Baseline, not top: this is the alignment the task list beside it already used,
                 // and top alignment sat the marker a fraction above the line it marks.
                 HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
                     marker(start.map { "\($0 + offset)." } ?? "\u{2022}")
                     MarkdownBlocksView(blocks: items[offset], foreground: foreground)
-                        .lineSpacing(listLineSpacing)
-                        .environment(\.markdownLineSpacingOverride, listLineSpacing)
+                        .lineSpacing(proseListLineSpacing)
+                        .environment(\.markdownLineSpacingOverride, proseListLineSpacing)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
@@ -331,7 +338,9 @@ private struct MarkdownBlockView: View {
                         .foregroundStyle(item.checked ? Palette.positive : Palette.textTertiary)
                         .frame(width: markerWidth, alignment: .trailing)
                         .accessibilityLabel(item.checked ? "Done" : "Not done")
-                    inlineText(item.inline, rung: Typo.body, color: foreground)
+                    // The AppKit link renderer reads spacing here, before a modifier below can
+                    // override the environment. Nested checklists must not inherit prose leading.
+                    inlineText(item.inline, rung: Typo.body, color: foreground, spacing: listLineSpacing)
                         .lineSpacing(listLineSpacing)
                         .environment(\.markdownLineSpacingOverride, listLineSpacing)
                 }
