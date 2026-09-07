@@ -81,7 +81,7 @@ import BloomCore
 ///
 /// **The driver is the stored height rather than a synthetic hand**, for `ResizeProbe`'s reason: a
 /// mouse driver needs this app in front and takes the owner's keyboard. `ComposerView` reads
-/// `composer.editorHeight` out of the defaults domain through `@AppStorage`, so stepping it once
+/// `composer.floatingEditorHeight` out of the defaults domain through `@AppStorage`, so stepping it once
 /// per vsync moves the editor exactly as the end of a real drag does, one step at a time, and
 /// reproduces the thing the last diagnosis turned on: the editor's height moves a pass before the
 /// composer holding it is laid out, so `ComposerView.chromeHeight` is measured from a total a
@@ -116,7 +116,7 @@ enum ComposerProbe {
 
     /// The key `ComposerView.manualHeight` is stored under. Spelled here rather than reached for,
     /// because a probe driving a key the view had stopped reading would report a clean run.
-    private static let heightKey = "composer.editorHeight"
+    private static let heightKey = "composer.floatingEditorHeight"
 
     // MARK: - Arguments
 

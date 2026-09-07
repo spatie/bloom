@@ -1,12 +1,8 @@
 import SwiftUI
 import AppKit
 
-/// The divider between the transcript and the composer, and the only way to set the composer's
-/// height by hand.
-///
-/// A hairline inside a grab strip rather than a bare hairline: one pixel is not a target. The strip
-/// is exactly the gap the composer already left above its box, so the divider costs the layout
-/// nothing and only adds the line that makes it findable.
+/// A grip on the floating composer's top edge. It keeps the same drag, double-click reset,
+/// and accessibility actions without drawing a divider across the conversation.
 struct ComposerResizeHandle: View {
     /// How far the pointer has moved since this drag began, in points, positive downwards. What
     /// that means for the height is the composer's business, not this view's.
@@ -29,8 +25,15 @@ struct ComposerResizeHandle: View {
 
     var body: some View {
         Color.clear
+            .frame(width: 48)
             .frame(height: Self.height)
-            .overlay(alignment: .top) { Hairline() }
+            .overlay {
+                Capsule()
+                    .fill(Palette.textTertiary)
+                    .frame(width: 22, height: 3)
+                    .opacity(isHovered || isDragging ? 0.65 : 0.25)
+                    .allowsHitTesting(false)
+            }
             .contentShape(.rect)
             .gesture(drag)
             .onTapGesture(count: 2, perform: onReset)
@@ -45,6 +48,7 @@ struct ComposerResizeHandle: View {
             }
             .accessibilityElement()
             .accessibilityLabel("Composer height")
+            .accessibilityHint("Drag to resize. Double-click to fit the text.")
             .accessibilityAdjustableAction { direction in
                 // Increment means a taller composer, and taller means dragging the top edge up,
                 // which is negative in view coordinates. One nudge is one whole gesture, so the

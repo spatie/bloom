@@ -55,7 +55,7 @@ struct ComposerPrompt<Footer: View>: View {
     /// Opens a slash command's backing file. Conversations use a Bloom file tab; prompts shown
     /// before a workspace exists retain the chip's external-editor fallback.
     var onOpenCommand: (@MainActor (String) -> Void)?
-    var fillsPanel = false
+    var isFloating = false
     /// The footer, handed what it can ask this view to write into the draft. Passed in rather than
     /// reached for, because everything an attachment and a quick prompt do lives here and the
     /// footer is only the buttons. See `ComposerPromptActions`.
@@ -166,7 +166,7 @@ struct ComposerPrompt<Footer: View>: View {
         .composerBox(
             isFocused: $isFocused,
             isDropTarget: isDropTarget,
-            fillsPanel: fillsPanel
+            isFloating: isFloating
         )
         // Publish this from the shared prompt rather than individual screens. This keeps prose
         // editing shortcuts, including Command-Backspace, inside every prompt editor.

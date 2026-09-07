@@ -238,12 +238,14 @@ private struct StripRow: View {
         // each tab its ideal width rather than a share of the row, so a strip drawn any other way
         // shows every tab at the 200 point cap and says nothing about how wide these titles are.
         TabStrip(pane: .content) {
+            Color.clear.frame(width: Metrics.spacingWide)
+        } tabs: {
             HStack(spacing: 0) {
                 ForEach(Array(tabs.enumerated()), id: \.offset) { index, tab in
                     if index > 0 {
                         TabStripSeparator(isHidden: tab.isActive || tabs[index - 1].isActive)
                     }
-                    item(tab, isFirst: index == 0)
+                    item(tab)
                 }
             }
         } append: {
@@ -258,12 +260,11 @@ private struct StripRow: View {
         .background(Palette.surface)
     }
 
-    private func item(_ fixture: Fixture, isFirst: Bool) -> some View {
+    private func item(_ fixture: Fixture) -> some View {
         TabItemView(
             title: fixture.title,
             icon: fixture.icon,
             isActive: fixture.isActive,
-            isAtPaneEdge: isFirst,
             surface: TabPane.content.surface,
             isRenaming: false,
             editableTitle: fixture.title,

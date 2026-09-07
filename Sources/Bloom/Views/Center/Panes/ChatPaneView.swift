@@ -63,49 +63,26 @@ struct ChatPaneView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            TranscriptView(
-                transcript: transcript,
-                isRunningSetup: model.isRunningSetup,
-                memory: TranscriptPaneMemory(model: model, pane: pane)
-            ) { isTranscriptScrolledUp = $0 }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // The wait, over the transcript alone: see `waiting` above. It is the same overlay
-            // `TranscriptListView` hangs its empty placeholder off, on the same frame, so the two
-            // things a pane says about having no rows are said in the same place.
-            //
-            // Nothing to hit, because the composer below is not covered and the transcript under
-            // it still takes clicks.
-            .overlay {
-                SlowLoadingView(subject: waiting, label: waiting?.label)
-                    .allowsHitTesting(false)
-            }
-            // On the transcript, not on the composer, and that is the whole of the change.
-            //
-            // The pill is a claim about the transcript ("there is more of this below, come and
-            // see"), so it belongs inside the surface it is talking about. Hung off the top of the
-            // composer it straddled the rule between the two and sat half over the editor, which
-            // read as a control that had something to do with what you were typing.
-            //
-            // It cannot cover the thing it is offering to take you to. It is only ever drawn while
-            // the reader is away from the live end, and the newest row, the echo of a message on
-            // its way out and any queued bubble are all below the viewport in exactly that state.
-            // A short conversation is at its end by definition, so nothing is drawn over it at all.
-            //
-            // A gutter of clearance rather than centred on the boundary, so there is daylight
-            // between the pill and `ComposerResizeHandle`'s hairline underneath it.
-            .overlay(alignment: .bottom) {
-                if isTranscriptScrolledUp {
-                    JumpToNewestPill(action: transcript.jumpToLiveEnd)
-                        .padding(.bottom, Metrics.gutter)
-                }
-            }
-
-            ComposerView(transcript: transcript, model: model, room: room)
+        TranscriptView(
+            transcript: transcript,
+            isRunningSetup: model.isRunningSetup,
+            memory: TranscriptPaneMemory(model: model, pane: pane)
+        ) { isTranscriptScrolledUp = $0 }
+        .environment(\.composerRoom, room)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay {
+            SlowLoadingView(subject: waiting, label: waiting?.label)
+                .padding(.bottom, room.clearance)
+                .allowsHitTesting(false)
         }
-        // Rounded inside the probe rather than after it, because `onGeometryChange` only calls
-        // the action when the value it is given has changed. Rounding here is what stops the
-        // action running at all for the frames that do not cross a step.
+        .overlay(alignment: .bottom) {
+            ComposerDock(
+                showsJumpToNewest: isTranscriptScrolledUp,
+                onJumpToNewest: transcript.jumpToLiveEnd
+            ) {
+                ComposerView(transcript: transcript, model: model, room: room)
+            }
+        }
         .onGeometryChange(for: CGFloat.self) { PaneMeasure.room($0.size.height) } action: {
             room.height = $0
         }

@@ -6,7 +6,7 @@ import BloomCore
 ///
 /// The surface itself is `ComposerPrompt`, which the create window uses too. What is left here is
 /// everything that is true of a conversation and of nothing else: the draft belongs to a
-/// transcript and is saved back to it, the divider above the box, the footer's values coming off
+/// transcript and is saved back to it, the resize grip, the footer's values coming off
 /// a `Session` row, and the first-open defaults.
 struct ComposerView: View {
     @Bindable var transcript: TranscriptModel
@@ -32,10 +32,9 @@ struct ComposerView: View {
     /// that the conversation is still readable, rather than a strip above a wall of prompt.
     private static let minTranscriptHeight: CGFloat = 120
 
-    /// The height the user dragged the editor to, or zero for automatic. App-wide rather than per
-    /// session on purpose: it is a preference about how you like to write, not a property of one
-    /// conversation, and a box that changed height as you switched tabs would read as a bug.
-    @AppStorage("composer.editorHeight") private var manualHeight = 0.0
+    /// The floating composer starts compact even if the former full-width panel was left tall.
+    /// Its own preference retains manual sizing across conversations without changing the old one.
+    @AppStorage("composer.floatingEditorHeight") private var manualHeight = 0.0
 
     /// What the wrapped text occupies, already clamped by `ComposerTextEditor` to its line window.
     @State private var contentHeight = ComposerTextEditor.lineHeight
@@ -78,8 +77,6 @@ struct ComposerView: View {
                 .foregroundStyle(Palette.textTertiary)
                 .padding(.horizontal, Metrics.gutter)
                 .frame(maxWidth: .infinity, minHeight: Metrics.rowHeight, alignment: .leading)
-                .background(Palette.surfaceSunken)
-                .overlay(alignment: .bottom) { Hairline() }
             }
 
             composer
@@ -91,7 +88,6 @@ struct ComposerView: View {
                     )
                 }
         }
-        .background(Palette.surface)
         // The chrome is whatever is left once the editor's share is taken off, so this settles on
         // the first pass and only moves again when the footer's controls change size.
         //
@@ -110,7 +106,11 @@ struct ComposerView: View {
             // `PaneMeasure.chrome(_:knowing:)`.
             let chrome = PaneMeasure.chrome(total - editorHeight, knowing: chromeHeight)
             if chrome != chromeHeight { chromeHeight = chrome }
+            let clearance = ceil(total) + ComposerLayout.bottomInset + ComposerLayout.textClearance
+            if room.clearance != clearance { room.clearance = clearance }
         }
+        .padding(.horizontal, ComposerLayout.horizontalInset)
+        .padding(.bottom, ComposerLayout.bottomInset)
     }
 
     private var composer: some View {
@@ -132,7 +132,7 @@ struct ComposerView: View {
             onKey: handle(key:),
             onOpenAttachment: open(attachment:),
             onOpenCommand: open(commandPath:),
-            fillsPanel: true
+            isFloating: true
         ) { actions in
             ComposerFooterView(
                 controls: controls,
@@ -173,7 +173,11 @@ struct ComposerView: View {
     private var editorHeight: CGFloat {
         let stored = manualHeight > 0 ? CGFloat(manualHeight) : contentHeight
         let wanted = liveHeight ?? stored
-        return min(max(wanted, ComposerTextEditor.lineHeight), maxEditorHeight)
+        return min(max(wanted, minimumEditorHeight), maxEditorHeight)
+    }
+
+    private var minimumEditorHeight: CGFloat {
+        max(ComposerLayout.minimumEditorHeight, ComposerTextEditor.lineHeight)
     }
 
     /// The tallest the editor may be drawn without leaving the transcript nowhere to go. Applied on
@@ -182,9 +186,9 @@ struct ComposerView: View {
     private var maxEditorHeight: CGFloat {
         PaneMeasure.editorCap(
             room: room.height,
-            chrome: chromeHeight,
+            chrome: chromeHeight + ComposerLayout.bottomInset + ComposerLayout.textClearance,
             floor: Self.minTranscriptHeight,
-            atLeast: ComposerTextEditor.lineHeight
+            atLeast: minimumEditorHeight
         )
     }
 
@@ -195,7 +199,7 @@ struct ComposerView: View {
         // Down is positive in view coordinates, and dragging the top edge up is what makes the box
         // taller, so the translation is subtracted rather than added.
         let wanted = origin - translation
-        liveHeight = min(max(wanted, ComposerTextEditor.lineHeight), maxEditorHeight)
+        liveHeight = min(max(wanted, minimumEditorHeight), maxEditorHeight)
     }
 
     private func endResize() {

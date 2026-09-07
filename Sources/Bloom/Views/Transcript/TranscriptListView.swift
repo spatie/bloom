@@ -26,6 +26,8 @@ import SwiftUI
 /// coordinator re-asserts it. Every place this file used to say `scrollTo(edge: .bottom)` says
 /// that instead.
 struct TranscriptListView: View {
+    @Environment(\.composerRoom) private var composerRoom
+
     let transcript: TranscriptModel
     /// Only to explain an empty transcript: a workspace whose setup script is still running has a
     /// session but cannot have said anything yet.
@@ -812,7 +814,7 @@ struct TranscriptListView: View {
                 }
             ))
         }
-        out.append(.bottomSpacing)
+        out.append(.bottomSpacing(clearance: composerRoom?.clearance ?? 0))
         // One increment and one add for the whole pass. See `TranscriptHoldCensus.entryPasses`:
         // this is the count that says whether a scroll is paying for the window rather than for
         // the screen.
@@ -934,6 +936,7 @@ struct TranscriptListView: View {
         .overlay {
             if showsPlaceholder {
                 TranscriptPlaceholderView(isRunningSetup: isRunningSetup, emptyState: emptyState)
+                    .padding(.bottom, composerRoom?.clearance ?? 0)
             }
         }
         // The case the whole of `TranscriptResume` is about: a tab switch destroys this view, and

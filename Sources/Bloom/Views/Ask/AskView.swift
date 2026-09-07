@@ -82,45 +82,29 @@ struct AskView: View {
     }
 
     private func conversation(_ transcript: TranscriptModel) -> some View {
-        VStack(spacing: 0) {
-            // The transcript draws the empty state itself, given these words. It used to be a
-            // second `EmptyStateView` laid over the top in a `ZStack`, which left both headings
-            // and both paragraphs on screen at once, printed over each other.
-            TranscriptView(transcript: transcript, emptyState: Self.opening) {
-                isTranscriptScrolledUp = $0
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .overlay(alignment: .bottom) {
-                if isTranscriptScrolledUp {
-                    JumpToNewestPill(action: transcript.jumpToLiveEnd)
-                        .padding(.bottom, Metrics.gutter)
-                }
-            }
-
-            // No workspace model, which the composer already allows for: its `model` is optional
-            // so that it can be dropped anywhere a transcript exists. What it loses here is the
-            // review comments and the worktree an attachment is resolved against, neither of which
-            // this chat has.
-            ComposerView(
-                transcript: transcript,
-                model: nil,
-                room: room,
-                placeholder: AskConversation.placeholder
-            )
+        TranscriptView(transcript: transcript, emptyState: Self.opening) {
+            isTranscriptScrolledUp = $0
         }
-        // The height the two share, which is what caps how far the divider between them can be
-        // dragged. Rounded inside the probe for the reason `ChatPaneView` gives: raw, it changed on
-        // every pixel of a window drag.
+        .environment(\.composerRoom, room)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .bottom) {
+            ComposerDock(
+                showsJumpToNewest: isTranscriptScrolledUp,
+                onJumpToNewest: transcript.jumpToLiveEnd
+            ) {
+                ComposerView(
+                    transcript: transcript,
+                    model: nil,
+                    room: room,
+                    placeholder: AskConversation.placeholder
+                )
+            }
+        }
         .onGeometryChange(for: CGFloat.self) { PaneMeasure.room($0.size.height) } action: {
             room.height = $0
         }
     }
 
-    /// What the owner sees the first time they open it, and after starting a fresh one.
-    ///
-    /// It says what this chat can do and what it cannot, in that order, because the second is the
-    /// surprising half: it looks exactly like every other conversation in Bloom and it cannot
-    /// change a file.
     private static let opening = TranscriptEmptyState(
         glyph: PaneGlyph.chat,
         title: AskConversation.emptyHeading,

@@ -96,9 +96,9 @@ struct SessionTabsView: View {
         //
         // `entries` is not a stored list: it maps the sessions, reads the tool tab list, works out
         // what the tabs have absorbed and lays the user's own order over the result. It used to be
-        // asked for again by the separator between every pair of tabs (twice each), by the pane
-        // edge test on every tab, by the scroll target, by the rule before the `+`, by every split
-        // menu, and once more inside the store on the way to the selection. That is about six full
+        // asked for again by the separator between every pair of tabs (twice each), by the scroll
+        // target, by the rule before the `+`, by every split menu, and once more inside the store
+        // on the way to the selection. That is about six full
         // derivations per tab per pass for a list that cannot change while the pass is running.
         //
         // This is `SidebarRepoGroup`'s bug and `SidebarRepoGroup`'s fix: derive it once, pass it
@@ -114,15 +114,12 @@ struct SessionTabsView: View {
         // is the moment after a tab is closed: aiming a scroll at an id that is no longer laid out
         // does nothing, and this says so rather than relying on that.
         let selectedID = selected.flatMap { entries.contains($0) ? AnyHashable($0.id) : nil }
-        // Whichever tab the pane's leading edge runs through. This strip begins at that edge: it
-        // has no leading control, so its first tab starts where the centre column starts, drops
-        // the line and the corner down that side and lets the pane's own rule be its edge. Read
-        // off the whole order rather than off either kind's run, because a workspace whose
-        // conversations have all been closed opens with a terminal or a browser first. See
-        // `TabItemView.isAtPaneEdge`.
-        let leadingID = entries.first?.id
-
         return TabStrip(pane: Self.pane, selection: selectedID) {
+            // Keep the first tab clear of the sidebar rule so it has the same rounded leading
+            // corner as every other tab. Outside the scroller, the gutter stays visible when
+            // tabs overflow and leaves the row's drag coordinates unchanged.
+            Color.clear.frame(width: Metrics.spacingWide)
+        } tabs: {
             HStack(spacing: 0) {
                 // One run over one list. A conversation and a terminal are two kinds of thing kept
                 // in two stores, which is why they used to be drawn by two `ForEach`es in that
@@ -139,16 +136,12 @@ struct SessionTabsView: View {
                     switch entry {
                     case .chat(let id):
                         if let session = session(id) {
-                            sessionTab(
-                                session,
-                                selected: selected,
-                                isAtPaneEdge: leadingID == id.rawValue
-                            )
-                            .id(id)
+                            sessionTab(session, selected: selected)
+                                .id(id)
                         }
                     case .tool(let id):
                         if let tab = tool(id) {
-                            toolTab(tab, selected: selected, isAtPaneEdge: leadingID == id)
+                            toolTab(tab, selected: selected)
                                 .id(id)
                         }
                     }
@@ -245,7 +238,7 @@ struct SessionTabsView: View {
     // MARK: - Tabs
 
     private func sessionTab(
-        _ session: Session, selected: PaneContent?, isAtPaneEdge: Bool
+        _ session: Session, selected: PaneContent?
     ) -> some View {
         SessionTabView(
             session: session,
@@ -254,7 +247,7 @@ struct SessionTabsView: View {
             ),
             isActive: selected == .chat(session.id),
             isRunning: model.isRunning(session),
-            isAtPaneEdge: isAtPaneEdge,
+            isAtPaneEdge: false,
             isRenaming: renamingID == session.id.rawValue,
             // Always. The workspace's last conversation IS closable, and hiding the cross was the
             // only thing pretending otherwise: "Close Session" in the File menu holds Cmd+W and has
@@ -281,13 +274,12 @@ struct SessionTabsView: View {
     }
 
     private func toolTab(
-        _ tab: CenterTab, selected: PaneContent?, isAtPaneEdge: Bool
+        _ tab: CenterTab, selected: PaneContent?
     ) -> some View {
         TabItemView(
             title: tabs.displayTitle(of: tab, in: model),
             icon: icon(for: tab),
             isActive: selected == .tool(tab.id),
-            isAtPaneEdge: isAtPaneEdge,
             surface: Self.pane.surface,
             isRenaming: renamingID == tab.id,
             // What is on the tab, not what the tab is filed under. A browser showing "Spatie"

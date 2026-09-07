@@ -152,7 +152,7 @@ enum ScrollProbe {
     /// **The owner's own reproduction, without his hand on the divider.**
     ///
     /// "When I resize the editor to be higher, the chat content will get empty lines as well." The
-    /// composer's height is `@AppStorage("composer.editorHeight")`, so the gesture is a write to
+    /// composer's height is `@AppStorage("composer.floatingEditorHeight")`, so the gesture is a write to
     /// that key: the box grows, the transcript above it gets shorter, and nothing about its width
     /// moves. Nothing is scrolled here on purpose, because a sweep would draw every row it passed
     /// and correct exactly what this is trying to catch.
@@ -162,7 +162,7 @@ enum ScrollProbe {
     private static func growComposer(to points: Double, scroll: NSScrollView) async {
         nudge(scroll)
         try? await Task.sleep(for: .seconds(1))
-        UserDefaults.standard.set(points, forKey: "composer.editorHeight")
+        UserDefaults.standard.set(points, forKey: "composer.floatingEditorHeight")
         try? await Task.sleep(for: .seconds(3))
         nudge(scroll)
         try? await Task.sleep(for: .seconds(1))

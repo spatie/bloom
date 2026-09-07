@@ -28,4 +28,8 @@ final class ComposerRoom {
     /// The height the transcript and the composer share, already quantised by `PaneMeasure.room`.
     /// Nought until the pane has been laid out, which `ComposerView` reads as "no cap yet".
     var height: CGFloat = 0
+
+    /// The floating composer and its bottom margin. Changing a draft without changing its
+    /// height does not invalidate the transcript's final spacing entry.
+    var clearance: CGFloat = 0
 }
