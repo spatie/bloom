@@ -114,13 +114,11 @@ struct UserTurnRowView: View {
             CappedWidth(width: maxWidth) {
                 bubble.padding(Self.padding)
             }
-            .background(Palette.accentFill, in: RoundedRectangle(cornerRadius: Self.corner))
+            .padding(.trailing, OutgoingBubbleShape.tailWidth)
+            .padding(.bottom, OutgoingBubbleShape.tailDrop)
+            .background(Palette.accentFill, in: OutgoingBubbleShape(cornerRadius: Self.corner))
             // No stroke around the fill. A border on a filled shape is a control's outline,
             // and the fill already separates the turn from the ground in both appearances.
-            //
-            // No tail either. The little pointer is iMessage's signature rather than a
-            // property of speech bubbles, and reproducing it would read as an imitation of
-            // another app instead of as this one's own decision.
             //
             // Everything inside is told it is sitting on the accent fill, which is the same
             // signal a selected sidebar row sends. `Chip`, `DiffStatLabel`, `RepoIcon` and now
