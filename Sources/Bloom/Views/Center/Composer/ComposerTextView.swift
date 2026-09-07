@@ -40,6 +40,13 @@ final class ComposerTextView: NSTextView, HoverQuickLookSource {
     fileprivate var hoveredChip: HoveredChip?
     fileprivate var hoverTask: Task<Void, Never>?
     fileprivate var hoverArea: NSTrackingArea?
+    private var chipHoverFractions: [HoveredChip: CGFloat] = [:]
+    private var chipHoverAnimation: Task<Void, Never>?
+
+    override func didChangeText() {
+        resetChipHover()
+        super.didChangeText()
+    }
 
     override func keyDown(with event: NSEvent) {
         if keyHandler?(event, selectedRange()) == true { return }
@@ -61,6 +68,7 @@ final class ComposerTextView: NSTextView, HoverQuickLookSource {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         HoverQuickLookController.shared.update(self)
+        if window == nil { resetChipHover() }
         if window != nil { onWindowChange?() }
     }
 
@@ -329,14 +337,9 @@ extension ComposerTextView {
 
     private func hover(over chip: HoveredChip?) {
         guard chip != hoveredChip else { return }
-        let was = hoveredChip
         hoveredChip = chip
         hoverTask?.cancel()
-
-        // The close control lives in the chip's own icon slot, so crossing into or out of one is
-        // a redraw. The whole box rather than the two glyph rects: it is twelve lines at most, and
-        // this runs when the pointer crosses a chip's edge rather than while it moves along one.
-        if was?.index != chip?.index { needsDisplay = true }
+        animateChipHover()
 
         guard let chip else {
             hoverAttachment?(nil)
@@ -348,12 +351,71 @@ extension ComposerTextView {
             self.hoverAttachment?(chip.path)
         }
     }
+
+    private func resetChipHover() {
+        hoverTask?.cancel()
+        chipHoverAnimation?.cancel()
+        chipHoverAnimation = nil
+        chipHoverFractions.removeAll()
+        hoveredChip = nil
+        hoverAttachment?(nil)
+        needsDisplay = true
+    }
+
+    private func animateChipHover() {
+        chipHoverAnimation?.cancel()
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            chipHoverAnimation = nil
+            chipHoverFractions = hoveredChip.map { [$0: 1] } ?? [:]
+            needsDisplay = true
+            return
+        }
+
+        if let hoveredChip, chipHoverFractions[hoveredChip] == nil {
+            chipHoverFractions[hoveredChip] = 0
+        }
+        // Retarget from the currently drawn opacity, including chips still fading out.
+        let initial = chipHoverFractions
+        let target = hoveredChip
+        let clock = ContinuousClock()
+        let start = clock.now
+        chipHoverAnimation = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let elapsed = min(1, (clock.now - start) / .milliseconds(180))
+                let eased = CGFloat(1 - pow(1 - elapsed, 3))
+                for (chip, fraction) in initial {
+                    let destination: CGFloat = chip == target ? 1 : 0
+                    self.chipHoverFractions[chip] = fraction + (destination - fraction) * eased
+                    if chip.index < (self.textStorage?.length ?? 0) {
+                        self.layoutManager?.invalidateDisplay(
+                            forCharacterRange: NSRange(location: chip.index, length: 1)
+                        )
+                    }
+                }
+                if elapsed == 1 {
+                    self.chipHoverFractions = target.map { [$0: 1] } ?? [:]
+                    self.chipHoverAnimation = nil
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
+    }
+
+    func chipHoverFraction(at characterIndex: Int) -> CGFloat {
+        guard let storage = textStorage,
+              characterIndex >= 0, characterIndex < storage.length,
+              let path = ComposerChipText.subject(of: storage, at: characterIndex)?.path
+        else { return 0 }
+        return chipHoverFractions[HoveredChip(path: path, index: characterIndex)] ?? 0
+    }
 }
 
 /// A chip and where it is, which is what the pointer is on rather than just which file it names:
 /// the same screenshot can be in the sentence twice, and the close control belongs to the one
 /// under the pointer.
-struct HoveredChip: Equatable {
+struct HoveredChip: Hashable {
     var path: String
     /// The character the chip is, in the text view's own storage.
     var index: Int
