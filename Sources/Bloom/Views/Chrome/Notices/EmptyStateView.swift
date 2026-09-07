@@ -36,9 +36,10 @@ struct EmptyStateView: View {
         } actions: {
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
-                    .buttonStyle(.borderedProminent)
-                    // Explicit so every primary action reads from the shared semantic token.
-                    .tint(Palette.controlAccent)
+                    // Recovery and setup controls should not borrow the chat bubble's filled
+                    // treatment. AppKit supplies the compact bezel, focus and pressed states.
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
             }
         }
     }
