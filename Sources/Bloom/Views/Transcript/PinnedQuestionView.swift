@@ -59,15 +59,10 @@ struct PinnedQuestionView: View {
     var body: some View {
         Button(action: onOpen) {
             HStack(spacing: Metrics.spacingWide) {
-                Image(systemName: "arrow.up")
-                    .font(Typo.captionEmphasis)
-                    .foregroundStyle(Palette.accent)
-                    .accessibilityHidden(true)
-
-                Text("You")
-                    .font(Typo.captionEmphasis)
+                Image(systemName: "text.bubble")
+                    .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
-                    .fixedSize()
+                    .accessibilityHidden(true)
 
                 Text(question.summary)
                     .font(Typo.label)
@@ -76,6 +71,13 @@ struct PinnedQuestionView: View {
                     .truncationMode(.tail)
 
                 Spacer(minLength: 0)
+
+                Image(systemName: "chevron.up")
+                    .font(Typo.captionEmphasis)
+                    .foregroundStyle(Palette.textSecondary)
+                    .frame(width: 20, height: 20)
+                    .background(Palette.textSecondary.opacity(0.08), in: Circle())
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, Metrics.gutter)
             .frame(maxWidth: .infinity, minHeight: Metrics.barHeight, maxHeight: Metrics.barHeight)
@@ -84,6 +86,7 @@ struct PinnedQuestionView: View {
         .buttonStyle(.plain)
         .frame(maxWidth: TranscriptLayout.conversationMeasure)
         .glassEffect(.regular.interactive(), in: Capsule())
+        .pointerStyle(.link)
         .help("Show the full question")
         .accessibilityLabel("Show question: \(question.summary)")
         .padding(.horizontal, ComposerLayout.horizontalInset)
