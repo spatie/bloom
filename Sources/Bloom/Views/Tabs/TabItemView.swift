@@ -115,6 +115,7 @@ struct TabItemView: View {
         HStack(spacing: Metrics.spacingSmall) {
             if isRunning {
                 ActivityDot(isActive: true)
+                    .padding(.trailing, Metrics.spacingSmall)
                     .accessibilityLabel("Running")
             }
 
