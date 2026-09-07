@@ -75,6 +75,12 @@ public enum SlashCommandIndex {
     /// and that a Bloom session can actually carry out. Adding to it is a decision, not a sweep.
     public static let builtIns: [SlashCommand] = [
         SlashCommand(
+            name: "clear",
+            detail: "Start a fresh chat here, keeping the previous conversation",
+            kind: .command,
+            scope: .builtIn
+        ),
+        SlashCommand(
             name: "code-review",
             detail: "Review the current diff, or a pull request, branch or path",
             kind: .command,

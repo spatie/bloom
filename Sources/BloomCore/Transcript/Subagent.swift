@@ -121,6 +121,8 @@ public struct SubagentStart: Sendable, Hashable {
     /// The whole prompt the subagent was given. Not drawn in the row, which has 260 points, but
     /// it is the first thing the output pane shows and it is the only account of what was asked.
     public let prompt: String
+    /// A confirmed new turn on an existing Codex child thread, not a replayed spawn event.
+    public let resumesExisting: Bool
 
     public init(
         id: SubagentID,
@@ -130,7 +132,8 @@ public struct SubagentStart: Sendable, Hashable {
         isBackgrounded: Bool = false,
         spawnDepth: Int = 1,
         taskType: String = "",
-        prompt: String = ""
+        prompt: String = "",
+        resumesExisting: Bool = false
     ) {
         self.id = id
         self.toolUseID = toolUseID
@@ -140,6 +143,7 @@ public struct SubagentStart: Sendable, Hashable {
         self.spawnDepth = spawnDepth
         self.taskType = taskType
         self.prompt = prompt
+        self.resumesExisting = resumesExisting
     }
 }
 

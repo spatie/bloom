@@ -33,6 +33,8 @@ public struct MakerProduct: Equatable, Sendable {
 public enum AppSite {
     public static let host = "runbloom.app"
     public static let url = URL(string: "https://runbloom.app")!
+    /// The public documentation was retired. Help opens the maintained support page instead.
+    public static let helpURL = url.appendingPathComponent("support")
 }
 
 /// Who made this app, and what else they make. The About window renders this; it decides none of it.

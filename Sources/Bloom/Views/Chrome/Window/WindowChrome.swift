@@ -1,10 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Keeps the unified title bar on its native material and adds the workspace's own strip.
-/// The sidebar also uses its system background, so navigation chrome follows appearance,
-/// inactive-window state and accessibility preferences together. Reading surfaces stay opaque;
-/// no material layers are added to scrolling content.
+/// Matches the unified title bar to the inactive tabs and adds the workspace's own strip.
+/// Reading surfaces stay opaque; no material layers are added to scrolling content.
 ///
 /// The trailing end of the same strip is `TitleBarStrip`, added as a title bar accessory. See
 /// that file for why an accessory rather than content drawn under a transparent title bar.
@@ -26,8 +24,8 @@ struct WindowChrome: ViewModifier {
 
     private func apply() {
         guard let window else { return }
-        window.titlebarAppearsTransparent = false
-        window.backgroundColor = .windowBackgroundColor
+        window.titlebarAppearsTransparent = true
+        window.backgroundColor = Palette.sidebarNSColor
         // AppKit's own title text, off. `WindowTitleControl` draws it as a toolbar item instead,
         // so that a double click on the NAME can start a rename without taking the double click on
         // the BAR that Desktop & Dock has already spent on Zoom or Minimise.

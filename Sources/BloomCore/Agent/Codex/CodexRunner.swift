@@ -41,12 +41,12 @@ public actor CodexRunner: SessionRunner {
     /// backend, and `ModelIdentifier`'s head is the bug both were added for.
     private var wireModel: String { ModelIdentifier.resolve(session.model).model }
 
-    /// The items seen this turn, by id.
+    /// Items seen in each thread, keyed by thread and then item id.
     ///
     /// An approval request carries only an item id: the diff or the command is on the
     /// `item/started` that arrived a moment before it. Without this the question would have to be
     /// asked with nothing on it.
-    private var items: [String: CodexItem] = [:]
+    private var items: [String: [String: CodexItem]] = [:]
 
     /// Which server request each pending ask answers. Kept apart from the ask itself because the
     /// id is the server's own numbering and means nothing outside this connection, while the ask
@@ -257,8 +257,11 @@ public actor CodexRunner: SessionRunner {
     /// Answer one question, as a person. The turn resumes on the other side of this line.
     public func answer(requestID: String, decision: PermissionDecision) async {
         guard let ask = pending.take(requestID) else { return }
-        await write(answerTo: ask, decision: CodexPermission.decision(for: decision))
-        await deliverReason(of: decision)
+        let request = approvals[requestID]
+        let answerInput: JSONValue?
+        if case .answer(let input) = decision { answerInput = input } else { answerInput = nil }
+        await write(answerTo: ask, decision: CodexPermission.decision(for: decision), answerInput: answerInput)
+        await deliverReason(of: decision, request: request)
         await close(ask, as: decision.storedName, note: "")
 
         // Bloom's own bookkeeping, and it happens after the agent has been unblocked, so a
@@ -466,8 +469,52 @@ public actor CodexRunner: SessionRunner {
 
     // MARK: - Events
 
+    private var subagents = CodexSubagents()
+
+    public func subagentTranscript(for id: SubagentID) async -> SubagentTranscript? {
+        guard let child = subagents.threadID(for: id), let client,
+              let result = try? await client.send("thread/read", params: .object([
+                  "threadId": .string(child), "includeTurns": .bool(true),
+              ]), timeout: .seconds(10)),
+              result["thread"]?["id"]?.stringValue == child else { return nil }
+        return CodexSubagentTranscript.read(result["thread"] ?? .null, sessionID: session.id)
+    }
+
     private func handle(_ event: CodexEvent) async {
+        if let threadID {
+            for signal in subagents.receive(event, parentThreadID: threadID) {
+                sink.yield(.subagent(signal))
+            }
+            if let source = event.threadID, source != threadID {
+                // Child approvals still need an answer, but their prose, usage and completion
+                // belong to the child pane, never to the parent's transcript or turn handle.
+                if subagents.contains(threadID: source) {
+                    remember(event)
+                    if case .approval(let request) = event { await ask(request) }
+                }
+                return
+            }
+            switch event {
+            case .itemStarted(let item), .itemCompleted(let item):
+                if case .subAgentActivity(let activity) = item.item,
+                   activity.agentThreadID == threadID { return }
+            default:
+                break
+            }
+        }
         remember(event)
+
+        if case .unknown(let method, let raw) = event, method == "serverRequest/resolved",
+           let json = try? JSONDecoder().decode(JSONValue.self, from: raw),
+           let id = CodexRequestID(json["params"]?["requestId"]),
+           let threadID = json["params"]?["threadId"]?.stringValue {
+            let requestID = CodexPermission.requestID(id, threadID: threadID)
+            if let ask = pending.take(requestID) {
+                await close(ask, as: PermissionAskOutcome.resolved, note: "")
+                if pending.isEmpty, session.apply(.unblocked).moves { await save(session) }
+            }
+            return
+        }
 
         // A connection that closed because Bloom closed it is not news, and it must not be drawn
         // as an outage. `.closed` translates to an `.error`, which the window puts up as "The
@@ -490,9 +537,9 @@ public actor CodexRunner: SessionRunner {
     private func remember(_ event: CodexEvent) {
         switch event {
         case .itemStarted(let started), .itemCompleted(let started):
-            items[started.item.id] = started.item
-        case .turnCompleted:
-            items.removeAll()
+            items[started.threadID, default: [:]][started.item.id] = started.item
+        case .turnCompleted(let turn):
+            items.removeValue(forKey: turn.threadID)
         default:
             break
         }
@@ -535,7 +582,7 @@ public actor CodexRunner: SessionRunner {
     // MARK: - Asking
 
     private func ask(_ request: CodexApprovalRequest) async {
-        let ask = CodexPermission.ask(for: request, item: items[request.itemID])
+        let ask = CodexPermission.ask(for: request, item: items[request.threadID]?[request.itemID])
         pending.add(ask)
         approvals[ask.requestID] = request
 
@@ -561,6 +608,7 @@ public actor CodexRunner: SessionRunner {
 
         guard matched == nil, pending.contains(ask.requestID) else { return }
 
+        guard request.kind != .toolUserInput || request.params["isBlocking"]?.boolValue != false else { return }
         session.apply(.blocked)
         await save(session)
     }
@@ -606,16 +654,24 @@ public actor CodexRunner: SessionRunner {
     /// Failure here is deliberately quiet. The refusal has already landed and the turn is already
     /// unblocked; a steer that misses because the turn moved on must not turn an answered question
     /// into an error.
-    private func deliverReason(of decision: PermissionDecision) async {
+    private func deliverReason(of decision: PermissionDecision, request: CodexApprovalRequest?) async {
         guard case .deny(let message, let endsTurn) = decision, !endsTurn else { return }
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let client, let threadID, let turnID = handle.turnID else { return }
-        _ = try? await client.steerTurn(threadID: threadID, turnID: turnID, input: [.text(text)])
+        guard !text.isEmpty, let client, let request, !request.turnID.isEmpty else { return }
+        _ = try? await client.steerTurn(
+            threadID: request.threadID, turnID: request.turnID, input: [.text(text)]
+        )
     }
 
-    private func write(answerTo ask: PermissionAsk, decision: CodexApprovalDecision) async {
+    private func write(
+        answerTo ask: PermissionAsk, decision: CodexApprovalDecision, answerInput: JSONValue? = nil
+    ) async {
         if let request = approvals.removeValue(forKey: ask.requestID) {
-            await client?.answer(request, decision: decision)
+            if request.kind == .toolUserInput, let answerInput {
+                await client?.answer(request.id, with: CodexQuestionnaire.result(input: answerInput, request: request))
+            } else {
+                await client?.answer(request, decision: decision)
+            }
         }
 
         guard pending.isEmpty else { return }

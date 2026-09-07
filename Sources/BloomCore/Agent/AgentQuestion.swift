@@ -39,21 +39,30 @@ public struct AgentQuestion: Sendable, Hashable, Identifiable {
         }
     }
 
-    /// The question itself, which is also the key an answer is filed under. The asker's words, and
-    /// the only handle the protocol gives an answer, so it is the identity too.
+    /// The asker's words. Claude also uses these as the answer key; Codex supplies a separate id.
     public var question: String
     /// The short chip the asker wanted beside it. Often empty.
     public var header: String
     public var multiSelect: Bool
     public var options: [Option]
+    /// Codex answers by a wire id; Claude answers by the question text.
+    public var answerID: String?
+    public var allowsOther: Bool
+    public var isSecret: Bool
 
-    public var id: String { question }
+    public var id: String { answerID ?? question }
 
-    public init(question: String, header: String = "", multiSelect: Bool = false, options: [Option] = []) {
+    public init(
+        question: String, header: String = "", multiSelect: Bool = false, options: [Option] = [],
+        answerID: String? = nil, allowsOther: Bool = true, isSecret: Bool = false
+    ) {
         self.question = question
         self.header = header
         self.multiSelect = multiSelect
         self.options = options
+        self.answerID = answerID
+        self.allowsOther = allowsOther
+        self.isSecret = isSecret
     }
 
     static func decode(_ json: JSONValue) -> AgentQuestion? {
@@ -63,7 +72,10 @@ public struct AgentQuestion: Sendable, Hashable, Identifiable {
             question: question,
             header: json["header"]?.stringValue ?? "",
             multiSelect: json["multiSelect"]?.boolValue ?? false,
-            options: (json["options"]?.arrayValue ?? []).compactMap(Option.decode)
+            options: (json["options"]?.arrayValue ?? []).compactMap(Option.decode),
+            answerID: json["bloomAnswerID"]?.stringValue,
+            allowsOther: json["bloomAllowsOther"]?.boolValue ?? true,
+            isSecret: json["isSecret"]?.boolValue ?? false
         )
     }
 }
@@ -73,7 +85,7 @@ public enum AgentQuestionnaire {
     /// The tool name, spelled once so the decoder and the view cannot disagree about it.
     public static let toolName = "AskUserQuestion"
 
-    /// What "Other" is called on every question, because the tool always allows one.
+    /// The custom-answer label on questions whose protocol allows one.
     ///
     /// The asker is told not to include an Other option of its own, on the promise that the host
     /// provides one. Bloom is the host, so Bloom provides it: without it a question whose options
@@ -124,7 +136,7 @@ public enum AgentQuestionnaire {
         guard !questions.isEmpty else { return false }
 
         return questions.allSatisfy { question in
-            let answer = answers[question.question] ?? ""
+            let answer = answers[question.id] ?? ""
             return !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }

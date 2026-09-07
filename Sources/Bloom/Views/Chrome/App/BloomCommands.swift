@@ -555,20 +555,13 @@ struct BloomCommands: Commands {
         }
 
         CommandGroup(replacing: .help) {
-            // The docs, not the repository. This pointed at github.com/spatie/Bloom#readme,
-            // which is not where Bloom lives and would have 404'd for everyone who pressed it.
             MenuCommand(.help) {
-                guard let url = URL(string: "https://runbloom.app/docs") else { return }
-                NSWorkspace.shared.open(url)
+                NSWorkspace.shared.open(AppSite.helpURL)
             }
 
-            // The first run window, on demand. A real item rather than a debug flag: somebody who
-            // waved the welcome away and wants it back has exactly the same need as somebody who
-            // has never seen it, and "was anything wrong with my setup" is a Help menu question
-            // in every Mac app that can answer it. It re-checks on every visit, so it is also the
-            // shortest way to find out whether the CLI you just installed was found.
+            // Replay the wizard from its greeting, not the cached screen from the last visit.
             MenuCommand(.welcome) {
-                WelcomeWindow.show()
+                WelcomeWindow.show(trigger: .firstRun, restarting: true)
             }
 
             Divider()
@@ -592,7 +585,7 @@ struct BloomCommands: Commands {
             }
 
             // The third way, and the only one that goes on paper. Below the divider with the other
-            // two rather than above it with the docs, because this is the same question they
+            // two rather than above it with Help, because this is the same question they
             // answer, how do I reach these people, and a row about an address filed next to the
             // manual would read as documentation about a feature. It is also where somebody looks
             // after meeting the word once in the welcome sequence and wanting the address again.

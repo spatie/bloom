@@ -172,7 +172,7 @@ final class AskModel {
     /// right source rather than a shortcut: that query joins the workspaces table to answer "which
     /// worktrees have an agent in them", and this conversation is in none of them.
     var isRunning: Bool {
-        transcript?.isRunning ?? false
+        transcript?.isRunning == true || transcript?.subagents.isWorking == true
     }
 
     var isAwaitingPermission: Bool {

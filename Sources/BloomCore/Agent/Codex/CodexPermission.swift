@@ -46,8 +46,11 @@ public enum CodexPermission {
     /// arrived a moment earlier: the request itself carries only an id, so the diff or the command
     /// is not in it. Without the item the question is still asked, just with less on it.
     public static func ask(for request: CodexApprovalRequest, item: CodexItem?) -> PermissionAsk {
-        let toolName = item.map(CodexTranslation.toolName(for:)) ?? fallbackToolName(request.kind)
-        let input = item.map(CodexTranslation.input(for:)) ?? request.params
+        let isQuestion = request.kind == .toolUserInput
+        let toolName = isQuestion ? AgentQuestionnaire.toolName
+            : item.map(CodexTranslation.toolName(for:)) ?? fallbackToolName(request.kind)
+        let input = isQuestion ? CodexQuestionnaire.input(for: request)
+            : item.map(CodexTranslation.input(for:)) ?? request.params
         let rule = rule(toolName: toolName, item: item, request: request)
 
         let ask = PermissionAsk(
@@ -71,6 +74,7 @@ public enum CodexPermission {
             // purpose: the flag is the one the prompt reads, and it must not depend on the rules
             // array happening to be empty.
             suppressesAlwaysAllow: rule == nil,
+            requiresUserInteraction: isQuestion,
             raw: Data()
         )
         // Rebuilt with its own bytes, because those bytes are what the database keeps and what a
@@ -203,9 +207,7 @@ public enum CodexPermission {
         switch decision {
         case .allow(.once): .accept
         case .allow(.session), .allow(.project): .acceptForSession
-        // Codex has no tool that asks a question, so nothing can produce one of these here. It is
-        // mapped to a plain accept rather than left to a `default`, so that adding a Codex tool
-        // that does ask one is a compile error in this file rather than a silently dropped reply.
+        // The runner sends the structured answer separately; this describes its approval outcome.
         case .answer: .accept
         case .deny(_, let endsTurn): endsTurn ? .cancel : .decline
         }

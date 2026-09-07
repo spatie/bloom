@@ -395,6 +395,7 @@ enum Snapshot {
         isRequested || isWindowCaptureRequested || isGalleryCaptureRequested
             || FrameProbe.isRequested || SwitchProbe.isRequested || ScrollProbe.isRequested
             || ResizeProbe.isRequested || TabProbe.isRequested || ComposerProbe.isRequested
+            || WelcomeRestartProbe.isRequested
             || CommandLine.arguments.contains("--menu-probe")
     }
 

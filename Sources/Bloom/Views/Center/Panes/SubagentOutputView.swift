@@ -101,12 +101,12 @@ struct SubagentOutputView: View {
         // running case keeps re-reading inside the task rather than re-keying it: an id that
         // carried the elapsed seconds would tear the whole pane down and rebuild it once a second,
         // losing the scroll position and any brief the reader had just opened.
-        .task(id: subagentID) { await follow() }
+        .onChange(of: subagentID) { _, _ in isBriefExpanded = false }
+        .task(id: "\(subagentID.rawValue):\(SubagentPane.refreshes(subagent))") { await follow() }
     }
 
     /// Read the file, and keep reading it for as long as the task is running.
     private func follow() async {
-        isBriefExpanded = false
         await load()
         while !Task.isCancelled, SubagentPane.refreshes(subagent) {
             try? await Task.sleep(for: .seconds(SubagentPane.refreshSeconds))
@@ -120,6 +120,14 @@ struct SubagentOutputView: View {
     }
 
     private func load() async {
+        if let parsed = await model.activeTranscript?.codexSubagentTranscript(for: subagentID) {
+            guard !Task.isCancelled else { return }
+            let updated = await Task.detached { SubagentReading(parsed) }.value
+            guard !Task.isCancelled else { return }
+            reading = updated
+            failure = nil
+            return
+        }
         // Off the main actor. A subagent's transcript is small in the capture and is not promised
         // to be, and this now runs once a second rather than once. Folding the messages into rows
         // goes with it: pairing a result onto its call decodes the result payload, which is the
@@ -144,6 +152,7 @@ struct SubagentOutputView: View {
                 return live.isEmpty ? .failure(reason) : .success(SubagentReading(live))
             }
         }.value
+        guard !Task.isCancelled else { return }
         switch result {
         case .success(let parsed):
             reading = parsed

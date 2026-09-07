@@ -114,13 +114,10 @@ struct UserTurnRowView: View {
             CappedWidth(width: maxWidth) {
                 bubble.padding(Self.padding)
             }
-            .background(Palette.accentFill, in: RoundedRectangle(cornerRadius: Self.corner))
+            .padding(.bottom, OutgoingBubbleShape.tailDrop)
+            .background(Palette.accentFill, in: OutgoingBubbleShape(cornerRadius: Self.corner))
             // No stroke around the fill. A border on a filled shape is a control's outline,
             // and the fill already separates the turn from the ground in both appearances.
-            //
-            // No tail either. The little pointer is iMessage's signature rather than a
-            // property of speech bubbles, and reproducing it would read as an imitation of
-            // another app instead of as this one's own decision.
             //
             // Everything inside is told it is sitting on the accent fill, which is the same
             // signal a selected sidebar row sends. `Chip`, `DiffStatLabel`, `RepoIcon` and now
@@ -177,6 +174,7 @@ struct UserTurnRowView: View {
             // A prompt of nothing but attachments is a turn in its own right, and an empty `Text`
             // above the chips would put a blank line inside the bubble.
             if !text.isEmpty {
+                let font = Typo.body.resolvedNSFont(scale: fontScale, face: chatFont)
                 // Written text, not markdown. A question with a `*` in it is a question with a
                 // `*` in it, and two things only are lifted out of it: an address, found by
                 // `LinkScan`, and a file, found by `FileMention`. Both rules live in the core
@@ -187,10 +185,10 @@ struct UserTurnRowView: View {
                 // `TranscriptTextView` exists: a link inside a selectable `Text` is decoration.
                 // Measured on a real window, the cursor over one was an I-beam and a press routed
                 // nothing at all. See the note on that type.
-                TranscriptTextView(
+                    TranscriptTextView(
                     text: TranscriptLink.attributedString(
                         sent: text,
-                        font: Typo.body.resolvedNSFont(scale: fontScale, face: chatFont),
+                        font: font,
                         // White, the same ink a selected row uses on the same fill. Measured 5.2
                         // to 1 on Spatie Blue, which passes AA for body text in both appearances.
                         color: .alternateSelectedControlTextColor,
@@ -207,6 +205,7 @@ struct UserTurnRowView: View {
                     // muted slate that sits clearly on Spatie Blue and leaves white text alone.
                     // AppKit cannot read the `colorScheme` this bubble sets, so it is named.
                     selectionColor: Palette.bubbleTextSelection,
+                    alignsBubbleInk: true,
                     actions: linkActions.opening(file: open, hovering: { hovered = $0 })
                 )
                 .background { chipProbe }

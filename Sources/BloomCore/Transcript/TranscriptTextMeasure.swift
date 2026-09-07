@@ -49,6 +49,14 @@ import Foundation
 /// So the fallback is the room the run was offered, and a hair's width when it was offered none.
 /// Nothing here can report a width the layout system did not first name.
 public enum TranscriptTextMeasure {
+    /// Centres visible letters rather than the font's asymmetric ascent and descent allowances.
+    /// Invalid or overflowing ink stays untouched, so this cannot introduce glyph clipping.
+    public static func bubbleTextOffset(height: Double, inkTop: Double, inkBottom: Double) -> Double {
+        guard height.isFinite, inkTop.isFinite, inkBottom.isFinite,
+              inkTop >= 0, inkBottom > inkTop, inkBottom <= height else { return 0 }
+        return (height - inkBottom - inkTop) / 2
+    }
+
     /// What "no width was proposed" is laid out at.
     ///
     /// Wide enough that nothing a transcript ever holds wraps inside it, which is what an ideal

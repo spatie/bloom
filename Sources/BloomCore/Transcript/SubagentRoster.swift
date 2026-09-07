@@ -114,6 +114,10 @@ public struct Subagent: Sendable, Hashable, Identifiable {
 
     fileprivate mutating func move(to state: SubagentState, at now: Date) {
         self.state = state
+        if state == .running {
+            finishedAt = nil
+            return
+        }
         // Only the first ending is timed. Two lines report one ending and the second must not
         // restart the hold, which would be a row that stayed twice as long as any other.
         if finishedAt == nil { finishedAt = now }
@@ -244,7 +248,7 @@ public struct SubagentRoster: Sendable, Hashable {
                 if !start.toolUseID.isEmpty { byToolUse[start.toolUseID] = start.id }
                 return
             }
-            apply(.spawned, at: index, now: now)
+            apply(start.resumesExisting ? .resumed : .spawned, at: index, now: now)
 
         case .progressed(let progress):
             guard let id = byToolUse[progress.parentToolUseID],

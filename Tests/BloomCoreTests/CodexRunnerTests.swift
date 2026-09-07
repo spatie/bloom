@@ -101,6 +101,29 @@ private func eventually(
         #expect(stored?.state == .running)
     }
 
+    @Test func childOutputAndCompletionNeverEnterOrFinishTheParentChat() async throws {
+        let store = try makeTestStore("codex-child-isolation")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.send("work with a child")
+        box.process.emit(#"{"method":"item/completed","params":{"threadId":"01a02144-3b7e-7233-97f2-73ebd5105085","turnId":"parent-turn","item":{"id":"root-self","type":"subAgentActivity","agentThreadId":"01a02144-3b7e-7233-97f2-73ebd5105085","agentPath":"/root","kind":"interacted"}}}"#)
+        box.process.emit(#"{"method":"item/completed","params":{"threadId":"child","turnId":"child-turn","item":{"id":"child-text","type":"agentMessage","text":"Child-only output"}}}"#)
+        box.process.emit(#"{"method":"turn/completed","params":{"threadId":"child","turn":{"id":"child-turn","status":"completed","items":[]}}}"#)
+        box.process.emit(#"{"method":"item/completed","params":{"threadId":"01a02144-3b7e-7233-97f2-73ebd5105085","turnId":"parent-turn","item":{"id":"parent-text","type":"agentMessage","text":"Parent still working"}}}"#)
+        await eventually("parent output after child completion") {
+            (try? await store.messages(sessionID: session.id).contains { $0.kind == .assistantText }) == true
+        }
+        let rows = try await store.messages(sessionID: session.id)
+        #expect(rows.filter { $0.kind == .assistantText }.count == 1)
+        #expect(!rows.contains { $0.kind == .result })
+        #expect(!rows.contains { String(decoding: $0.payload, as: UTF8.self).contains("root-self") })
+        #expect(!rows.contains { String(decoding: $0.payload, as: UTF8.self).contains("Child-only output") })
+        let current = try await store.session(id: session.id)
+        #expect(current?.state == .running)
+        await runner.shutdown()
+    }
+
     @Test func startsTheStoredCodexExecutable() async throws {
         let store = try makeTestStore("codex-runner-executable")
         let (session, _) = try await makeCodexSession(store)
@@ -114,6 +137,59 @@ private func eventually(
         try await runner.send("hello")
 
         #expect(box.process.launch.executable == "/tmp/tools/codex")
+    }
+
+    @Test func childApprovalsCannotBorrowParentMetadataOrSendReasonsToTheParent() async throws {
+        let store = try makeTestStore("codex-child-approval")
+        let (session, repoID) = try await makeCodexSession(store)
+        try await store.upsert(PermissionGrant(repoID: repoID, toolName: "Bash", ruleContent: "echo parent"))
+        let box = scriptedBox()
+        box.reply(to: "turn/steer", with: .object([:]))
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.send("review")
+        box.process.emit(#"{"method":"item/completed","params":{"threadId":"01a02144-3b7e-7233-97f2-73ebd5105085","turnId":"parent-turn","item":{"id":"spawn","type":"subAgentActivity","agentThreadId":"child","agentPath":"/root/review","kind":"started"}}}"#)
+        box.process.emit(#"{"method":"item/started","params":{"threadId":"01a02144-3b7e-7233-97f2-73ebd5105085","turnId":"parent-turn","item":{"id":"shared","type":"commandExecution","command":"echo parent","status":"inProgress"}}}"#)
+        box.process.emit(#"{"method":"item/started","params":{"threadId":"child","turnId":"child-turn","item":{"id":"shared","type":"commandExecution","command":"echo child","status":"inProgress"}}}"#)
+        box.process.emit(#"{"id":55,"method":"item/commandExecution/requestApproval","params":{"threadId":"child","turnId":"child-turn","itemId":"shared"}}"#)
+        await eventually("child permission to remain pending") {
+            ((try? await store.pendingPermissionAsks(sessionID: session.id)) ?? []).count == 1
+        }
+        let asks = try await store.pendingPermissionAsks(sessionID: session.id)
+        let ask = try #require(asks.first).ask
+        #expect(ask.input["command"]?.stringValue == "echo child")
+        await runner.answer(requestID: ask.requestID, decision: .deny(message: "Use a read-only check", endsTurn: false))
+        let steer = try #require(box.process.sentFrame { $0["method"]?.stringValue == "turn/steer" })
+        #expect(steer["params"]?["threadId"]?.stringValue == "child")
+        #expect(steer["params"]?["expectedTurnId"]?.stringValue == "child-turn")
+        await runner.shutdown()
+    }
+
+    @Test func aQuestionAnswerUsesTheCodexWireShapeAndResolvedQuestionsDisappear() async throws {
+        let store = try makeTestStore("codex-question-answer")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.send("ask me")
+        box.process.emit(#"{"id":71,"method":"item/tool/requestUserInput","params":{"threadId":"01a02144-3b7e-7233-97f2-73ebd5105085","turnId":"parent-turn","itemId":"question","isBlocking":false,"questions":[{"id":"scope","header":"Scope","question":"Which scope?","options":[{"label":"All","description":"Everything"}]}]}}"#)
+        await eventually("question card") {
+            ((try? await store.pendingPermissionAsks(sessionID: session.id)) ?? []).count == 1
+        }
+        let asks = try await store.pendingPermissionAsks(sessionID: session.id)
+        let ask = try #require(asks.first).ask
+        #expect(ask.toolName == AgentQuestionnaire.toolName)
+        let answered = AgentQuestionnaire.answered(ask.input, answers: ["scope": "All"])
+        await runner.answer(requestID: ask.requestID, decision: .answer(input: answered))
+        let reply = try #require(box.process.sentFrame { $0["id"]?.intValue == 71 && $0["result"] != nil })
+        #expect(reply["result"]?["answers"]?["scope"]?["answers"]?[0]?.stringValue == "All")
+        box.process.emit(#"{"id":72,"method":"item/tool/requestUserInput","params":{"threadId":"01a02144-3b7e-7233-97f2-73ebd5105085","turnId":"parent-turn","itemId":"question-2","questions":[{"id":"note","header":"Note","question":"Anything else?"}]}}"#)
+        box.process.emit(#"{"method":"serverRequest/resolved","params":{"threadId":"01a02144-3b7e-7233-97f2-73ebd5105085","requestId":72}}"#)
+        box.process.emit(#"{"method":"item/completed","params":{"threadId":"01a02144-3b7e-7233-97f2-73ebd5105085","turnId":"parent-turn","item":{"id":"sentinel","type":"agentMessage","text":"Question resolved"}}}"#)
+        await eventually("resolution processed before following prose") {
+            (try? await store.messages(sessionID: session.id).contains { $0.kind == .assistantText }) == true
+        }
+        let pending = try await store.pendingPermissionAsks(sessionID: session.id)
+        #expect(pending.isEmpty)
+        await runner.shutdown()
     }
 
     /// A chat that has spoken before resumes rather than starting a second conversation.

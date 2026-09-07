@@ -4,6 +4,19 @@ import Foundation
 
 @Suite("How a run of transcript prose says how big it is")
 struct TranscriptTextMeasureTests {
+    @Test("bubble alignment balances actual ink on both single and multiple lines")
+    func bubbleAlignment() {
+        for (height, top, bottom) in [(17.0, 4.0, 16.0), (61.0, 4.0, 60.0), (17.0, 3.0, 14.0)] {
+            let offset = TranscriptTextMeasure.bubbleTextOffset(height: height, inkTop: top, inkBottom: bottom)
+            #expect(top + offset == height - bottom - offset)
+            #expect(top + offset >= 0 && bottom + offset <= height)
+        }
+        #expect(TranscriptTextMeasure.bubbleTextOffset(height: 0, inkTop: 0, inkBottom: 0) == 0)
+        #expect(TranscriptTextMeasure.bubbleTextOffset(height: .infinity, inkTop: 4, inkBottom: 16) == 0)
+        #expect(TranscriptTextMeasure.bubbleTextOffset(height: 17, inkTop: -1, inkBottom: 16) == 0)
+        #expect(TranscriptTextMeasure.bubbleTextOffset(height: 17, inkTop: 1, inkBottom: 18) == 0)
+    }
+
     // MARK: What a run is laid out at
 
     /// The measurement that started this: at a container of 456, a wrapped paragraph's widest line
