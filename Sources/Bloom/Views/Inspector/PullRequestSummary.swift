@@ -48,6 +48,8 @@ struct PullRequestSummary: View {
     var onContinue: () -> Void
     /// Archives, through the app's ordinary archive with all its checks intact.
     var onArchive: () -> Void
+    @Binding var archiveRequest: ArchiveRequest?
+    var onConfirmArchive: (ArchiveRequest) -> Void
 
     /// Which method the user picked, held only for as long as the confirmation is up. Non-nil is
     /// what presents the dialog, so there is no way to reach `onMerge` without passing through it.
@@ -87,40 +89,19 @@ struct PullRequestSummary: View {
                 ShareLink(item: url) { Text("Share") }
             }
         }
-        // Attached to the merge button's own row, so the dialog animates out of the control that
-        // asked for it.
-        //
-        // Bloom's own confirmation and not `.confirmationDialog`, and the reasoning is written
-        // out on `ConfirmationSheet`. The short version is that this is the one confirmation in
-        // the app whose answer is not a loss, a system dialog can only draw its confirm button in
-        // red or grey, and the roles that draw it grey are the same roles that hand the merge to
-        // the Return key. `a595dfb` measured that and kept the red button rather than give up the
-        // guard. This keeps the guard and drops the red: Escape still cancels, Return still does
-        // nothing, and the button that lands the branch is finally the colour of landing it.
-        .confirmation($pendingMerge) { method in
-            Confirmation(
-                title: pullRequest.mergeConfirmationTitle(base: baseBranch),
-                // The two things that change the answer, and nothing else. The title above names
-                // the pull request and the button below names the method, so neither is repeated.
-                message: pullRequest.mergeConfirmation(
-                    base: baseBranch,
-                    deletesBranch: Self.deletesBranch,
-                    local: localWork
-                ),
-                confirmLabel: method.label,
-                // Escape lands here. See `ConfirmationSheet` for why no confirmation in this app
-                // gives its cancel button `.keyboardShortcut(.defaultAction)`.
-                cancelLabel: "Keep the pull request open",
-                tone: .completing
-            )
-        } onConfirm: { method in
-            onMerge(method)
-        }
         // The Workspace menu's copy of the merge, which had no item anywhere until now. It is
         // published from here because here is the only place that can raise the confirmation
         // above, so the menu item asks this view rather than growing a second path to a merge.
         // See `MergeAction`.
         .focusedSceneValue(\.mergeAction, mergeAction)
+        .onChange(of: canConfirmMerge) { _, available in
+            if !available { pendingMerge = nil }
+        }
+        .onChange(of: branchActions.isAllowed) { _, allowed in
+            if !allowed { dismissConfirmation() }
+        }
+        .onChange(of: worktree) { _, _ in dismissConfirmation() }
+        .onChange(of: pullRequest.url) { _, _ in dismissConfirmation() }
     }
 
     /// What the menu bar's Merge item says and does, or nil when this strip has nothing to land:
@@ -260,6 +241,26 @@ struct PullRequestSummary: View {
         // strip's own context menu only ever read.
         trailingControls
             .disabled(!branchActions.isAllowed)
+            .popover(isPresented: Binding(
+                get: { pendingMerge != nil },
+                set: { if !$0 { pendingMerge = nil } }
+            ), arrowEdge: .top) {
+                if let method = pendingMerge {
+                    MergeConfirmationPopover(
+                        pullRequest: pullRequest,
+                        baseBranch: baseBranch,
+                        localWork: localWork,
+                        method: method,
+                        deletesBranch: Self.deletesBranch,
+                        canMerge: canConfirmMerge,
+                        onConfirm: {
+                            pendingMerge = nil
+                            onMerge(method)
+                        },
+                        onCancel: { pendingMerge = nil }
+                    )
+                }
+            }
     }
 
     @ViewBuilder
@@ -399,6 +400,26 @@ struct PullRequestSummary: View {
 
     private var archiveControl: some View {
         Button("Archive", systemImage: "archivebox", action: onArchive)
+            .popover(item: $archiveRequest, arrowEdge: .top) { request in
+                ConfirmationPopover(
+                    title: "Archive this workspace?",
+                    confirmLabel: request.confirmLabel,
+                    tint: request.isDestructive ? Palette.negative : Palette.mergedFill,
+                    canConfirm: branchActions.isAllowed && !isWorking,
+                    onConfirm: { onConfirmArchive(request) },
+                    onCancel: dismissConfirmation,
+                    width: 380
+                ) {
+                    ViewThatFits(in: .vertical) {
+                        Text(request.message).fixedSize(horizontal: false, vertical: true)
+                        ScrollView {
+                            Text(request.message).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                    }
+                    .frame(maxHeight: 440)
+                }
+            }
             .buttonStyle(.borderedProminent)
             .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
             .tint(status.tone.fill)
@@ -543,6 +564,15 @@ struct PullRequestSummary: View {
             choose: onChooseMergeMethod,
             merge: { propose(mergeMethod) }
         )
+    }
+
+    private func dismissConfirmation() {
+        pendingMerge = nil
+        archiveRequest = nil
+    }
+
+    private var canConfirmMerge: Bool {
+        pullRequest.isOpen && status.canMerge && branchActions.isAllowed && !isWorking
     }
 
     // MARK: - Text

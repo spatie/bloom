@@ -3,44 +3,11 @@ import AppKit
 
 /// The dialog Bloom asks a yes-or-no question in, drawn by Bloom rather than by AppKit.
 ///
-/// **Why this exists.** Every confirmation in the app was a `.confirmationDialog`, which is a
-/// perfectly good control right up to the moment you need one thing out of it that it does not
-/// offer. Merging is that moment. It is the only confirmation in the app whose answer is not a
-/// loss, and a system dialog can draw its confirm button in exactly two ways: red, or grey.
-/// `a595dfb` measured every route to a third colour and found none. `.tint` is ignored on an
-/// alert button, and `.foregroundStyle` or `.buttonStyle` do not restyle it, they drop it from the
-/// dialog.
+/// Used for confirmations that block the window, such as discarding a queued message.
+/// The pull request strip uses `ConfirmationPopover` for its merge and archive confirmations.
 ///
-/// The trap in that measurement is why this is a component and not a repaint. In a system dialog
-/// the button's role is two switches wired together and the second one is the safety: the roles
-/// that draw grey are exactly the roles that hand the answer to the Return key. A scratch build
-/// with the role dropped merged a real pull request on one keystroke. The price of colour, in a
-/// system dialog, is the guard. Owning the dialog is what buys both, and owning it means owning
-/// the key handling, which is written out under `Keys` below.
-///
-/// **Why a component and not a bespoke merge dialog.** The app asks eleven of these questions and
-/// they have always looked alike. If merging alone became a hand-drawn panel the app would have
-/// two kinds of confirmation, and the difference between them would tell the reader nothing: they
-/// would differ by when they were written rather than by what they ask. So this is the shape all
-/// eleven are meant to end in.
-///
-/// Three are converted: merging, archiving and throwing a queued message away. The other eight
-/// are still `.confirmationDialog`, and the count is written here rather than left to be guessed
-/// because this paragraph said six and one for as long as it took four of them to be written.
-/// They are the revert in the file header bar and the one in the changed file list, the removal
-/// of a project asked from three places (one question, see `ProjectRemoval`), the discard in the
-/// file edit pane and the two in `RootView`.
-///
-/// **Why it looks like the system's.** The eight are still system dialogs and they are the
-/// baseline the reader has in their eye, so every number in `Layout` was read off a real
-/// `.confirmationDialog` in a window capture rather than chosen. The controls are the system's
-/// own `.bordered` buttons, so their plate, their corner radius, their pressed state and their
-/// inactive-window rendering are AppKit's and cannot drift away from the five. Measured against
-/// the system dialog on the same machine the reproduction is exact except for the buttons, which
-/// come out 28 points tall against the alert's 30: an alert button is not a size `controlSize`
-/// offers, `.large` is 28 and `.extraLarge` is 36, and 28 for both is worth more than 30 for one.
-/// The sheet is 260 by 180 where the system's is 260 by 188, and that difference is those two
-/// buttons.
+/// Native buttons preserve macOS control behaviour. The keyboard begins on Cancel, Escape
+/// dismisses, and no button is assigned the default action. See `Keys` below.
 struct ConfirmationSheet: View {
     let confirmation: Confirmation
     let onConfirm: () -> Void

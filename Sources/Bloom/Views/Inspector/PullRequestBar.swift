@@ -32,6 +32,8 @@ struct PullRequestBar: View {
     private static let pollInterval = Duration.seconds(20)
 
     @State private var isWorking = false
+    @State private var pendingArchive: ArchiveRequest?
+    @State private var isVisible = false
 
     /// Where an answer goes. Set here, drawn in the column: see the note on the type.
     private var report: PullRequestNotice? {
@@ -42,6 +44,12 @@ struct PullRequestBar: View {
     var body: some View {
         strip
             .task(id: model.workspace.id) { await poll() }
+            .onChange(of: model.workspace.id) { _, _ in pendingArchive = nil }
+            .onAppear { isVisible = true }
+            .onDisappear {
+                isVisible = false
+                pendingArchive = nil
+            }
     }
 
     private var strip: some View {
@@ -97,7 +105,9 @@ struct PullRequestBar: View {
                 onPush: push,
                 onFixConflicts: { fixConflicts(on: pullRequest) },
                 onContinue: { carryOn(after: pullRequest) },
-                onArchive: archive
+                onArchive: archive,
+                archiveRequest: $pendingArchive,
+                onConfirmArchive: confirmArchive
             )
         } else {
             PullRequestCreator(
@@ -262,14 +272,24 @@ struct PullRequestBar: View {
         }
     }
 
-    /// Archives, through the app's own path with every safety check intact.
-    ///
-    /// No confirmation is raised here. `AppModel.archive` decides for itself whether to ask, and
-    /// on a merged pull request it will not unless there is genuinely something to lose. Why this
-    /// button is allowed to be quiet while the sidebar's hover button never is, is written out at
-    /// `PullRequestSummary.archiveButton`.
+    /// The safety checks stay in AppModel; only their presentation belongs to this button.
     private func archive() {
-        Task { await app.archive(model.workspace) }
+        let workspace = model.workspace
+        Task {
+            await app.archive(workspace, presentConfirmation: presentArchive)
+        }
+    }
+
+    private func confirmArchive(_ request: ArchiveRequest) {
+        pendingArchive = nil
+        Task {
+            await app.confirmArchive(request, presentConfirmation: presentArchive)
+        }
+    }
+
+    private func presentArchive(_ request: ArchiveRequest) {
+        guard isVisible, app.selection.workspaceID == request.workspace.id else { return }
+        pendingArchive = request
     }
 
     /// Hands the merge to the agent, the same way Create pull request and Commit and push do.

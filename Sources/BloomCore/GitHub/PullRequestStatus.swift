@@ -243,64 +243,45 @@ public extension PullRequest {
         )
     }
 
-    /// The title of the confirmation, which is the one line a user reliably reads.
-    ///
-    /// It says who does it, and that is the whole of the change from the version that read "Merge
-    /// #42 into main?". Bloom no longer runs `gh pr merge`: the request goes to this workspace's
-    /// agent as an ordinary turn, and a title that implies the app is about to do it is the one
-    /// line most likely to be believed.
     func mergeConfirmationTitle(base: String) -> String {
-        "Ask the agent to merge #\(number) into \(base)?"
+        "Merge #\(number) into \(base)?"
     }
 
-    /// What confirming does, said as consequences rather than as a question.
-    ///
-    /// Rewritten when the merge moved onto the agent, and the closing paragraph is the part that
-    /// changed meaning rather than wording. It used to end "Bloom cannot undo this", which was the
-    /// honest thing to say about an app that was about to call `gh pr merge` itself and had no
-    /// answer for what came back. Bloom does not call it any more. What the reader is agreeing to
-    /// is a message going into the chat, and the two facts that follow from that are worth more
-    /// than an undo warning: the commands happen in front of them, under whatever permission mode
-    /// they set, and a refusal from GitHub comes back as words instead of as a failed button.
-    ///
-    /// What did NOT change is the first paragraph. A squash merge still lands what GitHub has,
-    /// not what is on this disk, and moving the work to an agent does not put an uncommitted file
-    /// into the merge. The strip lets the button stay live over local work rather than disabling
-    /// it, so this is still where that trade is paid back.
-    ///
-    /// The two conditional paragraphs are not compression candidates. Each of them only appears
-    /// when it is the most important thing on screen.
-    func mergeConfirmation(
-        base: String,
-        deletesBranch: Bool,
-        local: LocalWork? = nil
-    ) -> String {
-        var paragraphs: [String] = []
-        // First, above the rest, because it is the one line here that says the merge will land
-        // something OTHER than what the reader is looking at.
+    var mergeConfirmationMessage: String {
+        "Your agent will merge this pull request in the chat, where you can follow its progress."
+    }
+
+    func mergeBranchDeletionMessage(deletesBranch: Bool) -> String? {
+        guard deletesBranch, !branch.isEmpty else { return nil }
+        return "After merging, \(branch) will be deleted on GitHub. Your local branch stays."
+    }
+
+    /// These warnings precede the explanation so a merge of older work or a failing check
+    /// cannot disappear into the secondary branch-deletion note.
+    func mergeWarnings(base: String, local: LocalWork? = nil) -> [String] {
+        var warnings: [String] = []
         if let local, local.isAhead {
-            paragraphs.append(
+            warnings.append(
                 "GitHub does not have everything in this worktree: "
                     + Self.localDetail(local)
                     + ". None of that is part of what is merged, and the agent is told to leave it"
                     + " alone rather than commit it first."
             )
         }
-        if checks == .failing || hasConflicts {
-            paragraphs.append(
-                checks == .failing ? checksSummary : "This branch conflicts with \(base)."
-            )
-        }
-        // An older gh does not report the head branch, and naming a branch we are guessing at
-        // would be worse than not naming one. The instructions this turn carries say the same
-        // thing: without a name, the branch on the server is left standing.
-        var closing = "This workspace's agent is asked to merge it, in the chat, so you see every "
-            + "command it runs and it can tell you if GitHub refuses."
-        if deletesBranch, !branch.isEmpty {
-            closing += " Once the merge lands it deletes \(branch) on GitHub, not here."
-        }
-        paragraphs.append(closing)
-        return paragraphs.joined(separator: "\n\n")
+        if checks == .failing { warnings.append(checksSummary) }
+        if hasConflicts { warnings.append("This branch conflicts with \(base).") }
+        return warnings
+    }
+
+    func mergeConfirmation(
+        base: String,
+        deletesBranch: Bool,
+        local: LocalWork? = nil
+    ) -> String {
+        (mergeWarnings(base: base, local: local)
+            + [mergeConfirmationMessage]
+            + [mergeBranchDeletionMessage(deletesBranch: deletesBranch)].compactMap { $0 })
+            .joined(separator: "\n\n")
     }
 
     /// The headline for an open, unblocked pull request.
