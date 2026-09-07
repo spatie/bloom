@@ -47,20 +47,14 @@ struct PinnedQuestionIndex {
     }
 }
 
-/// A quiet, toolbar-like reminder of the question whose answer is under the reader.
-///
-/// It is deliberately not another blue bubble. The full bubble is conversation content; this is
-/// navigation, so it uses a translucent Mac header surface, one line and an upward arrow. The
-/// entire toolbar-height band is the hit target and the full question remains at its real position.
+/// A floating shortcut to the question whose answer is under the reader.
+/// It shares the conversation's width so navigation stays beside the content it describes.
 struct PinnedQuestionView: View {
     var question: PinnedQuestion
     var onOpen: () -> Void
 
-    /// The space navigation to a question must leave above its real bubble.
-    static let height: CGFloat = Metrics.barHeight + Metrics.hairline
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isHovered = false
+    /// Include the gap below the tabs when leaving room above the destination bubble.
+    static let height: CGFloat = Metrics.barHeight + Metrics.spacingWide
 
     var body: some View {
         Button(action: onOpen) {
@@ -72,35 +66,28 @@ struct PinnedQuestionView: View {
 
                 Text("You")
                     .font(Typo.captionEmphasis)
-                    .foregroundStyle(Palette.accent)
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize()
 
                 Text(question.summary)
                     .font(Typo.label)
-                    .foregroundStyle(Palette.textSecondary)
+                    .foregroundStyle(Palette.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, TranscriptLayout.inset + Metrics.spacingSmall)
-            .frame(
-                maxWidth: .infinity,
-                minHeight: Self.height,
-                maxHeight: Self.height,
-                alignment: .leading
-            )
-            .contentShape(Rectangle())
-            .background(isHovered ? Palette.hover : .clear)
+            .padding(.horizontal, Metrics.gutter)
+            .frame(maxWidth: .infinity, minHeight: Metrics.barHeight, maxHeight: Metrics.barHeight)
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .background(.regularMaterial)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Palette.border).frame(height: Metrics.outline)
-        }
-        .onHover { hovered in
-            withAnimation(reduceMotion ? nil : Motion.hover) { isHovered = hovered }
-        }
+        .frame(maxWidth: TranscriptLayout.conversationMeasure)
+        .glassEffect(.regular.interactive(), in: Capsule())
         .help("Show the full question")
         .accessibilityLabel("Show question: \(question.summary)")
+        .padding(.horizontal, ComposerLayout.horizontalInset)
+        .padding(.top, Metrics.spacingWide)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
