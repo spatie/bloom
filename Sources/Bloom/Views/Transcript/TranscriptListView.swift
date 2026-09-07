@@ -1314,6 +1314,14 @@ struct TranscriptListView: View {
         controller.goToEnd()
     }
 
+    private func honourLiveEndRequest() {
+        guard liveEndRequest.consume(
+            transcript.liveEndRequests, isReady: arrivalSession == transcript.session.id
+        ) else { return }
+        opening = .liveEnd
+        goToLiveEnd()
+    }
+
     /// Takes the reader back to the newest row, which is what the jump pill asks for, and what
     /// every button that composes a turn asks for through `TranscriptModel.submit`.
     ///
@@ -1330,14 +1338,6 @@ struct TranscriptListView: View {
     /// has not been laid out at all. Each of those leaves a scroll that was correct when it was
     /// issued a few hundred points short, and short of the end is exactly the state the reader
     /// pressed the pill to get out of. `goToEnd` is a standing instruction rather than a movement.
-    private func honourLiveEndRequest() {
-        guard liveEndRequest.consume(
-            transcript.liveEndRequests, isReady: arrivalSession == transcript.session.id
-        ) else { return }
-        opening = .liveEnd
-        goToLiveEnd()
-    }
-
     private func goToLiveEnd() {
         scroller.stop()
         follower.seekLiveEnd(true)
@@ -1352,7 +1352,6 @@ struct TranscriptListView: View {
             // end of the content as it stands now is aimed at a row that is about to be somewhere
             // else entirely. The standing instruction is what makes the arrival stick once they
             // have landed.
-            scroller.stop()
             controller.goToEnd()
             follower.seekLiveEnd(false)
             return

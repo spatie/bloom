@@ -166,7 +166,8 @@ public struct WorkspaceManager: Sendable {
         branch: String? = nil,
         baseBranch: String? = nil,
         origin: WorkspaceOrigin = .user,
-        checkout: WorkspaceCheckout? = nil
+        checkout: WorkspaceCheckout? = nil,
+        setupPolicy: WorkspaceSetupPolicy = .deferred
     ) async throws -> Workspace {
         // Everything below reads the repository and then acts on what it read, so two creates
         // running at once in one project decide on the same branch and the same directory and the
@@ -174,11 +175,13 @@ public struct WorkspaceManager: Sendable {
         // coalesced.
         try await WorktreeCutQueue.shared.cut(in: repo.path) {
             if let checkout {
-                return try await open(checkout, id: id, repo: repo, name: name, origin: origin)
+                return try await open(
+                    checkout, id: id, repo: repo, name: name, origin: origin, setupPolicy: setupPolicy
+                )
             }
             return try await cut(
                 id: id, repo: repo, prompt: prompt, name: name, branch: branch,
-                baseBranch: baseBranch, origin: origin
+                baseBranch: baseBranch, origin: origin, setupPolicy: setupPolicy
             )
         }
     }
@@ -192,7 +195,8 @@ public struct WorkspaceManager: Sendable {
         name: String?,
         branch: String?,
         baseBranch: String?,
-        origin: WorkspaceOrigin
+        origin: WorkspaceOrigin,
+        setupPolicy: WorkspaceSetupPolicy
     ) async throws -> Workspace {
         let settings = SettingsLoader.load(repo: repo.path)
         let base = baseBranch ?? repo.defaultBranch
@@ -231,7 +235,7 @@ public struct WorkspaceManager: Sendable {
             branch: finalBranch,
             path: worktreePath,
             baseBranch: base,
-            setupState: settings.setupScript == nil ? .skipped : .pending,
+            setupState: setupPolicy.initialState(script: settings.setupScript),
             sortOrder: try await store.nextWorkspaceSortOrder(repoID: repo.id),
             origin: origin
         )
@@ -259,7 +263,8 @@ public struct WorkspaceManager: Sendable {
         id: WorkspaceID,
         repo: Repo,
         name: String?,
-        origin: WorkspaceOrigin
+        origin: WorkspaceOrigin,
+        setupPolicy: WorkspaceSetupPolicy
     ) async throws -> Workspace {
         let settings = SettingsLoader.load(repo: repo.path)
         let existingBranches = Set(try await Git.branches(of: repo.path))
@@ -334,7 +339,7 @@ public struct WorkspaceManager: Sendable {
             branch: branch,
             path: worktreePath,
             baseBranch: checkout.baseBranch(default: repo.defaultBranch),
-            setupState: settings.setupScript == nil ? .skipped : .pending,
+            setupState: setupPolicy.initialState(script: settings.setupScript),
             sortOrder: try await store.nextWorkspaceSortOrder(repoID: repo.id),
             origin: origin,
             // Written now rather than waited for. A review workspace knows its pull request before

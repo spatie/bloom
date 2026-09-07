@@ -988,7 +988,7 @@ final class WorkspaceModel {
             SettingsLoader.load(repo: repoPath)
         }.value
 
-        if settings.setupScript != nil {
+        if workspace.setupState == .pending, settings.setupScript != nil {
             let succeeded = await stream(setupIn: repo, through: manager)
 
             // Archiving or quitting cancels this task. Starting an agent in a worktree that is on
