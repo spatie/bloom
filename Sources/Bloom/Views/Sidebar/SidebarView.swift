@@ -47,6 +47,7 @@ struct SidebarView: View {
     /// What the list itself thinks is selected. See the `onChange` pair below for why this is not
     /// bound straight to the model.
     @State private var listSelection: SidebarSelection?
+    @State private var archivePresentation = SidebarArchivePresentation()
 
     /// The grouped, filtered, sorted list the rows are drawn from.
     ///
@@ -326,7 +327,11 @@ struct SidebarView: View {
         // second, and the cost that argument is about is not here.
         .onChange(of: app.pendingWorkspaces) { _, _ in regroup() }
         // Rescoped, so widening the filter is not forty rows fading in at once. See `RowArrival`.
-        .onChange(of: filter) { _, _ in regroup(rescoped: true) }
+        .onChange(of: filter) { _, _ in
+            archivePresentation.cancel()
+            regroup(rescoped: true)
+        }
+        .onDisappear { archivePresentation.cancel() }
         // NOT rescoped, unlike the filter above, and the difference is what the two switches do.
         // A filter is a question you ask of rows that were always there. This one inserts project
         // headers at several depths at once, and a row that is arriving has no old position to
@@ -347,7 +352,11 @@ struct SidebarView: View {
         .onDeleteCommand {
             guard let id = app.selection.workspaceID,
                   let workspace = app.workspaces.first(where: { $0.id == id }) else { return }
-            Task { await app.archive(workspace) }
+            guard paneRows.contains(where: { row in
+                if case .workspace(let shown, _) = row { return shown.id == workspace.id }
+                return false
+            }) else { return }
+            archiveFromKeyboard(workspace)
         }
         // Rename from the menu bar, which reaches the field this list owns. A workspace this pane
         // is not drawing is ignored, so Home and the sidebar can both listen to one post.
@@ -564,6 +573,17 @@ struct SidebarView: View {
         app.selection = listSelection
     }
 
+    private func archiveFromKeyboard(_ workspace: Workspace) {
+        WorkspaceHoverCardPresenter.shared.pointerExited(.workspaceRow(workspace.id))
+        let generation = archivePresentation.begin(workspaceID: workspace.id, source: .row)
+        Task {
+            defer { archivePresentation.finish(generation: generation) }
+            await app.archive(workspace) { request in
+                archivePresentation.present(request, generation: generation)
+            }
+        }
+    }
+
     /// One workspace in the pane, with the fill and the ink the top level rows also take.
     private func workspaceRow(_ workspace: Workspace, projectName: String) -> some View {
         let target = SidebarSelection.workspace(workspace.id)
@@ -571,7 +591,8 @@ struct SidebarView: View {
             workspace: workspace,
             arrival: arrival,
             projectName: projectName,
-            renaming: $renaming
+            renaming: $renaming,
+            archivePresentation: $archivePresentation
         )
         .tag(target)
         // The same fill the three top level rows take. A row of one kind selecting in one blue and

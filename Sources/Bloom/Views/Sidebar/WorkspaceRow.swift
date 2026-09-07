@@ -44,6 +44,11 @@ struct WorkspaceRow: View {
     /// Raised to `SidebarWorkspaceRow`, which owns both the confirmation and the call into the
     /// model, so this button and the row's context menu cannot end up on different paths.
     var onArchive: (Workspace) -> Void
+    var onMenuArchive: (() -> Void)?
+    var isArchiveActive = false
+    @Binding var archiveRequest: ArchiveRequest?
+    @Binding var menuArchiveRequest: ArchiveRequest?
+    var onConfirmArchive: (ArchiveRequest) -> Void = { _ in }
 
     @Environment(AppModel.self) private var app
 
@@ -226,7 +231,7 @@ struct WorkspaceRow: View {
 
     /// Whether the two hover controls are being shown. Never while renaming: the field owns the
     /// whole row, and controls drawn over its trailing edge would sit on the text being typed.
-    private var controlsShown: Bool { isHovered && !isRenaming }
+    private var controlsShown: Bool { (isHovered || isArchiveActive) && !isRenaming }
 
     /// The width the controls cover when they are shown: the two buttons, side by side.
     private static let controlsWidth = SidebarMetrics.rowButton * 2
@@ -338,7 +343,7 @@ struct WorkspaceRow: View {
     /// `SidebarWorkspaceRow.confirmRowArchive`.
     private var moreMenu: some View {
         Menu {
-            WorkspaceMenuItems(workspace: workspace) { renaming = $0 }
+            WorkspaceMenuItems(workspace: workspace, onArchive: onMenuArchive) { renaming = $0 }
         } label: {
             // Still the CIRCLED ellipsis, which is not what the colour complaint looked like it
             // was asking for. A bare `ellipsis` was the obvious partner for `archivebox`, on the
@@ -377,6 +382,7 @@ struct WorkspaceRow: View {
         .fixedSize()
         .foregroundStyle(isEmphasized ? Palette.textInverted : Palette.textSecondary)
         .help("More for this workspace")
+        .archiveConfirmation($menuArchiveRequest, arrowEdge: .leading, onConfirm: onConfirmArchive)
     }
 
     private var archiveButton: some View {
@@ -398,6 +404,7 @@ struct WorkspaceRow: View {
         // way, and `ComposerStopButton`, which spelled the keys out in words.
         .help("Archive workspace (⌘⌫)")
         .accessibilityLabel("Archive \(workspace.name)")
+        .archiveConfirmation($archiveRequest, arrowEdge: .leading, onConfirm: onConfirmArchive)
     }
 
     // MARK: - Renaming

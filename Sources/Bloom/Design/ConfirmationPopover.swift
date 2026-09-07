@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Shared native popover content for the pull request strip's existing confirmations.
+/// Shared native popover content for confirmations attached to their initiating controls.
 struct ConfirmationPopover<Content: View>: View {
     let title: String
     let confirmLabel: String
@@ -39,6 +39,9 @@ struct ConfirmationPopover<Content: View>: View {
             }
             .padding(.top, 4)
         }
+        // A selected sidebar row inverts its ink. The popover has its own neutral surface.
+        .environment(\.backgroundProminence, .standard)
+        .foregroundStyle(.primary)
         .font(.body)
         .fixedSize(horizontal: false, vertical: true)
         .padding(20)
