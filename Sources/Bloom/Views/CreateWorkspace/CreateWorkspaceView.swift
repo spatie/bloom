@@ -71,6 +71,7 @@ struct CreateWorkspaceView: View {
     /// Whether this project runs anything after the worktree is cut, so the footer can say so.
     /// Read with the branches, from the same settings the rest of this window is built from.
     @State private var hasSetupScript = false
+    @State private var runSetupScript = true
     @State private var isLoading = false
 
     /// Whether a model will be asked to name this workspace, which decides what the window may
@@ -185,7 +186,7 @@ struct CreateWorkspaceView: View {
             prompt: task,
             hasCheckout: checkout != nil,
             isChatWorkspace: mode.runsAnAgent,
-            isBusy: app.isCreatingWorkspace
+            isBusy: app.isCreatingWorkspace || isLoading
         )
     }
 
@@ -204,9 +205,7 @@ struct CreateWorkspaceView: View {
     /// where the project has one. No worktree jargon, because a person who knows the word does not
     /// need the sentence and a person who does not is not helped by it.
     private var consequence: some View {
-        Text(hasSetupScript
-            ? "Creates a separate copy of the project on this Mac, on its own branch, and runs this project's setup script in it."
-            : "Creates a separate copy of the project on this Mac, on its own branch.")
+        Text("Creates a separate copy of the project on this Mac, on its own branch.")
             .font(Typo.caption)
             .foregroundStyle(Palette.textTertiary)
             .fixedSize(horizontal: false, vertical: true)
@@ -226,6 +225,12 @@ struct CreateWorkspaceView: View {
                     .padding(Metrics.gutter)
             } else {
                 composer
+                if hasSetupScript {
+                    WorkspaceSetupOption(isEnabled: $runSetupScript)
+                        .disabled(isLoading)
+                        .padding(.horizontal, Metrics.gutter)
+                        .padding(.bottom, Metrics.spacingWide)
+                }
                 consequence
             }
         }
@@ -893,6 +898,8 @@ struct CreateWorkspaceView: View {
         // so it goes with the project. Left standing, it would name a folder in a repository the
         // window is no longer looking at.
         heldProblem = nil
+        runSetupScript = true
+        hasSetupScript = false
 
         // Whichever box the remembered mode has put on screen. The window no longer always opens
         // on the writing box, so focusing it unconditionally would put the caret in a view that
@@ -1124,6 +1131,7 @@ struct CreateWorkspaceView: View {
         let base = baseBranch.isEmpty ? repo.defaultBranch : baseBranch
         let source = checkout
         let chosenControls = controls
+        let shouldRunSetup = runSetupScript
 
         // A file can be moved or deleted between being attached and Create being pressed, and
         // naming a path that is not there only teaches the agent that Bloom lies about paths.
@@ -1158,7 +1166,8 @@ struct CreateWorkspaceView: View {
                 opensWith: chosen,
                 controls: chosenControls,
                 staged: staged,
-                checkout: source
+                checkout: source,
+                runSetupScript: shouldRunSetup
             )
             // Whatever survived is in the worktree now, and whatever did not was never going to be.
             AttachmentStaging.discard(draftID: handedOver)

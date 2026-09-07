@@ -63,14 +63,9 @@ public struct WorkspaceStartRequest: Sendable {
     /// could go wrong, an id the CLI cannot find, is the CLI's answer to give and not this
     /// layer's to guess at.
     public var resuming: String?
-    /// Whether `start` runs the setup script itself, and waits for it.
-    ///
-    /// False for the app, which runs it through `WorkspaceModel` so the output streams into the
-    /// transcript, a failure raises the one sentence every route says about a failed setup, and
-    /// the whole thing can be cancelled by an archive. True for a caller with no window to stream
-    /// into, which wants the worktree to have its dependencies installed by the time `start`
-    /// returns.
-    public var runsSetup: Bool
+    /// The app normally streams setup itself. A headless caller can await it here instead,
+    /// or the owner can skip it for this workspace without changing the project configuration.
+    public var setupPolicy: WorkspaceSetupPolicy
 
     public init(
         id: WorkspaceID = .new(),
@@ -84,7 +79,7 @@ public struct WorkspaceStartRequest: Sendable {
         controls: ComposerControls? = nil,
         opensSession: Bool = true,
         resuming: String? = nil,
-        runsSetup: Bool = false
+        setupPolicy: WorkspaceSetupPolicy = .deferred
     ) {
         self.id = id
         self.repo = repo
@@ -97,7 +92,7 @@ public struct WorkspaceStartRequest: Sendable {
         self.controls = controls
         self.opensSession = opensSession
         self.resuming = resuming
-        self.runsSetup = runsSetup
+        self.setupPolicy = setupPolicy
     }
 }
 
@@ -170,7 +165,7 @@ extension WorkspaceManager {
     ///   to decline. It is a closure because whether to name a workspace automatically depends on
     ///   a preference and on whether the CLI is installed, and on which codenames are already in
     ///   use, none of which this layer should be reaching for.
-    /// - Parameter setupOutput: each line the setup script writes, when `runsSetup` is true.
+    /// - Parameter setupOutput: each line the setup script writes, when `setupPolicy` is `.run`.
     public func start(
         _ request: WorkspaceStartRequest,
         namer: @Sendable () async -> String? = { nil },
@@ -190,7 +185,8 @@ extension WorkspaceManager {
             branch: request.branch,
             baseBranch: request.baseBranch,
             origin: request.origin,
-            checkout: request.checkout
+            checkout: request.checkout,
+            setupPolicy: request.setupPolicy
         )
 
         // Here rather than inside `createWorkspace`, for the reason that method's own comment
@@ -237,7 +233,7 @@ extension WorkspaceManager {
         }
 
         var setupSucceeded: Bool?
-        if request.runsSetup {
+        if request.setupPolicy == .run {
             // **`ensurePort`, which is the same door the app's own setup run goes through.**
             //
             // This used to call `PortAllocator.allocate(taken: [])` directly, which is the bug

@@ -280,7 +280,7 @@ struct WorkspaceStartTests {
         let lines = LineCollector()
         let started = try await manager.start(
             WorkspaceStartRequest(
-                repo: registered, prompt: "Needs dependencies", origin: .user, runsSetup: true
+                repo: registered, prompt: "Needs dependencies", origin: .user, setupPolicy: .run
             ),
             setupOutput: { lines.append($0) }
         )
@@ -316,7 +316,7 @@ struct WorkspaceStartTests {
         let lines = LineCollector()
         let started = try await manager.start(
             WorkspaceStartRequest(
-                repo: registered, prompt: "Needs a port", origin: .user, runsSetup: true
+                repo: registered, prompt: "Needs a port", origin: .user, setupPolicy: .run
             ),
             setupOutput: { lines.append($0) }
         )
@@ -341,7 +341,7 @@ struct WorkspaceStartTests {
         """)
 
         let started = try await manager.start(WorkspaceStartRequest(
-            repo: registered, prompt: "Will not install", origin: .user, runsSetup: true
+            repo: registered, prompt: "Will not install", origin: .user, setupPolicy: .run
         ))
 
         #expect(started.setupSucceeded == false)

@@ -45,12 +45,14 @@ extension AppModel {
         branch: String? = nil,
         controls: ComposerControls? = nil,
         staged: StagedAttachments? = nil,
-        checkout: WorkspaceCheckout? = nil
+        checkout: WorkspaceCheckout? = nil,
+        runSetupScript: Bool = true
     ) async -> Workspace? {
         do {
             return try await startWorkspace(
                 in: repo, prompt: prompt, baseBranch: baseBranch, opensWith: opensWith,
-                branch: branch, controls: controls, staged: staged, checkout: checkout
+                branch: branch, controls: controls, staged: staged, checkout: checkout,
+                runSetupScript: runSetupScript
             )
         } catch {
             // Diagnosed rather than reported. `error.readableMessage` on a `ShellError` is the git
@@ -96,7 +98,8 @@ extension AppModel {
         checkout: WorkspaceCheckout? = nil,
         /// A thread on the chosen backend for the new chat to pick up. Only `carryOn` passes one.
         /// See `WorkspaceStartRequest.resuming`.
-        resuming: String? = nil
+        resuming: String? = nil,
+        runSetupScript: Bool = true
     ) async throws -> Workspace {
         guard let manager else { throw AppNotReady.stillStartingUp }
         isCreatingWorkspace = true
@@ -242,7 +245,7 @@ extension AppModel {
             // The app runs setup itself, through `WorkspaceModel`, so the output streams into the
             // transcript, a failure raises the one sentence every route says about a failed setup,
             // and an archive can cancel it. See `adopt`.
-            runsSetup: false
+            setupPolicy: runSetupScript ? .deferred : .skip
         )
 
         // Nil declines, and the workspace keeps the title git would have given it. The closure is
@@ -293,8 +296,8 @@ extension AppModel {
             prompt, staged: stagedPaths, arrived: arrived, isChatWorkspace: opensWith == .chat
         )
 
-        // Setup runs whether or not there is an agent turn to follow it. Only the turn is skipped
-        // for a terminal workspace.
+        // The persisted setup state carries the creation choice. The opening prompt still goes
+        // through the same queue when setup is skipped, including in a chat workspace.
         await model(for: started.workspace).startSetupThenSend(prompt: opening, repo: repo)
         return started.workspace
     }

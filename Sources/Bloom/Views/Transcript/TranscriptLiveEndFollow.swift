@@ -60,6 +60,19 @@ final class TranscriptLiveEndFollower {
     /// Whether the reader has hold of the view. Anything that is not an idle scroll phase.
     var isPaused = false { didSet { refresh() } }
 
+    /// An explicit glide owns the clip view until it lands. Streaming nudges must not start a
+    /// second display link, or reclaim the bottom before that glide has finished.
+    private(set) var isSeekingLiveEnd = false
+
+    func seekLiveEnd(_ seeking: Bool) {
+        isSeekingLiveEnd = seeking
+        if seeking {
+            dropLink()
+        } else {
+            refresh()
+        }
+    }
+
     /// Whether there is a travel to make at all, which is `TranscriptFollow.travels` and is about
     /// Reduce Motion. False leaves the transcript with the instant pin it has always had.
     var travels = true { didSet { refresh() } }
@@ -157,6 +170,7 @@ final class TranscriptLiveEndFollower {
         // Without the handback: a conversation the pane has left is owed nothing, and naming an
         // edge on the way out would land on whichever session arrives next.
         dropLink()
+        isSeekingLiveEnd = false
     }
 
     /// Forgets the height it had measured, without ending anything.
@@ -180,7 +194,7 @@ final class TranscriptLiveEndFollower {
     // MARK: - The link
 
     private var wants: Bool {
-        guard travels, isFrontmost, !isPaused, scrollView != nil else { return false }
+        guard travels, isFrontmost, !isPaused, !isSeekingLiveEnd, scrollView != nil else { return false }
         return isStreaming || CACurrentMediaTime() < deadline
     }
 
