@@ -818,7 +818,6 @@ public actor CodexRunner: SessionRunner {
     )
 }
 
-
 /// The live connection, where synchronous code can reach it. See `CodexRunner.terminateNow`.
 private final class LiveConnection: Sendable {
     private let client = Mutex<CodexClient?>(nil)
