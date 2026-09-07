@@ -118,7 +118,10 @@ extension AppModel {
     /// through `isPullRequestMerged`, so what is left to stop an archive is an agent mid turn and
     /// work that exists nowhere but that directory. Neither is weakened for it.
     func archive(
-        _ workspace: Workspace, deleteBranch: Bool? = nil, alwaysConfirm: Bool = false
+        _ workspace: Workspace,
+        deleteBranch: Bool? = nil,
+        alwaysConfirm: Bool = false,
+        presentConfirmation: ((ArchiveRequest) -> Void)? = nil
     ) async {
         guard let manager, let repo = repo(for: workspace) else {
             Log.archive.error(
@@ -153,13 +156,13 @@ extension AppModel {
                 path: workspace.path,
                 baseBranch: workspace.baseBranch
             )
-            pendingArchive = ArchiveRequest(
+            offerArchiveConfirmation(ArchiveRequest(
                 workspace: workspace,
                 report: WorkspaceSafetyReport(),
                 deleteBranch: deleteBranch,
                 problem: "Bloom could not check this workspace for unsaved work. \(trouble.sentence)",
                 hazards: hazards
-            )
+            ), present: presentConfirmation)
             return
         }
 
@@ -169,9 +172,9 @@ extension AppModel {
         )
 
         guard isSafe, !hazards.isAgentRunning, !alwaysConfirm else {
-            pendingArchive = ArchiveRequest(
+            offerArchiveConfirmation(ArchiveRequest(
                 workspace: workspace, report: report, deleteBranch: deleteBranch, hazards: hazards
-            )
+            ), present: presentConfirmation)
             return
         }
 
@@ -181,7 +184,8 @@ extension AppModel {
             deleteBranch: deleteBranch,
             force: false,
             report: report,
-            hazards: hazards
+            hazards: hazards,
+            presentConfirmation: presentConfirmation
         )
     }
 
@@ -209,8 +213,11 @@ extension AppModel {
     ///
     /// So nothing here may depend on state a dismissal can clear. The value the dialog was built
     /// from is the value it acts on.
-    func confirmArchive(_ request: ArchiveRequest) async {
-        pendingArchive = nil
+    func confirmArchive(
+        _ request: ArchiveRequest,
+        presentConfirmation: ((ArchiveRequest) -> Void)? = nil
+    ) async {
+        if pendingArchive?.id == request.id { pendingArchive = nil }
         guard let repo = repo(for: request.workspace) else {
             Log.archive.error(
                 "confirmed the archive of \(request.workspace.name, privacy: .public), but its project is gone"
@@ -225,12 +232,24 @@ extension AppModel {
             deleteBranch: request.deleteBranch,
             force: true,
             report: request.problem == nil ? request.report : nil,
-            hazards: request.hazards
+            hazards: request.hazards,
+            presentConfirmation: presentConfirmation
         )
     }
 
     func cancelPendingArchive() {
         pendingArchive = nil
+    }
+
+    /// Keep repeat safety questions on the surface that started the archive.
+    private func offerArchiveConfirmation(
+        _ request: ArchiveRequest, present: ((ArchiveRequest) -> Void)?
+    ) {
+        if let present {
+            present(request)
+        } else {
+            pendingArchive = request
+        }
     }
 
     private func performArchive(
@@ -239,7 +258,8 @@ extension AppModel {
         deleteBranch: Bool?,
         force: Bool,
         report: WorkspaceSafetyReport?,
-        hazards: ArchiveHazards
+        hazards: ArchiveHazards,
+        presentConfirmation: ((ArchiveRequest) -> Void)?
     ) async {
         guard let manager else {
             Log.archive.error(
@@ -327,9 +347,9 @@ extension AppModel {
                     "\(workspace.name, privacy: .public) changed between the check and the archive, so it is being asked about again"
                 )
                 // Only reachable when the worktree changed between the check and the archive.
-                pendingArchive = ArchiveRequest(
+                offerArchiveConfirmation(ArchiveRequest(
                     workspace: workspace, report: fresh, deleteBranch: deleteBranch, hazards: hazards
-                )
+                ), present: presentConfirmation)
             default:
                 Log.archive.error(
                     "could not archive \(workspace.name, privacy: .public): \(error.readableMessage, privacy: .public)"

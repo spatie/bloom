@@ -268,8 +268,6 @@ struct WorkspaceStatusTests {
         ).branch.isEmpty)
     }
 
-    /// The title is the one line a reader reliably reads, so it is the line that has to say who
-    /// merges. Bloom does not: the request goes to the workspace's agent as an ordinary turn.
     @Test("the merge confirmation says who is going to do it")
     func mergeConfirmationNamesEverything() throws {
         let pullRequest = try decode(json(
@@ -278,7 +276,7 @@ struct WorkspaceStatusTests {
         ))
 
         #expect(pullRequest.mergeConfirmationTitle(base: "main")
-            == "Ask the agent to merge #42 into main?")
+            == "Merge #42 into main?")
 
         let text = pullRequest.mergeConfirmation(base: "main", deletesBranch: true)
         #expect(text.contains("feature/glyphs"))
@@ -294,17 +292,14 @@ struct WorkspaceStatusTests {
         #expect(!text.contains("Squash and merge"))
     }
 
-    /// One paragraph still, and both halves of what confirming actually does: a turn goes into the
-    /// chat, and the branch on the server goes after the merge lands.
-    @Test("a clean merge confirmation is one short paragraph")
+    @Test("a clean merge separates the explanation from the branch deletion note")
     func mergeConfirmationIsShort() throws {
-        let text = try decode(json(state: "OPEN")).mergeConfirmation(
-            base: "main", deletesBranch: true
-        )
-        #expect(text == "This workspace's agent is asked to merge it, in the chat, so you see "
-            + "every command it runs and it can tell you if GitHub refuses. Once the merge lands "
-            + "it deletes feature/glyphs on GitHub, not here.")
-        #expect(!text.contains("\n"))
+        let pullRequest = try decode(json(state: "OPEN"))
+        #expect(pullRequest.mergeWarnings(base: "main").isEmpty)
+        #expect(pullRequest.mergeConfirmationMessage
+            == "Your agent will merge this pull request in the chat, where you can follow its progress.")
+        #expect(pullRequest.mergeBranchDeletionMessage(deletesBranch: true)
+            == "After merging, feature/glyphs will be deleted on GitHub. Your local branch stays.")
     }
 
     @Test("a confirmation that does not delete the branch does not claim to")
@@ -312,8 +307,9 @@ struct WorkspaceStatusTests {
         let text = try decode(json(state: "OPEN")).mergeConfirmation(
             base: "main", deletesBranch: false
         )
-        #expect(!text.contains("is deleted on GitHub"))
-        #expect(text.contains("asked to merge it, in the chat"))
+        #expect(!text.contains("deleted on GitHub"))
+        #expect(text.contains("agent will merge this pull request in the chat"))
+        #expect(try decode(json(state: "OPEN")).mergeBranchDeletionMessage(deletesBranch: false) == nil)
     }
 
     /// `describesPullRequest` is what sends `summary` and `detail` off to a pull request for the
