@@ -494,15 +494,19 @@ final class AttachmentChipCell: NSTextAttachmentCell {
             width: side,
             height: side
         )
-        // The chip's own icon, unless the pointer is on it, in which case the slot is the close
-        // control instead. A symbol that would not load draws nothing rather than leaving the
-        // wrong glyph in the slot: `icon` already falls back to the file's icon where there is a
-        // file, and for a block of instructions there is no second answer to fall back to.
-        let mark = (isRemovable(from: controlView, at: characterIndex) ? close : nil) ?? icon
-        mark?.draw(
-            in: iconRect, from: .zero, operation: .sourceOver, fraction: 1,
+        // Crossfade inside the fixed icon slot so the name and hit target stay still.
+        let hoverFraction = (controlView as? ComposerTextView)?
+            .chipHoverFraction(at: characterIndex) ?? 0
+        icon?.draw(
+            in: iconRect, from: .zero, operation: .sourceOver, fraction: 1 - hoverFraction,
             respectFlipped: true, hints: nil
         )
+        if hoverFraction > 0 {
+            close?.draw(
+                in: iconRect, from: .zero, operation: .sourceOver, fraction: hoverFraction,
+                respectFlipped: true, hints: nil
+            )
+        }
 
         let name = NSAttributedString(string: label, attributes: nameAttributes)
         let height = name.size().height
