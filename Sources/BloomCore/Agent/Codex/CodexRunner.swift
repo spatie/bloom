@@ -59,7 +59,7 @@ public actor CodexRunner: SessionRunner {
     private let connection = LiveConnection()
 
     private let pending = PendingAsks()
-    private let handle = TurnHandle()
+    private let handle = CodexTurnHandle()
     private let sink = EventFanout<AgentEvent>()
 
     /// Whether this run has already been stopped because its transcript was deleted underneath
@@ -215,7 +215,7 @@ public actor CodexRunner: SessionRunner {
     /// Answered before the interrupt rather than after, for the reason `AgentRunner.cancelNow`
     /// gives: an answer written after the thing that closes the turn is an answer the model never
     /// receives.
-    private func stopTurn(_ stopped: TurnHandle.Stopped) async {
+    private func stopTurn(_ stopped: CodexTurnHandle.Stopped) async {
         if handle.generation == stopped.generation, handle.wasCancelled {
             await filePendingAsks()
         }
@@ -255,7 +255,7 @@ public actor CodexRunner: SessionRunner {
         Task { await self.shutdown() }
     }
 
-    private func interrupt(_ stopped: TurnHandle.Stopped) async {
+    private func interrupt(_ stopped: CodexTurnHandle.Stopped) async {
         // Capture the stopped turn before persistence suspends. A new explicit send may install
         // a different turn while the cancelled state is being saved; that turn is not this Stop's.
         let target = stopped.turnID
@@ -571,6 +571,7 @@ public actor CodexRunner: SessionRunner {
     }
 
     private func emit(_ event: AgentEvent, endingTurn: String? = nil) async {
+        let intent = handle.intent
         if event.isTranscriptRow {
             await persist(
                 kind: event.kind,
@@ -581,7 +582,7 @@ public actor CodexRunner: SessionRunner {
 
         // Persistence suspends too. A terminal row already written stays in the history, but a
         // late event must not move the current lifecycle or announce completion to the window.
-        if let endingTurn, !handle.acceptsTerminal(turnID: endingTurn) { return }
+        if let endingTurn, !handle.acceptsTerminal(turnID: endingTurn, intent: intent) { return }
 
         switch event {
         case .result(let result):
@@ -605,7 +606,7 @@ public actor CodexRunner: SessionRunner {
             break
         }
 
-        if let endingTurn, !handle.acceptsTerminal(turnID: endingTurn) { return }
+        if let endingTurn, !handle.acceptsTerminal(turnID: endingTurn, intent: intent) { return }
         sink.yield(event)
     }
 
@@ -817,106 +818,6 @@ public actor CodexRunner: SessionRunner {
     )
 }
 
-// MARK: - Turn handle
-
-/// What a turn is, from outside the actor.
-///
-/// Stop is pressed from synchronous main-actor code, and the actor at that moment is busy running
-/// the thing being stopped. The intent has to be recorded where it can be read without waiting.
-///
-/// `Mutex<State>` rather than `NSLock` plus `@unchecked Sendable`, for the reason given on
-/// `EventFanout` in `SessionRunner`: `@unchecked` is a promise the compiler cannot check, and
-/// the two fields below have to move together.
-private final class TurnHandle: Sendable {
-    struct Stopped: Sendable {
-        let generation: UInt64
-        let turnID: String?
-    }
-
-    private struct State {
-        var current: String?
-        var cancelled = false
-        var generation: UInt64 = 0
-        var replacement: UUID?
-    }
-
-    private let state = Mutex(State())
-
-    var turnID: String? { state.withLock(\.current) }
-
-    /// The turn a message may be **steered into**, which is one that is open and has not been
-    /// stopped.
-    ///
-    /// **A stopped turn keeps its id for a moment and is over all the same.** `end()` runs on the
-    /// `turn/completed` the interrupt produces, so between `cancelNow` and that notification
-    /// arriving `current` still names a turn nobody is running. Steering into it is the wrong call
-    /// whatever the server answers, and it cost the one thing Stop is for: the next message went
-    /// into the dead turn instead of starting a new one on the same connection, which is what
-    /// keeps the grants the person has already given. `CodexRunnerTests`
-    /// `stopInterruptsTheTurnAndLeavesTheServerRunning` is that bug written down, at one handshake
-    /// and two turns.
-    ///
-    /// Both fields under one lock, which is the whole reason this is a `Mutex<State>`: reading
-    /// them separately is two answers that can disagree about the same instant.
-    var steerableTurnID: String? {
-        state.withLock { $0.cancelled ? nil : $0.current }
-    }
-
-    var wasCancelled: Bool { state.withLock(\.cancelled) }
-    var generation: UInt64 { state.withLock(\.generation) }
-
-    /// The old turn stops owning the busy state as soon as the owner asks for its replacement,
-    /// not only when the server eventually returns a new id.
-    func prepareReplacement() -> UUID? {
-        state.withLock {
-            guard $0.cancelled else { return nil }
-            let token = UUID()
-            $0.replacement = token
-            return token
-        }
-    }
-
-    func finishReplacement(_ token: UUID?) {
-        state.withLock {
-            if $0.replacement == token { $0.replacement = nil }
-        }
-    }
-
-    func acceptsTerminal(turnID: String) -> Bool {
-        state.withLock {
-            if $0.replacement != nil, $0.current == turnID { return false }
-            return $0.current == nil || $0.current == turnID
-        }
-    }
-
-    func check(_ generation: UInt64) throws {
-        guard state.withLock({ $0.generation == generation }) else { throw CancellationError() }
-        try Task.checkCancellation()
-    }
-
-    func begin(turnID: String, generation: UInt64) -> Bool {
-        state.withLock { state in
-            guard state.generation == generation else { return false }
-            state.current = turnID
-            state.cancelled = false
-            state.replacement = nil
-            return true
-        }
-    }
-
-    @discardableResult
-    func markCancelled() -> Stopped {
-        state.withLock {
-            $0.generation &+= 1
-            $0.cancelled = true
-            return Stopped(generation: $0.generation, turnID: $0.current)
-        }
-    }
-
-    func end() {
-        state.withLock { $0.current = nil }
-    }
-}
 
 /// The live connection, where synchronous code can reach it. See `CodexRunner.terminateNow`.
 private final class LiveConnection: Sendable {
