@@ -127,6 +127,9 @@ final class DetailSplitViewController: NSSplitViewController {
     private let detailHost: PaneViewController
     private let inspectorHost: PaneViewController
     private var inspectorItem: NSSplitViewItem!
+    /// AppKit may report an expanded frame during restoration or a closing animation.
+    /// Those frames must not reopen the title-bar band after the app has hidden the pane.
+    private var isInspectorPresented = false
 
     /// What the centre column refuses to go below. The inspector's ceiling is the other side of the
     /// same coin, and AppKit derives it rather than us: with both minimums declared a drag simply
@@ -246,7 +249,7 @@ final class DetailSplitViewController: NSSplitViewController {
     /// A drag or a resize. Never a slide: the pane is where it is, and the title bar should follow
     /// it this frame rather than a quarter of a second from now.
     @objc private func paneFrameChanged() {
-        publishInspectorWidth(collapsed: inspectorItem.isCollapsed, sliding: false)
+        publishInspectorWidth(collapsed: !isInspectorPresented || inspectorItem.isCollapsed, sliding: false)
     }
 
     /// `collapsed` is passed in rather than read back off the item, because the animated setter
@@ -264,20 +267,27 @@ final class DetailSplitViewController: NSSplitViewController {
         animated: Bool,
         content: SidebarSelection
     ) {
+        self.isInspectorPresented = isInspectorPresented
         detailHost.rootView = detail
         inspectorHost.rootView = inspector
 
         // Read before the assignment below, because what matters is whether the two lines above
         // have just handed SwiftUI a different pane to draw. See `InspectorTransition`, which is
         // where the crash this answers is written down.
+        let isFirstUpdate = lastContent == nil
         let contentIsChanging = lastContent != nil && lastContent != content
         lastContent = content
         let animated = InspectorTransition.isAnimated(
-            motionAllowed: animated, contentIsChanging: contentIsChanging
+            motionAllowed: animated && !isFirstUpdate, contentIsChanging: contentIsChanging
         )
 
         let shouldCollapse = !isInspectorPresented
-        guard inspectorItem.isCollapsed != shouldCollapse else { return }
+        guard inspectorItem.isCollapsed != shouldCollapse else {
+            // The restored native state can already be correct while the title bar still holds
+            // an earlier width. An unchanged collapse still needs to reconcile that geometry.
+            publishInspectorWidth(collapsed: shouldCollapse, sliding: false)
+            return
+        }
         if !shouldCollapse { makeRoomForInspector(animated: animated) }
         // The animated setter runs a layout pass on every frame of the transition, and layout churn
         // is the condition this window has crashed under, so Reduce Motion turns it off rather than
