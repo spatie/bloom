@@ -15,7 +15,8 @@ struct TranscriptEntryChangeTests {
     private func drawn(
         _ seqs: [Int], pending: [String] = []
     ) -> [TranscriptEntryID] {
-        [.setup] + rows(seqs) + [.sending, .streaming] + pending.map { .pending(DeliveryID($0)) }
+        [.setup] + rows(seqs) + [.sending, .streaming]
+            + pending.map { .pending(DeliveryID($0)) } + [.bottomSpacing]
     }
 
     // MARK: - Nothing moved
@@ -170,7 +171,7 @@ struct TranscriptEntryChangeTests {
     /// The turn here opens with the reader's message at row 0, and `fold.1` is the line over its
     /// working.
     private func turn(_ entries: [TranscriptEntryID]) -> [TranscriptEntryID] {
-        [.setup, .row(0)] + entries + [.sending, .streaming]
+        [.setup, .row(0)] + entries + [.sending, .streaming, .bottomSpacing]
     }
 
     /// A turn's line joins the list at the second row of its working, long before it can fold.

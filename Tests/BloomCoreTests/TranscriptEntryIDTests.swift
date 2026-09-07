@@ -4,6 +4,14 @@ import Foundation
 
 @Suite("What a transcript entry's id promises")
 struct TranscriptEntryIDTests {
+    @Test("bottom spacing is stable decoration, not a stored or self-updating row")
+    func bottomSpacingIsDecoration() {
+        #expect(TranscriptEntryID.bottomSpacing.seq == nil)
+        #expect(!TranscriptEntryID.bottomSpacing.redrawsItself)
+        #expect(TranscriptEntryID.bottomSpacing != .streaming)
+        #expect(TranscriptEntryID.bottomSpacing.description == "bottomSpacing")
+    }
+
     /// **The rule behind giving a row no view at all.** A row measured at nought is given no cell,
     /// which is most of a real session, and the whole safety of that is that a stored row cannot
     /// change what it draws without its content key moving.
