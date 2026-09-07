@@ -71,6 +71,7 @@ struct ChangedFileRow: View, Equatable {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .background(HoverQuickLook(url: URL(fileURLWithPath: fullPath)))
         // The real file, so a drop into Finder or an editor gets the document rather than a
         // sentence about where it lives. One file per drag: the list carries a single selection.
         .fileDrag(path: fullPath)

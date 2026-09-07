@@ -4,7 +4,14 @@ import BloomCore
 /// An `NSTextView` that offers each key press to the composer before typing it, says when it was
 /// resized or focused so the SwiftUI side can keep up, and hands over anything that arrives as a
 /// file or a picture rather than as text.
-final class ComposerTextView: NSTextView {
+final class ComposerTextView: NSTextView, HoverQuickLookSource {
+    var previewAttachment: (@MainActor (String) -> URL?)?
+
+    func quickLookURL(at point: NSPoint) -> URL? {
+        guard let path = chip(at: point)?.path else { return nil }
+        return previewAttachment?(path)
+    }
+
     /// Offered every key press, together with what is selected when it arrives: the composer's
     /// answer to backspace depends on whether the caret is a bare insertion point at the start,
     /// and only the text view knows that.
@@ -52,6 +59,7 @@ final class ComposerTextView: NSTextView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        HoverQuickLookController.shared.update(self)
         if window != nil { onWindowChange?() }
     }
 

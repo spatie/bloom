@@ -91,10 +91,10 @@ struct MediaShowRowView: View {
                     maxWidth: TranscriptLayout.proseMeasure,
                     maxHeight: 520
                 )
-                .background(MediaQuickLookHotspot(url: media.url))
+                .background(HoverQuickLook(url: media.url))
                 .help("Hover and press Space for Quick Look")
                 .accessibilityAction(named: "Quick Look") {
-                    MediaQuickLookController.shared.show(media.url)
+                    HoverQuickLookController.shared.show(media.url)
                 }
             case .video:
                 InlineVideoView(url: media.url)

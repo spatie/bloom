@@ -206,7 +206,10 @@ struct UserTurnRowView: View {
                     // AppKit cannot read the `colorScheme` this bubble sets, so it is named.
                     selectionColor: Palette.bubbleTextSelection,
                     alignsBubbleInk: true,
-                    actions: linkActions.opening(file: open, hovering: { hovered = $0 })
+                    actions: linkActions.opening(
+                        file: open, hovering: { hovered = $0 },
+                        previewing: { PromptAttachment.sent(path: $0).url(in: home.worktree) }
+                    )
                 )
                 .background { chipProbe }
             }
@@ -344,11 +347,13 @@ extension TranscriptLinkActions {
     @MainActor
     func opening(
         file open: @escaping @MainActor @Sendable (String) -> Void,
-        hovering hover: @escaping @MainActor @Sendable (FileChipHover?) -> Void
+        hovering hover: @escaping @MainActor @Sendable (FileChipHover?) -> Void,
+        previewing preview: @escaping @MainActor @Sendable (String) -> URL?
     ) -> TranscriptLinkActions {
         var copy = self
         copy.openFile = open
         copy.hoverFile = hover
+        copy.previewFile = preview
         // The identity moves with the closure, or a bubble that can open a file would compare
         // equal to the list's value that cannot, and the environment would never see the change.
         if case let .workspace(id, pane) = identity {
