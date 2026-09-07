@@ -48,7 +48,7 @@ struct FoldingASubagentsRowsTests {
     private let everything = 0..<1_000
 
     private func hides(_ work: TranscriptFold.Work) -> Int {
-        TranscriptFold.hides(work, revealed: [], drawn: everything)
+        TranscriptFold.hiddenIndices(work, revealed: [], drawn: everything).count
     }
 
     // MARK: The run that was drawn in full

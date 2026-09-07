@@ -47,12 +47,12 @@ import Foundation
 /// # What is never hidden
 ///
 /// Four things remain visible. Permanent outcomes split consecutive activity into a new fold;
-/// temporary or reader-selected rows cap the current fold without rearranging it.
+/// running actions stay outside their group, and reader-selected rows cap what it hides.
 ///
 /// 1. **A row whose result has not come back.** What such a row says can still change, and a fold
 ///    that had to reveal a row it had hidden is a transcript rearranging itself under somebody who
 ///    is reading it. A tool call with no result yet, and a permission question nobody has answered
-///    yet, are the same fact here.
+///    yet, are the same fact here. Completed actions after them can still join the fold.
 /// 2. **The agent stopping, and a row carrying content of its own.** An `error` row is the agent
 ///    exiting in a way it did not choose, and inline media is deliberate content wearing an
 ///    activity row's clothes. Both remain visible and divide the ordinary activity before and
@@ -80,8 +80,8 @@ import Foundation
 ///    only find a row the table is DRAWING, so a search hit or an unread mark inside a fold is not
 ///    a row somewhere off screen, it is a scroll that lands nowhere at all.
 ///
-/// **Every one of them is a stopping point rather than a refusal**, and that is the property the
-/// rest of this file is arranged around: what a fold hides only ever grows.
+/// Settling an action only adds it to the hidden rows. It never reveals completed work that
+/// was already folded, and the group keeps its identity while results arrive out of order.
 public enum TranscriptFold {
     /// The fewest rows worth hiding.
     ///
@@ -143,9 +143,9 @@ public enum TranscriptFold {
     /// different ids, which is exactly `.rebuilt`.
     ///
     /// - Parameter drawn: the window of rows the list is handing to the table. A fresh fold whose
-    ///   working runs past it cannot be adopted, and this is not a detail: `hides` refuses to fold
-    ///   a working the window stops inside, so adopting one would UNFOLD the turn for a pass. The
-    ///   window grows on the same event, one pass behind, exactly as these do.
+    ///   working runs past it cannot be adopted: `hiddenIndices` refuses to fold a working the
+    ///   window stops inside, so adopting one would UNFOLD the turn for a pass. The window grows
+    ///   on the same event, one pass behind, exactly as these do.
     public static func mayAdopt(_ fresh: Folds, over stale: Folds, drawn: Range<Int>) -> Bool {
         // A turn's first fold appearing is an insertion in the middle of the list, which is the
         // one shape `Folds` documents as a reload. It is left to the pass that already handles it.
@@ -161,38 +161,26 @@ public enum TranscriptFold {
     /// that leaves none. Rows are only ever appended, so a working that exposes a higher sequence
     /// number than it did is a working that has gained an exposed row.
     private static func lastExposedSeq(_ work: Work) -> Int {
-        guard work.ready < work.rows.count, let last = work.rows.last else { return .min }
+        guard let last = work.rows.last(where: { !work.ready.contains($0.index) }) else { return .min }
         return last.seq
     }
 
-    /// How many rows at the front of this turn's work are hidden right now, or nought for a fold
-    /// that is not folded.
+    /// The indices of completed activity rows hidden by a collapsed group.
     ///
-    /// **A prefix that only grows, which is the whole of why nothing unfolds under a reader.**
-    /// Every term moves in one direction only: results arrive and never un-arrive, questions get
-    /// answered and never unanswered, rows are appended and never removed, and `revealed` only ever
-    /// gains a row that is already on screen. So the answer for a given turn never goes down.
+    /// Results can arrive out of order. Keep pending actions visible without letting them hold
+    /// later completed actions outside the fold. The group still starts at its first activity
+    /// row, so settling a pending action changes the count without moving the disclosure.
     ///
-    /// `revealed` is every sequence number something has asked to be visible: the tool results the
-    /// reader has opened, and the row this session was opened on. `drawn` is the window of rows the
-    /// list is handing to the table, because a fold has to be able to draw what it leaves.
-    public static func hides(_ work: Work, revealed: Set<Int>, drawn: Range<Int>) -> Int {
-        // Settled work can all move into the fold. Its newest row remains visible as the fold's
-        // label, so this compacts the transcript without taking the current activity away.
-        var count = min(work.ready, work.rows.count)
-        // Cut short at the first row somebody is reading or being taken to, rather than refusing to
-        // fold at all: refusing would unfold a turn that had already folded.
+    /// A row the reader opened or navigated to still caps the fold, preserving the context they
+    /// are reading. A window that ends inside the group cannot fold it yet.
+    public static func hiddenIndices(_ work: Work, revealed: Set<Int>, drawn: Range<Int>) -> Set<Int> {
+        guard work.span.upperBound <= drawn.upperBound else { return [] }
+        var hidden = work.ready
         if !revealed.isEmpty,
-           let stop = work.rows.prefix(count).firstIndex(where: { revealed.contains($0.seq) }) {
-            count = stop
+           let stop = work.rows.first(where: { revealed.contains($0.seq) }) {
+            hidden = hidden.filter { $0 < stop.index }
         }
-        guard count >= leastHidden else { return 0 }
-        // A window that stops inside the working cannot fold it: the rows it would leave are rows
-        // the table is not drawing, and the line would stand over nothing. Only the window's END is
-        // asked about, because its start only ever moves down and what is hidden is an absolute
-        // range of rows rather than one measured from the window.
-        guard work.span.upperBound <= drawn.upperBound else { return 0 }
-        return count
+        return hidden.count >= leastHidden ? hidden : []
     }
 
     /// One row, in the only terms the fold cares about.
@@ -269,8 +257,8 @@ public enum TranscriptFold {
 
     /// One row of a turn's working: where it is, and what it is called.
     ///
-    /// The index answers "is this row hidden", which is a comparison against the first row that
-    /// stays. The seq answers "is this the row somebody asked to see", which arrives as a set of
+    /// The index answers "is this row hidden", through membership in the set of hidden indices.
+    /// The seq answers "is this the row somebody asked to see", which arrives as a set of
     /// sequence numbers from the view. Both are needed and neither can be derived from the other.
     public struct Row: Equatable, Sendable {
         public var index: Int
@@ -309,13 +297,9 @@ public enum TranscriptFold {
         public var span: Range<Int>
         /// Every row of the working that draws something, in order.
         public var rows: [Row]
-        /// How many rows from the front may be hidden.
-        ///
-        /// A prefix rather than a count, because a gap in the middle would let a row that is still
-        /// waiting be hidden behind one that has landed. Permanent visible rows are not part of
-        /// this work segment. It stops at the first row that has not settled, and it never goes
-        /// backwards, which is what makes the fold monotone.
-        public var ready: Int
+        /// Indices into the session's rows of every settled action in this group.
+        /// Pending actions are gaps in this set, so they cannot block later completed work.
+        public var ready: Set<Int>
         /// Whether the turn has said its answer, so nothing of the working need stay on screen.
         public var hasAnswer: Bool
         /// Whether this is a subagent's own work, so the line that stands for it is drawn indented
@@ -332,7 +316,7 @@ public enum TranscriptFold {
         public var firstSeq: Int { rows.first?.seq ?? 0 }
 
         public init(
-            span: Range<Int>, rows: [Row], ready: Int, hasAnswer: Bool, isNested: Bool = false
+            span: Range<Int>, rows: [Row], ready: Set<Int>, hasAnswer: Bool, isNested: Bool = false
         ) {
             self.span = span
             self.rows = rows
@@ -368,7 +352,7 @@ public enum TranscriptFold {
         /// Where the next scan starts, which is just past the last row that ENDED a turn.
         ///
         /// Only a user's message and a turn's result row settle everything above them. A turn that
-        /// is still running has a working whose answer is provisional and whose settled prefix is
+        /// is still running has a working whose answer is provisional and whose set of settled rows is
         /// about to grow, so it is rescanned in full every time a row lands. A turn is a few
         /// hundred rows at worst and the facts are read off the row rather than out of its payload.
         public var resumeIndex: Int
@@ -442,15 +426,10 @@ public enum TranscriptFold {
                 guard segment.count >= leastWork,
                       let first = segment.first,
                       let last = segment.last else { return }
-                var ready = 0
-                while ready < segment.count,
-                      segment[segment.index(segment.startIndex, offsetBy: ready)].ready {
-                    ready += 1
-                }
                 found.append(Work(
                     span: first.row.index..<(last.row.index + 1),
                     rows: segment.map(\.row),
-                    ready: ready,
+                    ready: Set(segment.lazy.filter(\.ready).map { $0.row.index }),
                     hasAnswer: hasAnswer,
                     // Every item in the buffer shares one parent, because a change of it is what
                     // closed the group, so the first answers for the segment.

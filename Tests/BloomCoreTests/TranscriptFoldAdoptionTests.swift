@@ -11,7 +11,7 @@ struct TranscriptFoldAdoptionTests {
     ) -> TranscriptFold.Work {
         let list = (0..<rows).map { TranscriptFold.Row(index: $0, seq: firstSeq + $0) }
         return TranscriptFold.Work(
-            span: 0..<(upperBound ?? rows), rows: list, ready: ready, hasAnswer: false
+            span: 0..<(upperBound ?? rows), rows: list, ready: Set(0..<ready), hasAnswer: false
         )
     }
 
@@ -26,6 +26,24 @@ struct TranscriptFoldAdoptionTests {
         let fresh = Self.folds([Self.work(firstSeq: 10, rows: 4, ready: 4)])
 
         #expect(TranscriptFold.mayAdopt(fresh, over: stale, drawn: 0..<40))
+    }
+
+    @Test func adoptsCompletedActionsAfterARunningCommand() {
+        var old = Self.work(firstSeq: 10, rows: 5, ready: 0)
+        old.ready = [1, 2, 3]
+        var new = old
+        new.ready.insert(4)
+
+        #expect(TranscriptFold.mayAdopt(Self.folds([new]), over: Self.folds([old]), drawn: 0..<40))
+    }
+
+    @Test func refusesANewRunningActionAfterCompletedActions() {
+        var old = Self.work(firstSeq: 10, rows: 4, ready: 0)
+        old.ready = [1, 2, 3]
+        var new = Self.work(firstSeq: 10, rows: 5, ready: 0)
+        new.ready = old.ready
+
+        #expect(!TranscriptFold.mayAdopt(Self.folds([new]), over: Self.folds([old]), drawn: 0..<40))
     }
 
     /// The batched case, and the reason the deferral exists: a result and the next call arrive
@@ -56,7 +74,7 @@ struct TranscriptFoldAdoptionTests {
         #expect(!TranscriptFold.mayAdopt(fresh, over: stale, drawn: 0..<40))
     }
 
-    /// **`hides` refuses to fold a working the drawn window stops inside**, so adopting one whose
+    /// **`hiddenIndices` refuses to fold a working the drawn window stops inside**, so adopting one whose
     /// rows the table is not all holding would unfold the turn for a pass, which is the opposite
     /// of the complaint. The window grows on the same event and one pass behind, exactly as the
     /// runs do.

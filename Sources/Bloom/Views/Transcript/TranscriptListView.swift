@@ -518,10 +518,10 @@ struct TranscriptListView: View {
         // and the `onChange` at the foot of `body`, which is the pass.
         let folds = Self.foldsForThisPass(rows: rows, stored: self.folds, drawn: drawnRange)
         let lastVisibleSeq = drawnRows.last(where: { !TranscriptNoise.isHidden($0) })?.seq
-        // The turn the loop below is inside, so a fold's own line is emitted once, and the first
-        // row of that turn's working which is NOT hidden. Every row before it is skipped.
+        // The group the loop is inside, so its line is emitted once, and the indices of its
+        // completed rows. Pending rows can sit between hidden ones.
         var foldSeq: Int?
-        var shownFrom = 0
+        var hiddenIndices: Set<Int> = []
 
         var out: [TranscriptTableEntry] = []
         // A workspace's setup script, its worktree events and its opening prompt. All three are
@@ -571,22 +571,14 @@ struct TranscriptListView: View {
                     foldSeq = work.firstSeq
                     // What the fold would hide if the reader had not opened it, which is what the
                     // line has to say either way, and whether it has anything to say at all.
-                    let would = TranscriptFold.hides(work, revealed: revealed, drawn: drawnRange)
-                    let hidden = unfolded.contains(work.firstSeq) ? 0 : would
-                    shownFrom = if hidden == 0 {
-                        work.span.lowerBound
-                    } else if hidden < work.rows.count {
-                        work.rows[hidden].index
-                    } else {
-                        // The whole working is behind the line, so the next thing drawn is the
-                        // turn's answer, which is past the span.
-                        work.span.upperBound
-                    }
+                    let would = TranscriptFold.hiddenIndices(work, revealed: revealed, drawn: drawnRange)
+                    hiddenIndices = unfolded.contains(work.firstSeq) ? [] : would
+                    let isFolded = !hiddenIndices.isEmpty
                     out.append(foldEntry(
                         firstSeq: work.firstSeq,
-                        hiding: hidden > 0 ? would : work.rows.count,
-                        showsMore: hidden > 0 && would < work.rows.count,
-                        isFolded: hidden > 0,
+                        hiding: isFolded ? would.count : work.rows.count,
+                        showsMore: isFolded && would.count < work.rows.count,
+                        isFolded: isFolded,
                         // A subagent's line is drawn where its rows are, under the call that
                         // started it. See `TranscriptFold`, which is where the grouping is.
                         isNested: work.isNested,
@@ -594,13 +586,15 @@ struct TranscriptListView: View {
                         // when it is pressed is worse than no control. Its entry stays in the list
                         // all the same, drawing nothing, because an entry that came and went in
                         // the middle of the list is the `.rebuilt` this is all arranged to avoid.
-                        shows: would > 0,
+                        shows: !would.isEmpty,
                         session: sessionID
                     ))
                 }
-                // Everything before the first row that stays is the fold, and the rows that draw
-                // nothing between them go with it.
-                if index < shownFrom { continue }
+                // Skip completed actions individually so a pending command stays visible even
+                // when later commands have finished. Empty stream rows need no table entry either.
+                if !hiddenIndices.isEmpty,
+                   hiddenIndices.contains(index)
+                    || TranscriptRowInk.drawsNothing(kind: row.kind, payload: row.payload) { continue }
             }
             guard !TranscriptNoise.isHidden(row) else { continue }
             let isExpanded = expanded.contains(row.seq)
