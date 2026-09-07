@@ -2,7 +2,6 @@ import AVFoundation
 import AVKit
 import AppKit
 import BloomCore
-import QuickLookUI
 import SwiftUI
 
 /// Media the agent deliberately placed in the conversation.
@@ -35,7 +34,7 @@ struct MediaShowRowView: View {
             if let media = resolvedMedia {
                 mediaView(media)
 
-                HStack(spacing: Metrics.spacingWide) {
+                HStack(spacing: Metrics.spacing) {
                     Label(media.relativePath, systemImage: media.kind == .image ? "photo" : "film")
                         .font(Typo.caption)
                         .foregroundStyle(Palette.textTertiary)
@@ -43,23 +42,20 @@ struct MediaShowRowView: View {
                         .truncationMode(.middle)
                         .help(media.relativePath)
 
-                    Spacer(minLength: Metrics.spacing)
-
-                    Button("Quick Look", systemImage: "eye") {
-                        MediaQuickLookController.shared.show(media.url)
+                    Menu {
+                        Button("Open") { NSWorkspace.shared.open(media.url) }
+                        Button("Download") { save(media.url) }
+                    } label: {
+                        Label("More for \(media.url.lastPathComponent)", systemImage: "ellipsis.circle")
                     }
                     .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
                     .controlSize(.small)
-                    .help("Open in Quick Look")
+                    .fixedSize()
+                    .help("Open or download this file")
 
-                    Button("Save As", systemImage: "square.and.arrow.down") {
-                        save(media.url)
-                    }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .help("Save a copy")
+                    Spacer(minLength: 0)
                 }
             } else {
                 Label("This media file is no longer available", systemImage: "doc.questionmark")
@@ -95,6 +91,11 @@ struct MediaShowRowView: View {
                     maxWidth: TranscriptLayout.proseMeasure,
                     maxHeight: 520
                 )
+                .background(MediaQuickLookHotspot(url: media.url))
+                .help("Hover and press Space for Quick Look")
+                .accessibilityAction(named: "Quick Look") {
+                    MediaQuickLookController.shared.show(media.url)
+                }
             case .video:
                 InlineVideoView(url: media.url)
             }
@@ -118,12 +119,21 @@ struct MediaShowRowView: View {
             panel.nameFieldStringValue = source.lastPathComponent
             panel.canCreateDirectories = true
             guard await panel.present() == .OK, let destination = panel.url else { return }
+            guard source.resolvingSymlinksInPath().standardizedFileURL
+                != destination.resolvingSymlinksInPath().standardizedFileURL else { return }
 
             do {
+                // Prepare the whole copy before replacing an existing destination. A failed
+                // copy must not delete the file the save panel asked permission to replace.
+                let temporary = destination.deletingLastPathComponent()
+                    .appendingPathComponent(".bloom-download-\(UUID().uuidString)")
+                defer { try? FileManager.default.removeItem(at: temporary) }
+                try FileManager.default.copyItem(at: source, to: temporary)
                 if FileManager.default.fileExists(atPath: destination.path) {
-                    try FileManager.default.removeItem(at: destination)
+                    _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
+                } else {
+                    try FileManager.default.moveItem(at: temporary, to: destination)
                 }
-                try FileManager.default.copyItem(at: source, to: destination)
             } catch {
                 NSAlert(error: error).runModal()
             }
@@ -187,29 +197,5 @@ private struct NativeVideoPlayer: NSViewRepresentable {
     static func dismantleNSView(_ view: AVPlayerView, coordinator: Void) {
         view.player?.pause()
         view.player = nil
-    }
-}
-
-private final class MediaQuickLookController: NSObject, @MainActor QLPreviewPanelDataSource {
-    @MainActor
-    static let shared = MediaQuickLookController()
-
-    private var url: URL?
-
-    @MainActor
-    func show(_ url: URL) {
-        self.url = url
-        guard let panel = QLPreviewPanel.shared() else { return }
-        panel.dataSource = self
-        panel.reloadData()
-        panel.makeKeyAndOrderFront(nil)
-    }
-
-    func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
-        url == nil ? 0 : 1
-    }
-
-    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! {
-        url as NSURL?
     }
 }
