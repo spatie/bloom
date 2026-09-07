@@ -18,6 +18,7 @@ struct AgentsSettingsView: View {
     @State private var isLoading = true
     @State private var isRefreshing = false
     @State private var saveFailure: String?
+    @State private var loginFailure: String?
     @State private var pathDraft = ""
     /// Which agent `pathDraft` belongs to. `selection` has already moved on by the time the
     /// change handler runs, so committing against it would file one agent's path under another.
@@ -50,6 +51,14 @@ struct AgentsSettingsView: View {
                 Section {
                     ErrorBanner(title: "Could not save", message: saveFailure) {
                         self.saveFailure = nil
+                    }
+                }
+            }
+
+            if let loginFailure {
+                Section {
+                    ErrorBanner(title: "Could not start sign-in", message: loginFailure) {
+                        self.loginFailure = nil
                     }
                 }
             }
@@ -285,12 +294,15 @@ struct AgentsSettingsView: View {
 
     // MARK: - Actions
 
-    /// The login flows are interactive, so they cannot run inline. `Reveal.inTerminal` opens a
-    /// Terminal window sitting at a path, and the command is appended to that so it runs in the
-    /// window the user is now looking at.
+    /// Detection may have found an override or an installation the external terminal cannot find
+    /// on PATH. Run that exact binary, with the directory and arguments kept separate throughout.
     private func runLogin() {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        Reveal.inTerminal("\(home) && \(selection.loginCommand)")
+        guard let executable = status?.executablePath else { return }
+        loginFailure = Reveal.inTerminal(
+            directory: AgentScratchDirectory.current(),
+            executable: executable,
+            arguments: selection.loginArguments
+        )
     }
 
     private func chooseExecutable() {

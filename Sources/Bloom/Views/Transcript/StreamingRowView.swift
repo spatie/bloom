@@ -38,9 +38,8 @@ import SwiftUI
 ///
 /// What was actually popping is the moment the answer starts: the turn shows "Working", and then
 /// a paragraph of prose is on screen in one frame where a status line was. That is a block
-/// arriving in front of the reader in exactly the sense `RowArrival` was written for, so it gets
-/// the same settle a tool row gets, at the same length, honouring the same Reduce Motion setting.
-/// Once per block, which is once or twice a turn, and nothing per delta.
+/// arriving in front of the reader. `MessageArrival` gives it a short fade with a clock that
+/// follows it into the saved row, honouring Reduce Motion. Once per block, nothing per delta.
 struct StreamingRowView: View {
     let transcript: TranscriptModel
 
@@ -58,7 +57,7 @@ struct StreamingRowView: View {
                     tokens: transcript.thinkingTokens
                 )
                 .transaction { $0.animation = nil }
-                .arrivingRow(true)
+                .messageArrival(transcript.messageArrivals.stream(.thinking))
             }
 
             if !transcript.streamingText.isEmpty {
@@ -80,7 +79,7 @@ struct StreamingRowView: View {
                     // modifier clears the animation for what it wraps, and the opacity this adds
                     // sits above it, so the block's own settle survives while the text under it
                     // stays as sudden as it was.
-                    .arrivingRow(true)
+                    .messageArrival(transcript.messageArrivals.stream(.assistantText))
             }
 
             // Before the status line and in place of it, because it is the same slot answering

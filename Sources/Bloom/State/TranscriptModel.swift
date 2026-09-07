@@ -133,6 +133,7 @@ final class TranscriptModel {
     /// Text and thinking arriving live, before the completed block is persisted.
     private(set) var streamingText = ""
     private(set) var streamingThinking = ""
+    @ObservationIgnored private(set) var messageArrivals = MessageArrivals()
     private(set) var streamingToolName: String?
     private(set) var thinkingTokens = 0
     private(set) var statusLabel: String?
@@ -437,6 +438,7 @@ final class TranscriptModel {
 
     /// The same fold, straight onto the model, for the rows that arrive while the session is open.
     private func absorb(_ message: Message, decisions: [String: String] = [:]) {
+        messageArrivals.persisted(seq: message.seq, kind: message.kind, sending: sending?.id)
         Self.absorb(message, decisions: decisions, into: &rows, indexByRefID: &indexByRefID)
         // The stored row has arrived, so the bubble drawn from the queue is now the same sentence
         // drawn twice. Retired here rather than after the send returns, because the pump can read
@@ -555,6 +557,7 @@ final class TranscriptModel {
         // bubble that goes on screen are one object with one id. Drawn twice under two ids is the
         // duplicate that would appear the moment the queue was read back.
         let delivery = Delivery(targetSessionID: session.id, body: body)
+        messageArrivals.sent(delivery.id)
         if queuesNextMessage {
             pendingDeliveries.append(delivery)
         } else {
@@ -1277,8 +1280,10 @@ final class TranscriptModel {
             // through. That is the only signal there is: the CLI announces a retry and never
             // announces a recovery, so the recovery is the next event of any kind.
             settleRetryRun()
-            clearStreaming()
             await appendLatestMessages()
+            // Keep the live drawing while the store is awaited. Clearing first leaves an empty
+            // frame between the stream and its saved row, interrupting the shared arrival.
+            clearStreaming()
 
         case .error(let failure):
             // The agent died without ever producing a result: a model it does not know, expired
@@ -1577,10 +1582,12 @@ final class TranscriptModel {
     /// Puts what has arrived on screen, in one write per property rather than one per delta.
     private func flushStream() {
         if !buffer.text.isEmpty {
+            if streamingText.isEmpty { messageArrivals.beganStream(.assistantText) }
             streamingText += buffer.text
             buffer.text = ""
         }
         if !buffer.thinking.isEmpty {
+            if streamingThinking.isEmpty { messageArrivals.beganStream(.thinking) }
             streamingThinking += buffer.thinking
             buffer.thinking = ""
         }

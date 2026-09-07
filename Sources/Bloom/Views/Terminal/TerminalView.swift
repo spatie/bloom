@@ -441,6 +441,21 @@ final class BloomTerminalView: LocalProcessTerminalView {
             return super.performKeyEquivalent(with: event)
         }
 
+        // Claim this before Archive Workspace's menu equivalent. Sending the original event
+        // through the terminal keeps enhanced keyboard protocols intact; legacy shells need
+        // Ctrl+U because SwiftTerm does not handle AppKit's deleteToBeginningOfLine selector.
+        if let input = TerminalEditingShortcut.input(
+            key: key,
+            isPlainCommand: !shift,
+            usesEnhancedKeyboard: !getTerminal().keyboardEnhancementFlags.isEmpty
+        ) {
+            switch input {
+            case .text(let text): send(txt: text)
+            case .keyEvent: keyDown(with: event)
+            }
+            return true
+        }
+
         switch key {
         case "k" where !shift:
             clearScreen()

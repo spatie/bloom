@@ -723,11 +723,16 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
 
     /// Interactive, so it has to be handed to a terminal rather than run inline.
     public var loginCommand: String {
+        ([executableName] + loginArguments).joined(separator: " ")
+    }
+
+    /// Kept separate from the executable so Settings can use the binary it actually detected,
+    /// including an override outside the external terminal's PATH.
+    public var loginArguments: [String] {
         switch self {
-        case .claudeCode: "claude /login"
-        case .codex: "codex login"
-        case .cursor: "cursor-agent login"
-        case .openCode: "opencode auth login"
+        case .claudeCode: ["/login"]
+        case .codex, .cursor: ["login"]
+        case .openCode: ["auth", "login"]
         }
     }
 

@@ -682,6 +682,7 @@ struct TranscriptListView: View {
                             // row: the row is inserted at its full height exactly as it always
                             // was, so nothing moves, nothing reflows, and nothing below it shifts.
                             .arrivingRow(settles && arrivals.isArriving(row.seq))
+                            .messageArrival(transcript.messageArrivals.row(row.seq))
                             .padding(.horizontal, TranscriptLayout.inset)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         )
@@ -723,12 +724,7 @@ struct TranscriptListView: View {
                             )
                         }
                     }
-                    // The owner's own bubble settles in like every other row that turns up. It is
-                    // the one thing on this screen the reader made happen, and it was the only
-                    // arrival with no settle at all: pressing Return put a bubble on screen in a
-                    // single frame. Always true rather than asked of the tracker, because this
-                    // view has no seq to ask about.
-                    .arrivingRow(true)
+                    .messageArrival(transcript.messageArrivals.delivery(sending.id))
                     .padding(.horizontal, TranscriptLayout.inset)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 )
@@ -805,6 +801,7 @@ struct TranscriptListView: View {
                             onEdit: { Task { await transcript.editPending(delivery) } },
                             onDelete: { transcript.askToDiscard(delivery) }
                         )
+                        .messageArrival(transcript.messageArrivals.delivery(delivery.id))
                         .padding(.horizontal, TranscriptLayout.inset)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     )

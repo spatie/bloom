@@ -45,17 +45,19 @@ enum Reveal {
         NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: (path as NSString).deletingLastPathComponent)
     }
 
-    static func inTerminal(_ path: String) {
-        // Backslash first, then the quote: escaping quotes alone left a trailing backslash
-        // in a path free to swallow the closing quote, and with it the rest of the line
-        // became part of a string handed to `do script`.
-        let escaped = path
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        let script = "tell application \"Terminal\" to do script \"cd \(escaped)\""
-        guard let apple = NSAppleScript(source: script) else { return }
+    /// Returns a launch error rather than silently leaving the user looking at an empty shell.
+    static func inTerminal(directory: String, executable: String, arguments: [String]) -> String? {
+        let script = TerminalLaunchScript.appleScript(
+            directory: directory, executable: executable, arguments: arguments
+        )
+        guard let apple = NSAppleScript(source: script) else {
+            return "The sign-in command could not be prepared. Try again."
+        }
         var error: NSDictionary?
         apple.executeAndReturnError(&error)
+        guard let error else { return nil }
+        return error[NSAppleScript.errorMessage] as? String
+            ?? "Terminal could not run the sign-in command. Try again."
     }
 
     /// Opens a path in the editor this project was last opened in.

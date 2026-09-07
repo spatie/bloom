@@ -1215,8 +1215,14 @@ final class WorkspaceModel {
         // Those are exactly the moments a commit can have appeared, and the six second poll is
         // already four git calls without adding a `log` for a menu nobody has opened.
         let wantsCommits = reason == .requested
+        let manager = app.manager
+        let observedWorkspace = workspace
 
         let task = Task.detached(priority: .userInitiated) { () -> Result<ChangesAnswer, GitFailure> in
+            // Also on arrival and manual refresh, so returning to a renamed branch does not
+            // wait for the background poll. The Store feed updates the sidebar and this model.
+            // Quiet refreshes follow refreshDiffStat, which has already read HEAD this tick.
+            if wantsCommits { await manager?.refreshBranch(workspace: observedWorkspace) }
             do {
                 // All three together rather than one after another. They ask three different
                 // questions of the same worktree and none of them reads another's answer, so
