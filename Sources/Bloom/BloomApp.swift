@@ -71,6 +71,7 @@ struct BloomApp: App {
         // and the table each believe before it, after it, after a scroll and after a window
         // resize. It is how somebody finally watches the transcript go blank. See `ComposerProbe`.
         if ComposerProbe.isRequested { ComposerProbe.schedule() }
+        if TranscriptLayoutProbe.isRequested { TranscriptLayoutProbe.schedule() }
 
         // And the one that answers "the battery menu says Bloom is using significant energy":
         // `Bloom --idle-probe <out.json> --idle-worktrees <list>` runs the diff stat pass the six
