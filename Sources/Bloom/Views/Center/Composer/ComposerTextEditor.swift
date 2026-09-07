@@ -146,6 +146,10 @@ struct ComposerTextEditor: NSViewRepresentable {
         textView.onFocusChange = { [weak coordinator = context.coordinator] focused in
             coordinator?.focusChanged(to: focused)
         }
+        textView.onWindowChange = { [weak coordinator = context.coordinator, weak textView] in
+            guard let coordinator, let textView else { return }
+            coordinator.applyFocus(to: textView)
+        }
         textView.onAttach = { [weak coordinator = context.coordinator] sources, range in
             guard let coordinator else { return false }
             return coordinator.parent.onAttach(sources, coordinator.draftRange(range, in: textView))
@@ -241,18 +245,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         // written down: the binding is one turn behind the view whenever the view has just
         // resigned, and re-asserting on that stale value took the keyboard back off a browser page
         // the reader had clicked into, so Cmd+C reached a composer with nothing selected.
-        let holdsKeyboard = textView.window?.firstResponder === textView
-        if ComposerFocus.shouldTakeKeyboard(
-            wantsFocus: isFocused,
-            holdsKeyboard: holdsKeyboard,
-            isReportingChange: context.coordinator.isReportingFocus
-        ) {
-            textView.window?.makeFirstResponder(textView)
-        } else if ComposerFocus.shouldGiveUpKeyboard(
-            wantsFocus: isFocused, holdsKeyboard: holdsKeyboard
-        ) {
-            textView.window?.makeFirstResponder(nil)
-        }
+        context.coordinator.applyFocus(to: textView)
 
         context.coordinator.reportHeight(of: textView)
     }
@@ -278,6 +271,23 @@ struct ComposerTextEditor: NSViewRepresentable {
 
         init(_ parent: ComposerTextEditor) {
             self.parent = parent
+        }
+
+        /// An update can precede attachment to a window, even from a SwiftUI task. Retry the
+        /// current request on attachment, without retaining a stale request after focus moved.
+        func applyFocus(to textView: ComposerTextView) {
+            guard let window = textView.window else { return }
+            let holdsKeyboard = window.firstResponder === textView
+            if ComposerFocus.shouldTakeKeyboard(
+                wantsFocus: parent.isFocused, holdsKeyboard: holdsKeyboard,
+                isReportingChange: isReportingFocus
+            ) {
+                window.makeFirstResponder(textView)
+            } else if ComposerFocus.shouldGiveUpKeyboard(
+                wantsFocus: parent.isFocused, holdsKeyboard: holdsKeyboard
+            ) {
+                window.makeFirstResponder(nil)
+            }
         }
 
         func textDidChange(_ notification: Notification) {

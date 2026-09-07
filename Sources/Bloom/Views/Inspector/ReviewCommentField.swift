@@ -58,16 +58,8 @@ struct ReviewCommentField: View {
         // click. `ComposerTextEditor` reports focus back the moment AppKit gives it, so this is a
         // request rather than a claim.
         //
-        // **In a `task` and not in `onAppear`, which is why the caret used to stay where it was.**
-        // The request is applied by `ComposerTextEditor.updateNSView`, which asks the text view's
-        // WINDOW for first responder, and a view a representable has only just made is not in a
-        // window yet: `MenuKeyHost` and `MenuSearchField` both write that measurement down.
-        // Written on the appear pass, the request was answered by a nil window, nothing else
-        // invalidated this box, so `updateNSView` never ran again and the ask was dropped in
-        // silence. Escape went with it, because Escape is answered in the text view's own
-        // `keyDown` and a box that is not first responder is never offered the key. A task runs a
-        // hop later, by which time there is a window to ask; the conversation's own box takes the
-        // keyboard the same way, in `ComposerView.prepare`.
+        // The bridge also retries on window attachment. A task alone does not guarantee that
+        // an editor in a lazy diff row has a window yet.
         .task { isFocused = true }
     }
 

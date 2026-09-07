@@ -39,6 +39,8 @@ public enum TranscriptMotion {
     /// take the owner's own message away and bring it back, which is the flicker the instant echo
     /// exists to remove.
     ///
+    /// These three use `MessageArrivals` instead: one clock shared across the temporary and
+    /// saved drawings, so persisting a message does not restart its effect.
     /// Everything else genuinely arrives.
     ///
     /// **The second list is written out rather than left to a `default`.** The three above are

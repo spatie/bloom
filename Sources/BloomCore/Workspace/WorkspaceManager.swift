@@ -748,6 +748,9 @@ public struct WorkspaceManager: Sendable {
     /// Deliberately leaves the stored counts alone when git fails, rather than writing zeroes.
     /// A stale count is a small lie; "0 files changed" on a workspace full of work is a big one.
     public func refreshDiffStat(workspace: Workspace) async {
+        // Branch discovery must survive a missing base ref: an agent may rename that ref too,
+        // which makes the diff fail but leaves HEAD perfectly readable.
+        await refreshBranch(workspace: workspace)
         guard let stat = try? await Git.diffStat(worktree: workspace.path, base: workspace.baseBranch) else {
             return
         }

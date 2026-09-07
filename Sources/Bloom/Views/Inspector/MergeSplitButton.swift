@@ -23,9 +23,9 @@ import BloomCore
 /// do is take a colour. Measured on this SDK, rendered offscreen at `controlActiveState.active`:
 /// a `Button` with `.borderedProminent` and `.tint(.red)` comes out red, and the same modifiers on
 /// a `Menu` come out as the neutral capsule, prominent or not, glass or not. So the state's colour
-/// is painted as a rounded rect behind the control and the label is asked for in dark appearance,
-/// which is what makes the system draw it, its chevron and its hairline white. That is two lines
-/// over a native control, against hand drawing a capsule, a divider, a chevron and a tick.
+/// is painted as a rounded rect behind the control. A dedicated AppKit host gives this one control
+/// dark appearance, making its label, chevron and hairline light even inside a light title bar.
+/// A SwiftUI colour-scheme override alone is ignored in a native title-bar accessory.
 ///
 /// The band's colour is a hard requirement rather than decoration: `PullRequestTint.fill` is the
 /// rule that the one prominent button carries the colour of the band it stands in, so a red
@@ -63,7 +63,8 @@ struct MergeSplitButton: View {
         // form below it was never once drawn. The candidates carry their own, on `control`, which
         // is what makes each of them report the width its label really wants. See
         // `PullRequestSummary.continueButton`, where the same slip was on four more.
-        styled.labelStyle(.titleAndIcon)
+        MergeControlHost(content: styled.labelStyle(.titleAndIcon))
+        .fixedSize()
         // **The label and the tick are one value, and this is what makes that true.** A `Menu`'s
         // content is not evaluated when the view is rebuilt; it is evaluated when the menu opens,
         // out of the closure SwiftUI stored, and the tick is drawn from the selection that closure
@@ -78,10 +79,6 @@ struct MergeSplitButton: View {
         control
             .buttonStyle(.borderedProminent)
             .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
-            // The label, the chevron and the hairline in white. See the type's note: the system
-            // will not tint this control, so the only lever left over its ink is the appearance
-            // it draws itself for.
-            .environment(\.colorScheme, .dark)
             .background(
                 // Dimmed rather than hidden when the press is not available, which is how AppKit
                 // draws a disabled prominent button and therefore how this one has to look beside
@@ -128,5 +125,46 @@ struct MergeSplitButton: View {
     /// Writing to it changes the mode. There is deliberately no path from here to a merge.
     private var binding: Binding<GitHub.MergeMethod> {
         Binding(get: { method }, set: { choose($0) })
+    }
+}
+
+/// Scope AppKit appearance to the split control, not its window or neighbouring title-bar items.
+private struct MergeControlHost<Content: View>: NSViewRepresentable {
+    var content: Content
+
+    func makeNSView(context: Context) -> MergeHostingView {
+        let host = MergeHostingView(rootView: root(context))
+        host.appearance = NSAppearance(named: .darkAqua)
+        host.sizingOptions = [.intrinsicContentSize]
+        return host
+    }
+
+    func updateNSView(_ host: MergeHostingView, context: Context) {
+        host.rootView = root(context)
+        host.needsLayout = true
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: MergeHostingView, context: Context) -> CGSize? {
+        nsView.fittingSize
+    }
+
+    private func root(_ context: Context) -> AnyView {
+        AnyView(content.environment(\.self, context.environment).environment(\.colorScheme, .dark))
+    }
+
+    final class MergeHostingView: NSHostingView<AnyView> {
+        override func layout() {
+            super.layout()
+            applyControlAppearance(in: self)
+        }
+
+        // SwiftUI explicitly gives the embedded native control the title bar's appearance.
+        // Override only controls owned by this host, after they have been created and laid out.
+        private func applyControlAppearance(in view: NSView) {
+            if let control = view as? NSControl, control.appearance?.name != .darkAqua {
+                control.appearance = NSAppearance(named: .darkAqua)
+            }
+            for child in view.subviews { applyControlAppearance(in: child) }
+        }
     }
 }

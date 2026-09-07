@@ -1471,6 +1471,22 @@ public actor Store {
         )
     }
 
+    /// A filesystem refresh owns only the branch. A rename, restore or archive that landed while
+    /// git was running wins over this older observation. An unchanged answer writes nothing, so
+    /// the background poll does not wake every workspace observer on an idle checkout.
+    public func updateCheckedOutBranch(_ branch: String, observed: Workspace) throws {
+        guard observed.state == .active, branch != observed.branch,
+              branch != "HEAD", Git.isValidBranchName(branch),
+              let current = try workspace(id: observed.id),
+              current.state == .active, current.path == observed.path,
+              current.branch == observed.branch, branch != current.baseBranch,
+              let project = try repo(id: current.repoID), branch != project.defaultBranch else { return }
+        try db.run(
+            "UPDATE workspaces SET branch = ? WHERE id = ?",
+            [.text(branch), .text(observed.id)]
+        )
+    }
+
     /// Writes the pull request this workspace is about, and only when it has actually changed.
     ///
     /// The same shape and the same reason as `updateDiffStat` above it: this runs behind a poll,

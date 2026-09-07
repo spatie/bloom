@@ -264,11 +264,11 @@ final class AppModel {
     /// reload knows about a decision the store has not caught up with yet. See
     /// `WorkspaceListReconciliation.afterStoreReload`.
     ///
-    /// Outside observation deliberately: nothing draws from it, `reload` is the only reader, and
-    /// the write that matters to the UI is the one it makes to `workspaces`. It sits up here with
-    /// the stored state rather than down beside the archive, because Swift has no stored property
-    /// in an extension and the archive is one now.
-    @ObservationIgnored private var archivingWorkspaceIDs: Set<WorkspaceID> = []
+    /// Observed so the retained pane becomes read-only during removal. The selected workspace
+    /// stays resolvable through its model while the sidebar hides its row.
+    private var archivingWorkspaceIDs: Set<WorkspaceID> = []
+
+    func isArchiving(_ id: WorkspaceID) -> Bool { archivingWorkspaceIDs.contains(id) }
 
     /// Workspaces the owner has asked for whose worktree is still being cut.
     ///
@@ -278,10 +278,7 @@ final class AppModel {
     /// finished. See `PendingWorkspace` for why these are not `Workspace` values and are not in
     /// `workspaces`.
     ///
-    /// Observed, unlike the archiving set, and the difference is what each one is for. That one
-    /// exists so `reload` can subtract from a list it is about to publish, and the write the
-    /// window sees is the write to `workspaces`. This one is drawn: the sidebar reads it directly,
-    /// so it has to invalidate when a row is added or taken away.
+    /// Observed because the sidebar draws these rows directly.
     ///
     /// Written only by `showPending` and `forgetPending`, and emptied by `reload` the moment the
     /// stored row it is standing in for arrives.
@@ -998,7 +995,10 @@ final class AppModel {
 
     var selectedWorkspace: Workspace? {
         guard let id = selection.workspaceID else { return nil }
+        // The row may leave the sidebar before Git accepts an archive. Keep the selected pane
+        // and its inspector alive until that succeeds, including across concurrent reloads.
         return workspaces.first { $0.id == id }
+            ?? (archivingWorkspaceIDs.contains(id) ? workspaceModels[id]?.workspace : nil)
     }
 
     /// Whether the inspector is actually on screen, rather than merely switched on.
@@ -1031,7 +1031,8 @@ final class AppModel {
     /// `WorkspaceMenuSubject`, which also hears about a row highlighted on Home, and which decides
     /// per item whether an archived workspace can answer it at all.
     var menuWorkspace: Workspace? {
-        selectedWorkspace ?? selectedArchivedWorkspace
+        if let id = selection.workspaceID, isArchiving(id) { return nil }
+        return selectedWorkspace ?? selectedArchivedWorkspace
     }
 
     /// The live model for a workspace: created if needed, and handed the workspace value to
@@ -1174,9 +1175,18 @@ final class AppModel {
     /// `AppModel+Archive.swift` because `private` is file scoped, and `workspaces` is a property
     /// this file's header claims to be the only writer of. A seam taking nothing but an id keeps
     /// that claim true.
-    func hideFromSidebar(_ id: WorkspaceID) {
-        archivingWorkspaceIDs.insert(id)
+    @discardableResult
+    func hideFromSidebar(_ id: WorkspaceID) -> Bool {
+        guard archivingWorkspaceIDs.insert(id).inserted else { return false }
         workspaces.removeAll { $0.id == id }
+        return true
+    }
+
+    /// Restore the presentation before dropping its in-flight fallback. Reload then refreshes
+    /// this snapshot from the store; no snapshot is ever written back to the database.
+    func restoreToSidebar(_ workspace: Workspace) {
+        if !workspaces.contains(where: { $0.id == workspace.id }) { workspaces.append(workspace) }
+        stopHidingFromSidebar(workspace.id)
     }
 
     /// Stops filtering a workspace out of a reload, for an archive that did not happen. Before

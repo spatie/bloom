@@ -8,6 +8,18 @@ import Testing
 @Suite("Concurrency safety")
 struct ConcurrencySafetyTests {
 
+    @Test("a satisfied condition is observed even at the polling deadline")
+    func observesConditionAtDeadline() async throws {
+        try await waitUntil({ true }, timeout: .zero)
+    }
+
+    @Test("an unsatisfied polling deadline stops the test")
+    func rejectsUnsatisfiedCondition() async {
+        await #expect(throws: ConditionTimeout.self) {
+            try await waitUntil({ false }, timeout: .zero)
+        }
+    }
+
     // MARK: - StreamingProcess
 
     @Test("keeps every line a process wrote just before it exited", .timeLimit(.minutes(1)))
@@ -199,12 +211,16 @@ private func waitUntil(
     timeout: Duration = .seconds(5)
 ) async throws {
     let deadline = ContinuousClock.now.advanced(by: timeout)
-    while ContinuousClock.now < deadline {
+    while true {
+        // A loaded CI runner can resume after the deadline even though the condition became
+        // true during the sleep. Observe it once more before declaring a timeout.
         if await condition() { return }
+        guard ContinuousClock.now < deadline else { throw ConditionTimeout() }
         try await Task.sleep(for: .milliseconds(5))
     }
-    Issue.record("condition never became true")
 }
+
+private struct ConditionTimeout: Error {}
 
 // MARK: - AgentCatalog
 

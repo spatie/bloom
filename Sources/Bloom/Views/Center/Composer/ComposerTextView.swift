@@ -11,6 +11,7 @@ final class ComposerTextView: NSTextView {
     var keyHandler: (@MainActor (NSEvent, NSRange) -> Bool)?
     var onWidthChange: (@MainActor () -> Void)?
     var onFocusChange: (@MainActor (Bool) -> Void)?
+    var onWindowChange: (@MainActor () -> Void)?
     /// Offered everything dropped or pasted into the editor that is not text, together with the
     /// stretch of text it should take the place of. Returns true when the composer took it, which
     /// is what stops AppKit from doing what it does by default: typing the file's path into the
@@ -47,6 +48,11 @@ final class ComposerTextView: NSTextView {
         let accepted = super.becomeFirstResponder()
         if accepted { onFocusChange?(true) }
         return accepted
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { onWindowChange?() }
     }
 
     override func resignFirstResponder() -> Bool {
