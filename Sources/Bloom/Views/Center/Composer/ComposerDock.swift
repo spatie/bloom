@@ -8,12 +8,14 @@ struct ComposerDock<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(spacing: Metrics.spacingWide) {
-            if showsJumpToNewest {
-                JumpToNewestPill(action: onJumpToNewest)
-            }
+        GlassEffectContainer(spacing: Metrics.spacingSmall) {
+            VStack(spacing: Metrics.spacingWide) {
+                if showsJumpToNewest {
+                    JumpToNewestPill(action: onJumpToNewest)
+                }
 
-            content
+                content
+            }
         }
     }
 }

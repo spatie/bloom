@@ -59,6 +59,8 @@ struct SidebarView: View {
     /// was moved. It is written in the same breath as `groups`, so the two can never disagree
     /// about what is on screen.
     @State private var paneRows: [SidebarPaneRow] = []
+    /// Updated with paneRows so a pending create cannot start its animation before its row exists.
+    @State private var workspaceIdentities: Set<WorkspaceID> = []
 
     /// What the status bar says instead of the running count, briefly, after a drag that could not
     /// land where it was let go. See `move(from:to:)`.
@@ -249,8 +251,8 @@ struct SidebarView: View {
         // read. Both were tried and both did exactly nothing. The list is the view that owns the
         // rows, so it is the view whose transaction has to carry the curve.
         //
-        // The value is which projects are folded and nothing else. Adding, renaming or reordering
-        // a workspace must not make the pane slide, and a running agent rewrites its diff stat
+        // The value is which projects are folded and nothing else. Renaming or reordering
+        // a workspace must not start a fold, and a running agent rewrites its diff stat
         // every few seconds, which would otherwise animate the whole column once a second.
         .animation(foldMotion, value: foldedProjects)
         // Hiding and unhiding, which is a different curve from folding because it is a different
@@ -261,6 +263,10 @@ struct SidebarView: View {
         // halves are told apart.
         .animation(visibilityMotion, value: hiddenProjects)
         .animation(visibilityMotion, value: showsHiddenProjects)
+        // Membership is published with the rows, after asynchronous creates, archives, deletes
+        // and restores reach the model. A set ignores renames, status updates and reordering;
+        // pending and stored workspaces share an id, so finishing a create does not reinsert it.
+        .animation(workspaceMotion, value: workspaceIdentities)
         // A subagent's row leaving when its work is done, which is another insertion or removal
         // and so another reflow, at the one length this pane confirms anything in.
         //
@@ -423,6 +429,11 @@ struct SidebarView: View {
         app.crewRows.mapValues { $0.map(\.id) }
     }
 
+    private var workspaceMotion: Animation? {
+        guard hasSettled, !reduceMotion else { return nil }
+        return .easeOut(duration: ProjectVisibilityMotion.seconds)
+    }
+
     /// A subagent's row leaving. See `ProjectVisibilityMotion.subagentRemoval`.
     private var subagentMotion: Animation? {
         guard hasSettled,
@@ -459,6 +470,7 @@ struct SidebarView: View {
         // the row stops being a spinner and starts being a workspace, in place, without a second
         // settle under it. Left out, every create would fade its row in twice.
         let ids = groups.flatMap { $0.workspaces.map(\.id) } + app.pendingWorkspaces.map(\.id)
+        workspaceIdentities = Set(ids)
         if rescoped {
             arrival.adopt(ids)
         } else {
