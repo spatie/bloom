@@ -355,46 +355,15 @@ public struct WorkspaceManager: Sendable {
     /// Copies glob patterns like `.env*` from the main checkout into a fresh worktree.
     func copyFiles(_ patterns: [String], from source: String, to destination: String) throws {
         let manager = FileManager.default
-        for pattern in patterns {
-            let directory = (pattern as NSString).deletingLastPathComponent
-            let filePattern = (pattern as NSString).lastPathComponent
-            let searchDirectory = directory.isEmpty
-                ? source
-                : (source as NSString).appendingPathComponent(directory)
-
-            guard let entries = try? manager.contentsOfDirectory(atPath: searchDirectory) else { continue }
-
-            for entry in entries where matches(entry, pattern: filePattern) {
-                let from = (searchDirectory as NSString).appendingPathComponent(entry)
-                let relative = directory.isEmpty ? entry : "\(directory)/\(entry)"
-                let to = (destination as NSString).appendingPathComponent(relative)
-
-                var isDirectory: ObjCBool = false
-                guard manager.fileExists(atPath: from, isDirectory: &isDirectory), !isDirectory.boolValue else {
-                    continue
-                }
-                if manager.fileExists(atPath: to) { continue }
-
-                try? manager.createDirectory(
-                    atPath: (to as NSString).deletingLastPathComponent,
-                    withIntermediateDirectories: true
-                )
-                try? manager.copyItem(atPath: from, toPath: to)
-            }
+        let plan = FilesToCopyResolver.resolve(patterns: patterns, in: source, limit: .max)
+        for match in plan.matches where !match.isDirectory {
+            guard let from = ContainedPath.relative(match.path, inside: source),
+                  let to = ContainedPath.relative(match.path, inside: destination, forWriting: true)
+            else { continue }
+            if manager.fileExists(atPath: to.path) { continue }
+            try manager.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try manager.copyItem(at: from, to: to)
         }
-    }
-
-    /// What a `files_to_copy` pattern matches, asked of the one place that answers it.
-    ///
-    /// These three lines were here as well as in `FilesToCopyResolver`, whose doc calls itself a
-    /// deliberate mirror of this method. A mirror is the right shape for the walk, because the
-    /// preview runs on every keystroke and must not write anything, and it is the wrong shape for
-    /// the predicate: two `fnmatch` calls that have to agree about what `.env*` means are two
-    /// places a wildcard rule can be changed in. The behavioural test still runs the real copier
-    /// against a real folder and compares what landed with what the preview named, so the walk is
-    /// pinned the way it was; this half no longer needs pinning because there is only one of it.
-    func matches(_ name: String, pattern: String) -> Bool {
-        FilesToCopyResolver.matches(name, pattern: pattern)
     }
 
     // MARK: - Scripts

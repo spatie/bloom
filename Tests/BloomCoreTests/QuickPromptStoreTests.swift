@@ -119,7 +119,7 @@ struct QuickPromptStoreTests {
         _ = try await store.update(quickPromptID: opted.id) { $0.sendsImmediately = true }
 
         let raw = try SQLiteDatabase(path: path)
-        raw.userVersion = 0
+        try raw.setUserVersion(0)
 
         let reopened = try Store(path: path)
         let plain = try #require(try await reopened.quickPrompt(id: old.id))

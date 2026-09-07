@@ -222,6 +222,7 @@ final class TranscriptModel {
     /// drain hanging off that result has to be able to tell the two endings apart. Cleared when a
     /// turn starts, so it never outlives the turn it describes.
     private var wasStoppedByHand = false
+    @ObservationIgnored private var drainState = DeliveryDrainState.idle
 
     /// The queued message a Steer has picked, waiting for the turn it stopped to finish dying.
     ///
@@ -560,7 +561,8 @@ final class TranscriptModel {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, let store else { return }
 
-        draft = ""
+        let submittedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines) == body ? draft : nil
+        if submittedDraft != nil { draft = "" }
 
         // Built here rather than inside the enqueue, so the row that goes in the table and the
         // bubble that goes on screen are one object with one id. Drawn twice under two ids is the
@@ -590,16 +592,17 @@ final class TranscriptModel {
         // asks `TranscriptMotion` whether Reduce Motion is on and jumps instead when it is.
         jumpToLiveEnd()
 
-        try? await store.saveDraft(sessionID: session.id, body: "")
-
         do {
-            _ = try await store.enqueueDelivery(delivery)
+            _ = try await store.enqueueDelivery(delivery, clearingDraftMatching: submittedDraft)
         } catch {
             // The bubble was drawn on the promise that this would be queued. It was not, so the
             // promise is taken back rather than left on screen next to a message that is never
             // going anywhere.
-            sending = nil
+            if sending?.id == delivery.id { sending = nil }
             pendingDeliveries.removeAll { $0.id == delivery.id }
+            draft = PendingMessageReturn.draft(taking: [delivery], into: draft)
+            composerFocusRequests += 1
+            await saveDraft()
             Log.composer.error(
                 "the message could not be queued: \(error.readableMessage, privacy: .public)"
             )
@@ -673,7 +676,10 @@ final class TranscriptModel {
     /// for at that moment, and both are covered by the queue simply sitting there, visibly, until
     /// somebody says something.
     func drain() async {
-        guard !isWorkspaceArchiving, let store else { return }
+        guard !isWorkspaceArchiving, !wasStoppedByHand, store != nil else { return }
+        guard drainState.begin() else { return }
+        var allowRepeat = true
+        defer { finishDrain(allowRepeat: allowRepeat) }
         await refreshQueue()
 
         // The list is taken once and walked, rather than the queue being re-asked for a front
@@ -682,7 +688,8 @@ final class TranscriptModel {
         for next in Delivery.deliverable(
             from: pendingDeliveries, hold: deliveryHold, on: session.agentKind
         ) {
-            guard !isWorkspaceArchiving, deliveryHold.allowsDelivery(on: session.agentKind) else { return }
+            guard !isWorkspaceArchiving, !wasStoppedByHand,
+                  deliveryHold.allowsDelivery(on: session.agentKind) else { return }
             // Deleted, or steered out, since the list was taken.
             guard pendingDeliveries.contains(where: { $0.id == next.id }) else { continue }
 
@@ -696,13 +703,52 @@ final class TranscriptModel {
             // Retired before it is handed over, rather than after. The pending bubble and the real
             // one are two drawings of the same sentence, and a delivery that is still pending
             // while its turn is starting is drawn twice. `restoreDelivery` is the one path back.
-            try? await store.markDelivered(id: next.id)
-            await refreshQueue()
+            guard await claimForDelivery(next) else {
+                allowRepeat = false
+                return
+            }
 
             // A turn that would not start stops the pass. Its delivery is back at the front of
             // the queue with an error row under it, and pushing the next one into an agent that
             // just refused would bury that.
-            guard await deliver(next) else { return }
+            guard await deliver(next) else {
+                allowRepeat = false
+                return
+            }
+        }
+    }
+
+    private func finishDrain(allowRepeat: Bool) {
+        let again = drainState.finish(allowRepeat: allowRepeat)
+        if again, !wasStoppedByHand, !isWorkspaceArchiving {
+            Task { await drain() }
+        }
+    }
+
+    private func claimForDelivery(_ delivery: Delivery) async -> Bool {
+        guard let store else { return false }
+        do {
+            let claimed = try await store.markDelivered(id: delivery.id)
+            guard claimed else {
+                if sending?.id == delivery.id { sending = nil }
+                await refreshQueue()
+                return false
+            }
+            await refreshQueue()
+            if isWorkspaceArchiving || wasStoppedByHand {
+                try await store.restoreDelivery(id: delivery.id)
+                if sending?.id == delivery.id { sending = nil }
+                await refreshQueue()
+                return false
+            }
+            return true
+        } catch {
+            if sending?.id == delivery.id { sending = nil }
+            app.alert = BloomAlert(
+                title: "Could not send the message",
+                message: TranscriptStanding.complaint(about: error)
+            )
+            return false
         }
     }
 
@@ -852,7 +898,10 @@ final class TranscriptModel {
     /// retire-then-deliver order for the same reason, which is that a delivery still marked
     /// pending while its turn is starting is drawn twice.
     private func sendSteered(_ delivery: Delivery) async {
-        guard !isWorkspaceArchiving, let store else { return }
+        guard !isWorkspaceArchiving, !wasStoppedByHand, store != nil else { return }
+        guard drainState.begin() else { return }
+        var allowRepeat = true
+        defer { finishDrain(allowRepeat: allowRepeat) }
         // A turn was started while this one was dying, which takes the owner typing into the
         // composer inside that second: `submit` drains, and the drain does not know a Steer is
         // booked. Two sends into one runner is the one outcome to avoid, and the cost of avoiding
@@ -865,9 +914,11 @@ final class TranscriptModel {
         guard pendingDeliveries.contains(where: { $0.id == delivery.id }) else { return }
 
         sending = delivery
-        try? await store.markDelivered(id: delivery.id)
-        await refreshQueue()
-        await deliver(delivery)
+        guard await claimForDelivery(delivery) else {
+            allowRepeat = false
+            return
+        }
+        allowRepeat = await deliver(delivery)
     }
 
     /// Closes the question when the message it is about is no longer waiting.
@@ -1066,6 +1117,7 @@ final class TranscriptModel {
     /// turn still emits its own result, and that event is what writes the final state back into the
     /// session row. Tearing the pump down here used to strand the session until the next launch.
     func stop() {
+        steering = nil
         cancelTurn()
 
         // **And the queue comes back with it.** Not draining after a Stop was right about the
@@ -1377,6 +1429,7 @@ final class TranscriptModel {
             // queue was handed back to the composer on the frame the button was pressed.
             if let steered = steering {
                 steering = nil
+                wasStoppedByHand = false
                 await sendSteered(steered)
             } else if !wasStoppedByHand {
                 await drain()

@@ -290,6 +290,7 @@ id_type_allowed_files=(
   'Sources/BloomCore/Agent/AgentQuestion.swift' # Codex's opaque question answer id, not a Bloom row
   'Sources/BloomCore/Agent/AgentEvent.swift'   # Claude Code's stream-json, as measured
   'Sources/BloomCore/Agent/Codex/CodexEvent.swift'   # the Codex app-server protocol
+  'Sources/BloomCore/Agent/Codex/CodexTurnHandle.swift' # turn ids assigned by that server
   'Sources/BloomCore/Agent/Codex/CodexClient.swift'  # the same protocol's request envelopes
   'Sources/BloomCore/Agent/AgentRetry.swift'   # the same stream-json, one line of it
 )

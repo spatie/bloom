@@ -172,7 +172,7 @@ struct WorkspaceWriteIsolationTests {
         try await store.update(workspaceID: workspace.id) { $0.colour = "D8608C" }
 
         let raw = try SQLiteDatabase(path: path)
-        raw.userVersion = 0
+        try raw.setUserVersion(0)
 
         let reopened = try Store(path: path)
         let stored = try #require(try await reopened.workspace(id: workspace.id))
@@ -253,7 +253,7 @@ struct WorkspaceWriteIsolationTests {
         ))
 
         let raw = try SQLiteDatabase(path: path)
-        raw.userVersion = 0
+        try raw.setUserVersion(0)
 
         let reopened = try Store(path: path)
         let storedParent = try #require(try await reopened.workspace(id: parent.id))

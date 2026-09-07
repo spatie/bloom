@@ -12,6 +12,7 @@ import Foundation
 /// it.
 final class ScriptedCodexProcess: AgentProcessing, @unchecked Sendable {
     let launch: AgentLaunch
+    private let onWrite: @Sendable (String) -> Void
 
     private let lock = NSLock()
     private var written: [String] = []
@@ -26,8 +27,9 @@ final class ScriptedCodexProcess: AgentProcessing, @unchecked Sendable {
     let lines: AsyncThrowingStream<String, Error>
     let errorLines: AsyncStream<String>
 
-    init(launch: AgentLaunch) {
+    init(launch: AgentLaunch, onWrite: @escaping @Sendable (String) -> Void = { _ in }) {
         self.launch = launch
+        self.onWrite = onWrite
 
         var out: AsyncThrowingStream<String, Error>.Continuation!
         lines = AsyncThrowingStream(bufferingPolicy: .unbounded) { out = $0 }
@@ -41,7 +43,7 @@ final class ScriptedCodexProcess: AgentProcessing, @unchecked Sendable {
     // MARK: Scripting
 
     func reply(to method: String, with result: JSONValue) {
-        lock.lock(); replies[method] = result; lock.unlock()
+        lock.lock(); replies[method] = result; ignored.remove(method); lock.unlock()
     }
 
     func fail(_ method: String, code: Int, message: String) {
@@ -97,6 +99,7 @@ final class ScriptedCodexProcess: AgentProcessing, @unchecked Sendable {
         let refusals = failures
         let silent = ignored
         lock.unlock()
+        onWrite(text)
 
         guard let json = JSONValue.parse(text),
               let method = json["method"]?.stringValue,
@@ -131,6 +134,7 @@ final class ScriptedCodexProcess: AgentProcessing, @unchecked Sendable {
 /// Holds the script, because the process itself does not exist until `start()` launches it and a
 /// test has to be able to say what the server will answer before that.
 final class ProcessBox: @unchecked Sendable {
+    private let onWrite: @Sendable (String) -> Void
     private let lock = NSLock()
     private var made: ScriptedCodexProcess?
     /// Every process this box has handed out, in order. A reconnect is a second one, and asking
@@ -139,6 +143,10 @@ final class ProcessBox: @unchecked Sendable {
     private var replies: [String: JSONValue] = [:]
     private var failures: [String: (code: Int, message: String)] = [:]
     private var ignored: [String] = []
+
+    init(onWrite: @escaping @Sendable (String) -> Void = { _ in }) {
+        self.onWrite = onWrite
+    }
 
     func ignore(_ method: String) {
         lock.lock(); ignored.append(method); let live = made; lock.unlock()
@@ -157,7 +165,7 @@ final class ProcessBox: @unchecked Sendable {
 
     var factory: @Sendable (AgentLaunch) -> any AgentProcessing {
         { launch in
-            let process = ScriptedCodexProcess(launch: launch)
+            let process = ScriptedCodexProcess(launch: launch, onWrite: self.onWrite)
             self.lock.lock()
             self.made = process
             self.started.append(process)

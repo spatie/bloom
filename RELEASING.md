@@ -284,40 +284,20 @@ The feed URL is `<BLOOM_PUBLIC_BASE_URL>/appcast.xml`, and it is computed from
 the same variables the upload uses rather than written down twice, so the
 address the app polls cannot drift from the address the feed is written to.
 
-## What has never run
+## Verified release path
 
-The workflow itself has run, and worked: v0.0.1-test and then 0.1.0 through
-0.6.0 each went through it, so importing the .p12, notarising the zip with an
-App Store Connect API key, stapling, the uploads and the appcast are all things
-that have happened for real. This section used to say the opposite, from before
-the first release, and was left saying it for six of them.
+The complete zip and disk-image pipeline has shipped. Release v1.2.0, build 1208,
+completed in [workflow run 34130547271](https://github.com/spatie/bloom/actions/runs/34130547271):
+signing, notarisation, stapling, uploads and appcast publication all passed.
+The public download redirected to its disk image and the website changelog was published.
 
-What has not run is the disk image half, added after 0.6.0:
+That is evidence for the pipeline, not a substitute for checking the next release. After every
+release, verify the workflow, both public artefacts, the appcast version and the website download
+redirect. Publish the matching notes on `runbloom.app/changelog` as well as on GitHub.
 
-- notarising a .dmg with the API key, and stapling the ticket to it
-- `spctl --assess --type open` against a notarised image
-- uploading a .dmg to the bucket, and the `bloom:diskImage` element reaching
-  the website through the appcast
-- `brew install --cask google-chrome`, which is only reached if a runner image
-  stops shipping Chrome
-
-There is no notarisation credential on any machine here, only the Developer ID
-certificate, so none of that could be tried locally either. What was checked
-locally, against the file rather than against an exit status:
-
-- `Tools/dmg/build.sh` produces the image from an app that has already been
-  signed with the hardened runtime, and the app inside the mounted image still
-  passes `codesign --verify --strict --deep`, so the layout step preserves the
-  signature and would preserve a stapled ticket with it
-- the image itself takes a Developer ID signature and passes
-  `codesign --verify --strict`
-- `spctl --assess --type open --context context:primary-signature` on that
-  image is rejected for want of a ticket, which is the check doing its job and
-  the reason it is a hard failure in `package-app.sh`
-
-The zip path is unchanged, so what it does is what it did for 0.6.0.
-
-Expect the first release with an image to need a fix or two anyway.
+`Tools/package-licences.sh` includes Bloom and dependency notices inside the app before signing.
+It reads SwiftPM's pinned checkouts and fails if a notice is missing. The independent packaging
+test runs in CI. Changes to dependencies should include a review of their distribution notices.
 
 ## Testing the parts that need no secrets
 

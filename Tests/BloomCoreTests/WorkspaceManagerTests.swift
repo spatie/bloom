@@ -345,9 +345,8 @@ struct WorkspaceManagerTests {
         ("a.txt", "?.txt", true),
         ("ab.txt", "?.txt", false),
     ])
-    func matchesGlobs(name: String, pattern: String, expected: Bool) throws {
-        let manager = WorkspaceManager(store: try makeTestStore("wm"))
-        #expect(manager.matches(name, pattern: pattern) == expected)
+    func matchesGlobs(name: String, pattern: String, expected: Bool) {
+        #expect(FilesToCopyResolver.matches(name, pattern: pattern) == expected)
     }
     // MARK: - Opening a branch that already exists
 

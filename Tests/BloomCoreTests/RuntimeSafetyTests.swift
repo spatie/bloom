@@ -565,7 +565,7 @@ struct StoreSequenceAllocationTests {
         // Rewind to the schema before the constraint existed and plant what it was added to catch.
         let db = try SQLiteDatabase(path: path)
         try db.execute("DROP INDEX IF EXISTS messages_session_seq;")
-        db.userVersion = 1
+        try db.setUserVersion(1)
         for (seq, body) in [(0, "a"), (1, "b"), (1, "c"), (2, "d")] {
             try db.run(
                 """

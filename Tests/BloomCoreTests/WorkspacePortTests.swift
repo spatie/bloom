@@ -91,7 +91,7 @@ struct WorkspacePortTests {
         // `ALTER TABLE` has no `IF NOT EXISTS`, and this is the shape the store's own tests use
         // to reproduce an old schema: replaying the step must neither throw nor reset the column.
         let raw = try SQLiteDatabase(path: path)
-        raw.userVersion = 0
+        try raw.setUserVersion(0)
 
         let reopened = try Store(path: path)
         let stored = try #require(try await reopened.workspace(id: workspace.id))

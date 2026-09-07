@@ -226,17 +226,15 @@ public struct ComposerControls: Equatable, Sendable {
     /// never asked and one that was asked and said no read back the same. `AgentRunner` and
     /// `CodexRunner` treat them the same too, which is what keeps the two ends from disagreeing.
     public func store(sessionID: SessionID, in store: Store) async {
-        try? await store.setSetting(
-            Self.fastModeKey(sessionID: sessionID), isFastMode ? "1" : nil
-        )
-        try? await store.setSetting(
-            Self.outputStyleKey(sessionID: sessionID),
-            OutputStyle.isDefault(outputStyle) ? nil : outputStyle
-        )
-        try? await store.setSetting(
-            Self.contextWindowKey(sessionID: sessionID),
-            CodexContextWindow.stored(codexContextWindow)
-        )
-        try? await store.setSetting(Self.defaultsAppliedKey(sessionID: sessionID), "1")
+        try? await store.saveComposerControls(self, sessionID: sessionID)
+    }
+
+    func settings(sessionID: SessionID) -> [(String, String?)] {
+        [
+            (Self.fastModeKey(sessionID: sessionID), isFastMode ? "1" : nil),
+            (Self.outputStyleKey(sessionID: sessionID), OutputStyle.isDefault(outputStyle) ? nil : outputStyle),
+            (Self.contextWindowKey(sessionID: sessionID), CodexContextWindow.stored(codexContextWindow)),
+            (Self.defaultsAppliedKey(sessionID: sessionID), "1"),
+        ]
     }
 }

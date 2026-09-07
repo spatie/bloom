@@ -29,6 +29,7 @@ final class AskModel {
     /// not both create a chat. The store is an actor, so two callers really can both read "no
     /// session" before either writes one.
     private var isOpening = false
+    private var isStartingFresh = false
     /// Whether the permission mode has been settled since Bloom started.
     ///
     /// This model is built once and kept for the life of the window, so its first `open()` is the
@@ -53,7 +54,7 @@ final class AskModel {
     /// Reads the chat back, or makes it, and builds its transcript. Safe to call again: the second
     /// call finds the session and returns.
     func open() async {
-        guard !isOpening, let store = app.store else { return }
+        guard !isOpening, !isStartingFresh, let store = app.store else { return }
         isOpening = true
         defer { isOpening = false }
 
@@ -106,7 +107,10 @@ final class AskModel {
     /// old conversation is still in the database, with its cost and its permission history, and
     /// nothing that has been said is thrown away because somebody wanted a clean start.
     func startFresh(controls: ComposerControls? = nil, draft: String = "") async {
-        guard let store = app.store, let current = session else { return }
+        guard !isOpening, !isStartingFresh, let store = app.store, let current = session,
+              let directory else { return }
+        isStartingFresh = true
+        defer { isStartingFresh = false }
 
         let carriedControls: ComposerControls
         if let controls {
@@ -129,26 +133,22 @@ final class AskModel {
             )
         }
 
-        transcript?.teardown()
-        transcript = nil
-        session = nil
-        // One column. The runner owns the state, the counters and the agent session id on this
-        // row and may have written any of them since this copy was read.
-        _ = try? await store.update(sessionID: current.id) { $0.archivedAt = Date() }
-        app.bridge?.retire(sessionID: current.id)
-
-        var next = AskConversation.newSession()
-        next.model = carriedControls.model
-        next.effort = carriedControls.effort
-        next.agentKind = carriedControls.agentKind
-        next.permissionMode = carriedControls.permissionMode
-        if let made = try? await store.upsert(next) {
-            await carriedControls.store(sessionID: made.id, in: store)
-            if !draft.isEmpty {
-                try? await store.saveDraft(sessionID: made.id, body: draft)
-            }
+        do {
+            let made = try await store.replaceAskConversation(
+                id: current.id, controls: carriedControls, draft: draft
+            )
+            transcript?.teardown()
+            app.bridge?.retire(sessionID: current.id)
+            session = made
+            let model = TranscriptModel(askSession: made, directory: directory, app: app)
+            transcript = model
+            await model.load()
+        } catch {
+            app.alert = BloomAlert(
+                title: "Could not start a new conversation",
+                message: TranscriptStanding.complaint(about: error)
+            )
         }
-        await open()
     }
 
     /// Signals the agent, without waiting. `AppModel.shutdownEverything` calls this on every model

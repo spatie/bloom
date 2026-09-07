@@ -112,6 +112,9 @@ jobs:
           done
 
       # The rules that are ours rather than the language's. See the script.
+      - name: Check licence packaging
+        run: zsh Tools/release/tests/licences.sh
+
       - name: Check the house rules
         run: ./Tools/house-rules.sh
 
