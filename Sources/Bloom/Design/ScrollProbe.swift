@@ -72,11 +72,16 @@ enum ScrollProbe {
         }
 
         if let composer {
-            await growComposer(to: composer, scroll: scroll)
+            guard let transcript = ProbeHarness.appModel?.selectedModel?.activeTranscript else {
+                harness.fail("no composer transcript")
+            }
+            let storedDraft = transcript.draft
+            await growComposer(to: composer, scroll: scroll, transcript: transcript)
             harness.write(report(
                 recorder: FrameRecorder(view: contentView) { 0 }, travel: 0, wall: 0,
                 window: window, scroll: scroll, heightBefore: scroll.documentView?.frame.height ?? 0
             ))
+            transcript.draft = storedDraft
             exit(0)
         }
 
@@ -149,20 +154,16 @@ enum ScrollProbe {
         exit(0)
     }
 
-    /// **The owner's own reproduction, without his hand on the divider.**
-    ///
-    /// "When I resize the editor to be higher, the chat content will get empty lines as well." The
-    /// composer's height is `@AppStorage("composer.floatingEditorHeight")`, so the gesture is a write to
-    /// that key: the box grows, the transcript above it gets shorter, and nothing about its width
-    /// moves. Nothing is scrolled here on purpose, because a sweep would draw every row it passed
-    /// and correct exactly what this is trying to catch.
-    ///
-    /// The nudge is what makes the census speak. It is taken on a movement of the clip view, so a
-    /// point down and back is how a run asks for one.
-    private static func growComposer(to points: Double, scroll: NSScrollView) async {
+    /// Grow real text so this still exercises layout after manual composer resizing was removed.
+    private static func growComposer(
+        to points: Double, scroll: NSScrollView, transcript: TranscriptModel
+    ) async {
         nudge(scroll)
         try? await Task.sleep(for: .seconds(1))
-        UserDefaults.standard.set(points, forKey: "composer.floatingEditorHeight")
+        transcript.draft = Array(
+            repeating: "Composer sizing probe.",
+            count: max(1, Int(points / ComposerTextEditor.lineHeight))
+        ).joined(separator: "\n")
         try? await Task.sleep(for: .seconds(3))
         nudge(scroll)
         try? await Task.sleep(for: .seconds(1))

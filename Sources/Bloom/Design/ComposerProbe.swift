@@ -81,16 +81,15 @@ import BloomCore
 ///
 /// **The driver is the stored height rather than a synthetic hand**, for `ResizeProbe`'s reason: a
 /// mouse driver needs this app in front and takes the owner's keyboard. `ComposerView` reads
-/// `composer.floatingEditorHeight` out of the defaults domain through `@AppStorage`, so stepping it once
+/// the editor height from its draft, so growing the text once
 /// per vsync moves the editor exactly as the end of a real drag does, one step at a time, and
 /// reproduces the thing the last diagnosis turned on: the editor's height moves a pass before the
 /// composer holding it is laid out, so `ComposerView.chromeHeight` is measured from a total a
 /// frame behind and `PaneMeasure.editorCap` is computed from a chrome that is short. What it does
 /// not reproduce is `liveHeight`, which is the same arithmetic through a different property.
 ///
-/// It writes to the DEV defaults domain, which is what `make dev` gives this build, and it puts
-/// the key back where it found it. A run that inherits the last run's composer height is the
-/// mistake `ResizeProbe.arrange` learned about splits.
+/// It temporarily grows the selected conversation's draft and restores it afterwards. Run only
+/// against an isolated probe database, just like the other transcript probes.
 ///
 ///     Bloom --composer-probe /tmp/composer.json --composer-workspace <id>
 ///           [--composer-pane-width 640] [--composer-arrangement chat|chat+browser]
@@ -114,9 +113,8 @@ enum ComposerProbe {
 
     static var isRequested: Bool { harness.isRequested }
 
-    /// The key `ComposerView.manualHeight` is stored under. Spelled here rather than reached for,
-    /// because a probe driving a key the view had stopped reading would report a clean run.
-    private static let heightKey = "composer.floatingEditorHeight"
+    /// The draft being grown. The composer now sizes from its text rather than a stored height.
+    private static var drivenTranscript: TranscriptModel?
 
     // MARK: - Arguments
 
@@ -214,8 +212,10 @@ enum ComposerProbe {
         await pin(window, pane: pane, in: contentView)
 
         // A known starting composer, so two runs are the same run. Restored at the end.
-        let storedHeight = UserDefaults.standard.double(forKey: heightKey)
-        UserDefaults.standard.set(0.0, forKey: heightKey)
+        guard let transcript = workspace.activeTranscript else { harness.fail("no active transcript") }
+        drivenTranscript = transcript
+        let storedDraft = transcript.draft
+        transcript.draft = ""
         try? await Task.sleep(for: .seconds(1))
 
         // At the live end, which is where a reader dragging the composer normally is and the only
@@ -253,7 +253,8 @@ enum ComposerProbe {
 
         // And back down, so the run leaves the composer where it found it as well as the key.
         let dragBack = await drive(from: travel, to: 0, by: -step, pane: pane)
-        UserDefaults.standard.set(storedHeight, forKey: heightKey)
+        transcript.draft = storedDraft
+        drivenTranscript = nil
 
         harness.write(report(
             window: window,
@@ -378,7 +379,7 @@ enum ComposerProbe {
 
     // MARK: - Driving
 
-    /// Steps the stored editor height from one value to another, sampling the pane on each step.
+    /// Grows the draft by whole lines, sampling the pane on each step, including past its cap.
     ///
     /// A sleep between steps rather than a display link, for `ResizeProbe`'s reason: the point is
     /// that each step is laid out before the next arrives, which is what a hand produces, and a
@@ -395,7 +396,10 @@ enum ComposerProbe {
         while step > 0 ? height < finish : height > finish {
             height += step
             let clamped = step > 0 ? min(height, finish) : max(height, finish)
-            UserDefaults.standard.set(Double(clamped), forKey: heightKey)
+            drivenTranscript?.draft = Array(
+                repeating: "Composer sizing probe.",
+                count: max(1, Int(clamped / ComposerTextEditor.lineHeight))
+            ).joined(separator: "\n")
             // A layout pass, and only then the sample: what is being watched for is the pane at
             // the size this step left it, not the size the step before left it.
             pane.scroll.window?.layoutIfNeeded()
@@ -529,7 +533,7 @@ enum ComposerProbe {
             "build": .string(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"),
             "workspace": .string(workspace.workspace.id.rawValue),
             "workspaceName": .string(workspace.workspace.name),
-            "driver": .string("storedHeight"),
+            "driver": .string("draftLines"),
             "drawnRows": .integer(TranscriptDrawn.rows),
             "travel": .number(Double(travel)),
             "step": .number(Double(step)),

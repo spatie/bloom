@@ -29,6 +29,7 @@ final class ComposerTextView: NSTextView, HoverQuickLookSource {
     /// happened to be left; a paste carries the selection, so it replaces what was selected
     /// exactly as pasting anything else does.
     var onAttach: (@MainActor ([AttachmentSource], NSRange) -> Bool)?
+    var onAttachmentFailure: @MainActor @Sendable (String) -> Void = { _ in }
     /// A click on a chip, which is a click on the file it names.
     var openAttachment: (@MainActor (String) -> Void)?
     /// The chip the pointer has settled on, or nil when it has left one. What raises the card that
@@ -81,9 +82,20 @@ final class ComposerTextView: NSTextView, HoverQuickLookSource {
     /// picture if that is all there is, and otherwise nothing, so a drag of text is still a drag
     /// of text and the text system handles it as well as it always has.
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        let sources = Self.attachables(on: sender.draggingPasteboard)
-        if !sources.isEmpty, onAttach?(sources, dropRange(for: sender)) == true { return true }
+        if AttachmentDrop.canRead(sender.draggingPasteboard), onAttach != nil {
+            let range = dropRange(for: sender)
+            return AttachmentDrop.receive(
+                sender.draggingPasteboard,
+                onReceive: { [weak self] sources in self?.onAttach?(sources, range) ?? false },
+                onFailure: onAttachmentFailure
+            )
+        }
         return super.performDragOperation(sender)
+    }
+
+    override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        if onAttach != nil, AttachmentDrop.canRead(sender.draggingPasteboard) { return true }
+        return super.prepareForDragOperation(sender)
     }
 
     /// Where a drop landed, as a place in the text.
@@ -101,11 +113,11 @@ final class ComposerTextView: NSTextView, HoverQuickLookSource {
     // is anything to take rather than taking it: reading the bytes here would copy a screenshot
     // out of the drag on every frame of it.
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        Self.hasAttachables(on: sender.draggingPasteboard) ? .copy : super.draggingEntered(sender)
+        AttachmentDrop.canRead(sender.draggingPasteboard) ? .copy : super.draggingEntered(sender)
     }
 
     override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        Self.hasAttachables(on: sender.draggingPasteboard) ? .copy : super.draggingUpdated(sender)
+        AttachmentDrop.canRead(sender.draggingPasteboard) ? .copy : super.draggingUpdated(sender)
     }
 
     /// Command+V. A screenshot is the single most common thing anybody attaches, and it arrives on

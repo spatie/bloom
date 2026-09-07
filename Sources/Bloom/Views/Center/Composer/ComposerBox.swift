@@ -39,10 +39,10 @@ struct ComposerBox: ViewModifier {
                 .glassEffect(.regular, in: shape)
                 .overlay {
                     shape.strokeBorder(
-                        isDropTarget ? Palette.controlAccent : Palette.focusRing,
-                        lineWidth: isDropTarget || contrast == .increased ? 2 : 1
+                        isDropTarget ? Palette.controlAccent : focusColour,
+                        lineWidth: isDropTarget || contrast == .increased ? 2 : 0.5
                     )
-                    .opacity(isDropTarget ? 1 : (isRingVisible ? 0.65 : 0))
+                    .opacity(isDropTarget ? 1 : (isRingVisible ? focusOpacity : 0))
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                 }
@@ -64,6 +64,12 @@ struct ComposerBox: ViewModifier {
                 }
         }
     }
+
+    private var focusColour: Color {
+        contrast == .increased ? Palette.focusRing : Palette.textSecondary
+    }
+
+    private var focusOpacity: Double { contrast == .increased ? 1 : 0.2 }
 }
 
 extension View {

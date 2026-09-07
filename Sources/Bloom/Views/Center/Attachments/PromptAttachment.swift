@@ -56,6 +56,7 @@ struct PromptAttachment: Identifiable, Hashable, Codable, Sendable {
 /// copying rules are written once instead of three times.
 enum AttachmentSource: Hashable, Sendable {
     case file(URL)
+    case promisedFile(URL, PromisedAttachmentStorage)
     /// A picture off a clipboard, which is bytes, a format and nothing else: a screenshot that
     /// was copied rather than saved has never had a file or a name. The name it earns is decided
     /// where the rest of the prompt's attachments are known, so two pastes in the same second do
@@ -71,7 +72,7 @@ enum AttachmentSource: Hashable, Sendable {
     /// The same thing under another name, which is what happens when the first one is taken.
     func named(_ name: String) -> AttachmentSource {
         switch self {
-        case .file: self
+        case .file, .promisedFile: self
         case .image(let data, let format, _): .image(data, format: format, named: name)
         case .text(let body, _): .text(body, named: name)
         }
@@ -80,7 +81,7 @@ enum AttachmentSource: Hashable, Sendable {
     /// What this will be called once it is a file in the worktree.
     var filename: String {
         switch self {
-        case .file(let url): url.lastPathComponent
+        case .file(let url), .promisedFile(let url, _): url.lastPathComponent
         case .image(_, _, let name): name
         case .text(_, let name): name
         }

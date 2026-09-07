@@ -7,6 +7,9 @@ struct BloomApp: App {
     @NSApplicationDelegateAdaptor(BloomAppDelegate.self) private var appDelegate
 
     init() {
+        #if DEBUG
+        if ComposerInputProbe.isRequested { ComposerInputProbe.runAndExit() }
+        #endif
         // First, before anything else in the process. Every `@AppStorage` binding in the app
         // resolves its key the moment the view holding it is created, and a binding that has
         // already answered from an empty domain would then WRITE that empty answer back, which

@@ -52,6 +52,7 @@ struct ComposerTextEditor: NSViewRepresentable {
     /// when the composer attached them, which is what keeps AppKit from typing their paths into
     /// the draft instead.
     var onAttach: @MainActor ([AttachmentSource], NSRange) -> Bool
+    var onAttachmentFailure: @MainActor @Sendable (String) -> Void = { _ in }
     /// The files the composer knows it has copied for this prompt, so a path that is not one of
     /// Bloom's own copies can still be drawn as a chip. See `AttachmentDraft`.
     var attachmentPaths: [String] = []
@@ -155,6 +156,9 @@ struct ComposerTextEditor: NSViewRepresentable {
             guard let coordinator else { return false }
             return coordinator.parent.onAttach(sources, coordinator.draftRange(range, in: textView))
         }
+        textView.onAttachmentFailure = { [weak coordinator = context.coordinator] message in
+            coordinator?.parent.onAttachmentFailure(message)
+        }
         textView.openAttachment = { [weak coordinator = context.coordinator] path in
             coordinator?.parent.onOpenAttachment(path)
         }
@@ -169,7 +173,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         // it writes the path into the text. Registering the type explicitly means the drop is
         // offered to `performDragOperation` on every macOS version rather than relying on which
         // types AppKit happens to have registered for a plain text view.
-        textView.registerForDraggedTypes(textView.registeredDraggedTypes + [.fileURL])
+        textView.registerForDraggedTypes(textView.registeredDraggedTypes + AttachmentDrop.types)
         textView.font = Self.font(scale: fontScale, face: chatFont)
         textView.textColor = .labelColor
         // The colour macOS uses for a caret, which is not always the accent colour: it stays
@@ -407,7 +411,9 @@ struct ComposerTextEditor: NSViewRepresentable {
             layout.ensureLayout(for: container)
 
             let line = layout.defaultLineHeight(for: textView.font ?? ComposerTextEditor.font)
-            let used = layout.usedRect(for: container).height
+            // A trailing newline owns a blank line with a caret. It is outside usedRect, so
+            // ignoring the extra fragment made the composer grow one Return too late.
+            let used = max(layout.usedRect(for: container).height, layout.extraLineFragmentRect.maxY)
             let minimum = CGFloat(parent.minLines) * line
             let maximum = CGFloat(parent.maxLines) * line
             let height = min(max(used, minimum), maximum).rounded(.up)

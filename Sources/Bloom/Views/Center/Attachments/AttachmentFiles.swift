@@ -68,7 +68,7 @@ enum AttachmentFiles {
     /// worktree is a path the agent may not be allowed to read.
     static func attach(_ source: AttachmentSource, workspace: String) throws -> PromptAttachment {
         switch source {
-        case .file(let url):
+        case .file(let url), .promisedFile(let url, _):
             try attach(file: url, workspace: workspace)
         case .image(let data, let format, let name):
             try attach(image: data, format: format, named: name, workspace: workspace)

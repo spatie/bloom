@@ -23,7 +23,6 @@ enum ComposerLayout {
     static let horizontalInset: CGFloat = 16
     static let bottomInset: CGFloat = 14
     static let textClearance: CGFloat = 12
-    static let minimumEditorHeight: CGFloat = 40
 }
 
 extension EnvironmentValues {

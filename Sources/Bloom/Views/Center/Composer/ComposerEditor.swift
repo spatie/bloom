@@ -2,10 +2,8 @@ import SwiftUI
 
 /// The text of the next turn, plus the placeholder that sits under it.
 ///
-/// The height used to be measured and applied here. It is now handed in, because the divider above
-/// the composer feeds the same number and two sources for one frame have to be reconciled in one
-/// place. That place is `ComposerView`, which owns the rule. What the wrapped text occupies is
-/// still measured here, where the text is, and reported outwards.
+/// The caller caps the measured height to the space available in the pane. TextKit measures
+/// the wrapped draft here, including the selected font and inline attachment chips.
 struct ComposerEditor: View {
     @Binding var text: String
     @Binding var caret: Int
@@ -20,6 +18,7 @@ struct ComposerEditor: View {
     /// Files dropped or pasted onto the text, with the stretch of the draft they should take the
     /// place of. Handed straight through to the composer, which owns what an attachment is.
     var onAttach: @MainActor ([AttachmentSource], NSRange) -> Bool
+    var onAttachmentFailure: @MainActor @Sendable (String) -> Void = { _ in }
     /// The files this prompt is carrying, so the paths in the draft can be drawn as chips.
     var attachmentPaths: [String] = []
     /// A click on one of those chips.
@@ -48,6 +47,7 @@ struct ComposerEditor: View {
                 // rendering fault rather than as a hint.
                 Text(placeholder)
                     .font(Typo.body)
+                    .lineLimit(1)
                     .foregroundStyle(Palette.textPlaceholder)
                     // The text view's own container inset, so the hint and the first character
                     // typed over it start on the same column.
@@ -60,11 +60,13 @@ struct ComposerEditor: View {
                 text: $text,
                 caret: $caret,
                 isFocused: $isFocused,
+                maxLines: 10,
                 accessibilityLabel: accessibilityLabel,
                 onHeightChange: onContentHeightChange,
                 onKey: onKey,
                 onBackspaceAtStart: onBackspaceAtStart,
                 onAttach: onAttach,
+                onAttachmentFailure: onAttachmentFailure,
                 attachmentPaths: attachmentPaths,
                 onOpenAttachment: onOpenAttachment,
                 onHoverAttachment: onHoverAttachment,

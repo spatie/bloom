@@ -168,6 +168,20 @@ struct ComposerPrompt<Footer: View>: View {
             isDropTarget: isDropTarget,
             isFloating: isFloating
         )
+        // The editor takes the drops that land on the text itself; this takes the ones that land
+        // on the chips, the footer and the padding, which is most of the box.
+        // A drop on the chrome has no character under it, so it goes to the end of the draft,
+        // which is where the next word would have been typed.
+        .composerDropDestination(
+            isTargeted: $isDropTarget,
+            onReceive: { sources in
+                attach(
+                    sources: sources,
+                    replacing: NSRange(location: (command.body as NSString).length, length: 0)
+                )
+            },
+            onFailure: attachmentFailed
+        )
         // Publish this from the shared prompt rather than individual screens. This keeps prose
         // editing shortcuts, including Command-Backspace, inside every prompt editor.
         .focusedValue(\.isTypingProse, isFocused)
@@ -178,16 +192,6 @@ struct ComposerPrompt<Footer: View>: View {
         // Global space says where the box is in its window and nothing about where the window
         // ends, and the completion menus need both. See the placement rule on `menuPlacement`.
         .background { WindowHeightReader { windowHeight = $0 } }
-        // The editor takes the drops that land on the text itself; this takes the ones that land
-        // on the chips, the footer and the padding, which is most of the box.
-        // A drop on the chrome has no character under it, so it goes to the end of the draft,
-        // which is where the next word would have been typed.
-        .dropDestination(for: URL.self) { urls, _ in
-            attach(
-                sources: urls.filter(\.isFileURL).map { .file($0) },
-                replacing: NSRange(location: (command.body as NSString).length, length: 0)
-            )
-        } isTargeted: { isDropTarget = $0 }
         .overlay(alignment: .topLeading) {
             // In the same place and the same card as the two completion menus, and never at the
             // same time as one of them: they would sit on top of each other, and a menu the user
@@ -273,6 +277,7 @@ struct ComposerPrompt<Footer: View>: View {
             onKey: handle(key:),
             onBackspaceAtStart: backspaceCommand,
             onAttach: attach(sources:replacing:),
+            onAttachmentFailure: attachmentFailed,
             attachmentPaths: attachments.map(\.path),
             onOpenAttachment: open(path:),
             onHoverAttachment: { hoveredPath = $0 },
@@ -649,6 +654,10 @@ struct ComposerPrompt<Footer: View>: View {
                 : "Some files were not attached",
             message: added.failures.joined(separator: "\n\n")
         )
+    }
+
+    private func attachmentFailed(_ message: String) {
+        app.alert = BloomAlert(title: "That file was not attached", message: message)
     }
 
     /// Writes the files into the draft where they were put, and leaves the caret after them.

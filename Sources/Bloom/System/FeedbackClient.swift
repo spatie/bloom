@@ -89,7 +89,7 @@ enum FeedbackImages {
 
     private nonisolated static func read(_ source: AttachmentSource) throws -> FeedbackImage {
         switch source {
-        case .file(let url):
+        case .file(let url), .promisedFile(let url, _):
             return try read(file: url)
         case .image(let data, _, let name):
             // A pasted picture is bytes that never had a file. What those bytes are is read from

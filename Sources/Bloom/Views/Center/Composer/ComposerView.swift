@@ -6,15 +6,15 @@ import BloomCore
 ///
 /// The surface itself is `ComposerPrompt`, which the create window uses too. What is left here is
 /// everything that is true of a conversation and of nothing else: the draft belongs to a
-/// transcript and is saved back to it, the resize grip, the footer's values coming off
+/// transcript and is saved back to it, its floating surface, the footer's values coming off
 /// a `Session` row, and the first-open defaults.
 struct ComposerView: View {
     @Bindable var transcript: TranscriptModel
     /// Optional so the composer can be dropped anywhere a transcript exists. When it is passed,
     /// the session list is kept in step with edits made here.
     var model: WorkspaceModel?
-    /// How tall the region the transcript and the composer share is, so a drag can be stopped
-    /// before the transcript is squeezed out of it.
+    /// How much room the transcript and composer share, so a growing draft cannot cover
+    /// the whole conversation.
     ///
     /// An object rather than a number, and `ComposerRoom` carries the measurement for why: a
     /// number is read by the view that passes it, so the pane publishing a new height rebuilt the
@@ -28,31 +28,20 @@ struct ComposerView: View {
 
     @Environment(AppModel.self) private var app
 
-    /// What the transcript keeps whatever the divider is dragged to. Three or four rows: enough
-    /// that the conversation is still readable, rather than a strip above a wall of prompt.
+    /// The space a short pane keeps for the conversation when the draft grows.
     private static let minTranscriptHeight: CGFloat = 120
-
-    /// The floating composer starts compact even if the former full-width panel was left tall.
-    /// Its own preference retains manual sizing across conversations without changing the old one.
-    @AppStorage("composer.floatingEditorHeight") private var manualHeight = 0.0
 
     /// What the wrapped text occupies, already clamped by `ComposerTextEditor` to its line window.
     @State private var contentHeight = ComposerTextEditor.lineHeight
-    /// Everything in the composer that is not the editor: the divider, the footer, the box and the
+    /// Everything in the composer that is not the editor: the footer, the box and the
     /// padding. Measured rather than assumed, because the footer's height comes from its controls.
     ///
-    /// Rounded, like the pane height it is taken off. This feeds `maxEditorHeight`, which feeds
-    /// `editorHeight`, which is the body: raw, a window resize wrote it once a frame and each
+    /// Rounded, like the pane height it is taken off. This feeds `editorHeight`: raw, a window
+    /// resize wrote it once a frame and each
     /// write re-ran this view and the footer under it. Up rather than down, because it is
     /// subtracted from the room, so both roundings err on the side of leaving the transcript its
     /// floor. See `PaneMeasure`.
     @State private var chromeHeight: CGFloat = 0
-    /// The height the drag started from, and the marker for "a drag is under way".
-    @State private var resizeOrigin: CGFloat?
-    /// Where the drag has got to so far. Held here rather than written straight to storage, so one
-    /// gesture does not rewrite a preference sixty times a second.
-    @State private var liveHeight: CGFloat?
-
     @State private var caret = 0
     @State private var isFocused = false
     @State private var isFastMode = false
@@ -80,13 +69,6 @@ struct ComposerView: View {
             }
 
             composer
-                .overlay(alignment: .top) {
-                    ComposerResizeHandle(
-                        onDrag: resize(by:),
-                        onDragEnd: endResize,
-                        onReset: resetHeight
-                    )
-                }
         }
         // The chrome is whatever is left once the editor's share is taken off, so this settles on
         // the first pass and only moves again when the footer's controls change size.
@@ -100,7 +82,7 @@ struct ComposerView: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { total in
             // `knowing:` rather than bare, and the transcript going blank is what it is for. A
             // chrome of nought is a pass that measured the composer before the editor inside it
-            // moved, not a composer with no chrome, and writing it lifts `maxEditorHeight` by the
+            // moved, not a composer with no chrome, and writing it lifts the editor cap by the
             // whole chrome: the floor below is then measured against a number that is short by
             // exactly the thing it is supposed to leave room for. See
             // `PaneMeasure.chrome(_:knowing:)`.
@@ -162,56 +144,17 @@ struct ComposerView: View {
 
     // MARK: - Height
 
-    /// How tall the editor is drawn, and the whole of the rule.
-    ///
-    /// Two modes, and the divider is what switches between them. Left alone, the box grows with the
-    /// text from one line to `ComposerTextEditor.maxLines` and then scrolls, exactly as it always
-    /// has. Once the divider has been dragged the height belongs to the user and stops following
-    /// the text, until they drag again or double click the divider to hand it back. The alternative
-    /// (a manual height that content could still push past) would mean the box never stays where it
-    /// was put, which is the one thing a resize has to promise.
+    /// The text editor measures up to ten lines, then scrolls internally. A short pane may
+    /// cap it earlier so the conversation always keeps some room above the writing surface.
     private var editorHeight: CGFloat {
-        let stored = manualHeight > 0 ? CGFloat(manualHeight) : contentHeight
-        let wanted = liveHeight ?? stored
-        return min(max(wanted, minimumEditorHeight), maxEditorHeight)
-    }
-
-    private var minimumEditorHeight: CGFloat {
-        max(ComposerLayout.minimumEditorHeight, ComposerTextEditor.lineHeight)
-    }
-
-    /// The tallest the editor may be drawn without leaving the transcript nowhere to go. Applied on
-    /// every render and not only while dragging, so shrinking the window shrinks the composer back
-    /// rather than pushing the transcript off the top.
-    private var maxEditorHeight: CGFloat {
-        PaneMeasure.editorCap(
+        let minimum = ComposerTextEditor.lineHeight
+        let maximum = PaneMeasure.editorCap(
             room: room.height,
             chrome: chromeHeight + ComposerLayout.bottomInset + ComposerLayout.textClearance,
             floor: Self.minTranscriptHeight,
-            atLeast: minimumEditorHeight
+            atLeast: minimum
         )
-    }
-
-    /// The drag begins from whatever is on screen, so switching out of automatic sizing never jumps.
-    private func resize(by translation: CGFloat) {
-        let origin = resizeOrigin ?? editorHeight
-        resizeOrigin = origin
-        // Down is positive in view coordinates, and dragging the top edge up is what makes the box
-        // taller, so the translation is subtracted rather than added.
-        let wanted = origin - translation
-        liveHeight = min(max(wanted, minimumEditorHeight), maxEditorHeight)
-    }
-
-    private func endResize() {
-        if let liveHeight { manualHeight = Double(liveHeight) }
-        liveHeight = nil
-        resizeOrigin = nil
-    }
-
-    private func resetHeight() {
-        manualHeight = 0
-        liveHeight = nil
-        resizeOrigin = nil
+        return min(max(contentHeight, minimum), maximum)
     }
 
     // MARK: - Derived state
