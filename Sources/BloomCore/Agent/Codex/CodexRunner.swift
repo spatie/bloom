@@ -135,6 +135,8 @@ public actor CodexRunner: SessionRunner {
     /// all, and `steer(_:threadID:turnID:on:)` for the fall back when the turn has just ended.
     public func send(_ text: String, recording: Data? = nil) async throws {
         let generation = handle.generation
+        let replacement = handle.prepareReplacement()
+        defer { handle.finishReplacement(replacement) }
         await applyContextWindowChange()
         try handle.check(generation)
         let client = try await connected()
@@ -197,8 +199,8 @@ public actor CodexRunner: SessionRunner {
     /// the server is `terminateNow`, and the difference between the two is which of them a chat
     /// is expected to survive.
     public nonisolated func cancelNow() {
-        let generation = handle.markCancelled()
-        Task { await self.stopTurn(generation: generation) }
+        let stopped = handle.markCancelled()
+        Task { await self.stopTurn(stopped) }
     }
 
     /// Stop, as the button means it: file the questions and then interrupt the turn.
@@ -213,11 +215,11 @@ public actor CodexRunner: SessionRunner {
     /// Answered before the interrupt rather than after, for the reason `AgentRunner.cancelNow`
     /// gives: an answer written after the thing that closes the turn is an answer the model never
     /// receives.
-    private func stopTurn(generation: UInt64) async {
-        guard handle.generation == generation, handle.wasCancelled else { return }
-        await filePendingAsks()
-        guard handle.generation == generation, handle.wasCancelled else { return }
-        await interrupt()
+    private func stopTurn(_ stopped: TurnHandle.Stopped) async {
+        if handle.generation == stopped.generation, handle.wasCancelled {
+            await filePendingAsks()
+        }
+        await interrupt(stopped)
     }
 
     /// Answers every question this turn can no longer answer, and files it as stopped.
@@ -253,14 +255,20 @@ public actor CodexRunner: SessionRunner {
         Task { await self.shutdown() }
     }
 
-    private func interrupt() async {
+    private func interrupt(_ stopped: TurnHandle.Stopped) async {
+        // Capture the stopped turn before persistence suspends. A new explicit send may install
+        // a different turn while the cancelled state is being saved; that turn is not this Stop's.
+        let target = stopped.turnID
+        let client = self.client
+        let threadID = self.threadID
         // Written here rather than left for the result to infer, which is what the `cancelled`
         // flag used to do at both of the sites below. `SessionLifecycle` refuses a stop on a
         // session with no turn open and ignores a result on one that has already been stopped, so
         // the two facts are stated once each instead of being recombined by a ternary twice.
-        if session.apply(.cancelled).moves { await save(session) }
-        guard let client, let threadID, let turnID = handle.turnID else { return }
-        try? await client.interruptTurn(threadID: threadID, turnID: turnID)
+        if handle.generation == stopped.generation, handle.wasCancelled,
+           session.apply(.cancelled).moves { await save(session) }
+        guard let client, let threadID, let target else { return }
+        try? await client.interruptTurn(threadID: threadID, turnID: target)
     }
 
     /// Answer one question, as a person. The turn resumes on the other side of this line.
@@ -511,6 +519,14 @@ public actor CodexRunner: SessionRunner {
                 break
             }
         }
+        let endingTurn: String? = switch event {
+        case .turnCompleted(let turn): turn.id
+        case .turnError(let failure) where !failure.willRetry: failure.turnID
+        default: nil
+        }
+        // Filter before forgetting item metadata too: an old completion must not erase the
+        // command or file details used to explain a question from the newer turn.
+        if let endingTurn, !handle.acceptsTerminal(turnID: endingTurn) { return }
         remember(event)
 
         if case .unknown(let method, let raw) = event, method == "serverRequest/resolved",
@@ -538,7 +554,7 @@ public actor CodexRunner: SessionRunner {
         }
 
         for translated in translation.translate(event) {
-            await emit(translated)
+            await emit(translated, endingTurn: endingTurn)
         }
     }
 
@@ -554,7 +570,7 @@ public actor CodexRunner: SessionRunner {
         }
     }
 
-    private func emit(_ event: AgentEvent) async {
+    private func emit(_ event: AgentEvent, endingTurn: String? = nil) async {
         if event.isTranscriptRow {
             await persist(
                 kind: event.kind,
@@ -562,6 +578,10 @@ public actor CodexRunner: SessionRunner {
                 refID: event.refID
             )
         }
+
+        // Persistence suspends too. A terminal row already written stays in the history, but a
+        // late event must not move the current lifecycle or announce completion to the window.
+        if let endingTurn, !handle.acceptsTerminal(turnID: endingTurn) { return }
 
         switch event {
         case .result(let result):
@@ -585,6 +605,7 @@ public actor CodexRunner: SessionRunner {
             break
         }
 
+        if let endingTurn, !handle.acceptsTerminal(turnID: endingTurn) { return }
         sink.yield(event)
     }
 
@@ -807,10 +828,16 @@ public actor CodexRunner: SessionRunner {
 /// `EventFanout` in `SessionRunner`: `@unchecked` is a promise the compiler cannot check, and
 /// the two fields below have to move together.
 private final class TurnHandle: Sendable {
+    struct Stopped: Sendable {
+        let generation: UInt64
+        let turnID: String?
+    }
+
     private struct State {
         var current: String?
         var cancelled = false
         var generation: UInt64 = 0
+        var replacement: UUID?
     }
 
     private let state = Mutex(State())
@@ -838,6 +865,30 @@ private final class TurnHandle: Sendable {
     var wasCancelled: Bool { state.withLock(\.cancelled) }
     var generation: UInt64 { state.withLock(\.generation) }
 
+    /// The old turn stops owning the busy state as soon as the owner asks for its replacement,
+    /// not only when the server eventually returns a new id.
+    func prepareReplacement() -> UUID? {
+        state.withLock {
+            guard $0.cancelled else { return nil }
+            let token = UUID()
+            $0.replacement = token
+            return token
+        }
+    }
+
+    func finishReplacement(_ token: UUID?) {
+        state.withLock {
+            if $0.replacement == token { $0.replacement = nil }
+        }
+    }
+
+    func acceptsTerminal(turnID: String) -> Bool {
+        state.withLock {
+            if $0.replacement != nil, $0.current == turnID { return false }
+            return $0.current == nil || $0.current == turnID
+        }
+    }
+
     func check(_ generation: UInt64) throws {
         guard state.withLock({ $0.generation == generation }) else { throw CancellationError() }
         try Task.checkCancellation()
@@ -848,16 +899,17 @@ private final class TurnHandle: Sendable {
             guard state.generation == generation else { return false }
             state.current = turnID
             state.cancelled = false
+            state.replacement = nil
             return true
         }
     }
 
     @discardableResult
-    func markCancelled() -> UInt64 {
+    func markCancelled() -> Stopped {
         state.withLock {
             $0.generation &+= 1
             $0.cancelled = true
-            return $0.generation
+            return Stopped(generation: $0.generation, turnID: $0.current)
         }
     }
 

@@ -13,8 +13,8 @@ public enum DeliveryDrainState: Sendable {
         return true
     }
 
-    public mutating func finish() -> Bool {
-        let again = self == .requested
+    public mutating func finish(allowRepeat: Bool = true) -> Bool {
+        let again = self == .requested && allowRepeat
         self = .idle
         return again
     }

@@ -125,4 +125,13 @@ struct AuditPersistenceTests {
         let finished = state.finish()
         #expect(first && !second && !third && again && next && !finished)
     }
+
+    @Test func aFailedDrainDoesNotAutomaticallyRetryCoalescedSubmissions() {
+        var state = DeliveryDrainState.idle
+        let first = state.begin()
+        let overlapping = state.begin()
+        let repeatAfterFailure = state.finish(allowRepeat: false)
+        let explicitRetry = state.begin()
+        #expect(first && !overlapping && !repeatAfterFailure && explicitRetry)
+    }
 }

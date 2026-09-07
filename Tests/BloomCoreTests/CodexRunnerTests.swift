@@ -84,6 +84,58 @@ private func eventually(
 // MARK: - Tests
 
 @Suite(.scratchDirectory) struct CodexRunnerTests {
+    @Test(arguments: [false, true])
+    func lateStoppedCompletionCannotEndTheNextIntentionalTurn(delayStart: Bool) async throws {
+        let store = try makeTestStore("codex-late-stop")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.send("first turn")
+        runner.cancelNow()
+        box.reply(to: "turn/start", with: .object([
+            "turn": .object(["id": .string("new-turn"), "status": .string("inProgress"), "items": .array([])]),
+        ]))
+        if delayStart { box.ignore("turn/start") }
+        let nextSend = Task { try await runner.send("new intentional turn") }
+        await eventually("second turn start", within: 20) {
+            box.process.sentMethods.filter { $0 == "turn/start" }.count == 2
+        }
+        if !delayStart { try await nextSend.value }
+        box.process.emit(#"{"method":"item/started","params":{"threadId":"01a02144-3b7e-7233-97f2-73ebd5105085","turnId":"new-turn","item":{"id":"new-command","type":"commandExecution","command":"echo new","status":"inProgress"}}}"#)
+        box.process.emit(#"{"method":"turn/completed","params":{"threadId":"01a02144-3b7e-7233-97f2-73ebd5105085","turn":{"id":"01a02144-3bab-7fe3-a92c-6eec594d84fd","status":"interrupted","items":[]}}}"#)
+        box.process.emit(#"{"method":"item/completed","params":{"threadId":"01a02144-3b7e-7233-97f2-73ebd5105085","turnId":"new-turn","item":{"id":"new-text","type":"agentMessage","text":"still working"}}}"#)
+        await eventually("new output after stale completion", within: 20) {
+            (try? await store.messages(sessionID: session.id).contains { $0.kind == .assistantText }) == true
+        }
+        // A result delivered while turn/start is pending would clear TranscriptModel's busy
+        // state. No result row is produced for this superseded completion either.
+        #expect(try await store.messages(sessionID: session.id).filter { $0.kind == .result }.isEmpty)
+        if delayStart {
+            let starts = box.process.stdin.compactMap(JSONValue.parse).filter { $0["method"]?.stringValue == "turn/start" }
+            let request = try #require(starts.last)
+            let id = try #require(request["id"])
+            box.process.emit("{\"id\":\(id.compactJSON),\"result\":{\"turn\":{\"id\":\"new-turn\",\"status\":\"inProgress\",\"items\":[]}}}")
+            try await nextSend.value
+        }
+        #expect(try await store.session(id: session.id)?.state == .running)
+        let interrupted = box.process.stdin.compactMap(JSONValue.parse).filter { $0["method"]?.stringValue == "turn/interrupt" }
+        #expect(!interrupted.contains { $0["params"]?["turnId"]?.stringValue == "new-turn" })
+        #expect(interrupted.contains { $0["params"]?["turnId"]?.stringValue == "01a02144-3bab-7fe3-a92c-6eec594d84fd" })
+        box.process.emit(#"{"id":99,"method":"item/commandExecution/requestApproval","params":{"threadId":"01a02144-3b7e-7233-97f2-73ebd5105085","turnId":"new-turn","itemId":"new-command"}}"#)
+        await eventually("new command approval after stale completion", within: 20) {
+            ((try? await store.pendingPermissionAsks(sessionID: session.id)) ?? []).count == 1
+        }
+        let asks = try await store.pendingPermissionAsks(sessionID: session.id)
+        #expect(asks.first?.ask.input["command"]?.stringValue == "echo new")
+        runner.cancelNow()
+        await eventually("new turn still interruptible", within: 20) {
+            box.process.stdin.compactMap(JSONValue.parse).contains {
+                $0["method"]?.stringValue == "turn/interrupt" && $0["params"]?["turnId"]?.stringValue == "new-turn"
+            }
+        }
+        await runner.shutdown()
+    }
+
     @Test(arguments: ["initialize", "thread/start", "turn/start"])
     func stopWhileStartingCannotBeLost(_ delayed: String) async throws {
         let store = try makeTestStore("codex-start-stop")
@@ -101,7 +153,7 @@ private func eventually(
                 Issue.record("unexpected send error: \(error)")
             }
         }
-        await eventually("delayed request") {
+        await eventually("delayed request", within: 20) {
             box.processes.first?.sentMethods.contains(delayed) == true
         }
         let request = try #require(box.process.sentFrame { $0["method"]?.stringValue == delayed })

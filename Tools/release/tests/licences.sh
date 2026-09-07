@@ -2,7 +2,7 @@
 # Packaging contract without a compiler, credentials or an installed application.
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
-fixture="$(mktemp -d -t bloom-licence-test)"
+fixture="$(mktemp -d "${TMPDIR:-/tmp}/bloom-licence-test.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
 
 mkdir -p "$fixture/checkouts/SwiftTerm" "$fixture/checkouts/Sparkle" "$fixture/checkouts/swift-argument-parser"

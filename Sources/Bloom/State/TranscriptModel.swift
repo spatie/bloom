@@ -678,7 +678,8 @@ final class TranscriptModel {
     func drain() async {
         guard !isWorkspaceArchiving, !wasStoppedByHand, store != nil else { return }
         guard drainState.begin() else { return }
-        defer { finishDrain() }
+        var allowRepeat = true
+        defer { finishDrain(allowRepeat: allowRepeat) }
         await refreshQueue()
 
         // The list is taken once and walked, rather than the queue being re-asked for a front
@@ -702,17 +703,23 @@ final class TranscriptModel {
             // Retired before it is handed over, rather than after. The pending bubble and the real
             // one are two drawings of the same sentence, and a delivery that is still pending
             // while its turn is starting is drawn twice. `restoreDelivery` is the one path back.
-            guard await claimForDelivery(next) else { return }
+            guard await claimForDelivery(next) else {
+                allowRepeat = false
+                return
+            }
 
             // A turn that would not start stops the pass. Its delivery is back at the front of
             // the queue with an error row under it, and pushing the next one into an agent that
             // just refused would bury that.
-            guard await deliver(next) else { return }
+            guard await deliver(next) else {
+                allowRepeat = false
+                return
+            }
         }
     }
 
-    private func finishDrain() {
-        let again = drainState.finish()
+    private func finishDrain(allowRepeat: Bool) {
+        let again = drainState.finish(allowRepeat: allowRepeat)
         if again, !wasStoppedByHand, !isWorkspaceArchiving {
             Task { await drain() }
         }
@@ -893,7 +900,8 @@ final class TranscriptModel {
     private func sendSteered(_ delivery: Delivery) async {
         guard !isWorkspaceArchiving, !wasStoppedByHand, store != nil else { return }
         guard drainState.begin() else { return }
-        defer { finishDrain() }
+        var allowRepeat = true
+        defer { finishDrain(allowRepeat: allowRepeat) }
         // A turn was started while this one was dying, which takes the owner typing into the
         // composer inside that second: `submit` drains, and the drain does not know a Steer is
         // booked. Two sends into one runner is the one outcome to avoid, and the cost of avoiding
@@ -906,8 +914,11 @@ final class TranscriptModel {
         guard pendingDeliveries.contains(where: { $0.id == delivery.id }) else { return }
 
         sending = delivery
-        guard await claimForDelivery(delivery) else { return }
-        await deliver(delivery)
+        guard await claimForDelivery(delivery) else {
+            allowRepeat = false
+            return
+        }
+        allowRepeat = await deliver(delivery)
     }
 
     /// Closes the question when the message it is about is no longer waiting.
