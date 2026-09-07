@@ -1703,7 +1703,7 @@ struct TranscriptTable: NSViewRepresentable {
         /// Save the reader's position before AppKit resizes the clip view and emits bounds
         /// notifications. Reading it afterwards mistakes a shorter viewport for scrolling up.
         private func viewportWillResize() {
-            guard !isHeld, viewportPlace == nil, heights.isReady else { return }
+            guard !isHeld, !isLiveScrolling, viewportPlace == nil, heights.isReady else { return }
             viewportPlace = HeldPlace(
                 wasAtEnd: holdsEnd || isFollowingAlong, anchor: anchorEntry()
             )
