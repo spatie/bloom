@@ -132,22 +132,39 @@ struct MergeSplitButton: View {
 private struct MergeControlHost<Content: View>: NSViewRepresentable {
     var content: Content
 
-    func makeNSView(context: Context) -> NSHostingView<AnyView> {
-        let host = NSHostingView(rootView: root(context))
+    func makeNSView(context: Context) -> MergeHostingView {
+        let host = MergeHostingView(rootView: root(context))
         host.appearance = NSAppearance(named: .darkAqua)
         host.sizingOptions = [.intrinsicContentSize]
         return host
     }
 
-    func updateNSView(_ host: NSHostingView<AnyView>, context: Context) {
+    func updateNSView(_ host: MergeHostingView, context: Context) {
         host.rootView = root(context)
+        host.needsLayout = true
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSHostingView<AnyView>, context: Context) -> CGSize? {
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: MergeHostingView, context: Context) -> CGSize? {
         nsView.fittingSize
     }
 
     private func root(_ context: Context) -> AnyView {
         AnyView(content.environment(\.self, context.environment).environment(\.colorScheme, .dark))
+    }
+
+    final class MergeHostingView: NSHostingView<AnyView> {
+        override func layout() {
+            super.layout()
+            applyControlAppearance(in: self)
+        }
+
+        // SwiftUI explicitly gives the embedded native control the title bar's appearance.
+        // Override only controls owned by this host, after they have been created and laid out.
+        private func applyControlAppearance(in view: NSView) {
+            if let control = view as? NSControl, control.appearance?.name != .darkAqua {
+                control.appearance = NSAppearance(named: .darkAqua)
+            }
+            for child in view.subviews { applyControlAppearance(in: child) }
+        }
     }
 }
