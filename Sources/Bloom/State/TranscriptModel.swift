@@ -548,6 +548,7 @@ final class TranscriptModel {
     /// in: as a sent bubble if nothing is holding the queue, as a pending one if something is. See
     /// `sending`.
     func submit(_ text: String) async {
+        guard !isWorkspaceArchiving else { return }
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, let store else { return }
 
@@ -664,7 +665,7 @@ final class TranscriptModel {
     /// for at that moment, and both are covered by the queue simply sitting there, visibly, until
     /// somebody says something.
     func drain() async {
-        guard let store else { return }
+        guard !isWorkspaceArchiving, let store else { return }
         await refreshQueue()
 
         // The list is taken once and walked, rather than the queue being re-asked for a front
@@ -673,7 +674,7 @@ final class TranscriptModel {
         for next in Delivery.deliverable(
             from: pendingDeliveries, hold: deliveryHold, on: session.agentKind
         ) {
-            guard deliveryHold.allowsDelivery(on: session.agentKind) else { return }
+            guard !isWorkspaceArchiving, deliveryHold.allowsDelivery(on: session.agentKind) else { return }
             // Deleted, or steered out, since the list was taken.
             guard pendingDeliveries.contains(where: { $0.id == next.id }) else { continue }
 
@@ -843,7 +844,7 @@ final class TranscriptModel {
     /// retire-then-deliver order for the same reason, which is that a delivery still marked
     /// pending while its turn is starting is drawn twice.
     private func sendSteered(_ delivery: Delivery) async {
-        guard let store else { return }
+        guard !isWorkspaceArchiving, let store else { return }
         // A turn was started while this one was dying, which takes the owner typing into the
         // composer inside that second: `submit` drains, and the drain does not know a Steer is
         // booked. Two sends into one runner is the one outcome to avoid, and the cost of avoiding
@@ -888,6 +889,10 @@ final class TranscriptModel {
     /// on a backend that takes a message mid turn and must stop at the first that did not.
     @discardableResult
     private func deliver(_ delivery: Delivery) async -> Bool {
+        guard !isWorkspaceArchiving else {
+            await abandon(delivery, saying: "The workspace is being archived.")
+            return false
+        }
         // A bare `return` used to stand here, and the sentence went nowhere: `drain` has already
         // retired this delivery from the queue and drawn it as sent, so a quiet return leaves a
         // bubble claiming to have been said to an agent that was never built. It takes a database
@@ -1129,6 +1134,10 @@ final class TranscriptModel {
         }
     }
 
+    private var isWorkspaceArchiving: Bool {
+        workspace.map { app.isArchiving($0.id) } ?? false
+    }
+
     /// Starts the runner and the event pump on first use. The pump is rebuilt whenever it is
     /// missing, so no path can leave a live runner with nothing reading its events.
     ///
@@ -1146,6 +1155,7 @@ final class TranscriptModel {
     /// second caller of this would take the app down. There is no reason for the guarantee to be
     /// somewhere other than here.
     private func ensureRunner() -> (any SessionRunner)? {
+        guard !isWorkspaceArchiving else { return nil }
         guard let store else { return nil }
         let preferences = RunnerPreferences(session: session)
         if runner != nil, runnerPreferences != preferences {

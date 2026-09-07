@@ -258,7 +258,8 @@ extension AppModel {
         // That trade is deliberate and it is the reason the archive script's failure message says
         // so rather than claiming the workspace is untouched. Moving the teardown after the
         // script would mean the script running while an agent still writes, which is worse.
-        workspaceModels[workspace.id]?.teardown()
+        guard hideFromSidebar(workspace.id) else { return }
+        workspaceModels[workspace.id]?.stopEverything()
 
         // Out of the sidebar now, before a single byte moves.
         //
@@ -272,9 +273,9 @@ extension AppModel {
         // made before this method was called, so the row can go at once and the disk can catch
         // up. If the disk refuses, the `catch` below reloads from the store, where the row is
         // still active, and it comes back with the reason in front of it.
-        let previousSelection = selection
-        hideFromSidebar(workspace.id)
-        if selection.workspaceID == workspace.id { selection = .home }
+        // Do not visit Home speculatively. On refusal its List was immediately dismantled again
+        // while the inspector was resizing, the suspected trigger of the macOS 27 crash.
+        // The sidebar can hide the row, but the selected content stays until Git has succeeded.
 
         do {
             try await manager.archive(
@@ -284,10 +285,12 @@ extension AppModel {
                 force: force,
                 isPullRequestMerged: hazards.isPullRequestMerged
             )
+            if selection.workspaceID == workspace.id { selection = .home }
             // The worktree is gone from disk now. Its shells are sitting in a directory that no
             // longer exists and its dev servers are still holding their ports, and nothing else in
             // the app will ever come back for them.
             await TerminalSessionStore.shared.discard(workspaceID: workspace.id)
+            workspaceModels[workspace.id]?.teardown()
             // Everything at once, and after the discard rather than before it. The store agrees
             // the workspace is archived by now, so the reload filter has nothing left to protect,
             // and holding it across one more await can only keep a row from flickering back.
@@ -297,7 +300,7 @@ extension AppModel {
             await offerUndo(of: workspace, repo: repo, report: report)
             Log.archive.info("archived \(workspace.name, privacy: .public)")
         } catch let error as WorkspaceError {
-            await undoOptimisticArchive(workspace, restoring: previousSelection)
+            await undoOptimisticArchive(workspace)
             switch error {
             case .archiveScriptFailed(let status, let output):
                 Log.archive.error(
@@ -334,7 +337,7 @@ extension AppModel {
                 await reportArchiveFailure(error, workspace: workspace)
             }
         } catch {
-            await undoOptimisticArchive(workspace, restoring: previousSelection)
+            await undoOptimisticArchive(workspace)
             Log.archive.error(
                 "could not archive \(workspace.name, privacy: .public): \(error.readableMessage, privacy: .public)"
             )
@@ -360,14 +363,13 @@ extension AppModel {
 
     /// Puts a workspace back in the sidebar after the disk refused to let it go.
     ///
-    /// Reloaded from the store rather than reinstated from a copy held in memory. `Workspace.state`
-    /// is only written once the removal has actually happened, so a failed archive leaves the row
-    /// exactly as it was, and reading it back is the one version that cannot disagree with what
-    /// every other part of the app is about to read.
-    private func undoOptimisticArchive(_ workspace: Workspace, restoring selection: SidebarSelection) async {
-        stopHidingFromSidebar(workspace.id)
+    /// The presentation is restored synchronously, then refreshed from the store. There must not
+    /// be an await between removing the in-flight fallback and putting the row back: that would
+    /// briefly remove the inspector and start another pane resize on a refused archive.
+    private func undoOptimisticArchive(_ workspace: Workspace) async {
+        restoreToSidebar(workspace)
         await reload()
-        self.selection = selection
+        // A user who navigated away while Git was working keeps their new selection.
     }
 
     /// Offers Edit > Undo for an archive that really can be taken back.

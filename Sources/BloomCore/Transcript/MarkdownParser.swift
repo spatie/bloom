@@ -446,6 +446,8 @@ private func tableCells(_ source: String) -> [String] {
 }
 
 private enum InlineParser {
+    private static let cache = MarkdownInlineCache()
+
     static func parseLines(_ lines: [String]) -> [MarkdownInline] {
         var output: [MarkdownInline] = []
         for (offset, raw) in lines.enumerated() {
@@ -465,8 +467,10 @@ private enum InlineParser {
     }
 
     static func parse(_ source: String) -> [MarkdownInline] {
-        var scanner = Scanner(source)
-        return coalesced(scanner.run())
+        cache.value(for: source) {
+            var scanner = Scanner(source)
+            return coalesced(scanner.run())
+        }
     }
 
     private static func coalesced(_ input: [MarkdownInline]) -> [MarkdownInline] {

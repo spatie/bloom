@@ -16,6 +16,7 @@ import SwiftUI
 /// left here is the one question this column answers.
 struct InspectorPane: View {
     let model: WorkspaceModel?
+    @Environment(AppModel.self) private var app
 
     var body: some View {
         content
@@ -26,6 +27,7 @@ struct InspectorPane: View {
     private var content: some View {
         if let model {
             InspectorView(model: model)
+                .disabled(app.isArchiving(model.workspace.id))
                 // Rebuilt per workspace, so a diff selection never leaks across a switch.
                 .id(model.workspace.id)
         } else {

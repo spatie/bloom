@@ -120,6 +120,10 @@ struct DetailColumn: View {
             // probe run turned it on. See `SwitchTrace`.
             let _ = SwitchTrace.mark("column.body", workspace: id)
             CenterColumnView(model: model)
+                .disabled(app.isArchiving(id))
+                .overlay {
+                    if app.isArchiving(id) { ArchiveInteractionShield() }
+                }
         } else {
             HomeView()
         }

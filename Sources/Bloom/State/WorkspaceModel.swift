@@ -1137,7 +1137,7 @@ final class WorkspaceModel {
     /// Through the same `setupTask` the first run uses, so archiving or quitting stops a
     /// `composer install` started from here exactly as it stops one started at creation.
     func runSetupAgain() {
-        guard canRunSetup, let repo, let manager = app.manager else { return }
+        guard !app.isArchiving(workspace.id), canRunSetup, let repo, let manager = app.manager else { return }
         setupTask?.cancel()
         setupGeneration += 1
         let generation = setupGeneration
