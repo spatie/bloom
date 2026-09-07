@@ -9,6 +9,7 @@ import BloomCore
 /// it still falls back to the built-in on the way out.
 struct PromptEditor: View {
     let definition: PromptDefinition
+    var onSave: () -> Void = {}
 
     /// Tall enough that the built-in prompts are readable without scrolling on a default window,
     /// and short enough that the variable reference below stays visible.
@@ -40,8 +41,11 @@ struct PromptEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
-            Text(definition.summary)
-                .settingsFootnote()
+            DisclosureGroup("When this prompt is used") {
+                Text(definition.summary)
+                    .settingsFootnote()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             editor
 
@@ -70,11 +74,14 @@ struct PromptEditor: View {
             variableReference
         }
         .task { load() }
-        .onChange(of: text) { _, value in save(value) }
     }
 
     private var editor: some View {
-        TextEditor(text: $text)
+        TextEditor(text: Binding(get: { text }, set: { value in
+            text = value
+            // Persist the keystroke before a selection change can remove this editor.
+            save(value)
+        }))
             .font(Typo.codeSmall)
             .scrollContentBackground(.hidden)
             .padding(Metrics.spacingSmall)
@@ -168,9 +175,11 @@ struct PromptEditor: View {
     private func save(_ value: String) {
         guard isLoaded else { return }
         overrides.set(value == definition.defaultTemplate ? nil : value, for: definition.id)
+        onSave()
     }
 
     private func restoreDefault() {
         text = definition.defaultTemplate
+        save(text)
     }
 }

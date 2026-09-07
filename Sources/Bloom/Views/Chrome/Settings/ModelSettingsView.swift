@@ -1,144 +1,65 @@
 import SwiftUI
 import BloomCore
 
-/// The "Models" tab: what a brand new session starts out as.
-///
-/// Every control here writes through `Store.setSetting`, and `ComposerView.prepare()` reads them
-/// back. That loop is the whole point of the screen. The previous Agent tab wrote the same three
-/// values and nothing ever read them, which is worse than having no controls at all, because the
-/// user believes a choice took effect.
-///
-/// Reads and writes go through the `Store` actor, so the values are loaded once into `@State` in
-/// `.task` and written back on change. Nothing in `body` touches the store or the file system.
+/// The root owns defaults so switching panes preserves edits and serialises their writes.
 struct ModelSettingsView: View {
-    /// What the app-wide default may be set to. Approve for me is the one mode left out, and the
-    /// reason is worth writing down: the rows are in Claude Code's vocabulary, and Claude Code's
-    /// name for that mode is Auto, so offering both would draw two rows reading "Auto" in one
-    /// menu. A Codex chat reaches it from the composer, which is where a chat's own mode is set.
-    ///
-    /// The vocabulary stays Claude Code's now that the model above can name Codex, because this
-    /// one picker sits under two model rows that are free to be on different backends: an owner
-    /// who works in Codex and has reviews done by Claude Code would otherwise need two permission
-    /// pickers to be told which words apply. A mode the backend a chat lands on has no row for
-    /// lands on its nearest, which is `PermissionMode.nearest(on:)`, and it is applied where the
-    /// chat is opened rather than trusted to this screen: Plan plus a Codex model is Read only.
-    private static let defaultablePermissionModes: [PermissionMode] =
-        PermissionMode.allCases.filter { $0 != .autoReview }
-
-    @Environment(AppModel.self) private var app
-
-    @State private var defaults = AppDefaults()
-    /// Guards the first write. Assigning `@State` inside `.task` fires every `onChange`, and
-    /// saving there would overwrite real settings with the fallbacks on every window open.
-    @State private var isLoaded = false
-    /// The styles this machine has. No project, because this screen is about every repository at
-    /// once: a style a single checkout defines is offered in that checkout's composer and would be
-    /// a setting nothing could honour here.
+    @Binding var defaults: AppDefaults
     @State private var outputStyles = ComposerOutputStyleCatalog()
 
     var body: some View {
         Form {
             Section {
-                LabeledContent {
+                SettingsRow("New sessions") {
                     ModelAndEffortPickers(
-                        model: $defaults.model,
-                        effort: $defaults.effort,
-                        backend: $defaults.backend
+                        model: $defaults.model, effort: $defaults.effort, backend: $defaults.backend
                     )
-                } label: {
-                    // No second line under either of these. "Model for new sessions" under a label
-                    // reading "Default model" is the label again in different words, and a caption
-                    // that says nothing teaches the reader to skip the ones that do.
-                    Text("Default model")
                 }
-
-                LabeledContent {
+                SettingsRow("Reviews") {
                     ModelAndEffortPickers(
-                        model: $defaults.reviewModel,
-                        effort: $defaults.reviewEffort,
+                        model: $defaults.reviewModel, effort: $defaults.reviewEffort,
                         backend: $defaults.reviewBackend
                     )
-                } label: {
-                    Text("Review model")
                 }
+            } header: {
+                Text("Models")
+            } footer: {
+                Text("Each row selects a model and reasoning effort. Project model settings take priority. Existing sessions keep their settings.")
+                    .settingsFootnote()
             }
 
-            Section {
-                // Claude Code only, and it says so in its own label now, because the sentence
-                // that used to excuse the silence has stopped being true: the model list above
-                // has a Codex section in it, so "nothing here mentions a backend" no longer
-                // describes this screen.
-                //
-                // Named rather than hidden, which is the other option and was rejected twice
-                // over. A row that disappears when the default model moves to Codex takes a
-                // stored style with it, leaving a value that is still in force for every Claude
-                // Code chat and no longer has a control; and the review model can be on the other
-                // backend from the default one, so there is no single backend for this row to
-                // appear and disappear with. The context window row at the foot of this section
-                // settled the same question the same way, and two rows that name their backends
-                // read as a pair where one alone read as an exception.
+            Section("New session behaviour") {
+                Toggle("Start in plan mode", isOn: $defaults.planMode)
+                Toggle("Start in fast mode", isOn: $defaults.fastMode)
+            }
+
+            Section("Claude Code") {
                 Picker(selection: $defaults.outputStyle) {
                     ForEach(outputStyles.options(includingCurrent: defaults.outputStyle)) { option in
                         Text(option.label).tag(option.id)
                     }
                 } label: {
-                    Text("Claude Code output style")
-                    Text(outputStyles.detail(of: defaults.outputStyle) ?? "How new sessions write")
+                    Text("Output style")
+                    Text(outputStyles.detail(of: defaults.outputStyle) ?? "How new Claude Code sessions write.")
                 }
+            }
 
-                Picker(selection: $defaults.permissionMode) {
-                    ForEach(Self.defaultablePermissionModes, id: \.self) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                } label: {
-                    Text("Default permission mode")
-                    Text("How much a new session may do without asking")
-                }
-
-                Toggle("Start new sessions in plan mode", isOn: $defaults.planMode)
-
-                Toggle("Start new sessions in fast mode", isOn: $defaults.fastMode)
-
-                // Codex only, and it says so for the same reason the output style above it now
-                // does: a "Context window" with no backend on it would read as a claim about
-                // every model in the list above, and half of that list is Claude Code's.
-                Picker(selection: $defaults.codexContextWindow) {
-                    ForEach(
-                        CodexContextWindow.options(including: defaults.codexContextWindow),
-                        id: \.self
-                    ) { tokens in
+            Section {
+                Picker("Context window", selection: $defaults.codexContextWindow) {
+                    ForEach(CodexContextWindow.options(including: defaults.codexContextWindow), id: \.self) { tokens in
                         Text(CodexContextWindow.label(for: tokens)).tag(tokens)
                     }
-                } label: {
-                    Text("Codex context window")
-                    Text("How large a new Codex session is told the model's window is")
                 }
+            } header: {
+                Text("Codex")
             } footer: {
-                // A footer rather than a section of its own. A group holding nothing but a
-                // sentence draws a card around the sentence, which makes an aside look like a
-                // setting the user has failed to find the control for.
-                Text(
-                    "A repository that pins a model in its own settings file wins over these. "
-                    + "Sessions that already exist keep whatever they were opened with."
-                )
-                .settingsFootnote()
+                Text("Overrides the context size reported to new Codex sessions. Use the model default unless you need a specific size.")
+                    .settingsFootnote()
             }
         }
         .settingsForm()
         .task {
-            // Codex's models are fetched, so the section is empty until this returns and the two
-            // pickers have to be right before it does. They are: a stored id the list does not
-            // hold stays on the list through `ComposerOption.adding`, so a machine that is
-            // offline, or that has no Codex on it at all, shows and keeps whatever was chosen.
             ComposerModelCatalog.shared.load()
             await outputStyles.refreshIfStale(project: nil)
-            guard let store = app.store else { return }
-            defaults = await AppDefaults.load(from: store)
-            isLoaded = true
-        }
-        .onChange(of: defaults) { _, updated in
-            guard isLoaded, let store = app.store else { return }
-            Task { await updated.save(to: store) }
         }
     }
 }

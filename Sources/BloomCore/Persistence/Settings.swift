@@ -492,6 +492,43 @@ public struct AppDefaults: Sendable, Hashable {
         return defaults
     }
 
+    /// Settings panes share a draft but only write the values the user actually changed.
+    /// Writing every fallback would pin an unchosen model and overwrite edits from another pane.
+    public func saveChanges(from previous: AppDefaults, to store: Store) async throws {
+        let values = storedValues
+        let oldValues = previous.storedValues
+        var changed = Set(values.keys.filter { values[$0, default: nil] != oldValues[$0, default: nil] })
+        let modelKeys: Set<String> = [Key.model, Key.effort, Key.backend]
+        let reviewKeys: Set<String> = [Key.reviewModel, Key.reviewEffort, Key.reviewBackend]
+        if !changed.isDisjoint(with: modelKeys) {
+            changed.formUnion(modelKeys)
+            // An unstated review model follows the default model on load. Preserve the review
+            // choice shown in the form when changing that default, including its backend.
+            changed.formUnion(reviewKeys)
+        } else if !changed.isDisjoint(with: reviewKeys) {
+            changed.formUnion(reviewKeys)
+        }
+        for key in changed.sorted() {
+            try await store.setSetting(key, values[key, default: nil])
+        }
+    }
+
+    private var storedValues: [String: String?] {
+        [
+            Key.model: model,
+            Key.effort: effort,
+            Key.backend: backend.rawValue,
+            Key.reviewModel: reviewModel,
+            Key.reviewEffort: reviewEffort,
+            Key.reviewBackend: reviewBackend.rawValue,
+            Key.permissionMode: permissionMode.rawValue,
+            Key.planMode: planMode ? "1" : "0",
+            Key.fastMode: fastMode ? "1" : "0",
+            Key.outputStyle: OutputStyle.isDefault(outputStyle) ? nil : outputStyle,
+            Key.codexContextWindow: CodexContextWindow.stored(codexContextWindow),
+        ]
+    }
+
     public func save(to store: Store) async {
         try? await store.setSetting(Key.model, model)
         try? await store.setSetting(Key.effort, effort)

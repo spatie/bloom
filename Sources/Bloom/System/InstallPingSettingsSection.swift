@@ -24,6 +24,9 @@ struct InstallPingSettingsSection: View {
                 Text(InstallPing.settingDetail)
             }
 
+        } header: {
+            Text("Installation reporting")
+        } footer: {
             Text(InstallPing.settingFooter)
                 .settingsFootnote()
         }

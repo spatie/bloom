@@ -212,6 +212,7 @@ struct BloomApp: App {
                 // edit. See `WindowRoles`.
                 .windowRole(.utility)
         }
+        .defaultSize(width: 850, height: 700)
 
         // One window per project, opened from the gear on its sidebar header. See the scene.
         RepoSettingsWindow(model: model)

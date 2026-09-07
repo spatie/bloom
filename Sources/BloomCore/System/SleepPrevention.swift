@@ -32,7 +32,7 @@ public enum SleepPrevention {
     /// Said in terms of what it does and what it leaves alone, because "keep awake" is read by
     /// most people as "keep the screen on", which this deliberately does not do.
     public static let settingDetail =
-        "Idle sleep is held off from the moment an agent starts until the last one finishes. The display still dims and sleeps as usual."
+        "Prevents idle sleep until all agents finish. The display can still sleep."
 
     /// The menu bar item's first row.
     ///
@@ -48,7 +48,7 @@ public enum SleepPrevention {
     /// external display attached, and no assertion any application can take changes that. It also
     /// applies on battery, which is a real cost and is said rather than hidden.
     public static let caveat =
-        "Closing the lid still sleeps the Mac, and the agents stop with it. This applies on battery too, so a long run away from power will keep the machine awake and drain it."
+        "Closing the lid can still put the Mac to sleep and pause agents. Keeping it awake uses more battery."
 
     /// Whether the assertion should currently be held open against sleep.
     ///

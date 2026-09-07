@@ -72,35 +72,31 @@ struct AgentsSettingsView: View {
             } else if let status {
                 statusSection(status)
 
+                capabilitySection
+
                 if status.connection == .notInstalled {
                     notInstalledSection
-                } else {
-                    if !status.details.isEmpty {
-                        Section("Details") {
-                            ForEach(status.details) { detail in
-                                SettingsRow(detail.label) {
-                                    Text(detail.value)
-                                        .font(Typo.label)
-                                        .foregroundStyle(Palette.textSecondary)
-                                        .textSelection(.enabled)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                        .help(detail.value)
-                                }
-                            }
-                        }
-                    }
-
-                    loginSection
                 }
 
-                executableSection(status)
-                configurationSection(status)
-                capabilitySection
+                Section("GitHub") {
+                    SettingsRow("Account") {
+                        Text(GitHubIdentity.cachedUsername ?? "Not available")
+                            .foregroundStyle(Palette.textSecondary)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                Section {
+                    DisclosureGroup("Advanced configuration") {
+                        executableSection(status)
+                        configurationSection(status)
+                    }
+                }
             }
         }
         .settingsForm()
         .task { await bootstrap() }
+        .onDisappear { commitPathDraft() }
         .onChange(of: selection) { _, kind in
             commitPathDraft()
             draftKind = kind
@@ -136,6 +132,22 @@ struct AgentsSettingsView: View {
                 .disabled(isRefreshing)
                 .accessibilityLabel("Refresh \(selection.label)")
             }
+
+            ForEach(status.details.filter { $0.label != "Version" || $0.value != status.version }) { detail in
+                SettingsRow(detail.label) {
+                    Text(detail.value)
+                        .foregroundStyle(Palette.textSecondary)
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(detail.value)
+                }
+            }
+
+            if status.connection != .notInstalled {
+                Button(status.connection == .connected ? "Sign in with another account…" : "Sign in…", action: runLogin)
+                    .help("Opens Terminal to sign in to \(selection.label).")
+            }
         } header: {
             Text(selection.label)
         }
@@ -158,21 +170,8 @@ struct AgentsSettingsView: View {
         }
     }
 
-    private var loginSection: some View {
-        Section("Sign in") {
-            Button("Run \(selection.loginCommand)", action: runLogin)
-                .help("Opens Terminal and runs \(selection.loginCommand). The login flow asks questions, so Bloom cannot run it inline.")
-        }
-    }
-
-    /// Two rows, because "where is Bloom running this from" and "where have you told it to look"
-    /// are different questions. The resolved path used to be passed as the text field's title,
-    /// which on macOS is a visible label rather than a placeholder, so it was drawn as loose
-    /// centred text beside the field and wrapped across two lines mid-path. As its own row it sits
-    /// beside its label like every other value in the window, on one line, with the middle of a
-    /// long path elided so both the home directory and the binary name survive.
     private func executableSection(_ status: AgentStatus) -> some View {
-        Section {
+        VStack(alignment: .leading, spacing: Metrics.gutter) {
             SettingsRow("Executable") {
                 if let path = status.executablePath {
                     Text(path)
@@ -226,15 +225,14 @@ struct AgentsSettingsView: View {
                 }
                 .help("Clears the custom path and goes back to whatever is first on your PATH.")
             }
-        } header: {
-            Text("Location")
         }
+        .padding(.top, Metrics.gutter)
     }
 
     @ViewBuilder
     private func configurationSection(_ status: AgentStatus) -> some View {
         if let path = status.configPath, let isDirectory = existenceKind(of: path) {
-            Section("Configuration") {
+            VStack(alignment: .leading, spacing: Metrics.gutter) {
                 SettingsRow(isDirectory ? "Config folder" : "Config file") {
                     HStack(spacing: Metrics.gutter) {
                         Text(path)
@@ -264,7 +262,7 @@ struct AgentsSettingsView: View {
         if !selection.canRunWorkspaces {
             Section {
                 Label {
-                    Text("Bloom can detect and configure \(selection.label), but cannot run a workspace with it yet. Workspaces run on \(AgentKind.runnableSentence).")
+                    Text("\(selection.label) cannot run workspaces in Bloom yet. Use \(AgentKind.runnableSentence).")
                         .settingsFootnote()
                 } icon: {
                     Image(systemName: "info.circle")

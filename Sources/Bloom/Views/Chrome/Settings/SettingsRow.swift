@@ -71,7 +71,7 @@ extension View {
 ///
 /// The rule is that a label lines up with the FIRST line of its content, and first text baseline
 /// is how that is said. Centre would be wrong: the tallest content in these rows is a stack two or
-/// three lines high, and a label centred against `SettingValue`'s list of contributing files sits
+/// three lines high, and a label centred against a list of contributing files sits
 /// opposite the middle path rather than against the thing it names.
 ///
 /// The one case first text baseline cannot answer is content with no text in it at all. SwiftUI

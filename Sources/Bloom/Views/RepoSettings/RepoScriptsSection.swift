@@ -44,17 +44,17 @@ struct RepoScriptsSection: View {
                 placeholder: "#!/bin/zsh",
                 text: $model.draft.archiveScript
             )
-        } footer: {
-            VStack(alignment: .leading, spacing: Metrics.spacingTight) {
-                Text("Run with the workspace folder as the working directory, not in an interactive shell, so anything a login shell would set up has to be set up in the script. A script saved as a file is run as itself, so the shebang on its first line picks the interpreter; one kept as a line of settings is run by zsh.")
-                Text(Self.variables)
-                    .font(Typo.codeTiny)
-                Text(Self.alias)
-                Text(Self.rerun)
+            DisclosureGroup("Execution details and variables") {
+                VStack(alignment: .leading, spacing: Metrics.spacingTight) {
+                    Text("Scripts run in the workspace folder without an interactive shell. Files use their shebang; inline commands use zsh.")
+                    Text(Self.variables)
+                        .font(Typo.codeTiny)
+                    Text(Self.alias)
+                    Text(Self.rerun)
+                }
+                .settingsFootnote()
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .font(Typo.caption)
-            .foregroundStyle(Palette.textSecondary)
-            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -100,7 +100,7 @@ struct RepoScriptsSection: View {
             Text("Run scripts")
         } footer: {
             VStack(alignment: .leading, spacing: Metrics.spacingTight) {
-                Text("Started from the Workspace menu, each in a terminal tab of its own named after the script. Use the one-at-a-time mode when the project cannot run twice, because it binds a fixed port or shares one database.")
+                Text("Start these from the Workspace menu. Limit them to one workspace when they share a port or database.")
                 SettingsDestinationLabel(model: model, key: .runScripts)
             }
             .font(Typo.caption)

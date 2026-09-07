@@ -76,14 +76,18 @@ struct RepoSettingsView: View {
                 case .project:
                     Form {
                         projectSection
-                        filesSection
+                        Section {
+                            DisclosureGroup("Settings files") {
+                                filesSection
+                            }
+                        }
                         removeSection
                     }
                     .settingsForm()
                 case .workspaces:
                     Form {
-                        RepoFilesToCopySection(model: model)
                         branchSection
+                        RepoFilesToCopySection(model: model)
                     }
                     .settingsForm()
                 case .scripts:
@@ -100,8 +104,10 @@ struct RepoSettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Hairline()
-            RepoSettingsSaveBar(model: model)
+            if pane != .project || model.isDirty || model.hasExternalChange || model.saveError != nil {
+                Hairline()
+                RepoSettingsSaveBar(model: model)
+            }
         }
         .background(Palette.windowBackground)
         .frame(minWidth: Self.minimumSize.width, minHeight: Self.minimumSize.height)
@@ -173,7 +179,7 @@ struct RepoSettingsView: View {
                 }
             }
         } footer: {
-            Text("Bloom's own record of this folder. Everything on the other two tabs is saved in the repository.")
+            Text("Name, icon and colour save automatically in Bloom. Other panes use Save Files to update the repository.")
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textSecondary)
         }
@@ -208,7 +214,7 @@ struct RepoSettingsView: View {
     /// `SettingsRow` has no such column, and with the field gone the line has room. The sentence
     /// underneath stays on a line of its own, because it is prose. See `summaryLine`.
     private var markRow: some View {
-        SettingsRow("Mark") {
+        SettingsRow("Icon") {
             VStack(alignment: .leading, spacing: Metrics.spacing) {
                 HStack(spacing: Metrics.gutter) {
                     markTile(size: Self.markTileSize)
@@ -443,7 +449,7 @@ struct RepoSettingsView: View {
 
             Toggle(isOn: $model.draft.deleteBranchOnArchive) {
                 Text("Delete the branch when a workspace is archived")
-                Text("Off by default. The worktree goes either way, the branch is what is kept.")
+                Text("Archiving always removes the worktree. Turn this on to remove its branch too.")
             }
         } header: {
             Text("Branches")
@@ -453,7 +459,7 @@ struct RepoSettingsView: View {
     // MARK: - Settings files
 
     private var filesSection: some View {
-        Section {
+        VStack(alignment: .leading, spacing: Metrics.gutter) {
             if model.loaded.sources.isEmpty {
                 Text("No settings file applies to this project yet. Saving creates \(shortPath(SettingsWriter.defaultFile(repo: repo.path))).")
                     .font(Typo.caption)
@@ -478,10 +484,7 @@ struct RepoSettingsView: View {
                     }
                 }
             }
-        } header: {
-            Text("Settings files")
-        } footer: {
-            Text("Lowest precedence first. A file inside the project outranks a machine-wide one, and a .local file outranks the one beside it that is committed.")
+            Text("Listed from lowest to highest priority. Project files override machine settings; .local files override shared files.")
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textSecondary)
         }

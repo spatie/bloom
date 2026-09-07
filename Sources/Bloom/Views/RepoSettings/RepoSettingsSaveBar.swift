@@ -17,10 +17,10 @@ struct RepoSettingsSaveBar: View {
 
             Spacer(minLength: Metrics.spacingSmall)
 
-            Button("Revert", action: model.revert)
+            Button("Revert File Changes", action: model.revert)
                 .disabled(!model.isDirty && !model.hasExternalChange)
 
-            Button("Save") {
+            Button("Save Files") {
                 Task { await model.save() }
             }
             .keyboardShortcut("s", modifiers: .command)
@@ -56,22 +56,24 @@ struct RepoSettingsSaveBar: View {
             // teammate's change; discarding what is on screen would lose the user's. Both are on
             // the table and the sentence says so.
             Label(
-                "These settings changed on disk while you were editing them. Save keeps what is on screen. Revert takes the new version.",
+                "These settings changed on disk while you were editing them. Save Files keeps your edits. Revert File Changes loads the new version.",
                 systemImage: "arrow.triangle.2.circlepath"
             )
             .font(Typo.caption)
             .foregroundStyle(Palette.warning)
         } else if model.isDirty {
-            Text("Unsaved changes to \(destinations).")
+            Text("Unsaved repository changes: \(destinations).")
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textSecondary)
         } else if !model.savedPaths.isEmpty {
             Label("Saved to \(saved).", systemImage: "checkmark.circle.fill")
                 .font(Typo.caption)
                 .foregroundStyle(Palette.positive)
+        } else {
+            Text("Repository changes need Save Files.")
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textSecondary)
         }
-        // Nothing when there is nothing to report. Where a setting is stored is said beside the
-        // setting, on the row that writes it, which is where it can be read while it matters.
     }
 
     private var destinations: String {

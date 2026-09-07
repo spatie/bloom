@@ -29,7 +29,7 @@ struct RepoInstructionsSection: View {
                 model: model,
                 subject: .merge,
                 title: "Merging",
-                summary: "Added to the turn Bloom sends when you confirm Merge, under Bloom's own steps and outranking them. Bloom already says which flags are forbidden, to stop rather than force when GitHub refuses, to delete the branch on the server only once the merge succeeded, and to change nothing on this machine.",
+                summary: "Extra instructions for merging pull requests, such as your preferred merge method.",
                 placeholder: "Squash unless the branch is a stack.",
                 text: $model.draft.mergeInstructions
             )
@@ -38,20 +38,20 @@ struct RepoInstructionsSection: View {
                 model: model,
                 subject: .fixConflicts,
                 title: "Merge conflicts",
-                summary: "Added to the turn Bloom sends when you press Fix merge conflicts. That turn already brings the base branch in, resolves, commits and pushes, and stops rather than pushing a resolution it is unsure of.",
+                summary: "Extra instructions for resolving and pushing merge conflicts.",
                 placeholder: "Regenerate the lock file rather than resolving it by hand.",
                 text: $model.draft.conflictInstructions
             )
-        } header: {
-            Text("Instructions")
-        } footer: {
-            VStack(alignment: .leading, spacing: Metrics.spacingTight) {
-                Text("Sent as an attachment on the turn, so an agent reads them as a file rather than as one more paragraph of a long message. Nothing is attached when both boxes are empty.")
-                Text("Read from the project's settings files rather than from a workspace, so a sentence typed here reaches every workspace as soon as it is saved, including the ones cut before it existed. It travels with the project once the file is committed.")
+            DisclosureGroup("How instructions are applied") {
+                VStack(alignment: .leading, spacing: Metrics.spacing) {
+                    Text("Saved instructions apply to every workspace in this project, including existing ones. Commit the settings file to share them with your team.")
+                    Text("Bloom attaches these instructions alongside its built-in merge and conflict-resolution steps. Empty fields add nothing.")
+                }
+                .settingsFootnote()
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .font(Typo.caption)
-            .foregroundStyle(Palette.textSecondary)
-            .fixedSize(horizontal: false, vertical: true)
+        } header: {
+            Text("Project instructions")
         }
     }
 }
@@ -108,7 +108,7 @@ struct RepoInstructionsField: View {
 
             if let overridingFile {
                 Label(
-                    "\(overridingFile) is in this project, and it wins. What is typed here is not sent while that file has anything in it.",
+                    "\(overridingFile) overrides this field while the file contains instructions.",
                     systemImage: "exclamationmark.triangle"
                 )
                 .font(Typo.caption)

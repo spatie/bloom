@@ -1,6 +1,6 @@
 import Foundation
 
-/// The two sentences the Appearance pane says about a terminal, each of which is a choice between
+/// The two sentences the Terminal pane says about a terminal, each of which is a choice between
 /// states rather than a label.
 ///
 /// They were computed properties inside `AppearanceSettingsView`, which is a decision nothing could

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ScreenCaptureKit
 import BloomCore
 
 /// Renders the app's own views to PNG files and exits.
@@ -420,7 +421,11 @@ enum Snapshot {
         guard let index = arguments.firstIndex(of: "--settings-tab"), index + 1 < arguments.count else {
             return nil
         }
-        return SettingsTab(rawValue: arguments[index + 1])
+        let name = arguments[index + 1]
+        // Keep existing capture commands working after the pane renames.
+        if name == "models" { return .sessions }
+        if name == "approvals" { return .permissions }
+        return SettingsTab(rawValue: name)
     }
 
     /// Which appearance to capture in, from `--appearance light|dark`.
@@ -673,7 +678,8 @@ enum Snapshot {
             //
             // `-l` names one window by number, so nothing else on the desktop is ever in the
             // file; `-o` drops the drop shadow; `-x` keeps it silent.
-            if captureWindowServerImage(windowNumber: window.windowNumber, to: path) {
+            if await captureOwnWindow(window, to: path)
+                || captureWindowServerImage(windowNumber: window.windowNumber, to: path) {
                 print(path)
                 exit(0)
             }
@@ -810,6 +816,30 @@ enum Snapshot {
         }
     }
 
+    /// macOS can share a process's own windows without Screen Recording permission. Using that
+    /// scope keeps native sidebars in the image and never asks to capture the user's display.
+    private static func captureOwnWindow(_ window: NSWindow, to path: String) async -> Bool {
+        do {
+            let content = try await SCShareableContent.currentProcess
+            guard let target = content.windows.first(where: { $0.windowID == CGWindowID(window.windowNumber) })
+            else { return false }
+            let filter = SCContentFilter(desktopIndependentWindow: target)
+            let configuration = SCStreamConfiguration()
+            configuration.width = Int(window.frame.width * window.backingScaleFactor)
+            configuration.height = Int(window.frame.height * window.backingScaleFactor)
+            configuration.showsCursor = false
+            configuration.ignoreShadowsSingleWindow = true
+            let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+            guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+            else { return false }
+            try png.write(to: URL(fileURLWithPath: path))
+            return true
+        } catch {
+            FileHandle.standardError.write(Data("Own-window capture failed: \(error.localizedDescription)\n".utf8))
+            return false
+        }
+    }
+
     /// Asks the window server for one window, by number, as a PNG on disk.
     ///
     /// Returns false when the file did not appear, which is what a run without screen recording
@@ -864,7 +894,11 @@ enum Snapshot {
     /// item is in the same position: `BloomCommands` replaces the `.appInfo` group, so the action
     /// behind it is a SwiftUI `Button` closure and lives nowhere the responder chain can reach.
     private static func openAppMenuItem(titled prefix: String) {
-        NSApp.activate(ignoringOtherApps: true)
+        // A background capture opens only this process's window, without taking keyboard focus
+        // from someone working in the installed app. Launch it with `open -g` as well.
+        if !CommandLine.arguments.contains("--background-capture") {
+            NSApp.activate(ignoringOtherApps: true)
+        }
         guard let appMenu = NSApp.mainMenu?.items.first?.submenu else { return }
         guard let index = appMenu.items.firstIndex(where: { $0.title.hasPrefix(prefix) })
         else { return }

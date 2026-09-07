@@ -24,6 +24,9 @@ struct SleepSettingsSection: View {
                 Text(SleepPrevention.settingDetail)
             }
 
+        } header: {
+            Text("While agents work")
+        } footer: {
             Text(SleepPrevention.caveat)
                 .settingsFootnote()
         }

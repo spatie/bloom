@@ -23,7 +23,7 @@ struct NotificationSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Notify me about agents I am not watching", isOn: $isEnabled)
+                Toggle("Enable agent notifications", isOn: $isEnabled)
                     .disabled(service.isRequestingPermission)
                     .onChange(of: isEnabled, requestPermissionIfTurnedOn)
 
@@ -31,35 +31,33 @@ struct NotificationSettingsView: View {
                     blockedNotice
                 }
             } footer: {
-                Text("Nothing is sent for the workspace already on screen while Bloom is in front of you.")
+                Text("Notifications are muted for the workspace you are viewing while Bloom is active.")
                     .settingsFootnote()
             }
 
-            Section("Tell me when") {
+            Section("Notify me when") {
                 ForEach(NotificationEvent.allCases, id: \.self) { event in
                     EventToggle(event: event)
                 }
             }
             .disabled(!isEnabled)
 
-            // Outside the master switch, and outside the "tell me when" list, because the badge
-            // is not a notification: it needs no permission, macOS cannot revoke it, and it says
-            // nothing while Bloom is in front of you. It belongs on this pane all the same, since
-            // this is the pane about being told things.
             Section {
-                Toggle("Badge the Dock icon with unread agent results", isOn: $badgesUnread)
+                Button("Send Test Notification", action: service.sendTestNotification)
+                    .disabled(!isEnabled || service.isBlockedBySystem)
             } footer: {
-                Text("How many workspaces an agent has finished in and nobody has read yet. It clears as you read them.")
+                Text("Preview how a notification appears.")
+                    .settingsFootnote()
+            }
+            Section {
+                Toggle("Show unread results on the Dock icon", isOn: $badgesUnread)
+            } header: {
+                Text("Dock badge")
+            } footer: {
+                Text("Counts workspaces with unread results. Clears as you read them.")
                     .settingsFootnote()
             }
 
-            Section {
-                Button("Send a Test Notification", action: service.sendTestNotification)
-                    .disabled(!isEnabled || service.isBlockedBySystem)
-            } footer: {
-                Text("Sends one banner now, so you can see where macOS puts it.")
-                    .settingsFootnote()
-            }
         }
         .settingsForm()
         .task { await service.refreshAuthorization() }

@@ -91,23 +91,22 @@ struct CommandLineSettingsView: View {
 
     private var regenerateSection: some View {
         Section {
-            SettingsRow("Regenerate") {
+            SettingsRow("Access token") {
                 HStack(spacing: Metrics.gutter) {
-                    Text("Ends the connection above and issues a new command to run.")
+                    Text("Disconnects registered clients. Run the new commands to reconnect.")
                         .settingsFootnote()
 
                     Spacer()
 
-                    Button("Regenerate", role: .destructive) { regenerate() }
+                    Button("Regenerate Token", role: .destructive) { regenerate() }
                         .disabled(isRegenerating)
                 }
             }
         } header: {
-            Text("Token")
+            Text("Connection security")
         } footer: {
             Text(
-                "Do this if the token has been somewhere it should not have been. The old one "
-                    + "stops working at once, so run the new command afterwards."
+                "Regenerate if your token was exposed. The old token stops working immediately."
             )
             .settingsFootnote()
         }

@@ -1,30 +1,15 @@
 import SwiftUI
 import BloomCore
 
-/// The Approvals pane: everything the user ever said "always allow" to, and the only way to take
-/// one back.
-///
-/// It is not optional decoration. Offering a button that grants a rule forever is only safe if the
-/// grant can be found again months later by somebody who has forgotten making it, so this pane is
-/// what pays for the "Always allow" button existing at all. An approval you cannot find is an
-/// approval you cannot revoke.
-///
-/// Grouped by project, because that is the scope a grant has. Bloom keeps them in its own database
-/// keyed by repository rather than in the CLI's `localSettings`, which writes
-/// `.claude/settings.local.json` inside a worktree: gitignored, not shared with the repository,
-/// and deleted when the workspace is archived. A rule granted "forever" would have quietly stopped
-/// applying the moment the workspace it was granted in went away.
-///
-/// The rule text is the CLI's own `ruleContent`, never a rewording. Showing anything else would
-/// mean somebody revoking a rule they never read.
-///
-/// **Matching is exact.** Bloom answers a question by itself only when the agent proposes one of
-/// these rules character for character; anything else is put to the user. That sentence used to be
-/// in a footer on the pane, and it is mechanism rather than anything a person revoking a rule can
-/// act on. What they can act on stayed: a revoke takes effect on the next question, not the next
-/// launch.
+/// Permissions stay discoverable before the first project-wide approval is granted.
 struct ApprovalSettingsView: View {
     @Environment(AppModel.self) private var app
+
+    @Binding var defaults: AppDefaults
+    var isReady: Bool
+    @State private var failure: String?
+
+    private static let permissionModes = PermissionMode.allCases.filter { $0 != .autoReview }
 
     @State private var grants: [PermissionGrant] = []
     @State private var isLoaded = false
@@ -35,19 +20,40 @@ struct ApprovalSettingsView: View {
 
     var body: some View {
         Form {
-            if isLoaded, grants.isEmpty {
-                Section {
-                    Text("Nothing yet.")
-                        .foregroundStyle(Palette.textSecondary)
-                } footer: {
-                    // The empty state is the one place on this pane that has to say what the
-                    // pane is for, because there is nothing else on it to work that out from.
-                    Text(
-                        "When an agent asks to do something, one of the answers is to allow it for "
-                        + "the whole project. Those rules are listed here, and this is where you "
-                        + "take them back."
-                    )
+            Section {
+                Picker("Default permission mode", selection: $defaults.permissionMode) {
+                    ForEach(Self.permissionModes, id: \.self) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .disabled(!isReady)
+            } header: {
+                Text("New sessions")
+            } footer: {
+                Text("Controls what an agent can do without asking. Plan mode in Sessions takes priority. Existing sessions keep their permissions.")
                     .settingsFootnote()
+            }
+
+            if let failure {
+                Section {
+                    ErrorBanner(title: "Could not update approvals", message: failure) {
+                        self.failure = nil
+                    }
+                    Button("Retry") { Task { await reload() } }
+                }
+            }
+
+            if !isLoaded {
+                Section { LoadingView("Loading saved approvals") }
+            } else if grants.isEmpty {
+                Section {
+                    Label("No saved approvals", systemImage: "hand.raised")
+                        .foregroundStyle(Palette.textSecondary)
+                } header: {
+                    Text("Project approvals")
+                } footer: {
+                    Text("Approvals you allow for an entire project appear here. You can revoke them at any time.")
+                        .settingsFootnote()
                 }
             }
 
@@ -69,7 +75,13 @@ struct ApprovalSettingsView: View {
             }
         }
         .settingsForm()
-        .task { await reload() }
+        .task {
+            await reload()
+            guard let store = app.store else { return }
+            for await _ in store.changes(of: [.permissionGrants]) {
+                await reload()
+            }
+        }
     }
 
     // MARK: Rows
@@ -151,14 +163,23 @@ struct ApprovalSettingsView: View {
 
     private func reload() async {
         guard let store = app.store else { return }
-        grants = (try? await store.permissionGrants()) ?? []
-        isLoaded = true
+        do {
+            grants = try await store.permissionGrants()
+            isLoaded = true
+            failure = nil
+        } catch {
+            failure = error.readableMessage
+        }
     }
 
     private func revoke(_ grant: PermissionGrant) async {
         guard let store = app.store else { return }
-        try? await store.deletePermissionGrant(id: grant.id)
-        confirming = nil
-        await reload()
+        do {
+            try await store.deletePermissionGrant(id: grant.id)
+            confirming = nil
+            await reload()
+        } catch {
+            failure = error.readableMessage
+        }
     }
 }

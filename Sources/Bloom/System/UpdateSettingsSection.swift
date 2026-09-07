@@ -20,10 +20,8 @@ struct UpdateSettingsSection: View {
     var body: some View {
         Section(SoftwareUpdate.sectionTitle) {
             if let explanation = SoftwareUpdate.unavailableExplanation(updater.availability) {
-                SettingsRow(SoftwareUpdate.settingTitle) {
-                    Text(explanation)
-                        .settingsFootnote()
-                }
+                Text(explanation)
+                    .settingsFootnote()
             } else {
                 // A switch with its explanation underneath, matching every other boolean in this
                 // window.
