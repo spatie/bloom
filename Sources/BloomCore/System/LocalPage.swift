@@ -82,11 +82,8 @@ public enum LocalPage {
         else { return nil }
 
         // The separator goes on before the comparison, so a worktree at `/w/bloom` cannot claim
-        // the file at `/w/bloom-old/index.html`. Standardised on both sides so that a `..` in the
-        // middle of the address is resolved before it is compared rather than after it is loaded.
-        let base = URL(filePath: root, directoryHint: .isDirectory).standardizedFileURL.path
-        let prefix = base.hasSuffix("/") ? base : base + "/"
-        guard url.standardizedFileURL.path.hasPrefix(prefix) else { return nil }
-        return url
+        // the file at `/w/bloom-old/index.html`. Canonical paths also keep a symlink inside the
+        // worktree from granting browser access to a page outside it.
+        return ContainedPath.resolve(url, inside: URL(filePath: root, directoryHint: .isDirectory))
     }
 }

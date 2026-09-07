@@ -97,7 +97,7 @@ struct StoreOceanTests {
         let pick = try #require(try await store.claimOcean(now: now))
 
         let raw = try SQLiteDatabase(path: path)
-        raw.userVersion = 0
+        try raw.setUserVersion(0)
 
         let reopened = try Store(path: path)
         #expect(try await reopened.oceans().count == 132)
@@ -124,7 +124,7 @@ struct StoreOceanTests {
             "INSERT INTO oceans (slug, name, latitude, longitude, used_at) VALUES (?, ?, ?, ?, ?)",
             [.text("borneo"), .text("Borneo"), .double(0.96), .double(114.55), .double(42)]
         )
-        raw.userVersion = 0
+        try raw.setUserVersion(0)
 
         let reopened = try Store(path: path)
         let oceans = try await reopened.oceans()

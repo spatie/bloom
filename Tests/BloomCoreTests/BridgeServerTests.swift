@@ -11,6 +11,26 @@ import Testing
 /// config file can say whether the flags are right. That is `LiveBridgeTests`.
 @Suite("BridgeServer", .tags(.subprocess, .persistence), .scratchDirectory)
 struct BridgeServerTests {
+    @Test(arguments: [false, true])
+    func revocationClosesAlreadyAuthenticatedClients(owner: Bool) async throws {
+        let (server, sessionToken, _, session) = try await makeBridge()
+        defer { server.stop() }
+        let token = owner ? "test-owner-token" : sessionToken
+        if owner { server.registry.admit(ownerToken: token) }
+        var caller = try Caller(socketPath: server.socketPath)
+        let welcome = try await caller.hello(BridgeHello(token: token, role: owner ? "owner" : "parent", shim: "test"))
+        #expect(welcome.accepted)
+        _ = try await caller.call(#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
+        if owner {
+            server.registry.admit(ownerToken: "replacement-owner-token")
+        } else {
+            server.retire(sessionID: session.id)
+        }
+        caller.connection.writeLine(#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#)
+        let reply = await caller.iterator.next()
+        #expect(reply == nil)
+    }
+
     /// A store holding one project, one workspace and one chat, and a server listening for it.
     private func makeBridge(
         origin: WorkspaceOrigin = .user

@@ -170,6 +170,8 @@ embed_sparkle() {
 
 embed_sparkle
 
+zsh Tools/package-licences.sh "$APP" "$(dirname "$(dirname "$BIN_DIR")")/checkouts"
+
 # The accent Bloom hands to AppKit, checked against the one Bloom draws with itself.
 #
 # Resources/Assets.xcassets/AccentColor.colorset is a colour set and nothing more, and a colour set
@@ -322,8 +324,11 @@ emit_app_intents_metadata() {
   /usr/bin/python3 -c "import json,sys; json.dump(json.load(open(sys.argv[1]))['constValueProtocols'], open(sys.argv[2],'w'))" \
     "$protocols" "$protocolList"
 
+  # Match SwiftPM's package identity: BloomCore's typed ids belong to this package, so their
+  # App Intents conformances are not foreign conformances in this separate typecheck either.
   swiftc -typecheck -wmo \
     -module-name Bloom \
+    -package-name bloom \
     -swift-version 6 \
     -target "$triple" \
     -sdk "$sdk" \

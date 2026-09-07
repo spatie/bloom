@@ -98,7 +98,7 @@ struct HiddenProjectStoreTests {
         _ = try await store.update(repoID: repo.id) { $0.hidden = true }
 
         let raw = try SQLiteDatabase(path: path)
-        raw.userVersion = 0
+        try raw.setUserVersion(0)
 
         let reopened = try Store(path: path)
         #expect(try await reopened.repo(id: repo.id)?.hidden == true)

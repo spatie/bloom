@@ -985,7 +985,10 @@ public actor Store {
             },
         ]
 
-        let current = Int(db.userVersion)
+        let current = Int(try db.readUserVersion())
+        guard current >= 0, current <= migrations.count else {
+            throw SQLiteError(message: "Unsupported database schema version \(current)", sql: nil)
+        }
 
         // Before the version is trusted, and whatever it says. See `repairSchema`: a database
         // stamped as fully migrated with a column missing is a real state that a real machine
@@ -1011,7 +1014,7 @@ public actor Store {
             for index in current..<migrations.count {
                 try migrations[index](db)
             }
-            db.userVersion = Int32(migrations.count)
+            try db.setUserVersion(Int32(migrations.count))
         }
     }
 
@@ -2478,6 +2481,19 @@ public actor Store {
 
     // MARK: - Deliveries
 
+    /// Queue acceptance and draft removal either both commit or neither does. A newer saved
+    /// draft belongs to the next message and must survive an earlier submission completing.
+    @discardableResult
+    public func enqueueDelivery(_ delivery: Delivery, clearingDraftMatching draft: String?) throws -> Delivery {
+        try db.transaction {
+            let queued = try enqueueDelivery(delivery)
+            if let draft, try self.draft(sessionID: delivery.targetSessionID) == draft {
+                try saveDraft(sessionID: delivery.targetSessionID, body: "")
+            }
+            return queued
+        }
+    }
+
     /// Everything asked for on this session that has not gone yet, oldest first.
     ///
     /// `created_at, rowid` and not `created_at` alone. The opening prompt and a sentence typed
@@ -2532,11 +2548,13 @@ public actor Store {
     /// `seq` is what the delivery became in the `messages` table where the caller knows it, which
     /// the owner's own path does not: the runner writes that row as part of starting the turn.
     /// See `Delivery.deliveredSeq`.
-    public func markDelivered(id: DeliveryID, seq: Int? = nil, at date: Date = Date()) throws {
+    @discardableResult
+    public func markDelivered(id: DeliveryID, seq: Int? = nil, at date: Date = Date()) throws -> Bool {
         try db.run(
-            "UPDATE deliveries SET delivered_at = ?, delivered_seq = ? WHERE id = ?",
+            "UPDATE deliveries SET delivered_at = ?, delivered_seq = ? WHERE id = ? AND delivered_at IS NULL",
             [.double(date.timeIntervalSince1970), seq.map { .int(Int64($0)) } ?? .null, .text(id)]
         )
+        return db.changedRowCount == 1
     }
 
     /// Takes one back out of the queue, because whoever asked for it changed their mind.
@@ -2555,12 +2573,8 @@ public actor Store {
     /// in the gap, because there is no gap.
     @discardableResult
     public func cancelDelivery(id: DeliveryID) throws -> Bool {
-        let pending = try db.query(
-            "SELECT id FROM deliveries WHERE id = ? AND delivered_at IS NULL", [.text(id)]
-        )
-        guard !pending.isEmpty else { return false }
         try db.run("DELETE FROM deliveries WHERE id = ? AND delivered_at IS NULL", [.text(id)])
-        return true
+        return db.changedRowCount == 1
     }
 
     /// Puts one back in the queue after a send that never started a turn.
@@ -2924,6 +2938,39 @@ public actor Store {
 
     public func setting(_ key: String) throws -> String? {
         try db.query("SELECT value FROM settings WHERE key = ?", [.text(key)]).first?.string("value")
+    }
+
+    public func saveComposerControls(_ controls: ComposerControls, sessionID: SessionID) throws {
+        try db.transaction {
+            for (key, value) in controls.settings(sessionID: sessionID) {
+                try setSetting(key, value)
+            }
+        }
+    }
+
+    /// Archive and replacement are one commit. A failed insert, preference or draft write must
+    /// leave the original conversation reachable, and a second caller must not replace it twice.
+    public func replaceAskConversation(
+        id: SessionID, controls: ComposerControls, draft: String = ""
+    ) throws -> Session {
+        try db.transaction {
+            guard let current = try session(id: id), current.workspaceID == nil,
+                  current.archivedAt == nil else {
+                throw SQLiteError(message: "This conversation is no longer current.", sql: nil)
+            }
+            var next = AskConversation.newSession()
+            next.model = controls.model
+            next.effort = controls.effort
+            next.agentKind = controls.agentKind
+            next.permissionMode = controls.permissionMode
+            try upsert(next)
+            for (key, value) in controls.settings(sessionID: next.id) {
+                try setSetting(key, value)
+            }
+            try saveDraft(sessionID: next.id, body: draft)
+            _ = try update(sessionID: id) { $0.archivedAt = Date() }
+            return next
+        }
     }
 
     public func setSetting(_ key: String, _ value: String?) throws {

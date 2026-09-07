@@ -58,12 +58,17 @@ You need Xcode 26, or a Swift 6.2 toolchain.
 ```bash
 git clone https://github.com/spatie/bloom.git
 cd bloom
-make app
+./Tools/dev-build.sh --no-launch
 ```
 
-`make` on its own lists every target. `make app` assembles a debug `Bloom.app` into SwiftPM's build
-directory, which is what you want while changing things, and `make run` builds a release copy and
-launches it.
+This installs `~/Applications/Bloom Dev.app` with a separate database, preferences and URL scheme.
+Open that copy when you want to try your changes. It does not replace the released application or
+use its data. See [the architecture guide](docs/ARCHITECTURE.md) before contributing.
+The dev script builds a committed revision, so commit your changes locally before rebuilding it.
+
+`make` on its own lists every target. `make build` compiles without installing or launching.
+`make app` and `make run` retain the production bundle identity, so use the isolated dev build for
+day-to-day development.
 
 There is no `.xcodeproj`, on purpose. Open `Package.swift` in Xcode and you get the targets, the
 schemes, the debugger and the previews; `CLAUDE.md` has the section explaining what a checked-in

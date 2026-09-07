@@ -117,7 +117,7 @@ struct SessionWithoutWorkspaceTests {
         // the very cascade this test exists to catch.
         try raw.execute("PRAGMA foreign_keys = OFF;")
         try raw.execute(Self.oldSessionsTable)
-        raw.userVersion = 0
+        try raw.setUserVersion(0)
         #expect(try isNullable(path) == false)
 
         let reopened = try Store(path: path)
@@ -141,7 +141,7 @@ struct SessionWithoutWorkspaceTests {
         _ = try await store.appendNext(sessionID: ask.id, kind: .user, payload: Data("hello".utf8))
 
         let raw = try SQLiteDatabase(path: path)
-        raw.userVersion = 0
+        try raw.setUserVersion(0)
 
         let reopened = try Store(path: path)
         #expect(try isNullable(path))

@@ -26,7 +26,6 @@ public actor CodexRunner: SessionRunner {
     private var pumpTask: Task<Void, Never>?
     private var translation: CodexTranslation
     private var threadID: String?
-    private var cancelled = false
 
     /// What this project has already approved. One type for both backends: see `SessionGrants`.
     private let grants: SessionGrants
@@ -135,11 +134,13 @@ public actor CodexRunner: SessionRunner {
     /// sentence. See `AgentKind.acceptsMidTurnMessage` for why a message reaches here mid turn at
     /// all, and `steer(_:threadID:turnID:on:)` for the fall back when the turn has just ended.
     public func send(_ text: String, recording: Data? = nil) async throws {
+        let generation = handle.generation
         await applyContextWindowChange()
+        try handle.check(generation)
         let client = try await connected()
+        try handle.check(generation)
         let threadID = try await openThread(on: client)
-
-        cancelled = false
+        try handle.check(generation)
         // One row, whichever it is, for the reason `AgentRunner.send` gives: the crew payload
         // already holds both renderings, and a user row beside it is the envelope back on screen.
         if let recording {
@@ -147,6 +148,7 @@ public actor CodexRunner: SessionRunner {
         } else {
             await persist(kind: .user, payload: Self.userPayload(text))
         }
+        try handle.check(generation)
 
         // Absorbed into the running turn, so there is no new turn id to hold and no state to
         // move: `turnStarted` is `unchanged` from `running` anyway. See `SessionLifecycle`.
@@ -159,6 +161,7 @@ public actor CodexRunner: SessionRunner {
            await steer(text, threadID: threadID, turnID: turnID, on: client) {
             return
         }
+        try handle.check(generation)
 
         let turn = try await client.startTurn(
             threadID: threadID,
@@ -169,7 +172,12 @@ public actor CodexRunner: SessionRunner {
             sandboxPolicy: Self.sandboxPolicy(for: session.permissionMode, writableRoot: workspacePath),
             approvalsReviewer: Self.approvalsReviewer(for: session.permissionMode)
         )
-        handle.begin(turnID: turn.id)
+        guard handle.begin(turnID: turn.id, generation: generation) else {
+            // Stop can arrive while turn/start is in flight, before there is an id to interrupt.
+            // Do not resurrect that turn when the reply finally supplies its id.
+            try? await client.interruptTurn(threadID: threadID, turnID: turn.id)
+            throw CancellationError()
+        }
 
         session.apply(.turnStarted)
         await save(session)
@@ -189,8 +197,8 @@ public actor CodexRunner: SessionRunner {
     /// the server is `terminateNow`, and the difference between the two is which of them a chat
     /// is expected to survive.
     public nonisolated func cancelNow() {
-        handle.markCancelled()
-        Task { await self.stopTurn() }
+        let generation = handle.markCancelled()
+        Task { await self.stopTurn(generation: generation) }
     }
 
     /// Stop, as the button means it: file the questions and then interrupt the turn.
@@ -205,8 +213,10 @@ public actor CodexRunner: SessionRunner {
     /// Answered before the interrupt rather than after, for the reason `AgentRunner.cancelNow`
     /// gives: an answer written after the thing that closes the turn is an answer the model never
     /// receives.
-    private func stopTurn() async {
+    private func stopTurn(generation: UInt64) async {
+        guard handle.generation == generation, handle.wasCancelled else { return }
         await filePendingAsks()
+        guard handle.generation == generation, handle.wasCancelled else { return }
         await interrupt()
     }
 
@@ -244,7 +254,6 @@ public actor CodexRunner: SessionRunner {
     }
 
     private func interrupt() async {
-        cancelled = true
         // Written here rather than left for the result to infer, which is what the `cancelled`
         // flag used to do at both of the sites below. `SessionLifecycle` refuses a stop on a
         // session with no turn open and ignores a result on one that has already been stopped, so
@@ -801,6 +810,7 @@ private final class TurnHandle: Sendable {
     private struct State {
         var current: String?
         var cancelled = false
+        var generation: UInt64 = 0
     }
 
     private let state = Mutex(State())
@@ -826,16 +836,29 @@ private final class TurnHandle: Sendable {
     }
 
     var wasCancelled: Bool { state.withLock(\.cancelled) }
+    var generation: UInt64 { state.withLock(\.generation) }
 
-    func begin(turnID: String) {
+    func check(_ generation: UInt64) throws {
+        guard state.withLock({ $0.generation == generation }) else { throw CancellationError() }
+        try Task.checkCancellation()
+    }
+
+    func begin(turnID: String, generation: UInt64) -> Bool {
         state.withLock { state in
+            guard state.generation == generation else { return false }
             state.current = turnID
             state.cancelled = false
+            return true
         }
     }
 
-    func markCancelled() {
-        state.withLock { $0.cancelled = true }
+    @discardableResult
+    func markCancelled() -> UInt64 {
+        state.withLock {
+            $0.generation &+= 1
+            $0.cancelled = true
+            return $0.generation
+        }
     }
 
     func end() {

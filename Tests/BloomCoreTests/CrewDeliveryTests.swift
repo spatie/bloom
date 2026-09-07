@@ -127,7 +127,7 @@ struct CrewDeliveryTests {
         )
 
         let raw = try SQLiteDatabase(path: path)
-        raw.userVersion = 0
+        try raw.setUserVersion(0)
 
         let reopened = try Store(path: path)
         let pending = try await reopened.pendingDeliveries(sessionID: member.id)

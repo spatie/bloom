@@ -41,7 +41,7 @@ final class ScriptedCodexProcess: AgentProcessing, @unchecked Sendable {
     // MARK: Scripting
 
     func reply(to method: String, with result: JSONValue) {
-        lock.lock(); replies[method] = result; lock.unlock()
+        lock.lock(); replies[method] = result; ignored.remove(method); lock.unlock()
     }
 
     func fail(_ method: String, code: Int, message: String) {

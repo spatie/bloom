@@ -7,9 +7,8 @@ import Foundation
 /// shows up much later as a workspace that will not boot. Resolving it while the pattern is being
 /// typed turns the field into something that can be checked.
 ///
-/// Deliberately a mirror of `WorkspaceManager.copyFiles` rather than a better matcher. A preview
-/// that resolved more cleverly than the copier would be a lie in the opposite direction, so
-/// `filesToCopyMatchesTheCopier` in the test suite pins the two together against the real thing.
+/// The copier consumes this same plan, so preview and execution share matching and source-path
+/// containment. The copier additionally checks destination paths before writing.
 public struct FilesToCopyPlan: Sendable, Hashable {
     public struct Match: Sendable, Hashable, Identifiable {
         /// Relative to the repository root, which is how the pattern is written.
@@ -77,9 +76,20 @@ public enum FilesToCopyResolver {
 
             let directory = (trimmed as NSString).deletingLastPathComponent
             let filePattern = (trimmed as NSString).lastPathComponent
-            let searchDirectory = directory.isEmpty
-                ? repo
-                : (repo as NSString).appendingPathComponent(directory)
+            guard !(trimmed as NSString).isAbsolutePath,
+                  !trimmed.split(separator: "/").contains("..") else {
+                plan.unmatchedPatterns.append(trimmed)
+                continue
+            }
+            let searchDirectory: String
+            if directory.isEmpty || directory == "." {
+                searchDirectory = repo
+            } else if let contained = ContainedPath.relative(directory, inside: repo) {
+                searchDirectory = contained.path
+            } else {
+                plan.unmatchedPatterns.append(trimmed)
+                continue
+            }
 
             guard let entries = try? manager.contentsOfDirectory(atPath: searchDirectory) else {
                 plan.unmatchedPatterns.append(trimmed)
@@ -89,7 +99,7 @@ public enum FilesToCopyResolver {
             var matchedAnything = false
             for entry in entries where matches(entry, pattern: filePattern) {
                 let relative = directory.isEmpty ? entry : "\(directory)/\(entry)"
-                let absolute = (searchDirectory as NSString).appendingPathComponent(entry)
+                guard let absolute = ContainedPath.relative(relative, inside: repo)?.path else { continue }
 
                 var entryIsDirectory: ObjCBool = false
                 guard manager.fileExists(atPath: absolute, isDirectory: &entryIsDirectory) else { continue }

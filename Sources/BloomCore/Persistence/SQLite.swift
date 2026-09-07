@@ -14,7 +14,7 @@ enum SQLValue: Sendable, Equatable {
     var intValue: Int64? {
         switch self {
         case .int(let value): value
-        case .double(let value): Int64(value)
+        case .double(let value): Int64(exactly: value.rounded(.towardZero))
         case .text(let value): Int64(value)
         default: nil
         }
@@ -228,10 +228,17 @@ final class SQLiteDatabase: @unchecked Sendable {
             case .null: sqlite3_bind_null(statement, index)
             case .int(let v): sqlite3_bind_int64(statement, index, v)
             case .double(let v): sqlite3_bind_double(statement, index, v)
-            case .text(let v): sqlite3_bind_text(statement, index, v, -1, sqliteTransient)
-            case .blob(let v): v.withUnsafeBytes {
-                sqlite3_bind_blob(statement, index, $0.baseAddress, Int32(v.count), sqliteTransient)
+            case .text(let v): v.withCString {
+                sqlite3_bind_text64(statement, index, $0, UInt64(v.utf8.count), sqliteTransient, UInt8(SQLITE_UTF8))
             }
+            case .blob(let v):
+                if v.isEmpty {
+                    sqlite3_bind_zeroblob(statement, index, 0)
+                } else {
+                    v.withUnsafeBytes {
+                        sqlite3_bind_blob64(statement, index, $0.baseAddress, UInt64(v.count), sqliteTransient)
+                    }
+                }
             }
             guard status == SQLITE_OK else {
                 sqlite3_finalize(statement)
@@ -245,12 +252,16 @@ final class SQLiteDatabase: @unchecked Sendable {
         switch sqlite3_column_type(statement, index) {
         case SQLITE_INTEGER: .int(sqlite3_column_int64(statement, index))
         case SQLITE_FLOAT: .double(sqlite3_column_double(statement, index))
-        case SQLITE_TEXT: .text(String(cString: sqlite3_column_text(statement, index)))
+        case SQLITE_TEXT:
+            .text(String(decoding: UnsafeBufferPointer(
+                start: sqlite3_column_text(statement, index),
+                count: Int(sqlite3_column_bytes(statement, index))
+            ), as: UTF8.self))
         case SQLITE_BLOB:
             if let bytes = sqlite3_column_blob(statement, index) {
                 .blob(Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, index))))
             } else {
-                .null
+                .blob(Data())
             }
         default: .null
         }
@@ -311,8 +322,17 @@ final class SQLiteDatabase: @unchecked Sendable {
         }
     }
 
-    var userVersion: Int32 {
-        get { (try? query("PRAGMA user_version;").first?.int("user_version")).flatMap { $0 }.map(Int32.init) ?? 0 }
-        set { try? execute("PRAGMA user_version = \(newValue);") }
+    var changedRowCount: Int { Int(sqlite3_changes(handle)) }
+
+    func readUserVersion() throws -> Int32 {
+        guard let value = try query("PRAGMA user_version;").first?.int("user_version"),
+              let version = Int32(exactly: value) else {
+            throw SQLiteError(message: "Could not read the database schema version", sql: nil)
+        }
+        return version
+    }
+
+    func setUserVersion(_ version: Int32) throws {
+        try execute("PRAGMA user_version = \(version);")
     }
 }

@@ -298,13 +298,16 @@ public final class BridgeServer: Sendable {
             connection.close()
             return
         }
-        guard let identity = await handshake(opening, on: connection) else {
+        guard let hello = await handshake(opening, on: connection) else {
             connection.close()
             return
         }
 
-        let dispatch = BridgeDispatch(store: store, identity: identity, toolbox: toolbox)
         while let line = await iterator.next() {
+            // A handshake does not grant authority for the lifetime of a socket. Rotation and
+            // retirement must also revoke clients that were already connected.
+            guard let identity = registry.identity(forToken: hello.token) else { break }
+            let dispatch = BridgeDispatch(store: store, identity: identity, toolbox: toolbox)
             if let reply = await dispatch.respond(to: line) {
                 connection.writeLine(reply)
             }
@@ -318,7 +321,7 @@ public final class BridgeServer: Sendable {
     /// running Bloom is told about the version rather than about an unknown token, which is what
     /// it would otherwise look like: the token really would be unknown, because it was minted by
     /// the other copy.
-    private func handshake(_ line: String, on connection: UnixSocketConnection) async -> BridgeIdentity? {
+    private func handshake(_ line: String, on connection: UnixSocketConnection) async -> BridgeHello? {
         guard let data = line.data(using: .utf8),
               let hello = try? JSONDecoder().decode(BridgeHello.self, from: data)
         else {
@@ -344,7 +347,7 @@ public final class BridgeServer: Sendable {
             note("bridge caller claimed role \(hello.role) and is \(identity.role.rawValue)")
         }
         connection.writeLine(encode(BridgeWelcome.accepting()))
-        return identity
+        return hello
     }
 
     private func refuse(_ problem: String, on connection: UnixSocketConnection) {

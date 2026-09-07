@@ -84,6 +84,49 @@ private func eventually(
 // MARK: - Tests
 
 @Suite(.scratchDirectory) struct CodexRunnerTests {
+    @Test(arguments: ["initialize", "thread/start", "turn/start"])
+    func stopWhileStartingCannotBeLost(_ delayed: String) async throws {
+        let store = try makeTestStore("codex-start-stop")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        box.ignore(delayed)
+        let runner = makeRunner(store: store, session: session, box: box)
+        let sending = Task {
+            do {
+                try await runner.send("do not run after Stop")
+                Issue.record("a cancelled send returned success")
+            } catch is CancellationError {
+                // Expected: the suspended send cannot cross the cancellation boundary.
+            } catch {
+                Issue.record("unexpected send error: \(error)")
+            }
+        }
+        await eventually("delayed request") {
+            box.processes.first?.sentMethods.contains(delayed) == true
+        }
+        let request = try #require(box.process.sentFrame { $0["method"]?.stringValue == delayed })
+        let id = try #require(request["id"])
+        runner.cancelNow()
+        let reply: JSONValue = switch delayed {
+        case "thread/start": threadStartReply
+        case "turn/start": turnStartReply
+        default: .object([:])
+        }
+        box.process.reply(to: delayed, with: reply)
+        box.process.emit("{\"id\":\(id.compactJSON),\"result\":\(reply.compactJSON)}")
+        await sending.value
+
+        if delayed == "turn/start" {
+            #expect(box.process.sentMethods.contains("turn/interrupt"))
+        } else {
+            #expect(!box.process.sentMethods.contains("turn/start"))
+        }
+        #expect(try await store.session(id: session.id)?.state != .running)
+        try await runner.send("this new turn is intentional")
+        #expect(try await store.session(id: session.id)?.state == .running)
+        await runner.shutdown()
+    }
+
     @Test func startsAThreadOnTheFirstTurnAndStoresItsID() async throws {
         let store = try makeTestStore("codex-runner-start")
         let (session, _) = try await makeCodexSession(store)
@@ -724,7 +767,7 @@ private func eventually(
         let session = try await store.upsert(Session(workspaceID: workspace.id, agentKind: .codex))
 
         let raw = try SQLiteDatabase(path: path)
-        raw.userVersion = 0
+        try raw.setUserVersion(0)
 
         let reopened = try Store(path: path)
         let sessions = try await reopened.sessions(workspaceID: workspace.id)
