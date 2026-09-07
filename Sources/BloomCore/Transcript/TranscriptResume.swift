@@ -104,6 +104,9 @@ public struct TranscriptPaneState: Equatable, Sendable {
     /// that holds different rows lands the reader somewhere else. See `TranscriptWindow`.
     public var drawn: TranscriptWindow
 
+    /// The last explicit scroll this pane honoured, not merely the last one the model sent.
+    public var liveEndRequest: Int
+
     public init(
         expanded: Set<Int>,
         unfolded: Set<Int> = [],
@@ -112,7 +115,8 @@ public struct TranscriptPaneState: Equatable, Sendable {
         anchorDelta: Double = 0,
         isAtLiveEnd: Bool,
         rowCount: Int,
-        drawn: TranscriptWindow = TranscriptWindow(start: 0, end: 0)
+        drawn: TranscriptWindow = TranscriptWindow(start: 0, end: 0),
+        liveEndRequest: Int = 0
     ) {
         self.expanded = expanded
         self.unfolded = unfolded
@@ -122,6 +126,7 @@ public struct TranscriptPaneState: Equatable, Sendable {
         self.isAtLiveEnd = isAtLiveEnd
         self.rowCount = rowCount
         self.drawn = drawn
+        self.liveEndRequest = liveEndRequest
     }
 }
 

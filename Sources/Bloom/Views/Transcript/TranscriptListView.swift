@@ -56,6 +56,9 @@ struct TranscriptListView: View {
         let remembered = memory?.remembered(session: transcript.session.id)
         _expanded = State(initialValue: remembered?.expanded ?? [])
         _unfolded = State(initialValue: remembered?.unfolded ?? [])
+        _liveEndRequest = State(initialValue: TranscriptLiveEndRequest(
+            handled: remembered?.liveEndRequest ?? 0
+        ))
         let rows = transcript.rows
         _drawn = State(initialValue: Drawn(
             session: transcript.session.id,
@@ -187,6 +190,7 @@ struct TranscriptListView: View {
     /// The travel the jump pill makes. See `TranscriptLiveEndScroller`, which carries the frame
     /// timings that put an AppKit level scroll there in place of a `withAnimation`.
     @State private var scroller = TranscriptLiveEndScroller()
+    @State private var liveEndRequest = TranscriptLiveEndRequest()
     /// What keeps the view with the newest row while a turn runs. See `TranscriptLiveEndFollower`.
     /// Nothing in this body reads it, on purpose: it writes no SwiftUI state, so following a turn
     /// costs no pass over this list.
@@ -913,6 +917,7 @@ struct TranscriptListView: View {
                 // And a view that goes on dragging somebody somewhere after they have grabbed it
                 // is the worst thing in this file.
                 scroller.stop()
+                follower.seekLiveEnd(false)
             }
         )
         .overlay(alignment: .top) {
@@ -937,6 +942,8 @@ struct TranscriptListView: View {
         .onAppear { isVisible.value = true }
         .onDisappear {
             remember()
+            scroller.stop()
+            follower.stop()
             isVisible.value = false
             isGrowing.value = false
         }
@@ -991,8 +998,8 @@ struct TranscriptListView: View {
         // Asked for by the jump pill, and by every button that composes a turn: see
         // `TranscriptModel.submit`, which bumps this so that what somebody just asked for is the
         // thing they are looking at.
-        .onChange(of: transcript.liveEndRequests) { _, _ in
-            goToLiveEnd()
+        .onChange(of: transcript.liveEndRequests, initial: true) { _, _ in
+            honourLiveEndRequest()
         }
         .onChange(of: transcript.session.id) { _, _ in
             // The session being left is written down here, from its own measurements: `writingTo`
@@ -1012,6 +1019,7 @@ struct TranscriptListView: View {
             )
             // The folds of the session being arrived at, which are its own and are usually none.
             let remembered = memory?.remembered(session: transcript.session.id)
+            liveEndRequest = TranscriptLiveEndRequest(handled: remembered?.liveEndRequest ?? 0)
             expanded = remembered?.expanded ?? []
             unfolded = remembered?.unfolded ?? []
             // From nothing rather than extended: the rows below this pane have been replaced
@@ -1105,6 +1113,7 @@ struct TranscriptListView: View {
             // 163ms to 169ms main thread block on every return.
             guard resumed != transcript.session.id else {
                 arrivalSession = transcript.session.id
+                honourLiveEndRequest()
                 scheduleHistoryPreparation()
                 SwitchTrace.mark("transcript.window", workspace: transcript.workspace?.id)
                 SwitchTrace.markOnScreen("transcript.window", workspace: transcript.workspace?.id)
@@ -1141,6 +1150,7 @@ struct TranscriptListView: View {
             // The session has finished arriving, so from here on a row that turns up is a row the
             // reader is watching turn up. The history that just landed is not one of them.
             arrivalSession = transcript.session.id
+            honourLiveEndRequest()
             scheduleHistoryPreparation()
             SwitchTrace.mark("transcript.history", workspace: transcript.workspace?.id)
             SwitchTrace.markOnScreen("transcript.history", workspace: transcript.workspace?.id)
@@ -1198,6 +1208,7 @@ struct TranscriptListView: View {
         if let place = controller.topmostPlace { topPlace.value = place }
         updatePinnedQuestion()
         atLiveEnd.value = table.isAtEnd || controller.holdsEnd || follower.isFollowing
+            || follower.isSeekingLiveEnd
 
         var measured = TranscriptGeometry(
             paneHeight: TranscriptGeometry.height(table.viewportHeight),
@@ -1319,7 +1330,17 @@ struct TranscriptListView: View {
     /// has not been laid out at all. Each of those leaves a scroll that was correct when it was
     /// issued a few hundred points short, and short of the end is exactly the state the reader
     /// pressed the pill to get out of. `goToEnd` is a standing instruction rather than a movement.
+    private func honourLiveEndRequest() {
+        guard liveEndRequest.consume(
+            transcript.liveEndRequests, isReady: arrivalSession == transcript.session.id
+        ) else { return }
+        opening = .liveEnd
+        goToLiveEnd()
+    }
+
     private func goToLiveEnd() {
+        scroller.stop()
+        follower.seekLiveEnd(true)
         // The live end has to be IN the window before anything can travel to it, and a reader far
         // enough from the end to press this is often reading a window that does not hold it.
         if drawn.session == transcript.session.id,
@@ -1333,6 +1354,7 @@ struct TranscriptListView: View {
             // have landed.
             scroller.stop()
             controller.goToEnd()
+            follower.seekLiveEnd(false)
             return
         }
 
@@ -1341,15 +1363,20 @@ struct TranscriptListView: View {
         ) {
         case .jump:
             controller.goToEnd()
+            follower.seekLiveEnd(false)
         case .glide(let seconds):
             // Let go of the end first, or the instruction and the travel are two things moving the
             // same clip view. AppKit rather than `withAnimation`: `TranscriptLiveEndScroller`
             // carries the frame timings that settled that.
             controller.releaseEnd()
             guard scroller.glide(
-                seconds: seconds, completion: { [controller] in controller.goToEnd() }
+                seconds: seconds, completion: { [controller, follower] in
+                    controller.goToEnd()
+                    follower.seekLiveEnd(false)
+                }
             ) else {
                 controller.goToEnd()
+                follower.seekLiveEnd(false)
                 return
             }
         }
@@ -1532,7 +1559,8 @@ struct TranscriptListView: View {
                 // Idle preparation may have filled the whole table. Remember only the reader's
                 // neighbourhood so returning from another tab does not rebuild thousands of
                 // entries before the pane can appear.
-                drawn: rememberedWindow
+                drawn: rememberedWindow,
+                liveEndRequest: liveEndRequest.handled
             ),
             session: target.session
         )
