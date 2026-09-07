@@ -13,10 +13,11 @@ struct ChatLineHeightTests {
         (12, 15), (13, 16), (15, 18), (17, 20), (20, 23),
     ]
 
-    @Test("the middle step is what the transcript was already set at")
-    func theDefaultIsWhereItWas() {
+    @Test("the new default leaves the old middle step unchanged")
+    func theDefaultPreservesExistingSteps() {
         #expect(ChatLineHeight.standard.ratio == 1.7)
-        #expect(TextLeading.proseRatio == ChatLineHeight.standard.ratio)
+        #expect(ChatLineHeight.defaultChoice == .tighter)
+        #expect(TextLeading.proseRatio == 1.55)
         #expect(ChatLineHeight.allCases.count == 5)
         #expect(ChatLineHeight.allCases[2] == .standard)
     }
@@ -39,8 +40,8 @@ struct ChatLineHeightTests {
         }
     }
 
-    @Test("the default text size answers two points a step, from two to ten")
-    func theDefaultSizeIsAnEvenLadder() {
+    @Test("the original 13 point size still answers two points a step, from two to ten")
+    func theOriginalSizeIsAnEvenLadder() {
         let points = ChatLineHeight.allCases.map {
             TextLeading.overPointSize(lineHeight: 16, pointSize: 13, ratio: $0.ratio)
         }
@@ -80,7 +81,7 @@ struct ChatLineHeightTests {
     func titlesAreDistinct() {
         let titles = ChatLineHeight.allCases.map(\.title)
         #expect(Set(titles).count == titles.count)
-        #expect(ChatLineHeight.standard.title == "Default")
+        #expect(ChatLineHeight.defaultChoice.title == "Default")
     }
 
     /// The code block is a separate decision against a separate denominator, and this setting

@@ -37,12 +37,8 @@ struct RootView: View {
                 // The system toggle offers an irrelevant label-style context menu on macOS 26.
                 // BloomWindowToolbar replaces it with the same image-only action.
                 .toolbar(removing: .sidebarToggle)
-                // The sidebar's ground is set here rather than inside `SidebarView`, because what has
-                // to be replaced is the `List`'s own scroll background, and that is a property of the
-                // column rather than of anything the sidebar draws. See `sidebarMaterial` for why a
-                // named colour beats the system's vibrant one in a window with a themed ramp.
-                .scrollContentBackground(.hidden)
-                .sidebarMaterial()
+                // Leave the native source-list background in place so the sidebar and unified
+                // title bar share the system's appearance and accessibility treatment.
                 // The rule down the sidebar's trailing edge.
                 //
                 // `NavigationSplitView` draws none: measured across the boundary, the sidebar's last

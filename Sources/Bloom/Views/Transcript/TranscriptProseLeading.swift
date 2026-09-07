@@ -62,14 +62,20 @@ extension TranscriptLayout {
     /// answer. The rule it applies is `ListLeading` in the core, which says why the gap is the
     /// item's own leading rather than a constant off the spacing scale.
     ///
-    /// The list ratio, not the prose one, for the reason `MarkdownView.listLineSpacing` uses it:
-    /// the wrapped lines inside an item are already led by it, and this has to be that same
-    /// number or the two disagree about the same list.
+    /// Prose lists use the selected paragraph ratio and extra item separation; checklists use
+    /// the compact list ratio for both their wrapped lines and the gaps between them.
     @MainActor
     static func listItemGap(
-        _ rung: ScaledFont, scale: CGFloat, face: ChatFont, lineHeight: ChatLineHeight, tight: Bool
+        _ rung: ScaledFont, scale: CGFloat, face: ChatFont, lineHeight: ChatLineHeight,
+        tight: Bool, prose: Bool = false
     ) -> CGFloat {
         let font = rung.resolvedNSFont(scale: scale, face: face)
+        if prose {
+            return CGFloat(ListLeading.betweenProseItems(
+                tight: tight, lineHeight: Double(lineBox(of: font)),
+                pointSize: Double(font.pointSize), ratio: lineHeight.ratio
+            ))
+        }
         return CGFloat(ListLeading.betweenItems(
             tight: tight,
             lineHeight: Double(lineBox(of: font)),
@@ -172,5 +178,5 @@ extension EnvironmentValues {
     /// Here rather than beside `ChatLineHeight` the way `chatFont` sits beside `ChatFont`, because
     /// that type is in the core and the core imports no UI framework. This file is how a view
     /// reaches the leading rule, and an environment value is exactly that.
-    @Entry var chatLineHeight: ChatLineHeight = .standard
+    @Entry var chatLineHeight: ChatLineHeight = .defaultChoice
 }

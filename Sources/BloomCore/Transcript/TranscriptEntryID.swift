@@ -1,7 +1,6 @@
 import Foundation
 
-/// What one entry of a drawn transcript is: a stored row, or one of the five things that are not
-/// stored rows.
+/// What one entry of a drawn transcript is: a stored row, live content, or decoration.
 ///
 /// **A type rather than the `String` the spike had, and the reason is the one `Identifier.swift`
 /// gives for every other id in this app.** A drawn transcript names five different things, and
@@ -38,8 +37,10 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
     case streaming
     /// A queued message, waiting to be sent.
     case pending(DeliveryID)
+    /// Breathing room after all content, including streaming output and queued messages.
+    case bottomSpacing
 
-    /// The sequence number this entry names, or nothing for the five that are not stored rows.
+    /// The sequence number this entry names, or nothing for entries that are not stored rows.
     ///
     /// What the pane writes down as the reader's place. Nothing else may guess at it: the whole
     /// point of the type is that a caller cannot mistake the streaming tail for row zero. A fold
@@ -60,7 +61,7 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
     /// anything that treats "measured at nought" as "will always be nought" would leave a running
     /// turn with no view to appear in.
     ///
-    /// Here rather than beside the table because it is a claim about these six cases, and a
+    /// Here rather than beside the table because it is a claim about these cases, and a
     /// caller acting on it is deciding whether to build a row's view at all.
     ///
     /// **This used to be `seq == nil`, and the coincidence ended with `fold`.** A fold's line
@@ -69,7 +70,7 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
     /// promise that holds until the key moves.
     public var redrawsItself: Bool {
         switch self {
-        case .row, .fold: false
+        case .row, .fold, .bottomSpacing: false
         case .setup, .sending, .streaming, .pending: true
         }
     }
@@ -82,6 +83,7 @@ public enum TranscriptEntryID: Hashable, Sendable, CustomStringConvertible {
         case .sending: "sending"
         case .streaming: "streaming"
         case .pending(let id): "pending.\(id)"
+        case .bottomSpacing: "bottomSpacing"
         }
     }
 }

@@ -29,9 +29,9 @@ import BloomCore
 /// worth adjusting only after the size and the face are settled.
 struct AppearanceSettingsView: View {
     @AppStorage("appearance") private var appearance = "system"
-    @AppStorage(ChatTextSize.defaultsKey) private var chatTextSize = ChatTextSize.standard
+    @AppStorage(ChatTextSize.defaultsKey) private var chatTextSize = ChatTextSize.defaultChoice
     @AppStorage(ChatFont.defaultsKey) private var chatFontID = ChatFont.standardID
-    @AppStorage(ChatLineHeight.defaultsKey) private var chatLineHeight = ChatLineHeight.standard
+    @AppStorage(ChatLineHeight.defaultsKey) private var chatLineHeight = ChatLineHeight.defaultChoice
     @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
     /// Zero means "no override, follow Ghostty". Read here as well as in `TerminalTextSize` so the
     /// pane redraws when a Cmd+Plus in a terminal moves it while this window is open.

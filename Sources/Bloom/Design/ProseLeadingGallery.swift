@@ -53,7 +53,7 @@ struct ProseLeadingGallery: View {
                 prose(leading: Self.wasFixed)
                     .environment(\.fontScale, size.scale)
             }
-            column("Prose, 1.7 of the size") { size in
+            column("Prose, \(ChatLineHeight.defaultChoice.ratio) of the size") { size in
                 prose()
                     .environment(\.fontScale, size.scale)
             }
@@ -104,7 +104,7 @@ struct ProseLeadingGallery: View {
                         .font(Typo.micro)
                         .foregroundStyle(Palette.textTertiary)
                     prose()
-                        .environment(\.fontScale, ChatTextSize.standard.scale)
+                        .environment(\.fontScale, ChatTextSize.defaultChoice.scale)
                         .environment(\.chatLineHeight, step)
                 }
             }
@@ -116,7 +116,7 @@ struct ProseLeadingGallery: View {
     /// off the picture rather than trusted.
     private func caption(for size: ChatTextSize) -> String {
         let leading = TranscriptLayout.proseLeading(
-            Typo.body, scale: size.scale, face: face, lineHeight: .standard
+            Typo.body, scale: size.scale, face: face, lineHeight: .defaultChoice
         )
         return "\(size.title), prose +\(Int(leading))pt"
     }
@@ -125,7 +125,7 @@ struct ProseLeadingGallery: View {
     /// default text size.
     private func caption(for step: ChatLineHeight) -> String {
         let leading = TranscriptLayout.proseLeading(
-            Typo.body, scale: ChatTextSize.standard.scale, face: face, lineHeight: step
+            Typo.body, scale: ChatTextSize.defaultChoice.scale, face: face, lineHeight: step
         )
         return "\(step.title), \(step.ratio) of the size, prose +\(Int(leading))pt"
     }

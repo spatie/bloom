@@ -1,22 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// Paints the title bar in Bloom's own chrome colour, and puts the workspace's own strip in it.
-///
-/// The toolbar is `.unified`, so AppKit draws the whole title bar strip with a window material
-/// that blends with the desktop behind the window. That is right for an app whose surfaces are
-/// the system's, and wrong for one with a ramp of its own: measured against the new palette the
-/// strip came out `#282B33`, a neutral grey sitting across the top of a deep blue window, which
-/// read as a piece of another application resting on ours.
-///
-/// `titlebarAppearsTransparent` hands the strip to the window's own background colour, which is
-/// the same `Palette.sidebar` the column below it is painted in. That is also what a unified
-/// toolbar is meant to look like: one continuous piece of chrome from the traffic lights down the
-/// sidebar. The traffic lights and the toolbar items stay exactly where AppKit puts them; only the
-/// paint behind them changes. The title is the one exception now, and `apply` says why.
-///
-/// The colour is an `NSColor` with an appearance provider rather than a resolved value, so the
-/// title bar follows a switch between light and dark without this modifier being told about it.
+/// Keeps the unified title bar on its native material and adds the workspace's own strip.
+/// The sidebar also uses its system background, so navigation chrome follows appearance,
+/// inactive-window state and accessibility preferences together. Reading surfaces stay opaque;
+/// no material layers are added to scrolling content.
 ///
 /// The trailing end of the same strip is `TitleBarStrip`, added as a title bar accessory. See
 /// that file for why an accessory rather than content drawn under a transparent title bar.
@@ -38,8 +26,8 @@ struct WindowChrome: ViewModifier {
 
     private func apply() {
         guard let window else { return }
-        window.titlebarAppearsTransparent = true
-        window.backgroundColor = Palette.sidebarNSColor
+        window.titlebarAppearsTransparent = false
+        window.backgroundColor = .windowBackgroundColor
         // AppKit's own title text, off. `WindowTitleControl` draws it as a toolbar item instead,
         // so that a double click on the NAME can start a rename without taking the double click on
         // the BAR that Desktop & Dock has already spent on Zoom or Minimise.

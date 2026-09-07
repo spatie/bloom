@@ -38,8 +38,12 @@ enum TranscriptLayoutProbe {
                 id: .row(row), contentKey: TranscriptContentKey { $0.combine(row) },
                 shape: .answer,
                 content: {
-                    AnyView(Text(String(repeating: "A transcript row that wraps when resized. ", count: row % 9 + 1))
-                        .font(.system(size: 15)).padding(8))
+                    let prose = String(repeating: "A transcript row that wraps when resized. ", count: row % 9 + 1)
+                    if row.isMultiple(of: 3) {
+                        return AnyView(MarkdownView("1. \(prose)\n2. Another item with `inline code` and **emphasis**.\n   - [x] A nested [linked checklist](https://example.com) that wraps when the pane gets narrow.\n\n- [x] A compact checklist\n- [ ] Still to do")
+                            .font(Typo.body).proseLeading().padding(8))
+                    }
+                    return AnyView(Text(prose).font(Typo.body).proseLeading().padding(8))
                 }
             )
         }
@@ -47,13 +51,15 @@ enum TranscriptLayoutProbe {
             id: .streaming, contentKey: TranscriptContentKey { $0.combine("tail") },
             content: { AnyView(TailRow(tail: tail)) }
         ))
+        let tailIndex = entries.count - 1
+        entries.append(.bottomSpacing)
         let view = TranscriptTable(
             entries: entries, session: SessionID("layout-probe"), controller: controller,
-            scale: 1,
+            scale: ChatTextSize.defaultChoice.scale,
             rowEnvironment: TranscriptRowEnvironment(
                 app: app, hoverHost: TranscriptHoverHost(), bubbleWidth: TranscriptBubbleWidth(),
-                linkActions: TranscriptLinkActions(), fontScale: 1, chatFont: .standard,
-                lineHeight: .standard, reduceMotion: true
+                linkActions: TranscriptLinkActions(), fontScale: ChatTextSize.defaultChoice.scale,
+                chatFont: .standard, lineHeight: .defaultChoice, reduceMotion: true
             ),
             onGeometryChange: { _ in }, onSettled: {}, onLiveScrollChange: { _ in }
         )
@@ -88,6 +94,11 @@ enum TranscriptLayoutProbe {
                 guard let top = row.drawnTop, let height = row.drawnHeight else { return true }
                 return abs(top - row.top) <= 0.5 && abs(height - row.told) <= 0.5
             }, "\(phase): rendered cell disagrees with its scrollable row rectangle")
+            if controller.geometry.isAtEnd, let table = controller.scrollView?.documentView as? NSTableView {
+                let gap = table.frame.height - table.rect(ofRow: tailIndex).maxY
+                check(abs(gap - TranscriptLayout.block) <= 0.5,
+                      "\(phase): final content is not clear of the composer by eight points")
+            }
         }
 
         // The live report had correct cached heights but every realised row was 92 points
@@ -154,7 +165,7 @@ enum TranscriptLayoutProbe {
         for height in [260.0, 40] {
             tail.height = height
             await settle(window)
-            check(abs(table.rect(ofRow: entries.count - 1).height - height) <= 0.5,
+            check(abs(table.rect(ofRow: tailIndex).height - height) <= 0.5,
                   "live scroll: tail did not adopt height \(height)")
         }
         NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)

@@ -56,9 +56,9 @@ struct ReviewPaneView: View {
     /// as `ChatPaneView` applies them to its whole subtree. Without this the same composer would
     /// change as the reader moved between the conversation and the review, which reads as a bug
     /// rather than a setting.
-    @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.standard
+    @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.defaultChoice
     @AppStorage(ChatFont.defaultsKey) private var chatFontID = ChatFont.standardID
-    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.standard
+    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.defaultChoice
 
     var body: some View {
         VStack(spacing: 0) {

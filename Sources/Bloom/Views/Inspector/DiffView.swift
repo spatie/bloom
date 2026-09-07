@@ -144,7 +144,9 @@ struct DiffView: View {
             switch mode {
             case .diff:
                 content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    // Empty states have an intrinsic size; centre them in the whole pane.
+                    // The actual diff fills this frame and owns its top-leading scroll anchor.
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     // Both of these hang on the diff rather than on the view around it, and that
                     // is not tidiness: a second `.alert` and a second `.sheet` on one view is one
                     // presentation modifier of each kind too many, and which of the pair wins is

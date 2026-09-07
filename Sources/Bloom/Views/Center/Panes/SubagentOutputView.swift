@@ -52,9 +52,9 @@ struct SubagentOutputView: View {
     /// The conversation's text size, face and line height, read here for the reason `ChatPaneView`
     /// reads them: this pane is a conversation, and a reader who has set the transcript larger has
     /// not asked for a subagent's half of it to stay small.
-    @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.standard
+    @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.defaultChoice
     @AppStorage(ChatFont.defaultsKey) private var chatFontID = ChatFont.standardID
-    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.standard
+    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.defaultChoice
 
     private var subagent: Subagent? {
         model.activeTranscript?.subagents[subagentID]

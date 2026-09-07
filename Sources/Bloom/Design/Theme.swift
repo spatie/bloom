@@ -982,32 +982,9 @@ enum Motion {
 
 // MARK: - Materials
 
-/// Every ground in this window is a colour, and there is deliberately no `NSVisualEffectView`
-/// anywhere for one to be reached for from.
-///
-/// There was: a `VisualEffectBackground` representable and a `headerMaterial()`, both of them
-/// under this heading with nothing calling either, directly above the two measurements that say
-/// why nothing should. Machinery kept under an argument against itself is an invitation to put
-/// the argued-against thing back, so it is gone and the measurements are below.
+/// Content strips stay opaque. The window title bar and navigation sidebar use their existing
+/// native materials, not per-view effect layers added to the scrolling surfaces here.
 extension View {
-    /// The sidebar's ground.
-    ///
-    /// A named colour rather than `NSVisualEffectView(.sidebar)`, and this is the one place where
-    /// dropping a system material is the right call. Sidebar vibrancy blends with the desktop
-    /// behind the window, so the column's colour is set by whatever wallpaper the user happens to
-    /// have: measured on this machine it rendered `#232833` in dark, a blue nobody picked, and it
-    /// would render green over a green wallpaper. A themed ramp cannot survive that. Everything
-    /// vibrancy was buying beyond the tint, the rounded window corner and the toolbar unification,
-    /// belongs to the window rather than to this view and is unaffected.
-    ///
-    /// The same answer came back for the strips of small controls, which is why they take this
-    /// colour too rather than a material of their own: `NSVisualEffectView(.headerView)` measured
-    /// `#292C33` over a `#0A1A25` pane, a neutral grey with nothing to do with what was behind it,
-    /// so every strip in the window read as a piece of a different app laid over it.
-    func sidebarMaterial() -> some View {
-        background(Palette.sidebar)
-    }
-
     /// The strip a tab bar sits in: the chrome colour with the pane's top edge already on it.
     ///
     /// The rule belongs here, behind the tabs, rather than in an overlay over them. Drawn over the

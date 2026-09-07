@@ -2,9 +2,9 @@ import Foundation
 
 /// How much air the conversation is given between its lines.
 ///
-/// The owner asked for the line height to be a setting, with what had just landed as its default.
-/// So 1.7 stopped being the answer and became the middle of five, and the five ratios below are
-/// the whole of that decision. They are here rather than beside the picker for the reason the
+/// The ratios keep their stored meanings even when the default selection changes. The current
+/// default pairs 1.55 leading with larger prose; a saved choice still reads exactly as before.
+/// They are here rather than beside the picker for the reason the
 /// three-target split exists: a number chosen inside a view is a number nothing can test.
 ///
 /// **Named steps rather than a slider or a raw ratio.** That is `ChatTextSize`'s argument and it
@@ -25,7 +25,7 @@ import Foundation
 ///     17 / 20        4     6     9    11    14
 ///     20 / 23        5     8    11    14    17
 ///
-/// Every step differs from its neighbour at every text size, by two points at the default one.
+/// Every step differs from its neighbour at every text size.
 /// A tenth apart would have collapsed rows of that table onto each other, which is a picker whose
 /// middle segments do nothing; a fifth apart would have put the ends outside the range worth
 /// offering. `ChatLineHeightTests` is that table, so a ratio cannot be nudged without the
@@ -53,6 +53,8 @@ public enum ChatLineHeight: String, CaseIterable, Identifiable, Sendable {
     /// The same `UserDefaults` slot the settings picker binds to. See `current`.
     public static let defaultsKey = "chat.lineHeight"
 
+    public static let defaultChoice: Self = .tighter
+
     public var id: String { rawValue }
 
     /// What a line of prose comes to, as a multiple of the size it is set at.
@@ -76,14 +78,12 @@ public enum ChatLineHeight: String, CaseIterable, Identifiable, Sendable {
         1.3 + (ratio - 1.4) / 2
     }
 
-    /// Comparatives rather than adjectives, so the control says which way each segment moves and
-    /// where the range stops. "Tight" and "Relaxed" next to each other read as two named densities
-    /// with no order between them; these cannot.
+    /// The labels follow the density order, with the actual fallback marked as Default.
     public var title: String {
         switch self {
-        case .tightest: "Tightest"
-        case .tighter: "Tighter"
-        case .standard: "Default"
+        case .tightest: "Tight"
+        case .tighter: "Default"
+        case .standard: "Loose"
         case .looser: "Looser"
         case .loosest: "Loosest"
         }
@@ -102,10 +102,11 @@ extension ChatLineHeight {
     /// render at a named step) would otherwise reach for `UserDefaults` by hand and spell the
     /// fallback differently.
     public static var current: ChatLineHeight {
-        get {
-            UserDefaults.standard.string(forKey: defaultsKey)
-                .flatMap(ChatLineHeight.init(rawValue:)) ?? .standard
-        }
+        get { read(from: .standard) }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey) }
+    }
+
+    public static func read(from defaults: UserDefaults) -> Self {
+        defaults.string(forKey: defaultsKey).flatMap(Self.init(rawValue:)) ?? defaultChoice
     }
 }

@@ -65,7 +65,9 @@ struct TurnFooterView: View {
             // with a time floating next to it. Six of its own above and two below: the answer
             // carries its own eight point rung, so fourteen points sit over the rule and eight
             // under it, where before it was fourteen and twelve.
-            Hairline()
+            Rectangle()
+                .fill(Palette.border)
+                .frame(height: Metrics.outline)
                 .padding(.horizontal, TranscriptLayout.inset)
                 .padding(.top, TranscriptLayout.inset)
                 .padding(.bottom, TranscriptLayout.tight)
