@@ -7,16 +7,20 @@ struct ComposerDock<Content: View>: View {
     var onJumpToNewest: @MainActor @Sendable () -> Void
     @ViewBuilder var content: Content
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         GlassEffectContainer(spacing: Metrics.spacingSmall) {
             VStack(spacing: Metrics.spacingWide) {
                 if showsJumpToNewest {
                     JumpToNewestPill(action: onJumpToNewest)
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 4)))
                 }
 
                 content
             }
         }
+        .animation(reduceMotion ? nil : Motion.pane, value: showsJumpToNewest)
     }
 }
 
