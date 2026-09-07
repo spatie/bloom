@@ -41,7 +41,7 @@ struct FoldingAnErroredActionTests {
     private let everything = 0..<1_000
 
     private func hides(_ work: TranscriptFold.Work, revealed: Set<Int> = []) -> Int {
-        TranscriptFold.hides(work, revealed: revealed, drawn: everything)
+        TranscriptFold.hiddenIndices(work, revealed: revealed, drawn: everything).count
     }
 
     private func only(_ facts: [TranscriptFold.Fact]) throws -> TranscriptFold.Work {

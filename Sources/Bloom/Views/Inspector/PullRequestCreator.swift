@@ -49,14 +49,6 @@ struct PullRequestCreator: View {
     var continued: ContinuedBranch?
     var action: () -> Void
 
-    /// Whether the pointer is on the branch name, which is the only time anything asks whether it
-    /// fits. See `TruncationProbe`: the answer costs a second text layout, so it is not one this
-    /// strip pays for at rest.
-    @State private var isHoveringBranch = false
-    /// Whether the name is actually being cut off. False until the probe above says otherwise, so
-    /// a branch that fits never grows a tooltip repeating what is already on screen.
-    @State private var isBranchTruncated = false
-
     /// Whether Bloom itself can talk to GitHub. It has no bearing on the button, which goes to the
     /// agent, and every bearing on whether this strip can be trusted when it says there is no pull
     /// request: signed out, Bloom simply never found out.
@@ -75,28 +67,13 @@ struct PullRequestCreator: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: Metrics.spacingHair) {
-                // Head truncation, and it stays: a branch is `murze/add-personal-notifications`
-                // and the half that says which branch it is is the last half. What head
-                // truncation costs is that the name is then unreachable, and that is what the two
-                // modifiers under it buy back.
+                // Keep the readable end of a long branch. The band's custom hover card shows
+                // the full name, so a system tooltip here would duplicate it.
                 Text(branch)
                     .font(Typo.title)
                     .foregroundStyle(Palette.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.head)
-                    .reportsTruncation(
-                        of: branch,
-                        font: Typo.title,
-                        isActive: isHoveringBranch,
-                        into: $isBranchTruncated
-                    )
-                    .onHover { isHoveringBranch = $0 }
-                    // Only when it is cut off. It used to be `.help(branch)` unconditionally,
-                    // which is a tooltip that spends a second and a half of the reader's time
-                    // repeating a string they can already see, and a tooltip that is usually
-                    // noise is a tooltip nobody waits for. Now it appears exactly when it is the
-                    // only way to read the name.
-                    .help(isBranchTruncated ? branch : "")
                     .accessibilityLabel("Branch \(branch)")
 
                 if github.isUsable {

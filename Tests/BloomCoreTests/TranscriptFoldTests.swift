@@ -59,7 +59,7 @@ struct TranscriptFoldTests {
     private let everything = 0..<1_000
 
     private func hides(_ work: TranscriptFold.Work, revealed: Set<Int> = []) -> Int {
-        TranscriptFold.hides(work, revealed: revealed, drawn: everything)
+        TranscriptFold.hiddenIndices(work, revealed: revealed, drawn: everything).count
     }
 
     private func only(_ facts: [TranscriptFold.Fact]) throws -> TranscriptFold.Work {
@@ -191,18 +191,44 @@ struct TranscriptFoldTests {
 
         let partly = [user(0)] + (1..<7).map { tool($0, settled: $0 < 5) }
         let work = try only(partly)
-        #expect(work.ready == 4)
+        #expect(work.ready == Set(1..<5))
         #expect(hides(work) == 4)
     }
 
-    /// The prefix stops at the first row still waiting, so a later result cannot reach over one
-    /// that has not come back.
-    @Test("a settled row behind an unsettled one is still not hidden")
-    func thePrefixHasNoGaps() throws {
+    @Test("completed actions fold around a running command")
+    func completedActionsSkipPendingRows() throws {
         let facts = [user(0), tool(1), tool(2), tool(3, settled: false), tool(4), tool(5), tool(6)]
         let work = try only(facts)
-        #expect(work.ready == 2)
-        #expect(hides(work) == 0)
+        #expect(TranscriptFold.hiddenIndices(work, revealed: [], drawn: everything) == [1, 2, 4, 5, 6])
+    }
+
+    @Test("a running first action does not block later completed commands")
+    func runningFirstAction() throws {
+        let facts = [user(10), tool(20, settled: false), quiet(30), tool(40), tool(50), tool(60)]
+        let work = try only(facts)
+        // Folding uses array indices, while disclosure identity and reveals use sequence numbers.
+        #expect(work.firstSeq == 20)
+        #expect(TranscriptFold.hiddenIndices(work, revealed: [], drawn: everything) == [3, 4, 5])
+        #expect(TranscriptFold.hiddenIndices(work, revealed: [50], drawn: everything).isEmpty)
+    }
+
+    @Test("out of order results grow the same fold without revealing completed actions")
+    func resultsArriveOutOfOrder() throws {
+        var facts = [user(0)] + (1...8).map { tool($0, settled: false) }
+        var folds = TranscriptFold.folds(in: facts)
+        var previous: Set<Int> = []
+        for seq in [2, 4, 6, 8, 3, 7, 5, 1] {
+            facts[seq].settled = true
+            folds = TranscriptFold.folds(in: facts, extending: folds)
+            let work = try #require(folds.all.first)
+            let hidden = TranscriptFold.hiddenIndices(work, revealed: [], drawn: everything)
+            #expect(folds.all.count == 1)
+            #expect(work.firstSeq == 1)
+            #expect(previous.isSubset(of: hidden))
+            #expect(hidden.allSatisfy { facts[$0].settled })
+            previous = hidden
+        }
+        #expect(previous == Set(1...8))
     }
 
     /// **Rule 2.** An error row is the agent exiting in a way it did not choose, which is the one
@@ -219,7 +245,8 @@ struct TranscriptFoldTests {
     @Test("a question nobody has answered is never hidden")
     func anUndecidedAskIsNeverHidden() throws {
         let waiting = [user(0), tool(1), tool(2), tool(3), tool(4), ask(5, decided: false), tool(6)]
-        #expect(hides(try only(waiting)) == 4)
+        let hidden = TranscriptFold.hiddenIndices(try only(waiting), revealed: [], drawn: everything)
+        #expect(hidden == [1, 2, 3, 4, 6])
         // Answered, it is history and folds away with everything else through the newest row.
         let decided = [user(0), tool(1), tool(2), tool(3), tool(4), ask(5), tool(6)]
         #expect(hides(try only(decided)) == 6)
@@ -255,7 +282,7 @@ struct TranscriptFoldTests {
     func aFailureIsSettled() throws {
         let facts = [user(0)] + (1..<7).map { tool($0, failed: $0 == 6, settled: $0 != 6) }
         let work = try only(facts)
-        #expect(work.ready == 6)
+        #expect(work.ready == Set(1..<7))
         #expect(hides(work) == 6)
     }
 
@@ -266,8 +293,8 @@ struct TranscriptFoldTests {
     @Test("a working that runs past the drawn window does not fold")
     func aWorkingOutsideTheWindowDoesNotFold() throws {
         let work = try only([user(0)] + (1..<7).map { tool($0) })
-        #expect(TranscriptFold.hides(work, revealed: [], drawn: 0..<7) == 6)
-        #expect(TranscriptFold.hides(work, revealed: [], drawn: 0..<6) == 0)
+        #expect(TranscriptFold.hiddenIndices(work, revealed: [], drawn: 0..<7).count == 6)
+        #expect(TranscriptFold.hiddenIndices(work, revealed: [], drawn: 0..<6).count == 0)
     }
 
     /// Only the window's end is asked about. Its start moves down as a reader scrolls back, and
@@ -276,8 +303,8 @@ struct TranscriptFoldTests {
     @Test("the window's start does not move what is hidden")
     func growingUpwardsTakesNothingOut() throws {
         let work = try only([user(0)] + (1..<7).map { tool($0) })
-        #expect(TranscriptFold.hides(work, revealed: [], drawn: 4..<20) == 6)
-        #expect(TranscriptFold.hides(work, revealed: [], drawn: 0..<20) == 6)
+        #expect(TranscriptFold.hiddenIndices(work, revealed: [], drawn: 4..<20).count == 6)
+        #expect(TranscriptFold.hiddenIndices(work, revealed: [], drawn: 0..<20).count == 6)
     }
 
     // MARK: Nothing unfolds
@@ -342,13 +369,13 @@ struct TranscriptFoldTests {
         let laterLive = TranscriptFold.Work(
             span: 20..<24,
             rows: (20..<24).map { TranscriptFold.Row(index: $0, seq: $0) },
-            ready: 4,
+            ready: Set(20..<24),
             hasAnswer: false
         )
         let historical = TranscriptFold.Work(
             span: 10..<14,
             rows: (10..<14).map { TranscriptFold.Row(index: $0, seq: $0) },
-            ready: 4,
+            ready: Set(10..<14),
             hasAnswer: true
         )
         let folds = TranscriptFold.Folds(
