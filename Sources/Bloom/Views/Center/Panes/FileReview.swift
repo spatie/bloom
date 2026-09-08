@@ -69,9 +69,20 @@ enum FileReview {
     }
 
     static func openAll(in model: WorkspaceModel) {
+        setShowsAllFiles(true, in: model)
+    }
+
+    /// Both mode controls use the review tab's state and remember the selected file.
+    /// Returning to one file must not land on an empty review or silently choose another file.
+    static func setShowsAllFiles(_ all: Bool, in model: WorkspaceModel) {
         let store = CenterTabStore.shared
-        let tab = store.showReview(path: "", workspaceID: model.workspace.id)
-        store.setShowsAllFiles(true, for: tab)
+        let remembered = store.review(for: model.workspace.id)?.path
+        let candidates = [remembered, model.selectedFilePath].compactMap { $0 }
+        let path = candidates.first { candidate in
+            model.changedFiles.contains { $0.path == candidate }
+        } ?? model.changedFiles.first?.path ?? ""
+        let tab = store.showReview(path: path, workspaceID: model.workspace.id)
+        store.setShowsAllFiles(all, for: tab)
         WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
     }
 
