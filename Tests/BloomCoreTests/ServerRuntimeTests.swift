@@ -5,6 +5,75 @@ import Testing
 
 @Suite("ServerRuntime", .tags(.persistence, .subprocess), .scratchDirectory)
 struct ServerRuntimeTests {
+    @Test func realAgentProcessSurvivesDisconnectAndAcceptsAnotherTurn() async throws {
+        let fixture = try await ServerFixture()
+        let script = fixture.directory + "/agent-fixture.sh"
+        try Self.agentScript.write(toFile: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script)
+        try await fixture.store.setSetting(AgentCatalog.executablePathSettingKey(.claudeCode), script)
+        let child = Mutex<StreamingProcess?>(nil)
+        let daemon = try await ServerDaemon.start(directory: fixture.directory, makeRunner: { session, path, store in
+            AgentRunner(workspacePath: path, session: session, store: store, makeProcess: { launch in
+                #expect(launch.executable == script)
+                // Always run the fixture, even if executable selection regresses. This test must
+                // never fall through to an installed agent or make a paid model request.
+                let process = StreamingProcess(executable: "/bin/sh", arguments: [script], cwd: path, mergeStderr: false)
+                child.withLock { $0 = process }
+                return process
+            })
+        })
+        do {
+            let first = try await ServerClient.connect(to: .local(directory: fixture.directory))
+            _ = try await first.request(ServerRequest(.send(sessionID: fixture.session.id, text: "First")))
+            await waitUntil("child receives the first prompt") {
+                FileManager.default.fileExists(atPath: fixture.directory + "/ready")
+            }
+            await first.disconnect()
+            #expect(child.withLock { $0?.isRunning } == true)
+
+            let second = try await ServerClient.connect(to: .local(directory: fixture.directory))
+            let busy = try await second.request(ServerRequest(.transcript(sessionID: fixture.session.id, afterSeq: -1)))
+            if case .transcript(let transcript) = busy.result { #expect(transcript.isBusy) } else { Issue.record("Missing transcript") }
+            try Data().write(to: URL(fileURLWithPath: fixture.directory + "/release"))
+            await waitUntil("disconnected work finishes") {
+                (try? await fixture.store.session(id: fixture.session.id)?.state) == .idle
+            }
+            let continued = try await second.request(ServerRequest(.send(sessionID: fixture.session.id, text: "Second")))
+            #expect(continued.isAccepted)
+            await waitUntil("second turn is persisted") {
+                let reply = await daemon.runtime.respond(to: ServerRequest(.transcript(sessionID: fixture.session.id, afterSeq: -1)))
+                if case .transcript(let transcript) = reply.result {
+                    return !transcript.isBusy && transcript.messages.filter { $0.kind == .result }.count == 2
+                }
+                return false
+            }
+            let prompts = try String(contentsOfFile: fixture.directory + "/prompts", encoding: .utf8)
+            #expect(prompts.split(separator: "\n").count == 2)
+            #expect(prompts.contains("First") && prompts.contains("Second"))
+            await second.disconnect()
+        } catch {
+            await daemon.shutdown()
+            throw error
+        }
+        await daemon.shutdown()
+        #expect(child.withLock { $0?.isRunning } == false)
+    }
+
+    private static let agentScript = #"""
+    printf '%s\n' '{"type":"system","subtype":"init","session_id":"fixture","model":"sonnet"}'
+    while IFS= read -r prompt; do
+        printf '%s\n' "$prompt" >> prompts
+        touch ready
+        attempts=0
+        while [ ! -f release ]; do
+            attempts=$((attempts + 1))
+            [ "$attempts" -lt 1000 ] || exit 1
+            sleep 0.01
+        done
+        printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"duration_api_ms":1,"duration_ms":1,"result":"Completed","session_id":"fixture"}'
+    done
+    """#
+
     @Test func concurrentRetriesLaunchOneTurn() async throws {
         let fixture = try await ServerFixture()
         let runtime = fixture.runtime()

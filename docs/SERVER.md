@@ -41,6 +41,15 @@ The Linux manifest omits the Mac app and its dependencies. It uses Swift Crypto 
 CryptoKit operations and system SQLite. Inline setup scripts use `/bin/sh` on Linux and
 `/bin/zsh` on macOS; executable script files retain their own shebangs.
 
+These are source-build instructions. The current Linux executable dynamically links Swift
+libraries, so copying only that executable to a fresh Ubuntu machine is insufficient. Swift is
+not installed by default on Ubuntu. The distribution target is a download that includes its
+runtime, without requiring users to install Swift. That packaging is not implemented yet.
+Swift's [Static Linux SDK](https://www.swift.org/documentation/articles/static-linux-getting-started.html)
+also supports standalone executables, but requires bundling SQLite and adapting the libc calls
+to Musl before this server can use it. Ubuntu 24.04 x86_64 is the initial validation target;
+other Ubuntu versions and ARM64 are not yet verified.
+
 ## Keep a standalone server running
 
 On the server Mac, create `~/Library/LaunchAgents/be.spatie.bloom.server.plist`. Replace the example

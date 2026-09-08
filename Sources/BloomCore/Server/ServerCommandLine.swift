@@ -13,7 +13,7 @@ public enum ServerCommandLine {
     serve     Run the standalone server in the foreground.
     connect   Relay the versioned JSON protocol over stdin/stdout.
 
-    Use launchd to keep serve running independently of a terminal or SSH connection.
+    Use launchd on macOS or systemd on Linux to keep serve running independently of a terminal.
     The directory is separate from the desktop app's data. The server runs on macOS 26 or Linux.
     """
 
