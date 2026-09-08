@@ -91,21 +91,17 @@ struct TranscriptListView: View {
     /// Every turn's working in this session. See `TranscriptFold`.
     ///
     /// **State rather than a computed property, and the lag is the point.** It is refreshed from
-    /// an `onChange` on the row count, which runs after the pass that drew the new row, so the
+    /// an `onChange` on the presentation revision, which runs after the pass that drew the new row, so the
     /// arrival is one `.grew` and the fold that follows it is one `.shrank`. Computed in `entries`
     /// instead, a run closing would insert the row that closed it and remove the rows it hides in
     /// a single pass, and two edits in one list is the `.rebuilt` that throws away every cell and
     /// the reader's text selection.
     ///
-    /// **And empty rather than seeded in `init`, which is not where the other three come from.**
-    /// The expression inside a `State(initialValue:)` is evaluated on every rebuild of this struct
-    /// and thrown away on all but the first, and this view is rebuilt by every row that lands: a
-    /// scan of the whole session there would be a walk of four thousand rows per arrival, to
-    /// produce a value that already exists. The first pass therefore draws a conversation with no
-    /// folds in it and the `onChange` below folds it on the next, which costs nothing at all,
-    /// because a pane arriving at a session is held blank until `arrived()` and only the last pass
-    /// that landed while it was held is ever applied. See `TranscriptTable.Coordinator.apply`.
+    /// The analysis itself lives on the transcript. This is only the version this pane has
+    /// adopted, so a newly completed working can fold one pass after its closing row arrives.
     @State private var folds = TranscriptFold.Folds.none
+    @State private var foldSession: SessionID?
+    @State private var foldRevision = -1
     @State private var geometry = TranscriptGeometry()
     /// The width a bubble may fill, held as an object rather than in `geometry` so a pane changing
     /// width invalidates the handful of views that draw a bubble rather than this whole body. See
@@ -155,9 +151,6 @@ struct TranscriptListView: View {
     /// `TranscriptPaneState.anchorDelta`. Nil until the table has a stored row to name, and never
     /// cleared by a pane that cannot see one, so what is written down is the last real place.
     @State private var topPlace = GeometryBox<(seq: Int, delta: CGFloat)?>(nil)
-    /// User turns indexed once as rows arrive. The scroll callback reads it every frame without
-    /// making this body observe those reads or walking backwards through the transcript.
-    @State private var questionIndex = GeometryBox(PinnedQuestionIndex())
     /// The question whose output is currently under the reader, only while its full bubble has
     /// passed above the viewport.
     @State private var pinnedQuestion: PinnedQuestion?
@@ -367,69 +360,13 @@ struct TranscriptListView: View {
         return out
     }
 
-    /// The runs of this session, read off the rows in the only terms `TranscriptFold` needs.
-    ///
-    /// Static, because it reads nothing this view holds and a rescan must not quietly depend on
-    /// one. Lazy, so the session is not projected into an array of facts to walk once:
-    /// `TranscriptFold.folds` only ever touches the last turn, which is what keeps a
-    /// turn's worth of arrivals off a walk of the whole conversation each time.
-    private static func rescan(
-        _ rows: [TranscriptRow], extending previous: TranscriptFold.Folds
-    ) -> TranscriptFold.Folds {
-        TranscriptFold.folds(
-            in: rows.lazy.map {
-                TranscriptFold.Fact(
-                    seq: $0.seq,
-                    kind: $0.kind,
-                    // A refusal travels as `is_error` too, and both are the same fact here: a
-                    // call that did not do what it was asked has said everything it is going to
-                    // say, which is all the fold needs of it. It is not held out of the fold for
-                    // it; see rule 2 in `TranscriptFold`.
-                    failed: $0.isError || $0.refusal != nil,
-                    featured: MediaShowRow.isCall($0.payload)
-                        || CodexImageViewRow.isCall($0.payload),
-                    drawsNothing: TranscriptNoise.isHidden($0)
-                        || TranscriptRowInk.drawsNothing(kind: $0.kind, payload: $0.payload),
-                    settled: settled($0),
-                    // Only a call has an id a subagent's rows can name. Every other kind carries
-                    // `refID` for something else, and a stray match here would make an ordinary
-                    // row the header of a run it has nothing to do with.
-                    toolUseID: $0.kind == .toolUse ? $0.refID : nil,
-                    parentToolUseID: $0.parentToolUseID
-                )
-            },
-            extending: previous
-        )
-    }
-
-    /// The runs to draw with, which are the ones held in state unless a rescan can be adopted
-    /// without moving anything into the tail. See `TranscriptFold.mayAdopt`.
-    ///
-    /// The rescan is skipped entirely on a pass where no row has arrived, which is nearly every
-    /// pass: a scroll, a hover and a selection all rebuild the entries and none of them changes
-    /// what is folded. `Folds.scannedRows` is what answers that, and it is on the value rather
-    /// than beside it so the two cannot drift.
-    private static func foldsForThisPass(
-        rows: [TranscriptRow], stored: TranscriptFold.Folds, drawn: Range<Int>
-    ) -> TranscriptFold.Folds {
-        guard stored.scannedRows != rows.count else { return stored }
-        let fresh = rescan(rows, extending: stored)
-        return TranscriptFold.mayAdopt(fresh, over: stored, drawn: drawn) ? fresh : stored
-    }
-
-    /// Whether nothing this row says can change again, which is what lets a fold hide it while the
-    /// turn is still running. See rule 1 in `TranscriptFold`.
-    ///
-    /// Two rows can still change and they are the two the reader must not lose: a call whose result
-    /// has not come back, and a question nobody has answered. Everything else is finished the
-    /// moment it is stored. A kind added later is settled, which is the safe direction: it can be
-    /// hidden a beat late, never revealed a beat after being hidden.
-    private static func settled(_ row: TranscriptRow) -> Bool {
-        switch row.kind {
-        case .toolUse: row.resultPayload != nil
-        case .permissionAsk: row.permissionDecision != nil
-        default: true
-        }
+    /// Keep insertion and folding as separate table updates during a live turn. A new session
+    /// uses its own cached analysis on its first pass, even before the session change callback.
+    private func foldsForThisPass(drawn: Range<Int>) -> TranscriptFold.Folds {
+        guard foldSession == transcript.session.id else { return transcript.presentationFolds() }
+        guard foldRevision != transcript.presentationRevision else { return folds }
+        let fresh = transcript.presentationFolds()
+        return TranscriptFold.mayAdopt(fresh, over: folds, drawn: drawn) ? fresh : folds
     }
 
     /// What a link in any row of this transcript does. Comparable, so that a fresh struct per pass
@@ -516,7 +453,7 @@ struct TranscriptListView: View {
         // puts none in. Everything else waits for the pass below, which is what keeps an arrival
         // and a fold from landing as one edit. See `TranscriptFold.mayAdopt`, which is the rule,
         // and the `onChange` at the foot of `body`, which is the pass.
-        let folds = Self.foldsForThisPass(rows: rows, stored: self.folds, drawn: drawnRange)
+        let folds = foldsForThisPass(drawn: drawnRange)
         let lastVisibleSeq = drawnRows.last(where: { !TranscriptNoise.isHidden($0) })?.seq
         // The group the loop is inside, so its line is emitted once, and the indices of its
         // completed rows. Pending rows can sit between hidden ones.
@@ -954,10 +891,7 @@ struct TranscriptListView: View {
             isVisible.value = false
             isGrowing.value = false
         }
-        .onChange(of: transcript.rows.count, initial: true) { _, _ in
-            questionIndex.value.update(
-                session: transcript.session.id, rows: transcript.rows
-            )
+        .onChange(of: transcript.presentationRevision, initial: true) { _, _ in
             updatePinnedQuestion()
             position()
             // A row arriving is another chance to notice that the window stops short of it.
@@ -972,8 +906,10 @@ struct TranscriptListView: View {
             //
             // Guarded, because `@State` does not compare before it invalidates and most row
             // arrivals leave the runs exactly as they were.
-            let rescanned = Self.rescan(transcript.rows, extending: folds)
+            let rescanned = transcript.presentationFolds()
             if rescanned != folds { folds = rescanned }
+            foldSession = transcript.session.id
+            foldRevision = transcript.presentationRevision
             // An open live turn is useful while the reader is inspecting it. Once they are back at
             // the live end and more work arrives, it is a growing log again: keep the newest item
             // visible and return everything completed above it to the compact count.
@@ -1021,17 +957,14 @@ struct TranscriptListView: View {
             isLiveScrolling.value = false
             opening = nil
             pinnedQuestion = nil
-            questionIndex.value.update(
-                session: transcript.session.id, rows: transcript.rows
-            )
             // The folds of the session being arrived at, which are its own and are usually none.
             let remembered = memory?.remembered(session: transcript.session.id)
             liveEndRequest = TranscriptLiveEndRequest(handled: remembered?.liveEndRequest ?? 0)
             expanded = remembered?.expanded ?? []
             unfolded = remembered?.unfolded ?? []
-            // From nothing rather than extended: the rows below this pane have been replaced
-            // wholesale, so there is no tail of the last conversation worth keeping.
-            folds = Self.rescan(transcript.rows, extending: .none)
+            folds = transcript.presentationFolds()
+            foldSession = transcript.session.id
+            foldRevision = transcript.presentationRevision
             // A session opens at its live end whatever the one being left was scrolled to, and the
             // anchor is read before the new rows arrive.
             geometry.isNearBottom = true
@@ -1429,7 +1362,7 @@ struct TranscriptListView: View {
     /// scrolling invalidate the transcript.
     private func updatePinnedQuestion() {
         guard let place = controller.topmostPlace,
-              let question = questionIndex.value.latest(atOrBefore: place.seq)
+              let question = transcript.pinnedQuestion(atOrBefore: place.seq)
         else {
             if pinnedQuestion != nil { pinnedQuestion = nil }
             return

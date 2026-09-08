@@ -99,6 +99,40 @@ final class TranscriptModel {
     }
 
     private(set) var rows: [TranscriptRow] = []
+    /// Changes to presentation facts include edits to existing tool and permission rows.
+    private(set) var presentationRevision = 0
+    @ObservationIgnored private var foldCache = TranscriptFoldCache()
+    @ObservationIgnored private var questionIndex = PinnedQuestionIndex()
+
+    /// These caches write no observable state and are safe to consult during a render pass.
+    /// Each belongs to this session, including when its pane is displaying another workspace.
+    func presentationFolds() -> TranscriptFold.Folds {
+        foldCache.resolve(rows.lazy.map { row in
+            let settled: Bool
+            switch row.kind {
+            case .toolUse: settled = row.resultPayload != nil
+            case .permissionAsk: settled = row.permissionDecision != nil
+            default: settled = true
+            }
+            return TranscriptFold.Fact(
+                seq: row.seq,
+                kind: row.kind,
+                failed: row.isError || row.refusal != nil,
+                featured: MediaShowRow.isCall(row.payload) || CodexImageViewRow.isCall(row.payload),
+                drawsNothing: TranscriptNoise.isHidden(row)
+                    || TranscriptRowInk.drawsNothing(kind: row.kind, payload: row.payload),
+                settled: settled,
+                toolUseID: row.kind == .toolUse ? row.refID : nil,
+                parentToolUseID: row.parentToolUseID
+            )
+        })
+    }
+
+    func pinnedQuestion(atOrBefore seq: Int) -> PinnedQuestion? {
+        questionIndex.update(session: session.id, rows: rows)
+        return questionIndex.latest(atOrBefore: seq)
+    }
+
     /// Whether this session's agent is mid turn.
     ///
     /// Computed over one stored flag rather than being the stored flag, so that every change to
@@ -359,7 +393,10 @@ final class TranscriptModel {
             return (rows: rows, index: index, highestMessageSeq: highestMessageSeq)
         }.value
 
+        foldCache.reset()
+        questionIndex = PinnedQuestionIndex()
         rows = built.rows
+        presentationRevision += 1
         indexByRefID = built.index
         highestSeenMessageSeq = built.highestMessageSeq
 
@@ -448,7 +485,11 @@ final class TranscriptModel {
     /// The same fold, straight onto the model, for the rows that arrive while the session is open.
     private func absorb(_ message: Message, decisions: [String: String] = [:]) {
         messageArrivals.persisted(seq: message.seq, kind: message.kind, sending: sending?.id)
+        let changedIndex = message.kind == .toolResult
+            ? message.refID.flatMap { indexByRefID[$0] } ?? rows.count : rows.count
+        foldCache.invalidate(row: changedIndex)
         Self.absorb(message, decisions: decisions, into: &rows, indexByRefID: &indexByRefID)
+        presentationRevision += 1
         // The stored row has arrived, so the bubble drawn from the queue is now the same sentence
         // drawn twice. Retired here rather than after the send returns, because the pump can read
         // the row first: only one turn is ever in flight, so a user row landing while something is
@@ -1564,8 +1605,10 @@ final class TranscriptModel {
                 && PermissionAsk.decode(payload: $0.payload)?.requestID == resolution.requestID
         }) else { return }
 
+        foldCache.invalidate(row: index)
         rows[index].permissionDecision = resolution.decision
         if !resolution.note.isEmpty { rows[index].permissionNote = resolution.note }
+        presentationRevision += 1
     }
 
     /// Pulls anything the runner has persisted since the last row we hold. The runner is the

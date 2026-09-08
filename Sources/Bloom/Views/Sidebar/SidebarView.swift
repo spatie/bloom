@@ -331,7 +331,11 @@ struct SidebarView: View {
             archivePresentation.cancel()
             regroup(rescoped: true)
         }
-        .onDisappear { archivePresentation.cancel() }
+        .onAppear { SwitchProbe.attachSidebarSelection($listSelection) }
+        .onDisappear {
+            archivePresentation.cancel()
+            SwitchProbe.attachSidebarSelection(nil)
+        }
         // NOT rescoped, unlike the filter above, and the difference is what the two switches do.
         // A filter is a question you ask of rows that were always there. This one inserts project
         // headers at several depths at once, and a row that is arriving has no old position to
@@ -343,14 +347,22 @@ struct SidebarView: View {
             regroup(rescoped: !ProjectVisibilityMotion.filterToggle(reduceMotion: reduceMotion)
                 .fadesArrivals)
         }
-        .onChange(of: listSelection) { _, _ in commitSelection() }
+        .onChange(of: listSelection) { _, selected in
+            if selected == nil { listSelection = app.selection }
+        }
+        .background {
+            SidebarSelectionActivation(selection: listSelection, active: app.selection) { target, previous in
+                commitSelection(target, replacing: previous)
+            }
+            .allowsHitTesting(false)
+        }
         // Delete on a selected row, which every Mac list that can delete binds and which
         // `onDeleteCommand` appeared nowhere in this app to answer. It is the menu item's own
         // action rather than a second path to the same place: `AppModel.archive` runs the git
         // safety check, says what is at stake when there is anything, and registers the undo, so
         // the reflex costs no more here than Shift+Cmd+Delete does from the menu.
         .onDeleteCommand {
-            guard let id = app.selection.workspaceID,
+            guard let id = listSelection?.workspaceID,
                   let workspace = app.workspaces.first(where: { $0.id == id }) else { return }
             guard paneRows.contains(where: { row in
                 if case .workspace(let shown, _) = row { return shown.id == workspace.id }
@@ -563,14 +575,15 @@ struct SidebarView: View {
     /// invalidates it again, so the row went blank while the detail pane carried on showing the
     /// workspace. Writing the old value back into the list's own state is what redraws it.
     ///
-    /// Running here rather than in a binding setter also keeps the model write out of the table's
-    /// selection callback, which is what AppKit means by a reentrant delegate operation.
-    private func commitSelection() {
-        guard let listSelection else {
+    /// The native highlight gets a frame of its own before this changes the centre column.
+    /// A newer click, external navigation or archive always wins over a pending activation.
+    private func commitSelection(_ target: SidebarSelection, replacing previous: SidebarSelection) {
+        guard listSelection == target, app.selection == previous else { return }
+        if let id = target.workspaceID, !app.workspaces.contains(where: { $0.id == id }) {
             listSelection = app.selection
             return
         }
-        app.selection = listSelection
+        app.selection = target
     }
 
     private func archiveFromKeyboard(_ workspace: Workspace) {

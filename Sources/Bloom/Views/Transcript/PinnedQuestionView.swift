@@ -11,7 +11,8 @@ struct PinnedQuestion: Equatable {
 ///
 /// `TranscriptListView.measured` runs on every scroll frame. Looking backwards through the whole
 /// transcript there would put a session-length scan on the hottest path in the chat. This index
-/// makes that lookup logarithmic and rebuilding it remains an append-only cost.
+/// makes that lookup logarithmic. Its owning TranscriptModel survives workspace switches, so
+/// decoding user messages remains an append-only cost across visits too.
 struct PinnedQuestionIndex {
     private var session: SessionID?
     private var scannedRows = 0
