@@ -13,8 +13,8 @@ import BloomCore
 ///
 /// The wording is `ReviewedMarkAction`, in the core, shared with the row's context menu, so the
 /// bar and the menu cannot come to two accounts of what the control does.
-struct ViewedToggle: View {
-    var model: WorkspaceModel
+struct ViewedToggle<Model: WorkspaceFileListing>: View {
+    var model: Model
     var file: ChangedFile
 
     private var isViewed: Bool { model.isViewed(file) }
@@ -29,6 +29,7 @@ struct ViewedToggle: View {
         }
         .toggleStyle(.button)
         .inspectorBarControl()
+        .disabled(!model.supportsViewedMarks)
         .help(action.help(for: file.filename))
         .accessibilityLabel(action.title)
     }

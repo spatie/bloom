@@ -129,6 +129,16 @@ final class ServerWindowModel {
     }
     private var terminals: [String: BloomTerminalView] = [:]
     private var fileBuffers: [String: ServerFileBuffer] = [:]
+    @ObservationIgnored private var editingSessions: [String: FileEditSession] = [:]
+
+    func fileEdits(for workspace: Workspace) -> FileEditSession {
+        let endpoint = lastEndpoint ?? .local(directory: "")
+        let key = String(reflecting: endpoint) + "/" + workspace.id.rawValue
+        if let held = editingSessions[key] { return held }
+        let session = RemoteFileEditing.make(server: self, workspace: workspace, endpoint: endpoint)
+        editingSessions[key] = session
+        return session
+    }
     private let preferences: UserDefaults
 
     init(preferences: UserDefaults = .standard, bundle: Bundle = .main) {

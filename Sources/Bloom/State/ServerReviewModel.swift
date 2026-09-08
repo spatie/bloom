@@ -31,6 +31,7 @@ final class ServerReviewModel {
     var isLoading = false
     private var workspaceID: WorkspaceID?
     private var generation = 0
+    var contentGeneration: Int { generation }
     private var needsContent = true
     private(set) var hasReadFiles = false
 

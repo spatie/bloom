@@ -10,8 +10,8 @@ import BloomCore
 /// A path rather than a `ChangedFile`, because the two ways into a file are the diff of one the
 /// agent touched and the worktree tree, and the tree opens files git has never heard of. Editing
 /// is a question about bytes on disk either way, so the pane only ever needed the path.
-struct FileEditPane: View {
-    let model: WorkspaceModel
+struct FileEditPane<Model: WorkspaceFileReview>: View {
+    let model: Model
     /// Relative to the workspace's worktree, the way every path in the inspector is.
     let path: String
     let session: FileEditSession
@@ -37,7 +37,7 @@ struct FileEditPane: View {
             // Including whatever the review pane is holding for this file, which is a picture of
             // the bytes that have just been replaced. See `WorkspaceModel.forgetHeldDiff`.
             model.forgetHeldDiff(for: path)
-            await model.refreshChanges()
+            await model.reloadChanges()
             onSaved()
         }
     }

@@ -19,7 +19,14 @@ final class FileEditSession {
     /// Absolute paths are unique across workspaces, so one store serves all of them.
     static let shared = FileEditSession()
 
-    private init() {}
+    private let remoteRead: ((String) async throws -> EditableFile)?
+    private let remoteWrite: ((String, String, EditableFile) async throws -> EditableFile)?
+
+    init(remoteRead: ((String) async throws -> EditableFile)? = nil,
+         remoteWrite: ((String, String, EditableFile) async throws -> EditableFile)? = nil) {
+        self.remoteRead = remoteRead
+        self.remoteWrite = remoteWrite
+    }
 
     /// One file's editing state. `baseline` is the exact bytes the text was loaded from, which is
     /// what makes a save checkable rather than hopeful.
@@ -73,9 +80,13 @@ final class FileEditSession {
         // the whole time, and flashing the pane empty for it would read as a glitch.
         if drafts[absolutePath] == nil { status[absolutePath] = .loading }
 
-        let outcome = await Task.detached(priority: .userInitiated) {
-            Self.reading(absolutePath)
-        }.value
+        let outcome: Result<EditableFile, FileEditorError>
+        if let remoteRead {
+            do { outcome = .success(try await remoteRead(absolutePath)) } catch { outcome = .failure(.unreadable(path: absolutePath, reason: error.localizedDescription)) }
+        } else {
+            outcome = await Task.detached(priority: .userInitiated) { Self.reading(absolutePath) }.value
+        }
+        guard drafts[absolutePath]?.isDirty != true else { return }
 
         switch outcome {
         case let .success(file):
@@ -97,13 +108,17 @@ final class FileEditSession {
 
         let text = draft.text
         let baseline = draft.baseline
-        let outcome = await Task.detached(priority: .userInitiated) {
-            Self.writing(text, over: baseline)
-        }.value
+        let outcome: Result<EditableFile, FileEditorError>
+        if let remoteWrite {
+            do { outcome = .success(try await remoteWrite(absolutePath, text, baseline)) } catch { outcome = .failure(.unwritable(path: absolutePath, reason: error.localizedDescription)) }
+        } else {
+            outcome = await Task.detached(priority: .userInitiated) { Self.writing(text, over: baseline) }.value
+        }
 
         switch outcome {
         case let .success(saved):
-            drafts[absolutePath] = Draft(baseline: saved, text: saved.text)
+            let current = drafts[absolutePath]?.text ?? text
+            drafts[absolutePath] = Draft(baseline: saved, text: current == text ? saved.text : current)
             status[absolutePath] = .saved
         case let .failure(error):
             status[absolutePath] = .failed(Self.message(for: error))

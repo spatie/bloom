@@ -9,17 +9,17 @@ import BloomCore
 /// used to get this bar, which named neither, and offered no way into the editor at all. The one
 /// control it did carry was a `square.and.pencil` menu that hands the file to Zed or VS Code, so
 /// the only glyph in the bar meant "edit somewhere else" while there was no way to edit here.
-struct FilePreview: View {
-    let model: WorkspaceModel
+struct FilePreview<Model: WorkspaceFileReview>: View {
+    let model: Model
     let path: String
     let absolutePathOverride: String?
     let canEditInBloom: Bool
 
     /// Far more than fits on a screen, and enough that scrolling never reaches the truncation on
     /// any file a person would open on purpose.
-    private static let lineLimit = 5_000
+    private static var lineLimit: Int { 5_000 }
     /// A horizontal scroll wider than this helps nobody and makes the scroller useless.
-    private static let columnLimit = 800
+    private static var columnLimit: Int { 800 }
 
     @State private var lines: [String] = []
     @State private var carries: [LexState] = []
@@ -39,14 +39,14 @@ struct FilePreview: View {
 
     /// Editing buffers outlive this view, so flipping back to View, walking to the next file or
     /// switching workspace cannot discard what was typed.
-    private let session = FileEditSession.shared
+    private var session: FileEditSession { model.fileEdits }
 
     /// Opens on the file, unless there is unsaved text for it, in which case it opens on the
     /// editor. `DiffView` seeds its own mode the same way and for the same reason: coming back to
     /// a file you were typing in and finding the read only half is indistinguishable from finding
     /// the typing gone.
     init(
-        model: WorkspaceModel,
+        model: Model,
         path: String,
         absolutePathOverride: String? = nil,
         canEditInBloom: Bool = true
@@ -58,7 +58,7 @@ struct FilePreview: View {
         let absolute = absolutePathOverride
             ?? (model.workspace.path as NSString).appendingPathComponent(path)
         _isEditing = State(
-            initialValue: canEditInBloom && FileEditSession.shared.isDirty(absolute)
+            initialValue: canEditInBloom && model.fileEdits.isDirty(absolute)
         )
     }
 
@@ -141,7 +141,7 @@ struct FilePreview: View {
             FileBarHintLabel(text: hint ?? "")
                 .layoutPriority(-2)
 
-            openInMenu
+            if model.supportsLocalFileActions { openInMenu }
             if canEditInBloom {
                 modePicker
             }
@@ -338,19 +338,24 @@ struct FilePreview: View {
         // Same call and same answer as `DiffView`, so the two bars never disagree about whether a
         // file can be edited.
         let absolute = absolutePath
-        guard canEditInBloom else {
+        if !canEditInBloom {
             isEditable = false
-            return
+        } else if model.supportsLocalFileActions {
+            isEditable = await Task.detached(priority: .utility) { FileEditor.isEditable(absolute) }.value
+        } else {
+            await session.load(path: absolute)
+            isEditable = session.draft(for: absolute) != nil
         }
-        isEditable = await Task.detached(priority: .utility) {
-            FileEditor.isEditable(absolute)
-        }.value
 
         guard !Task.isCancelled else { return }
 
         let detected = Language.detect(path: path)
         let lineLimit = Self.lineLimit
         let columnLimit = Self.columnLimit
+        let contents: String?
+        if absolutePathOverride != nil, model.supportsLocalFileActions {
+            contents = await Task.detached { try? String(contentsOfFile: absolute, encoding: .utf8) }.value
+        } else { contents = await model.readContents(of: path) }
 
         // Reading the file, splitting it and measuring its widest line all happen here, in one hop
         // and off the main actor. The read is the whole file off disk, the split walks all of it,
@@ -358,14 +363,12 @@ struct FilePreview: View {
         // that is the window held still for the length of all three. Only the carry pass used to
         // be moved off, and on a file with no lexer at all that is the one of the four that costs
         // nothing.
-        let prepared = await Task.detached(priority: .userInitiated) { () -> Prepared? in
-            guard let source = try? String(contentsOfFile: absolute, encoding: .utf8) else {
-                return nil
-            }
+        let prepared = await Task.detached(priority: .userInitiated) { () -> FilePreviewPrepared? in
+            guard let source = contents else { return nil }
             let all = source.components(separatedBy: "\n")
             let truncated = all.count > lineLimit
             let kept = truncated ? Array(all.prefix(lineLimit)) : all
-            return Prepared(
+            return FilePreviewPrepared(
                 lines: kept,
                 carries: CarryPass.states(for: kept, language: detected),
                 maxColumns: min(
@@ -392,10 +395,11 @@ struct FilePreview: View {
     }
 
     /// Everything the reader needs about a file, so the whole of the reading is one hop.
-    private struct Prepared: Sendable {
-        var lines: [String]
-        var carries: [LexState]
-        var maxColumns: Int
-        var isTruncated: Bool
-    }
+}
+
+private struct FilePreviewPrepared: Sendable {
+    var lines: [String]
+    var carries: [LexState]
+    var maxColumns: Int
+    var isTruncated: Bool
 }

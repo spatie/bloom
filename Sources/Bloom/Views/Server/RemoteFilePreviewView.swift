@@ -13,7 +13,8 @@ struct RemoteFilePreviewView: View {
         GeometryReader { geometry in
             Group {
                 if let localURL {
-                    AttachmentPreview(url: localURL, maxWidth: geometry.size.width, maxHeight: geometry.size.height)
+                    FileMediaView(worktree: "", path: path, sourceURL: localURL)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
                 } else if let error {
                     ContentUnavailableView("Cannot preview file", systemImage: "doc", description: Text(error))
                 } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
