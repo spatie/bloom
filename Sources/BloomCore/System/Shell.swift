@@ -202,7 +202,7 @@ public enum Shell {
             // default disposition of the signal that raises is to kill Bloom. `Git.run` passes a
             // commit message and a patch through here, so the child dying early is a bad
             // invocation rather than a hypothetical.
-            _ = fcntl(inPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+            SystemCalls.configurePipeWrites(inPipe.fileHandleForWriting.fileDescriptor)
             try? inPipe.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
             try? inPipe.fileHandleForWriting.close()
         }

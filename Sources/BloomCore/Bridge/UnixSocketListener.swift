@@ -13,7 +13,7 @@ import Synchronization
 public final class UnixSocketListener: Sendable {
     public let path: String
     private let descriptor: Int32
-    private let source: any DispatchSourceRead
+    private let source: Mutex<any DispatchSourceRead>
     /// Guards the once-ness of `stop`, which both the owner and `deinit` may reach: a second
     /// cancel is harmless, but a second unlink could remove a socket file a successor has
     /// already bound. `Mutex` rather than `NSLock` plus `@unchecked Sendable`, for the reason
@@ -62,7 +62,7 @@ public final class UnixSocketListener: Sendable {
         // is the same thread the cancel has to run on.
         _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL, 0) | O_NONBLOCK)
 
-        source = DispatchSource.makeReadSource(
+        let source = DispatchSource.makeReadSource(
             fileDescriptor: descriptor,
             queue: DispatchQueue(label: "be.spatie.bloom.bridge.accept")
         )
@@ -81,6 +81,7 @@ public final class UnixSocketListener: Sendable {
         // the next thing to open a file gets it.
         source.setCancelHandler { SystemCalls.close(descriptor) }
         source.resume()
+        self.source = Mutex(source)
     }
 
     /// Stops listening and removes the socket file. Connections already accepted are not touched:
@@ -93,7 +94,7 @@ public final class UnixSocketListener: Sendable {
         }
         guard claimed else { return }
 
-        source.cancel()
+        source.withLock { $0.cancel() }
         unlink(path)
     }
 

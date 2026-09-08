@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Reports distinct installations and coarse setup metrics about once a day.
 /// No paths, prompts, account details, serial numbers or hardware identifiers are collected.

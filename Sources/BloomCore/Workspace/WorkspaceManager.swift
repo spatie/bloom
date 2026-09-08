@@ -799,7 +799,7 @@ public enum PortAllocator {
     }
 
     static func isFree(_ port: Int) -> Bool {
-        let handle = socket(AF_INET, SOCK_STREAM, 0)
+        let handle = socket(AF_INET, SystemCalls.streamSocketType, 0)
         guard handle >= 0 else { return true }
         defer { close(handle) }
 
