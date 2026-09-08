@@ -34,6 +34,8 @@ struct FilePreview: View {
     /// The bar's own width, for the same reason `FileHeaderBar` measures its own: `ViewThatFits`
     /// only ever sees the share of the row the layout has already apportioned.
     @State private var width: CGFloat = 0
+    /// The sentence for whichever control the pointer is over. See `FileBarHint`.
+    @State private var hint: String?
 
     /// Editing buffers outlive this view, so flipping back to View, walking to the next file or
     /// switching workspace cannot discard what was typed.
@@ -132,6 +134,13 @@ struct FilePreview: View {
 
             Spacer(minLength: InspectorLayout.tight)
 
+            // The same instant sentence `FileHeaderBar` shows, for the same report and for the
+            // same reason: the button beside it is a glyph, and the only thing that used to say
+            // what it does was a tooltip a second and a half away. Always in the row and empty
+            // when there is nothing to say, for the reason spelled out there. See `FileBarHint`.
+            FileBarHintLabel(text: hint ?? "")
+                .layoutPriority(-2)
+
             openInMenu
             if canEditInBloom {
                 modePicker
@@ -171,7 +180,7 @@ struct FilePreview: View {
         .menuIndicator(.hidden)
         .controlSize(.small)
         .fixedSize()
-        .help(openTitle)
+        .fileBarHint(FileBarControl(title: "Open in", hint: openTitle), into: $hint)
         .environment(\.openInRepoID, model.repo?.id)
     }
 
@@ -195,11 +204,15 @@ struct FilePreview: View {
         .controlSize(.small)
         .fixedSize()
         .disabled(!isEditable)
-        .help(
-            isEditable
-                ? "Read \(filename), or edit it here"
-                : "\(filename) cannot be edited here. It is not UTF-8 text, or it is over "
-                    + "\(FileEditor.sizeLimit / 1_048_576) MB."
+        .fileBarHint(
+            FileBarControl(
+                title: "File view",
+                hint: isEditable
+                    ? "Read \(filename), or edit it here"
+                    : "\(filename) cannot be edited here. It is not UTF-8 text, or it is over "
+                        + "\(FileEditor.sizeLimit / 1_048_576) MB."
+            ),
+            into: $hint
         )
     }
 

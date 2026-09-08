@@ -9,6 +9,27 @@ import BloomCore
 /// inspector's own toolbar uses, so there is one source of truth per setting and no way for two
 /// controls to disagree about what the diff is showing.
 ///
+/// # The controls say what they are
+///
+/// **Reported by somebody reading a Bloom diff for the first time: this row is a line of glyphs
+/// and there is no telling what any of them do.** Six icon-only controls, and the only thing that
+/// explained them was a system tooltip about a second and a half away. Both halves of that are
+/// answered here and neither of them touches the tooltip delay, which is a setting the person
+/// using this Mac owns for every application on it.
+///
+/// The first answer is the words. `controls` draws each control with its title beside its glyph,
+/// and it is the arrangement `ViewThatFits` offers first, so at any ordinary width nothing has to
+/// be hovered at all. `compact` is the old glyph row and is what a narrower pane falls back to,
+/// and `collapsed` is the overflow menu under that.
+///
+/// The second is the hint. Every control reports its own sentence into `hint` on hover, and the
+/// bar draws it in the slack beside the controls, at once, because a line of text in a row is not
+/// a tooltip and has no delay to wait out. See `FileBarHint`.
+///
+/// The copy is `FileBarControls` in the core rather than string literals here, for the reason that
+/// file gives: the one string that was built inline said "Copy the diff" while the pane was
+/// showing the file.
+///
 /// The control cluster collapses into a menu when the pane is too narrow for it. A segmented
 /// control and a row of toggle buttons do not truncate: they overflow and get clipped, which is
 /// how a control ends up half visible at the edge of a narrow inspector.
@@ -29,6 +50,9 @@ struct FileHeaderBar: View {
     @State private var isConfirmingRevert = false
     @State private var didCopy = false
     @State private var copyReset: Task<Void, Never>?
+    /// The sentence for whichever control the pointer is over, or nil for none of them. Written by
+    /// `fileBarHint` and read only here. See `FileBarHint` for why this is not a tooltip.
+    @State private var hint: String?
     /// The bar's own width, which is the only thing that can decide how much of the path there is
     /// room for. `ViewThatFits` cannot: it is handed the share of the row the layout has already
     /// apportioned, so it dropped the folder while there was still most of a pane to spare.
@@ -56,8 +80,22 @@ struct FileHeaderBar: View {
             Spacer(minLength: InspectorLayout.tight)
                 .layoutPriority(-1)
 
+            // Between the spacer and the controls, so the sentence appears next to the control it
+            // is about, and lower priority than everything else in the row so it is the first
+            // thing to give up width.
+            //
+            // **Always in the row, empty when there is nothing to say.** An `if` here would take
+            // the view out of the stack, and a stack with one child fewer is a stack with one gap
+            // fewer: the eight points that frees go back to the controls, and a bar sitting on the
+            // boundary between two of `ViewThatFits`'s arrangements would swap them as the pointer
+            // arrived. The controls have to be the one thing in this bar that never moves while
+            // it is being pointed at.
+            FileBarHintLabel(text: hint ?? "")
+                .layoutPriority(-2)
+
             ViewThatFits(in: .horizontal) {
                 controls
+                compact
                 collapsed
             }
         }
@@ -85,18 +123,38 @@ struct FileHeaderBar: View {
 
     // MARK: - Control clusters
 
-    /// One arrangement rather than two. `compact` existed to hide the word "Viewed" and leave its
-    /// tick behind, and with the toggle gone every control in this row was already icon only, so
-    /// the two branches drew the same thing and `ViewThatFits` measured the first one twice.
+    /// The one that is offered first: every control with its word on it.
+    ///
+    /// It costs about two hundred points over the glyph row below, which is what the reviewer's
+    /// complaint is worth paying: at the widths the review tab actually opens at, this is what is
+    /// drawn, and nothing in the row has to be hovered to find out what it is.
     private var controls: some View {
         HStack(spacing: InspectorLayout.gap) {
-            revertButton
-            layoutPicker
+            revertButton(labelled: true)
+            layoutPicker(labelled: true)
             if mode == .diff {
-                whitespaceToggle
+                whitespaceToggle(labelled: true)
             }
-            copyButton
-            shareButton
+            copyButton(labelled: true)
+            overflowMenu(full: false)
+            modePicker
+        }
+    }
+
+    /// The same controls with their words dropped, for a pane too narrow to carry them.
+    ///
+    /// This is the row as it shipped, and it is a middle rung rather than the top one now. Every
+    /// control in it still answers on hover through `fileBarHint`, which is the half of the fix
+    /// that this arrangement needs and the wide one above does not.
+    private var compact: some View {
+        HStack(spacing: InspectorLayout.gap) {
+            revertButton(labelled: false)
+            layoutPicker(labelled: false)
+            if mode == .diff {
+                whitespaceToggle(labelled: false)
+            }
+            copyButton(labelled: false)
+            overflowMenu(full: false)
             modePicker
         }
     }
@@ -104,35 +162,59 @@ struct FileHeaderBar: View {
     /// The narrow arrangement: what this file is, and everything else behind an overflow menu.
     private var collapsed: some View {
         HStack(spacing: InspectorLayout.gap) {
-            Menu {
-                Picker("Layout", selection: $isSideBySide) {
-                    Text("Unified").tag(false)
-                    Text("Side by side").tag(true)
+            overflowMenu(full: true)
+            modePicker
+        }
+    }
+
+    /// Where Share went, and where everything else goes once the bar is too narrow to draw it.
+    ///
+    /// **Share used to be a control in the row and is not any more.** It was a share glyph beside
+    /// the copy glyph: two ways of doing nearly the same thing, given the same weight, in a row
+    /// that was already reported as too full to read. Copy is the one people press, so Copy keeps
+    /// the button and Share keeps the route, one press further away. It is the same item the
+    /// collapsed arrangement has always carried, which is why this menu is now drawn at every
+    /// width instead of only at the narrow one: removing the button must not make sharing
+    /// unreachable on a wide window.
+    ///
+    /// - Parameter full: whether the row outside this menu is empty, in which case everything goes
+    ///   in it rather than only what was left over.
+    private func overflowMenu(full: Bool) -> some View {
+        Menu {
+            if full {
+                Picker(FileBarControls.layout.title, selection: $isSideBySide) {
+                    Text(FileBarControls.unified).tag(false)
+                    Text(FileBarControls.sideBySide).tag(true)
                 }
                 .pickerStyle(.inline)
                 if mode == .diff {
-                    Toggle("Ignore whitespace", isOn: $ignoresWhitespace)
+                    Toggle(FileBarControls.whitespace(ignoring: ignoresWhitespace).title,
+                           isOn: $ignoresWhitespace)
                 }
                 Divider()
-                Button(copyTitle, action: copy)
-                // A `Text` label rather than a title string, because the `.labelStyle(.iconOnly)`
-                // below reaches this menu's contents too and would leave the item a bare glyph.
-                ShareLink(item: sharedDiff, preview: SharePreview(file.filename)) {
-                    Text("Share the diff")
-                }
-                Button("Revert file", role: .destructive) { isConfirmingRevert = true }
-            } label: {
-                Label("More for this file", systemImage: "ellipsis.circle")
+                Button(FileBarControls.copy(mode: mode).title, action: copy)
             }
-            .labelStyle(.iconOnly)
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .controlSize(.small)
-            .fixedSize()
-            .help("More for this file")
 
-            modePicker
+            // A `Text` label rather than a title string, because the `.labelStyle(.iconOnly)`
+            // below reaches this menu's contents too and would leave the item a bare glyph.
+            ShareLink(item: sharedDiff, preview: SharePreview(file.filename)) {
+                Text(FileBarControls.share(filename: file.filename).title)
+            }
+
+            if full {
+                Button(FileBarControls.revert(filename: file.filename).title, role: .destructive) {
+                    isConfirmingRevert = true
+                }
+            }
+        } label: {
+            Label(FileBarControls.more.title, systemImage: "ellipsis.circle")
         }
+        .labelStyle(.iconOnly)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .controlSize(.small)
+        .fixedSize()
+        .fileBarHint(FileBarControls.more, into: $hint)
     }
 
     /// Destructive, the way the collapsed arrangement already draws it.
@@ -142,15 +224,16 @@ struct FileHeaderBar: View {
     /// pasteboard. The overflow menu at `collapsed` marks the same action `role: .destructive` and
     /// always has; a bar and its own overflow saying two different things about one action is the
     /// disagreement, not the styling.
-    private var revertButton: some View {
-        Button(role: .destructive) {
+    private func revertButton(labelled: Bool) -> some View {
+        let control = FileBarControls.revert(filename: file.filename)
+        return Button(role: .destructive) {
             isConfirmingRevert = true
         } label: {
-            Label("Revert file", systemImage: "arrow.uturn.backward")
+            Label(control.title, systemImage: "arrow.uturn.backward")
         }
-        .labelStyle(.iconOnly)
+        .fileBarLabelStyle(labelled: labelled)
         .inspectorBarControl()
-        .help("Throw away the changes to \(file.filename)")
+        .fileBarHint(control, into: $hint)
     }
 
     /// Unified or side by side, which is one choice between two values and is therefore a
@@ -162,71 +245,79 @@ struct FileHeaderBar: View {
     /// it as an inline `Picker`, and `modePicker` two controls along is a segmented one, so this
     /// bar held all three spellings of the same idea.
     ///
-    /// `Image` rather than `Label` in the segments: a segmented control on macOS is an
+    /// `Image` rather than `Label` in the narrow segments: a segmented control on macOS is an
     /// `NSSegmentedControl`, whose cells carry a title or an image and not both, which
-    /// `CreateWorkspaceView.modePicker` records having found out the hard way.
-    private var layoutPicker: some View {
-        Picker("Diff layout", selection: $isSideBySide) {
-            Image(systemName: "list.bullet.rectangle")
-                .accessibilityLabel("Unified diff")
-                .tag(false)
-            Image(systemName: "rectangle.split.2x1")
-                .accessibilityLabel("Side by side diff")
-                .tag(true)
+    /// `CreateWorkspaceView.modePicker` records having found out the hard way. That limit is why
+    /// the wide arrangement drops the glyphs rather than putting the words next to them.
+    private func layoutPicker(labelled: Bool) -> some View {
+        // Two whole pickers rather than one with a branch inside it. A `Picker` finds its
+        // selection by reading the tags out of its content, and content wrapped in a
+        // `_ConditionalContent` is content it has to walk into to find them. Neither branch has a
+        // conditional in it this way, and the cost is a repeated title.
+        Group {
+            if labelled {
+                Picker(FileBarControls.layout.title, selection: $isSideBySide) {
+                    Text(FileBarControls.unified).tag(false)
+                    Text(FileBarControls.sideBySide).tag(true)
+                }
+            } else {
+                Picker(FileBarControls.layout.title, selection: $isSideBySide) {
+                    Image(systemName: "list.bullet.rectangle")
+                        .accessibilityLabel(FileBarControls.unified)
+                        .tag(false)
+                    Image(systemName: "rectangle.split.2x1")
+                        .accessibilityLabel(FileBarControls.sideBySide)
+                        .tag(true)
+                }
+            }
         }
         .pickerStyle(.segmented)
         .labelsHidden()
         .controlSize(.small)
         .fixedSize()
         .disabled(mode == .edit)
-        .help("Show the diff as one column or side by side")
+        .fileBarHint(FileBarControls.layout, into: $hint)
     }
 
-    private var whitespaceToggle: some View {
-        Toggle(isOn: $ignoresWhitespace) {
-            Label("Ignore whitespace", systemImage: "paragraphsign")
+    private func whitespaceToggle(labelled: Bool) -> some View {
+        let control = FileBarControls.whitespace(ignoring: ignoresWhitespace)
+        return Toggle(isOn: $ignoresWhitespace) {
+            Label(control.title, systemImage: "paragraphsign")
         }
-        .labelStyle(.iconOnly)
+        .fileBarLabelStyle(labelled: labelled)
         .toggleStyle(.button)
         .inspectorBarControl()
-        .help(
-            ignoresWhitespace
-                ? "Show whitespace-only changes again"
-                : "Hide changes that are only whitespace"
-        )
+        .fileBarHint(control, into: $hint)
     }
 
-    private var copyButton: some View {
-        Button(copyTitle, systemImage: didCopy ? "checkmark" : "doc.on.doc", action: copy)
-            .labelStyle(.iconOnly)
-            .inspectorBarControl()
-            .help(copyTitle)
-    }
-
-    /// Beside the copy button, because they are the same family: one puts the diff where you paste
-    /// it yourself, the other hands it to whatever you were going to paste it into.
-    private var shareButton: some View {
-        ShareLink(item: sharedDiff, preview: SharePreview(file.filename)) {
-            Label("Share the diff", systemImage: "square.and.arrow.up")
+    /// The glyph flashes to a tick after a press and the word does not change, which is the whole
+    /// reason `FileBarControls.copy` keeps one title across both states: a button whose label
+    /// grows or shrinks as it is pressed moves every control to the left of it while the pointer
+    /// is still on the one that moved.
+    ///
+    /// What does say so in words is the hint, and it says so for free: the pointer is on this
+    /// button at the moment of the press, so the sentence beside the controls turns into "The diff
+    /// is on the clipboard" as the tick appears.
+    private func copyButton(labelled: Bool) -> some View {
+        let control = FileBarControls.copy(mode: mode, didCopy: didCopy)
+        return Button(action: copy) {
+            Label(control.title, systemImage: didCopy ? "checkmark" : "doc.on.doc")
         }
-        .labelStyle(.iconOnly)
+        .fileBarLabelStyle(labelled: labelled)
         .inspectorBarControl()
-        .help("Share the diff for \(file.filename)")
+        .fileBarHint(control, into: $hint)
     }
 
-    /// What both share controls hand over. The patch is only rendered into a message on export,
+    /// What both share routes hand over. The patch is only rendered into a message on export,
     /// which is what keeps a four thousand line diff out of every redraw of this bar. See
     /// `SharedDiff`.
     private var sharedDiff: SharedDiff {
         SharedDiff(file: file, diff: diff)
     }
 
-    private var copyTitle: String {
-        mode == .edit ? "Copy the file" : "Copy the diff"
-    }
-
     private var modePicker: some View {
-        Picker("File view", selection: $mode) {
+        Picker(FileBarControls.mode(filename: file.filename, isEditable: isEditable).title,
+               selection: $mode) {
             ForEach(FileViewMode.allCases, id: \.self) { value in
                 Text(value.rawValue).tag(value)
             }
@@ -236,10 +327,8 @@ struct FileHeaderBar: View {
         .controlSize(.small)
         .fixedSize()
         .disabled(!isEditable && mode == .diff)
-        .help(
-            isEditable
-                ? "Switch between the diff and the file"
-                : "\(file.filename) cannot be edited here"
+        .fileBarHint(
+            FileBarControls.mode(filename: file.filename, isEditable: isEditable), into: $hint
         )
     }
 
@@ -261,6 +350,21 @@ struct FileHeaderBar: View {
                 guard !Task.isCancelled else { return }
                 didCopy = false
             }
+        }
+    }
+}
+
+/// Whether a control in this bar wears its word or only its glyph.
+///
+/// A `@ViewBuilder` rather than a ternary over two label styles, because SwiftUI has no
+/// `AnyLabelStyle` to put the two branches behind one type.
+private extension View {
+    @ViewBuilder
+    func fileBarLabelStyle(labelled: Bool) -> some View {
+        if labelled {
+            labelStyle(.titleAndIcon)
+        } else {
+            labelStyle(.iconOnly)
         }
     }
 }
