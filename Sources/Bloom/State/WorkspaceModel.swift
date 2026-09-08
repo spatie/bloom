@@ -1267,7 +1267,8 @@ final class WorkspaceModel {
                 let files = try await filesRead
                 let local = await localRead
                 let commits = await commitsRead
-                return .success(ChangesAnswer(files: files, local: local, commits: commits))
+                let revisions = ReviewedFileFingerprint.revisions(for: files, worktree: path, base: base, scope: scope)
+                return .success(ChangesAnswer(files: files, local: local, commits: commits, revisions: revisions))
             } catch {
                 // Diagnosed rather than reported, in the register `WorkspaceStartFailure` set. A
                 // worktree deleted underneath Bloom used to surface here as "`git rev-parse
@@ -1315,6 +1316,7 @@ final class WorkspaceModel {
             // which would rerun the inspector's body and rebuild the tree for nothing.
             if changesError != nil { changesError = nil }
             if changedFiles != answer.files { changedFiles = answer.files }
+            if viewedRevisions != answer.revisions { viewedRevisions = answer.revisions }
             // Only when git actually answered. A failed count leaves the last known one standing
             // rather than replacing it with "nothing local", which is a claim.
             if let local = answer.local, localWork != local { localWork = local }
@@ -1333,6 +1335,7 @@ final class WorkspaceModel {
         var local: LocalWork?
         /// Nil when this refresh did not ask, which is every quiet poll.
         var commits: BranchCommitList?
+        var revisions: [String: String] = [:]
     }
 
     /// Narrows or widens what the Changes tab is showing, and sends the pane back to git for it.
@@ -1531,17 +1534,18 @@ final class WorkspaceModel {
     /// In the store rather than only here for the reason the review comments are: a pass through a
     /// forty file diff is real work, and it has to survive switching workspace and quitting.
     private(set) var viewedFiles: [String: String] = [:]
+    private(set) var viewedRevisions: [String: String] = [:]
     private(set) var hasReadViewedFiles = false
 
     /// What the changed file list says over itself, or nil before anything has been ticked. The
     /// sentence is `ReviewedFiles.summary`, in the core, so the list and any other reader of it
     /// cannot come to two counts.
     var viewedSummary: String? {
-        ReviewedFiles.summary(among: changedFiles, marks: viewedFiles)
+        ReviewedFiles.summary(among: changedFiles, marks: viewedFiles, revisions: viewedRevisions)
     }
 
     func isViewed(_ file: ChangedFile) -> Bool {
-        ReviewedFiles.isViewed(file, marks: viewedFiles)
+        ReviewedFiles.isViewed(file, marks: viewedFiles, revisions: viewedRevisions)
     }
 
     func reloadViewedFiles() async {
@@ -1562,7 +1566,7 @@ final class WorkspaceModel {
     /// go stale honestly when the agent edits the file afterwards. See `ReviewedFileFingerprint`.
     func setViewed(_ isViewed: Bool, file: ChangedFile) async {
         guard let store else { return }
-        let fingerprint = ReviewedFileFingerprint.of(file)
+        let fingerprint = ReviewedFileFingerprint.of(file, revision: viewedRevisions[file.path] ?? "")
         do {
             if isViewed {
                 try await store.markReviewed(ReviewedFile(

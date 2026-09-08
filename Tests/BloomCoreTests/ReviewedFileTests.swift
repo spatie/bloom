@@ -39,6 +39,15 @@ struct ReviewedFileTests {
         #expect(!ReviewedFiles.isViewed(file("Sources/Other.swift"), marks: marks))
     }
 
+    @Test("same-count edits and comparison changes invalidate viewed marks")
+    func sameCountEdit() {
+        let widget = file("Sources/Widget.swift")
+        let marks = [widget.path: ReviewedFileFingerprint.of(widget, revision: "first revision")]
+        #expect(ReviewedFiles.isViewed(widget, marks: marks, revisions: [widget.path: "first revision"]))
+        #expect(!ReviewedFiles.isViewed(widget, marks: marks, revisions: [widget.path: "second revision"]))
+        #expect(ReviewedFiles.viewedCount(among: [widget], marks: marks, revisions: [widget.path: "second revision"]) == 0)
+    }
+
     @Test("a diff put back the way it was is viewed again")
     func survivesARevert() {
         // The mark is kept rather than deleted when it goes stale, so an edit the agent undoes
@@ -121,5 +130,27 @@ struct ReviewViewedShortcutTests {
     @Test("a review on screen with nobody typing owns the key")
     func armed() {
         #expect(ReviewViewedShortcut.isArmed(hasFile: true, isTakingText: false))
+    }
+}
+
+@Suite("Viewed file revision stamps", .scratchDirectory)
+struct ReviewedFileRevisionTests {
+    @Test("Rewriting the same number of bytes changes the revision stamp")
+    func sameSizeRewrite() throws {
+        let root = TestScratch.unique("viewed-revision")
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        let path = (root as NSString).appendingPathComponent("file.txt")
+        let url = URL(fileURLWithPath: path)
+        let file = ChangedFile(path: "file.txt", change: .modified, additions: 1, deletions: 1)
+        try Data("first\n".utf8).write(to: url)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1000)], ofItemAtPath: path)
+        let before = ReviewedFileFingerprint.revisions(for: [file], worktree: root, base: "main", scope: .all)
+        #expect(before == ReviewedFileFingerprint.revisions(for: [file], worktree: root, base: "main", scope: .all))
+        try Data("other\n".utf8).write(to: url)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 2000)], ofItemAtPath: path)
+        let after = ReviewedFileFingerprint.revisions(for: [file], worktree: root, base: "main", scope: .all)
+        #expect(before[file.path] != after[file.path])
+        let marks = [file.path: ReviewedFileFingerprint.of(file, revision: try #require(before[file.path]))]
+        #expect(!ReviewedFiles.isViewed(file, marks: marks, revisions: after))
     }
 }

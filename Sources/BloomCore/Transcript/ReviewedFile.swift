@@ -42,20 +42,26 @@ public struct ReviewedFile: Sendable, Hashable, Codable {
 
 /// What a file's diff looked like when it was ticked, in one short string.
 ///
-/// **Git's own counts rather than a hash of the patch, and that is a cost decision with a name.**
-/// The changed file poll runs every six seconds and hands over a `ChangedFile` for every file in
-/// the diff; hashing each patch would mean a `git diff` per file per poll, which is the one thing
-/// the poll is careful not to do. The counts are already in hand and cost nothing.
-///
-/// The limit that buys is worth saying out loud, because somebody will meet it: **an edit that
-/// swaps one line for another leaves the counts where they were, so the tick survives it.** The
-/// same blind spot is documented on `DiffView.refreshWorktreeCopy`, which is the other place a
-/// count that did not move hides an edit that happened. A reviewer who suspects it can untick the
-/// file, and the pending review comments on that file are re-checked against the worktree
-/// regardless, so nothing that is actually load bearing rests on this string.
+/// Diff counts identify the change shape; the worktree stamp also notices replacements that
+/// leave those counts unchanged. Stamps are read with the existing background file refresh,
+/// not while drawing a row and not by launching a git process for every viewed file.
 public enum ReviewedFileFingerprint {
-    public static func of(_ file: ChangedFile) -> String {
-        "\(file.change.rawValue):\(file.additions):\(file.deletions):\(file.isBinary ? 1 : 0)"
+    public static func of(_ file: ChangedFile, revision: String = "") -> String {
+        let counts = "\(file.change.rawValue):\(file.additions):\(file.deletions):\(file.isBinary ? 1 : 0)"
+        return revision.isEmpty ? counts : counts + ":" + revision
+    }
+
+    public static func revisions(for files: [ChangedFile], worktree: String, base: String, scope: DiffScope) -> [String: String] {
+        let comparison = scope.revision(baseline: base)
+        return Dictionary(uniqueKeysWithValues: files.map { file in
+            let path = (worktree as NSString).appendingPathComponent(file.path)
+            let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+            let modified = (attributes?[.modificationDate] as? Date)?.timeIntervalSinceReferenceDate
+            let size = (attributes?[.size] as? NSNumber)?.uint64Value
+            let inode = (attributes?[.systemFileNumber] as? NSNumber)?.uint64Value
+            let stamp = "\(comparison):\(modified.map { String($0) } ?? "missing"):\(size.map { String($0) } ?? "missing"):\(inode.map { String($0) } ?? "missing")"
+            return (file.path, stamp)
+        })
     }
 }
 
@@ -70,13 +76,13 @@ public enum ReviewedFileFingerprint {
 /// undone is a keystroke the reader should not have to spend) and every reader here reports it as
 /// unread while the disagreement lasts.
 public enum ReviewedFiles {
-    public static func isViewed(_ file: ChangedFile, marks: [String: String]) -> Bool {
-        marks[file.path] == ReviewedFileFingerprint.of(file)
+    public static func isViewed(_ file: ChangedFile, marks: [String: String], revisions: [String: String] = [:]) -> Bool {
+        marks[file.path] == ReviewedFileFingerprint.of(file, revision: revisions[file.path] ?? "")
     }
 
     /// How many of the files on screen carry a tick that still holds.
-    public static func viewedCount(among files: [ChangedFile], marks: [String: String]) -> Int {
-        files.count(where: { isViewed($0, marks: marks) })
+    public static func viewedCount(among files: [ChangedFile], marks: [String: String], revisions: [String: String] = [:]) -> Int {
+        files.count(where: { isViewed($0, marks: marks, revisions: revisions) })
     }
 
     /// The line the changed file list draws over itself, or nil when there is nothing to say.
@@ -85,10 +91,10 @@ public enum ReviewedFiles {
     /// progress bar for work nobody has started, and the whole list is unread by definition. It
     /// says "All 12 files viewed" at the end rather than "12 of 12", which is the one state worth
     /// reading as an answer instead of as a ratio.
-    public static func summary(among files: [ChangedFile], marks: [String: String]) -> String? {
+    public static func summary(among files: [ChangedFile], marks: [String: String], revisions: [String: String] = [:]) -> String? {
         let total = files.count
         guard total > 0 else { return nil }
-        let viewed = viewedCount(among: files, marks: marks)
+        let viewed = viewedCount(among: files, marks: marks, revisions: revisions)
         guard viewed > 0 else { return nil }
         if viewed >= total {
             return "All \(Counted.of(total, "file")) viewed"
@@ -100,9 +106,10 @@ public enum ReviewedFiles {
     /// to the next unread file needs.
     public static func unviewed(
         among files: [ChangedFile],
-        marks: [String: String]
+        marks: [String: String],
+        revisions: [String: String] = [:]
     ) -> [ChangedFile] {
-        files.filter { !isViewed($0, marks: marks) }
+        files.filter { !isViewed($0, marks: marks, revisions: revisions) }
     }
 }
 

@@ -63,6 +63,7 @@ struct NotesFormattingBar: View {
 
                 Toggle("Source", isOn: $showsSource)
                     .toggleStyle(.button)
+                    .buttonStyle(.bordered)
                     .help("Show the Markdown syntax")
             }
             .controlSize(.small)
