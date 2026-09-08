@@ -10,23 +10,28 @@ import SwiftUI
 /// recurse. Measuring after layout keeps the content-sized window while making the resize a new
 /// main-actor turn rather than part of the pass that requested it.
 @MainActor
-final class WelcomeHostingController<Content: View>: NSHostingController<Content> {
+final class WelcomeHostingController: NSHostingController<AnyView> {
     private let contentWidth: CGFloat
     private var resizeIsScheduled = false
 
-    init(rootView: Content, contentWidth: CGFloat) {
+    init(rootView: some View, contentWidth: CGFloat) {
         self.contentWidth = contentWidth
-        super.init(rootView: rootView)
+        super.init(rootView: AnyView(rootView))
         sizingOptions = []
+        // AppKit's viewDidLayout callback crashed in Swift's generated actor check before it
+        // reached our code (#159). Observe SwiftUI's content instead, keeping native layout out
+        // of that callback and allowing shorter steps to shrink the window again.
+        self.rootView = AnyView(rootView
+            .fixedSize(horizontal: false, vertical: true)
+            // The origin changes when the title bar's safe area arrives after attachment.
+            // Watching size alone leaves the initial greeting shorter than a return visit.
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { [weak self] _ in
+                self?.scheduleResize()
+            })
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not decoded from a nib") }
-
-    override func viewDidLayout() {
-        super.viewDidLayout()
-        scheduleResize()
-    }
 
     /// The size used before the controller has joined a window. It is measured from the same root
     /// view that will be installed, so the first frame and every later frame share one rule.
