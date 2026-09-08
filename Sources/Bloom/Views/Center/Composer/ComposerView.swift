@@ -697,7 +697,7 @@ struct ComposerView: View {
             // the chat has said anything, so there is no transcript in the old backend's
             // vocabulary and no thread on its server to strand. A chat that has spoken forks
             // instead, which is `BackendChange` and is the footer's problem rather than this one.
-            sessionEditor.apply {
+            sessionEditor.apply(implementationMode: appDefaults.permissionMode) {
                 $0.model = resolved.model
                 $0.effort = resolved.effort
                 $0.agentKind = resolved.backend
