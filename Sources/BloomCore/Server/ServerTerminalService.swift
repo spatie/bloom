@@ -7,8 +7,12 @@ actor ServerTerminalService {
     private var processes: [String: StreamingProcess] = [:]
     private var pumps: [String: Task<Void, Never>] = [:]
     private var starts: [String: Task<Void, Error>] = [:]
+    private var commands: [String: (TmuxCommand, String)] = [:]
+    private var isClosed = false
 
     func start(command: TmuxCommand, key: String, cwd: String) async throws {
+        guard !isClosed else { throw ServerFailure("The server is shutting down.") }
+        commands[key] = (command, cwd)
         #if os(Linux)
         if let task = starts[key] { return try await task.value }
         if processes[key]?.isRunning == true { return }
@@ -34,10 +38,22 @@ actor ServerTerminalService {
         throw ServerFailure("The server terminal did not become ready.")
     }
 
-    func shutdown() {
+    func shutdown() async {
+        isClosed = true
+        for start in starts.values { start.cancel() }
+        // A tmux server owns PTYs whose shells use separate process groups. Ask tmux to close
+        // those sessions before terminating its process, so a service stop leaves no shell behind.
+        for (command, cwd) in commands.values {
+            _ = try? await Shell.run(command.executable, command.arguments(["kill-server"]), cwd: cwd)
+        }
         for process in processes.values { process.terminate() }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while processes.values.contains(where: \.isRunning), ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        for process in processes.values where process.isRunning { process.kill() }
         for pump in pumps.values { pump.cancel() }
-        processes.removeAll(); pumps.removeAll()
+        processes.removeAll(); pumps.removeAll(); commands.removeAll()
     }
 
     deinit {

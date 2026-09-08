@@ -103,8 +103,9 @@ struct ServerWorkspaceTests {
             _ = try? await Shell.run(tmux, ["-S", terminal.socket, "kill-server"], cwd: repo.path)
             throw error
         }
-        _ = try await Shell.run(tmux, ["-S", terminal.socket, "kill-server"], cwd: repo.path)
         await service.shutdown()
+        let remaining = try await Shell.run(tmux, ["-S", terminal.socket, "has-session", "-t", "=" + terminal.session], cwd: repo.path)
+        #expect(!remaining.ok, "Stopping the owning server must close its terminal sessions")
     }
 
     @Test func previewForwardingBindsOnlyLoopbackAndRejectsInvalidPorts() throws {
