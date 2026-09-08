@@ -49,7 +49,23 @@ struct DiffView: View {
     /// answered the first death and not the second; see `WorkspaceModel.reviewDrafts` for the
     /// fragment that committing on disappear minted instead.
     private var draft: ReviewDraft? { model.reviewDrafts[file.path] }
-    private var draftSpot: ReviewSpot? { draft?.spot }
+    private var draftSelection: ReviewSelection? { draft?.selection }
+    /// Where the editor is drawn: under the LAST line the note will cover, so a note begun by
+    /// dragging reads as being about the lines above the box rather than as covering them. The
+    /// same placement the finished band gets, and the same one the in-place edit box has always
+    /// had.
+    private var draftEditorSpot: ReviewSpot? {
+        draftSelection.map { ReviewSpot(side: $0.side, line: $0.end) }
+    }
+
+    /// The range being dragged out of a gutter `+` right now, or nil.
+    ///
+    /// View state rather than the model's, and the difference from `reviewDrafts` is the whole
+    /// reason: a drag is over within a second and has no typed text in it, so nothing is lost when
+    /// this view is destroyed mid gesture, whereas a half-written comment is the one loss this
+    /// feature is not allowed. It is read by `isCommented` while the drag is live, which tints the
+    /// lines the release will comment on, so what the reader sees selected is what they get.
+    @State private var rangeDrag: ReviewSelection?
 
     /// The cancel waiting on an answer, or nil when nothing has been asked.
     ///
@@ -209,7 +225,7 @@ struct DiffView: View {
         .onChange(of: isSideBySide) { _, _ in rebuild() }
         .onChange(of: ignoresWhitespace) { _, _ in refold() }
         .onChange(of: fileComments) { _, _ in rebuild() }
-        .onChange(of: draftSpot) { _, _ in rebuild() }
+        .onChange(of: draftSelection) { _, _ in rebuild() }
         .onChange(of: model.changesGeneration) { _, _ in refreshWorktreeCopy() }
         // Nothing commits on disappear. Leaving the file used to commit whatever had been typed,
         // on the argument that a visible chip beats a sentence silently gone, and it made chips
@@ -607,6 +623,8 @@ struct DiffView: View {
                 width: width,
                 isCommented: isCommented(line, numbers: .both),
                 onComment: { beginDraft(at: $0) },
+                onDragComment: { extendDrag(from: $0, to: $1) },
+                onEndCommentDrag: finishDrag,
                 onEdit: { beginEdit(at: $0) }
             )
             // Every pass over this diff rebuilds every row the stack has already realised, and a
@@ -703,6 +721,8 @@ struct DiffView: View {
             numbers: numbers,
             width: width,
             onComment: { beginDraft(at: $0) },
+            onDragComment: { extendDrag(from: $0, to: $1) },
+            onEndCommentDrag: finishDrag,
             onEdit: { beginEdit(at: $0) }
         )
         // For the reason given at the per line call sites above, and up to four hundred times as
@@ -725,6 +745,8 @@ struct DiffView: View {
             width: width,
             isCommented: isCommented(line, numbers: numbers),
             onComment: { beginDraft(at: $0) },
+            onDragComment: { extendDrag(from: $0, to: $1) },
+            onEndCommentDrag: finishDrag,
             onEdit: { beginEdit(at: $0) }
         )
         // For the reason given at the unified call site above, and twice as much of it: the split
@@ -754,7 +776,13 @@ struct DiffView: View {
 
     private func isCommented(_ line: DiffLine?, numbers: DiffLineView.Numbers) -> Bool {
         guard let line else { return false }
-        return spots(of: line, numbers: numbers).contains { commentedSpots.contains($0) }
+        let rowSpots = spots(of: line, numbers: numbers)
+        if rowSpots.contains(where: { commentedSpots.contains($0) }) { return true }
+        // The live drag, which is not in `commentedSpots` because it moves on every pointer move
+        // and `rebuild` is a pass over the whole file. Read here instead, where a changed value
+        // only redraws the rows whose own `isCommented` came out different.
+        guard let rangeDrag else { return false }
+        return rowSpots.contains { rangeDrag.contains($0) }
     }
 
     /// The anchor is captured here, when the editor opens, not at commit. The diff reloads
@@ -765,14 +793,38 @@ struct DiffView: View {
     /// failure path threw the typed comment away. Captured up front, the evidence is exactly
     /// what was on screen when the comment was begun, and the commit can never lose the text.
     private func beginDraft(at spot: ReviewSpot) {
+        beginDraft(selection: ReviewSelection(spot))
+    }
+
+    /// The same, for a note about several lines at once, which is what a drag down the gutter
+    /// asks for. The anchor keeps the first line and the count; see `ReviewCommentAnchor.span`.
+    private func beginDraft(selection: ReviewSelection) {
         guard case let .ready(document) = phase,
               let anchor = ReviewCapture.anchor(
-                at: spot, hunks: document.file.hunks, fileLines: fileLines
+                at: selection, hunks: document.file.hunks, fileLines: fileLines
               )
         else { return }
         // A second press while text is pending moves the editor, and the text moves with it:
         // clearing it here would be the same silent loss the model-held draft exists to prevent.
-        model.reviewDrafts[file.path] = ReviewDraft(spot: spot, anchor: anchor)
+        model.reviewDrafts[file.path] = ReviewDraft(selection: selection, anchor: anchor)
+    }
+
+    /// A drag in progress: the rows between where it began and where it has reached are tinted,
+    /// and nothing else happens yet.
+    ///
+    /// Nothing is written and no editor opens until the pointer is let go, because a drag is a
+    /// gesture somebody can change their mind about halfway through, and an editor that opened on
+    /// the first row crossed would be a box appearing under the pointer mid drag.
+    private func extendDrag(from anchor: ReviewSpot, to target: ReviewSpot) {
+        guard let selection = ReviewSelection(from: anchor, to: target) else { return }
+        if rangeDrag != selection { rangeDrag = selection }
+    }
+
+    /// The pointer let go. The editor opens on the lines the tint has been showing.
+    private func finishDrag() {
+        guard let selection = rangeDrag else { return }
+        rangeDrag = nil
+        beginDraft(selection: selection)
     }
 
     /// Cancel and Escape, from the editor the gutter `+` opened.
@@ -815,7 +867,7 @@ struct DiffView: View {
         let path = file.path
         Task {
             await model.addReviewComment(
-                filePath: path, spot: draft.spot, anchor: draft.anchor, body: body
+                filePath: path, selection: draft.selection, anchor: draft.anchor, body: body
             )
         }
     }
@@ -964,12 +1016,16 @@ struct DiffView: View {
     }
 
     /// Bands and the editor, appended directly under the row that answers for their spot.
+    ///
+    /// The row that answers is the LAST line the note covers rather than its first, which for
+    /// every note left before dragging existed is the same row it always was. See
+    /// `ReviewPlacement.band`.
     private func appendAnnotations(_ rows: inout [DiffRow], spots rowSpots: [ReviewSpot]) {
         for spot in rowSpots {
-            for placement in placements where placement.spot == spot {
+            for placement in placements where placement.band == spot {
                 rows.append(.commentBand(placement))
             }
-            if draftSpot == spot {
+            if draftEditorSpot == spot {
                 rows.append(.commentEditor(spot))
             }
             // Under the LAST line of the region, so the box reads as continuing the lines above
@@ -983,7 +1039,7 @@ struct DiffView: View {
     /// The comments the diff on screen cannot put under a line, said at the top rather than
     /// dropped: they are still attached and still going with the next message.
     private func appendUnplacedComments(_ rows: inout [DiffRow]) {
-        for placement in placements where placement.spot == nil {
+        for placement in placements where placement.band == nil {
             rows.append(.commentBand(placement))
         }
     }
@@ -1003,7 +1059,7 @@ struct DiffView: View {
     /// reads the same file the same way.
     private func refreshWorktreeCopy() {
         let isEditing = edits.isOpen(absolutePath)
-        guard case .ready = phase, !fileComments.isEmpty || draftSpot != nil || isEditing else {
+        guard case .ready = phase, !fileComments.isEmpty || draftSelection != nil || isEditing else {
             return
         }
         let contents = model.contents(of: file.path)
@@ -1056,8 +1112,10 @@ struct DiffView: View {
             currentLines: fileLines,
             revealedNewLines: revealedContextLines(document)
         )
-        var spots = Set(placements.compactMap(\.spot))
-        if let draftSpot { spots.insert(draftSpot) }
+        // Every line each note covers, not only the line it anchors to: a note left across a
+        // range tints the whole of it, the way the band under it says it is about all of them.
+        var spots = Set(placements.flatMap(\.covered))
+        if let draftSelection { spots.formUnion(draftSelection.spots) }
         commentedSpots = spots
         // Grouped after the two builders have finished, never inside them: consecutive lines
         // become one block of selectable text, because a `Text` per line cannot be selected
@@ -1070,10 +1128,10 @@ struct DiffView: View {
         // in. The editor then moves to the top of the diff, next to the unplaced bands, rather
         // than vanishing, because a vanished editor takes the half-typed comment with it and
         // that is the one loss this feature is not allowed.
-        if let draftSpot, !rows.contains(where: {
+        if let draftEditorSpot, !rows.contains(where: {
             if case .commentEditor = $0 { return true } else { return false }
         }) {
-            rows.insert(.commentEditor(draftSpot), at: 0)
+            rows.insert(.commentEditor(draftEditorSpot), at: 0)
         }
 
         // The same rescue for the in-place editor, and it needs it more often than the comment

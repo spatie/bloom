@@ -23,6 +23,7 @@ public enum StoreDomain: String, Sendable, Hashable, CaseIterable {
     case settings
     case drafts
     case reviewComments = "review_comments"
+    case reviewedFiles = "reviewed_files"
     case permissionGrants = "permission_grants"
     case permissionAsks = "permission_asks"
     case agentQuotas = "agent_quotas"

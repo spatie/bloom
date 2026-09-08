@@ -208,6 +208,16 @@ public actor Store {
                 "ALTER TABLE deliveries ADD COLUMN crew_payload BLOB;",
                 nil
             ),
+            // Not fatal to open, and here all the same: `upsert` names this column, every caller
+            // writing a review comment does so through a `try?`, and the loss is a note somebody
+            // typed disappearing without a word. That is the one failure the review is most
+            // careful about everywhere else, and this list is where the numbering race that would
+            // cause it is already answered.
+            (
+                "review_comments", "span",
+                "ALTER TABLE review_comments ADD COLUMN span INTEGER NOT NULL DEFAULT 1;",
+                nil
+            ),
         ]
 
         for wanted in required {
@@ -983,6 +993,55 @@ public actor Store {
                     )
                 }
             },
+
+            // How many lines a review comment covers, for the ones left by dragging down the
+            // gutter rather than pressing the `+` on one line.
+            //
+            // A count and not an end line, because the anchor is re-found by the text of its
+            // FIRST line and the rest of the note slides with it; an end line stored on its own
+            // would stay where it was and the range would stretch. `ReviewCommentAnchor.span`
+            // carries the whole of that argument.
+            //
+            // Every row that existed when this ran covers one line, which is exactly what the
+            // default says, so there is nothing to backfill. Real code rather than SQL for the
+            // reason every step above is: `ADD COLUMN` has no `IF NOT EXISTS`, and the store's own
+            // tests rewind `user_version` and replay the list over a shape that already has it.
+            { db in
+                let names = Set(
+                    try db.query("PRAGMA table_info(review_comments);")
+                        .compactMap { $0.string("name") }
+                )
+                if !names.contains("span") {
+                    try db.execute(
+                        "ALTER TABLE review_comments ADD COLUMN span INTEGER NOT NULL DEFAULT 1;"
+                    )
+                }
+            },
+
+            // Which files a reviewer has said they have read, and what the diff looked like when
+            // they said it.
+            //
+            // In the database rather than in user defaults, which is where the first version of
+            // this feature lived and is why it was taken out again: a bool under
+            // `inspector.viewed.<workspace>.<path>` was written and read by one toggle and by
+            // nothing else, so it could not be counted, could not dim a row, and died with no
+            // migration because there was nothing to migrate. Here it is per-workspace working
+            // state beside the review comments, keyed the same way, and the foreign key deletes
+            // it with the worktree it is about.
+            //
+            // The fingerprint is the point of the table. A tick is given for a diff rather than
+            // for a path, so a file the agent rewrites afterwards stops reading as viewed without
+            // anything having to go round deleting rows during a poll. See
+            // `ReviewedFileFingerprint`.
+            sql("""
+            CREATE TABLE IF NOT EXISTS reviewed_files (
+                workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                file_path TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                viewed_at REAL NOT NULL,
+                PRIMARY KEY (workspace_id, file_path)
+            );
+            """),
         ]
 
         let current = Int(try db.readUserVersion())
@@ -2628,8 +2687,8 @@ public actor Store {
             """
             INSERT INTO review_comments (
                 id, workspace_id, file_path, side, line, line_text,
-                context_before, context_after, body, created_at, attached
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                context_before, context_after, body, created_at, attached, span
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 file_path = excluded.file_path,
                 side = excluded.side,
@@ -2638,7 +2697,8 @@ public actor Store {
                 context_before = excluded.context_before,
                 context_after = excluded.context_after,
                 body = excluded.body,
-                attached = excluded.attached
+                attached = excluded.attached,
+                span = excluded.span
             """,
             [
                 .text(comment.id), .text(comment.workspaceID), .text(comment.filePath),
@@ -2647,7 +2707,7 @@ public actor Store {
                 .text(Self.encodeContext(comment.anchor.before)),
                 .text(Self.encodeContext(comment.anchor.after)),
                 .text(comment.body), .double(comment.createdAt.timeIntervalSince1970),
-                .int(comment.isAttached ? 1 : 0),
+                .int(comment.isAttached ? 1 : 0), .int(Int64(comment.anchor.span)),
             ]
         )
         return comment
@@ -2677,6 +2737,53 @@ public actor Store {
 
     public func deleteReviewComment(id: ReviewCommentID) throws {
         try db.run("DELETE FROM review_comments WHERE id = ?", [.text(id)])
+    }
+
+    // MARK: - Viewed files
+
+    /// Every tick this workspace carries, however stale. Whether one still holds is
+    /// `ReviewedFiles.isViewed`, against the diff the poll last reported: a mark is given for a
+    /// fingerprint rather than for a path, and deciding here would mean this actor knowing what
+    /// git said a moment ago.
+    public func reviewedFiles(workspaceID: WorkspaceID) throws -> [ReviewedFile] {
+        try db.query(
+            "SELECT * FROM reviewed_files WHERE workspace_id = ? ORDER BY file_path",
+            [.text(workspaceID)]
+        ).map(Self.reviewedFile(from:))
+    }
+
+    /// Ticks one file, or re-ticks it against the diff it has now.
+    ///
+    /// `upsert` is right here for the reason `addReviewComment` gives: every column is written
+    /// from a value built in this call, and there is no other writer to carry a stale one back.
+    /// The primary key is the pair, so ticking a file twice is one row rather than a second one
+    /// nobody can tell from the first.
+    public func markReviewed(_ mark: ReviewedFile) throws {
+        try db.run(
+            """
+            INSERT INTO reviewed_files (workspace_id, file_path, fingerprint, viewed_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(workspace_id, file_path) DO UPDATE SET
+                fingerprint = excluded.fingerprint,
+                viewed_at = excluded.viewed_at
+            """,
+            [
+                .text(mark.workspaceID), .text(mark.path), .text(mark.fingerprint),
+                .double(mark.viewedAt.timeIntervalSince1970),
+            ]
+        )
+    }
+
+    public func clearReviewed(workspaceID: WorkspaceID, path: String) throws {
+        try db.run(
+            "DELETE FROM reviewed_files WHERE workspace_id = ? AND file_path = ?",
+            [.text(workspaceID), .text(path)]
+        )
+    }
+
+    /// Every tick on one workspace at once, which is what "start this pass again" means.
+    public func clearReviewed(workspaceID: WorkspaceID) throws {
+        try db.run("DELETE FROM reviewed_files WHERE workspace_id = ?", [.text(workspaceID)])
     }
 
     public func deleteReviewComments(workspaceID: WorkspaceID) throws {
@@ -3206,11 +3313,24 @@ public actor Store {
                 line: Int(row.int("line") ?? 1),
                 text: row.string("line_text") ?? "",
                 before: decodeContext(row.string("context_before")),
-                after: decodeContext(row.string("context_after"))
+                after: decodeContext(row.string("context_after")),
+                // A row written before ranges existed has no span at all, and one line is what it
+                // meant. The initialiser floors it, so a nought or a negative left by anything
+                // else reads as the single line it can only have been.
+                span: Int(row.int("span") ?? 1)
             ),
             body: row.string("body") ?? "",
             createdAt: row.date("created_at") ?? Date(),
             isAttached: row.bool("attached")
+        )
+    }
+
+    private static func reviewedFile(from row: Row) -> ReviewedFile {
+        ReviewedFile(
+            workspaceID: WorkspaceID(row.string("workspace_id") ?? ""),
+            path: row.string("file_path") ?? "",
+            fingerprint: row.string("fingerprint") ?? "",
+            viewedAt: row.date("viewed_at") ?? Date()
         )
     }
 

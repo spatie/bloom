@@ -130,6 +130,7 @@ struct FileHeaderBar: View {
     /// drawn, and nothing in the row has to be hovered to find out what it is.
     private var controls: some View {
         HStack(spacing: InspectorLayout.gap) {
+            viewedToggle(labelled: true)
             revertButton(labelled: true)
             layoutPicker(labelled: true)
             if mode == .diff {
@@ -148,6 +149,7 @@ struct FileHeaderBar: View {
     /// that this arrangement needs and the wide one above does not.
     private var compact: some View {
         HStack(spacing: InspectorLayout.gap) {
+            viewedToggle(labelled: false)
             revertButton(labelled: false)
             layoutPicker(labelled: false)
             if mode == .diff {
@@ -182,6 +184,11 @@ struct FileHeaderBar: View {
     private func overflowMenu(full: Bool) -> some View {
         Menu {
             if full {
+                Toggle("Viewed", isOn: Binding(
+                    get: { model.isViewed(file) },
+                    set: { value in Task { await model.setViewed(value, file: file) } }
+                ))
+                Divider()
                 Picker(FileBarControls.layout.title, selection: $isSideBySide) {
                     Text(FileBarControls.unified).tag(false)
                     Text(FileBarControls.sideBySide).tag(true)
@@ -215,6 +222,14 @@ struct FileHeaderBar: View {
         .controlSize(.small)
         .fixedSize()
         .fileBarHint(FileBarControls.more, into: $hint)
+    }
+
+    private func viewedToggle(labelled: Bool) -> some View {
+        ViewedToggle(model: model, file: file)
+            .fileBarLabelStyle(labelled: labelled)
+            .fileBarHint(FileBarControl(
+                title: "Viewed", hint: ReviewedMarkAction(isViewed: model.isViewed(file)).help(for: file.filename)
+            ), into: $hint)
     }
 
     /// Destructive, the way the collapsed arrangement already draws it.

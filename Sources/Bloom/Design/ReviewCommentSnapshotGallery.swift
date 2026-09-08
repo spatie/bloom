@@ -25,7 +25,7 @@ struct ReviewCommentSnapshotGallery: View {
     @State private var written = "The webhook signature is computed over the raw body.\n"
         + "Serialising and re-encoding here changes it."
 
-    private static func comment(_ body: String, line: Int = 179) -> ReviewComment {
+    private static func comment(_ body: String, line: Int = 179, span: Int = 1) -> ReviewComment {
         ReviewComment(
             workspaceID: WorkspaceID("w1"),
             filePath: "src/Jobs/CallWebhookJob.php",
@@ -34,16 +34,22 @@ struct ReviewCommentSnapshotGallery: View {
                 line: line,
                 text: "        $this->release($this->backoff());",
                 before: ["    {", ""],
-                after: ["    }", ""]
+                after: ["    }", ""],
+                span: span
             ),
             body: body
         )
     }
 
-    private static func placement(_ body: String, line: Int = 179) -> ReviewPlacement {
+    private static func placement(
+        _ body: String,
+        line: Int = 179,
+        span: Int = 1
+    ) -> ReviewPlacement {
         ReviewPlacement(
-            comment: comment(body, line: line),
-            status: .placed(ReviewSpot(side: .new, line: line), moved: false)
+            comment: comment(body, line: line, span: span),
+            status: .placed(ReviewSpot(side: .new, line: line), moved: false),
+            covered: (line..<(line + span)).map { ReviewSpot(side: .new, line: $0) }
         )
     }
 
@@ -78,6 +84,28 @@ struct ReviewCommentSnapshotGallery: View {
             group("After the edit") {
                 ReviewCommentBandView(
                     placement: Self.placement(edited),
+                    width: Self.sheet,
+                    onBeginEdit: {}, onCommitEdit: {}, onCancelEdit: {}, onRemove: {}
+                )
+            }
+
+            // A note left by dragging down the gutter, which is the one band whose own chip has
+            // two numbers in it. Worth the page because that chip is what the reader checks the
+            // band against, and `+179…183` has to stay readable at caption size beside a body.
+            group("Left across a range of lines") {
+                ReviewCommentBandView(
+                    placement: Self.placement("These five are one function.", span: 5),
+                    width: Self.sheet,
+                    onBeginEdit: {}, onCommitEdit: {}, onCancelEdit: {}, onRemove: {}
+                )
+            }
+
+            group("A range whose lines are gone") {
+                ReviewCommentBandView(
+                    placement: ReviewPlacement(
+                        comment: Self.comment("These five are one function.", span: 5),
+                        status: .outdated
+                    ),
                     width: Self.sheet,
                     onBeginEdit: {}, onCommitEdit: {}, onCancelEdit: {}, onRemove: {}
                 )
@@ -118,7 +146,9 @@ extension Gallery {
     static let reviewComments = Gallery(
         name: "review-comments",
         title: "Review comments",
-        size: CGSize(width: 820, height: 900),
+        // Taller by two bands than it was: the range states below the edit ones are each a band
+        // and a heading, and a page that clips is a page whose last state is never photographed.
+        size: CGSize(width: 820, height: 1_100),
         needsFocus: true,
         view: { _ in AnyView(ReviewCommentSnapshotGallery()) }
     )

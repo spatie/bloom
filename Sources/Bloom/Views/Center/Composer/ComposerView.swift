@@ -25,6 +25,13 @@ struct ComposerView: View {
     /// inviting somebody to ask it to.
     var placeholder: String = ComposerEditor.chatPlaceholder
     var destinationLabel: String?
+    /// The chats this composer may be pointed at, when the caller is offering a choice. Empty,
+    /// the default, leaves the strip above the box a plain sentence. See
+    /// `ComposerDestinationStrip`.
+    var destinations: [ComposerDestination] = []
+    /// What picking one does. Nil leaves the strip unpressable however many destinations are
+    /// passed, which is what a composer already sitting in its own conversation wants.
+    var onSelectDestination: ((SessionID) -> Void)?
 
     @Environment(AppModel.self) private var app
 
@@ -58,14 +65,12 @@ struct ComposerView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let destinationLabel {
-                HStack(spacing: Metrics.spacingSmall) {
-                    Image(systemName: "bubble.left")
-                    Text(destinationLabel)
-                }
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .padding(.horizontal, Metrics.gutter)
-                .frame(maxWidth: .infinity, minHeight: Metrics.rowHeight, alignment: .leading)
+                ComposerDestinationStrip(
+                    label: destinationLabel,
+                    destinations: destinations,
+                    selected: transcript.session.id,
+                    onSelect: onSelectDestination
+                )
             }
 
             composer

@@ -48,6 +48,13 @@ struct DiffRunView: View, Equatable {
     var width: CGFloat
     /// Opens the review comment editor at a line. Nil, the default, draws no `+` at all.
     var onComment: ((ReviewSpot) -> Void)?
+    /// A drag from one row's `+`, reporting where it began and which line it has reached. Where
+    /// that is comes from `DiffDragRange`, in the core: this run is a block of rows exactly
+    /// `CodeMetrics.rowHeight` apart, which is the same invariant the hover and the gutter rest
+    /// on, so counting rows off the travel is as true as a hit test would be.
+    var onDragComment: ((ReviewSpot, ReviewSpot) -> Void)?
+    /// The pointer let go, so the editor opens on whatever the drag selected.
+    var onEndCommentDrag: (() -> Void)?
     /// Opens the in-place editor on the lines around one, by its new-side number. Nil, the
     /// default, offers nothing.
     var onEdit: ((Int) -> Void)?
@@ -192,8 +199,44 @@ struct DiffRunView: View, Equatable {
     @ViewBuilder
     private func commentButton(_ row: Row) -> some View {
         if let onComment, let spot = spot(of: row.entry) {
-            DiffCommentButton(spot: spot, isRowHovered: row.isHovered, onComment: onComment)
+            DiffCommentButton(
+                spot: spot,
+                isRowHovered: row.isHovered,
+                onComment: onComment,
+                onDrag: drag(from: spot, at: row.id),
+                onDragEnd: onEndCommentDrag
+            )
         }
+    }
+
+    /// A drag from one row's `+`, in points of travel, answered with the line it has reached.
+    ///
+    /// The row it began on is passed as an index rather than looked up from the hover, for the
+    /// reason the context menu above is attached per row: hover is the one thing a selectable
+    /// `Text` can swallow, and nothing that could act on the wrong line is allowed to depend on
+    /// where a pointer is thought to be.
+    private func drag(from spot: ReviewSpot, at index: Int) -> ((CGFloat) -> Void)? {
+        guard let onDragComment else { return nil }
+        return { travel in
+            guard let target = DiffDragRange.spot(
+                from: index,
+                translation: travel,
+                rowHeight: CodeMetrics.rowHeight,
+                spots: dragSpots,
+                side: spot.side
+            ) else { return }
+            onDragComment(spot, target)
+        }
+    }
+
+    /// What each row of this run offers a drag, in drawn order.
+    ///
+    /// Filtered through `DiffCommentSpot` exactly as the `+` itself is, so a drag can only ever
+    /// reach a line this pane would have offered a button on. In the split layout that is what
+    /// keeps a range inside one half rather than jumping the hairline to a line wearing the same
+    /// number on the other side.
+    private var dragSpots: [ReviewSpot?] {
+        lines.map { DiffCommentSpot.offered(for: $0.line, numbers: numbers, enabled: true) }
     }
 
     // MARK: - Geometry

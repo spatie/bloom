@@ -9,9 +9,18 @@ public struct ReviewTurnRecord: Sendable, Hashable {
         public var side: ReviewCommentSide
         /// The line as the payload reported it, which is where the anchor resolved at send time.
         public var line: Int
+        /// The last line the note covered, which is `line` for every note but one left by
+        /// dragging across the gutter.
+        public var lastLine: Int
         public var body: String
 
         public var fileName: String { (filePath as NSString).lastPathComponent }
+
+        /// Where the note points, said out loud: "line 12", or "lines 12 to 16" for one left by
+        /// dragging across the gutter.
+        public var lineDescription: String {
+            lastLine > line ? "lines \(line) to \(lastLine)" : "line \(line)"
+        }
 
         /// What the chip says: the file and the start of the comment, the way Conductor labels
         /// the same chip. The whole body is offered and the view truncates, because how many
@@ -21,10 +30,17 @@ public struct ReviewTurnRecord: Sendable, Hashable {
             return condensed.isEmpty ? fileName : "\(fileName) \(condensed)"
         }
 
-        public init(filePath: String, side: ReviewCommentSide, line: Int, body: String) {
+        public init(
+            filePath: String,
+            side: ReviewCommentSide,
+            line: Int,
+            lastLine: Int? = nil,
+            body: String
+        ) {
             self.filePath = filePath
             self.side = side
             self.line = line
+            self.lastLine = max(line, lastLine ?? line)
             self.body = body
         }
     }
@@ -137,6 +153,8 @@ public enum ReviewTurn {
 
     private static let filePrefix = "## "
     private static let linePrefix = "### Line "
+    private static let rangePrefix = "### Lines "
+    private static let rangeJoin = " to "
     private static let oldSideSuffix = ", on the removed side of the diff"
 
     /// Reads the chips out of what `ReviewPayload.text` wrote: `## file` headings, `### Line n`
@@ -170,27 +188,49 @@ public enum ReviewTurn {
                 index += 1
                 continue
             }
-            guard let (number, side) = heading(line), let file else { return nil }
+            guard let (number, last, side) = heading(line), let file else { return nil }
             index += 1
             let body = readBody(lines, from: &index)
-            chips.append(
-                ReviewTurnRecord.Chip(filePath: file, side: side, line: number, body: body)
-            )
+            chips.append(ReviewTurnRecord.Chip(
+                filePath: file, side: side, line: number, lastLine: last, body: body
+            ))
         }
         return chips
     }
 
-    /// `### Line 12`, or `### Line 12, on the removed side of the diff`.
-    private static func heading(_ line: String) -> (line: Int, side: ReviewCommentSide)? {
-        guard line.hasPrefix(linePrefix) else { return nil }
-        var rest = line.dropFirst(linePrefix.count)
+    /// `### Line 12`, `### Lines 12 to 16`, either of them with `, on the removed side of the
+    /// diff` after it.
+    ///
+    /// The two shapes are what `ReviewPayload.heading` writes, and the range is recognised by its
+    /// own prefix rather than by looking for the word "to" inside the single line shape: a file
+    /// whose name or a heading whose suffix happened to contain it would otherwise turn one chip
+    /// into a range nobody drew.
+    private static func heading(
+        _ line: String
+    ) -> (line: Int, lastLine: Int, side: ReviewCommentSide)? {
+        let isRange = line.hasPrefix(rangePrefix)
+        guard isRange || line.hasPrefix(linePrefix) else { return nil }
+        var rest = line.dropFirst((isRange ? rangePrefix : linePrefix).count)
         var side = ReviewCommentSide.new
         if rest.hasSuffix(oldSideSuffix) {
             rest = rest.dropLast(oldSideSuffix.count)
             side = .old
         }
-        guard !rest.isEmpty, rest.allSatisfy(\.isNumber), let number = Int(rest) else { return nil }
-        return (number, side)
+        guard isRange else {
+            guard let number = wholeNumber(rest) else { return nil }
+            return (number, number, side)
+        }
+        guard let join = rest.range(of: rangeJoin),
+              let start = wholeNumber(rest[..<join.lowerBound]),
+              let end = wholeNumber(rest[join.upperBound...]),
+              end >= start
+        else { return nil }
+        return (start, end, side)
+    }
+
+    private static func wholeNumber(_ text: Substring) -> Int? {
+        guard !text.isEmpty, text.allSatisfy(\.isNumber) else { return nil }
+        return Int(text)
     }
 
     /// `...and 3 more comments not shown.`, which `ReviewPayload.text` appends past its limit.

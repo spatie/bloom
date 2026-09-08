@@ -162,16 +162,32 @@ struct ReviewCommentBandView: View {
 
     /// Placement's honesty, said in the band rather than left for the payload to reveal. Nil for
     /// a comment sitting exactly where it was written, which is the only quiet case.
+    ///
+    /// A note left across several lines says so in every one of these: "the line is gone" about a
+    /// remark covering five of them is a sentence the reader would have to work out for
+    /// themselves, and the payload the agent gets already speaks in the plural. Which words
+    /// change is `ReviewCommentAnchor.isRange`, the same property the payload reads.
     private var note: String? {
+        let anchor = placement.comment.anchor
+        let subject = anchor.isRange ? "These lines" : "This line"
         switch placement.status {
         case .placed(_, moved: false):
             return nil
         case .placed(let spot, moved: true):
-            return "Moved here from line \(placement.comment.anchor.line); now line \(spot.line)."
+            guard anchor.isRange else {
+                return "Moved here from line \(anchor.line); now line \(spot.line)."
+            }
+            return "Moved here from lines \(anchor.line) to \(anchor.lastLine); "
+                + "now lines \(spot.line) to \(spot.line + anchor.span - 1)."
         case .hidden(let line):
-            return "\(chip): the line is now line \(line), which this diff does not show."
+            guard anchor.isRange else {
+                return "\(chip): the line is now line \(line), which this diff does not show."
+            }
+            return "\(chip): these lines are now \(line) to \(line + anchor.span - 1), "
+                + "which this diff does not show."
         case .outdated:
-            return "\(chip): the line has changed or is gone. "
+            return "\(chip): \(subject.lowercased()) \(anchor.isRange ? "have" : "has") changed "
+                + "or \(anchor.isRange ? "are" : "is") gone. "
                 + "The comment will be sent with the code as it looked when it was written."
         }
     }
