@@ -69,6 +69,8 @@ final class NotesEditorController: NSHostingController<NativeTextViewWrapper> {
     private(set) weak var textView: NSTextView?
     private weak var observedWindow: NSWindow?
     private var observer: NSObjectProtocol?
+    private weak var observedUndoManager: UndoManager?
+    private var undoObservers: [NSObjectProtocol] = []
     private var connectionScheduled = false
     private var isDisconnected = false
     private var requestedFocus = false
@@ -101,21 +103,23 @@ final class NotesEditorController: NSHostingController<NativeTextViewWrapper> {
         let found = findTextView(in: view)
         if textView !== found {
             textView = found
-            textView?.writingToolsBehavior = .disabled
+            textView?.writingToolsBehavior = .none
             textView?.isAutomaticQuoteSubstitutionEnabled = false
             textView?.isAutomaticDashSubstitutionEnabled = false
             textView?.isAutomaticTextReplacementEnabled = false
             textView?.setAccessibilityLabel("Workspace notes")
         }
+        connectUndoManager()
         if observedWindow !== view.window {
             if let observer { NotificationCenter.default.removeObserver(observer) }
             observer = nil
             observedWindow = view.window
             if let window = view.window {
+                let refresh: @MainActor @Sendable () -> Void = { [weak self] in self?.reportFocus() }
                 observer = NotificationCenter.default.addObserver(
                     forName: NSWindow.didUpdateNotification, object: window, queue: .main
-                ) { [weak self] _ in
-                    Task { @MainActor [weak self] in self?.reportFocus() }
+                ) { _ in
+                    Task { @MainActor in refresh() }
                 }
             }
         }
@@ -124,6 +128,27 @@ final class NotesEditorController: NSHostingController<NativeTextViewWrapper> {
             window.makeFirstResponder(textView)
         }
         reportFocus()
+    }
+
+    private func connectUndoManager() {
+        let manager = textView?.undoManager
+        guard observedUndoManager !== manager else { return }
+        undoObservers.forEach(NotificationCenter.default.removeObserver)
+        undoObservers = []
+        observedUndoManager = manager
+        guard let manager, let textView else { return }
+        // AppKit can restore the text storage without the editor publishing its Markdown
+        // binding. Refresh through the normal delegate path after the whole group settles.
+        let refresh: @MainActor @Sendable () -> Void = { [weak self, weak textView, weak manager] in
+            guard let self, let textView, let manager, !self.isDisconnected,
+                  self.textView === textView, self.observedUndoManager === manager else { return }
+            textView.didChangeText()
+        }
+        undoObservers = [Notification.Name.NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange].map { name in
+            NotificationCenter.default.addObserver(forName: name, object: manager, queue: .main) { _ in
+                Task { @MainActor in refresh() }
+            }
+        }
     }
 
     private func reportFocus() {
@@ -139,11 +164,13 @@ final class NotesEditorController: NSHostingController<NativeTextViewWrapper> {
               let edit = NoteFormatting.edit(action, text: textView.string, selection: textView.selectedRange()) else { return }
         view.window?.makeFirstResponder(textView)
         let undo = textView.undoManager
+        textView.breakUndoCoalescing()
         undo?.beginUndoGrouping()
         for replacement in edit.replacements {
             textView.insertText(replacement.text, replacementRange: replacement.range)
         }
         undo?.endUndoGrouping()
+        textView.breakUndoCoalescing()
         textView.setSelectedRange(edit.selection)
         textView.scrollRangeToVisible(edit.selection)
         reportFocus()
@@ -153,6 +180,9 @@ final class NotesEditorController: NSHostingController<NativeTextViewWrapper> {
         isDisconnected = true
         onFocusChange = { _ in }
         if let observer { NotificationCenter.default.removeObserver(observer) }
+        undoObservers.forEach(NotificationCenter.default.removeObserver)
+        undoObservers = []
+        observedUndoManager = nil
         observer = nil
         observedWindow = nil
         textView = nil
@@ -160,6 +190,6 @@ final class NotesEditorController: NSHostingController<NativeTextViewWrapper> {
 
     private func findTextView(in root: NSView) -> NSTextView? {
         if let text = root as? NSTextView { return text }
-        return root.subviews.lazy.compactMap { findTextView(in: $0) }.first
+        return root.subviews.lazy.compactMap { self.findTextView(in: $0) }.first
     }
 }

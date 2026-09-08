@@ -72,9 +72,7 @@ public enum BackendChange: Sendable, Equatable {
     ///
     /// One sentence of fact and one of reason, which is the shape `NoticeText` splits on.
     public static func forkNotice(title: String, from current: AgentKind) -> String {
-        "Opened `\(title)` and brought it to the front. A conversation keeps the backend it "
-            + "started on, so the \(current.label) one is still there with its transcript and its "
-            + "thread untouched."
+        "Opened `\(title)`. Your original \(current.label) conversation is still available."
     }
 
     /// And when the fork could not be made at all.
@@ -83,8 +81,7 @@ public enum BackendChange: Sendable, Equatable {
     /// picker that appears broken, and the one state this really happens in, a workspace being
     /// archived out from under the window, is exactly the one where the user needs telling.
     public static func forkFailureNotice(to wanted: AgentKind) -> String {
-        "Could not open a \(wanted.label) conversation here. This conversation is unchanged, so "
-            + "nothing has been lost, and the workspace may be on its way to the archive."
+        "Could not open a \(wanted.label) conversation. Your current conversation is unchanged."
     }
 
     /// The same news for the one chat that has no tab strip to fork into.
@@ -94,9 +91,7 @@ public enum BackendChange: Sendable, Equatable {
     /// was said is still in the database. That is worth a sentence, because the transcript on
     /// screen does visibly empty.
     public static func replacementNotice(from current: AgentKind, to wanted: AgentKind) -> String {
-        "Started a fresh conversation on \(wanted.label). Ask Bloom has no second tab to fork "
-            + "into, so the \(current.label) one was archived rather than changed, and nothing "
-            + "said in it is lost."
+        "Started a new \(wanted.label) conversation. Your previous \(current.label) conversation was archived and kept."
     }
 
     /// What a chat forked onto another backend is called, so the strip does not show two tabs with

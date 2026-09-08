@@ -157,10 +157,10 @@ struct ReviewPaneView: View {
     @ViewBuilder
     private var content: some View {
         if let changed {
-            // Keyed on the path so walking to the next file builds a new view rather than
-            // reusing this one's loaded rows.
+            // A path can exist in several workspaces. Include the workspace so switching
+            // checkouts cannot reuse another workspace's diff, selection or expanded context.
             DiffView(model: model, file: changed)
-                .id(changed.path)
+                .id("\(model.workspace.id.rawValue):\(changed.path)")
         } else if tab.path.isEmpty {
             // Asked before the two branches below, because with no path there is nothing to look
             // for and `isPresent` answers optimistically until the first look comes back.

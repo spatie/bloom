@@ -136,7 +136,6 @@ struct WorkspaceNoteTests {
         #expect(WorkspaceNote.storable("a\n") == "a\n")
     }
 
-
 }
 
 /// What the pane says when the database will not answer.
