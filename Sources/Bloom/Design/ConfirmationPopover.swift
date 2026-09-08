@@ -39,9 +39,11 @@ struct ConfirmationPopover<Content: View>: View {
             }
             .padding(.top, 4)
         }
-        // A selected sidebar row inverts its ink. The popover has its own neutral surface.
+        // Hierarchical .primary still resolves through the selected row's white foreground.
+        // The popover needs a fresh semantic label colour on its own neutral surface.
         .environment(\.backgroundProminence, .standard)
-        .foregroundStyle(.primary)
+        .environment(\.isOnEmphasizedSelection, false)
+        .foregroundStyle(Palette.textPrimary)
         .font(.body)
         .fixedSize(horizontal: false, vertical: true)
         .padding(20)

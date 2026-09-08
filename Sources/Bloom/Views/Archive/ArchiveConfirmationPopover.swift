@@ -11,7 +11,7 @@ struct ArchiveConfirmationPopover: View {
         ConfirmationPopover(
             title: "Archive this workspace?",
             confirmLabel: request.confirmLabel,
-            tint: tint,
+            tint: Palette.controlAccent,
             canConfirm: canConfirm,
             onConfirm: onConfirm,
             onCancel: onCancel,
@@ -28,10 +28,6 @@ struct ArchiveConfirmationPopover: View {
         }
     }
 
-    private var tint: Color {
-        if request.isDestructive { return Palette.negative }
-        return request.hazards.isPullRequestMerged ? Palette.mergedFill : Palette.controlAccent
-    }
 }
 
 extension View {
