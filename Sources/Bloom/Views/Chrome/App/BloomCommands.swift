@@ -40,7 +40,8 @@ struct BloomCommands: Commands {
     /// Which project the settings item opens: the selected workspace's, or the only sensible
     /// fallback, which is the first one.
     private var projectSettingsRepo: Repo? {
-        model.selectedWorkspace.flatMap(model.repo(for:)) ?? model.repos.first
+        guard model.selection.remoteSessionID == nil else { return nil }
+        return model.selectedWorkspace.flatMap(model.repo(for:)) ?? model.repos.first
     }
 
     var body: some Commands {
@@ -127,10 +128,11 @@ struct BloomCommands: Commands {
             }
 
             MenuCommand(.newSession) {
-                guard let workspace = model.selectedModel else { return }
-                Task { await workspace.createSession() }
+                if model.selectedRemoteWorkspace != nil {
+                    Task { if let id = await model.remoteServer.newChat() { model.selection = .remote(id); model.remoteServer.activePane = "chat" } }
+                } else if let workspace = model.selectedModel { Task { await workspace.createSession() } }
             }
-            .disabled(model.selectedModel == nil)
+            .disabled(model.selectedModel == nil && model.selectedRemoteWorkspace == nil)
 
             // The other four things that open a tab in the workspace's centre column, which until
             // now existed only as key equivalents on hidden buttons inside `SessionTabsView`. The
@@ -153,11 +155,15 @@ struct BloomCommands: Commands {
             // it learnable.
             Divider()
 
-            MenuCommand(.newTerminalTab) { openPane(.terminal) }
-                .disabled(model.selectedModel == nil)
+            MenuCommand(.newTerminalTab, alternate: model.selectedRemoteWorkspace != nil) {
+                if model.selectedRemoteWorkspace != nil { model.remoteServer.activePane = "terminal" } else { openPane(.terminal) }
+            }
+            .disabled(model.selectedModel == nil && model.selectedRemoteWorkspace == nil)
 
-            MenuCommand(.newBrowserTab) { openBrowserPane() }
-                .disabled(model.selectedModel == nil)
+            MenuCommand(.newBrowserTab, alternate: model.selectedRemoteWorkspace != nil) {
+                if model.selectedRemoteWorkspace != nil { model.remoteServer.activePane = "preview" } else { openBrowserPane() }
+            }
+            .disabled(model.selectedModel == nil && model.selectedRemoteWorkspace == nil)
 
             // The same key both ways, as the hidden button had it: show me the change, or give me
             // the conversation back. Enabled on any selected workspace rather than only on one
@@ -165,10 +171,12 @@ struct BloomCommands: Commands {
             // the way back out of a review and a workspace can have a review open with nothing
             // left in it.
             MenuCommand(.showChanges) {
-                guard let workspace = model.selectedModel else { return }
-                FileReview.toggle(in: workspace)
+                if model.selectedRemoteWorkspace != nil {
+                    model.remoteServer.review.showsAllFiles = false
+                    model.isInspectorVisible.toggle()
+                } else if let workspace = model.selectedModel { FileReview.toggle(in: workspace) }
             }
-            .disabled(model.selectedModel == nil)
+            .disabled(model.selectedModel == nil && model.selectedRemoteWorkspace == nil)
 
             // Shift+Cmd+N, which nothing in Bloom held. It is the initial of the thing, which is
             // what the other three in this group are, and that pattern is the only reason a set
@@ -645,7 +653,14 @@ struct BloomCommands: Commands {
     /// submenu teaches nothing. See `WorkspaceModel.refreshSettings` for when the list is read.
     @ViewBuilder
     private var runScriptsMenu: some View {
-        if let workspace = model.selectedModel, !workspace.settings.runScripts.isEmpty {
+        if model.selection.remoteSessionID != nil, !model.remoteServer.runScripts.isEmpty {
+            MenuCommandGroup(.runScripts) {
+                ForEach(model.remoteServer.runScripts) { script in
+                    Button(script.name) { Task { await model.remoteServer.runScript(script) } }
+                }
+            }
+            Divider()
+        } else if let workspace = model.selectedModel, !workspace.settings.runScripts.isEmpty {
             MenuCommandGroup(.runScripts) {
                 ForEach(workspace.settings.runScripts) { script in
                     Button(script.name) { run(script, in: workspace) }

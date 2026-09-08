@@ -197,6 +197,7 @@ public actor ServerRuntime {
             return .accepted
         case .answer(let id, let requestID, let answer):
             guard let live = sessions[id] else { throw ServerFailure("This session has no running agent.") }
+            if case .denyWithReason(_, let endsTurn) = answer, endsTurn { try await queue().pause(id) }
             try await live.answer(requestID: requestID, decision: answer.decision, store: store, sessionID: id)
             return .accepted
         }

@@ -72,8 +72,8 @@ public enum MenuBarCatalogue {
         MenuBarItem(.newAskConversation, in: .file, "New Ask Bloom Conversation", availability: .always),
         MenuBarItem(.projectSettings, in: .file, "Project Settings…", key: .init("comma", .command, .shift), availability: .needsProject),
         MenuBarItem(.newSession, in: .file, "New Session", key: .command("t"), availability: .needsWorkspace),
-        MenuBarItem(.newTerminalTab, in: .file, "New Terminal Tab", key: .init("t", .command, .shift), availability: .needsWorkspace),
-        MenuBarItem(.newBrowserTab, in: .file, "New Browser Tab", key: .init("b", .command, .shift), availability: .needsWorkspace),
+        MenuBarItem(.newTerminalTab, in: .file, "New Terminal Tab", alternateTitle: "Show Terminal", key: .init("t", .command, .shift), availability: .needsWorkspace),
+        MenuBarItem(.newBrowserTab, in: .file, "New Browser Tab", alternateTitle: "Show Preview", key: .init("b", .command, .shift), availability: .needsWorkspace),
         MenuBarItem(.showChanges, in: .file, "Show Changes", key: .init("d", .command, .shift), availability: .needsWorkspace),
         MenuBarItem(.showNotes, in: .file, "Show Notes", key: .init("n", .command, .shift), availability: .needsWorkspace),
         // The rename a tab has always had on its own context menu and on its VoiceOver actions

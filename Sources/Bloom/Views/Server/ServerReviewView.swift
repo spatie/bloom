@@ -78,6 +78,7 @@ struct ServerReviewView: View {
                     ServerFileEditorView(buffer: editing, server: server)
                 } else if let error = model.error {
                     ContentUnavailableView("Cannot display this file", systemImage: "doc", description: Text(error))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if model.isLoading {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -85,18 +86,20 @@ struct ServerReviewView: View {
                 }
             } else if let error = model.error {
                 ContentUnavailableView("Cannot load changes", systemImage: "doc", description: Text(error))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ContentUnavailableView(
                     model.files.isEmpty ? "No changes" : "Select a file", systemImage: "doc.text.magnifyingglass",
                     description: Text(model.files.isEmpty ? "Changes from the server will appear here." : "Review a diff or read the current file on the server.")
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             if let server {
                 Divider()
                 ServerGitActionsView(model: server)
             }
         }
-        .frame(minWidth: 330)
+        .frame(minWidth: 330, maxHeight: .infinity, alignment: .top)
         .onChange(of: model.selectedPath) { _, _ in editing = nil; previewsFile = false }
         .onChange(of: model.showsAllFiles) { _, all in if all { model.showsFile = true } }
     }

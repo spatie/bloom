@@ -24,7 +24,9 @@ struct RemoteConversationView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        let rows = self.rows
+        let stopped = model.selectedSession?.state == .cancelled ? StoppedTurn.closingRow(in: rows.lazy.map(\.kind)).map { rows[$0].seq } : nil
+        return VStack(spacing: 0) {
             if let workspace = model.selectedWorkspace {
                 HStack(spacing: 8) {
                     Label(workspace.branch, systemImage: "arrow.triangle.branch")
@@ -46,16 +48,23 @@ struct RemoteConversationView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(rows) { row in
-                        TranscriptRowView(
-                            row: row,
-                            home: TranscriptHome(worktree: model.selectedWorkspace?.path ?? "", remoteWorkspaceID: model.selectedWorkspace?.id),
-                            isExpanded: expanded.contains(row.id),
-                            projectName: model.catalogue?.repositories.first { $0.id == model.selectedWorkspace?.repoID }?.name,
-                            onToggle: {
-                                if expanded.contains(row.id) { expanded.remove(row.id) } else { expanded.insert(row.id) }
-                            },
-                            onAnswer: answer
-                        )
+                        if row.kind == .result {
+                            TurnFooterView(rows: rows, row: row, worktree: model.selectedWorkspace?.path ?? "",
+                                permissionMode: model.selectedSession?.permissionMode ?? .acceptEdits,
+                                agentKind: model.selectedSession?.agentKind ?? .codex,
+                                wasStopped: row.seq == stopped, isRemote: true)
+                        } else {
+                            TranscriptRowView(
+                                row: row,
+                                home: TranscriptHome(worktree: model.selectedWorkspace?.path ?? "", remoteWorkspaceID: model.selectedWorkspace?.id),
+                                isExpanded: expanded.contains(row.id),
+                                projectName: model.catalogue?.repositories.first { $0.id == model.selectedWorkspace?.repoID }?.name,
+                                onToggle: {
+                                    if expanded.contains(row.id) { expanded.remove(row.id) } else { expanded.insert(row.id) }
+                                },
+                                onAnswer: answer
+                            )
+                        }
                     }
                     if !model.streamingText.isEmpty { ProseRowView(text: model.streamingText) }
                 }
@@ -101,7 +110,7 @@ struct RemoteConversationView: View {
     }
 
     private var rows: [TranscriptRow] {
-        return TranscriptModel.rows(from: model.messages).map { original in
+        return TranscriptModel.rows(from: model.messages).filter { !TranscriptNoise.isHidden($0) }.map { original in
             var row = original
             if row.kind == .permissionAsk, let ask = PermissionAsk.decode(payload: row.payload) {
                 row.permissionDecision = model.permissionDecisions[ask.requestID]
@@ -159,7 +168,8 @@ struct RemoteConversationView: View {
             case .session: response = .allowSession
             case .project: response = .allowProject
             }
-        case .deny: response = .deny
+        case .deny(let message, let endsTurn): response = .denyWithReason(message: message, endsTurn: endsTurn)
+        case .approvePlan(let mode): response = .approvePlan(mode: mode)
         case .answer(let value): response = .question(input: value)
         }
         Task { await model.answer(ask, decision: response) }

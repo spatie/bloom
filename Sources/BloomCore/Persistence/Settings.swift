@@ -1,7 +1,7 @@
 import Foundation
 import Synchronization
 
-public struct RunScript: Identifiable, Sendable, Hashable {
+public struct RunScript: Identifiable, Sendable, Hashable, Codable {
     public var id: String
     public var name: String
     public var command: String

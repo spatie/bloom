@@ -63,6 +63,6 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends python3 git
-          ! command -v swift
+          if command -v swift >/dev/null; then exit 1; fi
           tar -xzf package/bloom-server-linux-x86_64.tar.gz -C package
           python3 Tools/server-smoke.py package/bloom-server-linux-x86_64/bin/bloom-server

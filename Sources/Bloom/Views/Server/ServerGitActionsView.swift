@@ -8,19 +8,19 @@ struct ServerGitActionsView: View {
     @State private var bodyText = ""
     @State private var isDraft = true
     @State private var result = ""
+    @State private var pullRequestURL: String?
 
     private enum FormKind: String, Identifiable { case commit, pullRequest; var id: String { rawValue } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !result.isEmpty {
-                if let url = URL(string: result), url.scheme == "https" { Link("Open pull request", destination: url) } else { Text(result).font(.caption).foregroundStyle(.secondary) }
-            }
+            if let pullRequestURL, let url = URL(string: pullRequestURL) { Link("Open pull request", destination: url) }
+            if !result.isEmpty { Text(result).font(.caption).foregroundStyle(.secondary) }
             HStack {
                 Button("Commit…") { title = ""; form = .commit }
                 Button("Push") { Task { await perform(.push) } }
                 Spacer()
-                Button("Create PR…") { title = model.selectedWorkspace?.name ?? ""; form = .pullRequest }
+                if pullRequestURL == nil { Button("Create PR…") { title = model.selectedWorkspace?.name ?? ""; form = .pullRequest } }
             }
             .controlSize(.small)
             .disabled(!model.isConnected || model.isPerformingCommand)
@@ -52,10 +52,17 @@ struct ServerGitActionsView: View {
             .padding(24).frame(width: 500)
             .interactiveDismissDisabled(model.isPerformingCommand)
         }
-        .onChange(of: model.selectedWorkspace?.id) { _, _ in result = "" }
+        .task(id: model.selectedWorkspace?.id) {
+            result = ""; pullRequestURL = nil
+            guard let id = model.selectedWorkspace?.id else { return }
+            let found = await model.pullRequestURL(workspaceID: id)
+            if !Task.isCancelled, model.selectedWorkspace?.id == id { pullRequestURL = found }
+        }
     }
 
     private func perform(_ action: ServerWorkspaceAction) async {
-        if let reply = await model.workspaceAction(action), case .text(let text) = reply { result = text }
+        if let reply = await model.workspaceAction(action), case .text(let text) = reply {
+            if URL(string: text)?.scheme == "https" { pullRequestURL = text; result = "" } else { result = text }
+        }
     }
 }

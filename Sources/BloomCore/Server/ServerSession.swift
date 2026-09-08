@@ -78,8 +78,11 @@ actor ServerSession {
         answering.insert(requestID)
         defer { answering.remove(requestID) }
         let pending = try await store.pendingPermissionAsks(sessionID: sessionID)
-        guard pending.contains(where: { $0.requestID == requestID }), !isClosed else {
+        guard let question = pending.first(where: { $0.requestID == requestID }), !isClosed else {
             throw ServerFailure("This question is no longer waiting for an answer.")
+        }
+        if case .approvePlan(let mode) = decision {
+            guard question.ask.isPlanApproval, PlanApproval.modes.contains(mode) else { throw ServerFailure("This question cannot approve implementation in that mode.") }
         }
         await runner.answer(requestID: requestID, decision: decision)
     }

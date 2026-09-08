@@ -228,6 +228,12 @@ Bloom server to avoid a Foundation process-wait issue with daemonising children.
 app detaches the SSH terminal client; the shell and its commands keep running. Stopping the server
 service can stop its tmux process too.
 
+The normal tab chrome shows conversations, terminals and previews together. Additional terminal
+tabs are remembered by the Mac client and reattach to the server's shells. Project run scripts
+appear in the New Tab and Workspace menus, execute on the server and receive the same workspace
+environment and allocated port as local scripts. Retrying a completed command returns its original
+terminal rather than launching another copy.
+
 The Preview pane forwards localhost HTTP/HTTPS addresses over an SSH tunnel bound only to the
 Mac's loopback interface. Start the development server in the remote terminal, then open its
 address in Preview or click a localhost link in the conversation. Git controls can commit all
@@ -236,7 +242,7 @@ authenticated `gh`. Credentials remain on their respective execution host.
 
 ## Protocol and ownership
 
-`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 3). A protocol mismatch
+`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 4). A protocol mismatch
 is refused before dispatch. Commands and replies carry UUIDs, so a long setup command does not
 block transcript reads or controls on the same connection.
 
@@ -260,6 +266,8 @@ generations prevent replies from an old connection replacing a new server's stat
 
 Remote transcript rendering does not resolve server file or attachment paths against the Mac's
 filesystem. File reads reject absolute paths, traversal, external symlinks and special files.
+Remote message IDs receive unique presentation identities before entering shared transcript caches,
+so overlapping SQLite row IDs from local and remote databases cannot display each other's content.
 Diff requests resolve the changed-file metadata on the server and use literal git pathspecs.
 Diff and file refreshes run separately from conversation refreshes, so a slow git command does
 not stall the transcript.
@@ -275,7 +283,7 @@ server starts, even without a connected Mac.
 1. Move the existing desktop execution path onto the standalone runtime. Preserve workspace data,
    startup, shutdown and existing bridge behaviour when migrating existing local workspaces.
 2. Add stable release downloads and installers, and broaden Linux coverage across agent backends.
-3. Bring Bloom's custom MCP bridge, crew/subagent management, run-script controls, archive/restore,
+3. Bring Bloom's custom MCP bridge, crew/subagent management, archive/restore,
    merge workflows, start-from-PR/branch controls and full pane arrangements to remote workspaces.
 4. Add saved machine profiles, remote model discovery, push events and remote transcript search.
 5. Broaden attachment limits and preview navigation across multiple forwarded origins.

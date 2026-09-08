@@ -45,3 +45,13 @@ subscriptions can later reduce polling without changing which process owns the w
   every child process running.
 
 The supported operations and remaining gaps are tracked in [SERVER.md](SERVER.md).
+
+## Live verification on 8 September 2026
+
+The isolated Bloom Remote installation created a remote workspace from a private GitHub repository
+and a local terminal workspace through the regular New Workspace flow. Both appeared in its sidebar.
+Remote Codex turns, approvals and queued follow-ups survived closing and reopening the Mac app.
+Remote file editing, attachment upload and Quick Look, terminal commands, a private HTTP preview,
+commit, push and draft pull request creation were exercised through the interface. The terminal
+reported the Ubuntu hostname and service account; its local counterpart reported Darwin and the
+Mac user. The server remained stable after the process descriptor fixes.

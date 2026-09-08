@@ -4,6 +4,32 @@ import Testing
 
 @Suite("ServerWorkspace", .scratchDirectory, .tags(.subprocess, .persistence))
 struct ServerWorkspaceTests {
+    @Test func runScriptsUseServerEnvironmentAndRetryDoesNotLaunchTwice() async throws {
+        guard let tmux = Shell.which("tmux") else { return }
+        let repo = try await TempRepo()
+        try repo.write(".bloom/settings.toml", """
+        [scripts.run.verify]
+        name = "Verify server"
+        command = "printf '%s\\n' \\\"$BLOOM_WORKSPACE_PATH:$BLOOM_PORT\\\" >> run-output.txt"
+        """)
+        let store = try makeTestStore("run-script")
+        let storedRepo = try await store.upsert(Repo(name: "Test", path: repo.path))
+        let workspace = try await store.upsert(Workspace(repoID: storedRepo.id, name: "Test", branch: "main", path: repo.path, baseBranch: "main"))
+        let runtime = ServerRuntime(store: store)
+        let request = ServerRequest(.workspace(workspaceID: workspace.id, action: .runScript(id: "verify")))
+        let first = await runtime.respond(to: request)
+        guard case .terminalPane(let pane) = first.result else { Issue.record("Script failed: \(first.result)"); await runtime.shutdown(); return }
+        let retry = await runtime.respond(to: request)
+        if case .terminalPane(let repeated) = retry.result { #expect(pane == repeated) } else { Issue.record("Retry lost its terminal") }
+        await waitUntil("run script writes its server environment") { FileManager.default.fileExists(atPath: repo.path + "/run-output.txt") }
+        let port = try #require(try await store.workspace(id: workspace.id)?.port)
+        #expect(port > 0)
+        #expect(try String(contentsOfFile: repo.path + "/run-output.txt", encoding: .utf8) == "\(repo.path):\(port)\n")
+        let socket = TmuxSessions.socketName(databasePath: store.path)
+        _ = try await Shell.run(tmux, ["-L", socket, "kill-server"], cwd: repo.path)
+        await runtime.shutdown()
+    }
+
     @Test func editingChecksTheLoadedRevisionAndPreservesExecutableMode() async throws {
         let repo = try await TempRepo()
         let workspace = Workspace(repoID: .new(), name: "Test", branch: "main", path: repo.path, baseBranch: "main")
@@ -90,6 +116,11 @@ struct ServerWorkspaceTests {
         #expect(launch.arguments.contains("/Users/test/my key"))
         #expect(throws: ServerFailure.self) { _ = try endpoint.forwardLaunch(remotePort: 0, localPort: 55000) }
         #expect(throws: ServerFailure.self) { _ = try endpoint.forwardLaunch(remotePort: 8000, localPort: 65536) }
+    }
+
+    @Test func remoteAnswersPreservePlanModesAndDenialText() {
+        #expect(ServerAnswer.approvePlan(mode: .acceptEdits).decision == .approvePlan(mode: .acceptEdits))
+        #expect(ServerAnswer.denyWithReason(message: "Use the fixture only", endsTurn: true).decision == .deny(message: "Use the fixture only", endsTurn: true))
     }
 
     @Test func remoteSelectionCannotResolveToALocalWorkspace() {

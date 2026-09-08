@@ -9,36 +9,9 @@ struct RemoteWorkspaceContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Picker("Pane", selection: $model.activePane) {
-                    Text("Chat").tag("chat")
-                    Text("Terminal").tag("terminal")
-                    Text("Preview").tag("preview")
-                }
-                .pickerStyle(.segmented).labelsHidden().frame(width: 240)
-                if let workspace = model.selectedWorkspace {
-                    Picker("Conversation", selection: Binding(get: { model.selectedSessionID }, set: { id in
-                        if let id { app.selection = .remote(id) }
-                    })) {
-                        ForEach(model.catalogue?.sessions.filter { $0.workspaceID == workspace.id } ?? []) { session in
-                            Text(session.title.isEmpty ? "Chat" : session.title).tag(Optional(session.id))
-                        }
-                    }
-                    .labelsHidden().frame(maxWidth: 180)
-                }
-                Button("New Chat", systemImage: "plus") { Task {
-                    if let id = await model.newChat() { app.selection = .remote(id); model.activePane = "chat" }
-                } }
-                .labelStyle(.iconOnly).buttonStyle(.borderless)
-                .disabled(!model.isConnected || model.isPerformingCommand)
-                Spacer(minLength: 0)
-                Button("Session Settings", systemImage: "slider.horizontal.3") { showsSettings = true }
-                    .labelStyle(.iconOnly).buttonStyle(.borderless)
-            }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            Hairline()
+            RemoteWorkspaceTabsView(model: model, showsSettings: $showsSettings)
             if model.activePane == "terminal" {
-                RemoteTerminalView(model: model)
+                RemoteTerminalView(model: model, name: model.selectedTerminal)
             } else if model.activePane == "preview" {
                 RemotePreviewView(model: model)
             } else {
@@ -63,8 +36,9 @@ private struct RemoteSessionSettingsView: View {
                 ForEach(["low", "medium", "high", "xhigh"], id: \.self) { Text($0.capitalized).tag($0) }
             }
             Picker("Permissions", selection: $permissionMode) {
-                Text("Plan").tag(PermissionMode.plan)
-                Text("Allow edits").tag(PermissionMode.acceptEdits)
+                ForEach(ComposerControls(agentKind: model.selectedSession?.agentKind ?? .codex).availablePermissionModes, id: \.self) { mode in
+                    Text(mode.label(on: model.selectedSession?.agentKind ?? .codex)).tag(mode)
+                }
             }
             if model.isBusy { Text("Stop the current turn to change these settings.").font(.caption).foregroundStyle(.secondary) }
             if let error = model.error { Text(error).foregroundStyle(.red) }

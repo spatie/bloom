@@ -33,8 +33,9 @@ struct RemoteWorkspaceCreationView: View {
                 TextField("Model", text: $model.agentModel)
                 TextField("Effort", text: $model.effort)
                 Picker("Permissions", selection: $model.permissionMode) {
-                    Text(PermissionMode.plan.label(on: model.agent)).tag(PermissionMode.plan)
-                    Text(PermissionMode.acceptEdits.label(on: model.agent)).tag(PermissionMode.acceptEdits)
+                    ForEach(ComposerControls(agentKind: model.agent).availablePermissionModes, id: \.self) { mode in
+                        Text(mode.label(on: model.agent)).tag(mode)
+                    }
                 }
                 Text(model.workspaceDestination == .remote
                      ? "Creates the worktree and runs setup and agents on the remote server."
@@ -64,7 +65,8 @@ struct RemoteWorkspaceCreationView: View {
             .padding()
         }
         .frame(width: 620, height: 500)
-        .onAppear { model.workspaceDestination = .remote; model.showsNewWorkspace = true }
+        .onAppear { model.workspaceDestination = .remote; model.showsNewWorkspace = true; model.permissionMode = model.permissionMode.nearest(on: model.agent) }
+        .onChange(of: model.agent) { _, agent in model.permissionMode = model.permissionMode.nearest(on: agent) }
         .interactiveDismissDisabled(model.isPerformingCommand || model.isConnecting)
         .fileImporter(isPresented: $showsRepositoryPicker, allowedContentTypes: [.folder]) { result in
             do { model.localRepositoryPath = try result.get().path } catch { model.error = error.localizedDescription }

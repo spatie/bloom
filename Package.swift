@@ -3,7 +3,7 @@ import PackageDescription
 #if os(Linux)
 import Foundation
 
-let serverTests = ["ServerRuntimeTests.swift", "ServerReviewTests.swift", "ServerWorkspaceTests.swift", "ProcessPipeLifetimeTests.swift", "LocalServerIdentityTests.swift", "TestSupport.swift"]
+let serverTests = ["ServerRuntimeTests.swift", "ServerReviewTests.swift", "ServerWorkspaceTests.swift", "ProcessPipeLifetimeTests.swift", "PlanApprovalTests.swift", "CodexTranslationTests.swift", "LocalServerIdentityTests.swift", "TestSupport.swift"]
 let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Tests/BloomCoreTests")
 let otherTests = (try FileManager.default.contentsOfDirectory(atPath: testDirectory.path)).filter { !serverTests.contains($0) }
 

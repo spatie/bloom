@@ -3,6 +3,26 @@ import Foundation
 enum ServerWorkspaceOperations {
     static func perform(_ action: ServerWorkspaceAction, workspace: Workspace, store: Store, terminals: ServerTerminalService) async throws -> ServerResult {
         switch action {
+        case .runScripts:
+            guard let repo = try await store.repo(id: workspace.repoID) else { throw ServerFailure("The workspace's project is unavailable.") }
+            return .runScripts(SettingsLoader.load(repo: repo.path).runScripts)
+        case .runScript(let id):
+            guard let repo = try await store.repo(id: workspace.repoID),
+                  let script = SettingsLoader.load(repo: repo.path).runScripts.first(where: { $0.id == id }) else {
+                throw ServerFailure("This run script is no longer configured in the project.")
+            }
+            let pane = ServerTerminalPane(id: UUID().uuidString, title: script.name)
+            let terminal = try await terminal(workspace: workspace, name: pane.id.rawValue, store: store, service: terminals)
+            let target = ["-S", terminal.socket, "send-keys", "-t", "=" + terminal.session + ":"]
+            let typed = try await Shell.run(terminal.executable, target + ["-l", "--", script.command], cwd: workspace.path)
+            guard typed.ok else { throw ServerFailure(typed.stderr) }
+            let submitted = try await Shell.run(terminal.executable, target + ["Enter"], cwd: workspace.path)
+            guard submitted.ok else { throw ServerFailure(submitted.stderr) }
+            return .terminalPane(pane)
+        case .pullRequest:
+            let pull = try await GitHub.pullRequest(forBranch: workspace.branch, worktree: workspace.path, maxAge: .seconds(30))
+            await PullRequestNumber.record(pull, for: workspace, in: store)
+            return .text(pull?.url ?? "")
         case .files:
             let files = try await Git.checkRaw(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], in: workspace.path)
             let paths = String(decoding: files.stdout, as: UTF8.self).split(separator: "\0").map(String.init)
@@ -24,12 +44,15 @@ enum ServerWorkspaceOperations {
         case .createPullRequest(let title, let body, let draft):
             try await GitHub.push(worktree: workspace.path, branch: workspace.branch, setUpstream: true)
             let pull = try await GitHub.createPullRequest(worktree: workspace.path, base: workspace.baseBranch, title: title, body: body, draft: draft)
+            await PullRequestNumber.record(pull, for: workspace, in: store)
             return .text(pull.url)
         case .terminal(let name):
             return .terminal(try await terminal(workspace: workspace, name: name, store: store, service: terminals))
         case .newSession(let agent, let model, let effort, let permissionMode):
             guard agent.canRunWorkspaces, !model.isEmpty else { throw ServerFailure("Choose an available agent and model.") }
-            let session = try await store.upsert(Session(workspaceID: workspace.id, model: model, effort: effort, agentKind: agent, permissionMode: permissionMode))
+            let existing = try await store.sessions(workspaceID: workspace.id)
+            let title = PaneNaming.nextTitle(base: PaneNaming.chat, taken: existing.map(\.title))
+            let session = try await store.upsert(Session(workspaceID: workspace.id, title: title, model: model, effort: effort, agentKind: agent, permissionMode: permissionMode))
             return .created(session: session, workspace: workspace, setupSucceeded: nil)
         }
     }
@@ -49,7 +72,15 @@ enum ServerWorkspaceOperations {
         let session = TmuxSessions.sessionName(workspaceID: workspace.id, paneID: name)
         let exists = try await Shell.run(executable, command.arguments(["has-session", "-t", "=" + session]), cwd: workspace.path)
         if !exists.ok {
-            let created = try await Shell.run(executable, command.arguments(["new-session", "-d", "-s", session, "-c", workspace.path]), cwd: workspace.path)
+            var arguments = ["new-session", "-d", "-s", session, "-c", workspace.path]
+            if let repo = try await store.repo(id: workspace.repoID) {
+                let manager = WorkspaceManager(store: store)
+                let port = await manager.ensurePort(for: workspace)
+                for (key, value) in manager.environment(for: workspace, repo: repo, port: port).sorted(by: { $0.key < $1.key }) {
+                    arguments += ["-e", "\(key)=\(value)"]
+                }
+            }
+            let created = try await Shell.run(executable, command.arguments(arguments), cwd: workspace.path)
             if !created.ok {
                 let raced = try await Shell.run(executable, command.arguments(["has-session", "-t", "=" + session]), cwd: workspace.path)
                 guard raced.ok else { throw ServerFailure(created.stderr) }

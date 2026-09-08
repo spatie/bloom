@@ -2,7 +2,7 @@ import Foundation
 
 /// Versioned values cross the connection; database handles and local file URLs never do.
 public struct ServerRequest: Codable, Sendable, Equatable {
-    public static let protocolVersion = 3
+    public static let protocolVersion = 4
     public var version: Int
     public var id: UUID
     public var operation: ServerOperation
@@ -65,6 +65,8 @@ public enum ServerAnswer: Codable, Sendable, Equatable {
     case allowSession
     case allowProject
     case deny
+    case denyWithReason(message: String, endsTurn: Bool)
+    case approvePlan(mode: PermissionMode)
     case question(input: JSONValue)
 
     var decision: PermissionDecision {
@@ -73,6 +75,8 @@ public enum ServerAnswer: Codable, Sendable, Equatable {
         case .allowSession: .allow(scope: .session)
         case .allowProject: .allow(scope: .project)
         case .deny: .deny(message: PermissionDecision.defaultDenyMessage, endsTurn: false)
+        case .denyWithReason(let message, let endsTurn): .deny(message: message, endsTurn: endsTurn)
+        case .approvePlan(let mode): .approvePlan(mode: mode)
         case .question(let input): .answer(input: input)
         }
     }
@@ -101,6 +105,8 @@ public enum ServerResult: Codable, Sendable {
     case text(String)
     case download(ServerDownload)
     case terminal(ServerTerminal)
+    case runScripts([RunScript])
+    case terminalPane(ServerTerminalPane)
     case accepted
     case failure(String)
 }

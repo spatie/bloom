@@ -16,7 +16,7 @@ struct RemoteTerminalView: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .task(id: model.selectedWorkspace?.id) {
+        .task(id: (model.selectedWorkspace?.id.rawValue ?? "") + name + String(model.connectionGeneration)) {
             terminal = nil
             error = nil
             do {

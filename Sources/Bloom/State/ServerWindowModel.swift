@@ -38,6 +38,7 @@ final class ServerWindowModel {
             if let oldValue { drafts[oldValue.rawValue] = draft }
             draft = selectedSessionID.flatMap { drafts[$0.rawValue] } ?? ""
             messages = []
+            runScripts = []
             questions = []
             queuedPrompts = []
             queueError = nil
@@ -63,6 +64,16 @@ final class ServerWindowModel {
     var isEditingConnection = false
     var isUploading = false
     var activePane = "chat"
+    var runScripts: [RunScript] = []
+    private var terminalPanes: [String: [ServerTerminalPane]] = [:]
+    private var selectedTerminals: [WorkspaceID: String] = [:]
+    var availableTerminals: [ServerTerminalPane] {
+        [ServerTerminalPane(id: "main", title: "Terminal")] + (selectedWorkspace.flatMap { terminalPanes[$0.id.rawValue] } ?? [])
+    }
+    var selectedTerminal: String {
+        get { selectedWorkspace.flatMap { selectedTerminals[$0.id] } ?? "main" }
+        set { if let id = selectedWorkspace?.id { selectedTerminals[id] = newValue } }
+    }
     private var previewAddresses: [WorkspaceID: String] = [:]
     private var browsers: [WorkspaceID: BrowserSession] = [:]
     var previewAddress: String {
@@ -89,12 +100,15 @@ final class ServerWindowModel {
     private var transcriptSessionID: SessionID?
     private var uncertainRequest: ServerRequest?
     private var lastEndpoint: ServerEndpoint?
+    private let messageIdentity = RemoteMessageIdentity()
     private var terminals: [String: BloomTerminalView] = [:]
     private var fileBuffers: [String: ServerFileBuffer] = [:]
     private let preferences: UserDefaults
 
     init(preferences: UserDefaults = .standard, bundle: Bundle = .main) {
         self.preferences = preferences
+        if let data = preferences.data(forKey: "server.terminalPanes"),
+           let saved = try? JSONDecoder().decode([String: [ServerTerminalPane]].self, from: data) { terminalPanes = saved }
         let seed = bundle.object(forInfoDictionaryKey: "BloomRemoteConnection") as? [String: String] ?? [:]
         let saved = preferences.dictionary(forKey: "server.connection") as? [String: String] ?? [:]
         let values = seed.merging(saved) { _, saved in saved }
@@ -105,10 +119,11 @@ final class ServerWindowModel {
         remoteDirectory = values["directory"] ?? ""
         remoteRepositoryPath = values["repository"] ?? ""
         localRepositoryPath = values["localRepository"] ?? ""
-        if bundle.bundleIdentifier == Store.remoteBundleIdentifier {
-            agent = .codex
-            agentModel = values["model"] ?? "gpt-5.6-sol"
-        }
+        agent = values["agent"].flatMap(AgentKind.init(rawValue:))
+            ?? (bundle.bundleIdentifier == Store.remoteBundleIdentifier ? .codex : AppDefaults.fallbackBackend)
+        agentModel = values["model"] ?? (agent == .codex ? "" : AppDefaults.fallbackModel)
+        effort = values["effort"] ?? AppDefaults.fallbackEffort
+        permissionMode = (values["permissionMode"].flatMap(PermissionMode.init(rawValue:)) ?? .plan).nearest(on: agent)
     }
 
     var destinationLabel: String { connectionMode == .remote ? "Remote server" : "This Mac" }
@@ -128,7 +143,7 @@ final class ServerWindowModel {
         preferences.set([
             "host": host, "executable": executable, "directory": remoteDirectory, "identityFile": identityFile,
             "repository": remoteRepositoryPath, "localRepository": localRepositoryPath,
-            "model": agentModel,
+            "model": agentModel, "agent": agent.rawValue, "effort": effort, "permissionMode": permissionMode.rawValue,
         ], forKey: "server.connection")
     }
 
@@ -184,6 +199,15 @@ final class ServerWindowModel {
         review.showsFile = true
         review.selectedPath = path.hasPrefix(prefix) ? String(path.dropFirst(prefix.count)) : path
         showsReview = true
+    }
+
+    func pullRequestURL(workspaceID: WorkspaceID) async -> String? {
+        guard let client else { return nil }
+        do {
+            let reply = try await client.request(ServerRequest(.workspace(workspaceID: workspaceID, action: .pullRequest)), timeout: .seconds(30))
+            if case .text(let url) = reply.result, URL(string: url)?.scheme == "https" { return url }
+        } catch { /* A failed metadata refresh must not block the workspace's other actions. */ }
+        return nil
     }
 
     func workspaceAction(_ action: ServerWorkspaceAction) async -> ServerResult? {
@@ -265,6 +289,7 @@ final class ServerWindowModel {
             case .local: endpoint = try await localService.start()
             }
             if endpoint != lastEndpoint {
+                messageIdentity.reset()
                 uncertainRequest = nil
                 if lastEndpoint != nil {
                     selectedSessionID = nil
@@ -361,6 +386,28 @@ final class ServerWindowModel {
         return nil
     }
 
+    func newTerminal() {
+        guard let workspace = selectedWorkspace else { return }
+        let title = PaneNaming.nextTitle(base: "Terminal", taken: availableTerminals.map(\.title))
+        rememberTerminal(ServerTerminalPane(id: UUID().uuidString, title: title), workspaceID: workspace.id)
+    }
+
+    func runScript(_ script: RunScript) async {
+        guard let workspace = selectedWorkspace else { return }
+        if case .terminalPane(let pane) = await workspaceAction(.runScript(id: script.id)) {
+            rememberTerminal(pane, workspaceID: workspace.id)
+        }
+    }
+
+    private func rememberTerminal(_ pane: ServerTerminalPane, workspaceID: WorkspaceID) {
+        if terminalPanes[workspaceID.rawValue]?.contains(where: { $0.id == pane.id }) != true {
+            terminalPanes[workspaceID.rawValue, default: []].append(pane)
+        }
+        if let data = try? JSONEncoder().encode(terminalPanes) { preferences.set(data, forKey: "server.terminalPanes") }
+        selectedTerminals[workspaceID] = pane.id.rawValue
+        if selectedWorkspace?.id == workspaceID { activePane = "terminal" }
+    }
+
     func upload(_ sources: [AttachmentSource]) async {
         guard let workspaceID = selectedWorkspace?.id, let client, !isUploading else { return }
         let sessionID = selectedSessionID
@@ -398,6 +445,11 @@ final class ServerWindowModel {
                     let reply = try await client.request(ServerRequest(.catalogue), timeout: .seconds(15))
                     guard generation == connectionGeneration else { return }
                     if case .catalogue(let value) = reply.result { catalogue = value }
+                    if let workspace = selectedWorkspace {
+                        let scripts = try await client.request(ServerRequest(.workspace(workspaceID: workspace.id, action: .runScripts)), timeout: .seconds(15))
+                        if generation == connectionGeneration, selectedWorkspace?.id == workspace.id,
+                           case .runScripts(let value) = scripts.result { runScripts = value }
+                    }
                 }
                 try await refreshTranscript(client: client, generation: generation)
                 tick += 1
@@ -440,7 +492,7 @@ final class ServerWindowModel {
         guard generation == connectionGeneration, selectedSessionID == id else { return }
         if case .transcript(let value) = reply.result {
             let cursor = messages.last?.seq ?? -1
-            messages += value.messages.filter { $0.seq > cursor }
+            messages += value.messages.filter { $0.seq > cursor }.map { messageIdentity.presentation($0) }
             questions = value.pendingQuestions.compactMap { PermissionAsk.decode(payload: $0) }
             permissionDecisions = value.permissionDecisions
             queuedPrompts = value.queuedPrompts

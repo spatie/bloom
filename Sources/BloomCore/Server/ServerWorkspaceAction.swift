@@ -2,6 +2,9 @@ import Foundation
 
 public enum ServerWorkspaceAction: Codable, Sendable, Equatable {
     case files
+    case pullRequest
+    case runScripts
+    case runScript(id: String)
     case download(path: String)
     case writeFile(path: String, text: String, revision: String)
     case uploadFile(name: String, data: Data)
@@ -13,10 +16,17 @@ public enum ServerWorkspaceAction: Codable, Sendable, Equatable {
 
     var mutates: Bool {
         switch self {
-        case .files, .download: false
+        case .files, .download, .pullRequest, .runScripts: false
         default: true
         }
     }
+}
+
+public struct ServerTerminalPane: Identifiable, Codable, Sendable, Equatable {
+    public var id: TerminalTabID
+    public var title: String
+
+    public init(id: String, title: String) { self.id = TerminalTabID(id); self.title = title }
 }
 
 public struct ServerTerminal: Codable, Sendable {
