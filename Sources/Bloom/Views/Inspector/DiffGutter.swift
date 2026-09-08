@@ -130,14 +130,31 @@ struct DiffMarker: View {
 /// paragraph above would be quietly false. Both callers overlay it as a sibling of the collapsed
 /// row for that reason.
 struct DiffCommentButton: View {
+    /// How far the pointer has to travel before a press becomes a drag across lines.
+    ///
+    /// Far enough that a click is never read as a one line drag, since the two do the same thing
+    /// and the button's own action is what a click should reach; short enough that a deliberate
+    /// pull downwards starts selecting inside the first row. A quarter of a row.
+    static let dragThreshold: CGFloat = 4
+
     var spot: ReviewSpot
     var isRowHovered: Bool
     var onComment: (ReviewSpot) -> Void
+    /// How far a drag from this row has travelled, in points, positive downwards. Nil, the
+    /// default, leaves this a plain button, which is what a caller that cannot say where a drag
+    /// would land passes.
+    var onDrag: ((CGFloat) -> Void)?
+    /// The pointer let go, so whatever the drag selected is what the comment is about.
+    var onDragEnd: (() -> Void)?
 
     @FocusState private var isFocused: Bool
+    /// Drawn while a drag is in progress even though the pointer has left this row, because the
+    /// `+` is the handle being dragged and a handle that vanishes mid gesture reads as the drag
+    /// having been dropped.
+    @State private var isDragging = false
 
     var body: some View {
-        let shown = isRowHovered || isFocused
+        let shown = isRowHovered || isFocused || isDragging
         Button {
             onComment(spot)
         } label: {
@@ -154,9 +171,44 @@ struct DiffCommentButton: View {
         }
         .buttonStyle(.plain)
         .focused($isFocused)
+        // Simultaneous, so the button keeps its own click. A drag that passes the threshold ends
+        // outside the button's bounds, where a `Button` does not fire, and a click that never
+        // reaches the threshold never starts this gesture at all: the two paths cannot both run
+        // on one press. A drag pulled out and brought back is the one case where they can, and it
+        // costs nothing, because both of them open the editor on the same single line.
+        .modifier(DiffCommentDrag(onDrag: onDrag, onDragEnd: onDragEnd, isDragging: $isDragging))
         .padding(.leading, Metrics.spacingTight)
-        .help("Comment on this line")
+        .help(onDrag == nil ? "Comment on this line" : "Comment on this line, or drag over several")
         .accessibilityLabel("Comment on line \(spot.line)")
+    }
+}
+
+/// The drag that turns the gutter `+` into a range selector, attached only where the row can say
+/// which line the pointer has reached.
+///
+/// A modifier rather than an `if` inside the button's body, because a view that is sometimes
+/// wrapped in a gesture and sometimes not is two different view types to SwiftUI, and the
+/// identity change resets the `@FocusState` and the hover of every `+` in the diff the first time
+/// a caller stops passing the closures.
+private struct DiffCommentDrag: ViewModifier {
+    var onDrag: ((CGFloat) -> Void)?
+    var onDragEnd: (() -> Void)?
+    @Binding var isDragging: Bool
+
+    func body(content: Content) -> some View {
+        content.simultaneousGesture(
+            DragGesture(minimumDistance: DiffCommentButton.dragThreshold)
+                .onChanged { value in
+                    guard let onDrag else { return }
+                    isDragging = true
+                    onDrag(value.translation.height)
+                }
+                .onEnded { _ in
+                    guard onDrag != nil else { return }
+                    isDragging = false
+                    onDragEnd?()
+                }
+        )
     }
 }
 

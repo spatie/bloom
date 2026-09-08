@@ -26,8 +26,11 @@ import Foundation
 /// walk to another pane the composer was put here to spare.
 public enum ReviewComposer {
     /// - Parameters:
-    ///   - destination: the conversation a turn sent from the review joins, which is the
-    ///     workspace's active session, and nil when the workspace has no session at all.
+    ///   - destination: the conversation a turn sent from the review joins, which is whichever
+    ///     chat the review is pointed at (see `ReviewDestination`) and nil when the workspace has
+    ///     no session at all. It was the active session until the review could be aimed
+    ///     elsewhere, and the sentence below about the destination rather than any conversation
+    ///     is the part that had to hold when it moved.
     ///   - panes: what every pane of the tab holding this review is showing, the review's own pane
     ///     included. A tab nobody has split is one entry.
     public static func isDrawn(destination: SessionID?, panes: [PaneContent]) -> Bool {

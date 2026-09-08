@@ -45,6 +45,12 @@ enum InspectorLayout {
     static let badgeHeight: CGFloat = 24
     static let badgeInset: CGFloat = Metrics.spacingWide
     static let badgeStrokeOpacity: Double = 0.2
+    /// How far a file that has been read steps back in the changed file list.
+    ///
+    /// Quiet rather than gone. Half was tried and the filenames stopped being readable at a
+    /// glance, which turns "I have read that one" into "I cannot tell what that one is"; at this
+    /// step the name is still legible and the column still reads as sorted into two weights.
+    static let viewedOpacity: Double = 0.55
     /// A meaning colour used as a background rather than as ink. One value, so a green badge and a
     /// blue chip carry the same weight.
     static let tintOpacity: Double = 0.12

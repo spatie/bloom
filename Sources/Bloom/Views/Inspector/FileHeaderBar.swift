@@ -86,10 +86,15 @@ struct FileHeaderBar: View {
     // MARK: - Control clusters
 
     /// One arrangement rather than two. `compact` existed to hide the word "Viewed" and leave its
-    /// tick behind, and with the toggle gone every control in this row was already icon only, so
-    /// the two branches drew the same thing and `ViewThatFits` measured the first one twice.
+    /// tick behind, and every control in this row is icon only either way, so the two branches
+    /// drew the same thing and `ViewThatFits` measured the first one twice. The tick is back and
+    /// icon only with the rest of them.
     private var controls: some View {
         HStack(spacing: InspectorLayout.gap) {
+            // First, at the leading edge of the cluster, because it is the only control here that
+            // is about the reader's own pass through the diff rather than about the file. The
+            // others change what is shown or what is on disk.
+            ViewedToggle(model: model, file: file)
             revertButton
             layoutPicker
             if mode == .diff {
@@ -105,6 +110,10 @@ struct FileHeaderBar: View {
     private var collapsed: some View {
         HStack(spacing: InspectorLayout.gap) {
             Menu {
+                Toggle("Viewed", isOn: Binding(
+                    get: { model.isViewed(file) }, set: { mark(viewed: $0) }
+                ))
+                Divider()
                 Picker("Layout", selection: $isSideBySide) {
                     Text("Unified").tag(false)
                     Text("Side by side").tag(true)
@@ -244,6 +253,14 @@ struct FileHeaderBar: View {
     }
 
     // MARK: - Actions
+
+    /// The overflow menu's half of the tick. `ViewedToggle` is the bar's, and both go through
+    /// `WorkspaceModel.setViewed`, which is what writes the fingerprint the mark is given for.
+    private func mark(viewed: Bool) {
+        let model = model
+        let file = file
+        Task { await model.setViewed(viewed, file: file) }
+    }
 
     private func copy() {
         Task {

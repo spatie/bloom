@@ -79,6 +79,18 @@ struct ChangedFileList: View {
                 Hairline()
             }
 
+            // How much of the diff has been read, and a way back out of it. Only once something
+            // has been ticked, because "0 of 12 viewed" over an untouched list is a progress bar
+            // for work nobody has started. The sentence is `ReviewedFiles.summary`, in the core.
+            //
+            // **This line is what makes the tick worth having.** The first version of Viewed was
+            // a control nothing else read, and it was taken out again for exactly that: a mark
+            // you can set and never see anywhere else is a mark that does nothing.
+            if let summary = model.viewedSummary {
+                viewedBand(summary)
+                Hairline()
+            }
+
             ScrollViewReader { proxy in
                 Group {
                     if model.changedFiles.isEmpty {
@@ -288,6 +300,7 @@ struct ChangedFileList: View {
             ChangedFileRow(
                 file: file,
                 isSelected: isSelected,
+                isViewed: model.isViewed(file),
                 fullPath: fullPath(file.path),
                 depth: depth,
                 // Always a selection, never a toggle. Clicking the open row used to close the diff
@@ -297,14 +310,52 @@ struct ChangedFileList: View {
                 onSelect: { move(to: file.path) },
                 onRevert: { pendingRevert = file },
                 onOpenPage: { BrowserTab.openFile(fullPath(file.path), in: model) },
-                onSplitPage: { BrowserTab.splitFile(fullPath(file.path), in: model, axis: $0) }
+                onSplitPage: { BrowserTab.splitFile(fullPath(file.path), in: model, axis: $0) },
+                onSetViewed: { setViewed($0, file: file) }
             )
             .equatable()
         }
         .padding(.horizontal, Metrics.spacingSmall)
     }
 
+    /// The count, and the one control that undoes the whole of it.
+    private func viewedBand(_ summary: String) -> some View {
+        HStack(spacing: InspectorLayout.gap) {
+            Image(systemName: "checkmark.circle")
+                .font(Typo.micro)
+                .foregroundStyle(Palette.positive)
+                .accessibilityHidden(true)
+
+            Text(summary)
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textSecondary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            Button("Clear", action: clearViewed)
+                .buttonStyle(.plain)
+                .font(Typo.caption)
+                .foregroundStyle(Palette.accent)
+                .help("Take every viewed mark off this workspace")
+        }
+        .padding(.horizontal, InspectorLayout.inset)
+        .padding(.vertical, Metrics.spacingSmall)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.surfaceSunken)
+    }
+
     // MARK: - Actions
+
+    private func setViewed(_ isViewed: Bool, file: ChangedFile) {
+        let model = model
+        Task { await model.setViewed(isViewed, file: file) }
+    }
+
+    private func clearViewed() {
+        let model = model
+        Task { await model.clearViewedFiles() }
+    }
 
     /// Only the shape on screen is derived, because a running agent rewrites the changed file list
     /// every few seconds and the other shape would be thrown away unseen.

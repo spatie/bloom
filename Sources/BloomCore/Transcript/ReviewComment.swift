@@ -37,7 +37,8 @@ public struct ReviewCommentAnchor: Sendable, Hashable, Codable {
     /// prompt.
     public static let contextRadius = 3
 
-    /// The line number as the reviewer saw it, one-based, in `side`'s numbering.
+    /// The line number as the reviewer saw it, one-based, in `side`'s numbering. The FIRST line
+    /// when the note covers several; see `span`.
     public var line: Int
     /// The exact text of that line when the note was written, without its diff marker.
     public var text: String
@@ -45,23 +46,49 @@ public struct ReviewCommentAnchor: Sendable, Hashable, Codable {
     public var before: [String]
     /// Up to `contextRadius` lines immediately below, in file order.
     public var after: [String]
+    /// How many lines the note covers, including `line`. One for a note left on a single line,
+    /// which is every note written before dragging across the gutter existed.
+    ///
+    /// **A count rather than an end line, because the end has to move with the start.** The
+    /// anchor is re-found by the text on its first line (see `resolve`), so after an edit above it
+    /// the whole note slides down together; a stored end line would stay where it was and the
+    /// range would stretch or invert. The lines inside the range are not stored either, for the
+    /// same reason `before` and `after` are only three deep: the payload reads them out of the
+    /// file it resolved against, and a range the file can no longer vouch for falls back to the
+    /// snapshot the way a single line does.
+    public var span: Int
 
-    public init(line: Int, text: String, before: [String] = [], after: [String] = []) {
+    public init(
+        line: Int,
+        text: String,
+        before: [String] = [],
+        after: [String] = [],
+        span: Int = 1
+    ) {
         self.line = line
         self.text = text
         self.before = before
         self.after = after
+        self.span = max(1, span)
     }
 
-    /// Capture an anchor from the file's own lines. `line` is one-based.
+    /// The last line the note covers, in the same numbering as `line`.
+    public var lastLine: Int { line + span - 1 }
+
+    /// Whether this note is about more than one line.
+    public var isRange: Bool { span > 1 }
+
+    /// Capture an anchor from the file's own lines. `line` is one-based, and `span` is how many
+    /// lines from there the note covers.
     public static func make(
         line: Int,
+        span: Int = 1,
         in lines: [String],
         radius: Int = contextRadius
     ) -> ReviewCommentAnchor {
         let index = line - 1
         guard lines.indices.contains(index) else {
-            return ReviewCommentAnchor(line: line, text: "")
+            return ReviewCommentAnchor(line: line, text: "", span: span)
         }
         let start = max(0, index - radius)
         // Half open, not closed: a closed `(index + 1)...end` traps on the file's last line,
@@ -72,7 +99,8 @@ public struct ReviewCommentAnchor: Sendable, Hashable, Codable {
             line: line,
             text: lines[index],
             before: Array(lines[start..<index]),
-            after: Array(lines[(index + 1)..<end])
+            after: Array(lines[(index + 1)..<end]),
+            span: span
         )
     }
 
@@ -83,6 +111,7 @@ public struct ReviewCommentAnchor: Sendable, Hashable, Codable {
     /// when the hunk has no such line, which means the caller was asked to comment on padding.
     public static func make(
         line: Int,
+        span: Int = 1,
         side: ReviewCommentSide,
         in hunk: DiffHunk,
         radius: Int = contextRadius
@@ -99,7 +128,8 @@ public struct ReviewCommentAnchor: Sendable, Hashable, Codable {
             line: line,
             text: sideLines[index].text,
             before: sideLines[start..<index].map(\.text),
-            after: sideLines[(index + 1)..<end].map(\.text)
+            after: sideLines[(index + 1)..<end].map(\.text),
+            span: span
         )
     }
 
@@ -237,6 +267,8 @@ public struct ReviewComment: Identifiable, Sendable, Hashable, Codable {
     public var isAttached: Bool
 
     public var line: Int { anchor.line }
+    /// The last line the note covers, which is `line` for all but a note left by dragging.
+    public var lastLine: Int { anchor.lastLine }
 
     /// What a chip shows, and the last path component the prompt payload never uses, since the
     /// agent needs the full path to open the file.
@@ -290,8 +322,20 @@ public enum ReviewCommentSummary {
     /// The sign carries the side. `+` is the line as it stands after the change, `-` is the line
     /// as it was before, which is the only way a chip can distinguish a note about new code from a
     /// note about code that was removed.
+    ///
+    /// A note left across several lines says both ends, `Thing.swift +34…38`. The sign is written
+    /// once and an ellipsis joins the two numbers, rather than a hyphen: on the old side the sign
+    /// is already a hyphen, and `-34-38` reads as arithmetic.
     public static func chip(for comment: ReviewComment) -> String {
-        "\(comment.fileName) \(comment.side == .old ? "-" : "+")\(comment.anchor.line)"
+        "\(comment.fileName) \(mark(for: comment))"
+    }
+
+    /// The side, the line, and the second line when there is one. What a chip and a label are
+    /// both built out of, so the two cannot come to different spellings of one range.
+    public static func mark(for comment: ReviewComment) -> String {
+        let sign = comment.side == .old ? "-" : "+"
+        guard comment.anchor.isRange else { return "\(sign)\(comment.anchor.line)" }
+        return "\(sign)\(comment.anchor.line)…\(comment.anchor.lastLine)"
     }
 
     /// The label for everything currently attached.
@@ -302,8 +346,7 @@ public enum ReviewCommentSummary {
 
         let sameFile = ordered.allSatisfy { $0.filePath == first.filePath }
         if sameFile, ordered.count <= lineLimit {
-            let marks = ordered.map { "\($0.side == .old ? "-" : "+")\($0.anchor.line)" }
-            return "\(first.fileName) \(marks.joined(separator: " "))"
+            return "\(first.fileName) \(ordered.map(mark(for:)).joined(separator: " "))"
         }
 
         // Past a few notes the individual numbers stop being readable in a chip, so the first one

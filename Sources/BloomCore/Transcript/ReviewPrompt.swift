@@ -112,7 +112,7 @@ public enum ReviewPayload {
 
     private static func block(for render: ReviewCommentRender) -> String {
         let comment = render.comment
-        var parts = ["### Line \(render.resolution.line)\(sideSuffix(comment.side))"]
+        var parts = ["### \(heading(for: render))\(sideSuffix(comment.side))"]
 
         if let note = provenance(for: render) { parts.append(note) }
         if let snippet = fenced(render.snippet) { parts.append(snippet) }
@@ -123,11 +123,27 @@ public enum ReviewPayload {
         return parts.joined(separator: "\n\n")
     }
 
+    /// `Line 12`, or `Lines 12 to 16` for a note left by dragging across the gutter.
+    ///
+    /// Both ends are spelled out rather than given as a start and a count, because the agent is
+    /// about to go and read those lines and a count is one subtraction away from the numbers it
+    /// needs. `ReviewTurn.heading` reads this back, so the two spellings are one format.
+    static func heading(for render: ReviewCommentRender) -> String {
+        let start = render.resolution.line
+        let span = render.comment.anchor.span
+        return span > 1 ? "Lines \(start) to \(start + span - 1)" : "Line \(start)"
+    }
+
     /// Said out loud rather than left for the agent to notice, because a line number that no
     /// longer means what it meant is the one thing that can make a correct note act like a wrong
     /// one.
+    /// A note about several lines says so in the plural throughout, because "this line has
+    /// moved" about a remark covering five of them is a sentence the agent would have to
+    /// distrust. The singular wording is left exactly as it was: it is what every note written
+    /// before ranges existed still gets, and it is what the suite pins.
     private static func provenance(for render: ReviewCommentRender) -> String? {
-        let original = render.comment.anchor.line
+        let anchor = render.comment.anchor
+        let original = anchor.line
         switch render.resolution.status {
         case .exact:
             return nil
@@ -138,10 +154,20 @@ public enum ReviewPayload {
                 return "(this file could not be read just now, so the code below is how it looked "
                     + "when the comment was written)"
             }
-            return "(this line has moved since the comment was written: it was line \(original))"
+            guard anchor.isRange else {
+                return "(this line has moved since the comment was written: it was line "
+                    + "\(original))"
+            }
+            return "(these lines have moved since the comment was written: they were lines "
+                + "\(original) to \(anchor.lastLine))"
         case .outdated:
-            return "(the file has changed and this exact line is gone; it was line \(original) "
-                + "when the comment was written, and the code below is how it looked then)"
+            guard anchor.isRange else {
+                return "(the file has changed and this exact line is gone; it was line \(original) "
+                    + "when the comment was written, and the code below is how it looked then)"
+            }
+            return "(the file has changed and these exact lines are gone; they were lines "
+                + "\(original) to \(anchor.lastLine) when the comment was written, and the code "
+                + "below is how they looked then)"
         }
     }
 
@@ -190,20 +216,30 @@ public enum ReviewPayload {
         let resolution = comment.anchor.resolve(in: lines)
         let snippet: [ReviewCommentRender.SnippetLine] = resolution.isOutdated
             ? storedSnippet(comment.anchor)
-            : liveSnippet(around: resolution.line, in: lines)
+            : liveSnippet(around: resolution.line, span: comment.anchor.span, in: lines)
         return ReviewCommentRender(comment: comment, resolution: resolution, snippet: snippet)
     }
 
+    /// The code around the note: `snippetRadius` lines either side of the whole of it, with every
+    /// line the note covers marked.
+    ///
+    /// The radius is kept outside the range rather than replacing part of it, so a note left
+    /// across twenty lines is shown as twenty lines and its neighbours, not as seven. That is the
+    /// one place a range costs the payload real width, and it is the width the note is about.
     private static func liveSnippet(
         around line: Int,
+        span: Int,
         in lines: [String]
     ) -> [ReviewCommentRender.SnippetLine] {
         let index = line - 1
         guard lines.indices.contains(index) else { return [] }
+        let last = min(lines.count - 1, index + max(1, span) - 1)
         let start = max(0, index - snippetRadius)
-        let end = min(lines.count - 1, index + snippetRadius)
+        let end = min(lines.count - 1, last + snippetRadius)
         return (start...end).map {
-            ReviewCommentRender.SnippetLine(number: $0 + 1, text: lines[$0], isAnchor: $0 == index)
+            ReviewCommentRender.SnippetLine(
+                number: $0 + 1, text: lines[$0], isAnchor: $0 >= index && $0 <= last
+            )
         }
     }
 
@@ -223,8 +259,12 @@ public enum ReviewPayload {
             ReviewCommentRender.SnippetLine(number: anchor.line, text: anchor.text, isAnchor: true)
         )
         for (offset, text) in anchor.after.enumerated() {
+            let number = anchor.line + 1 + offset
+            // A range's snapshot only ever holds the three lines after its first, so this marks
+            // whichever of them were inside it and the payload shows the rest as missing rather
+            // than pretending to have kept them.
             lines.append(ReviewCommentRender.SnippetLine(
-                number: anchor.line + 1 + offset, text: text, isAnchor: false
+                number: number, text: text, isAnchor: number <= anchor.lastLine
             ))
         }
         return lines
