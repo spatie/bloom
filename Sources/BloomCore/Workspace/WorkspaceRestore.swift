@@ -141,7 +141,8 @@ public struct RestoreOutcome: Sendable, Equatable {
 /// second copy to check out.
 public extension WorkspaceSafetyReport {
     var isRestorableFromBranch: Bool {
-        !hasUncommittedChanges
+        preservedFolderPath == nil
+            && !hasUncommittedChanges
             && untrackedFiles.isEmpty
             && modifiedIgnoredFiles.isEmpty
             && detachedCommits == 0

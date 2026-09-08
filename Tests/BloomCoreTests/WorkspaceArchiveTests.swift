@@ -217,6 +217,44 @@ struct WorkspaceArchiveTests {
         #expect(await Git.branchExists(workspace.branch, in: repo.path))
     }
 
+    @Test("an unrecognized folder archives while preserving its files and branch",
+          arguments: [false, true], [false, true])
+    func archivesAnUnrecognizedFolder(force: Bool, prune: Bool) async throws {
+        let (repo, registered, manager, workspace) = try await makeWorkspace(settings: """
+        [git]
+        delete_branch_on_archive = true
+        [scripts]
+        archive = 'touch "$BLOOM_ROOT_PATH/archive-script-ran"; exit 9'
+        """)
+        defer { repo.cleanUp() }
+        defer { try? FileManager.default.removeItem(atPath: workspace.path) }
+
+        try TempRepo(existing: workspace.path).write("feature.txt", "committed work\n")
+        try await commit(in: workspace.path, message: "keep this branch")
+        let sha = try await Git.headSHA(of: workspace.path)
+        try FileManager.default.removeItem(atPath: workspace.path)
+        if prune {
+            try await Shell.check("git", ["worktree", "prune"], cwd: repo.path)
+        }
+        try FileManager.default.createDirectory(atPath: workspace.path, withIntermediateDirectories: true)
+        let folder = TempRepo(existing: workspace.path)
+        try folder.write("notes.txt", "only remaining copy\n")
+
+        let report = try await manager.safetyReport(workspace: workspace, repo: registered)
+        #expect(report.preservedFolderPath == workspace.path)
+        #expect(report.isSafeToDiscard)
+        #expect(!report.isRestorableFromBranch)
+
+        try await manager.archive(workspace: workspace, repo: registered, force: force)
+
+        #expect(try await manager.store.workspace(id: workspace.id)?.state == .archived)
+        #expect(folder.read("notes.txt") == "only remaining copy\n")
+        #expect(await Git.branchExists(workspace.branch, in: repo.path))
+        let branchSHA = try await Shell.check("git", ["rev-parse", workspace.branch], cwd: repo.path)
+        #expect(branchSHA.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == sha)
+        #expect(!repo.exists("archive-script-ran"))
+    }
+
     @Test("forcing over a dirty worktree destroys exactly what the report listed")
     func forceDestroysOnlyWhatWasReported() async throws {
         let (repo, registered, manager, workspace) = try await makeWorkspace()
