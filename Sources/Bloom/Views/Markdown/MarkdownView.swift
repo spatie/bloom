@@ -349,44 +349,34 @@ private struct MarkdownBlockView: View {
     }
 
     private func table(headers: [[MarkdownInline]], rows: [[[MarkdownInline]]], alignments: [TableAlignment]) -> some View {
-        ScrollView(.horizontal) {
-            Grid(horizontalSpacing: 0, verticalSpacing: 0) {
-                GridRow {
-                    ForEach(headers.indices, id: \.self) { column in
-                        // A header set a rung below the cells under it was the wrong way round.
-                        // Same size, heavier, on a fill: that is what makes it read as a header.
-                        tableCell(
-                            headers[column],
-                            rung: Typo.bodyEmphasis,
-                            alignment: alignment(at: column, in: alignments),
-                            isLastColumn: column == headers.count - 1,
-                            isLastRow: false
-                        )
-                        .background(Palette.surfaceSunken)
-                    }
-                }
-                ForEach(rows.indices, id: \.self) { index in
-                    let row = rows[index]
-                    GridRow {
-                        ForEach(row.indices, id: \.self) { column in
-                            tableCell(
-                                row[column],
-                                rung: Typo.body,
-                                alignment: alignment(at: column, in: alignments),
-                                isLastColumn: column == row.count - 1,
-                                isLastRow: index == rows.count - 1
-                            )
-                        }
-                    }
+        MarkdownTableLayout(columns: headers.count) {
+            ForEach(headers.indices, id: \.self) { column in
+                tableCell(
+                    headers[column],
+                    rung: Typo.labelEmphasis,
+                    alignment: alignment(at: column, in: alignments),
+                    isLastColumn: column == headers.count - 1,
+                    isLastRow: rows.isEmpty
+                )
+                .background(Palette.surfaceSunken)
+            }
+            ForEach(rows.indices, id: \.self) { index in
+                let row = rows[index]
+                ForEach(row.indices, id: \.self) { column in
+                    tableCell(
+                        row[column],
+                        rung: Typo.label,
+                        alignment: alignment(at: column, in: alignments),
+                        isLastColumn: column == row.count - 1,
+                        isLastRow: index == rows.count - 1
+                    )
                 }
             }
-            // Clipped before it is stroked, so the header fill stops at the corner and the last
-            // column and row do not draw a second line under the border they already have.
-            .clipShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
-            .overlay {
-                RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                    .strokeBorder(Palette.border, lineWidth: Metrics.outline)
-            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+        .overlay {
+            RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
         }
     }
 
@@ -398,9 +388,9 @@ private struct MarkdownBlockView: View {
         isLastRow: Bool
     ) -> some View {
         inlineText(inline, rung: rung, color: foreground)
-            .padding(.horizontal, MarkdownMetrics.blockGap)
+            .padding(.horizontal, Metrics.spacingWide)
             .padding(.vertical, Metrics.spacing)
-            .frame(maxWidth: .infinity, alignment: alignment)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
             .overlay(alignment: .trailing) {
                 if !isLastColumn { Hairline(axis: .vertical) }
             }
@@ -412,9 +402,9 @@ private struct MarkdownBlockView: View {
     private func alignment(at index: Int, in alignments: [TableAlignment]) -> Alignment {
         guard alignments.indices.contains(index) else { return .leading }
         return switch alignments[index] {
-        case .leading: .leading
-        case .center: .center
-        case .trailing: .trailing
+        case .leading: .topLeading
+        case .center: .top
+        case .trailing: .topTrailing
         }
     }
 }
