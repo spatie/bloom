@@ -40,14 +40,25 @@ enum AppChromeProbe {
         await render(ChromeTabsFixture(), size: CGSize(width: 720, height: 96), name: "tabs")
         await render(WelcomeGreeting(isFirstVisit: false, continueTitle: "See what Bloom needs", onContinue: {}),
                      size: CGSize(width: 520, height: 424), name: "welcome-inactive")
-        let result: [String: Any] = ["notifications": 1000, "checks": 15, "passed": failures.isEmpty, "failures": failures]
+        let emptyAligned = await render(NotesPageFixture(), size: CGSize(width: 960, height: 680), name: "notes-empty")
+        let narrowAligned = await render(NotesPageFixture(body: "Remember to keep the launch page concise.\n\nDecisions\nUse the current colours and retain the product screenshots.\n\nNext steps\nReview the mobile layout and check the signup flow."),
+                     size: CGSize(width: 360, height: 540), name: "notes-narrow")
+        if !emptyAligned { failures.append("empty notes caret and placeholder do not align") }
+        if !narrowAligned { failures.append("narrow notes text does not align") }
+        let result: [String: Any] = ["notifications": 1000, "checks": 17, "passed": failures.isEmpty, "failures": failures]
         if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {
             FileHandle.standardOutput.write(data)
         }
         exit(failures.isEmpty ? 0 : 1)
     }
 
-    private static func render(_ content: some View, size: CGSize, name: String) async {
+    private static func textView(in root: NSView) -> NSTextView? {
+        if let view = root as? NSTextView { return view }
+        return root.subviews.lazy.compactMap { textView(in: $0) }.first
+    }
+
+    @discardableResult
+    private static func render(_ content: some View, size: CGSize, name: String) async -> Bool {
         let host = NSHostingController(rootView: content
             .environment(\.colorScheme, .light)
             .environment(\.controlActiveState, .inactive)
@@ -60,8 +71,15 @@ enum AppChromeProbe {
         host.view.layoutSubtreeIfNeeded()
         try? await Task.sleep(for: .milliseconds(150))
         host.view.displayIfNeeded()
+        var aligned = true
+        if name.hasPrefix("notes") {
+            if let editor = textView(in: host.view) {
+                aligned = editor.textContainerOrigin.y == 0
+                    && editor.textContainerOrigin.x + (editor.textContainer?.lineFragmentPadding ?? 0) == NotesPage.textPadding
+            } else { aligned = false }
+        }
         guard let bitmap = host.view.bitmapImageRepForCachingDisplay(in: host.view.bounds),
-              let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return }
+              let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return false }
         if host.view.isFlipped {
             context.cgContext.translateBy(x: 0, y: size.height)
             context.cgContext.scaleBy(x: 1, y: -1)
@@ -69,6 +87,7 @@ enum AppChromeProbe {
         host.view.layer?.render(in: context.cgContext)
         context.flushGraphics()
         try? bitmap.representation(using: .png, properties: [:])?.write(to: URL(filePath: "/tmp/bloom-chrome-\(name).png"))
+        return aligned
     }
 }
 
@@ -103,6 +122,18 @@ private struct ChromeTabsRow: View {
                     onSelect: {}, onStartRename: {}, onCommitRename: { _ in }, onCancelRename: {}, onClose: {},
                     namespace: namespace)
             .fixedSize(horizontal: true, vertical: false)
+    }
+}
+private struct NotesPageFixture: View {
+    @State private var text: String
+    @FocusState private var isEditing: Bool
+
+    init(body: String = "") { _text = State(initialValue: body) }
+
+    var body: some View {
+        NotesPage(text: $text, isEditing: $isEditing, workspaceName: "Redesign the website",
+                  hasLoaded: true, couldNotLoad: false, couldNotSave: false, hasChanges: false,
+                  onRetryLoad: {}, onRetrySave: {}, onHandOff: {})
     }
 }
 #endif
