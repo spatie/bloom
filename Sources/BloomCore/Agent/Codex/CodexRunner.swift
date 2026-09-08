@@ -50,6 +50,7 @@ public actor CodexRunner: SessionRunner {
     /// id is the server's own numbering and means nothing outside this connection, while the ask
     /// is written to a database that outlives it.
     private var approvals: [String: CodexApprovalRequest] = [:]
+    private var connectionID = UUID()
 
     /// The live connection, held outside the actor so quit, close and archive can signal the
     /// server without waiting for a turn on one. Attached on every connect and never cleared, for
@@ -367,13 +368,15 @@ public actor CodexRunner: SessionRunner {
             contextWindow: contextWindow
         ))
         self.client = client
+        let connectionID = UUID()
+        self.connectionID = connectionID
         connection.attach(client)
         // Attached before the handshake, so nothing the server says between connecting and the
         // first turn can arrive with nowhere to go.
         let events = client.events
         pumpTask = Task { [weak self] in
             for await event in events {
-                await self?.handle(event)
+                await self?.handle(event, connectionID: connectionID)
             }
         }
         try await client.start()
@@ -496,7 +499,8 @@ public actor CodexRunner: SessionRunner {
         return CodexSubagentTranscript.read(result["thread"] ?? .null, sessionID: session.id)
     }
 
-    private func handle(_ event: CodexEvent) async {
+    private func handle(_ event: CodexEvent, connectionID: UUID) async {
+        guard connectionID == self.connectionID else { return }
         if let threadID {
             for signal in subagents.receive(event, parentThreadID: threadID) {
                 sink.yield(.subagent(signal))
@@ -532,7 +536,7 @@ public actor CodexRunner: SessionRunner {
            let json = try? JSONDecoder().decode(JSONValue.self, from: raw),
            let id = CodexRequestID(json["params"]?["requestId"]),
            let threadID = json["params"]?["threadId"]?.stringValue {
-            let requestID = CodexPermission.requestID(id, threadID: threadID)
+            let requestID = CodexPermission.requestID(id, threadID: threadID, connectionID: connectionID)
             if let ask = pending.take(requestID) {
                 await close(ask, as: PermissionAskOutcome.resolved, note: "")
                 if pending.isEmpty, session.apply(.unblocked).moves { await save(session) }
@@ -612,7 +616,7 @@ public actor CodexRunner: SessionRunner {
     // MARK: - Asking
 
     private func ask(_ request: CodexApprovalRequest) async {
-        let ask = CodexPermission.ask(for: request, item: items[request.threadID]?[request.itemID])
+        let ask = CodexPermission.ask(for: request, item: items[request.threadID]?[request.itemID], connectionID: connectionID)
         pending.add(ask)
         approvals[ask.requestID] = request
 

@@ -72,6 +72,7 @@ final class ServerReviewModel {
                     if files != changed { needsContent = true }
                     files = changed
                     hasReadFiles = true
+                    error = nil
                     if !showsFile, let selectedPath, !changed.contains(where: { $0.path == selectedPath }) {
                         self.selectedPath = nil
                     }

@@ -19,7 +19,10 @@ struct RemoteTerminalView: View {
         .task(id: model.selectedWorkspace?.id) {
             terminal = nil
             error = nil
-            do { terminal = try await model.terminal(named: name) } catch { self.error = error.localizedDescription }
+            do {
+                let loaded = try await model.terminal(named: name)
+                if !Task.isCancelled { terminal = loaded }
+            } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
         }
     }
 }

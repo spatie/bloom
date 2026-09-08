@@ -34,6 +34,14 @@ final class ServerFileBuffer {
         revision = file.revision
     }
 
+    func reload(_ file: ServerTextFile, replacing original: String) {
+        guard text == original else { error = "The editor changed while reloading. Reload again to replace those edits."; return }
+        text = file.text
+        savedText = file.text
+        revision = file.revision
+        error = nil
+    }
+
     func saved(_ file: ServerTextFile, submitted: String) {
         if text == submitted { text = file.text }
         savedText = file.text

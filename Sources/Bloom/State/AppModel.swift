@@ -527,6 +527,7 @@ final class AppModel {
     /// a login shell keeps running, all reparented to launchd. Worse, the next launch marks those
     /// sessions idle and happily resumes them, which puts two `claude` processes on one session.
     func shutdownEverything() async {
+        await remoteServer.shutdown()
         refreshTask?.cancel()
         refreshTask = nil
         worktreeWatcher.stop()

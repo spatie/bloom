@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import BloomCore
 
 /// The normal transcript rows and editor, with every action routed to the owning server.
@@ -6,6 +7,7 @@ import BloomCore
 struct RemoteConversationView: View {
     @Bindable var model: ServerWindowModel
     @Environment(AppModel.self) private var app
+    @State private var showsFilePicker = false
     @State private var expanded: Set<Int64> = []
     @State private var caret = 0
     @State private var focused = false
@@ -48,6 +50,7 @@ struct RemoteConversationView: View {
                             row: row,
                             home: TranscriptHome(worktree: model.selectedWorkspace?.path ?? "", remoteWorkspaceID: model.selectedWorkspace?.id),
                             isExpanded: expanded.contains(row.id),
+                            projectName: model.catalogue?.repositories.first { $0.id == model.selectedWorkspace?.repoID }?.name,
                             onToggle: {
                                 if expanded.contains(row.id) { expanded.remove(row.id) } else { expanded.insert(row.id) }
                             },
@@ -89,6 +92,12 @@ struct RemoteConversationView: View {
             openFile: { model.openFile($0); app.isInspectorVisible = true }
         ))
         .onChange(of: model.selectedSessionID) { _, _ in expanded = [] }
+        .fileImporter(isPresented: $showsFilePicker, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            do {
+                let sources = try result.get().map(AttachmentSource.file)
+                Task { await model.upload(sources) }
+            } catch { model.error = error.localizedDescription }
+        }
     }
 
     private var rows: [TranscriptRow] {
@@ -119,6 +128,9 @@ struct RemoteConversationView: View {
                 placeholder: "Ask to make changes"
             )
             HStack(spacing: 10) {
+                Button("Attach File", systemImage: "paperclip") { showsFilePicker = true }
+                    .labelStyle(.iconOnly).buttonStyle(.borderless)
+                    .disabled(!model.isConnected || model.isUploading)
                 if let session = model.selectedSession {
                     Text(session.model).font(Typo.caption).foregroundStyle(Palette.textSecondary)
                 }

@@ -15,7 +15,7 @@ struct RemoteWorkspaceContentView: View {
                     Text("Terminal").tag("terminal")
                     Text("Preview").tag("preview")
                 }
-                .pickerStyle(.segmented).frame(width: 240)
+                .pickerStyle(.segmented).labelsHidden().frame(width: 240)
                 if let workspace = model.selectedWorkspace {
                     Picker("Conversation", selection: Binding(get: { model.selectedSessionID }, set: { id in
                         if let id { app.selection = .remote(id) }

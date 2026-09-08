@@ -13,13 +13,13 @@ struct ServerReviewView: View {
                 Text("Changes").tag(false)
                 Text("Files").tag(true)
             }
-            .pickerStyle(.segmented).fixedSize(horizontal: false, vertical: true).padding(12)
+            .pickerStyle(.segmented).labelsHidden().fixedSize(horizontal: false, vertical: true).padding(12)
             if !model.showsAllFiles {
             Picker("Changes", selection: $model.scope) {
                 Text("Branch").tag(ServerDiffScope.branch)
                 Text("Uncommitted").tag(ServerDiffScope.uncommitted)
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.segmented).labelsHidden()
             .fixedSize(horizontal: false, vertical: true)
             .padding()
             }
@@ -61,7 +61,7 @@ struct ServerReviewView: View {
                         Text("Diff").tag(false)
                         Text("File").tag(true)
                     }
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.segmented).labelsHidden()
                     .frame(width: 120)
                     if server != nil {
                         Button("Preview", systemImage: "eye") { previewsFile.toggle() }.labelStyle(.iconOnly)
@@ -150,6 +150,7 @@ private struct ServerFileEditorView: View {
     @Bindable var buffer: ServerFileBuffer
     var server: ServerWindowModel
     @Environment(\.colorScheme) private var colorScheme
+    @State private var confirmsReload = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -158,11 +159,18 @@ private struct ServerFileEditorView: View {
             HStack {
                 Text(buffer.hasChanges ? "Unsaved changes" : "Saved").font(.caption).foregroundStyle(.secondary)
                 Spacer()
+                Button("Reload") {
+                    if buffer.hasChanges { confirmsReload = true } else { Task { await server.reloadFile(buffer) } }
+                }.disabled(buffer.isSaving)
                 Button("Save") { Task { await server.saveFile(buffer) } }
                     .keyboardShortcut("s", modifiers: .command)
                     .disabled(!buffer.hasChanges || buffer.isSaving)
             }
             .padding(10)
+        }
+        .confirmationDialog("Reload this file from the server? Your unsaved edits will be discarded.", isPresented: $confirmsReload) {
+            Button("Reload", role: .destructive) { Task { await server.reloadFile(buffer) } }
+            Button("Cancel", role: .cancel) {}
         }
     }
 }

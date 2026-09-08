@@ -11,7 +11,15 @@ struct RemotePreviewView: View {
             }.padding(10)
             Hairline()
             if let browser = model.browser {
-                BrowserWebView(session: browser)
+                ZStack {
+                    BrowserWebView(session: browser).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if let failure = browser.failure {
+                        EmptyStateView(glyph: "exclamationmark.triangle", title: failure.title,
+                            message: failure.message, actionTitle: "Try again", action: { browser.reload() })
+                            .background(Palette.surface)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ContentUnavailableView("Preview your app", systemImage: "globe", description: Text("Start a development server in the terminal, then enter its localhost address here."))
             }

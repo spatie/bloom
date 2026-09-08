@@ -91,14 +91,10 @@ public enum Git {
         // `readabilityHandler`, because clearing the handler once the process exits can discard
         // what the dispatch source had already buffered. That showed up as `git diff` returning
         // nothing at all, which `changedFiles` would have reported as a clean worktree.
-        let outReader = Thread {
-            collector.appendOut(outPipe.fileHandleForReading.readDataToEndOfFile())
-            collector.finishOut()
-        }
-        let errReader = Thread {
-            collector.appendErr(errPipe.fileHandleForReading.readDataToEndOfFile())
-            collector.finishErr()
-        }
+        let out = try ProcessPipeReader(outPipe.fileHandleForReading)
+        let err = try ProcessPipeReader(errPipe.fileHandleForReading)
+        let outReader = Thread { collector.read(out, stdout: true) }
+        let errReader = Thread { collector.read(err, stdout: false) }
         outReader.stackSize = 512 * 1_024
         errReader.stackSize = 512 * 1_024
 
@@ -122,6 +118,9 @@ public enum Git {
 
         // Exit does not mean the output is complete. Both pipes have to reach EOF first.
         await collector.waitForEOF()
+        try? outPipe.fileHandleForReading.close()
+        try? errPipe.fileHandleForReading.close()
+        try collector.checkReadErrors()
 
         return GitOutput(
             status: process.terminationStatus,

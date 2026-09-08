@@ -12,7 +12,7 @@ struct ServerWindow: Scene {
                 .environment(model)
                 .windowRole(.utility)
         }
-        .defaultSize(width: 660, height: 340)
+        .windowResizability(.contentSize)
     }
 }
 
@@ -53,6 +53,7 @@ private struct ServerConnectionView: View {
             }
         }
         .formStyle(.grouped)
+        .frame(width: 660, height: 340)
         .disabled(model.isConnecting)
         .onAppear { model.isEditingConnection = true; host = model.host; executable = model.executable; directory = model.remoteDirectory; identityFile = model.identityFile }
         .onDisappear { model.isEditingConnection = false }

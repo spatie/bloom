@@ -63,8 +63,16 @@ final class ServerWindowModel {
     var isEditingConnection = false
     var isUploading = false
     var activePane = "chat"
-    var previewAddress = "http://localhost:8000"
-    var browser: BrowserSession?
+    private var previewAddresses: [WorkspaceID: String] = [:]
+    private var browsers: [WorkspaceID: BrowserSession] = [:]
+    var previewAddress: String {
+        get { selectedWorkspace.flatMap { previewAddresses[$0.id] } ?? "http://localhost:8000" }
+        set { if let id = selectedWorkspace?.id { previewAddresses[id] = newValue } }
+    }
+    var browser: BrowserSession? {
+        get { selectedWorkspace.flatMap { browsers[$0.id] } }
+        set { if let id = selectedWorkspace?.id { browsers[id] = newValue } }
+    }
     private var forwards: [Int: ServerPortForward] = [:]
     var isBusy = false
     var isConnecting = false
@@ -137,21 +145,25 @@ final class ServerWindowModel {
               ["http", "https"].contains(input.scheme), var components = URLComponents(url: input, resolvingAgainstBaseURL: false) else {
             error = "Enter an HTTP or HTTPS address."; return
         }
+        let generation = connectionGeneration
+        guard let workspaceID = selectedWorkspace?.id else { return }
         do {
             if ["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"].contains(input.host ?? "") {
                 let port = input.port ?? (input.scheme == "https" ? 443 : 80)
                 var forward = forwards[port]
                 if await forward?.isAlive != true {
                     forward = try await ServerPortForward.connect(endpoint: endpoint, remotePort: port)
+                    guard generation == connectionGeneration, !Task.isCancelled else { await forward?.close(); return }
                     forwards[port] = forward
                 }
                 components.host = "127.0.0.1"
                 components.port = await forward?.localPort
             }
             guard let forwarded = components.url else { return }
-            browser = BrowserSession(url: forwarded.absoluteString)
-            previewAddress = input.absoluteString
-            activePane = "preview"
+            guard generation == connectionGeneration, !Task.isCancelled else { return }
+            browsers[workspaceID] = BrowserSession(url: forwarded.absoluteString)
+            previewAddresses[workspaceID] = input.absoluteString
+            if selectedWorkspace?.id == workspaceID { activePane = "preview" }
         } catch { self.error = error.localizedDescription }
     }
 
@@ -188,6 +200,17 @@ final class ServerWindowModel {
         let buffer = ServerFileBuffer(file: file, workspaceID: workspace.id, endpoint: endpoint)
         fileBuffers[key] = buffer
         return buffer
+    }
+
+    func reloadFile(_ buffer: ServerFileBuffer) async {
+        guard let client, lastEndpoint == buffer.endpoint, !buffer.isSaving else { return }
+        buffer.isSaving = true
+        defer { buffer.isSaving = false }
+        let original = buffer.text
+        do {
+            let reply = try await client.request(ServerRequest(.file(workspaceID: buffer.workspaceID, path: buffer.path)))
+            if case .file(let file) = reply.result { buffer.reload(file, replacing: original) }
+        } catch { buffer.error = error.localizedDescription }
     }
 
     func saveFile(_ buffer: ServerFileBuffer) async {
@@ -248,7 +271,8 @@ final class ServerWindowModel {
                     catalogue = nil
                     messages = []
                     review.reset()
-                    browser = nil
+                    browsers.removeAll()
+                    previewAddresses.removeAll()
                     for forward in forwards.values { await forward.close() }
                     forwards.removeAll()
                 }
@@ -283,6 +307,19 @@ final class ServerWindowModel {
         let previous = client
         client = nil
         await previous?.disconnect()
+    }
+
+    /// Tear down only Mac-side transports. The server's agents, shells and queued prompts stay.
+    func shutdown() async {
+        shouldReconnect = false
+        await disconnect()
+        for terminal in terminals.values { terminal.shutdown() }
+        terminals.removeAll()
+        let tunnels = Array(forwards.values)
+        forwards.removeAll()
+        await withTaskGroup(of: Void.self) { group in
+            for tunnel in tunnels { group.addTask { await tunnel.close() } }
+        }
     }
 
     func stopLocalServer() async {
@@ -425,7 +462,9 @@ final class ServerWindowModel {
             repositoryPath: repositoryPath, name: workspaceName, agent: agent,
             model: agentModel, effort: effort, permissionMode: permissionMode
         ))
-        if let result = await perform(operation), case .created(let session, _, let setupSucceeded) = result {
+        if let result = await perform(operation), case .created(let session, let workspace, let setupSucceeded) = result {
+            if catalogue?.workspaces.contains(where: { $0.id == workspace.id }) == false { catalogue?.workspaces.append(workspace) }
+            if catalogue?.sessions.contains(where: { $0.id == session.id }) == false { catalogue?.sessions.append(session) }
             selectedSessionID = session.id
             showsNewWorkspace = false
             if setupSucceeded == false { error = "Workspace created, but its setup script failed. Check the server before starting work." }
@@ -436,8 +475,13 @@ final class ServerWindowModel {
         guard let id = selectedSessionID else { return }
         let text = draft
         if await perform(.send(sessionID: id, text: text)) != nil {
-            if draft == text { draft = "" }
-            isBusy = true
+            if selectedSessionID == id {
+                if draft == text { draft = "" }
+                isBusy = true
+            } else if drafts[id.rawValue] == text {
+                drafts[id.rawValue] = ""
+                preferences.set(drafts, forKey: "server.drafts")
+            }
         }
     }
 

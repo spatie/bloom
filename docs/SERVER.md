@@ -73,6 +73,30 @@ Swift, SQLite and its other required libraries. No separate Swift installation i
 that package. Its glibc and loader come from the host, so this is an Ubuntu package rather than
 a fully static executable for every Linux distribution. ARM64 is not yet verified.
 
+## Codex sandbox on Ubuntu
+
+Ubuntu's AppArmor policy can block the user namespaces Codex needs, producing a Bubblewrap
+loopback error before a command starts. Install an application-specific profile for the actual
+native Codex executable when necessary, following [Ubuntu's user namespace guidance](https://discourse.ubuntu.com/t/ubuntu-24-04-lts-noble-numbat-release-notes/39890).
+The npm launcher is not the native executable; find the binary under its platform package first.
+
+For a root-owned native binary at `/opt/codex/bin/codex`, a profile can use this form:
+
+```text
+abi <abi/4.0>,
+include <tunables/global>
+
+profile bloom-codex /opt/codex/bin/codex flags=(unconfined) {
+  userns,
+  /opt/codex/bin/codex mr,
+}
+```
+
+Load the profile with `apparmor_parser`, then verify the installed CLI's sandbox command both
+runs a harmless command and refuses a write outside its allowed workspace. The validation host
+uses a profile for its exact native binary and retains the global user-namespace restriction.
+Its sandbox probe succeeds and an outside-workspace write fails with a read-only filesystem error.
+
 ## Linux package
 
 The Server workflow builds a `bloom-server-linux-x86_64` artifact and exercises it in fresh Ubuntu
@@ -261,10 +285,14 @@ server starts, even without a connected Mac.
 
 ## Verification
 
-`./Tools/test-core.sh ServerRuntime` exercises real Unix socket connections with fake agent
+`./Tools/test-core.sh ServerRuntime ServerReview ServerWorkspace ProcessPipeLifetime` exercises real Unix socket connections with fake agent
 runners, duplicate and interrupted commands, concurrent prompts and approvals, reconnect,
 protocol compatibility, exclusive server ownership and SSH quoting. It spends no model tokens.
-`swift build` builds both the Mac client and the standalone server.
+`swift build` builds both the Mac client and the standalone server. The Linux workflow also runs
+an isolated `BLOOM_FD_STRESS=1` check that repeatedly spawns Shell, Git and streaming processes and
+asserts the process's descriptor count stays bounded. This caught pipe retention that short-lived
+tests missed. Codex approval IDs include the connection identity so resuming a stored thread cannot
+reuse an old permission decision.
 
 The Linux package has also been exercised directly on an Ubuntu 26.04 x86_64 host without Swift
 installed, and in a fresh Ubuntu 24.04 container. A systemd service restart preserved conversation

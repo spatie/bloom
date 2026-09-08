@@ -171,16 +171,10 @@ public enum Shell {
         // `git diff`, and in the app it would have been an empty diff shown as though the file
         // had not changed. Reading to EOF cannot lose anything, and EOF is also the signal that
         // the child is done writing.
-        let outReader = Thread {
-            let data = outPipe.fileHandleForReading.readDataToEndOfFile()
-            collector.appendOut(data)
-            collector.finishOut()
-        }
-        let errReader = Thread {
-            let data = errPipe.fileHandleForReading.readDataToEndOfFile()
-            collector.appendErr(data)
-            collector.finishErr()
-        }
+        let out = try ProcessPipeReader(outPipe.fileHandleForReading)
+        let err = try ProcessPipeReader(errPipe.fileHandleForReading)
+        let outReader = Thread { collector.read(out, stdout: true) }
+        let errReader = Thread { collector.read(err, stdout: false) }
         outReader.stackSize = 512 * 1_024
         errReader.stackSize = 512 * 1_024
 
@@ -225,6 +219,11 @@ public enum Shell {
         // The child has exited, but its output is only complete once both pipes have reached EOF.
         // Returning before that is exactly how output goes missing.
         await collector.waitForEOF()
+        // Foundation's Linux Thread objects can retain their blocks after completion. Explicit
+        // closure keeps a long-running Git poll from accumulating pipe descriptors until EMFILE.
+        try? outPipe.fileHandleForReading.close()
+        try? errPipe.fileHandleForReading.close()
+        try collector.checkReadErrors()
 
         return ShellResult(
             status: process.terminationStatus,
@@ -277,6 +276,7 @@ final class PipeCollector: Sendable {
     private struct State {
         var out = Data()
         var err = Data()
+        var failure: String?
     }
 
     private let state = Mutex(State())
@@ -286,6 +286,23 @@ final class PipeCollector: Sendable {
     init() {
         eof.enter()
         eof.enter()
+    }
+
+    func read(_ reader: ProcessPipeReader, stdout: Bool) {
+        defer { reader.close(); if stdout { finishOut() } else { finishErr() } }
+        do {
+            while true {
+                guard let data = try reader.next() else { continue }
+                if data.isEmpty { return }
+                if stdout { appendOut(data) } else { appendErr(data) }
+            }
+        } catch { state.withLock { $0.failure = error.localizedDescription } }
+    }
+
+    func checkReadErrors() throws {
+        if let failure = state.withLock({ $0.failure }) {
+            throw ShellError(command: "read subprocess output", status: -1, stderr: failure)
+        }
     }
 
     func appendOut(_ data: Data) {

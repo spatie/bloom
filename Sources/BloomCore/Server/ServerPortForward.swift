@@ -46,6 +46,14 @@ public actor ServerPortForward {
     }
 
     public var isAlive: Bool { process.isRunning }
-    public func close() { process.terminate(); outputTask?.cancel(); errorTask?.cancel() }
+    public func close() async {
+        process.terminate()
+        outputTask?.cancel(); errorTask?.cancel()
+        for _ in 0..<20 {
+            if !process.isRunning { return }
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        process.kill()
+    }
     deinit { process.terminate(); outputTask?.cancel(); errorTask?.cancel() }
 }

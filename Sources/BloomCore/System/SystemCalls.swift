@@ -15,6 +15,14 @@ enum SystemCalls {
         #endif
     }
 
+    static func read(_ descriptor: Int32, _ buffer: UnsafeMutableRawPointer?, _ count: Int) -> Int {
+        #if os(Linux)
+        Glibc.read(descriptor, buffer, count)
+        #else
+        Darwin.read(descriptor, buffer, count)
+        #endif
+    }
+
     static func write(_ descriptor: Int32, _ buffer: UnsafeRawPointer?, _ count: Int) -> Int {
         #if os(Linux)
         Glibc.write(descriptor, buffer, count)
