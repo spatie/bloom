@@ -209,6 +209,8 @@ public enum CodexPermission {
         case .allow(.session), .allow(.project): .acceptForSession
         // The runner sends the structured answer separately; this describes its approval outcome.
         case .answer: .accept
+        // A Claude plan approval has no corresponding Codex request.
+        case .approvePlan: .decline
         case .deny(_, let endsTurn): endsTurn ? .cancel : .decline
         }
     }
