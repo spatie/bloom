@@ -342,10 +342,17 @@ final class WorkspaceTabsStore {
     /// Nothing is taken off a pane any more, so the guard those callers each carried (`isShowing`,
     /// so clicking a filename could not drag the review into the half the reader was typing in)
     /// lives here instead, once: something already visible in the tab in front is already in
-    /// front, and nothing is moved or refocused.
-    func reveal(_ content: PaneContent, in model: WorkspaceModel) {
+    /// front, and nothing is moved. Nothing is refocused either, unless the caller says otherwise
+    /// below.
+    /// - Parameter focusing: whether a pane of the tab already in front that is showing `content`
+    ///   should be made the focused one. False for a click on a filename, whose reader is standing
+    ///   in the inspector; true for a menu item or a keystroke that asks for the thing itself,
+    ///   where landing on a pane nobody is in is indistinguishable from nothing having happened.
+    func reveal(_ content: PaneContent, in model: WorkspaceModel, focusing: Bool = false) {
         if let current = selectedTab(in: model),
-           layout(of: current).panes.contains(where: { self.content(of: $0, in: current) == content }) {
+           let showing = layout(of: current).panes
+               .first(where: { self.content(of: $0, in: current) == content }) {
+            if focusing { focus(showing, in: current, of: model) }
             return
         }
 
