@@ -43,6 +43,7 @@ struct BloomAlert: Identifiable {
 @MainActor
 @Observable
 final class AppModel {
+    let remoteServer = ServerWindowModel()
     private(set) var store: Store?
     private(set) var manager: WorkspaceManager?
     /// The workspace bridge: one unix socket for this instance, and the token table an agent's MCP
@@ -79,6 +80,7 @@ final class AppModel {
             }
             let vacated = storedSelection.workspaceID
             storedSelection = newValue
+            remoteServer.selectedSessionID = newValue.remoteSessionID
             Self.rememberSelection(newValue)
             // Opening or closing a subagent's pane changes which rows are exempt from being
             // removed. See `SubagentRetention`: the row you are reading stays. Both workspaces,
@@ -109,16 +111,22 @@ final class AppModel {
     // MARK: - Remembering where you were
 
     private static let lastWorkspaceKey = "sidebar.lastWorkspaceID"
+    private static let lastRemoteSessionKey = "sidebar.lastRemoteSessionID"
 
     /// Only a workspace is worth remembering. Home and Search are where you go when you are
     /// looking for something, so reopening on them would be reopening on a question rather than
     /// on the work.
     private static func rememberSelection(_ selection: SidebarSelection) {
+        if let remote = selection.remoteSessionID {
+            UserDefaults.standard.set(remote.rawValue, forKey: lastRemoteSessionKey)
+            return
+        }
         guard let id = selection.workspaceID else { return }
         // `rawValue`, not the id itself. User defaults takes an `Any` and only checks at runtime,
         // so handing it a `WorkspaceID` compiles and then raises inside `NSUserDefaults`, which
         // AppKit turns into a trap during the layout pass. Every sidebar click reaches this line,
         // so the app died on selecting any workspace at all.
+        UserDefaults.standard.removeObject(forKey: lastRemoteSessionKey)
         UserDefaults.standard.set(id.rawValue, forKey: lastWorkspaceKey)
     }
 
@@ -130,6 +138,10 @@ final class AppModel {
     /// with nothing.
     private func restoreLastSelection() {
         guard case .home = storedSelection else { return }
+        if !remoteServer.host.isEmpty, let remote = UserDefaults.standard.string(forKey: Self.lastRemoteSessionKey) {
+            selection = .remote(SessionID(rawValue: remote))
+            return
+        }
         guard let id = UserDefaults.standard.string(forKey: Self.lastWorkspaceKey).map(WorkspaceID.init),
               workspaces.contains(where: { $0.id == id }) else { return }
         selection = .workspace(id)
@@ -1012,7 +1024,13 @@ final class AppModel {
     /// Two spellings of one rule is how the window ends up refusing a width for a pane it is not
     /// drawing. See `WindowWidths`.
     var isInspectorPresented: Bool {
-        isInspectorVisible && selectedWorkspace != nil
+        isInspectorVisible && (selectedWorkspace != nil || selection.remoteSessionID != nil)
+    }
+
+    var selectedRemoteWorkspace: Workspace? {
+        guard let id = selection.remoteSessionID,
+              let session = remoteServer.catalogue?.sessions.first(where: { $0.id == id }) else { return nil }
+        return remoteServer.catalogue?.workspaces.first { $0.id == session.workspaceID }
     }
 
     /// The archived workspace being read, if that is what the window is on.

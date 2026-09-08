@@ -146,6 +146,7 @@ struct UserTurnRowView: View {
         .padding(.vertical, TranscriptLayout.inset)
         .onChange(of: hovered) { _, chip in
             hoverTask?.cancel()
+            guard home.remoteWorkspaceID == nil else { return }
             guard let chip else {
                 withdraw()
                 return
@@ -208,7 +209,7 @@ struct UserTurnRowView: View {
                     alignsBubbleInk: true,
                     actions: linkActions.opening(
                         file: open, hovering: { hovered = $0 },
-                        previewing: { PromptAttachment.sent(path: $0).url(in: home.worktree) }
+                        previewing: { home.remoteWorkspaceID == nil ? PromptAttachment.sent(path: $0).url(in: home.worktree) : nil }
                     )
                 )
                 .background { chipProbe }
@@ -252,6 +253,11 @@ struct UserTurnRowView: View {
     /// same door the composer's chips use. The model is looked up rather than passed down: the
     /// transcript is handed a session, not a workspace model, and `existingModel` only reads.
     private func open(_ path: String) {
+        if home.remoteWorkspaceID != nil {
+            app.remoteServer.openFile(path)
+            app.isInspectorVisible = true
+            return
+        }
         // No workspace is Ask Bloom, which has no review pane for a file to open into. The chip
         // still draws and still previews, which is what a path in that conversation is for.
         guard let id = home.workspaceID, let model = app.existingModel(for: id) else { return }
@@ -309,6 +315,7 @@ struct UserTurnRowView: View {
     /// This is the trailer's chips, which are laid out by SwiftUI and measure themselves, so they
     /// arrive with a window frame already in hand and need none of the timing above.
     private func preview(_ path: String, _ frame: CGRect?) {
+        guard home.remoteWorkspaceID == nil else { return }
         guard let frame else {
             withdraw()
             return

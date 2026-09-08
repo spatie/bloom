@@ -30,6 +30,7 @@ public final class ServerDaemon: Sendable {
         try await store.resetRunningSessions()
         _ = try await store.abandonPendingPermissionAsks()
         let runtime = ServerRuntime(store: store, makeRunner: makeRunner)
+        try await runtime.restoreQueuedPrompts()
         let socketPath = try socketPath(directory: directory)
         let listener = try UnixSocketListener(path: socketPath) { connection in
             Task { await serve(connection, runtime: runtime) }
@@ -52,7 +53,7 @@ public final class ServerDaemon: Sendable {
     private static func serve(_ connection: UnixSocketConnection, runtime: ServerRuntime) async {
         defer { connection.close() }
         for await line in connection.lines {
-            guard line.utf8.count <= 2_097_152,
+            guard line.utf8.count <= 16_777_216,
                   let request = try? JSONDecoder().decode(ServerRequest.self, from: Data(line.utf8)) else { return }
             // A setup script can take minutes. Keep accepting reads and Stop commands while
             // it runs, and let the runtime own mutations even after this connection closes.

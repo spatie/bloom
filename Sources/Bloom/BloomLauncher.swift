@@ -10,10 +10,6 @@ enum BloomLauncher {
         #if DEBUG
         if FlareProbe.isRequested { await FlareProbe.runAndExit() }
         #endif
-        if Bundle.main.bundleIdentifier == Store.remoteBundleIdentifier {
-            BloomRemoteApp.main()
-        } else {
-            BloomApp.main()
-        }
+        BloomApp.main()
     }
 }

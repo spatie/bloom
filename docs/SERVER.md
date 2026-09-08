@@ -14,8 +14,8 @@ moved into this server. New server workspaces can run locally or on another mach
 ### Bloom Remote verification app
 
 `make remote` builds a pinned release copy at `~/Applications/Bloom Remote.app`. It has its own
-bundle identifier, preferences, database fallback and local background service. It opens the same
-server views used by Bloom, without constructing the normal desktop workspace model. Installation
+bundle identifier, preferences, database fallback and local background service. It launches the regular
+Bloom interface, with local and remote workspaces together in its normal sidebar. Installation
 does not restart any running app.
 
 The first build can embed a connection preset. These values are connection addresses, not agent
@@ -29,11 +29,11 @@ BLOOM_REMOTE_REPOSITORY=/srv/repository \
 make remote
 ```
 
-Bloom Remote connects to the preset server on launch. The toolbar switches between **Remote
-server** and **This Mac**. **New Workspace > Create on** also chooses the destination directly.
-Local repositories have a folder picker, remote repositories use paths on that server, and each
-destination remembers its own repository path. Switching machines disconnects the client while
-agents continue on the machine that owns them.
+Bloom Remote connects to the preset server on launch. **New Workspace > Create on** chooses
+**This Mac** or the configured remote host. Local creation retains Bloom's existing flow. Remote
+creation accepts a repository path on the server or an HTTPS/SSH Git URL, clones when needed,
+creates a worktree and runs the project's setup script. Remote conversations open in the main
+window, with chat, terminal and browser panes and the normal transcript rows and text editor.
 
 ### Standalone executable
 
@@ -171,46 +171,44 @@ a system service configured with `User=developer`.
 
 Build the Mac app from the same branch. Choose **File > Connect to Server…**.
 
-- **This Mac:** choose Start Local Server. Bloom registers its bundled helper through macOS
-  ServiceManagement, connects when it is ready and keeps it available after the app closes.
-- **Existing local server:** supply the standalone server's absolute data directory.
-- **Remote machine:** supply an SSH host or alias, the absolute `bloom-server` executable path,
-  and its absolute data directory on that machine.
+Enter an SSH host or alias, the absolute `bloom-server` executable path, and its absolute data
+directory. The connection window only configures the host. Its workspaces appear in Bloom's main
+sidebar beside local projects, and the workspace title identifies the execution host.
 
 Before connecting remotely, verify ordinary SSH access in Terminal. The client requires an
 already trusted host key and non-interactive authentication, usually a key loaded into ssh-agent.
 Port, identity and jump-host configuration can live in `~/.ssh/config`. Bloom does not accept new
 host keys silently or collect SSH passwords.
 
-The managed local server starts at login. If macOS requires background approval, the connection
-window offers Open Login Items. Stop Local Server unregisters the service and stops its agents;
-Disconnect leaves them running. An incompatible running server is never silently restarted.
-Use Stop Local Server and Start Local Server when an app update requires a server restart.
-
-Managed server data lives under Application Support/Bloom Servers, in a directory named for the
-app's bundle identifier. Bloom, Bloom Dev and Bloom Subagents have distinct service labels and
-databases. The bundle preparation script generates the launch-agent plist after the development
-build has set its identity. A bare `swift build` executable cannot register a managed service;
-assemble a Bloom app bundle to use this option, or run the standalone command yourself.
-
-The app is distributed outside the Mac App Store without App Sandbox. This registration does not
-add sandbox entitlements. ServiceManagement registration must be exercised from an installed,
-signed app; the automated packaging checks do not register a service on the developer's Mac.
+The bundled `LocalServerService` can register a separate managed local runtime through
+ServiceManagement. This remains infrastructure for the eventual local migration; **This Mac** in
+the workspace picker currently uses the existing local execution path. It does not migrate an
+existing database or change the lifetime of existing local agents.
 
 The remote connection runs `bloom-server connect --data-dir ...` over SSH. That short-lived
 process relays protocol messages to the existing server's private Unix socket. It does not start
 another server or own the coding agents. No public HTTP listener or Bloom account is involved.
 
-The server window can create workspaces from repositories already on the server, run configured
-setup scripts, send prompts, read conversations and streamed text, stop turns and answer pending
-permissions and questions. Its Changes inspector shows branch or uncommitted diffs and reads
-current text files from the server, including rename and deletion diffs. Files and patches are
-limited to 2 MB; binary files have no text-file view. Each new workspace has an initial chat. Both Claude Code and Codex
-use the same implementations as the existing desktop app.
+Remote workspaces support prompts and streaming, permission answers, stopping and queued prompts,
+multiple conversations and session settings. The inspector lists files and changes, displays diffs,
+and edits UTF-8 files with a revision check that refuses overwriting newer server contents. Text
+files and diffs are limited to 2 MB. Attachments upload to ignored workspace scratch storage, and
+file previews download a copy for the Mac's existing Quick Look renderer, up to 8 MB.
+
+Install `tmux` on the server for persistent terminals. Linux runs it in the foreground under the
+Bloom server to avoid a Foundation process-wait issue with daemonising children. Closing the Mac
+app detaches the SSH terminal client; the shell and its commands keep running. Stopping the server
+service can stop its tmux process too.
+
+The Preview pane forwards localhost HTTP/HTTPS addresses over an SSH tunnel bound only to the
+Mac's loopback interface. Start the development server in the remote terminal, then open its
+address in Preview or click a localhost link in the conversation. Git controls can commit all
+changes, push the workspace branch and create a draft or regular pull request using the server's
+authenticated `gh`. Credentials remain on their respective execution host.
 
 ## Protocol and ownership
 
-`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 2). A protocol mismatch
+`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 3). A protocol mismatch
 is refused before dispatch. Commands and replies carry UUIDs, so a long setup command does not
 block transcript reads or controls on the same connection.
 
@@ -228,26 +226,34 @@ pending requests and serialised per question, so two clients cannot answer one t
 The client refreshes the catalogue every three seconds and the selected transcript every second.
 Transcript reads use sequence cursors with pages of 500 messages. Pending questions and the
 bounded live text tail are refreshed with each page. This is snapshot polling, not a push event
-subscription. On connection failure, the client requires an explicit reconnect. Connection
+subscription. On connection failure, the client reconnects automatically with a bounded backoff, retaining the
+last transcript and selected conversation. Drafts are remembered separately for each session. Connection
 generations prevent replies from an old connection replacing a new server's state.
 
 Remote transcript rendering does not resolve server file or attachment paths against the Mac's
 filesystem. File reads reject absolute paths, traversal, external symlinks and special files.
 Diff requests resolve the changed-file metadata on the server and use literal git pathspecs.
 Diff and file refreshes run separately from conversation refreshes, so a slow git command does
-not stall the transcript. File editing and attachment downloads are not implemented yet.
+not stall the transcript.
+
+Prompt delivery is durable and belongs to the server. A second prompt waits while the current
+turn runs. Stop pauses pending deliveries; sending again resumes them. Each delivery records an
+attempt before it reaches the agent. After a crash, an uncertain attempt stays visible for review
+and removal instead of being replayed. A queued prompt that was never attempted resumes when the
+server starts, even without a connected Mac.
 
 ## Remaining work
 
 1. Move the existing desktop execution path onto the standalone runtime. Preserve workspace data,
    startup, shutdown and existing bridge behaviour when migrating existing local workspaces.
 2. Add stable release downloads and installers, and broaden Linux coverage across agent backends.
-3. Add remote file editing, terminals, browser previews, attachments and the Bloom MCP
-   bridge. The server preview currently launches agents without Bloom's custom MCP tools.
-4. Share the full workspace UI across local and remote connections, add saved machine profiles,
-   model discovery, push events, prompt queues and automatic reconnect.
-5. Add a mobile web client and decide whether to operate an encrypted relay for connections that
+3. Bring Bloom's custom MCP bridge, crew/subagent management, run-script controls, archive/restore,
+   merge workflows, start-from-PR/branch controls and full pane arrangements to remote workspaces.
+4. Add saved machine profiles, remote model discovery, push events and remote transcript search.
+5. Broaden attachment limits and preview navigation across multiple forwarded origins.
+6. Add a mobile web client and decide whether to operate an encrypted relay for connections that
    should not require SSH or a VPN.
+
 
 ## Verification
 

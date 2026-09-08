@@ -29,4 +29,28 @@ public enum ServerEndpoint: Sendable, Equatable {
     private static func quote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
+
+    public func forwardLaunch(remotePort: Int, localPort: Int) throws -> AgentLaunch {
+        guard (1...65_535).contains(remotePort), (1...65_535).contains(localPort),
+              case .ssh(let host, _, _) = self, let relay = try launch else {
+            throw ServerFailure("Choose a remote port between 1 and 65535.")
+        }
+        let arguments = Array(relay.arguments.dropLast(2)) + ["-N", "-v", "-o", "ExitOnForwardFailure=yes",
+            "-L", "127.0.0.1:\(localPort):127.0.0.1:\(remotePort)", host]
+        return AgentLaunch(executable: relay.executable, arguments: arguments, cwd: relay.cwd, environment: relay.environment)
+    }
+
+    public func terminalLaunch(_ terminal: ServerTerminal) throws -> AgentLaunch {
+        guard terminal.executable.hasPrefix("/"), terminal.socket.hasPrefix("/"), !terminal.session.isEmpty else {
+            throw ServerFailure("The server returned an invalid terminal.")
+        }
+        let attach = ["-S", terminal.socket, "attach-session", "-t", "=" + terminal.session]
+        guard let relay = try launch else {
+            return AgentLaunch(executable: terminal.executable, arguments: attach, cwd: NSTemporaryDirectory(), environment: Shell.environment())
+        }
+        var arguments = relay.arguments
+        if let noTTY = arguments.firstIndex(of: "-T") { arguments[noTTY] = "-tt" }
+        arguments[arguments.count - 1] = "exec " + ([terminal.executable] + attach).map(Self.quote).joined(separator: " ")
+        return AgentLaunch(executable: relay.executable, arguments: arguments, cwd: relay.cwd, environment: relay.environment)
+    }
 }

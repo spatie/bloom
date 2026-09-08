@@ -23,6 +23,10 @@ final class ServerReviewModel {
     }
     var lines: [DiffLine] = []
     var fileText = ""
+    var fileRevision = ""
+    var showsAllFiles = false
+    var allFiles: [String] = []
+    var fileFilter = ""
     var error: String?
     var isLoading = false
     private var workspaceID: WorkspaceID?
@@ -33,6 +37,7 @@ final class ServerReviewModel {
     func reset() {
         workspaceID = nil
         files = []
+        allFiles = []
         hasReadFiles = false
         selectedPath = nil
         invalidateContent()
@@ -42,6 +47,7 @@ final class ServerReviewModel {
         generation += 1
         patch = ""
         fileText = ""
+        fileRevision = ""
         error = nil
         needsContent = true
         isLoading = selectedPath != nil
@@ -55,13 +61,18 @@ final class ServerReviewModel {
         let observed = generation
         do {
             if refreshFiles || !hasReadFiles {
+                if showsAllFiles {
+                    let listing = try await client.request(ServerRequest(.workspace(workspaceID: workspaceID, action: .files)), timeout: .seconds(25))
+                    guard generation == observed else { return }
+                    if case .files(let paths) = listing.result { allFiles = paths }
+                }
                 let reply = try await client.request(ServerRequest(.changes(workspaceID: workspaceID, scope: scope)), timeout: .seconds(25))
                 guard generation == observed else { return }
                 if case .changes(let changed) = reply.result {
                     if files != changed { needsContent = true }
                     files = changed
                     hasReadFiles = true
-                    if let selectedPath, !changed.contains(where: { $0.path == selectedPath }) {
+                    if !showsFile, let selectedPath, !changed.contains(where: { $0.path == selectedPath }) {
                         self.selectedPath = nil
                     }
                 }
@@ -75,7 +86,7 @@ final class ServerReviewModel {
             guard generation == observed else { return }
             switch reply.result {
             case .patch(let text): patch = text
-            case .file(let file): fileText = file.text
+            case .file(let file): fileText = file.text; fileRevision = file.revision
             default: break
             }
             error = nil

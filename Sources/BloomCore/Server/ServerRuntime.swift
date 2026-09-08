@@ -6,12 +6,15 @@ public actor ServerRuntime {
     public typealias RunnerFactory = @Sendable (Session, String, Store) -> any SessionRunner
     private let store: Store
     private let makeRunner: RunnerFactory
+    private let repositories = ServerRepositoryResolver()
+    private let terminals = ServerTerminalService()
     private var sessions: [SessionID: ServerSession] = [:]
     private var creating: [SessionID: Task<ServerSession, Error>] = [:]
     private var commands: [UUID: Task<ServerReply, Never>] = [:]
     private var commandOperations: [UUID: ServerOperation] = [:]
     private var stopping: [SessionID: Int] = [:]
     private var isClosed = false
+    private var promptQueue: ServerPromptQueue?
 
     public init(store: Store, makeRunner: @escaping RunnerFactory = { session, path, store in
         SessionRunnerFactory.make(session: session, workspacePath: path, store: store)
@@ -19,6 +22,18 @@ public actor ServerRuntime {
         self.store = store
         self.makeRunner = makeRunner
     }
+
+    private func queue() -> ServerPromptQueue {
+        if let promptQueue { return promptQueue }
+        let queue = ServerPromptQueue(store: store) { [weak self] id in
+            guard let self else { throw ServerFailure("The server is shutting down.") }
+            return try await self.liveSession(id)
+        }
+        promptQueue = queue
+        return queue
+    }
+
+    public func restoreQueuedPrompts() async throws { try await queue().restore() }
 
     public func respond(to request: ServerRequest) async -> ServerReply {
         guard request.version == ServerRequest.protocolVersion else {
@@ -90,11 +105,12 @@ public actor ServerRuntime {
             guard request.agent.canRunWorkspaces else { throw ServerFailure("This agent backend is not supported.") }
             guard !request.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   !request.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  request.repositoryPath.hasPrefix("/") else {
-                throw ServerFailure("Enter a workspace name, model and an absolute repository path on the server.")
+                  !request.repositoryPath.isEmpty else {
+                throw ServerFailure("Enter a workspace name, model and repository path or Git URL.")
             }
             let manager = WorkspaceManager(store: store)
-            let repo = try await manager.addRepository(at: request.repositoryPath)
+            let path = try await repositories.resolve(request.repositoryPath, dataDirectory: URL(fileURLWithPath: store.path).deletingLastPathComponent())
+            let repo = try await manager.addRepository(at: path)
             let started = try await manager.start(WorkspaceStartRequest(
                 repo: repo, prompt: request.name, origin: .user, name: request.name,
                 controls: ComposerControls(
@@ -109,21 +125,51 @@ public actor ServerRuntime {
             let session = try await storedSession(id)
             let live = sessions[id]
             try await live?.refreshState(store: store, sessionID: id)
+            let queued = try await queue().snapshot(id)
             return .transcript(ServerTranscript(
                 session: session,
                 messages: try await store.messages(sessionID: id, afterSeq: afterSeq, limit: 500),
                 pendingQuestions: try await store.pendingPermissionAsks(sessionID: id).map { $0.ask.raw },
                 isBusy: await live?.isBusy ?? false,
-                streamingText: await live?.streamingText ?? ""
+                streamingText: await live?.streamingText ?? "",
+                permissionDecisions: try await store.permissionAskDecisions(sessionID: id),
+                queuedPrompts: queued.0, queueError: queued.1
             ))
+        case .workspace(let id, let action):
+            return try await ServerWorkspaceOperations.perform(action, workspace: workspace(id), store: store, terminals: terminals)
+        case .configure(let id, let model, let effort, let permissionMode):
+            guard !model.isEmpty else { throw ServerFailure("Choose a model.") }
+            guard stopping[id] == nil else { throw ServerFailure("This session is being changed. Try again shortly.") }
+            stopping[id] = 1
+            defer { stopping.removeValue(forKey: id) }
+            for (commandID, operation) in commandOperations {
+                if case .send(let target, _) = operation, target == id { _ = await commands[commandID]?.value }
+            }
+            let queued = try await queue().snapshot(id)
+            guard queued.0.isEmpty else { throw ServerFailure("Wait for queued messages before changing settings.") }
+            if let live = sessions[id] {
+                try await live.refreshState(store: store, sessionID: id)
+                guard await !live.isBusy else { throw ServerFailure("Stop the current turn before changing its settings.") }
+                await live.shutdown()
+                sessions.removeValue(forKey: id)
+            }
+            _ = try await store.update(sessionID: id) {
+                $0.model = model
+                $0.effort = effort
+                $0.permissionMode = permissionMode
+            }
+            return .accepted
         case .send(let id, let text):
             guard stopping[id] == nil else { throw ServerFailure("This session is being stopped.") }
             let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !body.isEmpty, body.utf8.count <= 1_048_576 else { throw ServerFailure("The prompt is empty or too large.") }
-            let live = try await liveSession(id)
-            try await live.refreshState(store: store, sessionID: id)
-            guard stopping[id] == nil else { throw ServerFailure("This session is being stopped.") }
-            try await live.send(body)
+            let session = try await storedSession(id)
+            guard let workspaceID = session.workspaceID else { throw ServerFailure("This session has no workspace.") }
+            _ = try await workspace(workspaceID)
+            try await queue().enqueue(body, sessionID: id)
+            return .accepted
+        case .cancelQueued(let id, let deliveryID):
+            try await queue().cancel(deliveryID, sessionID: id)
             return .accepted
         case .changes(let id, let scope):
             return .changes(try await ServerReview.changes(workspace: workspace(id), scope: scope))
@@ -146,6 +192,7 @@ public actor ServerRuntime {
             }
             for send in sends { _ = await send.value }
             _ = try await storedSession(id)
+            try await queue().pause(id)
             await sessions[id]?.stop()
             return .accepted
         case .answer(let id, let requestID, let answer):
@@ -205,6 +252,8 @@ public actor ServerRuntime {
         isClosed = true
         let runningCommands = Array(commands.values)
         for command in runningCommands { command.cancel() }
+        await promptQueue?.shutdown()
+        await terminals.shutdown()
         let liveSessions = Array(sessions.values)
         await withTaskGroup(of: Void.self) { group in
             for session in liveSessions { group.addTask { await session.shutdown() } }

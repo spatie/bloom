@@ -2,7 +2,7 @@ import Foundation
 
 /// Versioned values cross the connection; database handles and local file URLs never do.
 public struct ServerRequest: Codable, Sendable, Equatable {
-    public static let protocolVersion = 2
+    public static let protocolVersion = 3
     public var version: Int
     public var id: UUID
     public var operation: ServerOperation
@@ -22,14 +22,18 @@ public enum ServerOperation: Codable, Sendable, Equatable {
     case changes(workspaceID: WorkspaceID, scope: ServerDiffScope)
     case patch(workspaceID: WorkspaceID, path: String, scope: ServerDiffScope)
     case file(workspaceID: WorkspaceID, path: String)
+    case workspace(workspaceID: WorkspaceID, action: ServerWorkspaceAction)
+    case configure(sessionID: SessionID, model: String, effort: String, permissionMode: PermissionMode)
     case send(sessionID: SessionID, text: String)
+    case cancelQueued(sessionID: SessionID, deliveryID: DeliveryID)
     case stop(sessionID: SessionID)
     case answer(sessionID: SessionID, requestID: String, answer: ServerAnswer)
 
     var mutates: Bool {
         switch self {
         case .hello, .catalogue, .transcript, .changes, .patch, .file: false
-        case .create, .send, .stop, .answer: true
+        case .create, .send, .stop, .answer, .configure, .cancelQueued: true
+        case .workspace(_, let action): action.mutates
         }
     }
 }
@@ -58,12 +62,16 @@ public struct ServerWorkspaceRequest: Codable, Sendable, Equatable {
 
 public enum ServerAnswer: Codable, Sendable, Equatable {
     case allowOnce
+    case allowSession
+    case allowProject
     case deny
     case question(input: JSONValue)
 
     var decision: PermissionDecision {
         switch self {
         case .allowOnce: .allow(scope: .once)
+        case .allowSession: .allow(scope: .session)
+        case .allowProject: .allow(scope: .project)
         case .deny: .deny(message: PermissionDecision.defaultDenyMessage, endsTurn: false)
         case .question(let input): .answer(input: input)
         }
@@ -89,6 +97,10 @@ public enum ServerResult: Codable, Sendable {
     case changes([ChangedFile])
     case patch(String)
     case file(ServerTextFile)
+    case files([String])
+    case text(String)
+    case download(ServerDownload)
+    case terminal(ServerTerminal)
     case accepted
     case failure(String)
 }
@@ -103,6 +115,13 @@ public enum ServerDiffScope: String, Codable, Sendable, CaseIterable {
 public struct ServerTextFile: Codable, Sendable {
     public var path: String
     public var text: String
+    public var revision: String
+
+    public init(path: String, text: String) {
+        self.path = path
+        self.text = text
+        revision = ServerFileOperations.revision(Data(text.utf8))
+    }
 }
 
 public struct ServerCatalogue: Codable, Sendable {
@@ -117,6 +136,9 @@ public struct ServerTranscript: Codable, Sendable {
     public var pendingQuestions: [Data]
     public var isBusy: Bool
     public var streamingText: String
+    public var permissionDecisions: [String: String]
+    public var queuedPrompts: [ServerQueuedPrompt]
+    public var queueError: String?
 }
 
 struct ServerCommandRecord: Codable {

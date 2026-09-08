@@ -107,7 +107,7 @@ struct ServerRuntimeTests {
         async let second = runtime.respond(to: request)
         let replies = await [first, second]
         for reply in replies { #expect(reply.isAccepted) }
-        #expect(await fixture.runner.sends == ["First turn"])
+        await waitUntil("queued retry is delivered once") { await fixture.runner.sends == ["First turn"] }
 
         let changed = await runtime.respond(to: ServerRequest(.stop(sessionID: fixture.session.id), id: request.id))
         #expect(changed.failure?.contains("reused") == true)
@@ -121,9 +121,11 @@ struct ServerRuntimeTests {
         async let first = runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "One")))
         async let second = runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "Two")))
         let replies = await [first, second]
-        #expect(replies.filter(\.isAccepted).count == 1)
-        #expect(replies.contains { $0.failure?.contains("busy") == true })
-        #expect(await fixture.runner.sends.count == 1)
+        #expect(replies.allSatisfy { $0.isAccepted })
+        await waitUntil("first queued turn starts") { await fixture.runner.sends.count == 1 }
+        #expect(try await fixture.store.pendingDeliveries(sessionID: fixture.session.id).count >= 1)
+        await fixture.runner.finish()
+        await waitUntil("second turn runs after the first finishes") { await fixture.runner.sends.count == 2 }
         await runtime.shutdown()
     }
 
@@ -148,7 +150,7 @@ struct ServerRuntimeTests {
             return false
         }
         _ = try await second.request(ServerRequest(.send(sessionID: fixture.session.id, text: "Continue")))
-        #expect(await runner.sends == ["Keep working", "Continue"])
+        await waitUntil("continued prompt is delivered") { await runner.sends == ["Keep working", "Continue"] }
         await second.disconnect()
         await daemon.shutdown()
         #expect(runner.terminated.withLock { $0 })
@@ -160,11 +162,12 @@ struct ServerRuntimeTests {
         let request = ServerRequest(.send(sessionID: fixture.session.id, text: "Do this once"))
         let reply = await first.respond(to: request)
         #expect(reply.isAccepted)
+        await waitUntil("original turn starts") { await fixture.runner.sends.count == 1 }
         await first.shutdown()
         let second = fixture.runtime()
         let replay = await second.respond(to: request)
         #expect(replay.isAccepted)
-        #expect(await fixture.runner.sends.count == 1)
+        await waitUntil("accepted prompt is delivered") { await fixture.runner.sends.count == 1 }
         await second.shutdown()
     }
 
@@ -215,6 +218,7 @@ struct ServerRuntimeTests {
         let attributes = try FileManager.default.attributesOfItem(atPath: first.socketPath)
         #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
         _ = await first.runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "Working")))
+        await waitUntil("first server owns an active turn") { (try? await fixture.store.session(id: fixture.session.id)?.state) == .running }
         do {
             _ = try await ServerDaemon.start(directory: directory)
             Issue.record("A second server acquired the same data directory")
@@ -233,13 +237,14 @@ struct ServerRuntimeTests {
         fixture.runner.emitsStopResult.withLock { $0 = false }
         let runtime = fixture.runtime()
         _ = await runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "First")))
+        await waitUntil("first prompt starts before stopping") { await fixture.runner.sends.count == 1 }
         _ = await runtime.respond(to: ServerRequest(.stop(sessionID: fixture.session.id)))
         await waitUntil("cancelled state is stored") {
             (try? await fixture.store.session(id: fixture.session.id)?.state) == .cancelled
         }
         let second = await runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "Second")))
         #expect(second.isAccepted)
-        #expect(await fixture.runner.sends == ["First", "Second"])
+        await waitUntil("second prompt resumes the queue") { await fixture.runner.sends == ["First", "Second"] }
         await runtime.shutdown()
     }
 
@@ -253,6 +258,34 @@ struct ServerRuntimeTests {
         #expect(stopped.isAccepted)
         #expect(sent.isAccepted)
         #expect(fixture.runner.stops.withLock { $0 } == 1)
+        await runtime.shutdown()
+    }
+
+    @Test func queuedPromptsRestoreWithoutAConnectedClient() async throws {
+        let fixture = try await ServerFixture()
+        _ = try await fixture.store.enqueueDelivery(Delivery(targetSessionID: fixture.session.id, body: "Stored before restart"))
+        let runtime = fixture.runtime()
+        try await runtime.restoreQueuedPrompts()
+        await waitUntil("server restores pending delivery") { await fixture.runner.sends == ["Stored before restart"] }
+        await runtime.shutdown()
+    }
+
+    @Test func uncertainQueuedDeliveryRequiresReviewAndCanBeRemoved() async throws {
+        let fixture = try await ServerFixture()
+        let delivery = Delivery(targetSessionID: fixture.session.id, body: "Possibly already sent")
+        _ = try await fixture.store.enqueueDelivery(delivery)
+        try await fixture.store.setSetting("server.delivery." + delivery.id.rawValue, "started")
+        let runtime = fixture.runtime()
+        try await runtime.restoreQueuedPrompts()
+        await waitUntil("uncertain delivery is held") {
+            let reply = await runtime.respond(to: ServerRequest(.transcript(sessionID: fixture.session.id, afterSeq: -1)))
+            if case .transcript(let value) = reply.result { return value.queueError != nil && value.queuedPrompts.count == 1 }
+            return false
+        }
+        #expect(await fixture.runner.sends.isEmpty)
+        let cancelled = await runtime.respond(to: ServerRequest(.cancelQueued(sessionID: fixture.session.id, deliveryID: delivery.id)))
+        #expect(cancelled.isAccepted)
+        #expect(try await fixture.store.pendingDeliveries(sessionID: fixture.session.id).isEmpty)
         await runtime.shutdown()
     }
 

@@ -21,7 +21,7 @@ jobs:
       - name: Install system dependencies
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends libsqlite3-dev pkg-config git python3 patchelf
+          apt-get install -y --no-install-recommends libsqlite3-dev pkg-config git python3 patchelf tmux
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global user.name "Bloom tests"
           git config --global user.email "tests@runbloom.app"

@@ -105,7 +105,7 @@ struct RootView: View {
                     // column. Nothing it could reach was taken away with the field, which is the
                     // whole point of relocating it rather than replacing it. See `SearchPanelView`
                     // for the card and `SearchToolbarButton` for the glyph.
-                    .onChange(of: app.selectedWorkspace != nil, initial: true) { _, available in
+                    .onChange(of: app.selectedWorkspace != nil || app.selection.remoteSessionID != nil, initial: true) { _, available in
                         InspectorGeometry.shared.setWorkspaceAvailable(available)
                     }
             }
@@ -157,7 +157,12 @@ struct RootView: View {
             }
             .animation(reduceMotion ? nil : Motion.pane, value: app.notice)
 
-            .task { await app.bootstrap() }
+            .task {
+                await app.bootstrap()
+                await app.remoteServer.maintainConnection()
+            }
+            .task(id: app.remoteServer.connectionGeneration) { await app.remoteServer.poll() }
+            .task(id: app.remoteServer.connectionGeneration) { await app.remoteServer.pollReview() }
             // The install ping. Started from here because this is the first moment there is a window
             // and a model, and it keeps a loop of its own from then on rather than living inside this
             // task: Bloom goes on running with its window closed, and a view's task does not. It waits

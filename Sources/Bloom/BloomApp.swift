@@ -207,7 +207,7 @@ struct BloomApp: App {
             BloomCommands(model: model)
         }
 
-        ServerWindow()
+        ServerWindow(model: model)
 
         Settings {
             SettingsView()

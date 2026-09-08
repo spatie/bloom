@@ -213,6 +213,37 @@ struct SidebarView: View {
             // drag image, the autoscroll at the pane's edges, the snap back on a cancel and the
             // settle on drop are all AppKit's, and none of it is drawn here.
             .onMove(perform: move)
+            if let catalogue = app.remoteServer.catalogue {
+                Section {
+                    ForEach(catalogue.workspaces) { workspace in
+                        if let session = catalogue.sessions.first(where: { $0.workspaceID == workspace.id && $0.id == app.selection.remoteSessionID })
+                            ?? catalogue.sessions.first(where: { $0.workspaceID == workspace.id }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "server.rack").foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(workspace.name).lineLimit(1)
+                                    Text(session.state.rawValue.capitalized).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                                if session.state == .running { ProgressView().controlSize(.mini) }
+                            }
+                            .tag(SidebarSelection.remote(session.id))
+                            .listRowBackground(selectionFill(for: .remote(session.id)))
+                            .help("\(workspace.name) on \(app.remoteServer.serverName)")
+                        }
+                    }
+                } header: {
+                    Text(app.remoteServer.serverName)
+                }
+            } else if !app.remoteServer.host.isEmpty {
+                Button {
+                    Task { await app.remoteServer.connect() }
+                } label: {
+                    Label(app.remoteServer.isConnecting ? "Connecting to server…" : "Reconnect to server", systemImage: "server.rack")
+                }
+                .disabled(app.remoteServer.isConnecting)
+                .selectionDisabled()
+            }
         }
         // The list draws its own row height, and that is left to it. Its selection is not.
         //
