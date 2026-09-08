@@ -30,12 +30,15 @@ extension Git {
     ///   shortcut worth taking anywhere: `worktree add -b` on a branch that does exist fails with
     ///   git's own words rather than doing something quiet and wrong, so a caller that gets this
     ///   backwards finds out immediately.
+    /// - Parameter previousPath: a stale worktree retained during archiving. Prune its
+    ///   registration before restoring its branch if it is the sole holder and unlocked.
     public static func addWorktree(
         repo: String,
         path: String,
         branch: String,
         base: String,
-        branchIsNew: Bool? = nil
+        branchIsNew: Bool? = nil,
+        replacingPrunableWorktreeAt previousPath: String? = nil
     ) async throws {
         try validate(branch: branch)
         try validate(ref: base, label: "base branch")
@@ -46,6 +49,18 @@ extension Git {
 
         let exists = if let branchIsNew { !branchIsNew } else { await branchExists(branch, in: repo) }
         if exists {
+            if let previousPath {
+                let holders = try await worktrees(of: repo).filter { $0.branch == branch }
+                // A retained, stale registration must not block restoration at a new path.
+                // Let Git prune obsolete registrations. This keeps their files and branches,
+                // respects locks, and leaves the restored branch free to be archived again.
+                if holders.count == 1, let holder = holders.first,
+                   URL(fileURLWithPath: holder.path).resolvingSymlinksInPath()
+                    == URL(fileURLWithPath: previousPath).resolvingSymlinksInPath(),
+                   holder.isPrunable, !holder.isLocked {
+                    try await check(["worktree", "prune"], in: repo)
+                }
+            }
             try await check(["worktree", "add", "--", path, branch], in: repo)
         } else {
             try await check(["worktree", "add", "-b", branch, "--", path, base], in: repo)

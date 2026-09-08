@@ -101,7 +101,7 @@ public struct WorkspaceSafetyReport: Sendable, Hashable {
 
     /// Archiving only updates the record when this folder is no longer a checkout.
     /// Its files, branch and Git metadata are kept, and the archive script is skipped.
-    public var preservedFolderPath: String? = nil
+    public var preservedFolderPath: String?
 
     public init(
         hasUncommittedChanges: Bool = false,
