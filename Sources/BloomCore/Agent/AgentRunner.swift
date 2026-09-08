@@ -232,6 +232,9 @@ public actor AgentRunner {
             "--include-partial-messages",
             "--verbose",
             "--permission-mode", session.permissionMode.cliValue,
+            // Makes Bypass selectable on plan approval without enabling it during planning.
+            // Without this flag the CLI silently ignores a later setMode to bypassPermissions.
+            "--allow-dangerously-skip-permissions",
             // Always on, and this is the argument for it. Without it the CLI answers permission
             // questions on the user's behalf and the answer is no, which is every `permission-rule`
             // refusal in every transcript. With it the CLI stops deciding and asks.
@@ -496,6 +499,13 @@ public actor AgentRunner {
     /// Persist one event, apply whatever it says about the session, then hand it to the UI.
     /// Internal rather than private so tests can exercise persistence without a process.
     func ingest(_ event: AgentEvent) async {
+        var event = event
+        if case .permissionAsk(let ask) = event, ask.isPlanApproval {
+            let mode = (try? await store.planImplementationMode(
+                sessionID: session.id, hasWorktree: session.workspaceID != nil
+            )) ?? .acceptEdits
+            event = .permissionAsk(PlanApproval.preparing(ask, mode: mode))
+        }
         // A result for a turn Bloom never asked for closes nothing, and it is dropped here rather
         // than further down because every reader of a result treats one as a turn boundary: the
         // footer, the token counts, `SessionLifecycle`, and the drain that starts the next queued
@@ -746,6 +756,23 @@ public actor AgentRunner {
     /// unblocks a turn already in flight. The two share only the pipe.
     public func answer(requestID: String, decision: PermissionDecision) async {
         guard let ask = pending.take(requestID) else { return }
+
+        if case .approvePlan(let mode) = decision {
+            guard ask.isPlanApproval, PlanApproval.modes.contains(mode) else {
+                pending.add(ask)
+                return
+            }
+            // Save before unblocking: the permissionDecided event reloads the composer, and a
+            // resumed process must start in the mode the person just approved.
+            do {
+                try await store.updateSessionPreferences(id: session.id, permissionMode: mode)
+                session.permissionMode = mode
+            } catch {
+                pending.add(ask)
+                await report("could not save implementation permissions", error)
+                return
+            }
+        }
 
         await write(answerTo: ask, decision: decision)
         await close(ask, as: decision.storedName, note: "")

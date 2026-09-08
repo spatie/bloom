@@ -84,7 +84,13 @@ struct PermissionAskRowView: View {
             header
             command
             if isOpen {
-                if isWritingReason { reasonBox } else { actions }
+                if isWritingReason {
+                    reasonBox
+                } else if ask.isPlanApproval {
+                    planActions
+                } else {
+                    actions
+                }
             } else {
                 outcome
             }
@@ -168,7 +174,13 @@ struct PermissionAskRowView: View {
     /// see `TranscriptLayout.codeLeading`. It costs nothing here, because nothing is capped.
     @ViewBuilder
     private var command: some View {
-        if !ask.subject.isEmpty {
+        if ask.isPlanApproval, isOpen, let plan = ask.input["plan"]?.stringValue, !plan.isEmpty {
+            Text(plan)
+                .font(Typo.label)
+                .foregroundStyle(Palette.textPrimary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if !ask.subject.isEmpty {
             HStack(alignment: .top, spacing: TranscriptLayout.glyphGap) {
                 Text(ask.subject)
                     .font(ask.subjectIsCode ? Typo.codeSmall : Typo.label)
@@ -297,6 +309,45 @@ struct PermissionAskRowView: View {
         }
     }
 
+    private var planActions: some View {
+        let mode = PlanApproval.implementationMode(ask.implementationMode ?? .acceptEdits)
+        return VStack(alignment: .leading, spacing: Metrics.spacing) {
+            Text("Implementation permissions: \(mode.label)")
+                .font(Typo.labelEmphasis)
+                .foregroundStyle(Palette.textPrimary)
+            Text(mode.summary(on: .claudeCode))
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Metrics.spacing) { planButtons(mode: mode) }
+                VStack(alignment: .leading, spacing: Metrics.spacing) { planButtons(mode: mode) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func planButtons(mode: PermissionMode) -> some View {
+        Button("Approve and implement") { onAnswer(.approvePlan(mode: mode)) }
+            .buttonStyle(.borderedProminent)
+            .tint(Palette.controlAccent)
+            .keyboardShortcut(.return, modifiers: .command)
+        Menu("Other permissions") {
+            ForEach(PlanApproval.modes.filter { $0 != mode }, id: \.self) { alternative in
+                Button("Approve with \(alternative.label)") { onAnswer(.approvePlan(mode: alternative)) }
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        Button("Keep planning") {
+            onAnswer(.deny(message: PlanApproval.keepPlanningMessage, endsTurn: false))
+        }
+        .buttonStyle(.bordered)
+        Button("Give feedback…") { isWritingReason = true }
+            .buttonStyle(.borderless)
+    }
+
     /// The rule, in the CLI's spelling, and what each button would do with it. Printed rather than
     /// hidden behind a hover, because a scope nobody read is a scope nobody chose.
     private var scopeLine: some View {
@@ -377,6 +428,7 @@ struct PermissionAskRowView: View {
     // MARK: Copy
 
     private var title: String {
+        if ask.isPlanApproval { return isOpen ? "Ready to implement the plan" : "Plan review" }
         let verb = ask.toolName == "Bash" ? "run a command" : "use \(ask.label)"
         return isOpen ? "The agent is asking to \(verb)" : "The agent asked to \(verb)"
     }
@@ -384,6 +436,9 @@ struct PermissionAskRowView: View {
     /// Follows `SetupDiagnosis`: a real sentence when there is one, and nothing rather than
     /// filler when there is not.
     private func outcomeText(_ decision: String) -> String {
+        if let mode = PlanApproval.approvedMode(storedDecision: decision) {
+            return "Plan approved. Implementation permissions: \(mode.label)."
+        }
         // A rule answered it. Naming the rule is what makes the grant reviewable: a call that ran
         // because of a decision made days ago must not look like a call that simply ran.
         if !note.isEmpty { return note }

@@ -13,7 +13,7 @@ struct ComposerSessionEditor {
     /// the session list is kept in step with edits made here.
     var model: WorkspaceModel?
 
-    func apply(_ change: (inout Session) -> Void) {
+    func apply(implementationMode: PermissionMode? = nil, _ change: (inout Session) -> Void) {
         var session = transcript.session
         change(&session)
         session.updatedAt = Date.now
@@ -31,6 +31,7 @@ struct ComposerSessionEditor {
                 model: session.model,
                 effort: session.effort,
                 permissionMode: session.permissionMode,
+                implementationMode: implementationMode,
                 agentKind: session.agentKind
             )
         }

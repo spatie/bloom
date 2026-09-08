@@ -164,6 +164,8 @@ public struct PermissionAsk: Sendable, Hashable, Identifiable {
     /// A safety check somewhere in the reason says at least one part needs a person. False is the
     /// alarming value: it means manual approval is required.
     public var classifierApprovable: Bool?
+    /// Bloom's implementation choice, attached before this plan approval reaches the transcript.
+    public var implementationMode: PermissionMode?
     /// The whole line, so nothing is lost and a pending ask can be rebuilt from the database.
     public var raw: Data
 
@@ -183,6 +185,7 @@ public struct PermissionAsk: Sendable, Hashable, Identifiable {
         suppressesAlwaysAllow: Bool = false,
         requiresUserInteraction: Bool = false,
         classifierApprovable: Bool? = nil,
+        implementationMode: PermissionMode? = nil,
         raw: Data = Data()
     ) {
         self.requestID = requestID
@@ -198,6 +201,7 @@ public struct PermissionAsk: Sendable, Hashable, Identifiable {
         self.suppressesAlwaysAllow = suppressesAlwaysAllow
         self.requiresUserInteraction = requiresUserInteraction
         self.classifierApprovable = classifierApprovable
+        self.implementationMode = implementationMode
         self.raw = raw
     }
 
@@ -246,6 +250,8 @@ public struct PermissionAsk: Sendable, Hashable, Identifiable {
     /// `AgentQuestionnaire` and `AgentQuestionCard`.
     public var isQuestion: Bool { AgentQuestionnaire.isQuestion(toolName: toolName) }
 
+    public var isPlanApproval: Bool { toolName == "ExitPlanMode" }
+
     /// Whether a scope wider than this one call can honestly be offered.
     ///
     /// Three of the four ways it can be false are the CLI's own judgement rather than Bloom's
@@ -259,7 +265,7 @@ public struct PermissionAsk: Sendable, Hashable, Identifiable {
     /// second lock on a door that is already shut; it is here because the cost of that flag ever
     /// being absent is silent, and this makes it a state that cannot be reached instead.
     public var canWiden: Bool {
-        !isQuestion && !rules.isEmpty && !suppressesAlwaysAllow && !requiresUserInteraction
+        !isQuestion && !isPlanApproval && !rules.isEmpty && !suppressesAlwaysAllow && !requiresUserInteraction
     }
 
     /// The one thing worth putting beside the tool name in a collapsed row: the command for a
@@ -319,6 +325,7 @@ public struct PermissionAsk: Sendable, Hashable, Identifiable {
             suppressesAlwaysAllow: request["suppress_always_allow_rule"]?.boolValue ?? false,
             requiresUserInteraction: request["requires_user_interaction"]?.boolValue ?? false,
             classifierApprovable: request["classifier_approvable"]?.boolValue,
+            implementationMode: json["bloom_implementation_mode"]?.stringValue.flatMap(PermissionMode.init(rawValue:)),
             raw: raw
         )
     }
@@ -379,6 +386,8 @@ public enum PermissionDecision: Sendable, Hashable {
     /// which it is dealing with. Only `AskUserQuestion` produces one, and it is always `once`:
     /// there is no rule that could make the next question not need answering.
     case answer(input: JSONValue)
+    /// One plan approval, with an explicit implementation mode. Never a remembered tool rule.
+    case approvePlan(mode: PermissionMode)
     /// Refuse, in the user's own words, and optionally end the turn there.
     case deny(message: String, endsTurn: Bool)
 
@@ -404,7 +413,7 @@ public enum PermissionDecision: Sendable, Hashable {
     /// allow: the tool runs, with the reply in its input.
     public var isAllow: Bool {
         switch self {
-        case .allow, .answer: true
+        case .allow, .answer, .approvePlan: true
         case .deny: false
         }
     }
@@ -416,6 +425,7 @@ public enum PermissionDecision: Sendable, Hashable {
         case .allow(.session): "allowed for the session"
         case .allow(.project): "always allowed"
         case .answer: "answered"
+        case .approvePlan: "approved for implementation"
         case .deny: "denied"
         }
     }
@@ -426,6 +436,7 @@ public enum PermissionDecision: Sendable, Hashable {
         switch self {
         case .allow(let scope): "allow-\(scope.rawValue)"
         case .answer: "answered"
+        case .approvePlan(let mode): "approve-plan-\(mode.rawValue)"
         case .deny(_, let endsTurn): endsTurn ? "deny-stop" : "deny"
         }
     }
@@ -445,6 +456,19 @@ public enum PermissionAnswer {
         var response: [String: JSONValue] = [:]
 
         switch decision {
+        case .approvePlan(let mode):
+            guard ask.isPlanApproval, PlanApproval.modes.contains(mode) else {
+                throw PlanApprovalError.invalidDecision
+            }
+            response["behavior"] = .string("allow")
+            response["updatedInput"] = ask.input
+            response["updatedPermissions"] = .array([.object([
+                "type": .string("setMode"),
+                "mode": .string(mode.cliValue),
+                "destination": .string("session"),
+            ])])
+            response["decision"] = .string("user_temporary")
+
         case .answer(let input):
             // The one case that edits the input, and it edits it by adding the reply the tool
             // asked for. Nothing is remembered: a question answered once says nothing about the

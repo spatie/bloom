@@ -550,6 +550,7 @@ final class TranscriptModel {
         model: String? = nil,
         effort: String? = nil,
         permissionMode: PermissionMode? = nil,
+        implementationMode: PermissionMode? = nil,
         agentKind: AgentKind? = nil
     ) async {
         guard let store else { return }
@@ -559,6 +560,7 @@ final class TranscriptModel {
             model: model,
             effort: effort,
             permissionMode: permissionMode,
+            implementationMode: implementationMode,
             agentKind: agentKind
         )
         await refreshSession()
@@ -1593,6 +1595,12 @@ final class TranscriptModel {
     /// buttons stop being pressable the moment one of them is, and a slow store cannot leave two
     /// answers on their way to the same question.
     func answer(requestID: String, decision: PermissionDecision) async {
+        if case .approvePlan = decision {
+            // Saving the implementation mode can fail. Keep the card answerable until the
+            // runner confirms it, rather than showing a settled plan above a blocked agent.
+            await runner?.answer(requestID: requestID, decision: decision)
+            return
+        }
         settle(PermissionResolution(requestID: requestID, decision: decision.storedName))
         refreshAwaitingPermission()
         await runner?.answer(requestID: requestID, decision: decision)
