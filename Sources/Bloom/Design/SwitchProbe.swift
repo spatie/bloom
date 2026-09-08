@@ -26,6 +26,12 @@ enum SwitchProbe {
     private static let harness = ProbeHarness(subject: "switch")
 
     static var isRequested: Bool { harness.isRequested }
+    private static var sidebarSelection: Binding<SidebarSelection?>?
+
+    static func attachSidebarSelection(_ selection: Binding<SidebarSelection?>?) {
+        guard isRequested, driver == "sidebar" else { return }
+        sidebarSelection = selection
+    }
 
     // MARK: - Arguments
 
@@ -153,16 +159,23 @@ enum SwitchProbe {
             Data("SWITCH \(name) \(Date().timeIntervalSince1970)\n".utf8)
         )
 
+        var sidebarFrames: FrameRecorder?
         switch driver {
         case "click": await click(row: id, contentView: contentView)
+        case "sidebar": sidebarFrames = selectSidebar(row: id, contentView: contentView)
         default: app.selection = .workspace(id)
         }
 
         // Long enough for everything a switch starts to land, including `gh`.
         try? await Task.sleep(for: .milliseconds(settle))
         PaneLayoutTiming.isEnabled = false
+        sidebarFrames?.stop()
 
         return [
+            "sidebarHighlightedBeforeActivation": sidebarFrames.map {
+                .bool($0.widths.contains(1) && $0.widths.contains(2))
+            } ?? .null,
+
             "workspace": .string(id.rawValue),
             "name": .string(name),
             // Where the switch left the reader, which is the whole of what "it did not keep my
@@ -306,8 +319,12 @@ enum SwitchProbe {
         var flips: [JSONValue] = []
         for step in 0..<8 {
             let target = step.isMultiple(of: 2) ? first : second
-            app.selection = .workspace(target)
-            try? await Task.sleep(for: .milliseconds(120))
+            if driver == "sidebar" {
+                selectSidebar(row: target, contentView: contentView)?.stop()
+            } else {
+                app.selection = .workspace(target)
+            }
+            try? await Task.sleep(for: .milliseconds(driver == "sidebar" ? 2 : 120))
             flips.append(.object(["step": .integer(step), "selected": .string(target.rawValue)]))
         }
 
@@ -350,6 +367,19 @@ enum SwitchProbe {
     /// row too, and so is Home, so an index would be a guess that a reordered sidebar breaks
     /// silently. The name comes off the row's accessibility label, which is the same string
     /// VoiceOver reads.
+    /// Drive the same binding the native List writes, without moving the pointer or focusing
+    /// this test app. Display ticks must see the new highlight before the centre model changes.
+    private static func selectSidebar(row id: WorkspaceID, contentView: NSView) -> FrameRecorder? {
+        guard let app = ProbeHarness.appModel, let sidebarSelection else { return nil }
+        let frames = FrameRecorder(view: contentView) {
+            guard sidebarSelection.wrappedValue == .workspace(id) else { return 0 }
+            return app.selection.workspaceID == id ? 2 : 1
+        }
+        frames.start()
+        sidebarSelection.wrappedValue = .workspace(id)
+        return frames
+    }
+
     private static func click(row id: WorkspaceID, contentView: NSView) async {
         guard let app = ProbeHarness.appModel else { return }
         guard let window = contentView.window,
