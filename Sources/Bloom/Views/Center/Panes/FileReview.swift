@@ -15,11 +15,22 @@ import BloomCore
 enum FileReview {
     /// Opens the workspace's review on a file, or points the open one at it.
     static func open(path: String, in model: WorkspaceModel) {
+        show(path: path, in: model, focusing: false)
+    }
+
+    /// The one door, with the one thing the two callers disagree about.
+    ///
+    /// `focusing` is false for a filename clicked in the inspector, because the reader's attention
+    /// is over there and moving the pane focus under them would take the keyboard off the list
+    /// they are walking. It is true for the routes that name no file, which are the `+` menu and
+    /// the keyboard: those are somebody asking to BE in the review, and a request that lands on a
+    /// pane nobody is standing in looks exactly like a menu item that does nothing.
+    private static func show(path: String, in model: WorkspaceModel, focusing: Bool) {
         let tab = CenterTabStore.shared.showReview(path: path, workspaceID: model.workspace.id)
         // `reveal` brings the tab holding the review forward and takes nothing off a pane, so the
         // rule above is kept by the door rather than by a guard here. A review already on screen
         // is already on screen, whichever pane of the tab in front is showing it.
-        WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
+        WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model, focusing: focusing)
     }
 
     /// Opens a file in a tab that stays on it, which is what a double click on a file pill and
@@ -37,10 +48,19 @@ enum FileReview {
     /// Opens the review on whatever the reader was last looking at, which is the selected changed
     /// file, and failing that the first one. Used by the `+` menu and by the keyboard, where no
     /// file has been named.
+    ///
+    /// An empty path is a perfectly good answer and is deliberately not refused: a worktree with
+    /// nothing in its diff still has a review tab to open, and what it draws is the sentence
+    /// saying nothing differs from the base branch yet. Refusing here, or greying the menu row
+    /// out, is what made this read as a control that did nothing.
     static func open(in model: WorkspaceModel) {
         let remembered = CenterTabStore.shared.review(for: model.workspace.id)?.path
         let fallback = model.selectedFilePath ?? model.changedFiles.first?.path
-        open(path: remembered.flatMap { $0.isEmpty ? nil : $0 } ?? fallback ?? "", in: model)
+        show(
+            path: remembered.flatMap { $0.isEmpty ? nil : $0 } ?? fallback ?? "",
+            in: model,
+            focusing: true
+        )
     }
 
     /// The same keystroke both ways: open the review, or, if the pane the reader is in is already

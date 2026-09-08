@@ -353,11 +353,16 @@ struct SessionTabsView: View {
             Button(PaneKind.browser.title, systemImage: PaneKind.browser.symbol, action: newBrowser)
                 .keyboardShortcut("b", modifiers: [.command, .shift])
             Divider()
+            // **Never disabled, and it used to be**, on the argument that an empty review has
+            // nothing to show. It has: the pane says what the worktree is being compared against
+            // and that nothing differs from it yet, which is an answer, and it is the answer
+            // somebody who picked this row was asking for. Greyed out it read as a broken menu
+            // item, which is how it was reported. The File menu's own Show Changes has been
+            // enabled on any workspace all along, and the two saying different things about the
+            // same tab was the other half of the confusion.
             Button("Changes", systemImage: "doc.text") { FileReview.open(in: model) }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
-                .disabled(model.changedFiles.isEmpty)
-            // Never disabled, unlike Changes: an empty note is exactly what somebody opening this
-            // is about to fix, where an empty review has nothing to show.
+            // An empty note is exactly what somebody opening this is about to fix.
             Button(CenterTab.notesTitle, systemImage: "note.text") { WorkspaceNotes.open(in: model) }
         } label: {
             Label("New tab", systemImage: "plus")

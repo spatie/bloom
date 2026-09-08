@@ -555,6 +555,9 @@ struct ChangedFileList: View {
             if let message = await FileRevert.revert(file: file, in: workspace) {
                 revertProblem = RevertProblem(filename: file.filename, message: message)
             }
+            // As from the header bar's own Revert: what the review pane is holding for this file
+            // is a picture of lines that are no longer there. See `WorkspaceModel.forgetHeldDiff`.
+            model.forgetHeldDiff(for: file.path)
             await model.refreshChanges()
         }
     }

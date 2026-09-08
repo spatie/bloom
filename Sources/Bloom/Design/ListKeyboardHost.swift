@@ -34,9 +34,10 @@ struct ListKeyboardHost: NSViewRepresentable {
     var armToken: Int
     /// What the list does with a key. False hands it back to the responder chain.
     var onKey: (ListKey) -> Bool
-    /// Whether this list holds the keyboard, which is what decides between the emphasised
-    /// selection fill and the quiet one, and whether the focus ring is drawn. See `RowBackground`.
-    var onFocusChange: (Bool) -> Void
+    /// Whether this list holds the keyboard, and how it came by it. The first decides between the
+    /// emphasised selection fill and the quiet one (see `RowBackground`), the second decides the
+    /// ring. The rule over the pair is `ListFocus`, in the core.
+    var onFocusChange: (ListFocus) -> Void
 
     func makeNSView(context: Context) -> ListKeyboardHostView {
         ListKeyboardHostView()
@@ -51,10 +52,12 @@ struct ListKeyboardHost: NSViewRepresentable {
 
 final class ListKeyboardHostView: NSView, @MainActor QLPreviewPanelDataSource, @MainActor QLPreviewPanelDelegate {
     var onKey: (ListKey) -> Bool = { _ in false }
-    var onFocusChange: (Bool) -> Void = { _ in }
+    var onFocusChange: (ListFocus) -> Void = { _ in }
 
     private var url: URL?
     private var armToken = 0
+    /// How this view came by the keyboard, while it has it. See `ListFocusOrigin`.
+    private var origin: ListFocusOrigin = .unknown
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -84,15 +87,49 @@ final class ListKeyboardHostView: NSView, @MainActor QLPreviewPanelDataSource, @
     /// and takes the responder from there, so telling the list about it synchronously would be
     /// writing state in the middle of the update that caused it.
     private func report(focus: Bool) {
-        Task { @MainActor in onFocusChange(focus) }
+        let value = ListFocus(
+            hasKeyboard: focus,
+            origin: focus ? origin : .unknown,
+            // Read here rather than once at launch: turning Full Keyboard Access on is a thing
+            // somebody does in System Settings while an app is open, and the next focus change is
+            // soon enough to notice it.
+            fullKeyboardAccess: NSApp.isFullKeyboardAccessEnabled
+        )
+        Task { @MainActor in onFocusChange(value) }
+    }
+
+    /// Which device asked for the focus, taken from the event AppKit is dispatching.
+    ///
+    /// `NSApp.currentEvent` is the last event pulled off the queue, which is still the click when
+    /// `update(url:armToken:)` makes this view first responder a turn after a row was activated,
+    /// and still the key press when the key view loop moves focus here on Tab. Anything else, and
+    /// there is no pointer involved, so the ring is drawn: only a mouse silences it.
+    private static func origin(of event: NSEvent?) -> ListFocusOrigin {
+        guard let event else { return .unknown }
+        switch event.type {
+        // The tracking events are in the list on purpose. A click that takes the focus a turn
+        // later can have a `mouseMoved` or a `mouseEntered` behind it by the time the SwiftUI pass
+        // runs, and a pointer that has merely moved is still a pointer doing the work.
+        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp,
+             .otherMouseDown, .otherMouseUp, .leftMouseDragged, .rightMouseDragged,
+             .otherMouseDragged, .mouseMoved, .mouseEntered, .mouseExited, .cursorUpdate,
+             .scrollWheel:
+            return .mouse
+        case .keyDown, .keyUp, .flagsChanged:
+            return .keyboard
+        default:
+            return .unknown
+        }
     }
 
     override func becomeFirstResponder() -> Bool {
+        origin = Self.origin(of: NSApp.currentEvent)
         report(focus: true)
         return super.becomeFirstResponder()
     }
 
     override func resignFirstResponder() -> Bool {
+        origin = .unknown
         report(focus: false)
         return super.resignFirstResponder()
     }
@@ -101,18 +138,35 @@ final class ListKeyboardHostView: NSView, @MainActor QLPreviewPanelDataSource, @
     /// background window is the tell `RowBackground` exists to avoid on the fill.
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil { report(focus: false) }
+        if window == nil {
+            origin = .unknown
+            report(focus: false)
+        }
+    }
+
+    /// A reader who clicked a row and then reached for the arrow keys IS a keyboard user, and from
+    /// that key on the ring is what says which list the keys are pointed at. So a click starts
+    /// silent and the first key this list answers promotes it, which is the whole of the rule: the
+    /// ring appears for the reader who needs it and never for the one who does not.
+    private func promoteToKeyboard() {
+        guard origin == .mouse else { return }
+        origin = .keyboard
+        report(focus: true)
     }
 
     // MARK: - Keys
 
     override func keyDown(with event: NSEvent) {
         if isSpace(event) {
+            promoteToKeyboard()
             toggle()
             return
         }
 
-        if let key = Self.key(for: event), onKey(key) { return }
+        if let key = Self.key(for: event), onKey(key) {
+            promoteToKeyboard()
+            return
+        }
         super.keyDown(with: event)
     }
 
@@ -247,25 +301,64 @@ extension View {
         armToken: Int,
         onKey: @escaping (ListKey) -> Bool
     ) -> some View {
-        background(
-            ListKeyboardHost(
+        modifier(
+            ListKeyboardModifier(
+                hasKeyboard: hasKeyboard,
                 url: url,
                 armToken: armToken,
-                onKey: onKey,
-                onFocusChange: { hasKeyboard.wrappedValue = $0 }
+                onKey: onKey
             )
         )
-        .modifier(ListFocusRing(isVisible: hasKeyboard.wrappedValue))
     }
 }
 
-/// The ring around the list the keyboard is pointed at.
+/// The host and the ring, and the state between them.
+///
+/// A modifier rather than two calls in the extension above, because the ring needs the whole of
+/// `ListFocus` and the three lists only ever wanted the boolean half of it. `hasKeyboard` still
+/// goes out to the caller and still decides the selection fill; the origin stays here, where the
+/// only thing that reads it is the ring.
+private struct ListKeyboardModifier: ViewModifier {
+    @Binding var hasKeyboard: Bool
+    var url: URL?
+    var armToken: Int
+    var onKey: (ListKey) -> Bool
+
+    @State private var focus = ListFocus()
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                ListKeyboardHost(
+                    url: url,
+                    armToken: armToken,
+                    onKey: onKey,
+                    onFocusChange: { report($0) }
+                )
+            )
+            .modifier(ListFocusRing(isVisible: focus.showsRing))
+    }
+
+    /// Writing an unchanged value is still a write as far as SwiftUI is concerned, and the host
+    /// reports on every promotion as well as on every focus change.
+    private func report(_ next: ListFocus) {
+        if focus != next { focus = next }
+        if hasKeyboard != next.hasKeyboard { hasKeyboard = next.hasKeyboard }
+    }
+}
+
+/// The ring around the list the keyboard is pointed at, when the reader is using the keyboard.
 ///
 /// `keyboardFocusIndicatorColor` at two points, drawn only in the key window, which is the
 /// convention the five hand-built text fields in this app already follow (see `HomeBar`). Written
 /// once here rather than a sixth time: these three lists are the first things in the window that
 /// can hold the keyboard without being a field, and the answer to "which one has it" has to look
 /// the same wherever it is asked.
+///
+/// **Not drawn for a click**, which is the whole of a reported complaint: selecting a file in the
+/// inspector put a two point blue rectangle around the pane and told the reader nothing the
+/// emphasised row was not already telling them. `ListFocus` holds that rule and the reasoning for
+/// it; an `NSTableView` behaves the same way and for the same reason.
 ///
 /// Inset by half the line width so the ring lands inside the pane rather than half outside it,
 /// where the split view's own edge would clip it.

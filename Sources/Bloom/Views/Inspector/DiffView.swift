@@ -90,11 +90,37 @@ struct DiffView: View {
     /// while it is being read, turns it into a changed file, and the centre column answers by
     /// swapping `FilePreview` out for this view. Landing on a diff would leave the typing on screen
     /// nowhere, which reads exactly like losing it.
+    ///
+    /// It also opens on whatever this file last looked like, when the workspace is still holding
+    /// it, and that is what makes switching to the changes tab immediate rather than a spinner
+    /// and a wait.
+    ///
+    /// **In the initialiser rather than at the top of `load`, and the difference is one frame.**
+    /// A tab switch destroys this view, so `phase` starts at `.loading` and the `task` that would
+    /// mend it does not run until after the first frame has been drawn: the reader got a spinner
+    /// flashed at them on the way into a diff the app already had. Seeded here there is no such
+    /// frame. `load` still runs, still asks git, and still replaces this the moment the answer
+    /// differs; see `DiffPresentationCache` for why handing back what was last on screen is the
+    /// same rule an open pane already follows.
+    ///
+    /// The whitespace setting is read straight out of user defaults because `@AppStorage` is not
+    /// available yet here, and it has to be part of the question: ignoring whitespace changes
+    /// which hunks there are.
     init(model: WorkspaceModel, file: ChangedFile) {
         self.model = model
         self.file = file
         let absolute = (model.workspace.path as NSString).appendingPathComponent(file.path)
         _mode = State(initialValue: FileEditSession.shared.isDirty(absolute) ? .edit : .diff)
+
+        let held = model.heldDiff(
+            for: file,
+            ignoringWhitespace: UserDefaults.standard.bool(forKey: DiffWhitespaceSetting.storageKey)
+        )
+        let opening: Phase = held.map { .ready($0.document) } ?? .loading
+        _phase = State(initialValue: opening)
+        _source = State(initialValue: held?.source)
+        _fileLines = State(initialValue: held?.lines)
+        _presented = State(initialValue: held == nil ? nil : file.path)
     }
 
     private enum Phase {
@@ -251,6 +277,16 @@ struct DiffView: View {
 
     private func load() async {
         priming?.cancel()
+
+        // The rows a seeded document needs. The initialiser can put the document in place but not
+        // build the rows over it: that pass reads the review comments, the draft and the layout
+        // setting, and it writes state. This is the first moment after the view exists where it
+        // can run, and it runs before the `await` below so the diff is laid out in the same turn
+        // the pane appeared in.
+        if case let .ready(document) = phase, rows.isEmpty {
+            rebuild()
+            prime(document)
+        }
         // **A reload of the file already on screen keeps what is on screen.**
         //
         // This used to say `phase = .loading` unconditionally, and the reader paid for it twice.
@@ -264,10 +300,12 @@ struct DiffView: View {
         // still drops to the spinner, because the alternative is holding one file's diff under
         // another file's name.
         //
-        // It does not answer the case a rebuilt view has. A tab switch destroys this view, so the
-        // way back starts at `Phase.loading` from the state's own initialiser whatever this does,
-        // and what shortens that is `PatchCache` already having the patch: no `git diff`, only the
-        // parse. See `WorkspaceModel.patch(for:)`.
+        // The case a rebuilt view has is answered above rather than here. A tab switch destroys
+        // this view, so the way back used to start at `Phase.loading` from the state's own
+        // initialiser whatever this said, and the reader watched the parse and the preparation
+        // pass again for a file the app had already drawn. The initialiser opens on what the
+        // workspace is still holding, which is why `presented` can already be this file on the
+        // first run through here. See `DiffPresentationCache`.
         if presented != file.path {
             phase = .loading
             rows = []
@@ -299,8 +337,19 @@ struct DiffView: View {
             )
             return
         }
-        source = parsed
-        await apply(parsed)
+        // **Only when the patch actually moved.** The presentation this view opened holding is
+        // usually the same bytes git has just described, because the reader has come back to a
+        // file nothing has touched since, and presenting it again would lex the whole file a
+        // second time, read it off disk again and rebuild every row for a document identical to
+        // the one already on screen.
+        //
+        // It also keeps a decision the reader made. A diff over `largeDiffLimit` that they pressed
+        // Show anyway on is held as what it became, so coming back to it does not put the gate
+        // in front of them a second time.
+        if parsed != source {
+            source = parsed
+            await apply(parsed)
+        }
 
         // Whether Edit mode is even offered is a question about the bytes on disk rather than
         // about the patch, so it is asked off the main thread, and it is asked AFTER the diff is
@@ -360,6 +409,10 @@ struct DiffView: View {
             // used to have is a box that can only refuse.
             edits.close(path: absolutePath)
             revertProblem = await FileRevert.revert(file: file, in: model.workspace)
+            // What this view is holding for the file is about a file that no longer says any of
+            // it, and a revert is exactly the press that must not be answered with the old lines
+            // for even one frame. See `WorkspaceModel.forgetHeldDiff`.
+            model.forgetHeldDiff(for: file.path)
             await model.refreshChanges()
         }
     }
@@ -389,6 +442,14 @@ struct DiffView: View {
         let document = prepared.document
         fileLines = prepared.lines
         phase = .ready(document)
+        // Held for the next visit, keyed on the question it answers. `source` is the patch before
+        // the whitespace setting was applied to it, which is what a later visit compares against.
+        // See `DiffPresentationCache`.
+        model.holdDiff(
+            DiffPresentation(source: source ?? fileDiff, document: document, lines: prepared.lines),
+            for: file,
+            ignoringWhitespace: ignoresWhitespace
+        )
         rebuild()
         prime(document)
     }
@@ -806,6 +867,10 @@ struct DiffView: View {
             let saved = await edits.save(path: path)
             rebuild()
             guard saved else { return }
+            // The bytes on disk are not what this file was last drawn from any more, so what the
+            // workspace is holding for it goes with the save rather than being shown to whoever
+            // opens the file next. See `WorkspaceModel.forgetHeldDiff`.
+            model.forgetHeldDiff(for: file.path)
             await model.refreshChanges()
             await load()
         }

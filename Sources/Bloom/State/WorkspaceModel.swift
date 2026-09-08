@@ -112,6 +112,11 @@ final class WorkspaceModel {
     /// not another subprocess. Not observed: nothing draws it, and a write on every file opened
     /// would invalidate every view watching this model. See `PatchCache`.
     @ObservationIgnored private var patches = PatchCache()
+    /// The files the review pane has already prepared, held so that coming back to one draws it on
+    /// the first frame rather than going through the parse, the preparation pass and the read of
+    /// the worktree copy again. Ignored by observation for the same reason as the patches above:
+    /// filing one is not a fact any view is watching. See `DiffPresentationCache`.
+    @ObservationIgnored private var presentations = DiffPresentationCache()
     /// Where each chat pane had got to in each conversation, so that coming back to a tab is not
     /// the session being opened all over again.
     ///
@@ -145,6 +150,12 @@ final class WorkspaceModel {
     }
 
     var isLoadingPullRequest = false
+    /// Whether any refresh has come back for this workspace this launch, whatever it said.
+    ///
+    /// Not the same question as `pullRequest != nil`, and that is the whole point: "this branch
+    /// has no pull request" is an answer, and reading it as "we have not looked yet" is what put
+    /// the spinner over the Create pull request button on every poll. See `PullRequestProgress`.
+    private(set) var hasReadPullRequest = false
 
     /// How this project's branches land, which is what the band's split button promises.
     ///
@@ -1603,6 +1614,43 @@ final class WorkspaceModel {
         return patch
     }
 
+    /// What the review pane last drew for this file, if it has drawn it.
+    ///
+    /// Handed back without asking git anything, so the pane can put a diff on screen on the frame
+    /// the tab was picked and then go and check. What makes that honest, and what the key holds,
+    /// is `DiffPresentationCache`.
+    func heldDiff(for file: ChangedFile, ignoringWhitespace: Bool) -> DiffPresentation? {
+        presentations.presentation(for: presentationKey(file, ignoringWhitespace: ignoringWhitespace))
+    }
+
+    /// Files what the pane has just drawn, so the next visit to this file is a lookup.
+    func holdDiff(
+        _ presentation: DiffPresentation, for file: ChangedFile, ignoringWhitespace: Bool
+    ) {
+        presentations.store(
+            presentation, for: presentationKey(file, ignoringWhitespace: ignoringWhitespace)
+        )
+    }
+
+    /// Drops what is held for one file, for the two presses that rewrite it under the reader: the
+    /// revert in the header bar and a save from the in-place editor. Both are followed by a fresh
+    /// read, and neither may show what the file said before the press for even one frame.
+    func forgetHeldDiff(for path: String) {
+        presentations.forget(file: path)
+    }
+
+    private func presentationKey(
+        _ file: ChangedFile, ignoringWhitespace: Bool
+    ) -> DiffPresentationCache.Key {
+        DiffPresentationCache.Key(
+            worktree: workspace.path,
+            base: workspace.baseBranch,
+            file: file,
+            scope: diffScope,
+            ignoresWhitespace: ignoringWhitespace
+        )
+    }
+
     /// Full contents of a file in the worktree, for the All files tab.
     func contents(of relativePath: String) -> String? {
         Self.contents(of: relativePath, in: workspace.path)
@@ -1664,14 +1712,23 @@ final class WorkspaceModel {
             await GitHubBridge.pullRequest(for: asked, maxAge: maxAge)
         }
         pullRequestTask = task
-        // Only when there is nothing to show, for the same reason the changed file list only
-        // spins when it is empty.
-        if pullRequest == nil { isLoadingPullRequest = true }
+        // Only before there has been any answer at all, for the same reason the changed file list
+        // only spins when it has nothing: a refresh of something already on screen leaves it
+        // alone. The rule and what it cost to get wrong are `PullRequestProgress`.
+        if PullRequestProgress.announces(
+            hasAnswered: hasReadPullRequest, hasPullRequest: pullRequest != nil
+        ) {
+            isLoadingPullRequest = true
+        }
 
         let fresh = await task.value
 
         guard pullRequestTask == task, !task.isCancelled else { return }
         pullRequestTask = nil
+        // Before the write below, and set whatever came back: a nil from gh is still this
+        // workspace having been looked at, and the next refresh has an answer on screen to leave
+        // alone. Only a superseded or cancelled refresh, which returns above, says nothing.
+        hasReadPullRequest = true
         // A nil is not written, and that is the rule the shared cache has always had: nil is "gh
         // could not answer" at least as often as it is "there is no pull request", so a slow
         // network or a rate limit would otherwise drop the mark back to a plain branch.
