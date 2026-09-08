@@ -63,6 +63,11 @@ struct PermissionVocabularyTests {
         // names for one `--permission-mode auto`.
         #expect(!claude.contains(.autoReview))
         #expect(PermissionMode.autoReview.cliValue == PermissionMode.auto.cliValue)
+
+        let grok = ComposerControls(agentKind: .grok).availablePermissionModes
+        #expect(grok.contains(.plan))
+        #expect(!grok.contains(.autoReview))
+        #expect(PermissionMode.bypassPermissions.label(on: .grok) == "Always approve")
     }
 
     @Test("a mode the new backend has no row for lands somewhere that mode still means something")

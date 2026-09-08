@@ -76,17 +76,19 @@ struct AgentCatalogTests {
 
     @Test("describes every agent kind")
     func describesKinds() {
-        #expect(AgentKind.allCases.map(\.label) == ["Claude Code", "Codex", "Cursor", "OpenCode"])
-        #expect(AgentKind.allCases.map(\.executableName) == ["claude", "codex", "cursor-agent", "opencode"])
-        // Two backends now, and the two that are not on this list are the ones with no runner.
-        #expect(AgentKind.allCases.filter(\.canRunWorkspaces) == [.claudeCode, .codex])
+        #expect(AgentKind.allCases.map(\.label) == ["Claude Code", "Codex", "Grok", "Cursor", "OpenCode"])
+        #expect(AgentKind.allCases.map(\.executableName) == ["claude", "codex", "grok", "cursor-agent", "opencode"])
+        // Three backends now, and the two that are not on this list are the ones with no runner.
+        #expect(AgentKind.allCases.filter(\.canRunWorkspaces) == [.claudeCode, .codex, .grok])
         // The sentence the settings screen prints, derived so it cannot say Claude Code alone
         // again once a second backend exists.
-        #expect(AgentKind.runnableSentence == "Claude Code and Codex")
+        #expect(AgentKind.runnableSentence == "Claude Code, Codex and Grok")
         #expect(AgentKind.claudeCode.loginCommand == "claude auth login")
         #expect(AgentKind.codex.loginCommand == "codex login")
+        #expect(AgentKind.grok.loginCommand == "grok login")
         #expect(AgentKind.codex.configPath.hasSuffix("/.codex/config.toml"))
         #expect(AgentKind.claudeCode.configPath.hasSuffix("/.claude/settings.json"))
+        #expect(AgentKind.grok.configPath.hasSuffix("/.grok/config.toml"))
     }
 
     // MARK: Claude
@@ -203,12 +205,44 @@ struct AgentCatalogTests {
         #expect(details.map(\.value) == ["OpenAI", "API key", "Set"])
     }
 
+    // MARK: Grok
+
+    @Test("reads a Grok account into ordered details and never the key")
+    func readsGrokAccount() {
+        let details = AgentCatalog.grokDetails(
+            authJSON: json([
+                "https://auth.x.ai::client": [
+                    "auth_mode": "oauth",
+                    "email": "ada@example.com",
+                    "first_name": "Ada",
+                    "key": "xai-secret-must-never-appear",
+                    "refresh_token": "refresh-secret-must-never-appear",
+                ],
+            ]),
+            version: "1.0.24",
+            apiKeyIsSet: false
+        )
+
+        #expect(details.map(\.label) == ["Version", "Provider", "Login method", "Account"])
+        #expect(details.map(\.value) == ["1.0.24", "xAI", "Grok login", "ada@example.com"])
+        #expect(!details.contains { $0.value.contains("xai-secret") })
+        #expect(!details.contains { $0.value.contains("refresh-secret") })
+    }
+
+    @Test("an XAI_API_KEY with no auth file still shows as connected")
+    func grokAPIKeyWithoutFile() {
+        let details = AgentCatalog.grokDetails(authJSON: nil, version: "1.0.24", apiKeyIsSet: true)
+        #expect(details.map(\.label) == ["Version", "Provider", "Login method", "Account"])
+        #expect(details.map(\.value) == ["1.0.24", "xAI API key", "API key (XAI_API_KEY set)", "unknown"])
+    }
+
     // MARK: Versions
 
     @Test("parses both observed version formats and falls back on anything else")
     func parsesVersions() {
         #expect(AgentCatalog.parseVersion("2.1.234 (Claude Code)") == "2.1.234")
         #expect(AgentCatalog.parseVersion("codex-cli 0.147.0") == "0.147.0")
+        #expect(AgentCatalog.parseVersion("grok 1.0.24 (68e414c661e3) [alpha]") == "1.0.24")
         #expect(AgentCatalog.parseVersion("v1.2.3") == "1.2.3")
         #expect(AgentCatalog.parseVersion("  0.9.0\nextra noise\n") == "0.9.0")
         #expect(AgentCatalog.parseVersion("built from source") == "built from source")
@@ -241,15 +275,27 @@ struct AgentCatalogTests {
             ],
         ])
 
+        let grokKey = "xai-secret-GROKKEY-abcdefghijklmnopqrstuvwxyz123456"
+        let grokRefresh = "grok-refresh-MNBVCXZLKJHGFDSAPOIUYTREWQ0987654321"
+        let grokFile = json([
+            "https://auth.x.ai::client": [
+                "auth_mode": "oauth",
+                "email": "ada@example.com",
+                "key": grokKey,
+                "refresh_token": grokRefresh,
+            ],
+        ])
+
         let details = AgentCatalog.claudeDetails(
             accountJSON: json(claudeFile), version: "2.1.234", apiKeyIsSet: true
         ) + AgentCatalog.codexDetails(authJSON: codexFile)
+            + AgentCatalog.grokDetails(authJSON: grokFile, version: "1.0.24", apiKeyIsSet: true)
 
         #expect(details.isEmpty == false)
 
         // Any run of twelve characters from a credential appearing in a rendered value would mean
         // part of that credential reached the UI.
-        let secrets = [accessToken, refreshToken, openAIKey, anthropicToken, idToken]
+        let secrets = [accessToken, refreshToken, openAIKey, anthropicToken, idToken, grokKey, grokRefresh]
         for secret in secrets {
             let characters = Array(secret)
             for start in 0...(characters.count - 12) {

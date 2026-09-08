@@ -255,6 +255,7 @@ public enum InstallPing {
         switch kind {
         case .claudeCode: "claude"
         case .codex: "codex"
+        case .grok: "grok"
         case .cursor: "cursor"
         case .openCode: "opencode"
         }

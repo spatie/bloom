@@ -341,6 +341,28 @@ extension AppModel {
             }
             controls.model = chosen.id
             controls.effort = chosen.resolvedEffort(preferring: controls.effort)
+        case .grok:
+            if order.model == nil, agent == inheritedAgent { return controls }
+
+            let models = try await GrokModelCatalog.live().pickerModels()
+            let chosen: GrokModel?
+            if let requested = order.model {
+                chosen = models.first { $0.id == requested }
+                guard chosen != nil else {
+                    throw BridgeWorkspaceModelFailure.invalid(
+                        model: requested,
+                        agent: agent,
+                        available: models.map(\.id)
+                    )
+                }
+            } else {
+                chosen = models.first { $0.isDefault } ?? models.first
+            }
+            guard let chosen else {
+                throw BridgeWorkspaceModelFailure.noneAvailable(agent)
+            }
+            controls.model = chosen.id
+            controls.effort = chosen.resolvedEffort(preferring: controls.effort)
         case .cursor, .openCode:
             throw BridgeWorkspaceModelFailure.noneAvailable(agent)
         }

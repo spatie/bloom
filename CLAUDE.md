@@ -9,7 +9,7 @@ worktree on disk, which is why so much of what follows is about not destroying o
 
 Longer documents, pointed at rather than repeated here: `README.md` for what the app is,
 `RELEASING.md` for signing, notarising and the appcast, `docs/CODEX.md` for the Codex app-server
-protocol as measured, `docs/PROTOCOL.md` for Claude Code's stream-json,
+protocol as measured, `docs/GROK.md` for Grok's ACP over stdio, `docs/PROTOCOL.md` for Claude Code's stream-json,
 `docs/AGENTS-INTEGRATION.md` for how the four CLIs are detected, `docs/BRIDGE.md` for the MCP
 bridge an agent calls back in through and which callers may call what, `docs/PLAN.md` for what was
 built and in what order, `docs/start-from.html` for the design note the create sheet's source picker
