@@ -124,6 +124,8 @@ struct GeneralSettingsView: View {
                 }
             }
 
+            DirectorySettingsSection()
+
             SleepSettingsSection()
 
             Section("Workspaces") {

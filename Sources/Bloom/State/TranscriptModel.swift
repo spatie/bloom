@@ -77,9 +77,8 @@ final class TranscriptModel {
     /// unread mark, a notification that names a place. Each of them now says nothing rather than
     /// saying it about a workspace that was invented to keep the type non-optional.
     let workspace: Workspace?
-    /// Where this chat's agent runs. The worktree, when there is one, and Ask Bloom's own empty
-    /// directory when there is not. See `AskConversation.directory`, which argues at length why
-    /// that directory is empty rather than the owner's home.
+    /// Where this chat's agent runs: its worktree, or the directory retained by its Ask tab.
+    /// New Ask conversations use the folder chosen in Settings, with Bloom's own folder as fallback.
     let cwd: String
     private unowned let app: AppModel
 

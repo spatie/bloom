@@ -44,7 +44,10 @@ extension ProjectFolderPicker {
     /// - Parameter startingAt: where to open, which the caller works out from what is in the
     ///   field: the target itself where it exists, and otherwise the deepest folder above it that
     ///   does, since a half typed path names a folder nobody has made.
-    static func chooseTarget(startingAt path: String?) async -> String? {
+    static func chooseTarget(
+        startingAt path: String?,
+        message: String = "Choose the folder your project should live in."
+    ) async -> String? {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -53,7 +56,7 @@ extension ProjectFolderPicker {
         // rather than refuses. See `NewProjectVerdict.adopt`.
         panel.canCreateDirectories = true
         panel.prompt = "Choose"
-        panel.message = "Choose the folder your project should live in."
+        panel.message = message
         if let path, FileManager.default.fileExists(atPath: path) {
             panel.directoryURL = URL(fileURLWithPath: path)
         }

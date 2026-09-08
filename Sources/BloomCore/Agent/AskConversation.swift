@@ -33,7 +33,8 @@ public enum AskConversation {
     /// default landing on this chat the first time it is opened.
     public static let permissionMode = PermissionMode.auto
 
-    /// The chat's working directory: its own, empty, and made once.
+    /// The fallback working directory, used until the owner chooses a folder in Settings.
+    /// Each conversation keeps the directory it started in. See `AskTabs`.
     ///
     /// **This is a permission decision rather than a tidiness one**, and it is the second lock
     /// rather than the first. `permissionMode` above is what stops this chat opening on the mode
