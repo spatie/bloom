@@ -84,6 +84,9 @@ struct WelcomeGreeting: View {
             .clipped()
             .ignoresSafeArea(edges: .top)
         }
+        // This screen always has a dark ground, even when the rest of the app is light.
+        // Native controls need that appearance to retain readable inactive-window colours.
+        .environment(\.colorScheme, .dark)
         .onAppear {
             guard !entered else { return }
             if reduceMotion || !isFirstVisit {

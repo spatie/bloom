@@ -103,6 +103,8 @@ struct TabItemView: View {
     /// 200 point ceiling three points come off the title instead.
     private static let closeSlop: CGFloat = 1.5
 
+    @Environment(\.colorSchemeContrast) private var contrast
+
     @State private var isHovered = false
     /// The pointer on the close cross itself rather than on the tab around it.
     ///
@@ -112,17 +114,20 @@ struct TabItemView: View {
     @FocusState private var isRenameFocused: Bool
 
     var body: some View {
-        HStack(spacing: Metrics.spacingSmall) {
-            if isRunning {
-                ActivityDot(isActive: true)
-                    .padding(.trailing, Metrics.spacingSmall)
-                    .accessibilityLabel("Running")
-            }
-
-            if let icon {
-                TabItemIconView(
-                    icon: icon, ink: isActive ? surface.ink : Palette.textSecondary
-                )
+        HStack(spacing: 6) {
+            // Activity replaces the glyph in a fixed slot, so the title stays still as work starts.
+            if icon != nil || isRunning {
+                ZStack {
+                    if isRunning {
+                        ActivityDot(isActive: true)
+                            .accessibilityLabel("Running")
+                    } else if let icon {
+                        TabItemIconView(
+                            icon: icon, ink: isActive ? surface.ink : Palette.textSecondary
+                        )
+                    }
+                }
+                .frame(width: TabItemIconView.pageSize, height: TabItemIconView.pageSize)
             }
 
             if isRenaming {
@@ -158,7 +163,7 @@ struct TabItemView: View {
         // selection cannot change the metrics of anything. Everything a tab can hold is then on
         // the same line as everything a neighbouring tab holds, whatever each of them is showing,
         // and a tab that becomes selected does not reflow as it does so.
-        .font(Typo.label)
+        .font(Typo.body)
         .frame(height: Self.labelHeight)
         .padding(.horizontal, Metrics.inset)
         .frame(maxWidth: Self.maximumWidth)
@@ -265,7 +270,7 @@ struct TabItemView: View {
                 .fill(surface.fill)
                 .overlay {
                     TabItemOutline(radius: Self.cornerRadius, skipsLeadingEdge: isAtPaneEdge)
-                        .strokeBorder(Palette.border, lineWidth: Metrics.outline)
+                        .strokeBorder(Palette.border.opacity(contrast == .increased ? 1 : 0.65), lineWidth: Metrics.outline)
                 }
                 .matchedGeometryEffect(id: Self.selectionID, in: namespace)
         } else if isHovered {

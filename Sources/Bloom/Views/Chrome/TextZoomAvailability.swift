@@ -33,7 +33,9 @@ final class TextZoomAvailability {
             NotificationCenter.default.addObserver(
                 forName: name, object: nil, queue: .main
             ) { _ in
-                MainActor.assumeIsolated { TextZoomAvailability.shared.refresh() }
+                // AppKit delivers this outside a Swift task. Hop onto the actor instead of
+                // querying the current executor from the native notification callback.
+                Task { @MainActor in TextZoomAvailability.shared.refresh() }
             }
         }
     }
