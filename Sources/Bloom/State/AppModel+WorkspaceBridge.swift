@@ -101,9 +101,9 @@ extension AppModel {
             BrowserScrollTool(browser),
             BrowserScreenshotTool(browser),
             BrowserTextTool(browser),
-            WorkspaceArchiveTool { [weak self] workspace in
+            WorkspaceArchiveTool { [weak self] order in
                 guard let self else { return .refused("Bloom is still starting up.") }
-                return await self.archiveWorkspaceForBridge(workspace)
+                return await self.archiveWorkspaceForBridge(order)
             },
             WorkspaceMergeTool { [weak self] workspace, pullRequest, method in
                 guard let self else {
@@ -138,11 +138,23 @@ extension AppModel {
 
     /// Uses the UI lifecycle so tabs, agents, terminals and selection cannot outlive the worktree.
     /// A refusal goes back to the caller instead of asking the user to approve a destructive retry.
-    private func archiveWorkspaceForBridge(_ workspace: Workspace) async -> WorkspaceArchiveOutcome {
-        guard let current = workspaces.first(where: { $0.id == workspace.id }) else {
+    ///
+    /// The owner's own client is acted on at once, because it is standing outside every turn. A
+    /// workspace's own agent is booked, because it is standing inside the worktree: see
+    /// `bookArchiveForBridge` and `WorkspaceArchiveTool`.
+    ///
+    /// `workspaces` rather than the row the tool read, in both arms. The list is this window's
+    /// own, so a workspace that has been archived by hand since the call came in is not in it, and
+    /// booking against a row nobody can act on any more would be a request that could only ever be
+    /// refused at the owner.
+    private func archiveWorkspaceForBridge(_ order: WorkspaceArchiveOrder) async -> WorkspaceArchiveOutcome {
+        guard let current = workspaces.first(where: { $0.id == order.workspace.id }) else {
             return .refused("This workspace is no longer active. Refresh workspace_list.")
         }
-        return await archive(current, deleteBranch: false, allowsConfirmation: false)
+        guard let sessionID = order.afterTurnOf else {
+            return await archive(current, deleteBranch: false, allowsConfirmation: false)
+        }
+        return bookArchiveForBridge(of: current, after: sessionID)
     }
 
     /// Confirms that the path the model named is a real image or movie inside its own worktree.

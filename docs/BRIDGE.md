@@ -117,7 +117,7 @@ places: the listing, the dispatch and the gate.
 | `workspace_list` | Every workspace, its state, its worktree path, its chats and their cost, what an agent is stopped on, what is queued and why | | | ✓ |
 | `workspace_start` | Cut a worktree and put an agent in it with a task, on a new branch, existing branch or GitHub pull request | ✓ | | ✓ |
 | `workspace_rename` | Give a workspace the name the work in it turned out to be about. Its own, for a workspace agent; any of them, named out loud, for the owner | ✓ | | ✓ |
-| `workspace_archive` | Archive a workspace through normal safety checks, keeping its branch and history | | | ✓ |
+| `workspace_archive` | Archive a workspace through normal safety checks, keeping its branch and history. Its own, and only when the turn asking for it has ended, for a workspace agent; any of them, named out loud and at once, for the owner | ✓ | | ✓ |
 | `workspace_merge` | Ask a workspace's own agent to merge its pull request | | | ✓ |
 | `reveal` | Point Bloom's window at one workspace, or at Home narrowed by project, scope and search. Navigation and nothing else: it creates nothing and archives nothing | | | ✓ |
 | `pane_open` | Open a chat, a terminal or a browser in a new tab of the caller's own workspace | ✓ | | |
@@ -262,13 +262,30 @@ Nothing here opens or closes a tab except the tools whose whole subject that is.
 brings an existing tab forward and will not make one on the way, which is what keeps "go back to the
 terminal" from forking a second terminal.
 
-`workspace_archive` is owner-only and takes an exact workspace id from `workspace_list`.
-It runs the app's normal archive lifecycle, including the project archive script, and only answers
-success after completion. The worktree is removed; the branch, notes and chat history are kept.
-Running agents, uncommitted work, local files at risk and failed safety checks refuse the call.
-There is no force or branch-deletion argument. Already archived workspaces are a no-op.
-This tool is not self-approved: the caller's permission policy still applies. `reveal` can show
-candidates before the owner chooses which to archive.
+`workspace_archive` runs the app's normal archive lifecycle, including the project archive script.
+The worktree is removed; the branch, notes and chat history are kept. Running agents, queued
+messages, uncommitted work, local files at risk and failed safety checks refuse the call. There is
+no force or branch-deletion argument. Already archived workspaces are a no-op. This tool is not
+self-approved for either role: removing a worktree is a question a person answers, and `reveal` can
+show candidates before the owner chooses which to archive.
+
+**Its two arms are shaped like `workspace_rename`'s, and one of them answers differently.** The
+owner's own client takes an exact workspace id from `workspace_list`, is acted on at once, and only
+answers success after completion. A workspace's own agent takes no arguments at all and is refused
+if it passes any: the token says which workspace is asking, so there is nothing to name and nothing
+to forge, and that is the whole of the isolation between one workspace and the next.
+
+That agent's call is a **request rather than an archive**, and its answer says so in those words.
+The agent is standing in the worktree that would be removed, and `AppModel.performArchive` stops a
+workspace's agents before git touches a file, so archiving there and then would kill the turn that
+is waiting for the answer. Bloom books it instead and runs it when that turn ends, whether the turn
+ended with a result or with the agent dying. The safety check is then made again from scratch, with
+nothing excused: another agent still running in the workspace or a message still queued refuses it,
+and the refusal reaches the owner as a notice, because by then there is no agent left to tell. The
+first check, made during the call, excuses only the asking chat's own running turn, and never its
+queue. See `WorkspaceArchiveSafety`, which is the one place both checks are written.
+
+Not `.child`. A child reports and that is all, here as everywhere.
 
 Nothing a rename touches is on disk. `workspace_rename` writes one column of one row: the branch,
 the worktree, the pull request and the directory keep the names they have. That is worth saying out
