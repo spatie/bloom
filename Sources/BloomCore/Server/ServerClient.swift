@@ -47,14 +47,19 @@ public actor ServerClient {
                 await self?.connectionEnded()
             }
         } else if let process {
+            // Accessing lines starts SSH. Do that before returning to the handshake: launching
+            // inside the pump task let request() write first, and StreamingProcess correctly
+            // drops writes made before launch. Reconnect then waited forever for a lost hello.
+            let errors = process.errorLines
+            let lines = process.lines
             pump = Task { [weak self] in
                 do {
-                    for try await line in process.lines { await self?.receive(line) }
+                    for try await line in lines { await self?.receive(line) }
                 } catch { /* The transport's stderr supplies the actionable SSH error. */ }
                 await self?.connectionEnded()
             }
             errorPump = Task { [weak self] in
-                for await line in process.errorLines { await self?.recordError(line) }
+                for await line in errors { await self?.recordError(line) }
             }
         }
     }

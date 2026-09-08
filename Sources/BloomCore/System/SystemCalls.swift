@@ -31,6 +31,14 @@ enum SystemCalls {
         #endif
     }
 
+    static func socketRead(_ descriptor: Int32, _ buffer: UnsafeMutableRawPointer?, _ count: Int) -> Int {
+        #if os(Linux)
+        Glibc.recv(descriptor, buffer, count, Int32(MSG_DONTWAIT))
+        #else
+        Darwin.recv(descriptor, buffer, count, MSG_DONTWAIT)
+        #endif
+    }
+
     static func close(_ descriptor: Int32) {
         #if os(Linux)
         _ = Glibc.close(descriptor)

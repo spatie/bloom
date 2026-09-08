@@ -41,14 +41,38 @@ The Linux manifest omits the Mac app and its dependencies. It uses Swift Crypto 
 CryptoKit operations and system SQLite. Inline setup scripts use `/bin/sh` on Linux and
 `/bin/zsh` on macOS; executable script files retain their own shebangs.
 
-These are source-build instructions. The current Linux executable dynamically links Swift
-libraries, so copying only that executable to a fresh Ubuntu machine is insufficient. Swift is
-not installed by default on Ubuntu. The distribution target is a download that includes its
-runtime, without requiring users to install Swift. That packaging is not implemented yet.
-Swift's [Static Linux SDK](https://www.swift.org/documentation/articles/static-linux-getting-started.html)
-also supports standalone executables, but requires bundling SQLite and adapting the libc calls
-to Musl before this server can use it. Ubuntu 24.04 x86_64 is the initial validation target;
-other Ubuntu versions and ARM64 are not yet verified.
+These are source-build instructions. Swift is not installed by default on Ubuntu, and copying
+only the executable from a source build is insufficient. The Linux preview package includes
+Swift, SQLite and its other required libraries. No separate Swift installation is needed to run
+that package. Its glibc and loader come from the host, so this is an Ubuntu package rather than
+a fully static executable for every Linux distribution. ARM64 is not yet verified.
+
+## Linux package
+
+The Server workflow builds a `bloom-server-linux-x86_64` artifact and exercises it in fresh Ubuntu
+24.04 and 26.04 containers without Swift installed. Download the artifact from a successful run,
+extract its tarball and keep the `bin` and `lib` directories together:
+
+```sh
+tar -xzf bloom-server-linux-x86_64.tar.gz
+mkdir -m 700 "$HOME/.bloom-server"
+./bloom-server-linux-x86_64/bin/bloom-server serve --data-dir "$HOME/.bloom-server"
+```
+
+Install Git and authenticate the desired agent CLI under the service account. Runtime libraries
+are resolved relative to the executable; the package does not change `LD_LIBRARY_PATH` for the
+agent processes it launches. Library updates require rebuilding the package.
+
+To produce the same preview package in the Ubuntu 24.04 Swift build environment:
+
+```sh
+sudo apt-get install libsqlite3-dev pkg-config git python3 patchelf
+swift build --product bloom-server
+python3 Tools/package-linux-server.py .build/debug/bloom-server .build/bloom-server-linux-x86_64.tar.gz
+```
+
+The package carries licence notices and a manifest of the included libraries. It is a development
+artifact, not an automatically published release or installer.
 
 ## Keep a standalone server running
 
@@ -94,6 +118,9 @@ settings. A server restart stops the old processes. Persisted conversations can 
 sending a new prompt, but interrupted tasks are not automatically replayed.
 
 For Linux, a user service at `~/.config/systemd/user/bloom-server.service` can run the same command:
+
+For a packaged build, set `ExecStart` to the executable inside the extracted package, keeping its
+adjacent `lib` directory in place. Use that same executable path in the Mac client's connection.
 
 ```ini
 [Unit]
@@ -188,7 +215,7 @@ not stall the transcript. File editing and attachment downloads are not implemen
 
 1. Move the existing desktop execution path onto the standalone runtime. Preserve workspace data,
    startup, shutdown and existing bridge behaviour when migrating existing local workspaces.
-2. Add server distribution artifacts and broaden Linux integration coverage across agent backends.
+2. Add stable release downloads and installers, and broaden Linux coverage across agent backends.
 3. Add remote file editing, terminals, browser previews, attachments and the Bloom MCP
    bridge. The server preview currently launches agents without Bloom's custom MCP tools.
 4. Share the full workspace UI across local and remote connections, add saved machine profiles,
@@ -202,3 +229,25 @@ not stall the transcript. File editing and attachment downloads are not implemen
 runners, duplicate and interrupted commands, concurrent prompts and approvals, reconnect,
 protocol compatibility, exclusive server ownership and SSH quoting. It spends no model tokens.
 `swift build` builds both the Mac client and the standalone server.
+
+The Linux package has also been exercised directly on an Ubuntu 26.04 x86_64 host without Swift
+installed, and in a fresh Ubuntu 24.04 container. A systemd service restart preserved conversation
+history. Boot enablement was checked; a full host reboot has not yet been tested.
+
+`RemoteServerTests` is an opt-in test of the actual Mac SSH client against a disposable server.
+Configure that server's `agent.claudeCode.executablePath` setting to the executable
+`Tests/fixtures/server-agent.py`. Its repository must contain `bloom-validation.txt` with the
+text `Bloom remote protocol fixture` followed by a newline, and a committed `hello.txt` file.
+Use a dedicated server database and service account for this fixture.
+
+```sh
+BLOOM_REMOTE_TEST_HOST=developer@test-server \
+BLOOM_REMOTE_TEST_EXECUTABLE=/opt/bloom-server/bin/bloom-server \
+BLOOM_REMOTE_TEST_DIRECTORY=/var/lib/bloom-test/data \
+BLOOM_REMOTE_TEST_REPOSITORY=/var/lib/bloom-test/repository \
+Tools/test-core.sh RemoteServer
+```
+
+This verifies workspace creation, an approval surviving disconnect, file and diff review, stopping
+a process and resuming its conversation. The deterministic fixture makes no model calls. Live
+provider authentication and model execution are separate checks.

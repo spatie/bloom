@@ -5,6 +5,31 @@ import Testing
 
 @Suite("ServerRuntime", .tags(.persistence, .subprocess), .scratchDirectory)
 struct ServerRuntimeTests {
+    @Test func concurrentReconnectsCannotReuseDescriptorsStillBeingWatched() async throws {
+        let fixture = try await ServerFixture()
+        let runner = fixture.runner
+        let daemon = try await ServerDaemon.start(directory: fixture.directory, makeRunner: { _, _, _ in runner })
+        do {
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for _ in 0..<8 {
+                    group.addTask {
+                        for _ in 0..<25 {
+                            let client = try await ServerClient.connect(to: .local(directory: fixture.directory))
+                            let reply = try await client.request(ServerRequest(.catalogue))
+                            if case .catalogue = reply.result {} else { Issue.record("Lost connection during descriptor reuse") }
+                            await client.disconnect()
+                        }
+                    }
+                }
+                try await group.waitForAll()
+            }
+        } catch {
+            await daemon.shutdown()
+            throw error
+        }
+        await daemon.shutdown()
+    }
+
     @Test func realAgentProcessSurvivesDisconnectAndAcceptsAnotherTurn() async throws {
         let fixture = try await ServerFixture()
         let script = fixture.directory + "/agent-fixture.sh"

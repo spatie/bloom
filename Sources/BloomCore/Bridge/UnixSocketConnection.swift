@@ -13,7 +13,7 @@ import Synchronization
 /// must cause a failed write, never a SIGPIPE that takes down every other server session.
 public final class UnixSocketConnection: Sendable {
     private let descriptor: Int32
-    private let handle: FileHandle
+    private let source = Mutex<(any DispatchSourceRead)?>(nil)
     private let buffer = LineBuffer()
     /// Whether the descriptor has been given back to the kernel. Guarded by a `Mutex` rather
     /// than `NSLock` plus `@unchecked Sendable`, for the reason given on `EventFanout` in
@@ -29,28 +29,27 @@ public final class UnixSocketConnection: Sendable {
 
     init(descriptor: Int32) {
         self.descriptor = descriptor
-        handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
         (lines, continuation) = AsyncStream.makeStream(of: String.self, bufferingPolicy: .unbounded)
 
         #if canImport(Darwin)
         var on: Int32 = 1
         setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
         #endif
-        // Blocking, explicitly. On BSD, and therefore on macOS, an accepted socket inherits
-        // O_NONBLOCK from the listener, and the listener has to be non-blocking so its accept loop
-        // can drain. `availableData` on a non-blocking descriptor answers with no bytes when there
-        // are none yet, which reads exactly like end of file, so an inherited flag would close
-        // every connection the moment it went quiet.
+        // Writes remain blocking; reads use MSG_DONTWAIT so draining never parks the queue.
+        // BSD accepted sockets inherit O_NONBLOCK from the listener.
         _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL, 0) & ~O_NONBLOCK)
 
-        handle.readabilityHandler = { [weak self] handle in
-            guard let self else { return }
-            let data = handle.availableData
-            if data.isEmpty {
-                close()
-                return
-            }
-            deliver(data)
+        source.withLock {
+            let reader = DispatchSource.makeReadSource(
+                fileDescriptor: descriptor, queue: DispatchQueue(label: "be.spatie.bloom.bridge.read")
+            )
+            reader.setEventHandler { [weak self] in self?.readAvailable() }
+            // FileHandle's readability handler cancels asynchronously. Closing its descriptor
+            // ourselves let Linux recycle it while libdispatch still watched it, crashing the
+            // event loop under connection churn. Only the cancellation handler may release it.
+            reader.setCancelHandler { SystemCalls.close(descriptor) }
+            reader.resume()
+            $0 = reader
         }
     }
 
@@ -77,6 +76,23 @@ public final class UnixSocketConnection: Sendable {
 
     private func deliver(_ data: Data) {
         for line in buffer.take(data) { continuation.yield(line) }
+    }
+
+    private func readAvailable() {
+        var bytes = [UInt8](repeating: 0, count: 16_384)
+        while !closed.withLock({ $0 }) {
+            let count = bytes.withUnsafeMutableBytes { SystemCalls.socketRead(descriptor, $0.baseAddress, $0.count) }
+            if count > 0 {
+                deliver(Data(bytes.prefix(count)))
+            } else if count < 0, errno == EINTR {
+                continue
+            } else if count < 0, errno == EAGAIN || errno == EWOULDBLOCK {
+                return
+            } else {
+                close()
+                return
+            }
+        }
     }
 
     /// Writes one line, newline appended. Silently does nothing once the connection is closed,
@@ -113,8 +129,9 @@ public final class UnixSocketConnection: Sendable {
         }
         guard claimed else { return }
 
-        handle.readabilityHandler = nil
+        source.withLock { $0?.cancel() }
         continuation.finish()
-        SystemCalls.close(descriptor)
     }
+
+    deinit { close() }
 }
