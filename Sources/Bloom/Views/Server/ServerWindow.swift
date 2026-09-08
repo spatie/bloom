@@ -29,9 +29,14 @@ private struct ServerWindowView: View {
                 .padding()
                 .background(.quaternary)
             }
-            if model.isConnected { connected } else { connectionForm }
+            if model.isConnected {
+                connected.inspector(isPresented: $model.showsReview) {
+                    ServerReviewView(model: model.review).inspectorColumnWidth(min: 330, ideal: 480, max: 900)
+                }
+            } else { connectionForm }
         }
         .task(id: model.connectionGeneration) { await model.poll() }
+        .task(id: model.connectionGeneration) { await model.pollReview() }
         .onDisappear { Task { await model.disconnect() } }
         .sheet(isPresented: $model.showsNewWorkspace) { newWorkspace }
         .onChange(of: model.agent) { _, agent in
@@ -90,6 +95,7 @@ private struct ServerWindowView: View {
                 Button("New Workspace", systemImage: "plus") { model.showsNewWorkspace = true }
                     .disabled(model.isPerformingCommand)
                 Button("Disconnect", systemImage: "network.slash") { Task { await model.disconnect() } }
+                Button("Show Changes", systemImage: "sidebar.right") { model.showsReview.toggle() }
             }
         } detail: {
             if model.selectedSessionID != nil { conversation } else {

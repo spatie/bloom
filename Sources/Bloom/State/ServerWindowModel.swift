@@ -26,6 +26,7 @@ final class ServerWindowModel {
             questions = []
             streamingText = ""
             isBusy = selectedSessionID != nil
+            review.reset()
         }
     }
     var messages: [Message] = []
@@ -38,6 +39,8 @@ final class ServerWindowModel {
     var error: String?
     var connectionGeneration = 0
     var showsNewWorkspace = false
+    var showsReview = true
+    let review = ServerReviewModel()
     private var client: ServerClient?
     private var transcriptSessionID: SessionID?
     private var uncertainRequest: ServerRequest?
@@ -89,6 +92,7 @@ final class ServerWindowModel {
         questions = []
         streamingText = ""
         isBusy = false
+        review.reset()
         await previous?.disconnect()
     }
 
@@ -111,6 +115,19 @@ final class ServerWindowModel {
                 await disconnect()
                 return
             }
+        }
+    }
+
+    func pollReview() async {
+        let generation = connectionGeneration
+        var tick = 0
+        while let client, generation == connectionGeneration, !Task.isCancelled {
+            if showsReview, let selectedSessionID,
+               let workspaceID = catalogue?.sessions.first(where: { $0.id == selectedSessionID })?.workspaceID {
+                await review.refresh(client: client, workspaceID: workspaceID, refreshFiles: tick % 3 == 0)
+            }
+            tick += 1
+            do { try await Task.sleep(for: .seconds(1)) } catch { return }
         }
     }
 

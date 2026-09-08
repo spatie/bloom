@@ -125,6 +125,13 @@ public actor ServerRuntime {
             guard stopping[id] == nil else { throw ServerFailure("This session is being stopped.") }
             try await live.send(body)
             return .accepted
+        case .changes(let id, let scope):
+            return .changes(try await ServerReview.changes(workspace: workspace(id), scope: scope))
+        case .patch(let id, let path, let scope):
+            return .patch(try await ServerReview.patch(workspace: workspace(id), path: path, scope: scope))
+        case .file(let id, let path):
+            let selected = try await workspace(id)
+            return .file(try ServerReview.file(workspace: selected, path: path))
         case .stop(let id):
             stopping[id, default: 0] += 1
             defer {
@@ -151,6 +158,13 @@ public actor ServerRuntime {
     private func storedSession(_ id: SessionID) async throws -> Session {
         guard let session = try await store.session(id: id) else { throw ServerFailure("This session no longer exists.") }
         return session
+    }
+
+    private func workspace(_ id: WorkspaceID) async throws -> Workspace {
+        guard let workspace = try await store.workspace(id: id), workspace.state == .active else {
+            throw ServerFailure("This workspace is no longer available.")
+        }
+        return workspace
     }
 
     private func liveSession(_ id: SessionID) async throws -> ServerSession {

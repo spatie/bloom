@@ -2,7 +2,7 @@ import Foundation
 
 /// Versioned values cross the connection; database handles and local file URLs never do.
 public struct ServerRequest: Codable, Sendable, Equatable {
-    public static let protocolVersion = 1
+    public static let protocolVersion = 2
     public var version: Int
     public var id: UUID
     public var operation: ServerOperation
@@ -19,13 +19,16 @@ public enum ServerOperation: Codable, Sendable, Equatable {
     case catalogue
     case create(ServerWorkspaceRequest)
     case transcript(sessionID: SessionID, afterSeq: Int)
+    case changes(workspaceID: WorkspaceID, scope: ServerDiffScope)
+    case patch(workspaceID: WorkspaceID, path: String, scope: ServerDiffScope)
+    case file(workspaceID: WorkspaceID, path: String)
     case send(sessionID: SessionID, text: String)
     case stop(sessionID: SessionID)
     case answer(sessionID: SessionID, requestID: String, answer: ServerAnswer)
 
     var mutates: Bool {
         switch self {
-        case .hello, .catalogue, .transcript: false
+        case .hello, .catalogue, .transcript, .changes, .patch, .file: false
         case .create, .send, .stop, .answer: true
         }
     }
@@ -83,8 +86,23 @@ public enum ServerResult: Codable, Sendable {
     case catalogue(ServerCatalogue)
     case created(session: Session, workspace: Workspace, setupSucceeded: Bool?)
     case transcript(ServerTranscript)
+    case changes([ChangedFile])
+    case patch(String)
+    case file(ServerTextFile)
     case accepted
     case failure(String)
+}
+
+public enum ServerDiffScope: String, Codable, Sendable, CaseIterable {
+    case branch
+    case uncommitted
+
+    var gitScope: DiffScope { self == .branch ? .all : .uncommitted }
+}
+
+public struct ServerTextFile: Codable, Sendable {
+    public var path: String
+    public var text: String
 }
 
 public struct ServerCatalogue: Codable, Sendable {

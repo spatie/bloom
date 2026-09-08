@@ -92,12 +92,14 @@ another server or own the coding agents. No public HTTP listener or Bloom accoun
 
 The server window can create workspaces from repositories already on the server, run configured
 setup scripts, send prompts, read conversations and streamed text, stop turns and answer pending
-permissions and questions. Each new workspace has an initial chat. Both Claude Code and Codex
+permissions and questions. Its Changes inspector shows branch or uncommitted diffs and reads
+current text files from the server, including rename and deletion diffs. Files and patches are
+limited to 2 MB; binary files have no text-file view. Each new workspace has an initial chat. Both Claude Code and Codex
 use the same implementations as the existing desktop app.
 
 ## Protocol and ownership
 
-`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values. A protocol mismatch
+`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 2). A protocol mismatch
 is refused before dispatch. Commands and replies carry UUIDs, so a long setup command does not
 block transcript reads or controls on the same connection.
 
@@ -119,7 +121,10 @@ subscription. On connection failure, the client requires an explicit reconnect. 
 generations prevent replies from an old connection replacing a new server's state.
 
 Remote transcript rendering does not resolve server file or attachment paths against the Mac's
-filesystem. Remote files need a server API before those desktop actions can become available.
+filesystem. File reads reject absolute paths, traversal, external symlinks and special files.
+Diff requests resolve the changed-file metadata on the server and use literal git pathspecs.
+Diff and file refreshes run separately from conversation refreshes, so a slow git command does
+not stall the transcript. File editing and attachment downloads are not implemented yet.
 
 ## Remaining work
 
@@ -127,7 +132,7 @@ filesystem. Remote files need a server API before those desktop actions can beco
    a local server. Preserve workspace data, startup, shutdown and existing bridge behaviour.
 2. Port the runtime's Apple-specific system dependencies and shell assumptions to Linux, with a
    Linux build and process integration tests.
-3. Add remote diffs, file access, terminals, browser previews, attachments and the Bloom MCP
+3. Add remote file editing, terminals, browser previews, attachments and the Bloom MCP
    bridge. The server preview currently launches agents without Bloom's custom MCP tools.
 4. Share the full workspace UI across local and remote connections, add saved machine profiles,
    model discovery, push events, prompt queues and automatic reconnect.
