@@ -8,6 +8,7 @@ enum BloomLauncher {
     static func main() async {
         #if DEBUG
         if FlareProbe.isRequested { await FlareProbe.runAndExit() }
+        if WelcomeLayoutProbe.isRequested { WelcomeLayoutProbe.runAndExit() }
         #endif
         BloomApp.main()
     }
