@@ -70,6 +70,99 @@ struct EditorCatalogTests {
         #expect(EditorCatalog.knownIDs.count == EditorCatalog.known.count)
     }
 
+    // MARK: - The identifiers an application actually ships under
+    //
+    // Reported as "opening a file in PhpStorm does not work", and measured on the reporter's Mac:
+    // `/Applications/PhpStorm.app` is `com.jetbrains.PhpStormLight-EAP`, and the catalogue held
+    // `com.jetbrains.PhpStorm` and nothing else. LaunchServices answered nothing for the id it was
+    // asked for, the folder sweep found the bundle and threw it away for having the wrong id, and
+    // PhpStorm was in no "Open in" menu at all on a Mac running PhpStorm.
+
+    @Test("the PhpStorm that is actually installed is PhpStorm")
+    func aLightEAPBuildIsTheSameApplication() {
+        let phpStorm = EditorCatalog.known.first { $0.bundleID == "com.jetbrains.PhpStorm" }
+
+        // The exact identifier measured on the machine the report came from.
+        #expect(phpStorm?.matches(bundleID: "com.jetbrains.PhpStormLight-EAP") == true)
+        #expect(phpStorm?.matches(bundleID: "com.jetbrains.PhpStorm-EAP") == true)
+        #expect(phpStorm?.matches(bundleID: "com.jetbrains.PhpStormLight") == true)
+        #expect(phpStorm?.matches(bundleID: "com.jetbrains.PhpStorm") == true)
+        // And a suffix nobody has typed here yet, which is the point of the family rule.
+        #expect(phpStorm?.matches(bundleID: "com.jetbrains.PhpStorm-Nightly-2027") == true)
+    }
+
+    @Test("a bundle that could not be read is nobody's")
+    func anUnreadableBundleMatchesNothing() {
+        let phpStorm = EditorCatalog.known.first { $0.bundleID == "com.jetbrains.PhpStorm" }
+
+        #expect(phpStorm?.matches(bundleID: nil) == false)
+        #expect(phpStorm?.matches(bundleID: "com.jetbrains.WebStorm") == false)
+        #expect(phpStorm?.matches(bundleID: "com.microsoft.VSCode") == false)
+    }
+
+    @Test("the family rule is JetBrains only, so Zed Preview is not Zed")
+    func theFamilyRuleDoesNotReachOtherVendors() {
+        let zed = EditorCatalog.known.first { $0.bundleID == "dev.zed.Zed" }
+        let code = EditorCatalog.known.first { $0.bundleID == "com.microsoft.VSCode" }
+
+        // Both of these are entries of their own with names of their own, so a prefix rule that
+        // swallowed them would show the wrong name for the copy it found.
+        #expect(zed?.matches(bundleID: "dev.zed.Zed-Preview") == false)
+        #expect(code?.matches(bundleID: "com.microsoft.VSCodeInsiders") == false)
+    }
+
+    @Test("a full stop is a different product, not a different build")
+    func communityEditionIsNotUltimate() {
+        let ultimate = EditorCatalog.known.first { $0.bundleID == "com.jetbrains.intellij" }
+
+        #expect(ultimate?.matches(bundleID: "com.jetbrains.intellij.ce") == false)
+        #expect(EditorCatalog.owner(ofBundleID: "com.jetbrains.intellij.ce")?.name == "IntelliJ IDEA CE")
+        #expect(EditorCatalog.owner(ofBundleID: "com.jetbrains.intellij-EAP")?.name == "IntelliJ IDEA")
+    }
+
+    @Test("an installed variant is one of ours, so the system default does not add it twice")
+    func aVariantCountsAsKnown() {
+        // The menu adds whatever the user set as the handler for a file type only when it is not
+        // already in the catalogue. This identifier IS the handler for `.php` on the reporter's
+        // Mac, and `knownIDs` answered no for it, which would have drawn PhpStorm twice the
+        // moment the catalogue started finding it.
+        #expect(EditorCatalog.isKnown(bundleID: "com.jetbrains.PhpStormLight-EAP"))
+        #expect(EditorCatalog.owner(ofBundleID: "com.jetbrains.PhpStormLight-EAP")?.name == "PhpStorm")
+        #expect(!EditorCatalog.isKnown(bundleID: "com.example.SomeEditor"))
+    }
+
+    @Test("installed is asked about every identifier, not only the canonical one")
+    func installedSeesAVariant() {
+        let apps = EditorCatalog.installed { $0 == "com.jetbrains.PhpStormLight-EAP" }
+
+        #expect(apps.map(\.name) == ["PhpStorm"])
+        // And the menu still keys its order and its memory by the canonical identifier.
+        #expect(apps.map(\.bundleID) == ["com.jetbrains.PhpStorm"])
+    }
+
+    @Test("a bundle named after the application is worth opening; one merely starting with it is not")
+    func fileNamesAreMatchedAtABoundary() {
+        let phpStorm = EditorCatalog.known.first { $0.bundleID == "com.jetbrains.PhpStorm" }
+
+        #expect(phpStorm?.matchesFileName("PhpStorm.app") == true)
+        #expect(phpStorm?.matchesFileName("PhpStorm EAP.app") == true)
+        #expect(phpStorm?.matchesFileName("PhpStorm 2025.2.app") == true)
+        #expect(phpStorm?.matchesFileName("phpstorm.app") == true)
+        // The boundary: a different application whose name happens to start the same way.
+        #expect(phpStorm?.matchesFileName("PhpStormy.app") == false)
+        #expect(phpStorm?.matchesFileName("WebStorm.app") == false)
+        #expect(phpStorm?.matchesFileName("PhpStorm") == false)
+    }
+
+    @Test("every catalogue entry still resolves to itself")
+    func everyEntryOwnsItsOwnIdentifier() {
+        for app in EditorCatalog.known {
+            for bundleID in app.bundleIDs {
+                #expect(EditorCatalog.owner(ofBundleID: bundleID)?.bundleID == app.bundleID)
+            }
+        }
+    }
+
     // MARK: - Order
 
     @Test("the one used last is at the top")
