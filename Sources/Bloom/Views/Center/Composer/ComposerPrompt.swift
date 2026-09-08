@@ -56,6 +56,7 @@ struct ComposerPrompt<Footer: View>: View {
     /// before a workspace exists retain the chip's external-editor fallback.
     var onOpenCommand: (@MainActor (String) -> Void)?
     var isFloating = false
+    var remote: RemoteSessionConnection?
     /// The footer, handed what it can ask this view to write into the draft. Passed in rather than
     /// reached for, because everything an attachment and a quick prompt do lives here and the
     /// footer is only the buttons. See `ComposerPromptActions`.
@@ -97,7 +98,7 @@ struct ComposerPrompt<Footer: View>: View {
     @State private var isMenuDismissed = false
 
     private var attachments: [PromptAttachment] {
-        PromptAttachmentStore.shared.attachments(for: attachmentKey)
+        remote == nil ? PromptAttachmentStore.shared.attachments(for: attachmentKey) : []
     }
 
     var body: some View {
@@ -237,12 +238,14 @@ struct ComposerPrompt<Footer: View>: View {
         // and then draw them under every session the window visited afterwards. See
         // `CenterPanesView.soloPane`.
         .task(id: attachmentKey) {
+            if let remote { await remote.cacheAttachments(in: text); return }
             PromptAttachmentStore.shared.load(sessionID: attachmentKey)
             adoptAttachmentsKeptBesideTheDraft()
             applyCaptureDraft()
             applyCaptureAttachments()
         }
-        .task(id: mentionRoot) {
+        .task(id: mentionRoot + (remote?.sessionID.rawValue ?? "")) {
+            if let remote { slashCatalog = remote.commands; return }
             let catalog = SlashCommandCatalog.shared(for: mentionRoot)
             slashCatalog = catalog
             await catalog.load(workspacePath: mentionRoot)
@@ -251,6 +254,7 @@ struct ComposerPrompt<Footer: View>: View {
         // worth re-reading one. A skill written in another window while Bloom stayed open is in
         // the list by the time the user has finished typing the slash.
         .task(id: openMenu.kind == .slash) {
+            guard remote == nil else { return }
             guard openMenu.kind == .slash else { return }
             await slashCatalog.refreshIfStale(workspacePath: mentionRoot)
         }
@@ -495,7 +499,8 @@ struct ComposerPrompt<Footer: View>: View {
             fileMatches = []
             return
         }
-        let paths = await FileIndex.shared.files(workspacePath: mentionRoot)
+        let paths: [String]
+        if let remote { paths = await remote.files() } else { paths = await FileIndex.shared.files(workspacePath: mentionRoot) }
         let query = token.query
         // Off the main actor: a large repository has tens of thousands of tracked files and this
         // runs on every keystroke after the `@`.
@@ -640,6 +645,14 @@ struct ComposerPrompt<Footer: View>: View {
     }
 
     private func add(_ sources: [AttachmentSource], replacing range: NSRange) async {
+        if let remote {
+            do {
+                let paths = try await remote.attach(sources)
+                write(paths, replacing: range)
+                isFocused = true
+            } catch { attachmentFailed(error.localizedDescription) }
+            return
+        }
         let added = await PromptAttachmentStore.shared.add(
             sources,
             sessionID: attachmentKey,
@@ -704,7 +717,7 @@ struct ComposerPrompt<Footer: View>: View {
         // `@mention` already says "this directory" without pretending it is one attachment.
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
-        panel.directoryURL = URL(filePath: mentionRoot)
+        if remote == nil { panel.directoryURL = URL(filePath: mentionRoot) }
 
         guard await panel.present() == .OK else { return }
 

@@ -4,6 +4,30 @@ import Testing
 
 @Suite("ServerWorkspace", .scratchDirectory, .tags(.subprocess, .persistence))
 struct ServerWorkspaceTests {
+    @Test func sharedComposerSettingsPersistOnTheOwningServer() async throws {
+        let repo = try await TempRepo()
+        let store = try makeTestStore("composer-settings")
+        let storedRepo = try await store.upsert(Repo(name: "Test", path: repo.path))
+        let workspace = try await store.upsert(Workspace(repoID: storedRepo.id, name: "Test", branch: "main", path: repo.path, baseBranch: "main"))
+        let session = try await store.upsert(Session(workspaceID: workspace.id, title: "Chat", model: "opus", effort: "high"))
+        let controls = ComposerControls(model: "sonnet", effort: "medium", agentKind: .claudeCode, permissionMode: .acceptEdits,
+            isFastMode: true, outputStyle: "Concise", codexContextWindow: 200_000)
+        let request = ServerRequest(.setComposer(sessionID: session.id, controls: controls))
+        let roundTrip = try JSONDecoder().decode(ServerRequest.self, from: JSONEncoder().encode(request))
+        #expect(roundTrip == request)
+        let runtime = ServerRuntime(store: store)
+        guard case .accepted = await runtime.respond(to: request).result else { Issue.record("Settings were refused"); return }
+        let saved = try #require(try await store.session(id: session.id))
+        #expect(try await ServerComposer.controls(session: saved, store: store) == controls)
+        let forkControls = ComposerControls(model: "gpt-test", effort: "low", agentKind: .codex, permissionMode: .acceptEdits)
+        let fork = await runtime.respond(to: ServerRequest(.setComposer(sessionID: session.id, controls: forkControls)))
+        guard case .created(let created, _, _) = fork.result else { Issue.record("A backend change did not create its own conversation"); return }
+        #expect(created.id != session.id)
+        #expect(created.agentKind == .codex)
+        #expect(try await store.session(id: session.id)?.agentKind == .claudeCode)
+        await runtime.shutdown()
+    }
+
     @Test func runScriptsUseServerEnvironmentAndRetryDoesNotLaunchTwice() async throws {
         guard let tmux = Shell.which("tmux") else { return }
         let repo = try await TempRepo()

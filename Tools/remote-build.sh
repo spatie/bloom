@@ -13,7 +13,7 @@ lock=/tmp/bloom-remote-build.lock
 destination="$HOME/Applications/Bloom Remote.app"
 bloom_refuse_real_app "$destination"
 bloom_refuse_if_own_host "$destination" "$HOME/Library/Application Support/Bloom Remote/bloom.sqlite"
-if [[ -n "$(bloom_app_pids "$destination")" ]]; then
+if [[ "${BLOOM_REMOTE_BUILD_ONLY:-0}" != 1 && -n "$(bloom_app_pids "$destination")" ]]; then
   print -ru2 -- "Bloom Remote is running. Close that app before replacing its installed build."
   exit 1
 fi
@@ -40,6 +40,13 @@ built="$work/.build/release/Bloom.app"
 [[ -d "$built" ]] || { print -ru2 -- "The build did not produce an app bundle"; exit 1; }
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$built/Contents/Info.plist")" == be.spatie.bloom.remote ]]
 codesign --verify --deep --strict "$built"
+if [[ "${BLOOM_REMOTE_BUILD_ONLY:-0}" == 1 ]]; then
+  ready=/tmp/Bloom-Remote-ready.app
+  rm -rf "$ready"
+  ditto "$built" "$ready"
+  print -- "Ready to install $ready at ${resolved[1,8]}"
+  exit 0
+fi
 mkdir -p "$HOME/Applications"
 staging="$HOME/Applications/.Bloom Remote.installing.app"
 rm -rf "$staging"

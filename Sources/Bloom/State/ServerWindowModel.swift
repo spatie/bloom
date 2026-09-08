@@ -101,6 +101,32 @@ final class ServerWindowModel {
     private var uncertainRequest: ServerRequest?
     private var lastEndpoint: ServerEndpoint?
     private let messageIdentity = RemoteMessageIdentity()
+    private var conversationModels: [SessionID: TranscriptModel] = [:]
+    var endpoint: ServerEndpoint? { lastEndpoint }
+
+    func conversation(app: AppModel) -> TranscriptModel? {
+        guard let session = selectedSession, let workspace = selectedWorkspace, let endpoint else { return nil }
+        if let existing = conversationModels[session.id] { return existing }
+        let connection = RemoteSessionConnection(server: self, endpoint: endpoint, session: session, workspace: workspace)
+        let model = TranscriptModel(session: session, workspace: workspace, app: app, remote: connection)
+        model.draft = drafts[session.id.rawValue] ?? ""
+        conversationModels[session.id] = model
+        return model
+    }
+
+    func saveRemoteDraft(_ text: String, sessionID: SessionID) {
+        drafts[sessionID.rawValue] = text
+        preferences.set(drafts, forKey: "server.drafts")
+        if selectedSessionID == sessionID { draft = text }
+    }
+
+    func read(_ operation: ServerOperation) async throws -> ServerResult {
+        guard let client else { throw ServerFailure("Connect to the server first.") }
+        let generation = connectionGeneration
+        let reply = try await client.request(ServerRequest(operation))
+        guard generation == connectionGeneration else { throw ServerFailure("The server connection changed. Try again.") }
+        return reply.result
+    }
     private var terminals: [String: BloomTerminalView] = [:]
     private var fileBuffers: [String: ServerFileBuffer] = [:]
     private let preferences: UserDefaults
@@ -290,6 +316,7 @@ final class ServerWindowModel {
             }
             if endpoint != lastEndpoint {
                 messageIdentity.reset()
+                conversationModels.removeAll()
                 uncertainRequest = nil
                 if lastEndpoint != nil {
                     selectedSessionID = nil
@@ -336,6 +363,7 @@ final class ServerWindowModel {
 
     /// Tear down only Mac-side transports. The server's agents, shells and queued prompts stay.
     func shutdown() async {
+        for model in conversationModels.values { await model.saveDraft() }
         shouldReconnect = false
         await disconnect()
         for terminal in terminals.values { terminal.shutdown() }
@@ -499,6 +527,7 @@ final class ServerWindowModel {
             queueError = value.queueError
             isBusy = value.isBusy
             streamingText = value.streamingText
+            conversationModels[id]?.receiveRemote(value, messages: messages)
         }
     }
 
@@ -554,7 +583,7 @@ final class ServerWindowModel {
         }
     }
 
-    private func perform(_ operation: ServerOperation) async -> ServerResult? {
+    func perform(_ operation: ServerOperation) async -> ServerResult? {
         guard let client, !isPerformingCommand else { return nil }
         isPerformingCommand = true
         defer { isPerformingCommand = false }

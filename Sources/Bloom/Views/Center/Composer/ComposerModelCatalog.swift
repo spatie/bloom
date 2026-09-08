@@ -40,6 +40,8 @@ final class ComposerModelCatalog {
         self.catalog = catalog
     }
 
+    func receive(_ models: [CodexModel]) { codexModels = models; lastFailure = nil }
+
     /// Fetches once, and again only after `refresh()`. Cheap to call on every menu appearance,
     /// which is exactly how the footer calls it.
     func load() {

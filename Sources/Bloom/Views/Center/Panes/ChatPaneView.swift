@@ -10,7 +10,7 @@ import BloomCore
 /// them can be dragged to a different place in each.
 struct ChatPaneView: View {
     var transcript: TranscriptModel
-    @Bindable var model: WorkspaceModel
+    var model: WorkspaceModel?
     /// Which pane of the tab this is, and the only thing it is used for is remembering where the
     /// reader had got to in the conversation. See `TranscriptPaneMemory`.
     var pane: String
@@ -65,8 +65,8 @@ struct ChatPaneView: View {
     var body: some View {
         TranscriptView(
             transcript: transcript,
-            isRunningSetup: model.isRunningSetup,
-            memory: TranscriptPaneMemory(model: model, pane: pane)
+            isRunningSetup: model?.isRunningSetup ?? false,
+            memory: model.map { TranscriptPaneMemory(model: $0, pane: pane) }
         ) { isTranscriptScrolledUp = $0 }
         .environment(\.composerRoom, room)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

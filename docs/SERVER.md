@@ -242,7 +242,7 @@ authenticated `gh`. Credentials remain on their respective execution host.
 
 ## Protocol and ownership
 
-`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 4). A protocol mismatch
+`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 5). A protocol mismatch
 is refused before dispatch. Commands and replies carry UUIDs, so a long setup command does not
 block transcript reads or controls on the same connection.
 
@@ -285,7 +285,7 @@ server starts, even without a connected Mac.
 2. Add stable release downloads and installers, and broaden Linux coverage across agent backends.
 3. Bring Bloom's custom MCP bridge, crew/subagent management, archive/restore,
    merge workflows, start-from-PR/branch controls and full pane arrangements to remote workspaces.
-4. Add saved machine profiles, remote model discovery, push events and remote transcript search.
+4. Add saved machine profiles, push events and remote transcript search.
 5. Broaden attachment limits and preview navigation across multiple forwarded origins.
 6. Add a mobile web client and decide whether to operate an encrypted relay for connections that
    should not require SSH or a VPN.

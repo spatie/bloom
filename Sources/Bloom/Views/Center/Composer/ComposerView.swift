@@ -107,8 +107,8 @@ struct ComposerView: View {
             text: $transcript.draft,
             caret: $caret,
             isFocused: $isFocused,
-            mentionRoot: transcript.cwd,
-            attachmentRoot: transcript.cwd,
+            mentionRoot: transcript.remote == nil ? transcript.cwd : "",
+            attachmentRoot: transcript.remote?.attachmentCache ?? transcript.cwd,
             attachmentKey: transcript.session.id.rawValue,
             reviewComments: reviewComments,
             onRemoveReviewComment: remove(reviewComment:),
@@ -121,7 +121,8 @@ struct ComposerView: View {
             onKey: handle(key:),
             onOpenAttachment: open(attachment:),
             onOpenCommand: open(commandPath:),
-            isFloating: true
+            isFloating: true,
+            remote: transcript.remote
         ) { actions in
             ComposerFooterView(
                 controls: controls,
@@ -130,13 +131,15 @@ struct ComposerView: View {
                 isRunning: transcript.isRunning,
                 queues: transcript.queuesNextMessage,
                 canSend: canSend,
-                project: transcript.cwd,
+                project: transcript.remote == nil ? transcript.cwd : nil,
                 onAttach: actions.attach,
                 onQuickPrompt: { fire($0, insert: actions.insert) },
                 onSend: send,
-                onStop: transcript.stop
+                onStop: transcript.stop,
+                remote: transcript.remote
             )
         }
+        .id(transcript.remote?.sessionID.rawValue ?? "local")
         .task(id: transcript.session.id) { await prepare() }
         .onChange(of: transcript.draft) { _, _ in scheduleDraftSave() }
         // Something put words in the box for the owner to carry on writing, which today is Edit on
@@ -171,7 +174,7 @@ struct ComposerView: View {
     }
 
     private var controls: ComposerControls {
-        ComposerControls(
+        transcript.remote?.controls ?? ComposerControls(
             session: transcript.session,
             isFastMode: isFastMode,
             outputStyle: outputStyle,
@@ -205,7 +208,7 @@ struct ComposerView: View {
     /// Review comments alone are a turn for the same reason: each one already says which file,
     /// which line and what to do, and the payload spells out that the comments are the whole
     /// request when nothing else was typed. See `ReviewPromptContext.noMessage`.
-    private var canSend: Bool { hasBody || !reviewComments.isEmpty }
+    private var canSend: Bool { (transcript.remote?.canSend ?? true) && (hasBody || !reviewComments.isEmpty) }
 
     // MARK: - Keys
 
@@ -228,6 +231,16 @@ struct ComposerView: View {
     /// Writes the footer's choices back where a conversation keeps them: the four that are columns
     /// go on the session row, and fast mode and the output style go in the store's key value table.
     private func apply(controls new: ComposerControls) {
+        if let remote = transcript.remote {
+            let draft = transcript.draft
+            Task {
+                if let session = await remote.apply(new) {
+                    remote.saveDraft(draft, for: session)
+                    app.selection = .remote(session.id)
+                }
+            }
+            return
+        }
         if new.isFastMode != isFastMode {
             isFastMode = new.isFastMode
             if let store = app.store {
@@ -371,6 +384,13 @@ struct ComposerView: View {
             return
         }
 
+        if transcript.remote != nil {
+            let text = transcript.draft
+            caret = 0
+            Task { await self.transcript.submit(text) }
+            return
+        }
+
         // A file can be moved or deleted between being attached and the prompt going, and naming a
         // path that is not there any more only teaches the agent that Bloom lies about paths. The
         // chip carries a warning while it is on screen; this is the last check before it matters,
@@ -437,7 +457,7 @@ struct ComposerView: View {
     /// second chat on. A prompt that asked for one then writes into this box instead.
     private func fire(_ prompt: QuickPrompt, insert: @MainActor (QuickPrompt) -> Void) {
         switch QuickPromptDelivery.decided(
-            for: prompt, canSend: true, canOpenNewChat: model != nil
+            for: prompt, canSend: true, canOpenNewChat: model != nil || transcript.remote != nil
         ) {
         case .compose:
             insert(prompt)
@@ -464,6 +484,15 @@ struct ComposerView: View {
     /// Both are written, so a load that had already finished is not left holding nothing, and the
     /// two agree because the store now says the same words.
     private func openChat(for prompt: QuickPrompt, sending: Bool) {
+        if let remote = transcript.remote {
+            Task {
+                guard let session = await remote.newChat() else { return }
+                remote.saveDraft(prompt.text, for: session)
+                app.selection = .remote(session.id)
+                if sending { _ = await remote.submit(prompt.text, to: session.id); remote.saveDraft("", for: session) }
+            }
+            return
+        }
         guard let model else { return }
         let text = prompt.text
         Task { @MainActor in
@@ -478,6 +507,15 @@ struct ComposerView: View {
     }
 
     private func startFreshChat() {
+        if let remote = transcript.remote {
+            Task {
+                guard let session = await remote.newChat() else { return }
+                transcript.draft = ""
+                await transcript.saveDraft()
+                app.selection = .remote(session.id)
+            }
+            return
+        }
         guard !isClearingChat else { return }
         isClearingChat = true
         let previous = transcript
@@ -521,6 +559,7 @@ struct ComposerView: View {
     /// `FileReview`. An attachment is not a special kind of file and does not get a special kind
     /// of tab.
     private func open(attachment: PromptAttachment) {
+        if let remote = transcript.remote { remote.openFile(attachment.path); app.isInspectorVisible = true; return }
         guard let model else { return }
         FileReview.open(path: attachment.path, in: model)
     }
@@ -586,6 +625,12 @@ struct ComposerView: View {
     /// All of it is only interesting once, hence the `task(id:)`. The precedence rules live in
     /// `ComposerDefaults`.
     private func prepare() async {
+        if let remote = transcript.remote {
+            isFocused = true
+            caret = (transcript.draft as NSString).length
+            await remote.prepare()
+            return
+        }
         // A `defer`, because this function has five ways out and every one of them is a composer
         // that is ready: the common one by far is the early return below for a session whose
         // defaults were applied on an earlier launch, which is exactly the path a return to a chat

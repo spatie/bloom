@@ -8,6 +8,7 @@ public actor ServerRuntime {
     private let makeRunner: RunnerFactory
     private let repositories = ServerRepositoryResolver()
     private let terminals = ServerTerminalService()
+    private let modelCatalogue = CodexModelCatalog.live()
     private var sessions: [SessionID: ServerSession] = [:]
     private var creating: [SessionID: Task<ServerSession, Error>] = [:]
     private var commands: [UUID: Task<ServerReply, Never>] = [:]
@@ -94,6 +95,33 @@ public actor ServerRuntime {
         switch operation {
         case .hello:
             return .hello(name: ProcessInfo.processInfo.hostName)
+        case .composer(let id):
+            let session = try await storedSession(id)
+            guard let workspaceID = session.workspaceID else { throw ServerFailure("This session has no workspace.") }
+            let path = try await workspace(workspaceID).path
+            let controls = try await ServerComposer.controls(session: session, store: store)
+            let models = (try? await modelCatalogue.pickerModels()) ?? []
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            return .composer(ServerComposerState(controls: controls, models: models,
+                commands: SlashCommandIndex.discover(home: home, project: path),
+                styles: OutputStyleIndex.discover(home: home, project: path)))
+        case .markRead(let id, let seq):
+            _ = try await storedSession(id)
+            try await store.updateLastReadSeq(sessionID: id, seq: seq)
+            return .accepted
+        case .setComposer(let id, let controls):
+            let session = try await storedSession(id)
+            guard controls.agentKind.canRunWorkspaces, !controls.model.isEmpty else { throw ServerFailure("Choose an available agent and model.") }
+            if controls.agentKind != session.agentKind {
+                guard let workspaceID = session.workspaceID else { throw ServerFailure("This session has no workspace.") }
+                let workspace = try await workspace(workspaceID)
+                let result = try await ServerWorkspaceOperations.perform(.newSession(agent: controls.agentKind, model: controls.model,
+                    effort: controls.effort, permissionMode: controls.permissionMode), workspace: workspace, store: store, terminals: terminals)
+                if case .created(let created, _, _) = result { try await ServerComposer.save(controls, session: created, store: store) }
+                return result
+            }
+            try await configure(id, controls: controls)
+            return .accepted
         case .catalogue:
             let workspaces = try await store.workspaces()
             var storedSessions: [Session] = []
@@ -138,26 +166,11 @@ public actor ServerRuntime {
         case .workspace(let id, let action):
             return try await ServerWorkspaceOperations.perform(action, workspace: workspace(id), store: store, terminals: terminals)
         case .configure(let id, let model, let effort, let permissionMode):
-            guard !model.isEmpty else { throw ServerFailure("Choose a model.") }
-            guard stopping[id] == nil else { throw ServerFailure("This session is being changed. Try again shortly.") }
-            stopping[id] = 1
-            defer { stopping.removeValue(forKey: id) }
-            for (commandID, operation) in commandOperations {
-                if case .send(let target, _) = operation, target == id { _ = await commands[commandID]?.value }
-            }
-            let queued = try await queue().snapshot(id)
-            guard queued.0.isEmpty else { throw ServerFailure("Wait for queued messages before changing settings.") }
-            if let live = sessions[id] {
-                try await live.refreshState(store: store, sessionID: id)
-                guard await !live.isBusy else { throw ServerFailure("Stop the current turn before changing its settings.") }
-                await live.shutdown()
-                sessions.removeValue(forKey: id)
-            }
-            _ = try await store.update(sessionID: id) {
-                $0.model = model
-                $0.effort = effort
-                $0.permissionMode = permissionMode
-            }
+            var controls = try await ServerComposer.controls(session: storedSession(id), store: store)
+            controls.model = model
+            controls.effort = effort
+            controls.permissionMode = permissionMode
+            try await configure(id, controls: controls)
             return .accepted
         case .send(let id, let text):
             guard stopping[id] == nil else { throw ServerFailure("This session is being stopped.") }
@@ -206,6 +219,26 @@ public actor ServerRuntime {
     private func storedSession(_ id: SessionID) async throws -> Session {
         guard let session = try await store.session(id: id) else { throw ServerFailure("This session no longer exists.") }
         return session
+    }
+
+    private func configure(_ id: SessionID, controls: ComposerControls) async throws {
+        guard !controls.model.isEmpty else { throw ServerFailure("Choose a model.") }
+        guard stopping[id] == nil else { throw ServerFailure("This session is being changed. Try again shortly.") }
+        stopping[id] = 1
+        defer { stopping.removeValue(forKey: id) }
+        for (commandID, operation) in commandOperations {
+            if case .send(let target, _) = operation, target == id { _ = await commands[commandID]?.value }
+        }
+        let queued = try await queue().snapshot(id)
+        guard queued.0.isEmpty else { throw ServerFailure("Wait for queued messages before changing settings.") }
+        if let live = sessions[id] {
+            try await live.refreshState(store: store, sessionID: id)
+            guard await !live.isBusy else { throw ServerFailure("Stop the current turn before changing its settings.") }
+            await live.shutdown()
+            sessions.removeValue(forKey: id)
+        }
+        let session = try await storedSession(id)
+        try await ServerComposer.save(controls, session: session, store: store)
     }
 
     private func workspace(_ id: WorkspaceID) async throws -> Workspace {

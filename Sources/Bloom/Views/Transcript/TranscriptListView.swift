@@ -597,7 +597,8 @@ struct TranscriptListView: View {
                                 permissionMode: permissionMode,
                                 agentKind: agentKind,
                                 wasStopped: wasStopped,
-                                recovered: recovered
+                                recovered: recovered,
+                                isRemote: home.remoteWorkspaceID != nil
                             )
                             .arrivingRow(settles && arrivals.isArriving(row.seq))
                             .padding(.horizontal, TranscriptLayout.inset)

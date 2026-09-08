@@ -4,7 +4,6 @@ import BloomCore
 /// Uses the same tab chrome as local workspaces; only the actions change their execution host.
 struct RemoteWorkspaceTabsView: View {
     @Bindable var model: ServerWindowModel
-    @Binding var showsSettings: Bool
     @Environment(AppModel.self) private var app
     @Namespace private var selection
 
@@ -53,8 +52,7 @@ struct RemoteWorkspaceTabsView: View {
                 .disabled(!model.isConnected || model.isPerformingCommand)
                 .padding(.horizontal, 10)
         } trailing: {
-            Button("Session Settings", systemImage: "slider.horizontal.3") { showsSettings = true }
-                .labelStyle(.iconOnly).buttonStyle(.borderless).padding(.horizontal, 12)
+            EmptyView()
         }
     }
 

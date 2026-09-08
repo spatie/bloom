@@ -8,7 +8,7 @@ import Foundation
 /// model has two names, `opus` for the CLI and Opus 5 for the person; an output style has one,
 /// because the built in four are called Proactive, Concise, Explanatory and Learning in the
 /// binary and a custom one is called whatever its own file says.
-public struct OutputStyle: Identifiable, Hashable, Sendable {
+public struct OutputStyle: Identifiable, Hashable, Sendable, Codable {
     public var name: String
     /// One line about what the style does. The CLI's own words for the built in four, read out of
     /// the installed binary rather than written from memory, and the file's `description`

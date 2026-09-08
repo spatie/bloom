@@ -2,7 +2,7 @@ import Foundation
 
 /// Versioned values cross the connection; database handles and local file URLs never do.
 public struct ServerRequest: Codable, Sendable, Equatable {
-    public static let protocolVersion = 4
+    public static let protocolVersion = 5
     public var version: Int
     public var id: UUID
     public var operation: ServerOperation
@@ -17,6 +17,9 @@ public struct ServerRequest: Codable, Sendable, Equatable {
 public enum ServerOperation: Codable, Sendable, Equatable {
     case hello
     case catalogue
+    case composer(sessionID: SessionID)
+    case setComposer(sessionID: SessionID, controls: ComposerControls)
+    case markRead(sessionID: SessionID, seq: Int)
     case create(ServerWorkspaceRequest)
     case transcript(sessionID: SessionID, afterSeq: Int)
     case changes(workspaceID: WorkspaceID, scope: ServerDiffScope)
@@ -31,8 +34,8 @@ public enum ServerOperation: Codable, Sendable, Equatable {
 
     var mutates: Bool {
         switch self {
-        case .hello, .catalogue, .transcript, .changes, .patch, .file: false
-        case .create, .send, .stop, .answer, .configure, .cancelQueued: true
+        case .hello, .catalogue, .transcript, .changes, .patch, .file, .composer: false
+        case .create, .send, .stop, .answer, .configure, .cancelQueued, .setComposer, .markRead: true
         case .workspace(_, let action): action.mutates
         }
     }
@@ -69,6 +72,17 @@ public enum ServerAnswer: Codable, Sendable, Equatable {
     case approvePlan(mode: PermissionMode)
     case question(input: JSONValue)
 
+    public init(_ decision: PermissionDecision) {
+        switch decision {
+        case .allow(.once): self = .allowOnce
+        case .allow(.session): self = .allowSession
+        case .allow(.project): self = .allowProject
+        case .deny(let message, let endsTurn): self = .denyWithReason(message: message, endsTurn: endsTurn)
+        case .approvePlan(let mode): self = .approvePlan(mode: mode)
+        case .answer(let input): self = .question(input: input)
+        }
+    }
+
     var decision: PermissionDecision {
         switch self {
         case .allowOnce: .allow(scope: .once)
@@ -96,6 +110,7 @@ public struct ServerReply: Codable, Sendable {
 public enum ServerResult: Codable, Sendable {
     case hello(name: String)
     case catalogue(ServerCatalogue)
+    case composer(ServerComposerState)
     case created(session: Session, workspace: Workspace, setupSucceeded: Bool?)
     case transcript(ServerTranscript)
     case changes([ChangedFile])
