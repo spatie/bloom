@@ -1,8 +1,7 @@
 import SwiftUI
 import BloomCore
 
-/// The review, filling one pane of the centre column: one file at a time, at the full height of
-/// the window.
+/// The review, filling one pane with either a selected file or all changed files.
 ///
 /// This is where reading a change belongs. It used to happen in a two hundred point drawer under
 /// the inspector's file list, where a diff got about eight lines and editing a file got the same,
@@ -10,9 +9,8 @@ import BloomCore
 /// trade: the list keeps the whole inspector, the file keeps the whole column, and the split
 /// (Cmd+\) puts the conversation beside the diff instead of above it.
 ///
-/// It draws no chrome of its own. `DiffView` already carries the bar that names the file and
-/// holds the Viewed tick, revert, the layout toggles and the Diff / Edit pair, and a second bar
-/// over the top of it would say the same things twice.
+/// The shared review offers a choice between one file and all files. Each `DiffView` carries
+/// its own filename, Viewed tick, revert, layout controls and Diff / Edit pair.
 struct ReviewPaneView: View {
     @Bindable var model: WorkspaceModel
     var tab: CenterTab
@@ -62,6 +60,10 @@ struct ReviewPaneView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !tab.isPinnedToPath {
+                reviewToolbar
+                Hairline()
+            }
             content
                 // Pinned to the top, not centred, which is what an unaligned fill means and what
                 // a reader reported on 0.20.0: a file with a handful of lines in it floated in
@@ -107,7 +109,7 @@ struct ReviewPaneView: View {
         // `ViewedShortcutHost` for the character it would otherwise have swallowed out of the
         // composer below it and out of the terminal in the pane beside it.
         .background {
-            ViewedShortcutHost(hasFile: changed != nil) {
+            ViewedShortcutHost(hasFile: !tab.showsAllFiles && changed != nil) {
                 guard let changed else { return }
                 let model = model
                 Task { await model.setViewed(!model.isViewed(changed), file: changed) }
@@ -156,7 +158,13 @@ struct ReviewPaneView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let changed {
+        if tab.showsAllFiles, !tab.isPinnedToPath {
+            AllFilesReviewView(
+                model: model, selectedPath: tab.path,
+                navigationRevision: tab.reviewNavigationRevision
+            )
+                .id(model.workspace.id)
+        } else if let changed {
             // A path can exist in several workspaces. Include the workspace so switching
             // checkouts cannot reuse another workspace's diff, selection or expanded context.
             DiffView(model: model, file: changed)
@@ -197,6 +205,37 @@ struct ReviewPaneView: View {
                 message: "It is no longer in this worktree. Pick another file in the inspector."
             )
         }
+    }
+
+    private var reviewToolbar: some View {
+        HStack(spacing: InspectorLayout.gap) {
+            Picker("Review files", selection: Binding(
+                get: { tab.showsAllFiles },
+                set: { all in
+                    let store = CenterTabStore.shared
+                    store.setShowsAllFiles(all, for: tab)
+                    if !all, changed == nil, let first = model.changedFiles.first {
+                        FileReview.open(path: first.path, in: model)
+                    }
+                }
+            )) {
+                Text("Selected file").tag(false)
+                Text("All files").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .fixedSize()
+
+            Spacer(minLength: 0)
+
+            Text(model.diffScope.badge)
+                .font(Typo.caption)
+                .foregroundStyle(Palette.textSecondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, InspectorLayout.inset)
+        .frame(height: InspectorLayout.barHeight)
     }
 
     private static func isAbsolute(_ path: String) -> Bool {

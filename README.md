@@ -95,7 +95,9 @@ conversation that is changing it.
 
 **Review and ship.** The inspector lists the files the workspace changed and shows a
 syntax-highlighted diff against the merge base, with inline comments and an editor on the same
-file. When `gh` is installed it also carries the pull request: open it, watch its checks, merge it.
+file. Choose **Review all files** to scroll through every file's changes together, or switch back
+to **Selected file** to focus on one. When `gh` is installed it also carries the pull request: open
+it, watch its checks, merge it.
 
 **Ask Bloom.** A conversation that belongs to no workspace, for the questions that are about your
 projects rather than about one branch.

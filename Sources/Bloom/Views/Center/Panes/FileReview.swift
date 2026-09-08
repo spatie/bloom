@@ -15,6 +15,11 @@ import BloomCore
 enum FileReview {
     /// Opens the workspace's review on a file, or points the open one at it.
     static func open(path: String, in model: WorkspaceModel) {
+        // Unchanged files and attachments still open on their own.
+        if !model.changedFiles.contains(where: { $0.path == path }),
+           let tab = CenterTabStore.shared.review(for: model.workspace.id) {
+            CenterTabStore.shared.setShowsAllFiles(false, for: tab)
+        }
         show(path: path, in: model, focusing: false)
     }
 
@@ -61,6 +66,13 @@ enum FileReview {
             in: model,
             focusing: true
         )
+    }
+
+    static func openAll(in model: WorkspaceModel) {
+        let store = CenterTabStore.shared
+        let tab = store.showReview(path: "", workspaceID: model.workspace.id)
+        store.setShowsAllFiles(true, for: tab)
+        WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
     }
 
     /// The same keystroke both ways: open the review, or, if the pane the reader is in is already

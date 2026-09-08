@@ -168,6 +168,12 @@ struct BloomCommands: Commands {
             }
             .disabled(model.selectedModel == nil)
 
+            MenuCommand(.reviewAllFiles) {
+                guard let workspace = model.selectedModel else { return }
+                FileReview.openAll(in: workspace)
+            }
+            .disabled(model.selectedModel == nil)
+
             // Shift+Cmd+N, which nothing in Bloom held. It is the initial of the thing, which is
             // what the other three in this group are, and that pattern is the only reason a set
             // of four is easier to remember than four separate facts. Never disabled beyond

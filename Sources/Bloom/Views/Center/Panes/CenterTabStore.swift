@@ -98,7 +98,7 @@ final class CenterTabStore {
                 page: tab.pageTitle, address: tab.url, fallback: tab.title, isNamed: tab.isNamed
             )
         case .review:
-            guard !tab.path.isEmpty else { return tab.title }
+            guard !tab.showsAllFiles, !tab.path.isEmpty else { return tab.title }
             // A pinned tab is about one file and says so, whether or not the change happens to
             // touch it: "All changes" on a tab that will never show another file would be a lie
             // the strip repeated all day.
@@ -294,7 +294,12 @@ final class CenterTabStore {
     @discardableResult
     func showReview(path: String, workspaceID: WorkspaceID) -> CenterTab {
         if let existing = review(for: workspaceID) {
-            if existing.path != path { update(existing) { $0.path = path } }
+            if existing.path != path || existing.showsAllFiles {
+                update(existing) {
+                    $0.path = path
+                    $0.reviewNavigationRevision += 1
+                }
+            }
             return review(for: workspaceID) ?? existing
         }
         var tabs = tabs(for: workspaceID)
@@ -307,6 +312,11 @@ final class CenterTabStore {
         tabs.append(tab)
         apply(tabs, to: workspaceID)
         return tab
+    }
+
+    func setShowsAllFiles(_ showsAllFiles: Bool, for tab: CenterTab) {
+        guard tab.kind == .review, !tab.isPinnedToPath else { return }
+        update(tab) { $0.showsAllFiles = showsAllFiles }
     }
 
     /// Opens a review tab that stays on one file, or hands back the one already reading it.
