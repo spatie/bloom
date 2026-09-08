@@ -1,7 +1,6 @@
 import SwiftUI
 import BloomCore
 
-@main
 struct BloomApp: App {
     @State private var model = AppModel()
     @NSApplicationDelegateAdaptor(BloomAppDelegate.self) private var appDelegate
@@ -18,6 +17,7 @@ struct BloomApp: App {
         // already answered from an empty domain would then WRITE that empty answer back, which
         // is how a migration that runs one step too late destroys the thing it came to save.
         LegacyDefaults.migrate()
+        CrashReportingService.shared.start()
 
         // The stored appearance, applied while the process is still faceless. It used to be a
         // side effect of `SettingsView.init`, which made a dark preference's arrival at launch
