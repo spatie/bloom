@@ -63,8 +63,6 @@ final class CrashReportingService {
             "app": "Bloom",
             "bundle_identifier": .string(Bundle.main.bundleIdentifier ?? "unbundled"),
             "build": .string(BuildIdentity.read(from: .main).line),
-            "macos": .string(ProcessInfo.processInfo.operatingSystemVersionString),
-            "architecture": .string(FeedbackEnvironment.architecture().wireName ?? "unknown"),
         ]
     }
 

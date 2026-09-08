@@ -41,6 +41,10 @@ enum FlareProbe {
                     "run": .string(root.lastPathComponent),
                     "purpose": "Verify native crash recovery from the Bloom binary",
                 ]) { _, new in new })
+                let started = try JSONEncoder().encode(JSONValue.number(Date().timeIntervalSince1970))
+                try started.write(to: root.appendingPathComponent("crash-started.json"), options: .atomic)
+                // Let the SDK's 30-second sampler refresh once before capturing the crash.
+                try await Task.sleep(for: .seconds(32))
                 fatalError("Intentional Bloom Flare probe crash")
             case "retry", "upload", "empty":
                 let sender = mode == "retry" ? CrashReportingService.client(environment: "testing", apiKey: "") : client
@@ -72,6 +76,12 @@ enum FlareProbe {
 
     private static func reportCases(client: FlareClient, run: String) async throws -> [String: JSONValue] {
         var cases: [String: JSONValue] = [:]
+        let device = FlareDiagnostics.deviceContext()
+        guard device["model"] != nil, device["memory_total_bytes"] != nil,
+              device["memory_available_estimate_bytes"] != nil, device["memory_sampled_at"] != nil else {
+            throw ProbeError("The device or memory diagnostics are missing.")
+        }
+        cases["device_diagnostics"] = .string("passed")
         let caught = await client.report(
             ProbeError("Bloom Flare integration: a caught Swift error"),
             context: ["synthetic": true, "run": .string(run), "private_note": "THIS_MUST_BE_REMOVED"]

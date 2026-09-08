@@ -13,7 +13,7 @@ struct CrashReportingSettingsSection: View {
         } header: {
             Text("Crash reporting")
         } footer: {
-            Text("Includes Bloom and macOS versions and crash stack traces. Changes take effect after restarting Bloom.")
+            Text("Includes your Mac model, memory, Bloom and macOS versions, and crash stack traces. Changes take effect after restarting Bloom.")
                 .settingsFootnote()
         }
     }
