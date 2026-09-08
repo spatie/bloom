@@ -10,6 +10,49 @@ enum ArchiveFailureProbe {
 
     static func schedule() { Task { @MainActor in await run() } }
 
+    private static func checkBridge(app: AppModel, store: Store, root: URL) async throws -> [String] {
+        var failures: [String] = []
+        let repoPath = root.appendingPathComponent("bridge-project").path
+        let worktree = root.appendingPathComponent("bridge-worktree").path
+        try FileManager.default.createDirectory(atPath: repoPath, withIntermediateDirectories: true)
+        try await Shell.check("git", ["init", "-q", "-b", "main"], cwd: repoPath)
+        try await Shell.check("git", ["-c", "user.name=Bloom Probe", "-c", "user.email=probe@bloom.local",
+                                      "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "Fixture"], cwd: repoPath)
+        try await Shell.check("git", ["worktree", "add", "-qb", "bridge-review", worktree], cwd: repoPath)
+        let repo = try await store.upsert(Repo(name: "Archive bridge probe", path: repoPath))
+        let workspace = try await store.upsert(Workspace(
+            repoID: repo.id, name: "Finished bridge review", branch: "bridge-review",
+            path: worktree, baseBranch: "main"
+        ))
+        let session = try await store.upsert(Session(workspaceID: workspace.id, title: "Preserved history"))
+        await app.reload()
+        guard let tool = app.bridgeToolbox().handler(named: "workspace_archive", for: .owner) else {
+            return ["workspace_archive was not registered in the app"]
+        }
+        let request = MCPRequest(id: .integer(1), method: "workspace_archive",
+                                 params: .object(["id": .string(workspace.id.rawValue)]))
+        let localFile = URL(filePath: worktree).appendingPathComponent("local-only.txt")
+        try Data("keep this file".utf8).write(to: localFile)
+        app.pendingArchive = nil
+        let refused = await tool.call(request, as: .owner, store: store)
+        if !refused.isError { failures.append("bridge archived local-only work") }
+        if app.pendingArchive != nil { failures.append("bridge refusal opened a confirmation") }
+        if !FileManager.default.fileExists(atPath: localFile.path) { failures.append("bridge deleted local-only work") }
+        // Only the synthetic file created above. A real refusal never removes its cause.
+        try FileManager.default.removeItem(at: localFile)
+        let completed = await tool.call(request, as: .owner, store: store)
+        if completed.isError { failures.append("bridge clean archive failed: \(completed.text)") }
+        if try await store.workspace(id: workspace.id)?.state != .archived {
+            failures.append("bridge returned before the workspace was archived")
+        }
+        if FileManager.default.fileExists(atPath: worktree) { failures.append("bridge left the worktree on disk") }
+        if await !Git.branchExists(workspace.branch, in: repoPath) { failures.append("bridge deleted the branch") }
+        if try await store.session(id: session.id) == nil { failures.append("bridge deleted chat history") }
+        let repeated = await tool.call(request, as: .owner, store: store)
+        if repeated.isError { failures.append("bridge archive was not idempotent") }
+        return failures
+    }
+
     private static func run() async {
         guard Bundle.main.bundleIdentifier?.hasPrefix("be.spatie.bloom.typography-") == true else {
             harness.fail("requires a disposable probe bundle")
@@ -94,6 +137,7 @@ enum ArchiveFailureProbe {
             if try Data(contentsOf: marker) != Data("keep this work".utf8) {
                 failures.append("refused archive changed the folder")
             }
+            failures += try await checkBridge(app: app, store: store, root: root)
             harness.write(.object([
                 "passed": .bool(failures.isEmpty), "failures": .strings(failures),
                 "observations": .integer(observations), "lateDepartures": .integer(lateDepartures),

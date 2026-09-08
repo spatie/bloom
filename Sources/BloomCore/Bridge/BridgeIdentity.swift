@@ -28,8 +28,8 @@ public enum BridgeRole: String, Sendable, Hashable, Codable, CaseIterable {
     /// What it may do is what the owner may do from the sidebar and no more: see the projects,
     /// register an existing repository as one, and start a workspace in one of them. What it may
     /// not do is anything scoped to a workspace, because it has none to be scoped to, and anything
-    /// that destroys work, because the whole reason Bloom asks before archiving is that the answer
-    /// is sometimes no and there is nobody on this connection to ask.
+    /// that discards unprotected work. `workspace_archive` retains the branch and refuses anything
+    /// the normal archive lifecycle would need the owner to confirm.
     case owner
 
     public init(origin: WorkspaceOrigin) {

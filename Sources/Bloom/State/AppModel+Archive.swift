@@ -118,20 +118,25 @@ extension AppModel {
     /// A merged pull request needs no new logic and gets none. It already clears the commits
     /// through `isPullRequestMerged`, so what is left to stop an archive is an agent mid turn and
     /// work that exists nowhere but that directory. Neither is weakened for it.
+    @discardableResult
     func archive(
         _ workspace: Workspace,
         deleteBranch: Bool? = nil,
         alwaysConfirm: Bool = false,
+        allowsConfirmation: Bool = true,
         presentConfirmation: ((ArchiveRequest) -> Void)? = nil
-    ) async {
+    ) async -> WorkspaceArchiveOutcome {
         guard let manager, let repo = repo(for: workspace) else {
             Log.archive.error(
                 "asked to archive \(workspace.name, privacy: .public), but the app has no manager or no project for it"
             )
-            return
+            return .refused("Bloom cannot archive this workspace because its project is unavailable.")
+        }
+        guard !isArchiving(workspace.id) else {
+            return .refused("This workspace is already being archived. Check workspace_list shortly.")
         }
 
-        let hazards = ArchiveHazards(
+        var hazards = ArchiveHazards(
             isAgentRunning: isRunning(workspace),
             isPullRequestMerged: isPullRequestMerged(workspace),
             // Resolved here rather than left as nil, because the confirmation has to say whether
@@ -157,35 +162,40 @@ extension AppModel {
                 path: workspace.path,
                 baseBranch: workspace.baseBranch
             )
-            offerArchiveConfirmation(ArchiveRequest(
+            let request = ArchiveRequest(
                 workspace: workspace,
                 report: WorkspaceSafetyReport(),
                 deleteBranch: deleteBranch,
                 problem: "Bloom could not check this workspace for unsaved work. \(trouble.sentence)",
                 hazards: hazards
-            ), present: presentConfirmation)
-            return
+            )
+            if allowsConfirmation { offerArchiveConfirmation(request, present: presentConfirmation) }
+            return .refused(archiveRefusal(request))
         }
 
+        // A turn may have started while Git inspected the worktree.
+        hazards.isAgentRunning = isRunning(workspace) || isAwaitingPermission(workspace)
         let isSafe = report.isSafeToDiscard(
             deletingBranch: hazards.isDeletingBranch,
             isPullRequestMerged: hazards.isPullRequestMerged
         )
 
         guard isSafe, !hazards.isAgentRunning, !alwaysConfirm else {
-            offerArchiveConfirmation(ArchiveRequest(
+            let request = ArchiveRequest(
                 workspace: workspace, report: report, deleteBranch: deleteBranch, hazards: hazards
-            ), present: presentConfirmation)
-            return
+            )
+            if allowsConfirmation { offerArchiveConfirmation(request, present: presentConfirmation) }
+            return .refused(archiveRefusal(request))
         }
 
-        await performArchive(
+        return await performArchive(
             workspace,
             repo: repo,
             deleteBranch: deleteBranch,
             force: false,
             report: report,
             hazards: hazards,
+            allowsConfirmation: allowsConfirmation,
             presentConfirmation: presentConfirmation
         )
     }
@@ -253,6 +263,7 @@ extension AppModel {
         }
     }
 
+    @discardableResult
     private func performArchive(
         _ workspace: Workspace,
         repo: Repo,
@@ -260,13 +271,14 @@ extension AppModel {
         force: Bool,
         report: WorkspaceSafetyReport?,
         hazards: ArchiveHazards,
+        allowsConfirmation: Bool = true,
         presentConfirmation: ((ArchiveRequest) -> Void)?
-    ) async {
+    ) async -> WorkspaceArchiveOutcome {
         guard let manager else {
             Log.archive.error(
                 "archiving \(workspace.name, privacy: .public) stopped before it began: no workspace manager"
             )
-            return
+            return .refused("Bloom is still starting up. Try again in a moment.")
         }
 
         // The agents go first: they are the ones writing to the worktree that is about to be
@@ -279,7 +291,9 @@ extension AppModel {
         // That trade is deliberate and it is the reason the archive script's failure message says
         // so rather than claiming the workspace is untouched. Moving the teardown after the
         // script would mean the script running while an agent still writes, which is worse.
-        guard hideFromSidebar(workspace.id) else { return }
+        guard hideFromSidebar(workspace.id) else {
+            return .refused("This workspace is already being archived. Check workspace_list shortly.")
+        }
         workspaceModels[workspace.id]?.stopEverything()
 
         // Out of the sidebar now, before a single byte moves.
@@ -341,6 +355,7 @@ extension AppModel {
             invalidateArchived()
             await offerUndo(of: workspace, repo: repo, report: report)
             Log.archive.info("archived \(workspace.name, privacy: .public)")
+            return .archived
         } catch let error as WorkspaceError {
             await undoOptimisticArchive(workspace)
             switch error {
@@ -376,22 +391,34 @@ extension AppModel {
                 // handed to a view that went away with the selection is a question nobody is ever
                 // shown. The window's dialog is exactly where a refusal with no control to
                 // animate out of belongs, which is what `RootView` says it is for.
-                offerArchiveConfirmation(ArchiveRequest(
+                let request = ArchiveRequest(
                     workspace: workspace, report: fresh, deleteBranch: deleteBranch, hazards: hazards
-                ), present: departure == nil ? presentConfirmation : nil)
+                )
+                if allowsConfirmation {
+                    offerArchiveConfirmation(request, present: departure == nil ? presentConfirmation : nil)
+                }
+                return .refused(archiveRefusal(request))
             default:
                 Log.archive.error(
                     "could not archive \(workspace.name, privacy: .public): \(error.readableMessage, privacy: .public)"
                 )
-                await reportArchiveFailure(error, workspace: workspace)
+                return .refused(await reportArchiveFailure(error, workspace: workspace))
             }
+            return .refused("The archive script failed. Its worktree and branch were kept. Check Bloom's alert for the script output.")
         } catch {
             await undoOptimisticArchive(workspace)
             Log.archive.error(
                 "could not archive \(workspace.name, privacy: .public): \(error.readableMessage, privacy: .public)"
             )
-            await reportArchiveFailure(error, workspace: workspace)
+            return .refused(await reportArchiveFailure(error, workspace: workspace))
         }
+    }
+
+    private func archiveRefusal(_ request: ArchiveRequest) -> String {
+        if let problem = request.problem { return problem }
+        let reasons = request.losses + request.notes
+        guard !reasons.isEmpty else { return "Confirm this archive in Bloom." }
+        return "Archiving would discard \(reasons.joined(separator: "; ")). Resolve this or review it in Bloom."
     }
 
     /// Diagnosed rather than reported, for both of the archive's catches.
@@ -400,7 +427,7 @@ extension AppModel {
     /// remove ...` exited 128" in a modal and a refused row put "[UPDATE workspaces SET ...
     /// VALUES (?, ?, ?)]" in one. Neither said what to do. `WorkspaceTrouble.archiving` asks the
     /// worktree instead.
-    private func reportArchiveFailure(_ error: any Error, workspace: Workspace) async {
+    private func reportArchiveFailure(_ error: any Error, workspace: Workspace) async -> String {
         let trouble = await WorkspaceTrouble.archiving(
             error,
             workspace: workspace.name,
@@ -408,6 +435,7 @@ extension AppModel {
             baseBranch: workspace.baseBranch
         )
         alert = BloomAlert(title: "Could not archive the workspace", message: trouble.sentence)
+        return trouble.sentence
     }
 
     /// Puts a workspace back in the sidebar after the disk refused to let it go.
