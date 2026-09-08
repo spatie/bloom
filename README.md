@@ -35,8 +35,7 @@ your hometown, mentioning what you are building with it. You'll find our address
 
 Bloom needs macOS 26 or later.
 
-Download the disk image from [runbloom.app/download](https://runbloom.app/download), or from the
-[releases page](https://github.com/spatie/bloom/releases), and drag Bloom into your Applications
+Download the disk image from [runbloom.app](https://runbloom.app), and drag Bloom into your Applications
 folder. Every release is signed, notarised and stapled, then published to a Sparkle appcast, so an
 installed copy offers you each new version as it lands.
 
