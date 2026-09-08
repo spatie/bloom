@@ -20,12 +20,14 @@ for arg in "$@"; do
 done
 
 echo "==> swift build -c $CONFIG"
-swift build -c "$CONFIG" --product Bloom
+build_args=()
+if [[ -n "${BLOOM_BUILD_JOBS:-}" ]]; then build_args=(--jobs "$BLOOM_BUILD_JOBS"); fi
+swift build -c "$CONFIG" "${build_args[@]}" --product Bloom
 # The MCP stdio shim an agent CLI launches. A separate invocation because --product names one
 # product, and a separate binary because that is what an MCP server registration can point at: the
 # CLI spawns it, it forwards to the app over a unix socket, and the app answers. See BridgeShim.
-swift build -c "$CONFIG" --product bloom-bridge
-swift build -c "$CONFIG" --product bloom-server
+swift build -c "$CONFIG" "${build_args[@]}" --product bloom-bridge
+swift build -c "$CONFIG" "${build_args[@]}" --product bloom-server
 
 BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
 APP="$BIN_DIR/Bloom.app"

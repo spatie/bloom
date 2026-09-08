@@ -32,7 +32,9 @@ jobs:
       - name: Exercise the server executable
         run: python3 Tools/server-smoke.py .build/debug/bloom-server
       - name: Check service packaging
-        run: python3 Tools/test-server-packaging.py
+        run: |
+          python3 Tools/test-server-packaging.py
+          python3 Tools/test-remote-packaging.py
       - name: Package the server and its runtime
         run: python3 Tools/package-linux-server.py .build/debug/bloom-server .build/bloom-server-linux-x86_64.tar.gz
       - uses: actions/upload-artifact@v7

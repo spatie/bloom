@@ -11,8 +11,19 @@ final class ServerWindowModel {
     var connectionMode = ConnectionMode.remote
     var host = ""
     var executable = ""
-    var directory = ""
-    var repositoryPath = ""
+    var remoteDirectory = ""
+    var existingLocalDirectory = ""
+    var directory: String {
+        get { connectionMode == .existingLocal ? existingLocalDirectory : remoteDirectory }
+        set { if connectionMode == .existingLocal { existingLocalDirectory = newValue } else { remoteDirectory = newValue } }
+    }
+    var workspaceDestination = ConnectionMode.remote
+    var remoteRepositoryPath = ""
+    var localRepositoryPath = ""
+    var repositoryPath: String {
+        get { workspaceDestination == .remote ? remoteRepositoryPath : localRepositoryPath }
+        set { if workspaceDestination == .remote { remoteRepositoryPath = newValue } else { localRepositoryPath = newValue } }
+    }
     var workspaceName = ""
     var agent = AgentKind.claudeCode
     var agentModel = AppDefaults.fallbackModel
@@ -49,10 +60,49 @@ final class ServerWindowModel {
     private var transcriptSessionID: SessionID?
     private var uncertainRequest: ServerRequest?
     private var lastEndpoint: ServerEndpoint?
+    private let preferences: UserDefaults
+
+    init(preferences: UserDefaults = .standard, bundle: Bundle = .main) {
+        self.preferences = preferences
+        let seed = bundle.object(forInfoDictionaryKey: "BloomRemoteConnection") as? [String: String] ?? [:]
+        let saved = preferences.dictionary(forKey: "server.connection") as? [String: String] ?? [:]
+        let values = seed.merging(saved) { _, saved in saved }
+        host = values["host"] ?? ""
+        executable = values["executable"] ?? ""
+        remoteDirectory = values["directory"] ?? ""
+        remoteRepositoryPath = values["repository"] ?? ""
+        localRepositoryPath = values["localRepository"] ?? ""
+        if bundle.bundleIdentifier == Store.remoteBundleIdentifier {
+            agent = .codex
+            agentModel = values["model"] ?? "gpt-5.6-sol"
+        }
+    }
+
+    var destinationLabel: String { connectionMode == .remote ? "Remote server" : "This Mac" }
+
+    func prepareNewWorkspace() {
+        workspaceDestination = connectionMode
+        showsNewWorkspace = true
+    }
+
+    func switchMachine(_ destination: ConnectionMode) async {
+        guard !isConnecting, !isPerformingCommand else { return }
+        connectionMode = destination
+        await connect()
+    }
+
+    private func saveConnection() {
+        preferences.set([
+            "host": host, "executable": executable, "directory": remoteDirectory,
+            "repository": remoteRepositoryPath, "localRepository": localRepositoryPath,
+            "model": agentModel,
+        ], forKey: "server.connection")
+    }
 
     var isConnected: Bool { client != nil }
 
     func connect() async {
+        saveConnection()
         await disconnect()
         let generation = connectionGeneration
         isConnecting = true
@@ -172,6 +222,13 @@ final class ServerWindowModel {
     }
 
     func createWorkspace() async {
+        guard !isConnecting, !isPerformingCommand else { return }
+        if workspaceDestination != connectionMode || !isConnected {
+            connectionMode = workspaceDestination
+            await connect()
+            guard isConnected else { return }
+        }
+        saveConnection()
         let operation = ServerOperation.create(ServerWorkspaceRequest(
             repositoryPath: repositoryPath, name: workspaceName, agent: agent,
             model: agentModel, effort: effort, permissionMode: permissionMode

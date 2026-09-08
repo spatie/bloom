@@ -33,6 +33,7 @@ with tempfile.TemporaryDirectory(prefix="bloom-server-packaging-") as directory:
         ("Bloom", "be.spatie.bloom"),
         ("Bloom Dev", "be.spatie.bloom.dev"),
         ("Bloom Subagents", "be.spatie.bloom.subagents"),
+        ("Bloom Remote", "be.spatie.bloom.remote"),
     ]:
         bundle = bundle_at(root, name, application_id)
         module.prepare(bundle)
@@ -44,7 +45,7 @@ with tempfile.TemporaryDirectory(prefix="bloom-server-packaging-") as directory:
         assert job["ProgramArguments"] == ["bloom-server", "serve", "--application-id", application_id]
         assert job["KeepAlive"] is True and job["RunAtLoad"] is True
         assert str(root) not in str(job), "A bundle baked the builder's home path into its service"
-    assert len(labels) == 3, "Development and release servers share an identity"
+    assert len(labels) == 4, "Development and release servers share an identity"
     old = bundle_at(root, "Old Bloom", "be.spatie.bloom.dev", has_server=False)
     module.prepare(old)
     assert not (old / "Contents/Library/LaunchAgents/BloomServer.plist").exists()

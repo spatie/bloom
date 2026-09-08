@@ -1,5 +1,6 @@
 import SwiftUI
 import BloomCore
+import UniformTypeIdentifiers
 
 /// A separate window is the initial remote surface. Local workspaces remain usable beside it.
 struct ServerWindow: Scene {
@@ -15,8 +16,10 @@ struct ServerWindow: Scene {
     }
 }
 
-private struct ServerWindowView: View {
+struct ServerWindowView: View {
     @State private var model = ServerWindowModel()
+    @State private var showsRepositoryPicker = false
+    private let isRemoteApp = Bundle.main.bundleIdentifier == Store.remoteBundleIdentifier
 
     var body: some View {
         VStack(spacing: 0) {
@@ -37,6 +40,11 @@ private struct ServerWindowView: View {
         }
         .task(id: model.connectionGeneration) { await model.poll() }
         .task(id: model.connectionGeneration) { await model.pollReview() }
+        .task {
+            if isRemoteApp, !model.host.isEmpty, !model.executable.isEmpty, !model.directory.isEmpty {
+                await model.connect()
+            }
+        }
         .onDisappear { Task { await model.disconnect() } }
         .sheet(isPresented: $model.showsNewWorkspace) { newWorkspace }
         .onChange(of: model.agent) { _, agent in
@@ -111,10 +119,22 @@ private struct ServerWindowView: View {
                     }
                 }
             }
-            .navigationTitle(model.serverName)
+            .navigationTitle(isRemoteApp ? "Bloom Remote" : model.serverName)
+            .navigationSubtitle("\(model.destinationLabel): \(model.serverName)")
             .toolbar {
-                Button("New Workspace", systemImage: "plus") { model.showsNewWorkspace = true }
-                    .disabled(model.isPerformingCommand)
+                Picker("Machine", selection: Binding(
+                    get: { model.connectionMode }, set: { destination in Task { await model.switchMachine(destination) } }
+                )) {
+                    Text("Remote server").tag(ServerWindowModel.ConnectionMode.remote)
+                    Text("This Mac").tag(ServerWindowModel.ConnectionMode.local)
+                    if model.connectionMode == .existingLocal {
+                        Text("Existing local server").tag(ServerWindowModel.ConnectionMode.existingLocal)
+                    }
+                }
+                .pickerStyle(.menu)
+                .disabled(model.isConnecting || model.isPerformingCommand)
+                Button("New Workspace", systemImage: "plus") { model.prepareNewWorkspace() }
+                    .disabled(model.isConnecting || model.isPerformingCommand)
                 Button("Disconnect", systemImage: "network.slash") { Task { await model.disconnect() } }
                 Button("Show Changes", systemImage: "sidebar.right") { model.showsReview.toggle() }
                 if model.connectionMode == .local {
@@ -125,11 +145,11 @@ private struct ServerWindowView: View {
         } detail: {
             if model.selectedSessionID != nil { conversation } else {
                 ContentUnavailableView {
-                    Label("Server workspaces", systemImage: "server.rack")
+                    Label(model.destinationLabel + " workspaces", systemImage: model.connectionMode == .remote ? "server.rack" : "desktopcomputer")
                 } description: {
                     Text("Select a conversation or create a workspace on \(model.serverName).")
                 } actions: {
-                    Button("New Workspace") { model.showsNewWorkspace = true }
+                    Button("New Workspace") { model.prepareNewWorkspace() }
                 }
             }
         }
@@ -194,7 +214,24 @@ private struct ServerWindowView: View {
     private var newWorkspace: some View {
         VStack(spacing: 0) {
             Form {
-                TextField("Repository on server", text: $model.repositoryPath, prompt: Text("/absolute/path/to/repository"))
+                Picker("Create on", selection: $model.workspaceDestination) {
+                    Text("Remote server").tag(ServerWindowModel.ConnectionMode.remote)
+                    Text("This Mac").tag(ServerWindowModel.ConnectionMode.local)
+                    if model.connectionMode == .existingLocal {
+                        Text("Existing local server").tag(ServerWindowModel.ConnectionMode.existingLocal)
+                    }
+                }
+                .pickerStyle(.segmented)
+                if model.workspaceDestination == .remote {
+                    Text(model.host.isEmpty ? "Configure the remote connection first." : "Runs on \(model.host)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    TextField(model.workspaceDestination == .remote ? "Repository on server" : "Repository on this Mac", text: $model.repositoryPath, prompt: Text("/absolute/path/to/repository"))
+                    if model.workspaceDestination != .remote {
+                        Button("Choose…") { showsRepositoryPicker = true }
+                    }
+                }
                 TextField("Workspace name", text: $model.workspaceName)
                 Picker("Agent", selection: $model.agent) {
                     Text("Claude Code").tag(AgentKind.claudeCode)
@@ -206,23 +243,30 @@ private struct ServerWindowView: View {
                     Text(PermissionMode.plan.label(on: model.agent)).tag(PermissionMode.plan)
                     Text(PermissionMode.acceptEdits.label(on: model.agent)).tag(PermissionMode.acceptEdits)
                 }
-                Text("Creates a git worktree and runs the repository's configured setup script on the server.")
+                Text(model.workspaceDestination == .remote
+                     ? "Creates the worktree and runs setup and agents on the remote server."
+                     : "Creates the worktree and runs setup and agents on this Mac. The local server keeps working when you close the app.")
                     .font(.caption).foregroundStyle(.secondary)
+                if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             }
             .formStyle(.grouped)
+            .disabled(model.isPerformingCommand || model.isConnecting)
             HStack {
                 Button("Cancel") { model.showsNewWorkspace = false }
                     .keyboardShortcut(.cancelAction)
-                    .disabled(model.isPerformingCommand)
+                    .disabled(model.isPerformingCommand || model.isConnecting)
                 Spacer()
-                if model.isPerformingCommand { ProgressView().controlSize(.small) }
+                if model.isPerformingCommand || model.isConnecting { ProgressView().controlSize(.small) }
                 Button("Create Workspace") { Task { await model.createWorkspace() } }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(model.isPerformingCommand || model.repositoryPath.isEmpty || model.workspaceName.isEmpty || model.agentModel.isEmpty)
+                    .disabled(model.isPerformingCommand || model.isConnecting || model.repositoryPath.isEmpty || model.workspaceName.isEmpty || model.agentModel.isEmpty)
             }
             .padding()
         }
-        .frame(width: 560, height: 430)
-        .interactiveDismissDisabled(model.isPerformingCommand)
+        .frame(width: 620, height: 560)
+        .interactiveDismissDisabled(model.isPerformingCommand || model.isConnecting)
+        .fileImporter(isPresented: $showsRepositoryPicker, allowedContentTypes: [.folder]) { result in
+            do { model.localRepositoryPath = try result.get().path } catch { model.error = error.localizedDescription }
+        }
     }
 }

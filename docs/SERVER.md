@@ -11,6 +11,32 @@ moved into this server. New server workspaces can run locally or on another mach
 
 ## Build and run
 
+### Bloom Remote verification app
+
+`make remote` builds a pinned release copy at `~/Applications/Bloom Remote.app`. It has its own
+bundle identifier, preferences, database fallback and local background service. It opens the same
+server views used by Bloom, without constructing the normal desktop workspace model. Installation
+does not restart any running app.
+
+The first build can embed a connection preset. These values are connection addresses, not agent
+credentials, and subsequent builds preserve the installed preset unless explicitly overridden:
+
+```sh
+BLOOM_REMOTE_HOST=developer@server \
+BLOOM_REMOTE_EXECUTABLE=/opt/bloom-server/bin/bloom-server \
+BLOOM_REMOTE_DIRECTORY=/var/lib/bloom/data \
+BLOOM_REMOTE_REPOSITORY=/srv/repository \
+make remote
+```
+
+Bloom Remote connects to the preset server on launch. The toolbar switches between **Remote
+server** and **This Mac**. **New Workspace > Create on** also chooses the destination directly.
+Local repositories have a folder picker, remote repositories use paths on that server, and each
+destination remembers its own repository path. Switching machines disconnects the client while
+agents continue on the machine that owns them.
+
+### Standalone executable
+
 From the repository:
 
 ```sh
