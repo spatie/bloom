@@ -516,12 +516,22 @@ public struct WorkspaceManager: Sendable {
     /// What archiving this workspace would throw away. Call it before `archive` to build a
     /// confirmation the user can actually judge.
     public func safetyReport(workspace: Workspace, repo: Repo) async throws -> WorkspaceSafetyReport {
-        try await Git.safetyReport(
+        if await preservesFolderWhenArchiving(workspace) {
+            var report = WorkspaceSafetyReport()
+            report.preservedFolderPath = workspace.path
+            return report
+        }
+        return try await Git.safetyReport(
             worktree: workspace.path,
             branch: workspace.branch,
             base: workspace.baseBranch,
             repo: repo.path
         )
+    }
+
+    private func preservesFolderWhenArchiving(_ workspace: Workspace) async -> Bool {
+        guard FileManager.default.fileExists(atPath: workspace.path) else { return false }
+        return !(await Git.isRepository(workspace.path))
     }
 
     // MARK: - Ports
@@ -640,6 +650,14 @@ public struct WorkspaceManager: Sendable {
                 throw WorkspaceError.unsafeToArchive(computed)
             }
             report = computed
+        }
+
+        // A deleted worktree can be recreated by a lingering process. Git cannot remove that
+        // folder safely, but it need not prevent archiving the record. Keep everything on disk,
+        // including the branch and stale worktree metadata, even when force was requested.
+        if report?.preservedFolderPath != nil {
+            try await store.update(workspaceID: workspace.id) { $0.archive() }
+            return
         }
 
         // A failing archive script means the workspace was not wound down: containers still

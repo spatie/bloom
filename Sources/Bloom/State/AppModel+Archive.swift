@@ -354,6 +354,14 @@ extension AppModel {
             // One more workspace is archived now, so anything holding the old answer is wrong.
             invalidateArchived()
             await offerUndo(of: workspace, repo: repo, report: report)
+            if let path = report?.preservedFolderPath {
+                notice = BloomNotice(
+                    message: "\(workspace.name) was archived. Its folder at `\(path)` and its branch "
+                        + "were kept because Git no longer recognizes the folder as a worktree. "
+                        + "The archive script was skipped.",
+                    dismissal: .untilDismissed
+                )
+            }
             Log.archive.info("archived \(workspace.name, privacy: .public)")
             return .archived
         } catch let error as WorkspaceError {

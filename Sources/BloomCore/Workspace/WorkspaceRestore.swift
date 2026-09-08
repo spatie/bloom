@@ -141,7 +141,8 @@ public struct RestoreOutcome: Sendable, Equatable {
 /// second copy to check out.
 public extension WorkspaceSafetyReport {
     var isRestorableFromBranch: Bool {
-        !hasUncommittedChanges
+        preservedFolderPath == nil
+            && !hasUncommittedChanges
             && untrackedFiles.isEmpty
             && modifiedIgnoredFiles.isEmpty
             && detachedCommits == 0
@@ -234,7 +235,8 @@ public extension WorkspaceManager {
         }
 
         try await Git.addWorktree(
-            repo: repo.path, path: path, branch: workspace.branch, base: base
+            repo: repo.path, path: path, branch: workspace.branch, base: base,
+            replacingPrunableWorktreeAt: workspace.path
         )
 
         let settings = SettingsLoader.load(repo: repo.path)
