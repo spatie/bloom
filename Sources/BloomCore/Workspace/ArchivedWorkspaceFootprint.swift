@@ -4,8 +4,8 @@ import Foundation
 ///
 /// Archiving removes the worktree and, if the project asks for it, the branch. It removes nothing
 /// from the database at all: `Workspace.archive()` writes two columns and every row that ever
-/// hung off the workspace is still there. So an archived workspace costs no disk outside
-/// `bloom.sqlite` and, inside it, costs everything it ever did.
+/// hung off the workspace is still there. An unrecognized worktree folder is kept on disk when
+/// archiving. These measurements cover only the database contents, not that retained folder.
 ///
 /// **The bytes here are measured, not estimated, and they are deliberately an undercount.** The
 /// numbers come from `LENGTH()` over the columns that actually hold content, dominated by

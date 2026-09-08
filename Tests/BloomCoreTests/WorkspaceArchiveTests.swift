@@ -217,6 +217,80 @@ struct WorkspaceArchiveTests {
         #expect(await Git.branchExists(workspace.branch, in: repo.path))
     }
 
+    @Test("an unrecognized folder archives while preserving its files and branch",
+          arguments: [false, true], [false, true])
+    func archivesAnUnrecognizedFolder(force: Bool, prune: Bool) async throws {
+        let (repo, registered, manager, workspace) = try await makeWorkspace(settings: """
+        [git]
+        delete_branch_on_archive = true
+        [scripts]
+        archive = 'touch "$BLOOM_ROOT_PATH/archive-script-ran"; exit 9'
+        """)
+        defer { repo.cleanUp() }
+        defer { try? FileManager.default.removeItem(atPath: workspace.path) }
+
+        try TempRepo(existing: workspace.path).write("feature.txt", "committed work\n")
+        try await commit(in: workspace.path, message: "keep this branch")
+        let sha = try await Git.headSHA(of: workspace.path)
+        try FileManager.default.removeItem(atPath: workspace.path)
+        if prune {
+            try await Shell.check("git", ["worktree", "prune"], cwd: repo.path)
+        }
+        try FileManager.default.createDirectory(atPath: workspace.path, withIntermediateDirectories: true)
+        let folder = TempRepo(existing: workspace.path)
+        try folder.write("notes.txt", "only remaining copy\n")
+
+        let report = try await manager.safetyReport(workspace: workspace, repo: registered)
+        #expect(report.preservedFolderPath == workspace.path)
+        #expect(report.isSafeToDiscard)
+        #expect(!report.isRestorableFromBranch)
+
+        try await manager.archive(workspace: workspace, repo: registered, force: force)
+
+        #expect(try await manager.store.workspace(id: workspace.id)?.state == .archived)
+        #expect(folder.read("notes.txt") == "only remaining copy\n")
+        #expect(await Git.branchExists(workspace.branch, in: repo.path))
+        let branchSHA = try await Shell.check("git", ["rev-parse", workspace.branch], cwd: repo.path)
+        #expect(branchSHA.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == sha)
+        #expect(!repo.exists("archive-script-ran"))
+
+        let restored = try await manager.restore(workspace: workspace, repo: registered)
+        defer { try? FileManager.default.removeItem(atPath: restored.workspace.path) }
+        #expect(restored.workspace.state == .active)
+        #expect(restored.workspace.path != workspace.path)
+        #expect(try await Git.headSHA(of: restored.workspace.path) == sha)
+        #expect(folder.read("notes.txt") == "only remaining copy\n")
+
+        // Later archives and restores must not remain blocked by the original registration.
+        try repo.write(".conductor/settings.toml", "")
+        try await manager.archive(workspace: restored.workspace, repo: registered, deleteBranch: false)
+        let restoredAgain = try await manager.restore(workspace: restored.workspace, repo: registered)
+        try await manager.archive(workspace: restoredAgain.workspace, repo: registered, deleteBranch: true, force: true)
+        #expect(!(await Git.branchExists(workspace.branch, in: repo.path)))
+        #expect(folder.read("notes.txt") == "only remaining copy\n")
+    }
+
+    @Test("restoring a retained folder cannot override another live checkout")
+    func retainedFolderDoesNotOverrideLiveCheckout() async throws {
+        let (repo, registered, manager, workspace) = try await makeWorkspace()
+        defer { repo.cleanUp() }
+        defer { try? FileManager.default.removeItem(atPath: workspace.path) }
+        try FileManager.default.removeItem(atPath: workspace.path)
+        try FileManager.default.createDirectory(atPath: workspace.path, withIntermediateDirectories: true)
+        try await manager.archive(workspace: workspace, repo: registered)
+
+        let livePath = workspace.path + "-live"
+        defer { try? FileManager.default.removeItem(atPath: livePath) }
+        try await Shell.check("git", ["worktree", "add", "--force", "--", livePath, workspace.branch], cwd: repo.path)
+        try TempRepo(existing: livePath).write("notes.txt", "live work\n")
+
+        await #expect(throws: ShellError.self) {
+            try await manager.restore(workspace: workspace, repo: registered)
+        }
+        #expect(TempRepo(existing: livePath).read("notes.txt") == "live work\n")
+        #expect(try await manager.store.workspace(id: workspace.id)?.state == .archived)
+    }
+
     @Test("forcing over a dirty worktree destroys exactly what the report listed")
     func forceDestroysOnlyWhatWasReported() async throws {
         let (repo, registered, manager, workspace) = try await makeWorkspace()

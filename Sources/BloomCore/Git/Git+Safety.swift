@@ -99,6 +99,10 @@ public struct WorkspaceSafetyReport: Sendable, Hashable {
     /// throws away the per-worktree reflog that was the last thing holding them.
     public var detachedCommits: Int
 
+    /// Archiving only updates the record when this folder is no longer a checkout.
+    /// Its files, branch and Git metadata are kept, and the archive script is skipped.
+    public var preservedFolderPath: String?
+
     public init(
         hasUncommittedChanges: Bool = false,
         untrackedFiles: [String] = [],
