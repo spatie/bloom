@@ -47,35 +47,48 @@ enum ArchiveFailureProbe {
             let pending = try await store.pendingDeliveries(sessionID: session.id)
             if !pending.isEmpty { failures.append("archive queued a new prompt") }
             app.restoreToSidebar(workspace)
+            // The window leaves with the row, and a refusal never carries it back. Both halves are
+            // counted rather than sampled once: the departure is synchronous with the row leaving
+            // the sidebar, so `isArchiving` becoming true and the workspace still being on screen
+            // is the regression this probe exists to catch, and it is the one that made archiving
+            // look frozen for two or three seconds.
             var observations = 0
-            var lostSelection = 0
-            var lostInspector = 0
+            var lateDepartures = 0
+            var returnsAfterRefusal = 0
             for _ in 0..<5 {
+                app.selection = .workspace(workspace.id)
                 await app.archive(workspace, deleteBranch: false, alwaysConfirm: true)
                 guard let request = app.pendingArchive else { harness.fail("no refusal confirmation") }
                 let archive = Task { await app.confirmArchive(request) }
+                while !app.isArchiving(workspace.id) { await Task.yield() }
+                if app.selection == .workspace(workspace.id) { lateDepartures += 1 }
                 for _ in 0..<100 {
                     observations += 1
-                    if app.selection != .workspace(workspace.id) { lostSelection += 1 }
-                    if app.selectedWorkspace == nil { lostInspector += 1 }
+                    if app.selection == .workspace(workspace.id) { returnsAfterRefusal += 1 }
                     try? await Task.sleep(for: .milliseconds(2))
                 }
                 await archive.value
+                if app.selection == .workspace(workspace.id) { returnsAfterRefusal += 1 }
+                // The pane went, and what it was drawing did not. Nothing about leaving the
+                // workspace may throw away a transcript the user can come back to.
                 if model.existingTranscript(for: session.id) !== transcript {
                     failures.append("refused archive discarded its transcript model")
                 }
                 if app.alert == nil { failures.append("failed archive did not explain its refusal") }
                 app.alert = nil
+                if app.existingModel(for: workspace.id) == nil {
+                    failures.append("refused archive threw away its workspace model")
+                }
             }
-            if lostSelection > 0 { failures.append("failed archive changed the detail selection") }
-            if lostInspector > 0 { failures.append("failed archive removed the inspector subject") }
+            if lateDepartures > 0 { failures.append("archive left the workspace on screen") }
+            if returnsAfterRefusal > 0 { failures.append("refusal took the window back to the workspace") }
             await app.archive(workspace, deleteBranch: false, alwaysConfirm: true)
             guard let request = app.pendingArchive else { harness.fail("no second refusal") }
             let navigation = Task { await app.confirmArchive(request) }
             while !app.isArchiving(workspace.id) { await Task.yield() }
-            app.selection = .home
+            app.selection = .ask
             await navigation.value
-            if app.selection != .home { failures.append("refusal overrode newer navigation") }
+            if app.selection != .ask { failures.append("refusal overrode newer navigation") }
             let saved = try await store.workspace(id: workspace.id)
             if saved?.state != .active { failures.append("refused workspace was archived") }
             if try Data(contentsOf: marker) != Data("keep this work".utf8) {
@@ -83,8 +96,8 @@ enum ArchiveFailureProbe {
             }
             harness.write(.object([
                 "passed": .bool(failures.isEmpty), "failures": .strings(failures),
-                "observations": .integer(observations), "lostSelection": .integer(lostSelection),
-                "lostInspector": .integer(lostInspector), "fixture": .string(root.path),
+                "observations": .integer(observations), "lateDepartures": .integer(lateDepartures),
+                "returnsAfterRefusal": .integer(returnsAfterRefusal), "fixture": .string(root.path),
             ]))
             exit(failures.isEmpty ? 0 : 1)
         } catch { harness.fail(error.localizedDescription) }
