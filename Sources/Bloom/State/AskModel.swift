@@ -23,9 +23,13 @@ final class AskModel {
     init(app: AppModel) { self.app = app }
 
     func open() async {
-        guard !hasOpened, !isChanging, let store = app.store else { return }
+        guard !isChanging, let store = app.store else { return }
         isChanging = true
         defer { isChanging = false }
+        if hasOpened {
+            if transcript == nil, let selectedID { await select(selectedID) }
+            return
+        }
         do {
             sessions = try await store.sessionsWithoutWorkspace()
             if sessions.isEmpty {
