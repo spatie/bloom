@@ -20,8 +20,15 @@ product interface. Existing local workspaces continue to run locally.
 ## Implementation boundaries
 
 A remote session has a distinct sidebar selection that cannot resolve to a local filesystem
-workspace. Its actions use the server API. The transcript rows, composer editor, source editor,
-terminal renderer, browser and file preview renderer are shared with the local app.
+workspace. Its actions use the server API. Remote snapshots populate `TranscriptModel`, which uses
+the same `ChatPaneView`, `TranscriptListView` and `ComposerView` as local conversations. The model,
+reasoning, permissions and context controls read and write the owning server. File mentions and
+attachments use that host while their menus, editor, drop handling and previews stay shared.
+
+The inspector toolbar, Changes list, All files tree and file-editing surface are shared views with
+host-specific data and action adapters. Selecting a remote file opens it in the centre column.
+Capabilities involving local filesystem URLs are withheld until a remote adapter can supply a
+downloaded file. A server path must never be offered to Finder or a local editor as a Mac path.
 
 The server is the only owner of its database and runners. SSH clients are replaceable transports.
 Commands and queued prompt deliveries have durable receipts. Unknown outcomes after an interrupted

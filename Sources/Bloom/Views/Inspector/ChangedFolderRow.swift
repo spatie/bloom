@@ -21,6 +21,7 @@ struct ChangedFolderRow: View, Equatable {
             && lhs.isExpanded == rhs.isExpanded
             && lhs.depth == rhs.depth
             && lhs.fullPath == rhs.fullPath
+            && lhs.supportsLocalFileActions == rhs.supportsLocalFileActions
     }
 
     var name: String
@@ -33,6 +34,7 @@ struct ChangedFolderRow: View, Equatable {
     var action: () -> Void
     /// Opens a shell in this folder. See `FolderTerminal`.
     var onOpenTerminal: () -> Void
+    var supportsLocalFileActions = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -69,6 +71,7 @@ struct ChangedFolderRow: View, Equatable {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            if supportsLocalFileActions {
             Button("Reveal in Finder") { Reveal.inFinder(fullPath) }
             OpenInItems(target: .folder(fullPath))
             // With the two above rather than beside Copy path, and worded exactly as the worktree
@@ -77,6 +80,7 @@ struct ChangedFolderRow: View, Equatable {
             // a diff after the agent deleted it.
             if FolderTerminal.canOpen(folder: fullPath) {
                 Button(FolderTerminal.menuTitle, action: onOpenTerminal)
+            }
             }
             Button("Copy path", action: copyPath)
         }

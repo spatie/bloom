@@ -10,8 +10,21 @@ import BloomCore
 /// Only the controls that mean something for the pane below are drawn. A row of four trailing
 /// buttons pushed the picker into its narrow form at the DEFAULT inspector width, and two of them
 /// did nothing at all on the checks tab.
-struct InspectorToolbar: View {
-    @Bindable var model: WorkspaceModel
+struct InspectorToolbar<ScopeMenu: View, WorktreeMenu: View>: View {
+    @Binding var selection: InspectorTab
+    var tabs: [InspectorTab]
+    var fileCount: Int
+    var scopeMenu: ScopeMenu
+    var worktreeMenu: WorktreeMenu
+
+    init(selection: Binding<InspectorTab>, tabs: [InspectorTab], fileCount: Int,
+         @ViewBuilder scopeMenu: () -> ScopeMenu, @ViewBuilder worktreeMenu: () -> WorktreeMenu) {
+        _selection = selection
+        self.tabs = tabs
+        self.fileCount = fileCount
+        self.scopeMenu = scopeMenu()
+        self.worktreeMenu = worktreeMenu()
+    }
 
     /// Shared with `ChangedFileList` through the same defaults key, and outliving the launch
     /// because a user who thinks in folders thinks in folders tomorrow too.
@@ -48,7 +61,7 @@ struct InspectorToolbar: View {
     /// the pane's default width instead of dropping to its pop-up form.
     private var trailing: some View {
         HStack(spacing: Metrics.spacingTight) {
-            if model.inspectorTab == .changes {
+            if selection == .changes {
                 // No Review toggle. It existed to hide this list so that the diff under it had
                 // room, and the diff is not under it any more: it is a tab in the centre column
                 // at the full height of the window, and the list stays beside it the whole time.
@@ -68,7 +81,7 @@ struct InspectorToolbar: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(model.changedFiles.isEmpty)
+                .disabled((fileCount == 0))
                 .accessibilityLabel("Group changes by folder")
                 .accessibilityAddTraits(isTree ? .isSelected : [])
                 .help(
@@ -82,7 +95,7 @@ struct InspectorToolbar: View {
                 // list is GitHub's. Which scope is in force is said by the band under this row
                 // rather than in it, for the width reason `DiffScopeBand` spells out.
                 Menu {
-                    DiffScopeMenuItems(model: model)
+                    scopeMenu
                 } label: {
                     Label(
                         "What the changes are measured from",
@@ -113,7 +126,7 @@ struct InspectorToolbar: View {
             // The items themselves are `WorktreeMenuItems`, which is a view of its own so that
             // this menu can be photographed. See its head.
             Menu {
-                WorktreeMenuItems(workspace: model.workspace, pullRequest: model.pullRequest)
+                worktreeMenu
             } label: {
                 Label("More for this worktree", systemImage: "ellipsis.circle")
             }
@@ -132,8 +145,8 @@ struct InspectorToolbar: View {
         // GitHub has reported a run for the branch, so a workspace with no pull request draws two
         // segments and no gap where a third used to be. `InspectorTab.available` is where that is
         // decided and why it is decided there.
-        Picker("Inspector view", selection: $model.inspectorTab) {
-            ForEach(model.availableInspectorTabs, id: \.self) { tab in
+        Picker("Inspector view", selection: $selection) {
+            ForEach(tabs, id: \.self) { tab in
                 Text(title(for: tab)).tag(tab)
             }
         }
@@ -141,10 +154,10 @@ struct InspectorToolbar: View {
 
     private var tabStrip: some View {
         HStack(spacing: 0) {
-            ForEach(model.availableInspectorTabs, id: \.self) { tab in
-                let isSelected = model.inspectorTab == tab
+            ForEach(tabs, id: \.self) { tab in
+                let isSelected = selection == tab
                 Button {
-                    model.inspectorTab = tab
+                    selection = tab
                 } label: {
                     Text(title(for: tab))
                         .font(Typo.label)
@@ -212,8 +225,19 @@ struct InspectorToolbar: View {
     /// one file inside it, and the field holding a word is what says the list below is showing
     /// fewer.
     private func title(for tab: InspectorTab) -> String {
-        guard tab == .changes, !model.changedFiles.isEmpty else { return tab.rawValue }
-        return "\(tab.rawValue) (\(model.changedFiles.count))"
+        guard tab == .changes, !(fileCount == 0) else { return tab.rawValue }
+        return "\(tab.rawValue) (\(fileCount))"
     }
 
+}
+
+extension InspectorToolbar where ScopeMenu == DiffScopeMenuItems, WorktreeMenu == WorktreeMenuItems {
+    init(model: WorkspaceModel) {
+        self.init(selection: Binding(get: { model.inspectorTab }, set: { model.inspectorTab = $0 }),
+            tabs: model.availableInspectorTabs, fileCount: model.changedFiles.count) {
+            DiffScopeMenuItems(model: model)
+        } worktreeMenu: {
+            WorktreeMenuItems(workspace: model.workspace, pullRequest: model.pullRequest)
+        }
+    }
 }

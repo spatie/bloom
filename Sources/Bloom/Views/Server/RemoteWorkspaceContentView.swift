@@ -11,6 +11,8 @@ struct RemoteWorkspaceContentView: View {
             RemoteWorkspaceTabsView(model: model)
             if model.activePane == "terminal" {
                 RemoteTerminalView(model: model, name: model.selectedTerminal)
+            } else if model.activePane == "review" {
+                RemoteReviewPane(server: model)
             } else if model.activePane == "preview" {
                 RemotePreviewView(model: model)
             } else {

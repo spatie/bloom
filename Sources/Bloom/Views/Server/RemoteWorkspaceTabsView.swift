@@ -11,6 +11,7 @@ struct RemoteWorkspaceTabsView: View {
         switch model.activePane {
         case "terminal": "terminal-" + model.selectedTerminal
         case "preview": "preview"
+        case "review": "review"
         default: model.selectedSessionID?.rawValue ?? ""
         }
     }
@@ -33,6 +34,9 @@ struct RemoteWorkspaceTabsView: View {
                     }
                 }
                 tab("Preview", id: "preview", glyph: PaneGlyph.browser) { model.activePane = "preview" }
+                if let path = model.review.selectedPath {
+                    tab((path as NSString).lastPathComponent, id: "review", glyph: PaneGlyph.review) { model.activePane = "review" }
+                }
             }
         } append: {
             Menu {

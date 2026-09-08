@@ -223,6 +223,7 @@ final class ServerWindowModel {
         guard let workspace = selectedWorkspace else { return }
         let prefix = workspace.path.hasSuffix("/") ? workspace.path : workspace.path + "/"
         review.showsFile = true
+        activePane = "review"
         review.selectedPath = path.hasPrefix(prefix) ? String(path.dropFirst(prefix.count)) : path
         showsReview = true
     }
@@ -244,10 +245,30 @@ final class ServerWindowModel {
     func editBuffer() -> ServerFileBuffer? {
         guard let workspace = selectedWorkspace, let path = review.selectedPath,
               let endpoint = lastEndpoint, !review.fileRevision.isEmpty else { return nil }
-        let key = host + remoteDirectory + workspace.id.rawValue + "/" + path
         let file = ServerTextFile(path: path, text: review.fileText)
+        return holdEditBuffer(file, workspaceID: workspace.id, endpoint: endpoint)
+    }
+
+    func cachedEditBuffer(path: String, workspaceID: WorkspaceID) -> ServerFileBuffer? {
+        guard let endpoint else { return nil }
+        return fileBuffers[String(reflecting: endpoint) + "/" + workspaceID.rawValue + "/" + path]
+    }
+
+    func loadEditBuffer(path: String, workspaceID: WorkspaceID) async -> ServerFileBuffer? {
+        guard let endpoint else { return nil }
+        do {
+            guard case .file(let file) = try await read(.file(workspaceID: workspaceID, path: path)) else { return nil }
+            return holdEditBuffer(file, workspaceID: workspaceID, endpoint: endpoint)
+        } catch {
+            if selectedWorkspace?.id == workspaceID { self.error = error.localizedDescription }
+            return nil
+        }
+    }
+
+    private func holdEditBuffer(_ file: ServerTextFile, workspaceID: WorkspaceID, endpoint: ServerEndpoint) -> ServerFileBuffer {
+        let key = String(reflecting: endpoint) + "/" + workspaceID.rawValue + "/" + file.path
         if let buffer = fileBuffers[key] { buffer.receive(file); return buffer }
-        let buffer = ServerFileBuffer(file: file, workspaceID: workspace.id, endpoint: endpoint)
+        let buffer = ServerFileBuffer(file: file, workspaceID: workspaceID, endpoint: endpoint)
         fileBuffers[key] = buffer
         return buffer
     }

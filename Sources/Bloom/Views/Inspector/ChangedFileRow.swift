@@ -22,7 +22,10 @@ struct ChangedFileRow: View, Equatable {
             && lhs.isSelected == rhs.isSelected
             && lhs.isViewed == rhs.isViewed
             && lhs.fullPath == rhs.fullPath
+            && lhs.supportsLocalFileActions == rhs.supportsLocalFileActions
             && lhs.depth == rhs.depth
+            && lhs.supportsViewedMarks == rhs.supportsViewedMarks
+            && lhs.supportsFileRevert == rhs.supportsFileRevert
     }
 
     var file: ChangedFile
@@ -46,6 +49,9 @@ struct ChangedFileRow: View, Equatable {
     /// Ticks the file, or takes the tick off. The wording of the item is `ReviewedMarkAction`'s,
     /// shared with the file bar's toggle.
     var onSetViewed: @MainActor (Bool) -> Void = { _ in }
+    var supportsLocalFileActions = true
+    var supportsFileRevert = true
+    var supportsViewedMarks = true
 
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
 
@@ -93,25 +99,31 @@ struct ChangedFileRow: View, Equatable {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(HoverQuickLook(url: URL(fileURLWithPath: fullPath)))
+        .background { if supportsLocalFileActions { HoverQuickLook(url: URL(fileURLWithPath: fullPath)) } }
         // The real file, so a drop into Finder or an editor gets the document rather than a
         // sentence about where it lives. One file per drag: the list carries a single selection.
-        .fileDrag(path: fullPath)
+        .fileDrag(path: fullPath, isEnabled: supportsLocalFileActions)
         .contextMenu {
             // First, because it is the one item here about the reader's pass through the diff
             // rather than about handing the file to something else, and because it is the item
             // this menu is most often opened for during a review.
-            Button(ReviewedMarkAction(isViewed: isViewed).title) { onSetViewed(!isViewed) }
-            Divider()
+            if supportsViewedMarks {
+                Button(ReviewedMarkAction(isViewed: isViewed).title) { onSetViewed(!isViewed) }
+                Divider()
+            }
+            if supportsLocalFileActions {
             OpenInItems(target: .file(fullPath))
             Button("Reveal in Finder") { Reveal.inFinder(fullPath) }
             // With the two above rather than beside Copy path: all of them hand this row to
             // something that opens it, and only the last is about the clipboard. The same grouping
             // `FileTreeRow` puts `Open Terminal Tab Here` in.
             LocalPageItems(path: fullPath, open: onOpenPage, split: onSplitPage)
+            }
             Button("Copy path", action: copyPath)
+            if supportsFileRevert {
             Divider()
             Button("Revert this file", role: .destructive, action: onRevert)
+            }
         }
         .help(file.path)
         .accessibilityInputLabels([file.filename])

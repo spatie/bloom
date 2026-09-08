@@ -32,7 +32,7 @@ final class ServerReviewModel {
     private var workspaceID: WorkspaceID?
     private var generation = 0
     private var needsContent = true
-    private var hasReadFiles = false
+    private(set) var hasReadFiles = false
 
     func reset() {
         workspaceID = nil

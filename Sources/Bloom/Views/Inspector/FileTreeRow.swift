@@ -16,6 +16,7 @@ struct FileTreeRow: View, Equatable {
             && lhs.isExpanded == rhs.isExpanded
             && lhs.isChanged == rhs.isChanged
             && lhs.fullPath == rhs.fullPath
+            && lhs.supportsLocalFileActions == rhs.supportsLocalFileActions
     }
 
     var item: FileTreeRowItem
@@ -31,6 +32,7 @@ struct FileTreeRow: View, Equatable {
     /// than the model, so the row keeps comparing on its values alone: see `==` above.
     var onOpenPage: @MainActor () -> Void
     var onSplitPage: @MainActor (SplitAxis) -> Void
+    var supportsLocalFileActions = true
 
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -76,12 +78,13 @@ struct FileTreeRow: View, Equatable {
         }
         .buttonStyle(.plain)
         .background {
-            if !item.node.isDirectory { HoverQuickLook(url: URL(fileURLWithPath: fullPath)) }
+            if supportsLocalFileActions, !item.node.isDirectory { HoverQuickLook(url: URL(fileURLWithPath: fullPath)) }
         }
         // Folders included: dragging a directory out of a worktree is the same gesture in Finder,
         // and the provider carries whichever of the two this row is.
-        .fileDrag(path: fullPath)
+        .fileDrag(path: fullPath, isEnabled: supportsLocalFileActions)
         .contextMenu {
+            if supportsLocalFileActions {
             // The one place a row is either kind, so the target is decided per row rather than
             // per view: a folder is not offered to something that only opens files, and a file is
             // not handed to a terminal.
@@ -97,6 +100,7 @@ struct FileTreeRow: View, Equatable {
             // The other half of that pair, and the same argument for where it sits. The two are
             // never both drawn: a shell wants a folder and a page is a file.
             LocalPageItems(path: fullPath, open: onOpenPage, split: onSplitPage)
+            }
             Button("Copy path", action: copyPath)
         }
         .help(item.node.path)
