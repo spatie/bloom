@@ -82,6 +82,13 @@ enum ReviewRunProbe {
             await settle(window)
             if let scroll = scrollView(in: host) {
                 let initial = hoverViews(in: host).count
+                // Classic scrollbars add height around the horizontal scroller on CI.
+                // The code keeps its exact height; the outer extent must stay stable.
+                let initialHeight = scroll.documentView?.bounds.height ?? 0
+                let inner = scroll.documentView.flatMap { scrollView(in: $0) }
+                let codeHeight = inner?.documentView?.bounds.height ?? 0
+                check(abs(codeHeight - CodeMetrics.rowHeight * 5000) < 1,
+                      "embedded code height was \(codeHeight), expected \(CodeMetrics.rowHeight * 5000)")
                 realisedRuns[deferred ? "deferred" : "eager"] = .integer(initial)
                 check(deferred ? (1...2).contains(initial) : initial == 13,
                       "unexpected number of realised text runs: \(initial), deferred: \(deferred)")
@@ -90,8 +97,8 @@ enum ReviewRunProbe {
                     scroll.reflectScrolledClipView(scroll.contentView)
                     await settle(window)
                     let height = scroll.documentView?.bounds.height ?? 0
-                    check(abs(height - CodeMetrics.rowHeight * 5000) < 1,
-                          "embedded diff changed height while scrolling")
+                    check(abs(height - initialHeight) < 1,
+                          "embedded diff height moved from \(initialHeight) to \(height)")
                     if deferred {
                         check((1...2).contains(hoverViews(in: host).count),
                               "embedded diff did not keep rendering bounded at line \(line)")
@@ -113,7 +120,28 @@ enum ReviewRunProbe {
                 app: app
             )
             await model.refreshChanges()
-            check(model.changedFiles.count == 5, "review fixture did not load its five changed files")
+            check(model.changedFiles.count == 6, "review fixture did not load its six changed files")
+            model.selectedFilePath = "README.md"
+            FileReview.setShowsAllFiles(true, in: model)
+            check(CenterTabStore.shared.review(for: model.workspace.id)?.showsAllFiles == true,
+                  "review-all toggle did not activate all-files mode")
+            FileReview.setShowsAllFiles(false, in: model)
+            check(CenterTabStore.shared.review(for: model.workspace.id)?.showsAllFiles == false,
+                  "review-all toggle did not return to one file")
+            check(CenterTabStore.shared.review(for: model.workspace.id)?.path == "README.md",
+                  "review-all toggle forgot the selected file")
+            let inspector = NSHostingView(rootView: ChangedFileList(model: model).background(Palette.surface))
+            let inspectorWindow = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 340, height: 560),
+                styleMask: [.borderless], backing: .buffered, defer: false
+            )
+            inspectorWindow.contentView = inspector
+            await settle(inspectorWindow)
+            save(inspector, name: "review-toggle-off")
+            FileReview.setShowsAllFiles(true, in: model)
+            await settle(inspectorWindow)
+            save(inspector, name: "review-toggle-on")
+            inspectorWindow.contentView = nil
             var tab = CenterTab(workspaceID: model.workspace.id, kind: .review, title: "All changes")
             tab.showsAllFiles = true
             let host = NSHostingView(rootView: ReviewPaneView(model: model, tab: tab))
@@ -146,6 +174,17 @@ enum ReviewRunProbe {
             host.rootView = ReviewPaneView(model: model, tab: tab)
             for _ in 0..<5 { await settle(window) }
             save(host, name: "all-files-jump")
+            tab.path = "Sources/LongReview.swift"
+            tab.reviewNavigationRevision += 1
+            host.rootView = ReviewPaneView(model: model, tab: tab)
+            for _ in 0..<5 { await settle(window) }
+            if let scroll = scrollView(in: host) {
+                let origin = scroll.contentView.bounds.origin
+                scroll.contentView.scroll(to: NSPoint(x: origin.x, y: origin.y + 300))
+                scroll.reflectScrolledClipView(scroll.contentView)
+                await settle(window)
+                save(host, name: "all-files-sticky")
+            }
             check(!hoverViews(in: host).isEmpty, "review did not render code after jumping to a file")
             check(!window.isVisible && !window.isKeyWindow, "review probe activated its window")
             window.contentView = nil
@@ -163,6 +202,21 @@ enum ReviewRunProbe {
                 section.rootView = ReviewCollapseFixture(model: model, file: file)
                 for _ in 0..<5 { await settle(window) }
                 check(!hoverViews(in: section).isEmpty, "reopened file stayed on its loading placeholder")
+                window.contentView = nil
+            }
+            if let file = model.changedFiles.first(where: { $0.path == "Sources/Checkout.swift" }) {
+                model.forgetHeldDiff(for: file.path)
+                let whitespaceHost = NSHostingView(rootView: DiffView(model: model, file: file))
+                window.contentView = whitespaceHost
+                window.contentView?.layoutSubtreeIfNeeded()
+                await Task.yield()
+                UserDefaults.standard.set(true, forKey: DiffWhitespaceSetting.storageKey)
+                for _ in 0..<8 { await settle(window) }
+                let raw = DiffDocument.parse(patch: await model.patch(for: file), path: file.path)
+                let held = model.heldDiff(for: file, ignoringWhitespace: true)
+                check(held != nil && raw != nil && held?.document.file == raw?.ignoringWhitespace(),
+                      "whitespace change during loading cached the wrong presentation")
+                UserDefaults.standard.set(false, forKey: DiffWhitespaceSetting.storageKey)
                 window.contentView = nil
             }
             withExtendedLifetime(app) {}
@@ -218,8 +272,10 @@ private struct ReviewCollapseFixture: View {
 
     var body: some View {
         ScrollView(.vertical) {
-            DiffView(model: model, file: file, embeddedWidth: 1000, embeddedViewportHeight: 680,
-                     isCollapsed: collapsed, onToggleCollapsed: {})
+            LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                DiffView(model: model, file: file, embeddedWidth: 1000, embeddedViewportHeight: 680,
+                         isCollapsed: collapsed, onToggleCollapsed: {})
+            }
         }
         .defaultScrollAnchor(.topLeading)
     }

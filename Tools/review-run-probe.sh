@@ -45,7 +45,8 @@ def git(*args):
     subprocess.run(['git', '-C', str(fixture), *args], check=True, capture_output=True)
 git('init', '-b', 'main')
 git('add', '.')
-git('-c', 'user.name=Review Probe', '-c', 'user.email=probe@example.test', 'commit', '-m', 'Fixture')
+git('-c', 'commit.gpgsign=false', '-c', 'user.name=Review Probe',
+    '-c', 'user.email=probe@example.test', 'commit', '-m', 'Fixture')
 (fixture / 'Config/features.json').write_text('{"free_shipping": true, "threshold": 50}\n')
 (fixture / 'Docs/legacy-shipping.md').unlink()
 (fixture / 'Docs/review-checklist.md').write_text('# Review checklist\n\n- Check empty carts.\n- Check quantities.\n')
@@ -55,10 +56,13 @@ git('-c', 'user.name=Review Probe', '-c', 'user.email=probe@example.test', 'comm
     '\n## Review\n\nRead the changes and add comments beside the relevant lines.\n'
 )
 (fixture / 'Sources/Checkout.swift').write_text(
-    'struct Checkout {\n    var freeShippingThreshold: Decimal = 50\n'
+    '    struct Checkout {\n    var freeShippingThreshold: Decimal = 50\n'
     '    var shippingFee: Decimal = 4.95\n\n'
     '    var qualifiesForFreeShipping: Bool {\n        subtotal >= freeShippingThreshold\n    }\n'
     '}\n'
+)
+(fixture / 'Sources/LongReview.swift').write_text(
+    ''.join(f'let reviewLine{line} = {line}\n' for line in range(120))
 )
 try:
     subprocess.run(

@@ -83,6 +83,7 @@ struct DiffView: View {
     /// The patch as git wrote it, kept so the whitespace toggle can refold it without going back
     /// to git for a diff it has already been given.
     @State private var source: FileDiff?
+    @State private var preparedWhitespace: Bool?
     @State private var mode: FileViewMode
     @State private var isEditable = false
     /// The file whose diff is on screen, which is not the same question as `file`.
@@ -148,6 +149,8 @@ struct DiffView: View {
         let opening: Phase = held.map { .ready($0.document) } ?? .loading
         _phase = State(initialValue: opening)
         _source = State(initialValue: held?.source)
+        _preparedWhitespace = State(initialValue: held == nil ? nil
+            : UserDefaults.standard.bool(forKey: DiffWhitespaceSetting.storageKey))
         _fileLines = State(initialValue: held?.lines)
         _presented = State(initialValue: held == nil ? nil : file.path)
     }
@@ -155,7 +158,7 @@ struct DiffView: View {
     private enum Phase {
         case loading
         case notice(symbol: String, title: String, detail: String)
-        case gated(FileDiff, changed: Int)
+        case gated(FileDiff, changed: Int, ignoringWhitespace: Bool)
         case ready(DiffDocument)
     }
 
@@ -164,6 +167,7 @@ struct DiffView: View {
         var file: ChangedFile
         var scope: DiffScope
         var isCollapsed: Bool
+        var ignoringWhitespace: Bool
     }
 
     /// One cancel that has been asked about: what would be lost, and which editor to close once
@@ -186,56 +190,22 @@ struct DiffView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            FileHeaderBar(
-                model: model,
-                file: file,
-                session: session,
-                diff: source,
-                mode: $mode,
-                isEditable: isEditable,
-                onRevert: revert,
-                isCollapsed: isCollapsed,
-                onToggleCollapsed: onToggleCollapsed
-            )
-            if !isCollapsed {
-                Hairline()
-
-                switch mode {
-                case .diff:
-                    content
-                        // Empty states have an intrinsic size; centre them in the whole pane.
-                        // The actual diff fills this frame and owns its top-leading scroll anchor.
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        // Both of these hang on the diff rather than on the view around it, and that
-                        // is not tidiness: a second `.alert` and a second `.sheet` on one view is one
-                        // presentation modifier of each kind too many, and which of the pair wins is
-                        // not something to find out in a build. The revert's alert and the review's
-                        // discard sheet own the outer view; these two are about the diff and live on
-                        // it. Not on the band either, which is a row in a lazy stack: scrolled away,
-                        // it would take its own sheet with it.
-                        .alert(
-                            "Cannot edit these lines",
-                            isPresented: $editProblem.isPresent(),
-                            presenting: editProblem
-                        ) { _ in
-                        } message: { problem in
-                            Text(problem)
-                        }
-                        .confirmation($discardingEdit) { _ in
-                            Confirmation(
-                                title: DiffEdit.Discard.title,
-                                message: DiffEdit.Discard.message,
-                                confirmLabel: DiffEdit.Discard.confirmLabel,
-                                cancelLabel: DiffEdit.Discard.cancelLabel
-                            )
-                        } onConfirm: { _ in
-                            closeEdit()
-                        }
-                case .edit:
-                    FileEditPane(model: model, path: file.path, session: session)
-                        .frame(height: embeddedWidth == nil ? nil : 400)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        Group {
+            if embeddedWidth != nil {
+                Section {
+                    if !isCollapsed {
+                        fileContent
+                            .overlay(alignment: .bottom) { Hairline() }
+                    }
+                } header: {
+                    fileHeader
+                        .overlay(alignment: .bottom) { Hairline() }
+                }
+            } else {
+                VStack(spacing: 0) {
+                    fileHeader
+                    Hairline()
+                    fileContent
                 }
             }
         }
@@ -245,7 +215,7 @@ struct DiffView: View {
         }
         .task(id: LoadID(
             workspaceID: model.workspace.id, file: file, scope: model.diffScope,
-            isCollapsed: isCollapsed
+            isCollapsed: isCollapsed, ignoringWhitespace: ignoresWhitespace
         )) {
             guard !isCollapsed else {
                 priming?.cancel()
@@ -254,7 +224,6 @@ struct DiffView: View {
             await load()
         }
         .onChange(of: isSideBySide) { _, _ in rebuild() }
-        .onChange(of: ignoresWhitespace) { _, _ in refold() }
         .onChange(of: fileComments) { _, _ in rebuild() }
         .onChange(of: draftSelection) { _, _ in rebuild() }
         .onChange(of: model.changesGeneration) { _, _ in refreshWorktreeCopy() }
@@ -290,6 +259,54 @@ struct DiffView: View {
         }
     }
 
+    private var fileHeader: some View {
+        FileHeaderBar(
+            model: model, file: file, session: session, diff: source,
+            mode: $mode, isEditable: isEditable, onRevert: revert,
+            isCollapsed: isCollapsed, onToggleCollapsed: onToggleCollapsed
+        )
+    }
+
+    @ViewBuilder
+    private var fileContent: some View {
+        switch mode {
+        case .diff:
+            content
+                // Empty states have an intrinsic size; centre them in the whole pane.
+                // The actual diff fills this frame and owns its top-leading scroll anchor.
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Both of these hang on the diff rather than on the view around it, and that
+                // is not tidiness: a second `.alert` and a second `.sheet` on one view is one
+                // presentation modifier of each kind too many, and which of the pair wins is
+                // not something to find out in a build. The revert's alert and the review's
+                // discard sheet own the outer view; these two are about the diff and live on
+                // it. Not on the band either, which is a row in a lazy stack: scrolled away,
+                // it would take its own sheet with it.
+                .alert(
+                    "Cannot edit these lines",
+                    isPresented: $editProblem.isPresent(),
+                    presenting: editProblem
+                ) { _ in
+                } message: { problem in
+                    Text(problem)
+                }
+                .confirmation($discardingEdit) { _ in
+                    Confirmation(
+                        title: DiffEdit.Discard.title,
+                        message: DiffEdit.Discard.message,
+                        confirmLabel: DiffEdit.Discard.confirmLabel,
+                        cancelLabel: DiffEdit.Discard.cancelLabel
+                    )
+                } onConfirm: { _ in
+                    closeEdit()
+                }
+        case .edit:
+            FileEditPane(model: model, path: file.path, session: session)
+                .frame(height: embeddedWidth == nil ? nil : 400)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
     /// Cmd+E flips between the diff and the file, which is what Conductor binds the same choice
     /// to. A hidden button rather than a menu command, for the reason spelled out in
     /// `SessionTabsView`: the menu bar is built elsewhere, and a key equivalent is only offered to
@@ -316,8 +333,8 @@ struct DiffView: View {
                 )
         case let .notice(symbol, title, detail):
             placeholder(symbol: symbol, title: title, detail: detail)
-        case let .gated(fileDiff, changed):
-            gate(fileDiff, changed: changed)
+        case let .gated(fileDiff, changed, ignoringWhitespace):
+            gate(fileDiff, changed: changed, ignoringWhitespace: ignoringWhitespace)
         case let .ready(document):
             diff(document)
         }
@@ -327,6 +344,11 @@ struct DiffView: View {
 
     private func load() async {
         priming?.cancel()
+        let ignoringWhitespace = ignoresWhitespace
+        if let preparedWhitespace, preparedWhitespace != ignoringWhitespace {
+            expandedRuns = []
+            revealedGaps = [:]
+        }
 
         // The rows a seeded document needs. The initialiser can put the document in place but not
         // build the rows over it: that pass reads the review comments, the draft and the layout
@@ -397,12 +419,13 @@ struct DiffView: View {
         // It also keeps a decision the reader made. A diff over `largeDiffLimit` that they pressed
         // Show anyway on is held as what it became, so coming back to it does not put the gate
         // in front of them a second time.
-        if parsed != source {
-            await apply(parsed)
+        if parsed != source || preparedWhitespace != ignoringWhitespace {
+            await apply(parsed, ignoringWhitespace: ignoringWhitespace)
             guard !Task.isCancelled else { return }
             // A collapse can cancel preparation. Only remember the patch once it was
             // presented, so expanding retries instead of leaving a loading placeholder.
             source = parsed
+            preparedWhitespace = ignoringWhitespace
         }
 
         // Whether Edit mode is even offered is a question about the bytes on disk rather than
@@ -421,10 +444,10 @@ struct DiffView: View {
     }
 
     /// Turn the parsed patch into whatever the current settings say it should be.
-    private func apply(_ raw: FileDiff) async {
-        let fileDiff = ignoresWhitespace ? raw.ignoringWhitespace() : raw
+    private func apply(_ raw: FileDiff, ignoringWhitespace: Bool) async {
+        let fileDiff = ignoringWhitespace ? raw.ignoringWhitespace() : raw
 
-        if ignoresWhitespace, fileDiff.hunks.isEmpty, !raw.hunks.isEmpty {
+        if ignoringWhitespace, fileDiff.hunks.isEmpty, !raw.hunks.isEmpty {
             phase = .notice(
                 symbol: "paragraphsign",
                 title: "Only whitespace changed",
@@ -439,19 +462,10 @@ struct DiffView: View {
 
         let changed = fileDiff.additions + fileDiff.deletions
         if changed > Self.largeDiffLimit {
-            phase = .gated(fileDiff, changed: changed)
+            phase = .gated(fileDiff, changed: changed, ignoringWhitespace: ignoringWhitespace)
             return
         }
-        await present(fileDiff, raw: raw)
-    }
-
-    /// Refolding drops what the reader expanded, because a run that was expanded no longer exists
-    /// once whitespace-only changes have folded back into context.
-    private func refold() {
-        guard let source else { return }
-        expandedRuns = []
-        revealedGaps = [:]
-        Task { await apply(source) }
+        await present(fileDiff, raw: raw, ignoringWhitespace: ignoringWhitespace)
     }
 
     /// Throw the file's changes away. Only ever reached through the confirmation in the header
@@ -471,7 +485,11 @@ struct DiffView: View {
         }
     }
 
-    private func present(_ fileDiff: FileDiff, raw: FileDiff? = nil) async {
+    private func present(
+        _ fileDiff: FileDiff, raw: FileDiff? = nil, ignoringWhitespace: Bool? = nil
+    ) async {
+        let whitespace = ignoringWhitespace ?? ignoresWhitespace
+        guard whitespace == ignoresWhitespace else { return }
         let path = file.path
         let worktree = model.workspace.path
         // The worktree copy is read here rather than after the await, which is where it used to be
@@ -491,7 +509,7 @@ struct DiffView: View {
             )
         }.value
 
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, whitespace == ignoresWhitespace else { return }
 
         let document = prepared.document
         fileLines = prepared.lines
@@ -502,7 +520,7 @@ struct DiffView: View {
         model.holdDiff(
             DiffPresentation(source: raw ?? source ?? fileDiff, document: document, lines: prepared.lines),
             for: file,
-            ignoringWhitespace: ignoresWhitespace
+            ignoringWhitespace: whitespace
         )
         rebuild()
         prime(document)
@@ -590,13 +608,13 @@ struct DiffView: View {
             .frame(minHeight: embeddedWidth == nil ? nil : 160)
     }
 
-    private func gate(_ fileDiff: FileDiff, changed: Int) -> some View {
+    private func gate(_ fileDiff: FileDiff, changed: Int, ignoringWhitespace: Bool) -> some View {
         EmptyStateView(
             glyph: "doc.text.magnifyingglass",
             title: "\(changed.formatted()) changed lines",
             message: "Highlighting a diff this size takes a moment.",
             actionTitle: "Show anyway",
-            action: { Task { await present(fileDiff) } }
+            action: { Task { await present(fileDiff, ignoringWhitespace: ignoringWhitespace) } }
         )
         .frame(minHeight: embeddedWidth == nil ? nil : 160)
     }

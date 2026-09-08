@@ -21,7 +21,7 @@ struct AllFilesReviewView: View {
         } else {
             GeometryReader { geometry in
                 ScrollView(.vertical) {
-                    LazyVStack(spacing: Metrics.spacingWide) {
+                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                         ForEach(model.changedFiles) { file in
                             DiffView(
                                 model: model, file: file, embeddedWidth: geometry.size.width,
@@ -33,7 +33,6 @@ struct AllFilesReviewView: View {
                                     }
                                 }
                             )
-                                .overlay(alignment: .bottom) { Hairline() }
                                 .id(file.path)
                         }
                     }

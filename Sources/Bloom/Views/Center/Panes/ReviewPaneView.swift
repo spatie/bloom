@@ -211,13 +211,7 @@ struct ReviewPaneView: View {
         HStack(spacing: InspectorLayout.gap) {
             Picker("Review files", selection: Binding(
                 get: { tab.showsAllFiles },
-                set: { all in
-                    let store = CenterTabStore.shared
-                    store.setShowsAllFiles(all, for: tab)
-                    if !all, changed == nil, let first = model.changedFiles.first {
-                        FileReview.open(path: first.path, in: model)
-                    }
-                }
+                set: { FileReview.setShowsAllFiles($0, in: model) }
             )) {
                 Text("Selected file").tag(false)
                 Text("All files").tag(true)
