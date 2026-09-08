@@ -1,4 +1,7 @@
 import Foundation
+#if os(Linux)
+import Glibc
+#endif
 
 /// `connect` is only a relay. Ending SSH or stdin closes that connection and leaves `serve`
 /// running under its own process manager, with every agent still owned by the server.
@@ -14,6 +17,7 @@ public enum ServerCommandLine {
     """
 
     public static func run(arguments: [String] = Array(CommandLine.arguments.dropFirst())) async -> Int32 {
+        SystemCalls.configurePipeWrites(STDOUT_FILENO)
         if arguments.isEmpty || arguments == ["--help"] {
             print(usage)
             return 0

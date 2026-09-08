@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 public enum WorkspaceError: Error, CustomStringConvertible {
     case notARepository(String)
@@ -131,7 +130,7 @@ public struct WorkspaceManager: Sendable {
     }
 
     /// Where a project coming back into the sidebar says so. See `bringProjectBack`.
-    private static let log = Logger(
+    private static let log = CoreLogger(
         subsystem: Bundle.main.bundleIdentifier ?? "be.spatie.bloom",
         category: "workspace"
     )

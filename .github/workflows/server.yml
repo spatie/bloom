@@ -1,0 +1,33 @@
+name: Server
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bloom-server-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    container: swift:6.3.3-noble
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends libsqlite3-dev pkg-config git python3
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global user.name "Bloom tests"
+          git config --global user.email "tests@runbloom.app"
+      - name: Build the standalone server
+        run: swift build --product bloom-server -j 4 -Xswiftc -warnings-as-errors
+      - name: Run the server tests
+        run: swift test -j 4 -Xswiftc -warnings-as-errors
+      - name: Exercise the server executable
+        run: python3 Tools/server-smoke.py .build/debug/bloom-server

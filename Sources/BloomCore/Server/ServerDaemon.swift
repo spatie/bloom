@@ -1,4 +1,7 @@
 import Foundation
+#if os(Linux)
+import Glibc
+#endif
 
 /// A separate data directory and a process lock prevent the server from sharing live ownership
 /// with another server. The lock is acquired before SQLite recovery or socket replacement.

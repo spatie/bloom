@@ -1,6 +1,5 @@
 import Foundation
 import Synchronization
-import os
 
 // MARK: - Process seam
 
@@ -675,7 +674,7 @@ public actor AgentRunner {
         }
     }
 
-    private static let log = Logger(
+    private static let log = CoreLogger(
         subsystem: Bundle.main.bundleIdentifier ?? "be.spatie.bloom",
         category: "agent-runner"
     )

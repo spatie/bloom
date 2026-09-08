@@ -1,4 +1,7 @@
+import Foundation
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 /// Where a hover card is put, in screen coordinates: beside a sidebar row, or under the pull
 /// request band in the title bar.

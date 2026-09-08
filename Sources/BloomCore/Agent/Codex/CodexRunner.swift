@@ -1,6 +1,5 @@
 import Foundation
 import Synchronization
-import os
 
 /// Supervises one `codex app-server` connection for one Bloom chat.
 ///
@@ -812,7 +811,7 @@ public actor CodexRunner: SessionRunner {
     /// the suite, and for the same reason as `AgentRunner.hasBeenCancelled`.
     var transcriptWasRemoved: Bool { trouble.hasStopped }
 
-    private static let log = Logger(
+    private static let log = CoreLogger(
         subsystem: Bundle.main.bundleIdentifier ?? "be.spatie.bloom",
         category: "codex-runner"
     )

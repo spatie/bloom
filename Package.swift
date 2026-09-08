@@ -1,5 +1,36 @@
 // swift-tools-version: 6.2
 import PackageDescription
+#if os(Linux)
+import Foundation
+
+let serverTests = ["ServerRuntimeTests.swift", "ServerReviewTests.swift", "TestSupport.swift"]
+let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Tests/BloomCoreTests")
+let otherTests = (try FileManager.default.contentsOfDirectory(atPath: testDirectory.path)).filter { !serverTests.contains($0) }
+
+let package = Package(
+    name: "Bloom",
+    products: [
+        .executable(name: "bloom-server", targets: ["bloom-server"]),
+        .executable(name: "bloom-bridge", targets: ["bloom-bridge"]),
+        .library(name: "BloomCore", targets: ["BloomCore"]),
+    ],
+    dependencies: [.package(url: "https://github.com/apple/swift-crypto.git", from: "4.5.2")],
+    targets: [
+        .systemLibrary(name: "SQLite3", path: "Sources/CSQLite", pkgConfig: "sqlite3", providers: [.apt(["libsqlite3-dev"])]),
+        .target(
+            name: "BloomCore",
+            dependencies: ["SQLite3", .product(name: "Crypto", package: "swift-crypto")],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .executableTarget(name: "bloom-server", dependencies: ["BloomCore"], swiftSettings: [.swiftLanguageMode(.v6)]),
+        .executableTarget(name: "bloom-bridge", dependencies: ["BloomCore"], swiftSettings: [.swiftLanguageMode(.v6)]),
+        .testTarget(
+            name: "BloomCoreTests", dependencies: ["BloomCore"], path: "Tests/BloomCoreTests",
+            exclude: otherTests, sources: serverTests, swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+    ]
+)
+#else
 
 let package = Package(
     name: "Bloom",
@@ -63,3 +94,5 @@ let package = Package(
         ),
     ]
 )
+
+#endif

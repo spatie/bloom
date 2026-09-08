@@ -1,4 +1,7 @@
 import Foundation
+#if os(Linux)
+import Glibc
+#endif
 import Synchronization
 
 /// A long-lived subprocess whose output is consumed line by line while it runs, and whose stdin
@@ -111,23 +114,9 @@ public final class StreamingProcess: Sendable {
             if case .cancelled = reason { self?.terminate() }
         }
 
-        // SIGPIPE, whose default disposition kills the process, and Bloom does not turn it off.
-        //
-        // Nothing in this tree sets the disposition process wide, which was checked rather than
-        // assumed, and `UnixSocketConnection` says the same thing in the other direction: it sets
-        // `SO_NOSIGPIPE` on every socket it owns and its comment is that without it Bloom would be
-        // taken down by an agent CLI exiting mid-call. A pipe to a child is the same hazard and
-        // was never given the same treatment, so `write(_:)` below could be killed rather than
-        // told, and the comment on it claiming a dead child turns a write into an exception was
-        // only ever true of a process that ignores the signal. It is now, for this descriptor:
-        // `F_SETNOSIGPIPE` makes a write to a pipe nobody is reading return EPIPE, which is what
-        // "the child went away" should look like.
-        //
-        // Per descriptor rather than a process wide `signal()` call, for the reason the socket
-        // took the same route: the policy belongs to the pipe this type owns, and a library that
-        // changes a signal disposition changes it for whoever linked it, including the test
-        // binary and the bridge shim.
-        _ = fcntl(stdinPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        // Darwin suppresses SIGPIPE on this descriptor. Linux has no equivalent for pipes,
+        // so the shared helper ignores that signal there and writes report EPIPE instead.
+        SystemCalls.configurePipeWrites(stdinPipe.fileHandleForWriting.fileDescriptor)
     }
 
     public var isRunning: Bool {
@@ -317,7 +306,7 @@ public final class StreamingProcess: Sendable {
         let group = getpgid(pid)
         if group > 0, group != getpgrp(), killpg(group, signal) == 0 { return }
 
-        Foundation.kill(pid, signal)
+        SystemCalls.kill(pid, signal)
     }
 
     public var exitStatus: Int32 {

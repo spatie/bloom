@@ -1,4 +1,7 @@
 import Foundation
+#if os(Linux)
+import Glibc
+#endif
 import Synchronization
 
 /// A listening unix domain socket, handing each accepted connection to a callback.
@@ -28,7 +31,7 @@ public final class UnixSocketListener: Sendable {
         self.path = path
 
         var address = try UnixSocketAddress.make(path: path)
-        let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        let descriptor = socket(AF_UNIX, SystemCalls.streamSocketType, 0)
         guard descriptor >= 0 else { throw UnixSocketError.couldNotOpen(code: errno) }
         self.descriptor = descriptor
 
@@ -45,12 +48,12 @@ public final class UnixSocketListener: Sendable {
         umask(previousMask)
         guard bound == 0 else {
             let code = errno
-            Darwin.close(descriptor)
+            SystemCalls.close(descriptor)
             throw UnixSocketError.couldNotBind(path: path, code: code)
         }
         guard listen(descriptor, 16) == 0 else {
             let code = errno
-            Darwin.close(descriptor)
+            SystemCalls.close(descriptor)
             unlink(path)
             throw UnixSocketError.couldNotListen(path: path, code: code)
         }
@@ -68,7 +71,7 @@ public final class UnixSocketListener: Sendable {
             // between two of them, so this drains rather than accepting one and waiting to be
             // told again.
             while true {
-                let accepted = Darwin.accept(descriptor, nil, nil)
+                let accepted = SystemCalls.accept(descriptor)
                 guard accepted >= 0 else { return }
                 handler(UnixSocketConnection(descriptor: accepted))
             }
@@ -76,7 +79,7 @@ public final class UnixSocketListener: Sendable {
         // The descriptor is closed here rather than in `stop`, because cancelling a source is
         // asynchronous: closing it first frees a number the source may still be about to use, and
         // the next thing to open a file gets it.
-        source.setCancelHandler { Darwin.close(descriptor) }
+        source.setCancelHandler { SystemCalls.close(descriptor) }
         source.resume()
     }
 

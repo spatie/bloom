@@ -1,4 +1,7 @@
 import Foundation
+#if os(Linux)
+import Glibc
+#endif
 import Synchronization
 
 /// One end of a connected unix domain socket, read as lines and written as lines.
@@ -6,10 +9,8 @@ import Synchronization
 /// Line delimited JSON both ways, because that is what MCP over stdio already is and the shim is a
 /// relay: whatever the CLI wrote on one line arrives here as one line and goes back the same way.
 ///
-/// `SO_NOSIGPIPE` is set on every socket this type owns, and it is not optional. Writing to a
-/// socket whose far end has gone raises SIGPIPE, whose default disposition kills the process, so
-/// without it Bloom would be taken down by an agent CLI exiting mid-call. With it the write
-/// returns EPIPE and the connection closes, which is what "the other side left" should look like.
+/// Darwin sockets use `SO_NOSIGPIPE`; Linux writes use `MSG_NOSIGNAL`. A disconnected client
+/// must cause a failed write, never a SIGPIPE that takes down every other server session.
 public final class UnixSocketConnection: Sendable {
     private let descriptor: Int32
     private let handle: FileHandle
@@ -31,8 +32,10 @@ public final class UnixSocketConnection: Sendable {
         handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
         (lines, continuation) = AsyncStream.makeStream(of: String.self, bufferingPolicy: .unbounded)
 
+        #if canImport(Darwin)
         var on: Int32 = 1
         setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        #endif
         // Blocking, explicitly. On BSD, and therefore on macOS, an accepted socket inherits
         // O_NONBLOCK from the listener, and the listener has to be non-blocking so its accept loop
         // can drain. `availableData` on a non-blocking descriptor answers with no bytes when there
@@ -58,15 +61,15 @@ public final class UnixSocketConnection: Sendable {
     /// than a tool call that hangs for a timeout the model cannot see.
     public static func connect(to path: String) throws -> UnixSocketConnection {
         var address = try UnixSocketAddress.make(path: path)
-        let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        let descriptor = socket(AF_UNIX, SystemCalls.streamSocketType, 0)
         guard descriptor >= 0 else { throw UnixSocketError.couldNotOpen(code: errno) }
 
         let result = UnixSocketAddress.withSocketAddress(&address) { socketAddress, length in
-            Darwin.connect(descriptor, socketAddress, length)
+            SystemCalls.connect(descriptor, socketAddress, length)
         }
         guard result == 0 else {
             let code = errno
-            Darwin.close(descriptor)
+            SystemCalls.close(descriptor)
             throw UnixSocketError.couldNotConnect(path: path, code: code)
         }
         return UnixSocketConnection(descriptor: descriptor)
@@ -88,7 +91,7 @@ public final class UnixSocketConnection: Sendable {
             var offset = 0
             while offset < payload.count {
                 let written = payload.withUnsafeBufferPointer { bytes in
-                    Darwin.write(descriptor, bytes.baseAddress! + offset, bytes.count - offset)
+                    SystemCalls.socketWrite(descriptor, bytes.baseAddress! + offset, bytes.count - offset)
                 }
                 // EINTR is a signal landing mid-write and nothing else, so the same bytes are
                 // written again. Any other failure means the far end is gone and there is nothing
@@ -112,6 +115,6 @@ public final class UnixSocketConnection: Sendable {
 
         handle.readabilityHandler = nil
         continuation.finish()
-        Darwin.close(descriptor)
+        SystemCalls.close(descriptor)
     }
 }

@@ -1,3 +1,4 @@
+#if canImport(Combine)
 import Combine
 import Foundation
 
@@ -39,3 +40,5 @@ public enum OpenWorkspaceNotification {
             .eraseToAnyPublisher()
     }
 }
+
+#endif

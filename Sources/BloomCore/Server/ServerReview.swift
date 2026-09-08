@@ -1,4 +1,7 @@
 import Foundation
+#if os(Linux)
+import Glibc
+#endif
 
 /// Review commands operate on paths belonging to the selected server workspace. Clients cannot
 /// supply a git revision, pretend a tracked file is untracked, or resolve a path on their Mac.
