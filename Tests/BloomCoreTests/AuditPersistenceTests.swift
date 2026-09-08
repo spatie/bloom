@@ -91,6 +91,7 @@ struct AuditPersistenceTests {
         let session = try await store.upsert(AskConversation.newSession())
         try await store.saveDraft(sessionID: session.id, body: "original")
         let raw = try SQLiteDatabase(path: store.path)
+        let settingsBefore = try raw.query("SELECT * FROM settings ORDER BY key").map(\.columns)
         try raw.execute("CREATE TRIGGER refuse_write BEFORE \(write) BEGIN SELECT RAISE(ABORT, 'disk full'); END")
         await #expect(throws: SQLiteError.self) {
             try await store.replaceAskConversation(id: session.id, controls: ComposerControls(isFastMode: true), draft: "carried")
@@ -98,7 +99,7 @@ struct AuditPersistenceTests {
         #expect(try await store.sessionsWithoutWorkspace().map(\.id) == [session.id])
         #expect(try await store.draft(sessionID: session.id) == "original")
         #expect(try raw.query("SELECT * FROM sessions").count == 1)
-        #expect(try raw.query("SELECT * FROM settings WHERE key LIKE 'session.%'").isEmpty)
+        #expect(try raw.query("SELECT * FROM settings ORDER BY key").map(\.columns) == settingsBefore)
     }
 
     @Test func freshConversationCommitsOnceWithControlsAndDraft() async throws {
