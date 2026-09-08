@@ -26,7 +26,6 @@ struct RootView: View {
     @Bindable private var feedback = FeedbackPresenter.shared
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var isStartingFreshAskConversation = false
 
     var body: some View {
         @Bindable var app = app
@@ -81,7 +80,7 @@ struct RootView: View {
                             app: app,
                             isSidebarVisible: columnVisibility != .detailOnly,
                             toggleSidebar: toggleSidebar,
-                            startFreshAskConversation: { isStartingFreshAskConversation = true }
+                            startFreshAskConversation: { Task { await app.ask.newConversation() } }
                         )
                     }
                     // Said here as well as under `navigationTitle` below, and deliberately.
@@ -247,18 +246,6 @@ struct RootView: View {
                 // `ArchiveRequest` in the core, where it can be tested.
                 Text(request.message)
             }
-            .confirmationDialog(
-                "Start a new conversation?",
-                isPresented: $isStartingFreshAskConversation,
-                titleVisibility: .visible
-            ) {
-                Button("Start New Conversation") {
-                    Task { await app.ask.startFresh() }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("The current Ask Bloom conversation will be cleared from view.")
-            }
             // The question asked before a session that is still working is closed. On the window for
             // the reason the archive confirmation above is: it is raised from the tab strip's close
             // button and from Cmd+W in the menu bar, and there is no one control both of those could
@@ -390,11 +377,10 @@ struct RootView: View {
         // where the post was already being received and because `openWindow` needs a view: the
         // window itself is `CreateWorkspaceWindow`, and it is keyed by project, so asking twice
         // for the same project brings the first one forward with its draft still in it.
-        // File, New Ask Bloom Conversation. It raises the same confirmation the toolbar's glyph
-        // raises rather than starting fresh outright: the act archives the conversation on screen,
-        // and a menu item that discards a conversation with no question asked is not one.
+        // File, New Ask Bloom Conversation opens a tab and keeps the existing conversations.
         .onReceive(NotificationCenter.default.publisher(for: .bloomNewAskConversation)) { _ in
-            isStartingFreshAskConversation = true
+            app.selection = .ask
+            Task { await app.ask.newConversation() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .bloomNewWorkspace)) { note in
             if note.userInfo?[Notification.bloomPullRequestKey] as? Bool == true {

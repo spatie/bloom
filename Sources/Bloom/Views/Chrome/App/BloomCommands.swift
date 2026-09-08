@@ -120,15 +120,15 @@ struct BloomCommands: Commands {
             // a control you have to be looking at Ask Bloom to see, so it could not answer
             // somebody wondering whether the conversation can be started over at all.
             //
-            // The same notification the toolbar posts, rather than a second route into `AskModel`:
-            // `RootView` owns the flag, because starting fresh archives the old conversation and
-            // that is a store write which must not happen twice.
+            // The menu and toolbar both append a conversation and preserve the open tabs.
             MenuCommand(.newAskConversation) {
                 NotificationCenter.default.post(name: .bloomNewAskConversation, object: nil)
             }
 
-            MenuCommand(.newSession) { openPane(.chat) }
-            .disabled(model.selectedPaneModel == nil)
+            MenuCommand(.newSession) {
+                if model.selection == .ask { Task { await model.ask.newConversation() } } else { openPane(.chat) }
+            }
+            .disabled(model.selectedPaneModel == nil && model.selection != .ask)
 
             // The other four things that open a tab in the workspace's centre column, which until
             // now existed only as key equivalents on hidden buttons inside `SessionTabsView`. The
@@ -163,6 +163,12 @@ struct BloomCommands: Commands {
             // left in it.
             MenuCommand(.showChanges) {
                 if let workspace = model.selectedPaneModel { FileReview.toggle(in: workspace) }
+            }
+            .disabled(model.selectedPaneModel == nil)
+
+            MenuCommand(.reviewAllFiles) {
+                guard let workspace = model.selectedPaneModel else { return }
+                FileReview.openAll(in: workspace)
             }
             .disabled(model.selectedPaneModel == nil)
 
@@ -206,7 +212,7 @@ struct BloomCommands: Commands {
             }
             // Scoped to the main window as well as to there being a tab, because this item holds
             // Cmd+W for the whole app. See `MainWindowFocus`.
-            .disabled(isMainWindowFocused != true || closableTab == nil)
+            .disabled(isMainWindowFocused != true || (closableTab == nil && !canCloseAskTab))
 
             Divider()
 
@@ -797,11 +803,18 @@ struct BloomCommands: Commands {
     /// Greyed on a strip with nothing to move to, rather than on no workspace at all, which is
     /// the same rule Split Right follows two items above.
     private var canCycleCentreTabs: Bool {
+        if model.selection == .ask { return model.ask.sessions.count > 1 }
         guard let workspace = model.selectedPaneModel else { return false }
         return WorkspaceTabsStore.shared.entries(in: workspace).count > 1
     }
 
     private func cycleCentreTab(by offset: Int) {
+        if model.selection == .ask {
+            if let next = TabCycle.next(from: model.ask.selectedID, in: model.ask.sessions.map(\.id), offset: offset) {
+                Task { await model.ask.select(next) }
+            }
+            return
+        }
         guard let workspace = model.selectedPaneModel else { return }
         WorkspaceTabsStore.shared.selectNextTab(offset: offset, in: workspace)
     }
@@ -819,7 +832,20 @@ struct BloomCommands: Commands {
     /// `TabCycle.numbered` in the core.
     @ViewBuilder
     private var goToTabMenu: some View {
-        if let workspace = model.selectedPaneModel {
+        if model.selection == .ask {
+            MenuCommandGroup(.goToTab) {
+                ForEach(TabCycle.numbered(model.ask.sessions.map(\.id))) { entry in
+                    if let chat = model.ask.sessions.first(where: { $0.id == entry.tab }) {
+                        let button = Button(model.ask.title(for: chat)) {
+                            Task { await model.ask.select(chat.id) }
+                        }
+                        if let ordinal = entry.ordinal {
+                            button.keyboardShortcut(KeyEquivalent(Character("\(ordinal)")), modifiers: .command)
+                        } else { button }
+                    }
+                }
+            }
+        } else if let workspace = model.selectedPaneModel {
             let entries = WorkspaceTabsStore.shared.entries(in: workspace)
             MenuCommandGroup(.goToTab) {
                 ForEach(TabCycle.numbered(entries), id: \.tab) { entry in
@@ -879,7 +905,13 @@ struct BloomCommands: Commands {
     /// Closing a conversation still goes through `CloseSessionAlert`, which asks when there is
     /// something to lose by it and never asks when there is not. That is the whole of what the old
     /// Close Session did, so nothing about a chat closes more quietly than it used to.
+    private var canCloseAskTab: Bool { model.selection == .ask && model.ask.sessions.count > 1 }
+
     private func closeSelectedTab() {
+        if canCloseAskTab, let id = model.ask.selectedID {
+            model.ask.requestClose(id)
+            return
+        }
         guard let workspace = model.selectedPaneModel, let target = closableTab else { return }
         switch target {
         case .chat(let id):

@@ -71,10 +71,11 @@ public enum MenuBarCatalogue {
         // makes directly above it.
         MenuBarItem(.newAskConversation, in: .file, "New Ask Bloom Conversation", availability: .always),
         MenuBarItem(.projectSettings, in: .file, "Project Settings…", key: .init("comma", .command, .shift), availability: .needsProject),
-        MenuBarItem(.newSession, in: .file, "New Session", key: .command("t"), availability: .needsWorkspace),
-        MenuBarItem(.newTerminalTab, in: .file, "New Terminal Tab", alternateTitle: "Show Terminal", key: .init("t", .command, .shift), availability: .needsWorkspace),
-        MenuBarItem(.newBrowserTab, in: .file, "New Browser Tab", alternateTitle: "Show Preview", key: .init("b", .command, .shift), availability: .needsWorkspace),
+        MenuBarItem(.newSession, in: .file, "New Session", key: .command("t"), availability: .needsConversationArea),
+        MenuBarItem(.newTerminalTab, in: .file, "New Terminal Tab", key: .init("t", .command, .shift), availability: .needsWorkspace),
+        MenuBarItem(.newBrowserTab, in: .file, "New Browser Tab", key: .init("b", .command, .shift), availability: .needsWorkspace),
         MenuBarItem(.showChanges, in: .file, "Show Changes", key: .init("d", .command, .shift), availability: .needsWorkspace),
+        MenuBarItem(.reviewAllFiles, in: .file, "Review All Files", availability: .needsWorkspace),
         MenuBarItem(.showNotes, in: .file, "Show Notes", key: .init("n", .command, .shift), availability: .needsWorkspace),
         // The rename a tab has always had on its own context menu and on its VoiceOver actions
         // rotor, and nowhere else. No key: Finder gives Rename none either, and the strip already
@@ -221,6 +222,7 @@ public enum MenuBarAction: String, CaseIterable, Sendable {
     case newTerminalTab
     case newBrowserTab
     case showChanges
+    case reviewAllFiles
     case showNotes
     case renameTab
     case closeTab
@@ -333,6 +335,8 @@ public enum MenuBarAvailability: String, Equatable, Sendable {
     case needsProject
     /// A workspace is selected in the sidebar.
     case needsWorkspace
+    /// A workspace or Ask Bloom is selected.
+    case needsConversationArea
     /// Any workspace exists at all, selected or not.
     case needsAnyWorkspace
     /// A workspace is the Workspace menu's subject, and that subject allows this action. See

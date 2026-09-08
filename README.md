@@ -89,16 +89,34 @@ The `.noindex` suffix keeps Spotlight out of them, which is what a dozen worktre
 need once each of them holds its own copy of `vendor` and `.build`. A workspace can also be started
 on an existing branch, or on a GitHub pull request, to review one rather than write one.
 
+To continue on an existing branch, open **New Workspace** (Cmd+N), choose the project, and click
+**Open existing branch…** beside the branch selector. Search for and select the branch, then
+create the workspace. Commits go onto that branch. Choose **Terminal** under **Start with** if
+you want to open it without starting an agent. The branch selector also offers this under its
+**Existing branch** tab.
+
+If the branch is already checked out in a Bloom workspace, selecting it opens that workspace.
+If another worktree holds it, Bloom shows its location so you can free the branch there first.
+
+The project field suggests folders as you type, searching beside your existing projects or inside
+a typed path. Use the arrow keys and Return to choose a suggestion, or Tab to complete the first
+match. In Settings, General, choose where new projects are created and add other folders to search.
+
 **Panes.** A workspace holds tabs, and a tab can be split. A pane is a chat, a terminal standing in
 the worktree, or a browser, so the dev server the setup script started can be read beside the
 conversation that is changing it.
 
 **Review and ship.** The inspector lists the files the workspace changed and shows a
 syntax-highlighted diff against the merge base, with inline comments and an editor on the same
-file. When `gh` is installed it also carries the pull request: open it, watch its checks, merge it.
+file. Choose **Review all files** to scroll through every file's changes together, or switch back
+to **Selected file** to focus on one. When `gh` is installed it also carries the pull request: open
+it, watch its checks, merge it.
 
-**Ask Bloom.** A conversation that belongs to no workspace, for the questions that are about your
-projects rather than about one branch.
+**Ask Bloom.** Conversations that belong to no workspace, for questions about your projects.
+Start another conversation with the toolbar button or Cmd+T. The tab bar appears when a second
+conversation is open, and switching tabs keeps agents running. Closing a tab archives its chat.
+Choose the working directory for new conversations in Settings, General; existing chats retain
+their directory.
 
 **Quick prompts.** A library of prompts you reuse, available in any workspace.
 

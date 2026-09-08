@@ -3106,7 +3106,7 @@ public actor Store {
                   current.archivedAt == nil else {
                 throw SQLiteError(message: "This conversation is no longer current.", sql: nil)
             }
-            var next = AskConversation.newSession()
+            var next = AskConversation.newSession(sortOrder: current.sortOrder)
             next.model = controls.model
             next.effort = controls.effort
             next.agentKind = controls.agentKind
@@ -3116,7 +3116,47 @@ public actor Store {
                 try setSetting(key, value)
             }
             try saveDraft(sessionID: next.id, body: draft)
+            let directory = try setting(AskTabs.directoryKey(id))
+                ?? AskConversation.directory(besideDatabaseAt: path)
+            try setSetting(AskTabs.directoryKey(next.id), directory)
+            try setSetting(AskTabs.selectionKey, next.id.rawValue)
             _ = try update(sessionID: id) { $0.archivedAt = Date() }
+            return next
+        }
+    }
+
+    /// Inserting the chat and its controls, draft, directory and selection is one transaction.
+    public func createAskConversation(
+        directory: String, controls: ComposerControls? = nil, draft: String = ""
+    ) throws -> Session {
+        try db.transaction {
+            let existing = try sessionsWithoutWorkspace()
+            var next = AskConversation.newSession(sortOrder: (existing.map(\.sortOrder).max() ?? -1) + 1)
+            if let controls {
+                next.model = controls.model
+                next.effort = controls.effort
+                next.agentKind = controls.agentKind
+                next.permissionMode = controls.permissionMode
+            }
+            try upsert(next)
+            if let controls {
+                for (key, value) in controls.settings(sessionID: next.id) { try setSetting(key, value) }
+            }
+            try saveDraft(sessionID: next.id, body: draft)
+            try setSetting(AskTabs.directoryKey(next.id), directory)
+            try setSetting(AskTabs.selectionKey, next.id.rawValue)
+            return next
+        }
+    }
+
+    /// Closing a tab archives its transcript and records the neighbouring selection together.
+    public func closeAskConversation(id: SessionID, selected: SessionID?) throws -> SessionID? {
+        try db.transaction {
+            let sessions = try sessionsWithoutWorkspace()
+            guard sessions.count > 1, sessions.contains(where: { $0.id == id }) else { return selected }
+            let next = AskTabs.selectionAfterClosing(id, selected: selected, sessions: sessions)
+            _ = try update(sessionID: id) { $0.archivedAt = Date() }
+            try setSetting(AskTabs.selectionKey, next?.rawValue)
             return next
         }
     }

@@ -75,6 +75,17 @@ struct ChangedFileList<Model: WorkspaceFileListing>: View {
             // Only over a diff there is something to narrow. A filter above "No changes yet" is a
             // control that cannot do anything, offered at the one moment it is useless.
             if !model.changedFiles.isEmpty {
+                Button {
+                    model.showAllReview()
+                } label: {
+                    Label("Review all files", systemImage: "doc.text")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .font(Typo.captionEmphasis)
+                .padding(.horizontal, InspectorLayout.inset)
+                .frame(height: InspectorLayout.barHeight)
+                Hairline()
                 InspectorFilterField(query: $query, onEscape: escape, onReturn: enterList)
                 Hairline()
             }
@@ -155,11 +166,7 @@ struct ChangedFileList<Model: WorkspaceFileListing>: View {
             // The same sentence the header bar's Revert shows, from the same place, because it is
             // the same command on the same file and two wordings would eventually describe two
             // different operations.
-            Text(FileRevert.losses(
-                for: file,
-                in: model.workspace,
-                hasDraft: FileEditSession.shared.isDirty(fullPath(file.path))
-            ))
+            Text(revertLosses(file))
         }
         .alert(
             "Could not revert \(revertProblem?.filename ?? "the file")",
@@ -169,6 +176,11 @@ struct ChangedFileList<Model: WorkspaceFileListing>: View {
         } message: { problem in
             Text(problem.message)
         }
+    }
+
+    private func revertLosses(_ file: ChangedFile) -> String {
+        let hasDraft = FileEditSession.shared.isDirty(fullPath(file.path))
+        return FileRevert.losses(for: file, in: model.workspace, hasDraft: hasDraft)
     }
 
     private var list: some View {

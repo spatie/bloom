@@ -264,6 +264,9 @@ jobs:
       - name: Check welcome navigation and window sizing
         run: ./Tools/welcome-layout-probe.sh
 
+      - name: Check diff scrolling and comment focus
+        run: ./Tools/review-run-probe.sh
+
       # Everything below only happens on a manual run.
       #
       # Assembles Bloom.app: the icon, the App Intents metadata, the embedded

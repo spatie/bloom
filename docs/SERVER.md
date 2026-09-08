@@ -33,7 +33,10 @@ Bloom Remote connects to the preset server on launch. **New Workspace > Create o
 **This Mac** or the configured remote host. Local creation retains Bloom's existing flow. Remote
 creation accepts a repository path on the server or an HTTPS/SSH Git URL, clones when needed,
 creates a worktree and runs the project's setup script. Remote conversations open in the main
-window, with chat, terminal and browser panes and the normal transcript rows and text editor.
+window using the same tab strip, split panes, composer, transcript, inspector, diff viewer and
+file editor as local workspaces. Tabs can be closed, renamed and rearranged. Remote notes are
+stored on the server. Closing a terminal tab stops that server shell; quitting the client only
+detaches it.
 
 ### Standalone executable
 
@@ -257,7 +260,7 @@ Client disconnect does not cancel those tasks. A second prompt while a turn is b
 server-side prompt queuing is not implemented yet. Permission answers are checked against current
 pending requests and serialised per question, so two clients cannot answer one twice.
 
-The client refreshes the catalogue every three seconds and the selected transcript every second.
+The client refreshes the catalogue every three seconds and loaded transcripts in the selected workspace every second.
 Transcript reads use sequence cursors with pages of 500 messages. Pending questions and the
 bounded live text tail are refreshed with each page. This is snapshot polling, not a push event
 subscription. On connection failure, the client reconnects automatically with a bounded backoff, retaining the
@@ -284,7 +287,7 @@ server starts, even without a connected Mac.
    startup, shutdown and existing bridge behaviour when migrating existing local workspaces.
 2. Add stable release downloads and installers, and broaden Linux coverage across agent backends.
 3. Bring Bloom's custom MCP bridge, crew/subagent management, archive/restore,
-   merge workflows, start-from-PR/branch controls and full pane arrangements to remote workspaces.
+   merge workflows and start-from-PR/branch controls to remote workspaces.
 4. Add saved machine profiles, push events and remote transcript search.
 5. Broaden attachment limits and preview navigation across multiple forwarded origins.
 6. Add a mobile web client and decide whether to operate an encrypted relay for connections that

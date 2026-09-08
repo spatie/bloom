@@ -54,6 +54,11 @@ struct StartProjectView: View {
     /// the window appears, so it cannot move while somebody is typing.
     @State private var defaultLocation = ""
     @State private var projectsThere = 0
+    @State private var searchLocations: [String] = []
+    @State private var isLocationLoaded = false
+    @State private var completions: [String] = []
+    @State private var selectedCompletion: Int?
+    @State private var acceptedCompletion: String?
     /// What the first commit's branch will be. Read from git rather than asserted, because a
     /// machine with `init.defaultBranch` set gets its own answer. See `NewProjectStarter`.
     @State private var branch = "main"
@@ -98,6 +103,9 @@ struct StartProjectView: View {
 
     /// The block, from the core: the instruction before anything is typed, and the verdict after.
     private var consequence: ProjectConsequence {
+        guard isLocationLoaded else {
+            return ProjectConsequence(detail: "Loading project folders…", tone: .waiting)
+        }
         guard hasTyped else {
             return .opening(location: defaultLocation, projectsThere: projectsThere, home: home)
         }
@@ -132,15 +140,17 @@ struct StartProjectView: View {
         // worth saying once, which is why it moves rather than goes: "Setting up bloom" is what
         // the window is doing, and a failure's title is what went wrong.
         .navigationTitle(title)
-        .onAppear {
-            if defaultLocation.isEmpty {
-                let paths = app.repos.map(\.path)
-                defaultLocation = NewProjectPlan.suggestedLocation(projectPaths: paths, home: home)
-                projectsThere = NewProjectPlan.projectsIn(defaultLocation, projectPaths: paths)
-            }
-            isFieldFocused = true
-        }
         .task {
+            let preferences: DirectoryPreferences
+            if let store = app.store { preferences = await DirectoryPreferences.load(from: store) } else {
+                preferences = DirectoryPreferences()
+            }
+            let paths = app.repos.map(\.path)
+            defaultLocation = preferences.projectLocation(projectPaths: paths, home: home)
+            searchLocations = preferences.searchLocations(projectPaths: paths, home: home)
+            projectsThere = NewProjectPlan.projectsIn(defaultLocation, projectPaths: paths)
+            isLocationLoaded = true
+            isFieldFocused = true
             branch = await NewProjectStarter.plannedBranch()
             identityProblem = await RepositoryStarter.identityProblem(at: home)
         }
@@ -157,6 +167,21 @@ struct StartProjectView: View {
             }.value
             guard !Task.isCancelled else { return }
             facts = found
+        }
+        .task(id: typed + searchLocations.joined(separator: "\n")) {
+            completions = []
+            selectedCompletion = nil
+            guard typed != acceptedCompletion else { return }
+            try? await Task.sleep(for: Self.inspectionDelay)
+            guard !Task.isCancelled else { return }
+            let line = typed
+            let locations = searchLocations
+            let userHome = home
+            let matches = await Task.detached {
+                ProjectCompletion.matches(line, locations: locations, home: userHome)
+            }.value
+            guard !Task.isCancelled else { return }
+            completions = matches
         }
         // The counts under a Start Tracking verdict, which are a walk of the whole folder and so
         // are asked only once the target has settled on one. Keyed on the path rather than on the
@@ -250,8 +275,58 @@ struct StartProjectView: View {
                 .textFieldStyle(.roundedBorder)
                 .font(Typo.body)
                 .focused($isFieldFocused)
-                .onSubmit(start)
+                .disabled(!isLocationLoaded)
+                .onKeyPress(.return) {
+                    guard let selectedCompletion else { return .ignored }
+                    acceptCompletion(selectedCompletion)
+                    return .handled
+                }
+                .onSubmit {
+                    if let selectedCompletion { acceptCompletion(selectedCompletion) } else { start() }
+                }
+                .onKeyPress(.downArrow) {
+                    guard !completions.isEmpty else { return .ignored }
+                    selectedCompletion = min((selectedCompletion ?? -1) + 1, completions.count - 1)
+                    return .handled
+                }
+                .onKeyPress(.upArrow) {
+                    guard !completions.isEmpty else { return .ignored }
+                    selectedCompletion = max((selectedCompletion ?? 1) - 1, 0)
+                    return .handled
+                }
+                .onKeyPress(.tab) {
+                    guard !completions.isEmpty else { return .ignored }
+                    acceptCompletion(selectedCompletion ?? 0)
+                    return .handled
+                }
+                .onKeyPress(.escape) {
+                    guard !completions.isEmpty else { return .ignored }
+                    completions = []
+                    selectedCompletion = nil
+                    return .handled
+                }
             Button("Choose\u{2026}", action: chooseFolder)
+        }
+
+        if !completions.isEmpty {
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                ForEach(Array(completions.enumerated()), id: \.element) { index, path in
+                    Button { acceptCompletion(index) } label: {
+                        HStack {
+                            Image(systemName: "folder")
+                            Text((path as NSString).lastPathComponent)
+                            Spacer()
+                            Text(NewProjectPlan.display(path, home: home))
+                                .foregroundStyle(Palette.textSecondary)
+                                .lineLimit(1).truncationMode(.middle)
+                        }
+                        .padding(Metrics.spacingSmall)
+                        .background(selectedCompletion == index ? Palette.controlAccent.opacity(0.15) : .clear)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(NewProjectPlan.display(path, home: home))
+                }
+            }
         }
 
         // Only where a commit is about to be made. Adding a repository writes nothing, so an
@@ -458,11 +533,20 @@ struct StartProjectView: View {
     }
 
     private var canStart: Bool {
-        guard hasTyped, verdict.isAllowed else { return false }
+        guard isLocationLoaded, hasTyped, verdict.isAllowed else { return false }
         return identityProblem == nil || !verdict.makesACommit
     }
 
     // MARK: - Work
+
+    private func acceptCompletion(_ index: Int) {
+        guard completions.indices.contains(index) else { return }
+        let path = NewProjectPlan.display(completions[index], home: home)
+        acceptedCompletion = path
+        typed = path
+        completions = []
+        selectedCompletion = nil
+    }
 
     private func chooseFolder() {
         // The panel lands on THIS window, and nothing here had to change for that: `present()`

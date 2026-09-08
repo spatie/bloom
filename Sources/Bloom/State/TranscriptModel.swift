@@ -77,9 +77,8 @@ final class TranscriptModel {
     /// unread mark, a notification that names a place. Each of them now says nothing rather than
     /// saying it about a workspace that was invented to keep the type non-optional.
     let workspace: Workspace?
-    /// Where this chat's agent runs. The worktree, when there is one, and Ask Bloom's own empty
-    /// directory when there is not. See `AskConversation.directory`, which argues at length why
-    /// that directory is empty rather than the owner's home.
+    /// Where this chat's agent runs: its worktree, or the directory retained by its Ask tab.
+    /// New Ask conversations use the folder chosen in Settings, with Bloom's own folder as fallback.
     let cwd: String
     private unowned let app: AppModel
     let remote: RemoteSessionConnection?
@@ -1476,6 +1475,14 @@ final class TranscriptModel {
             await reportToOrchestrator(
                 CrewMessage.failed(name: session.title, reason: failure.message)
             )
+            // An agent that died is an agent whose turn has ended, so a workspace it had asked to
+            // archive is due now. `notifyFinished` is not on this path and never was: it is about
+            // a result, and there is none. The recheck decides as it does everywhere else.
+            if let workspaceNow {
+                await app.archiveIfRequested(
+                    workspaceNow, endedIn: session.id, wasStopped: wasStoppedByHand
+                )
+            }
 
         case .result(let result):
             // A turn that recovered leaves its sentence on the row that closes it; one that failed
@@ -1868,6 +1875,25 @@ final class TranscriptModel {
 
         NotificationService.shared.turnFinished(
             workspace: workspaceNow, result: result, wasCancelled: session.state == .cancelled
+        )
+
+        // Last, and after the banner, because this is the one thing here that can take the
+        // workspace away: a notification about a turn that finished in a workspace is worth
+        // sending whether or not the worktree survives the next line.
+        //
+        // Before the drain rather than after it, which is the ordering that matters. `drain` runs
+        // once this returns and is guarded by `isWorkspaceArchiving`, so an archive that starts
+        // here cannot have a queued message sent into it; and a workspace that still has one
+        // queued is refused with the true reason rather than with "an agent is running" a
+        // fraction of a second later.
+        //
+        // `wasStoppedByHand` is read here rather than a few lines down for the reason the drain
+        // reads it: the owner stepped in, and a worktree removing itself out from under somebody
+        // who has just pressed Stop is the opposite of what Stop is for. It is still true at this
+        // line for a Steer, which is a stop made in order to say one particular thing, and that is
+        // right too. See `AppModel.archiveIfRequested`.
+        await app.archiveIfRequested(
+            workspaceNow, endedIn: session.id, wasStopped: wasStoppedByHand
         )
     }
 }

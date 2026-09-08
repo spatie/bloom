@@ -72,6 +72,10 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
     /// poll drops any selection git no longer reports, which would throw the reader out of a file
     /// they opened from the worktree tree a few seconds after they opened it.
     var path: String = ""
+    /// Review only: stack every changed file in one continuous scroll area.
+    var showsAllFiles: Bool = false
+    /// A repeated click on the same file still asks the continuous review to scroll back to it.
+    var reviewNavigationRevision: Int = 0
 
     /// The glyph that tells the kinds apart in the strip. Chats carry one too now, and the whole
     /// vocabulary is `PaneGlyph`.
@@ -108,6 +112,7 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
         title = try container.decode(String.self, forKey: .title)
         url = try container.decodeIfPresent(String.self, forKey: .url) ?? ""
         path = try container.decodeIfPresent(String.self, forKey: .path) ?? ""
+        showsAllFiles = try container.decodeIfPresent(Bool.self, forKey: .showsAllFiles) ?? false
         pageTitle = try container.decodeIfPresent(String.self, forKey: .pageTitle) ?? ""
         isNamed = try container.decodeIfPresent(Bool.self, forKey: .isNamed) ?? false
         directory = try container.decodeIfPresent(String.self, forKey: .directory) ?? ""

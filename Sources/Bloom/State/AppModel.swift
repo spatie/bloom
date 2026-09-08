@@ -293,6 +293,33 @@ final class AppModel {
 
     func isArchiving(_ id: WorkspaceID) -> Bool { archivingWorkspaceIDs.contains(id) }
 
+    /// Workspaces whose own agent has asked to be archived, and the chat whose turn has to end
+    /// before that can happen.
+    ///
+    /// The booking is here rather than on `WorkspaceModel` because the model is torn down by the
+    /// archive it is waiting for, and a request held on the thing it is about is a request that
+    /// dies half way through being carried out. It is a dictionary rather than a set because the
+    /// chat is the point: a workspace running a crew ends several turns and only one of them is
+    /// the turn that asked. See `AppModel.archiveIfRequested`.
+    ///
+    /// One booking per workspace. A second call from the same agent overwrites the first rather
+    /// than queueing behind it, because both name the same worktree and the later one is the one
+    /// with the fresher chat behind it.
+    private var archiveBookings: [WorkspaceID: SessionID] = [:]
+
+    /// Books a workspace to be archived once the asking chat's turn has ended.
+    func bookArchive(of id: WorkspaceID, after sessionID: SessionID) {
+        archiveBookings[id] = sessionID
+    }
+
+    /// Takes the booking back, if there is one and this is the chat it was waiting on. Answers
+    /// whether the caller now owns it, so a booking cannot be acted on twice.
+    func takeArchiveBooking(of id: WorkspaceID, endedIn sessionID: SessionID) -> Bool {
+        guard archiveBookings[id] == sessionID else { return false }
+        archiveBookings[id] = nil
+        return true
+    }
+
     /// Workspaces the owner has asked for whose worktree is still being cut.
     ///
     /// The mirror of `archivingWorkspaceIDs` above: that one takes a row away before the disk work
@@ -1255,6 +1282,10 @@ final class AppModel {
     func forgetWorkspace(_ id: WorkspaceID) {
         stopHidingFromSidebar(id)
         workspaceModels[id] = nil
+        // An archive that has happened cannot still be waiting to happen. Nothing books one twice
+        // today, but a booking outliving the worktree it names is a request that can only ever be
+        // refused, and it would be refused at the owner rather than at the agent that made it.
+        archiveBookings[id] = nil
         storedActivity.removeAll { $0.workspaceID == id }
         // The crew rows go for the same reason the activity rows above do: `ON DELETE CASCADE`
         // has taken this workspace's sessions with it, and rows read before that would keep

@@ -10,6 +10,7 @@ enum BloomLauncher {
         #if DEBUG
         if FlareProbe.isRequested { await FlareProbe.runAndExit() }
         if WelcomeLayoutProbe.isRequested { WelcomeLayoutProbe.runAndExit() }
+        if ReviewRunProbe.isRequested { ReviewRunProbe.runAndExit() }
         #endif
         BloomApp.main()
     }

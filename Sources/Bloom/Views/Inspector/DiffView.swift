@@ -10,6 +10,8 @@ import BloomCore
 struct DiffView<Model: WorkspaceFileReview>: View {
     let model: Model
     let file: ChangedFile
+    /// Non-nil when the all-files review owns vertical scrolling.
+    let embeddedWidth: CGFloat?
 
     /// Above this many changed lines the diff is gated behind a tap. Rendering is lazy and would
     /// survive it, but the preparation pass and the user's attention would both rather not.
@@ -122,9 +124,10 @@ struct DiffView<Model: WorkspaceFileReview>: View {
     /// The whitespace setting is read straight out of user defaults because `@AppStorage` is not
     /// available yet here, and it has to be part of the question: ignoring whitespace changes
     /// which hunks there are.
-    init(model: Model, file: ChangedFile) {
+    init(model: Model, file: ChangedFile, embeddedWidth: CGFloat? = nil) {
         self.model = model
         self.file = file
+        self.embeddedWidth = embeddedWidth
         let absolute = (model.workspace.path as NSString).appendingPathComponent(file.path)
         _mode = State(initialValue: model.fileEdits.isDirty(absolute) ? .edit : .diff)
 
@@ -149,6 +152,7 @@ struct DiffView<Model: WorkspaceFileReview>: View {
     private struct LoadID: Hashable {
         var workspaceID: WorkspaceID
         var file: ChangedFile
+        var scope: DiffScope
     }
 
     /// One cancel that has been asked about: what would be lost, and which editor to close once
@@ -216,12 +220,17 @@ struct DiffView<Model: WorkspaceFileReview>: View {
                     }
             case .edit:
                 FileEditPane(model: model, path: file.path, session: session)
+                    .frame(height: embeddedWidth == nil ? nil : 400)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .background(Palette.surface)
-        .background { shortcut }
-        .task(id: LoadID(workspaceID: model.workspace.id, file: file)) { await load() }
+        .background {
+            if embeddedWidth == nil { shortcut }
+        }
+        .task(id: LoadID(workspaceID: model.workspace.id, file: file, scope: model.diffScope)) {
+            await load()
+        }
         .onChange(of: isSideBySide) { _, _ in rebuild() }
         .onChange(of: ignoresWhitespace) { _, _ in refold() }
         .onChange(of: fileComments) { _, _ in rebuild() }
@@ -279,7 +288,10 @@ struct DiffView<Model: WorkspaceFileReview>: View {
         switch phase {
         case .loading:
             LoadingView("Reading the diff")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(
+                    maxWidth: .infinity, minHeight: embeddedWidth == nil ? nil : 120,
+                    maxHeight: .infinity
+                )
         case let .notice(symbol, title, detail):
             placeholder(symbol: symbol, title: title, detail: detail)
         case let .gated(fileDiff, changed):
@@ -552,6 +564,7 @@ struct DiffView<Model: WorkspaceFileReview>: View {
 
     private func placeholder(symbol: String, title: String, detail: String) -> some View {
         EmptyStateView(glyph: symbol, title: title, message: detail)
+            .frame(minHeight: embeddedWidth == nil ? nil : 160)
     }
 
     private func gate(_ fileDiff: FileDiff, changed: Int) -> some View {
@@ -562,11 +575,32 @@ struct DiffView<Model: WorkspaceFileReview>: View {
             actionTitle: "Show anyway",
             action: { Task { await present(fileDiff) } }
         )
+        .frame(minHeight: embeddedWidth == nil ? nil : 160)
     }
 
     // MARK: Diff
 
+    @ViewBuilder
     private func diff(_ document: DiffDocument) -> some View {
+        if let embeddedWidth {
+            let width = max(embeddedWidth, intrinsicWidth(document))
+            ScrollView(.horizontal) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(rows) { row in
+                        rowView(row, document: document, width: width)
+                    }
+                }
+                .frame(width: width, alignment: .leading)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .defaultScrollAnchor(.topLeading)
+            .scrollBounceBehavior(.basedOnSize)
+        } else {
+            standaloneDiff(document)
+        }
+    }
+
+    private func standaloneDiff(_ document: DiffDocument) -> some View {
         GeometryReader { proxy in
             let width = max(proxy.size.width, intrinsicWidth(document))
             ScrollView([.vertical, .horizontal]) {
