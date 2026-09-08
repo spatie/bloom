@@ -54,7 +54,7 @@ final class RemoteSessionConnection {
             commands.receive(state.commands.map { var command = $0; command.path = nil; return command })
             styles.receive(state.styles)
             prepared = true
-        } catch { server?.error = error.localizedDescription }
+        } catch { if !Task.isCancelled { server?.error = error.localizedDescription } }
     }
 
     func apply(_ value: ComposerControls) async -> Session? {
@@ -102,7 +102,7 @@ final class RemoteSessionConnection {
     func files() async -> [String] {
         do {
             if case .files(let paths) = try await request(.workspace(workspaceID: workspace.id, action: .files)) { return paths }
-        } catch { server?.error = error.localizedDescription }
+        } catch { if !Task.isCancelled { server?.error = error.localizedDescription } }
         return []
     }
 

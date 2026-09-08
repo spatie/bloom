@@ -504,9 +504,11 @@ struct ComposerPrompt<Footer: View>: View {
         let query = token.query
         // Off the main actor: a large repository has tens of thousands of tracked files and this
         // runs on every keystroke after the `@`.
-        fileMatches = await Task.detached(priority: .userInitiated) {
+        let matches = await Task.detached(priority: .userInitiated) {
             FileMatch.search(paths, query: query, limit: 200)
         }.value
+        guard !Task.isCancelled, activeMenu.mention?.query == query else { return }
+        fileMatches = matches
     }
 
     /// Accepting a row replaces the token the menu was opened on, and only that token.

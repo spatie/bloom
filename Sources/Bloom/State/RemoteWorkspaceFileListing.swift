@@ -18,8 +18,8 @@ final class RemoteWorkspaceFileListing: WorkspaceFileListing {
         set { server.review.selectedPath = newValue }
     }
     var changesError: String? { server.review.error }
-    var isLoadingChanges: Bool { !server.review.hasReadFiles }
-    var hasReadChanges: Bool { server.review.hasReadFiles }
+    var isLoadingChanges: Bool { !server.review.hasReadFiles && server.review.error == nil }
+    var hasReadChanges: Bool { server.review.hasReadFiles || server.review.error != nil }
     var diffScope: DiffScope { server.review.scope == .branch ? .all : .uncommitted }
     var viewedSummary: String? { nil }
     var supportsLocalFileActions: Bool { false }
@@ -37,13 +37,17 @@ final class RemoteWorkspaceFileListing: WorkspaceFileListing {
         do {
             if case .changes(let files) = try await server.read(.changes(workspaceID: workspace.id, scope: server.review.scope)),
                server.selectedWorkspace?.id == workspace.id { server.review.files = files }
-        } catch { server.review.error = error.localizedDescription }
+        } catch {
+            if !Task.isCancelled, server.selectedWorkspace?.id == workspace.id { server.review.error = error.localizedDescription }
+        }
     }
     func loadFileTree() async {
         do {
             if case .files(let paths) = try await server.read(.workspace(workspaceID: workspace.id, action: .files)),
                server.selectedWorkspace?.id == workspace.id { server.review.allFiles = paths; hasReadFileTree = true }
-        } catch { server.review.error = error.localizedDescription }
+        } catch {
+            if !Task.isCancelled, server.selectedWorkspace?.id == workspace.id { server.review.error = error.localizedDescription }
+        }
     }
     func showReview(path: String) {
         guard server.selectedWorkspace?.id == workspace.id else { return }
