@@ -2,180 +2,176 @@ import Foundation
 import Observation
 import BloomCore
 
-/// The state behind Ask Bloom: one conversation, above every project.
-///
-/// It is `WorkspaceModel` with everything a worktree brings taken out. There is no diff, no
-/// terminal, no pull request, no setup script and no tab strip, because none of those is about a
-/// conversation. What is left is a session row, the transcript over it, and the directory the
-/// agent runs in.
-///
-/// **One chat rather than a list.** The design is one conversation that sits above every project,
-/// and a strip of tabs here would be a second answer to "which Ask Bloom am I in" for a room with
-/// one chair in it. Starting a new one archives the old, which is what `Session.archivedAt`
-/// already means and what leaves the transcript readable rather than deleted.
+/// Each open Ask tab owns a live transcript. Selection never tears down a running conversation.
 @MainActor
 @Observable
 final class AskModel {
-    /// The chat, once it has been read back or made. Nil for the moment between the pane opening
-    /// and the store answering, which is the only time this pane draws nothing.
-    private(set) var session: Session?
-    private(set) var transcript: TranscriptModel?
-    /// Set when the working directory could not be made, which is the one failure that stops this
-    /// pane rather than degrading it. See `directory`.
+    private(set) var sessions: [Session] = []
+    private(set) var selectedID: SessionID?
+    private(set) var transcripts: [SessionID: TranscriptModel] = [:]
     private(set) var trouble: String?
-
+    var closingID: SessionID?
     private unowned let app: AppModel
-    /// Whether `open()` is already running, so the pane's `.task` and a reselection of the row do
-    /// not both create a chat. The store is an actor, so two callers really can both read "no
-    /// session" before either writes one.
-    private var isOpening = false
-    private var isStartingFresh = false
-    /// Whether the permission mode has been settled since Bloom started.
-    ///
-    /// This model is built once and kept for the life of the window, so its first `open()` is the
-    /// launch boundary. See `AskConversation.modeOnOpening` for why there has to be one.
-    private var hasSettledMode = false
+    private var isChanging = false
+    private var hasOpened = false
+    private var settledModes: Set<SessionID> = []
+    private var loading: Set<SessionID> = []
 
-    init(app: AppModel) {
-        self.app = app
-    }
+    var transcript: TranscriptModel? { selectedID.flatMap { transcripts[$0] } }
+    var session: Session? { transcript?.session ?? sessions.first { $0.id == selectedID } }
 
-    /// The empty directory the agent runs in, made once.
-    ///
-    /// Read the argument on `AskConversation.directory`: this is a permission decision, and it is
-    /// the second of two. A chat started in the owner's home directory would treat every file in
-    /// it as inside the working directory, which is the one place any permission mode stops asking
-    /// about.
-    private var directory: String? {
-        guard let store = app.store else { return nil }
-        return AskConversation.prepareDirectory(besideDatabaseAt: store.path)
-    }
+    init(app: AppModel) { self.app = app }
 
-    /// Reads the chat back, or makes it, and builds its transcript. Safe to call again: the second
-    /// call finds the session and returns.
     func open() async {
-        guard !isOpening, !isStartingFresh, let store = app.store else { return }
-        isOpening = true
-        defer { isOpening = false }
-
-        guard let directory else {
-            trouble = "Bloom could not make the folder this conversation runs in, "
-                + "inside its own Application Support directory."
+        guard !isChanging, let store = app.store else { return }
+        isChanging = true
+        defer { isChanging = false }
+        if hasOpened {
+            if transcript == nil, let selectedID { await select(selectedID) }
             return
         }
-        trouble = nil
-
-        // Oldest first, and the first is the one. More than one can only exist if somebody made a
-        // second by hand in the database; taking the oldest means the chat the owner has been
-        // using stays the chat the owner has been using.
-        let existing = (try? await store.sessionsWithoutWorkspace()) ?? []
-        var chat: Session
-        if let first = existing.first {
-            chat = first
-        } else if let made = try? await store.upsert(AskConversation.newSession()) {
-            chat = made
-        } else {
-            // The database refused the insert. Nothing is drawn rather than a pane pretending to
-            // be a conversation, and the next selection of the row tries again.
-            return
-        }
-
-        // Back to Ask on the first open of the launch, whatever the owner left it on. The picker
-        // still works and still lasts the rest of the launch; what expires is the presence that
-        // justified the choice, not the choice. See `AskConversation.modeOnOpening`.
-        if let mode = AskConversation.modeOnOpening(
-            stored: chat.permissionMode, isFirstOpenSinceLaunch: !hasSettledMode
-        ) {
-            // The one column, through the method that names it: the runner owns the state, the
-            // counters and the agent session id on this row and may have written any of them.
-            try? await store.updateSessionPreferences(id: chat.id, permissionMode: mode)
-            chat.permissionMode = mode
-        }
-        hasSettledMode = true
-
-        session = chat
-        if transcript?.session.id != chat.id {
-            let model = TranscriptModel(askSession: chat, directory: directory, app: app)
-            transcript = model
-            await model.load()
-        }
+        do {
+            sessions = try await store.sessionsWithoutWorkspace()
+            if sessions.isEmpty {
+                let directory = try await newDirectory()
+                sessions = [try await store.createAskConversation(directory: directory)]
+            }
+            let saved = try await store.setting(AskTabs.selectionKey)
+            hasOpened = true
+            if let id = AskTabs.selection(saved: saved, sessions: sessions) { await select(id) }
+        } catch { trouble = error.readableMessage }
     }
 
-    /// Puts this conversation away and opens an empty one.
-    ///
-    /// Archived rather than deleted, which is what the column already means everywhere else: the
-    /// old conversation is still in the database, with its cost and its permission history, and
-    /// nothing that has been said is thrown away because somebody wanted a clean start.
-    func startFresh(controls: ComposerControls? = nil, draft: String = "") async {
-        guard !isOpening, !isStartingFresh, let store = app.store, let current = session,
-              let directory else { return }
-        isStartingFresh = true
-        defer { isStartingFresh = false }
-
-        let carriedControls: ComposerControls
-        if let controls {
-            carriedControls = controls
-        } else {
-            let isFastMode = (try? await store.setting(
-                ComposerControls.fastModeKey(sessionID: current.id)
-            )) == "1"
-            let outputStyle = (try? await store.setting(
-                ComposerControls.outputStyleKey(sessionID: current.id)
-            )) ?? OutputStyle.defaultName
-            let contextWindow = CodexContextWindow.normalised(try? await store.setting(
-                ComposerControls.contextWindowKey(sessionID: current.id)
-            ))
-            carriedControls = ComposerControls(
-                session: current,
-                isFastMode: isFastMode,
-                outputStyle: outputStyle,
-                codexContextWindow: contextWindow
-            )
-        }
-
+    func select(_ id: SessionID) async {
+        guard let store = app.store, var chat = sessions.first(where: { $0.id == id }) else { return }
+        selectedID = id
+        trouble = nil
         do {
-            let made = try await store.replaceAskConversation(
-                id: current.id, controls: carriedControls, draft: draft
-            )
-            transcript?.teardown()
-            app.bridge?.retire(sessionID: current.id)
-            session = made
-            let model = TranscriptModel(askSession: made, directory: directory, app: app)
-            transcript = model
+            try await store.setSetting(AskTabs.selectionKey, id.rawValue)
+            if transcripts[id] != nil || loading.contains(id) { return }
+            loading.insert(id)
+            defer { loading.remove(id) }
+            // Old conversations predate directory preferences and retain their original cwd.
+            let saved = try await store.setting(AskTabs.directoryKey(id))
+            guard let directory = AskTabs.prepareDirectory(saved ?? "", databasePath: store.path) else {
+                throw AskDirectoryError.unavailable(saved ?? AskConversation.directory(besideDatabaseAt: store.path))
+            }
+            if let mode = AskConversation.modeOnOpening(
+                stored: chat.permissionMode, isFirstOpenSinceLaunch: !settledModes.contains(id)
+            ) {
+                try await store.updateSessionPreferences(id: id, permissionMode: mode)
+                chat.permissionMode = mode
+            }
+            settledModes.insert(id)
+            let model = TranscriptModel(askSession: chat, directory: directory, app: app)
+            transcripts[id] = model
             await model.load()
         } catch {
-            app.alert = BloomAlert(
-                title: "Could not start a new conversation",
-                message: TranscriptStanding.complaint(about: error)
-            )
+            if selectedID == id { trouble = error.readableMessage }
         }
     }
 
-    /// Signals the agent, without waiting. `AppModel.shutdownEverything` calls this on every model
-    /// first so the SIGTERM escalations all run at once rather than one after another.
-    ///
-    /// **This chat has to be in that sweep.** macOS reparents a child process to launchd rather
-    /// than killing it, so a conversation left out of the teardown would leave a `claude` running
-    /// against Bloom's own Application Support directory for the rest of the day, with nothing on
-    /// screen to say so.
-    func stopEverything() {
-        transcript?.terminateNow()
+    func newConversation() async {
+        guard !isChanging, let store = app.store else { return }
+        isChanging = true
+        defer { isChanging = false }
+        do {
+            if !hasOpened { sessions = try await store.sessionsWithoutWorkspace() }
+            let directory = try await newDirectory()
+            let made = try await store.createAskConversation(directory: directory)
+            sessions.append(made)
+            hasOpened = true
+            await select(made.id)
+        } catch { report(error, title: "Could not start a new conversation") }
     }
 
-    func shutdown() async {
-        await transcript?.shutdown()
+    /// Explicit fresh-start composer actions replace only their tab, carrying its directory.
+    func startFresh(controls: ComposerControls? = nil, draft: String = "") async {
+        guard !isChanging, let store = app.store, let current = session else { return }
+        isChanging = true
+        defer { isChanging = false }
+        do {
+            let carried: ComposerControls
+            if let controls {
+                carried = controls
+            } else {
+                let fast = (try await store.setting(ComposerControls.fastModeKey(sessionID: current.id))) == "1"
+                let style = (try await store.setting(ComposerControls.outputStyleKey(sessionID: current.id))) ?? ""
+                let window = CodexContextWindow.normalised(
+                    try await store.setting(ComposerControls.contextWindowKey(sessionID: current.id))
+                )
+                carried = ComposerControls(session: current, isFastMode: fast, outputStyle: style,
+                                           codexContextWindow: window)
+            }
+            let made = try await store.replaceAskConversation(id: current.id, controls: carried, draft: draft)
+            transcripts.removeValue(forKey: current.id)?.teardown()
+            app.bridge?.retire(sessionID: current.id)
+            if let index = sessions.firstIndex(where: { $0.id == current.id }) { sessions[index] = made }
+            settledModes.insert(made.id)
+            await select(made.id)
+        } catch { report(error, title: "Could not start a new conversation") }
     }
 
-    /// Whether the agent in this chat is mid turn, for the sidebar row's own mark.
-    ///
-    /// Read off the live transcript rather than out of `Store.sessionActivity`, and that is the
-    /// right source rather than a shortcut: that query joins the workspaces table to answer "which
-    /// worktrees have an agent in them", and this conversation is in none of them.
-    var isRunning: Bool {
-        transcript?.isRunning == true || transcript?.subagents.isWorking == true
+    func requestClose(_ id: SessionID) {
+        if isRunning(id) { closingID = id } else { Task { await close(id) } }
     }
 
-    var isAwaitingPermission: Bool {
-        transcript?.isAwaitingPermission ?? false
+    func close(_ id: SessionID) async {
+        guard !isChanging, sessions.count > 1, let store = app.store else { return }
+        isChanging = true
+        defer { isChanging = false }
+        do {
+            let next = try await store.closeAskConversation(id: id, selected: selectedID)
+            transcripts.removeValue(forKey: id)?.teardown()
+            app.bridge?.retire(sessionID: id)
+            sessions.removeAll { $0.id == id }
+            if let next { await select(next) }
+        } catch { report(error, title: "Could not close the conversation") }
+    }
+
+    func rename(_ id: SessionID, title: String) async {
+        guard let store = app.store else { return }
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        do {
+            _ = try await store.update(sessionID: id) { $0.title = title }
+            if let index = sessions.firstIndex(where: { $0.id == id }) { sessions[index].title = title }
+            transcripts[id]?.session.title = title
+        } catch { report(error, title: "Could not rename the conversation") }
+    }
+
+    func title(for chat: Session) -> String { transcripts[chat.id]?.session.title ?? chat.title }
+
+    func isRunning(_ id: SessionID) -> Bool {
+        transcripts[id]?.isRunning == true || transcripts[id]?.subagents.isWorking == true
+    }
+
+    var isRunning: Bool { transcripts.keys.contains { isRunning($0) } }
+    var isAwaitingPermission: Bool { transcripts.values.contains { $0.isAwaitingPermission } }
+
+    func stopEverything() { for model in transcripts.values { model.terminateNow() } }
+    func shutdown() async { for model in transcripts.values { await model.shutdown() } }
+
+    private func newDirectory() async throws -> String {
+        guard let store = app.store else { throw AskDirectoryError.unavailable("") }
+        let preferences = await DirectoryPreferences.load(from: store)
+        guard let path = AskTabs.prepareDirectory(preferences.ask, databasePath: store.path) else {
+            throw AskDirectoryError.unavailable(preferences.ask)
+        }
+        return path
+    }
+
+    private func report(_ error: Error, title: String) {
+        app.alert = BloomAlert(title: title, message: error.readableMessage)
+    }
+}
+
+private enum AskDirectoryError: LocalizedError {
+    case unavailable(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unavailable(let path): "The working directory could not be opened: \(path)"
+        }
     }
 }
