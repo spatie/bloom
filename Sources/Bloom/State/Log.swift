@@ -32,6 +32,8 @@ enum Log {
     /// did not send.
     static let ping = Logger(subsystem: subsystem, category: "ping")
 
+    static let crashes = Logger(subsystem: subsystem, category: "crashes")
+
     /// The launch sweep for project artwork, which is the only work the app does that nobody
     /// asked for and that changes something on screen. When a badge is suddenly a picture, this
     /// is where it says which projects it looked at and how long it spent.

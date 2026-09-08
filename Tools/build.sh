@@ -287,6 +287,11 @@ if [[ -d "$BIN_DIR/Bloom_Bloom.bundle" ]]; then
   cp -R "$BIN_DIR/Bloom_Bloom.bundle" "$APP/Contents/Resources/"
 fi
 
+# PLCrashReporter's privacy manifest is a SwiftPM resource bundle, even though its code links statically.
+for resource in "$BIN_DIR"/*_CrashReporter.bundle(N); do
+  cp -R "$resource" "$APP/Contents/Resources/"
+done
+
 # App Intents. Shortcuts and Spotlight do not read the binary: they read a Metadata.appintents
 # bundle that Xcode normally produces from constant values the compiler emits while building. A
 # Swift package build emits none of that, so intents that compile perfectly are invisible to the
@@ -324,15 +329,29 @@ emit_app_intents_metadata() {
   /usr/bin/python3 -c "import json,sys; json.dump(json.load(open(sys.argv[1]))['constValueProtocols'], open(sys.argv[2],'w'))" \
     "$protocols" "$protocolList"
 
-  # Match SwiftPM's package identity: BloomCore's typed ids belong to this package, so their
-  # App Intents conformances are not foreign conformances in this separate typecheck either.
+  # Worktrees take their package identity from their directory, which is not always "bloom".
+  # Reuse the actual compiler argument so this pass treats BloomCore's identifiers as ours too.
+  local package_name
+  package_name="$(python3 - "$BIN_DIR/description.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1]) as handle:
+    commands = json.load(handle)['swiftCommands']
+command = next(value for value in commands.values() if value.get('moduleName') == 'Bloom')
+arguments = command['otherArguments']
+print(arguments[arguments.index('-package-name') + 1])
+PY
+)"
+
   swiftc -typecheck -wmo \
     -module-name Bloom \
-    -package-name bloom \
+    -package-name "$package_name" \
     -swift-version 6 \
     -target "$triple" \
     -sdk "$sdk" \
     -I "$BIN_DIR/Modules" \
+    -Xcc "-fmodule-map-file=$BIN_DIR/CrashReporter.build/module.modulemap" \
     -F "${SPARKLE_SEARCH_PATH:-$BIN_DIR}" \
     -emit-const-values-path "$constvalues" \
     -Xfrontend -const-gather-protocols-file -Xfrontend "$protocolList" \

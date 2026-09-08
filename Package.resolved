@@ -1,6 +1,15 @@
 {
-  "originHash" : "13e89256b17cb2fa11ceedbb08d5643c1297f99a0b2c14878a28601422e8a2c8",
+  "originHash" : "c5530a0e1ce9893c5b809248100aea1864feab285a3f2e3a13cb0d24f68ce91a",
   "pins" : [
+    {
+      "identity" : "flare-client-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/spatie/flare-client-swift.git",
+      "state" : {
+        "revision" : "06b7e20c420f39084a1ba251b458f7ba52d69f97",
+        "version" : "1.0.0"
+      }
+    },
     {
       "identity" : "highlighterswift",
       "kind" : "remoteSourceControl",
@@ -8,6 +17,15 @@
       "state" : {
         "revision" : "fe7aae9c9b31d3b296fd3d2dd575e1a207bb29e0",
         "version" : "3.1.0"
+      }
+    },
+    {
+      "identity" : "plcrashreporter",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/microsoft/plcrashreporter.git",
+      "state" : {
+        "revision" : "0254f941c646b1ed17b243654723d0f071e990d0",
+        "version" : "1.12.2"
       }
     },
     {

@@ -160,6 +160,7 @@ struct GeneralSettingsView: View {
 
             UpdateSettingsSection()
             InstallPingSettingsSection()
+            CrashReportingSettingsSection()
         }
         .settingsForm()
     }

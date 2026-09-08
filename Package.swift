@@ -22,6 +22,7 @@ let package = Package(
         // against it but copies nothing: `Tools/build.sh` embeds `Sparkle.framework` into
         // `Contents/Frameworks` and adds the rpath that finds it there. See `Tools/build.sh`.
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.6"),
+        .package(url: "https://github.com/spatie/flare-client-swift.git", from: "1.0.0"),
     ],
     targets: [
         .target(
@@ -35,6 +36,8 @@ let package = Package(
                 .product(name: "MarkdownEngine", package: "swift-markdown-engine"),
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
                 .product(name: "Sparkle", package: "Sparkle"),
+                .product(name: "Flare", package: "flare-client-swift"),
+                .product(name: "FlareCrashReporter", package: "flare-client-swift"),
             ],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

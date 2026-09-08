@@ -30,6 +30,7 @@ enum SystemDefaults {
             SleepPrevention.settingKey: SleepPrevention.isOnByDefault,
             MenuBarStatusItem.settingKey: MenuBarStatusItem.isOnByDefault,
             InstallPing.settingKey: InstallPing.isOnByDefault,
+            CrashReporting.settingKey: CrashReporting.isOnByDefault,
         ])
     }
 }
