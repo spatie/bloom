@@ -6,17 +6,13 @@ import BloomCore
 /// It exists for the thing you notice at eleven at night and want the morning agent to fix. That
 /// makes two things load bearing and everything else decoration. It has to still be there after the
 /// app has been quit, which is why the text is a row in SQLite rather than anything this view owns.
-/// And it must never send itself anywhere: the note reaches an agent only when the button below is
-/// pressed, and even then it lands in the composer as a draft the user still has to read and send.
+/// Notes are a standalone scratchpad and are never handed to the conversation automatically.
 ///
 /// **What this view decides is nothing.** Where the text lives, when it is worth writing, what
-/// counts as blank and what a note becomes on its way to the composer are all `WorkspaceNote` in
-/// the core, where the tests can see them. What is left here is a text field, a save that is
-/// scheduled, and a button.
+/// counts as blank are all `WorkspaceNote` in the core. This view loads the note, schedules
+/// writes, and passes its draft to the Markdown editor.
 struct NotesPaneView: View {
     @Bindable var model: WorkspaceModel
-
-    @Environment(AppModel.self) private var app
 
     @State private var text = ""
     /// What the database is known to hold, so a save that would rewrite the same row is skipped.
@@ -35,14 +31,14 @@ struct NotesPaneView: View {
         NotesPage(
             text: $text,
             isEditing: $isEditing,
+            workspaceID: model.workspace.id,
             workspaceName: model.workspace.name,
             hasLoaded: hasLoaded,
             couldNotLoad: couldNotLoad,
             couldNotSave: couldNotSave,
             hasChanges: WorkspaceNote.needsSave(stored: saved, typed: text),
             onRetryLoad: { Task { await load() } },
-            onRetrySave: saveNow,
-            onHandOff: handOff
+            onRetrySave: saveNow
         )
         .onChange(of: text) { _, _ in scheduleSave() }
         .task {
@@ -141,15 +137,4 @@ struct NotesPaneView: View {
         }
     }
 
-    /// **It does not send the turn**, which is the same rule the browser's screenshot button
-    /// follows. What lands in the composer is the note and a caret, and the user decides whether
-    /// that is the prompt they meant.
-    private func handOff() {
-        guard let sentence = WorkspaceNote.handoff(text) else { return }
-        Task {
-            let outcome = await ComposerHandoff.write(sentence, to: model)
-            guard let failure = outcome.failure else { return }
-            app.alert = BloomAlert(title: "That note was not handed over", message: failure)
-        }
-    }
 }

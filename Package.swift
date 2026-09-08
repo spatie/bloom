@@ -10,6 +10,8 @@ let package = Package(
         .library(name: "BloomCore", targets: ["BloomCore"]),
     ],
     dependencies: [
+        // Native live Markdown editing for workspace notes. Pin the pre-1.0 API we integrate.
+        .package(url: "https://github.com/nodes-app/swift-markdown-engine", exact: "0.12.0"),
         // The terminal panes. The upper bound is not tidiness: SwiftTerm tags 1.20.0 as a
         // pre-release ("one last before 2.0"), and SwiftPM cannot see that flag because the tag
         // carries no semver pre-release identifier, so a bare `from:` would resolve to it. 1.19.0
@@ -30,6 +32,7 @@ let package = Package(
             name: "Bloom",
             dependencies: [
                 "BloomCore",
+                .product(name: "MarkdownEngine", package: "swift-markdown-engine"),
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
                 .product(name: "Sparkle", package: "Sparkle"),
             ],

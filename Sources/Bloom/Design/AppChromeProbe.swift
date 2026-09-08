@@ -1,6 +1,7 @@
 import AppKit
 import BloomCore
 import SwiftUI
+import MarkdownEngine
 
 #if DEBUG
 /// Runs notification callbacks and draws the welcome and tab controls in an isolated probe bundle.
@@ -45,11 +46,67 @@ enum AppChromeProbe {
                      size: CGSize(width: 360, height: 540), name: "notes-narrow")
         if !emptyAligned { failures.append("empty notes caret and placeholder do not align") }
         if !narrowAligned { failures.append("narrow notes text does not align") }
-        let result: [String: Any] = ["notifications": 1000, "checks": 17, "passed": failures.isEmpty, "failures": failures]
+        let formatting = await checkFormatting()
+        failures += formatting.failures
+        let result: [String: Any] = ["notifications": 1000, "checks": 17 + formatting.checks, "passed": failures.isEmpty, "failures": failures]
         if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {
             FileHandle.standardOutput.write(data)
         }
         exit(failures.isEmpty ? 0 : 1)
+    }
+
+    private static func checkFormatting() async -> (checks: Int, failures: [String]) {
+        var checks = 0
+        var failures: [String] = []
+        func check(_ condition: Bool, _ message: String) {
+            checks += 1
+            if !condition { failures.append(message) }
+        }
+        let original = "Hello 👩🏽‍💻 café\nsecond line"
+        var note = original
+        let editor = NativeTextViewWrapper(text: Binding(get: { note }, set: { note = $0 }),
+                                           documentId: "formatting-probe")
+        let controller = NotesEditorController(rootView: editor)
+        controller.sizingOptions = []
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 640, height: 240),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentViewController = controller
+        controller.view.frame = CGRect(x: 0, y: 0, width: 640, height: 240)
+        controller.view.layoutSubtreeIfNeeded()
+        controller.scheduleConnection()
+        try? await Task.sleep(for: .milliseconds(150))
+        guard let text = controller.textView else { return (1, ["Markdown editor did not connect"]) }
+        let selected = (original as NSString).range(of: "👩🏽‍💻 café")
+        text.setSelectedRange(selected)
+        controller.apply(.bold)
+        try? await Task.sleep(for: .milliseconds(100))
+        check(note == "Hello **👩🏽‍💻 café**\nsecond line", "bold lost or changed the selected Unicode text")
+        check((text.string as NSString).substring(with: text.selectedRange()) == "👩🏽‍💻 café", "bold lost the selection")
+        text.undoManager?.undo()
+        try? await Task.sleep(for: .milliseconds(100))
+        check(note == original, "formatting did not undo in one step")
+        text.undoManager?.redo()
+        try? await Task.sleep(for: .milliseconds(100))
+        check(note == "Hello **👩🏽‍💻 café**\nsecond line", "formatting did not redo")
+        text.undoManager?.undo()
+        try? await Task.sleep(for: .milliseconds(100))
+        text.setSelectedRange(NSRange(location: 0, length: (text.string as NSString).length))
+        controller.apply(.codeBlock)
+        try? await Task.sleep(for: .milliseconds(100))
+        check(note == "```\n\(original)\n```", "code formatting discarded the selected lines")
+        text.undoManager?.undo()
+        try? await Task.sleep(for: .milliseconds(100))
+        check(note == original, "code formatting did not undo in one step")
+        text.setSelectedRange(NSRange(location: 0, length: (text.string as NSString).length))
+        controller.apply(.bulletList)
+        try? await Task.sleep(for: .milliseconds(100))
+        check(note == "- Hello 👩🏽‍💻 café\n- second line", "list formatting lost a line")
+        text.undoManager?.undo()
+        try? await Task.sleep(for: .milliseconds(100))
+        check(note == original, "list formatting did not undo in one step")
+        check(!window.isVisible, "the Markdown probe displayed a window")
+        controller.disconnect()
+        return (checks, failures)
     }
 
     private static func textView(in root: NSView) -> NSTextView? {
@@ -131,9 +188,9 @@ private struct NotesPageFixture: View {
     init(body: String = "") { _text = State(initialValue: body) }
 
     var body: some View {
-        NotesPage(text: $text, isEditing: $isEditing, workspaceName: "Redesign the website",
+        NotesPage(text: $text, isEditing: $isEditing, workspaceID: WorkspaceID("notes-probe"), workspaceName: "Redesign the website",
                   hasLoaded: true, couldNotLoad: false, couldNotSave: false, hasChanges: false,
-                  onRetryLoad: {}, onRetrySave: {}, onHandOff: {})
+                  onRetryLoad: {}, onRetrySave: {})
     }
 }
 #endif

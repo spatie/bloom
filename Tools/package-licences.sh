@@ -19,3 +19,5 @@ copy_notice "$checkouts/SwiftTerm/LICENSE" SwiftTerm.txt
 # Sparkle's notice includes its bundled third-party licences.
 copy_notice "$checkouts/Sparkle/LICENSE" Sparkle.txt
 copy_notice "$checkouts/swift-argument-parser/LICENSE.txt" SwiftArgumentParser.txt
+
+copy_notice "$checkouts/swift-markdown-engine/LICENSE" MarkdownEngine.txt

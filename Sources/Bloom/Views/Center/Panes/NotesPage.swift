@@ -1,10 +1,11 @@
 import SwiftUI
 import BloomCore
 
-/// The notes' writing surface. Persistence and the handoff stay with NotesPaneView.
+/// The notes' writing surface. Persistence stays with NotesPaneView.
 struct NotesPage: View {
     @Binding var text: String
     var isEditing: FocusState<Bool>.Binding
+    var workspaceID: WorkspaceID
     var workspaceName: String
     var hasLoaded: Bool
     var couldNotLoad: Bool
@@ -12,7 +13,9 @@ struct NotesPage: View {
     var hasChanges: Bool
     var onRetryLoad: () -> Void
     var onRetrySave: () -> Void
-    var onHandOff: () -> Void
+
+    @State private var commands = NotesFormattingCommands()
+    @State private var showsSource = false
 
     static let textPadding: CGFloat = 5
 
@@ -21,7 +24,11 @@ struct NotesPage: View {
             header
                 .padding(.horizontal, Self.textPadding)
                 .padding(.top, Metrics.pane)
-                .padding(.bottom, Metrics.pane)
+                .padding(.bottom, Metrics.inset)
+
+            NotesFormattingBar(commands: commands, isEditing: isEditing.wrappedValue, showsSource: $showsSource)
+                .disabled(!hasLoaded)
+                .padding(.bottom, Metrics.spacingWide)
 
             editor
 
@@ -35,19 +42,7 @@ struct NotesPage: View {
         .background(Palette.surface)
     }
 
-    private var header: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: Metrics.pane) {
-                heading
-                Spacer(minLength: Metrics.spacingWide)
-                handoffButton
-            }
-            VStack(alignment: .leading, spacing: Metrics.inset) {
-                heading
-                handoffButton
-            }
-        }
-    }
+    private var header: some View { heading }
 
     private var heading: some View {
         VStack(alignment: .leading, spacing: Metrics.spacingWide) {
@@ -62,26 +57,10 @@ struct NotesPage: View {
         }
     }
 
-    private var handoffButton: some View {
-        Button("Send to composer", systemImage: "arrow.turn.down.left", action: onHandOff)
-            .buttonStyle(.bordered)
-            .controlSize(.regular)
-            .disabled(!hasLoaded || WorkspaceNote.handoff(text) == nil)
-            .help("Adds these notes to the conversation's draft for you to review and send.")
-    }
-
     private var editor: some View {
-        TextEditor(text: $text)
-            .focused(isEditing)
-            // Keep the floating Writing Tools affordance out of the neighbouring pane.
-            .writingToolsBehavior(.disabled)
-            .font(Typo.body)
-            .lineSpacing(5)
-            .foregroundStyle(Palette.textPrimary)
-            .scrollContentBackground(.hidden)
+        NotesMarkdownEditor(text: $text, isEditing: isEditing, workspaceID: workspaceID,
+                            isEditable: hasLoaded, showsSource: showsSource, commands: commands)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .disabled(!hasLoaded)
-            .accessibilityLabel("Workspace notes")
             .overlay(alignment: .topLeading) { placeholder }
     }
 
@@ -96,19 +75,6 @@ struct NotesPage: View {
                     .buttonStyle(.bordered)
             }
             .padding(.horizontal, Self.textPadding)
-        } else if hasLoaded, text.isEmpty {
-            VStack(alignment: .leading, spacing: Metrics.spacingWide) {
-                Text("Start writing…")
-                    .font(Typo.body)
-                    .foregroundStyle(Palette.textPlaceholder)
-                Text("Ideas, decisions and reminders for this workspace.")
-                    .font(Typo.label)
-                    .foregroundStyle(Palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            // Match the native editor's first glyph, including its text-container padding.
-            .padding(.horizontal, Self.textPadding)
-            .allowsHitTesting(false)
         }
     }
 
@@ -129,8 +95,6 @@ struct NotesPage: View {
                 Label(hasChanges ? "Saving…" : "Saved with this workspace",
                       systemImage: hasChanges ? "ellipsis" : "checkmark")
                     .foregroundStyle(Palette.textSecondary)
-                Text("Notes are not sent to the agent automatically.")
-                    .foregroundStyle(Palette.textTertiary)
             }
         }
         .font(Typo.caption)
