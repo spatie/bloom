@@ -83,7 +83,7 @@ struct BloomCommands: Commands {
                 // what the main window has selected. See `RootView.openCreateWindow`.
                 NotificationCenter.default.post(name: .bloomNewWorkspace, object: nil)
             }
-            .disabled(model.repos.isEmpty)
+            .disabled(model.repos.isEmpty && model.remoteServer.host.isEmpty)
 
             // Directly under New Workspace, because it starts one, and at the top level of File
             // rather than nowhere. Opening a workspace on somebody else's pull request was a whole

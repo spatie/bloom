@@ -21,7 +21,7 @@ def prepare(source, previous_app, commit, environment):
     for key, variable in {
         "host": "BLOOM_REMOTE_HOST", "executable": "BLOOM_REMOTE_EXECUTABLE",
         "directory": "BLOOM_REMOTE_DIRECTORY", "repository": "BLOOM_REMOTE_REPOSITORY",
-        "model": "BLOOM_REMOTE_MODEL",
+        "model": "BLOOM_REMOTE_MODEL", "identityFile": "BLOOM_REMOTE_IDENTITY_FILE",
     }.items():
         if variable in environment:
             connection[key] = environment[variable]

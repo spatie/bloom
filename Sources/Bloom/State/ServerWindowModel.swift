@@ -11,6 +11,7 @@ final class ServerWindowModel {
     var connectionMode = ConnectionMode.remote
     var host = ""
     var executable = ""
+    var identityFile = ""
     var remoteDirectory = ""
     var existingLocalDirectory = ""
     var directory: String {
@@ -59,6 +60,7 @@ final class ServerWindowModel {
     }
     private var drafts: [String: String] = [:]
     var shouldReconnect = true
+    var isEditingConnection = false
     var isUploading = false
     var activePane = "chat"
     var previewAddress = "http://localhost:8000"
@@ -91,6 +93,7 @@ final class ServerWindowModel {
         drafts = preferences.dictionary(forKey: "server.drafts") as? [String: String] ?? [:]
         host = values["host"] ?? ""
         executable = values["executable"] ?? ""
+        identityFile = values["identityFile"] ?? ""
         remoteDirectory = values["directory"] ?? ""
         remoteRepositoryPath = values["repository"] ?? ""
         localRepositoryPath = values["localRepository"] ?? ""
@@ -115,7 +118,7 @@ final class ServerWindowModel {
 
     private func saveConnection() {
         preferences.set([
-            "host": host, "executable": executable, "directory": remoteDirectory,
+            "host": host, "executable": executable, "directory": remoteDirectory, "identityFile": identityFile,
             "repository": remoteRepositoryPath, "localRepository": localRepositoryPath,
             "model": agentModel,
         ], forKey: "server.connection")
@@ -227,12 +230,14 @@ final class ServerWindowModel {
         await disconnect()
         let generation = connectionGeneration
         isConnecting = true
+        defer { isConnecting = false }
+        var stage = "Connecting over SSH"
         needsBackgroundApproval = false
         error = nil
         do {
             let endpoint: ServerEndpoint
             switch connectionMode {
-            case .remote: endpoint = .ssh(host: host, executable: executable, directory: directory)
+            case .remote: endpoint = .ssh(host: host, executable: executable, directory: directory, identityFile: identityFile.isEmpty ? nil : identityFile)
             case .existingLocal: endpoint = .local(directory: directory)
             case .local: endpoint = try await localService.start()
             }
@@ -255,9 +260,11 @@ final class ServerWindowModel {
                 return
             }
             client = connected
+            stage = "Reading server identity"
             let reply = try await connected.request(ServerRequest(.hello), timeout: .seconds(15))
             guard generation == connectionGeneration else { return }
             if case .hello(let name) = reply.result { serverName = name }
+            stage = "Loading workspaces"
             let listed = try await connected.request(ServerRequest(.catalogue), timeout: .seconds(15))
             guard generation == connectionGeneration else { return }
             if case .catalogue(let value) = listed.result { catalogue = value }
@@ -265,11 +272,10 @@ final class ServerWindowModel {
         } catch {
             if generation == connectionGeneration {
                 needsBackgroundApproval = error is LocalServerServiceError
-                self.error = error.localizedDescription
+                self.error = stage + ": " + error.localizedDescription
                 await disconnect()
             }
         }
-        isConnecting = false
     }
 
     func disconnect() async {
@@ -294,7 +300,7 @@ final class ServerWindowModel {
     func maintainConnection() async {
         var delay = 1
         while !Task.isCancelled {
-            if shouldReconnect, !isConnected, !isConnecting, !host.isEmpty {
+            if shouldReconnect, !isEditingConnection, !isConnected, !isConnecting, !host.isEmpty {
                 await connect()
                 delay = isConnected ? 1 : min(30, delay * 2)
             } else { delay = 1 }

@@ -321,7 +321,7 @@ struct SidebarView: View {
             reorderNote = nil
         }
         .overlay {
-            if app.repos.isEmpty, app.isLoaded {
+            if app.repos.isEmpty, app.remoteServer.host.isEmpty, app.isLoaded {
                 noProjects
             }
         }

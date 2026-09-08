@@ -178,7 +178,11 @@ sidebar beside local projects, and the workspace title identifies the execution 
 Before connecting remotely, verify ordinary SSH access in Terminal. The client requires an
 already trusted host key and non-interactive authentication, usually a key loaded into ssh-agent.
 Port, identity and jump-host configuration can live in `~/.ssh/config`. Bloom does not accept new
-host keys silently or collect SSH passwords.
+host keys silently or collect SSH passwords. If an SSH agent requires per-application approval,
+authorise Bloom in that agent or choose an existing private key with **SSH key (optional)**.
+An explicit key uses `IdentitiesOnly` and disables agent lookup for that connection. The private
+key stays on the Mac; only its path is saved in the connection profile. The `BLOOM_REMOTE_IDENTITY_FILE`
+build preset accepts the same path.
 
 The bundled `LocalServerService` can register a separate managed local runtime through
 ServiceManagement. This remains infrastructure for the eventual local migration; **This Mac** in

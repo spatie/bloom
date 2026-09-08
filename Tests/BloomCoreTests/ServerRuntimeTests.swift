@@ -5,6 +5,18 @@ import Testing
 
 @Suite("ServerRuntime", .tags(.persistence, .subprocess), .scratchDirectory)
 struct ServerRuntimeTests {
+    @Test func actualSSHHandshakeWhenExplicitlyConfigured() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let host = env["BLOOM_REMOTE_TEST_HOST"], let executable = env["BLOOM_REMOTE_TEST_EXECUTABLE"],
+              let directory = env["BLOOM_REMOTE_TEST_DIRECTORY"] else { return }
+        let client = try await ServerClient.connect(to: .ssh(host: host, executable: executable, directory: directory, identityFile: env["BLOOM_REMOTE_TEST_IDENTITY_FILE"]))
+        for _ in 0..<3 {
+            let reply = try await client.request(ServerRequest(.catalogue), timeout: .seconds(15))
+            if case .catalogue = reply.result {} else { Issue.record("Missing catalogue") }
+        }
+        await client.disconnect()
+    }
+
     @Test func concurrentReconnectsCannotReuseDescriptorsStillBeingWatched() async throws {
         let fixture = try await ServerFixture()
         let runner = fixture.runner
@@ -139,6 +151,7 @@ struct ServerRuntimeTests {
         #expect(runner.terminated.withLock { $0 } == false)
 
         let second = try await ServerClient.connect(to: .local(directory: fixture.directory))
+        await waitUntil("queued prompt reaches the transcript") { (try? await fixture.store.messages(sessionID: fixture.session.id).count) == 1 }
         let reply = try await second.request(ServerRequest(.transcript(sessionID: fixture.session.id, afterSeq: -1)))
         guard case .transcript(let transcript) = reply.result else { Issue.record("Missing transcript"); return }
         #expect(transcript.isBusy)

@@ -313,6 +313,10 @@ public actor AgentRunner {
 
     public var isRunning: Bool { alive }
 
+    /// Cancelling marks the turn idle before SIGTERM has reaped its child. Server shutdown must
+    /// wait for the actual process, otherwise its SIGKILL fallback dies with the server.
+    public nonisolated var isProcessAlive: Bool { handle.current?.isRunning ?? false }
+
     public var currentSession: Session { session }
 
     /// The last thing that could not be written to disk, kept for as long as the runner lives.

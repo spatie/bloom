@@ -22,6 +22,7 @@ private struct ServerConnectionView: View {
     @Environment(\.dismissWindow) private var dismissWindow
     @State private var host = ""
     @State private var executable = ""
+    @State private var identityFile = ""
     @State private var directory = ""
 
     var body: some View {
@@ -30,6 +31,7 @@ private struct ServerConnectionView: View {
                 TextField("SSH host", text: $host, prompt: Text("user@machine or SSH alias"))
                 TextField("Server executable", text: $executable, prompt: Text("/absolute/path/to/bloom-server"))
                 TextField("Server data directory", text: $directory)
+                TextField("SSH key (optional)", text: $identityFile, prompt: Text("Leave empty to use your SSH agent"))
             }
             if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
@@ -37,7 +39,7 @@ private struct ServerConnectionView: View {
                 Spacer()
                 Button("Connect") {
                     Task {
-                        model.host = host; model.executable = executable; model.remoteDirectory = directory
+                        model.host = host; model.executable = executable; model.remoteDirectory = directory; model.identityFile = identityFile
                         model.connectionMode = .remote
                         await model.connect()
                         if model.isConnected {
@@ -52,6 +54,7 @@ private struct ServerConnectionView: View {
         }
         .formStyle(.grouped)
         .disabled(model.isConnecting)
-        .onAppear { host = model.host; executable = model.executable; directory = model.remoteDirectory }
+        .onAppear { model.isEditingConnection = true; host = model.host; executable = model.executable; directory = model.remoteDirectory; identityFile = model.identityFile }
+        .onDisappear { model.isEditingConnection = false }
     }
 }

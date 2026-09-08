@@ -82,10 +82,12 @@ struct ServerWorkspaceTests {
     }
 
     @Test func previewForwardingBindsOnlyLoopbackAndRejectsInvalidPorts() throws {
-        let endpoint = ServerEndpoint.ssh(host: "user@test", executable: "/srv/server", directory: "/srv/data")
+        let endpoint = ServerEndpoint.ssh(host: "user@test", executable: "/srv/server", directory: "/srv/data", identityFile: "/Users/test/my key")
         let launch = try endpoint.forwardLaunch(remotePort: 8000, localPort: 55000)
         #expect(launch.arguments.contains("127.0.0.1:55000:127.0.0.1:8000"))
         #expect(launch.arguments.contains("ExitOnForwardFailure=yes"))
+        #expect(launch.arguments.contains("IdentityAgent=none"))
+        #expect(launch.arguments.contains("/Users/test/my key"))
         #expect(throws: ServerFailure.self) { _ = try endpoint.forwardLaunch(remotePort: 0, localPort: 55000) }
         #expect(throws: ServerFailure.self) { _ = try endpoint.forwardLaunch(remotePort: 8000, localPort: 65536) }
     }

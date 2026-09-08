@@ -166,7 +166,7 @@ struct ComposerTextEditor: NSViewRepresentable {
             coordinator?.parent.onHoverAttachment(path)
         }
         textView.previewAttachment = { [weak coordinator = context.coordinator] path in
-            guard let coordinator else { return nil }
+            guard let coordinator, !coordinator.parent.attachmentRoot.isEmpty else { return nil }
             return PromptAttachment.sent(path: path).url(in: coordinator.parent.attachmentRoot)
         }
         // A text view already accepts a file drag, which is exactly the behaviour being replaced:
