@@ -276,4 +276,6 @@ Tools/test-core.sh RemoteServer
 
 This verifies workspace creation, an approval surviving disconnect, file and diff review, stopping
 a process and resuming its conversation. The deterministic fixture makes no model calls. Live
-provider authentication and model execution are separate checks.
+provider authentication and model execution are separate checks. A real Codex turn has also been
+verified on the Ubuntu 26.04 host: it continued after SSH disconnected, requested approval for a
+file change, completed after approval and returned the expected file through the server API.
