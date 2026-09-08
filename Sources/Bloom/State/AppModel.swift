@@ -80,7 +80,7 @@ final class AppModel {
             }
             let vacated = storedSelection.workspaceID
             storedSelection = newValue
-            remoteServer.selectedSessionID = newValue.remoteSessionID
+            if let id = newValue.remoteWorkspaceID { remoteServer.selectWorkspace(id) } else { remoteServer.selectedSessionID = newValue.remoteSessionID }
             Self.rememberSelection(newValue)
             // Opening or closing a subagent's pane changes which rows are exempt from being
             // removed. See `SubagentRetention`: the row you are reading stays. Both workspaces,
@@ -112,11 +112,17 @@ final class AppModel {
 
     private static let lastWorkspaceKey = "sidebar.lastWorkspaceID"
     private static let lastRemoteSessionKey = "sidebar.lastRemoteSessionID"
+    private static let lastRemoteWorkspaceKey = "sidebar.lastRemoteWorkspaceID"
 
     /// Only a workspace is worth remembering. Home and Search are where you go when you are
     /// looking for something, so reopening on them would be reopening on a question rather than
     /// on the work.
     private static func rememberSelection(_ selection: SidebarSelection) {
+        if let id = selection.remoteWorkspaceID {
+            UserDefaults.standard.set(id.rawValue, forKey: lastRemoteWorkspaceKey)
+            UserDefaults.standard.removeObject(forKey: lastRemoteSessionKey)
+            return
+        }
         if let remote = selection.remoteSessionID {
             UserDefaults.standard.set(remote.rawValue, forKey: lastRemoteSessionKey)
             return
@@ -127,6 +133,7 @@ final class AppModel {
         // AppKit turns into a trap during the layout pass. Every sidebar click reaches this line,
         // so the app died on selecting any workspace at all.
         UserDefaults.standard.removeObject(forKey: lastRemoteSessionKey)
+        UserDefaults.standard.removeObject(forKey: lastRemoteWorkspaceKey)
         UserDefaults.standard.set(id.rawValue, forKey: lastWorkspaceKey)
     }
 
@@ -138,6 +145,10 @@ final class AppModel {
     /// with nothing.
     private func restoreLastSelection() {
         guard case .home = storedSelection else { return }
+        if !remoteServer.host.isEmpty, let id = UserDefaults.standard.string(forKey: Self.lastRemoteWorkspaceKey) {
+            selection = .remoteWorkspace(WorkspaceID(id))
+            return
+        }
         if !remoteServer.host.isEmpty, let remote = UserDefaults.standard.string(forKey: Self.lastRemoteSessionKey) {
             selection = .remote(SessionID(rawValue: remote))
             return
@@ -1025,13 +1036,29 @@ final class AppModel {
     /// Two spellings of one rule is how the window ends up refusing a width for a pane it is not
     /// drawing. See `WindowWidths`.
     var isInspectorPresented: Bool {
-        isInspectorVisible && (selectedWorkspace != nil || selection.remoteSessionID != nil)
+        isInspectorVisible && (selectedWorkspace != nil || selection.isRemote)
     }
 
     var selectedRemoteWorkspace: Workspace? {
+        if let id = selection.remoteWorkspaceID { return remoteServer.catalogue?.workspaces.first { $0.id == id } }
         guard let id = selection.remoteSessionID,
               let session = remoteServer.catalogue?.sessions.first(where: { $0.id == id }) else { return nil }
         return remoteServer.catalogue?.workspaces.first { $0.id == session.workspaceID }
+    }
+
+    var selectedPaneModel: (any WorkspacePaneModel)? {
+        if let selectedModel { return selectedModel }
+        return selectedRemoteWorkspace.flatMap { remoteServer.existingWorkspaceModel($0.id) }
+    }
+
+    func selectRemoteSession(_ id: SessionID) {
+        guard let workspaceID = remoteServer.catalogue?.sessions.first(where: { $0.id == id })?.workspaceID else { return }
+        selection = .remoteWorkspace(workspaceID)
+        remoteServer.activateSession(id, in: workspaceID)
+        if let workspace = remoteServer.workspaceModel(app: self) {
+            workspace.prepareTranscript(for: id)
+            WorkspaceTabsStore.shared.reveal(.chat(id), in: workspace)
+        }
     }
 
     /// The archived workspace being read, if that is what the window is on.

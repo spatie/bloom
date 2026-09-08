@@ -236,7 +236,7 @@ struct ComposerPrompt<Footer: View>: View {
         // again for each one. An unsplit centre column is now the same pane in every workspace, so
         // a composer that read its staged attachments in `onAppear` would read the first session's
         // and then draw them under every session the window visited afterwards. See
-        // `CenterPanesView.soloPane`.
+        // `CenterPanesView<WorkspaceModel>.soloPane`.
         .task(id: attachmentKey) {
             if let remote { await remote.cacheAttachments(in: text); return }
             PromptAttachmentStore.shared.load(sessionID: attachmentKey)

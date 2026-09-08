@@ -8,8 +8,8 @@ import BloomCore
 /// conversation and a terminal rebuild the column and re-run the workspace's arrival work, and it
 /// is also what made a chat and a terminal mutually exclusive. A pane holds a tab, so now they are
 /// not.
-struct CenterColumnView: View {
-    @Bindable var model: WorkspaceModel
+struct CenterColumnView<Model: WorkspacePaneModel>: View {
+    @Bindable var model: Model
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,7 +17,11 @@ struct CenterColumnView: View {
             CenterPanesView(model: model)
         }
         .background(Palette.windowBackground)
+        .onChange(of: CenterTabStore.shared.tabs(for: model.workspace.id).map(\.id)) {
+            model.remoteServer?.prepareTabs(for: model.workspace)
+        }
         .task(id: model.workspace.id) {
+            model.remoteServer?.prepareTabs(for: model.workspace)
             openStartingPane()
             await model.onAppear()
             // Last, and that ordering is the whole of it. `onAppear` does not return until the

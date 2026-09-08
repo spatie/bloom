@@ -4,6 +4,37 @@ import Testing
 
 @Suite("ServerWorkspace", .scratchDirectory, .tags(.subprocess, .persistence))
 struct ServerWorkspaceTests {
+    @Test func remoteNotesRemainWithTheirWorkspace() async throws {
+        let repo = try await TempRepo()
+        let store = try makeTestStore("notes")
+        let storedRepo = try await store.upsert(Repo(name: "Test", path: repo.path))
+        let workspace = try await store.upsert(Workspace(repoID: storedRepo.id, name: "Test", branch: "main", path: repo.path, baseBranch: "main"))
+        let runtime = ServerRuntime(store: store)
+        let saved = await runtime.respond(to: ServerRequest(.workspace(workspaceID: workspace.id, action: .saveNotes("Remember this\n"))))
+        if case .accepted = saved.result {} else { Issue.record("Note save refused") }
+        let loaded = await runtime.respond(to: ServerRequest(.workspace(workspaceID: workspace.id, action: .notes)))
+        if case .text(let body) = loaded.result { #expect(body == "Remember this\n") } else { Issue.record("Missing notes") }
+        #expect(try await store.note(workspaceID: workspace.id)?.body == "Remember this\n")
+        await runtime.shutdown()
+    }
+
+    @Test func closingOneRemoteTerminalLeavesItsNeighbourRunning() async throws {
+        guard let tmux = Shell.which("tmux") else { return }
+        let repo = try await TempRepo()
+        let store = try makeTestStore("terminal-close")
+        let workspace = Workspace(repoID: .new(), name: "Test", branch: "main", path: repo.path, baseBranch: "main")
+        let service = ServerTerminalService()
+        let first = try await ServerWorkspaceOperations.perform(.terminal(name: "first"), workspace: workspace, store: store, terminals: service)
+        let second = try await ServerWorkspaceOperations.perform(.terminal(name: "second"), workspace: workspace, store: store, terminals: service)
+        guard case .terminal(let a) = first, case .terminal(let b) = second else { Issue.record("Missing terminals"); await service.shutdown(); return }
+        _ = try await ServerWorkspaceOperations.perform(.closeTerminal(name: "first"), workspace: workspace, store: store, terminals: service)
+        let gone = try await Shell.run(tmux, ["-S", a.socket, "has-session", "-t", "=" + a.session], cwd: repo.path)
+        let alive = try await Shell.run(tmux, ["-S", b.socket, "has-session", "-t", "=" + b.session], cwd: repo.path)
+        #expect(!gone.ok)
+        #expect(alive.ok)
+        await service.shutdown()
+    }
+
     @Test func sharedComposerSettingsPersistOnTheOwningServer() async throws {
         let repo = try await TempRepo()
         let store = try makeTestStore("composer-settings")

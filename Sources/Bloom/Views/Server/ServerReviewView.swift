@@ -5,6 +5,7 @@ import BloomCore
 struct ServerReviewView: View {
     @Bindable var model: ServerReviewModel
     var server: ServerWindowModel?
+    @Environment(AppModel.self) private var app
     @State private var listing: RemoteWorkspaceFileListing?
     @State private var showsGitActions = false
 
@@ -31,7 +32,7 @@ struct ServerReviewView: View {
         .background(Palette.surface)
         .overlay(alignment: .top) { Hairline() }
         .task(id: server?.selectedWorkspace?.id) {
-            if let server, let workspace = server.selectedWorkspace { listing = RemoteWorkspaceFileListing(workspace: workspace, server: server) }
+            listing = server?.workspaceModel(app: app)
         }
         .sheet(isPresented: $showsGitActions) {
             if let server {

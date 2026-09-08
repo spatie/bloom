@@ -1,24 +1,20 @@
 import SwiftUI
 import BloomCore
 
-/// A remote worktree uses the same conversation, terminal and browser surfaces as a local one.
+/// Remote workspaces supply data to Bloom's standard tab and pane hierarchy.
 struct RemoteWorkspaceContentView: View {
     @Bindable var model: ServerWindowModel
     @Environment(AppModel.self) private var app
+    @State private var workspace: RemoteWorkspaceFileListing?
 
     var body: some View {
-        VStack(spacing: 0) {
-            RemoteWorkspaceTabsView(model: model)
-            if model.activePane == "terminal" {
-                RemoteTerminalView(model: model, name: model.selectedTerminal)
-            } else if model.activePane == "review" {
-                RemoteReviewPane(server: model)
-            } else if model.activePane == "preview" {
-                RemotePreviewView(model: model)
+        Group {
+            if let workspace, workspace.workspace.id == model.selectedWorkspace?.id {
+                CenterColumnView(model: workspace)
             } else {
-                RemoteConversationView(model: model)
+                LoadingView("Opening workspace")
             }
         }
-        .onChange(of: model.selectedWorkspace?.id) { _, _ in model.activePane = "chat" }
+        .task(id: model.selectedWorkspace?.id) { workspace = model.workspaceModel(app: app) }
     }
 }

@@ -25,7 +25,7 @@ enum PaneDuplicate {
     /// `CenterTab`.
     static func open(
         _ content: PaneContent,
-        in model: WorkspaceModel,
+        in model: any WorkspacePaneModel,
         place: @escaping @MainActor (PaneContent) -> Void
     ) {
         let tab = tab(for: content, in: model)
@@ -61,18 +61,18 @@ enum PaneDuplicate {
     /// two used to be written separately and disagreed: the menu enabled its items on nothing more
     /// than a workspace being selected, so Split Right on the review or the Notes tab read as
     /// available and then did nothing, with no split and no feedback.
-    static func canOpen(_ content: PaneContent, in model: WorkspaceModel) -> Bool {
+    static func canOpen(_ content: PaneContent, in model: any WorkspacePaneModel) -> Bool {
         PaneSplit.duplicating(content, tabKind: tab(for: content, in: model)?.kind).opensAPane
     }
 
     /// Which row of the View menu's Split submenus means "another one of these", and therefore
     /// carries `Cmd+\`. Nil on the review and the notes, which have no kind of their own for the
     /// key to sit on. See `PaneDuplicateOutcome.sameAgainKind`.
-    static func sameAgainKind(_ content: PaneContent, in model: WorkspaceModel) -> PaneKind? {
+    static func sameAgainKind(_ content: PaneContent, in model: any WorkspacePaneModel) -> PaneKind? {
         PaneSplit.duplicating(content, tabKind: tab(for: content, in: model)?.kind).sameAgainKind
     }
 
-    private static func tab(for content: PaneContent, in model: WorkspaceModel) -> CenterTab? {
+    private static func tab(for content: PaneContent, in model: any WorkspacePaneModel) -> CenterTab? {
         guard case .tool(let tabID) = content else { return nil }
         return CenterTabStore.shared.tabs(for: model.workspace.id).first { $0.id == tabID }
     }

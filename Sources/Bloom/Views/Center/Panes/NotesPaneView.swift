@@ -11,8 +11,8 @@ import BloomCore
 /// **What this view decides is nothing.** Where the text lives, when it is worth writing, what
 /// counts as blank are all `WorkspaceNote` in the core. This view loads the note, schedules
 /// writes, and passes its draft to the Markdown editor.
-struct NotesPaneView: View {
-    @Bindable var model: WorkspaceModel
+struct NotesPaneView<Model: WorkspacePaneModel>: View {
+    @Bindable var model: Model
 
     @State private var text = ""
     /// What the database is known to hold, so a save that would rewrite the same row is skipped.
@@ -70,9 +70,9 @@ struct NotesPaneView: View {
     /// blank version over it. A missing row is still an empty note; a database that would not
     /// answer leaves the field disabled and says so.
     private func load() async {
-        guard !hasLoaded, let store = model.store else { return }
+        guard !hasLoaded else { return }
         do {
-            let stored = try await store.note(workspaceID: model.workspace.id)?.body ?? ""
+            let stored = try await model.readNote()
             text = stored
             saved = stored
             couldNotLoad = false
@@ -101,15 +101,14 @@ struct NotesPaneView: View {
     private func saveNow() {
         saveTask?.cancel()
         guard hasLoaded, WorkspaceNote.needsSave(stored: saved, typed: text) else { return }
-        guard let store = model.store else { return }
-        let workspaceID = model.workspace.id
+        let model = model
         let body = text
         // Detached, so `saved` is set from inside rather than out here. This view is usually gone
         // by the time the write lands, and a `saved` moved before the write is the same lie the
         // debounced path told.
         Task { @MainActor in
             do {
-                try await store.saveNote(workspaceID: workspaceID, body: body)
+                try await model.writeNote(body)
                 saved = body
                 couldNotSave = false
             } catch {
@@ -125,11 +124,10 @@ struct NotesPaneView: View {
     /// autosave fired, `saveNow` returned early, and the text existed only in `@State` until the
     /// pane went away. Left where it was, the next keystroke tries again.
     private func write() async {
-        guard let store = model.store else { return }
         guard WorkspaceNote.needsSave(stored: saved, typed: text) else { return }
         let body = text
         do {
-            try await store.saveNote(workspaceID: model.workspace.id, body: body)
+            try await model.writeNote(body)
             saved = body
             couldNotSave = false
         } catch {

@@ -3,6 +3,18 @@ import Foundation
 enum ServerWorkspaceOperations {
     static func perform(_ action: ServerWorkspaceAction, workspace: Workspace, store: Store, terminals: ServerTerminalService) async throws -> ServerResult {
         switch action {
+        case .notes:
+            return .text(try await store.note(workspaceID: workspace.id)?.body ?? "")
+        case .saveNotes(let body):
+            guard body.utf8.count <= 1_048_576 else { throw ServerFailure("The note is too large.") }
+            try await store.saveNote(workspaceID: workspace.id, body: body)
+            return .accepted
+        case .closeTerminal(let name):
+            guard let executable = Shell.which("tmux") else { return .accepted }
+            let session = TmuxSessions.sessionName(workspaceID: workspace.id, paneID: name)
+            let command = TmuxCommand(executable: executable, socketName: TmuxSessions.socketName(databasePath: store.path), configPath: URL(fileURLWithPath: store.path).deletingLastPathComponent().appendingPathComponent("tmux.conf").path)
+            _ = try await Shell.run(executable, command.arguments(["kill-session", "-t", "=" + session]), cwd: workspace.path)
+            return .accepted
         case .runScripts:
             guard let repo = try await store.repo(id: workspace.repoID) else { throw ServerFailure("The workspace's project is unavailable.") }
             return .runScripts(SettingsLoader.load(repo: repo.path).runScripts)

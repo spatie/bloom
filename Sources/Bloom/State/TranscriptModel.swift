@@ -347,6 +347,8 @@ final class TranscriptModel {
 
     /// A remote session fills the same presentation model, while its store and runner remain
     /// exclusively on the server. No remote message enters the Mac database.
+    var remoteCursor: Int { highestSeenMessageSeq }
+
     func receiveRemote(_ snapshot: ServerTranscript, messages: [Message]) {
         guard remote != nil, snapshot.session.id == session.id else { return }
         session = snapshot.session

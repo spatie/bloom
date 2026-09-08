@@ -13,8 +13,8 @@ import BloomCore
 /// It draws no chrome of its own. `DiffView` already carries the bar that names the file and
 /// holds the Viewed tick, revert, the layout toggles and the Diff / Edit pair, and a second bar
 /// over the top of it would say the same things twice.
-struct ReviewPaneView: View {
-    @Bindable var model: WorkspaceModel
+struct ReviewPaneView<Model: WorkspacePaneModel>: View {
+    @Bindable var model: Model
     var tab: CenterTab
     /// What every pane of the tab this one is in is showing, this pane included, which is the one
     /// fact the composer below turns on. See `ReviewComposer`.
@@ -84,7 +84,7 @@ struct ReviewPaneView: View {
                let transcript = model.existingTranscript(for: destination.id) {
                 ComposerView(
                     transcript: transcript,
-                    model: model,
+                    model: model.localWorkspaceModel,
                     room: room,
                     destinationLabel: ReviewDestination.label(for: destination.title),
                     destinations: model.sessions.map {
@@ -126,6 +126,7 @@ struct ReviewPaneView: View {
         // who has not moved: the changes generation is what says the worktree has been looked at
         // again.
         .task(id: ExistsID(path: tab.path, generation: model.changesGeneration)) {
+            guard model.remoteServer == nil else { exists = true; return }
             let path = tab.path
             let absolute = Self.absolutePath(path, worktree: model.workspace.path)
             exists = await Task.detached(priority: .userInitiated) {
@@ -175,11 +176,14 @@ struct ReviewPaneView: View {
             // An image, a PDF, a video. `FilePreview` reads a file as text and would say there is
             // nothing to show, which for the screenshot somebody just attached is both wrong and
             // the whole reason they clicked.
-            FileMediaView(
-                worktree: Self.isAbsolute(tab.path) ? "/" : model.workspace.path,
-                path: Self.isAbsolute(tab.path) ? String(tab.path.dropFirst()) : tab.path
-            )
-                .id(tab.path)
+            if let server = model.remoteServer {
+                RemoteFilePreviewView(server: server, workspaceID: model.workspace.id, path: tab.path)
+            } else {
+                FileMediaView(
+                    worktree: Self.isAbsolute(tab.path) ? "/" : model.workspace.path,
+                    path: Self.isAbsolute(tab.path) ? String(tab.path.dropFirst()) : tab.path
+                ).id(tab.path)
+            }
         } else if isPresent {
             FilePreview(
                 model: model,

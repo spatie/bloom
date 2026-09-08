@@ -5,6 +5,30 @@ import Testing
 
 @Suite("ServerRuntime", .tags(.persistence, .subprocess), .scratchDirectory)
 struct ServerRuntimeTests {
+    @Test func closingAConversationStopsItsRunnerAndRefusesFurtherPrompts() async throws {
+        let fixture = try await ServerFixture()
+        let runtime = fixture.runtime()
+        let sent = await runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "Work")))
+        #expect(sent.isAccepted)
+        await waitUntil("runner starts") { await fixture.runner.sends.count == 1 }
+        let renamed = await runtime.respond(to: ServerRequest(.renameSession(sessionID: fixture.session.id, title: "Renamed")))
+        #expect(renamed.isAccepted)
+        #expect(try await fixture.store.session(id: fixture.session.id)?.title == "Renamed")
+        let closed = await runtime.respond(to: ServerRequest(.closeSession(sessionID: fixture.session.id)))
+        #expect(closed.isAccepted)
+        #expect(try await fixture.store.session(id: fixture.session.id)?.archivedAt != nil)
+        #expect(fixture.runner.terminated.withLock { $0 })
+        let refused = await runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "Must not start")))
+        #expect(!refused.isAccepted)
+        #expect(await fixture.runner.sends == ["Work"])
+        let catalogue = await runtime.respond(to: ServerRequest(.catalogue))
+        if case .catalogue(let value) = catalogue.result {
+            #expect(value.workspaces.count == 1)
+            #expect(!value.sessions.contains { $0.id == fixture.session.id })
+        } else { Issue.record("Missing catalogue") }
+        await runtime.shutdown()
+    }
+
     @Test func actualSSHHandshakeWhenExplicitlyConfigured() async throws {
         let env = ProcessInfo.processInfo.environment
         guard let host = env["BLOOM_REMOTE_TEST_HOST"], let executable = env["BLOOM_REMOTE_TEST_EXECUTABLE"],

@@ -4,13 +4,21 @@ import BloomCore
 
 @MainActor
 @Observable
-final class RemoteWorkspaceFileListing: WorkspaceFileReview {
-    let workspace: Workspace
-    private let server: ServerWindowModel
+final class RemoteWorkspaceFileListing: WorkspacePaneModel {
+    var workspace: Workspace
+    private unowned let server: ServerWindowModel
+    private unowned let app: AppModel
     private let endpoint: ServerEndpoint?
     @ObservationIgnored private var indexedPaths: [String] = []
     @ObservationIgnored private var indexedTree: [String: [FileTreeNode]] = [:]
     private(set) var hasReadFileTree = false
+    @ObservationIgnored private var panePositions: [TranscriptPaneState.Key: TranscriptPaneState] = [:]
+    private var sessionOrder: [SessionID] = []
+    var reviewDestinationID: SessionID?
+    var reviewDestination: Session? {
+        let id = ReviewDestination.resolved(chosen: reviewDestinationID, active: activeSessionID, sessions: sessions.map(\.id))
+        return sessions.first { $0.id == id }
+    }
     var reviewDrafts: [String: ReviewDraft] = [:]
     var reviewEdits: Set<ReviewCommentID> = []
     let reviewText = ReviewTextHost()
@@ -21,11 +29,85 @@ final class RemoteWorkspaceFileListing: WorkspaceFileReview {
     var repo: Repo? { server.catalogue?.repositories.first { $0.id == workspace.repoID } }
     let fileEdits: FileEditSession
 
-    init(workspace: Workspace, server: ServerWindowModel) {
+    init(workspace: Workspace, server: ServerWindowModel, app: AppModel) {
         self.workspace = workspace
         self.server = server
+        self.app = app
         endpoint = server.endpoint
         fileEdits = server.fileEdits(for: workspace)
+    }
+
+    var localWorkspaceModel: WorkspaceModel? { nil }
+    var remoteServer: ServerWindowModel? { server }
+    var sessions: [Session] {
+        get {
+            let found = server.catalogue?.sessions.filter { $0.workspaceID == workspace.id && $0.archivedAt == nil } ?? []
+            guard !sessionOrder.isEmpty else { return found }
+            let ranks = Dictionary(sessionOrder.enumerated().map { ($0.element, $0.offset) }, uniquingKeysWith: { first, _ in first })
+            return found.sorted { (ranks[$0.id] ?? Int.max) < (ranks[$1.id] ?? Int.max) }
+        }
+        set { server.catalogue?.sessions = (server.catalogue?.sessions.filter { $0.workspaceID != workspace.id } ?? []) + newValue }
+    }
+    var activeSessionID: SessionID? {
+        get { server.activeSession(in: workspace.id) }
+        set { server.activateSession(newValue, in: workspace.id) }
+    }
+    var activeSession: Session? { sessions.first { $0.id == activeSessionID } }
+    var activeTranscript: TranscriptModel? { activeSessionID.flatMap(existingTranscript(for:)) }
+    var hasReadSessions: Bool { server.catalogue != nil }
+    var isRunningSetup: Bool { workspace.setupState == .running }
+    var port: Int { workspace.port }
+    func ensurePort() async -> Int { workspace.port }
+    func onAppear() async {
+        await reloadSessions()
+        if let id = activeSessionID { prepareTranscript(for: id) }
+    }
+    func reloadSessions() async {
+        do {
+            if case .catalogue(let value) = try await read(.catalogue) {
+                server.catalogue = value
+                if let fresh = value.workspaces.first(where: { $0.id == workspace.id }) { workspace = fresh }
+                if !sessions.contains(where: { $0.id == activeSessionID }) { activeSessionID = sessions.first?.id }
+            }
+        } catch { if !Task.isCancelled { server.error = error.localizedDescription } }
+    }
+    func makePaneSession(title: String?, controls: ComposerControls?, draft: String) async -> Session? {
+        let choices = controls ?? activeSession.map { ComposerControls(session: $0, isFastMode: false, outputStyle: OutputStyle.defaultName) }
+            ?? ComposerControls(model: server.agentModel, effort: server.effort, agentKind: server.agent, permissionMode: server.permissionMode)
+        guard case .created(let created, _, _) = await perform(.workspace(workspaceID: workspace.id,
+            action: .newSession(agent: choices.agentKind, model: choices.model, effort: choices.effort, permissionMode: choices.permissionMode))) else { return nil }
+        server.saveRemoteDraft(draft, sessionID: created.id)
+        if let title { _ = await perform(.renameSession(sessionID: created.id, title: title)) }
+        if controls != nil { _ = await perform(.setComposer(sessionID: created.id, controls: choices)) }
+        await reloadSessions()
+        activeSessionID = created.id
+        prepareTranscript(for: created.id)
+        return sessions.first { $0.id == created.id } ?? created
+    }
+    func renameSession(_ session: Session, title: String) async {
+        _ = await perform(.renameSession(sessionID: session.id, title: title))
+        await reloadSessions()
+    }
+    func closeSession(_ session: Session) async {
+        guard await perform(.closeSession(sessionID: session.id)) != nil else { return }
+        server.forgetConversation(session.id)
+        await reloadSessions()
+    }
+    func reorderSessions(to ids: [SessionID]) { sessionOrder = ids }
+    func isRunning(_ session: Session) -> Bool { existingTranscript(for: session.id)?.isRunning == true || session.state == .running }
+    func existingTranscript(for id: SessionID) -> TranscriptModel? { server.existingConversation(id) }
+    func prepareTranscript(for id: SessionID) { _ = server.conversation(id: id, app: app) }
+    func panePosition(pane: String, session: SessionID) -> TranscriptPaneState? { panePositions[.init(pane: pane, session: session)] }
+    func rememberPanePosition(_ state: TranscriptPaneState, pane: String, session: SessionID) { panePositions[.init(pane: pane, session: session)] = state }
+    func readNote() async throws -> String {
+        if case .text(let text) = try await read(.workspace(workspaceID: workspace.id, action: .notes)) { return text }
+        return ""
+    }
+    func writeNote(_ body: String) async throws { _ = try await read(.workspace(workspaceID: workspace.id, action: .saveNotes(body))) }
+
+    private func perform(_ operation: ServerOperation) async -> ServerResult? {
+        guard server.endpoint == endpoint else { server.error = "Reconnect to this workspace's server."; return nil }
+        return await server.perform(operation)
     }
 
     private func read(_ operation: ServerOperation) async throws -> ServerResult {
@@ -73,7 +155,7 @@ final class RemoteWorkspaceFileListing: WorkspaceFileReview {
         guard server.selectedWorkspace?.id == workspace.id else { return }
         server.review.showsFile = !changedFiles.contains { $0.path == path }
         server.review.selectedPath = path
-        server.activePane = "review"
+        FileReview.open(path: path, in: self)
     }
     func showTerminal(folder: String) {}
     func showPage(path: String, axis: SplitAxis?) {}

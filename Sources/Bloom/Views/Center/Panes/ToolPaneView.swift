@@ -6,8 +6,8 @@ import BloomCore
 /// It used to replace the conversation for the whole column, on the grounds that a shell given a
 /// third of the height is a shell nobody can read. Panes make that a choice rather than a rule: put
 /// a terminal beside a chat and it keeps the full height of its own half.
-struct ToolPaneView: View {
-    @Bindable var model: WorkspaceModel
+struct ToolPaneView<Model: WorkspacePaneModel>: View {
+    @Bindable var model: Model
     var tab: CenterTab
     /// What every pane of the tab holding this one is showing, this pane included. Only the review
     /// reads it, and only to ask whether the conversation it would send to is already on screen.
@@ -30,7 +30,7 @@ struct ToolPaneView: View {
     /// A tab id rather than a flag, for the same reason `TranscriptListView.drawnInFull` is one:
     /// this view is reused from one workspace to the next rather than built again, so a flag left
     /// standing from the last workspace's terminal would let the next one's shell be forked before
-    /// its port had been allocated. See `CenterPanesView.soloPane`.
+    /// its port had been allocated. See `CenterPanesView<WorkspaceModel>.soloPane`.
     @State private var readyTabID: String?
 
     /// Read for the setup strip's slide. See the `.animation` in `body`.
@@ -46,7 +46,10 @@ struct ToolPaneView: View {
                 WorktreeSetupStrip(readiness: readiness)
 
                 Group {
-                    if readyTabID == tab.id {
+                    if let server = model.remoteServer {
+                        RemoteTerminalView(model: server, name: server.terminalName(for: tab))
+                            .id(tab.id)
+                    } else if readyTabID == tab.id {
                         TerminalSplitView(
                             ownerID: tab.id,
                             workspace: model.workspace,
@@ -110,8 +113,8 @@ struct ToolPaneView: View {
     /// its setup and run scripts were told to bind. Allocation lives on the model, where
     /// concurrent callers get one block. See `WorkspaceModel.ensurePort`.
     private func prepareTerminal() async {
-        TerminalSessionStore.shared.useStore(model.store)
-        await model.ensurePort()
+        TerminalSessionStore.shared.useStore(model.localWorkspaceModel?.store)
+        _ = await model.ensurePort()
         readyTabID = tab.id
     }
 }

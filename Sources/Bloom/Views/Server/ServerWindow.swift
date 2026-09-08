@@ -43,7 +43,7 @@ private struct ServerConnectionView: View {
                         model.connectionMode = .remote
                         await model.connect()
                         if model.isConnected {
-                            if let session = model.catalogue?.sessions.first { app.selection = .remote(session.id) }
+                            if let session = model.catalogue?.sessions.first { app.selectRemoteSession(session.id) }
                             dismissWindow(id: ServerWindow.id)
                         }
                     }

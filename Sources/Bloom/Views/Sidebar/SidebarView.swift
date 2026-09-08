@@ -216,21 +216,20 @@ struct SidebarView: View {
             if let catalogue = app.remoteServer.catalogue {
                 Section {
                     ForEach(catalogue.workspaces) { workspace in
-                        if let session = catalogue.sessions.first(where: { $0.workspaceID == workspace.id && $0.id == app.selection.remoteSessionID })
-                            ?? catalogue.sessions.first(where: { $0.workspaceID == workspace.id }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "server.rack").foregroundStyle(.secondary)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(workspace.name).lineLimit(1)
-                                    Text(session.state.rawValue.capitalized).font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer(minLength: 0)
-                                if session.state == .running { ProgressView().controlSize(.mini) }
+                        let session = catalogue.sessions.first { $0.workspaceID == workspace.id && $0.id == app.remoteServer.activeSession(in: workspace.id) }
+                            ?? catalogue.sessions.first { $0.workspaceID == workspace.id }
+                        HStack(spacing: 8) {
+                            Image(systemName: "server.rack").foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(workspace.name).lineLimit(1)
+                                Text(session?.state.rawValue.capitalized ?? "No conversations").font(.caption).foregroundStyle(.secondary)
                             }
-                            .tag(SidebarSelection.remote(session.id))
-                            .listRowBackground(selectionFill(for: .remote(session.id)))
-                            .help("\(workspace.name) on \(app.remoteServer.serverName)")
+                            Spacer(minLength: 0)
+                            if session?.state == .running { ProgressView().controlSize(.mini) }
                         }
+                        .tag(SidebarSelection.remoteWorkspace(workspace.id))
+                        .listRowBackground(selectionFill(for: .remoteWorkspace(workspace.id)))
+                        .help("\(workspace.name) on \(app.remoteServer.serverName)")
                     }
                 } header: {
                     Text(app.remoteServer.serverName)

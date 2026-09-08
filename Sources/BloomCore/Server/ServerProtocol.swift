@@ -2,7 +2,7 @@ import Foundation
 
 /// Versioned values cross the connection; database handles and local file URLs never do.
 public struct ServerRequest: Codable, Sendable, Equatable {
-    public static let protocolVersion = 5
+    public static let protocolVersion = 6
     public var version: Int
     public var id: UUID
     public var operation: ServerOperation
@@ -20,6 +20,8 @@ public enum ServerOperation: Codable, Sendable, Equatable {
     case composer(sessionID: SessionID)
     case setComposer(sessionID: SessionID, controls: ComposerControls)
     case markRead(sessionID: SessionID, seq: Int)
+    case renameSession(sessionID: SessionID, title: String)
+    case closeSession(sessionID: SessionID)
     case create(ServerWorkspaceRequest)
     case transcript(sessionID: SessionID, afterSeq: Int)
     case changes(workspaceID: WorkspaceID, scope: ServerDiffScope)
@@ -35,7 +37,7 @@ public enum ServerOperation: Codable, Sendable, Equatable {
     var mutates: Bool {
         switch self {
         case .hello, .catalogue, .transcript, .changes, .patch, .file, .composer: false
-        case .create, .send, .stop, .answer, .configure, .cancelQueued, .setComposer, .markRead: true
+        case .create, .send, .stop, .answer, .configure, .cancelQueued, .setComposer, .markRead, .renameSession, .closeSession: true
         case .workspace(_, let action): action.mutates
         }
     }

@@ -32,9 +32,15 @@ final class ServerWindowModel {
     var permissionMode = PermissionMode.plan
     var serverName = ""
     var catalogue: ServerCatalogue?
+    var selectedWorkspaceID: WorkspaceID?
+    private var activeSessions: [WorkspaceID: SessionID] = [:]
     var selectedSessionID: SessionID? {
         didSet {
             guard oldValue != selectedSessionID else { return }
+            if let id = selectedSessionID, let workspaceID = catalogue?.sessions.first(where: { $0.id == id })?.workspaceID {
+                selectedWorkspaceID = workspaceID
+                activeSessions[workspaceID] = id
+            }
             if let oldValue { drafts[oldValue.rawValue] = draft }
             draft = selectedSessionID.flatMap { drafts[$0.rawValue] } ?? ""
             messages = []
@@ -63,27 +69,8 @@ final class ServerWindowModel {
     var shouldReconnect = true
     var isEditingConnection = false
     var isUploading = false
-    var activePane = "chat"
     var runScripts: [RunScript] = []
     private var terminalPanes: [String: [ServerTerminalPane]] = [:]
-    private var selectedTerminals: [WorkspaceID: String] = [:]
-    var availableTerminals: [ServerTerminalPane] {
-        [ServerTerminalPane(id: "main", title: "Terminal")] + (selectedWorkspace.flatMap { terminalPanes[$0.id.rawValue] } ?? [])
-    }
-    var selectedTerminal: String {
-        get { selectedWorkspace.flatMap { selectedTerminals[$0.id] } ?? "main" }
-        set { if let id = selectedWorkspace?.id { selectedTerminals[id] = newValue } }
-    }
-    private var previewAddresses: [WorkspaceID: String] = [:]
-    private var browsers: [WorkspaceID: BrowserSession] = [:]
-    var previewAddress: String {
-        get { selectedWorkspace.flatMap { previewAddresses[$0.id] } ?? "http://localhost:8000" }
-        set { if let id = selectedWorkspace?.id { previewAddresses[id] = newValue } }
-    }
-    var browser: BrowserSession? {
-        get { selectedWorkspace.flatMap { browsers[$0.id] } }
-        set { if let id = selectedWorkspace?.id { browsers[id] = newValue } }
-    }
     private var forwards: [Int: ServerPortForward] = [:]
     var isBusy = false
     var isConnecting = false
@@ -102,16 +89,49 @@ final class ServerWindowModel {
     private var lastEndpoint: ServerEndpoint?
     private let messageIdentity = RemoteMessageIdentity()
     private var conversationModels: [SessionID: TranscriptModel] = [:]
+    private var workspaceModels: [WorkspaceID: RemoteWorkspaceFileListing] = [:]
     var endpoint: ServerEndpoint? { lastEndpoint }
 
     func conversation(app: AppModel) -> TranscriptModel? {
-        guard let session = selectedSession, let workspace = selectedWorkspace, let endpoint else { return nil }
+        guard let id = selectedSessionID else { return nil }
+        return conversation(id: id, app: app)
+    }
+
+    func conversation(id: SessionID, app: AppModel) -> TranscriptModel? {
+        guard let session = catalogue?.sessions.first(where: { $0.id == id }),
+              let workspace = catalogue?.workspaces.first(where: { $0.id == session.workspaceID }), let endpoint else { return nil }
         if let existing = conversationModels[session.id] { return existing }
         let connection = RemoteSessionConnection(server: self, endpoint: endpoint, session: session, workspace: workspace)
         let model = TranscriptModel(session: session, workspace: workspace, app: app, remote: connection)
         model.draft = drafts[session.id.rawValue] ?? ""
         conversationModels[session.id] = model
         return model
+    }
+
+    func workspaceModel(app: AppModel) -> RemoteWorkspaceFileListing? {
+        guard let workspace = selectedWorkspace else { return nil }
+        if let held = workspaceModels[workspace.id] { return held }
+        let model = RemoteWorkspaceFileListing(workspace: workspace, server: self, app: app)
+        workspaceModels[workspace.id] = model
+        return model
+    }
+    func existingWorkspaceModel(_ id: WorkspaceID) -> RemoteWorkspaceFileListing? { workspaceModels[id] }
+    func existingConversation(_ id: SessionID) -> TranscriptModel? { conversationModels[id] }
+    func forgetConversation(_ id: SessionID) { conversationModels[id] = nil }
+
+    func activeSession(in workspaceID: WorkspaceID) -> SessionID? {
+        let sessions = catalogue?.sessions.filter { $0.workspaceID == workspaceID && $0.archivedAt == nil }
+        if let held = activeSessions[workspaceID], sessions == nil || sessions?.contains(where: { $0.id == held }) == true { return held }
+        return sessions?.first?.id
+    }
+    func activateSession(_ id: SessionID?, in workspaceID: WorkspaceID) {
+        activeSessions[workspaceID] = id
+        preferences.set(Dictionary(uniqueKeysWithValues: activeSessions.map { ($0.key.rawValue, $0.value.rawValue) }), forKey: "server.activeSessions")
+        if selectedWorkspaceID == workspaceID { selectedSessionID = id }
+    }
+    func selectWorkspace(_ id: WorkspaceID) {
+        selectedWorkspaceID = id
+        selectedSessionID = activeSession(in: id)
     }
 
     func saveRemoteDraft(_ text: String, sessionID: SessionID) {
@@ -143,6 +163,9 @@ final class ServerWindowModel {
 
     init(preferences: UserDefaults = .standard, bundle: Bundle = .main) {
         self.preferences = preferences
+        if let saved = preferences.dictionary(forKey: "server.activeSessions") as? [String: String] {
+            activeSessions = Dictionary(uniqueKeysWithValues: saved.map { (WorkspaceID($0.key), SessionID($0.value)) })
+        }
         if let data = preferences.data(forKey: "server.terminalPanes"),
            let saved = try? JSONDecoder().decode([String: [ServerTerminalPane]].self, from: data) { terminalPanes = saved }
         let seed = bundle.object(forInfoDictionaryKey: "BloomRemoteConnection") as? [String: String] ?? [:]
@@ -187,35 +210,80 @@ final class ServerWindowModel {
 
     var selectedSession: Session? { catalogue?.sessions.first { $0.id == selectedSessionID } }
     var selectedWorkspace: Workspace? {
-        guard let session = selectedSession else { return nil }
-        return catalogue?.workspaces.first { $0.id == session.workspaceID }
+        let id = selectedWorkspaceID ?? selectedSession?.workspaceID
+        return catalogue?.workspaces.first { $0.id == id }
     }
 
-    func preview(_ url: URL? = nil) async {
-        guard let endpoint = lastEndpoint, let input = url ?? URL(string: previewAddress),
-              ["http", "https"].contains(input.scheme), var components = URLComponents(url: input, resolvingAgainstBaseURL: false) else {
-            error = "Enter an HTTP or HTTPS address."; return
+    func forwardedAddress(_ text: String) async throws -> String {
+        guard let endpoint, let input = BrowserAddress.url(from: text),
+              var components = URLComponents(url: input, resolvingAgainstBaseURL: false) else {
+            throw ServerFailure("Enter an HTTP or HTTPS address.")
         }
         let generation = connectionGeneration
-        guard let workspaceID = selectedWorkspace?.id else { return }
         do {
             if ["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"].contains(input.host ?? "") {
                 let port = input.port ?? (input.scheme == "https" ? 443 : 80)
                 var forward = forwards[port]
                 if await forward?.isAlive != true {
                     forward = try await ServerPortForward.connect(endpoint: endpoint, remotePort: port)
-                    guard generation == connectionGeneration, !Task.isCancelled else { await forward?.close(); return }
+                    guard generation == connectionGeneration, !Task.isCancelled else {
+                        await forward?.close()
+                        throw CancellationError()
+                    }
                     forwards[port] = forward
                 }
                 components.host = "127.0.0.1"
                 components.port = await forward?.localPort
             }
-            guard let forwarded = components.url else { return }
-            guard generation == connectionGeneration, !Task.isCancelled else { return }
-            browsers[workspaceID] = BrowserSession(url: forwarded.absoluteString)
-            previewAddresses[workspaceID] = input.absoluteString
-            if selectedWorkspace?.id == workspaceID { activePane = "preview" }
-        } catch { self.error = error.localizedDescription }
+            guard generation == connectionGeneration, let result = components.url else { throw CancellationError() }
+            return result.absoluteString
+        } catch {
+            if !Task.isCancelled { self.error = error.localizedDescription }
+            throw error
+        }
+    }
+
+    func displayAddress(_ text: String) async -> String {
+        guard var url = URLComponents(string: text), url.host == "127.0.0.1", let port = url.port else { return text }
+        for (remote, forward) in forwards where await forward.localPort == port {
+            url.host = "localhost"
+            url.port = remote
+            return url.string ?? text
+        }
+        return text
+    }
+
+    private var terminalNames: [String: String] {
+        get { preferences.dictionary(forKey: "server.tabTerminalNames") as? [String: String] ?? [:] }
+        set { preferences.set(newValue, forKey: "server.tabTerminalNames") }
+    }
+
+    func terminalName(for tab: CenterTab) -> String { terminalNames[tab.id] ?? tab.id }
+
+    func prepareTabs(for workspace: Workspace) {
+        let tabs = CenterTabStore.shared
+        tabs.load(workspaceID: workspace.id)
+        let key = "server.sharedTabs." + workspace.id.rawValue
+        if !preferences.bool(forKey: key) {
+            let legacy = [ServerTerminalPane(id: "main", title: "Terminal")] + (terminalPanes[workspace.id.rawValue] ?? [])
+            for pane in legacy {
+                let tab = tabs.add(kind: .terminal, workspaceID: workspace.id, title: pane.title)
+                terminalNames[tab.id] = pane.id.rawValue
+            }
+            preferences.set(true, forKey: key)
+        }
+        for tab in tabs.tabs(for: workspace.id) where tab.kind == .terminal {
+            let capturedEndpoint = endpoint
+            let name = terminalName(for: tab)
+            tabs.onClose(tab) { [weak self] in
+                guard let self, self.endpoint == capturedEndpoint else { return false }
+                guard await self.perform(.workspace(workspaceID: workspace.id, action: .closeTerminal(name: name))) != nil else { return false }
+                let key = self.host + self.remoteDirectory + workspace.id.rawValue + "/" + name
+                self.terminals.removeValue(forKey: key)?.shutdown()
+                self.terminalNames[tab.id] = nil
+                return true
+            }
+        }
     }
 
     func download(_ path: String, workspaceID: WorkspaceID) async throws -> URL {
@@ -233,9 +301,9 @@ final class ServerWindowModel {
         guard let workspace = selectedWorkspace else { return }
         let prefix = workspace.path.hasSuffix("/") ? workspace.path : workspace.path + "/"
         review.showsFile = true
-        activePane = "review"
         review.selectedPath = path.hasPrefix(prefix) ? String(path.dropFirst(prefix.count)) : path
         showsReview = true
+        if let model = workspaceModels[workspace.id], let path = review.selectedPath { FileReview.open(path: path, in: model) }
     }
 
     func pullRequestURL(workspaceID: WorkspaceID) async -> String? {
@@ -348,14 +416,14 @@ final class ServerWindowModel {
             if endpoint != lastEndpoint {
                 messageIdentity.reset()
                 conversationModels.removeAll()
+                workspaceModels.removeAll()
                 uncertainRequest = nil
                 if lastEndpoint != nil {
                     selectedSessionID = nil
+                    selectedWorkspaceID = nil
                     catalogue = nil
                     messages = []
                     review.reset()
-                    browsers.removeAll()
-                    previewAddresses.removeAll()
                     for forward in forwards.values { await forward.close() }
                     forwards.removeAll()
                 }
@@ -445,12 +513,6 @@ final class ServerWindowModel {
         return nil
     }
 
-    func newTerminal() {
-        guard let workspace = selectedWorkspace else { return }
-        let title = PaneNaming.nextTitle(base: "Terminal", taken: availableTerminals.map(\.title))
-        rememberTerminal(ServerTerminalPane(id: UUID().uuidString, title: title), workspaceID: workspace.id)
-    }
-
     func runScript(_ script: RunScript) async {
         guard let workspace = selectedWorkspace else { return }
         if case .terminalPane(let pane) = await workspaceAction(.runScript(id: script.id)) {
@@ -463,8 +525,12 @@ final class ServerWindowModel {
             terminalPanes[workspaceID.rawValue, default: []].append(pane)
         }
         if let data = try? JSONEncoder().encode(terminalPanes) { preferences.set(data, forKey: "server.terminalPanes") }
-        selectedTerminals[workspaceID] = pane.id.rawValue
-        if selectedWorkspace?.id == workspaceID { activePane = "terminal" }
+        if let workspace = catalogue?.workspaces.first(where: { $0.id == workspaceID }) {
+            let tab = CenterTabStore.shared.add(kind: .terminal, workspaceID: workspaceID, title: pane.title)
+            terminalNames[tab.id] = pane.id.rawValue
+            prepareTabs(for: workspace)
+            if let model = workspaceModels[workspaceID] { WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model) }
+        }
     }
 
     func upload(_ sources: [AttachmentSource]) async {
@@ -526,8 +592,7 @@ final class ServerWindowModel {
         let generation = connectionGeneration
         var tick = 0
         while let client, generation == connectionGeneration, !Task.isCancelled {
-            if showsReview, let selectedSessionID,
-               let workspaceID = catalogue?.sessions.first(where: { $0.id == selectedSessionID })?.workspaceID {
+            if showsReview, let workspaceID = selectedWorkspace?.id {
                 await review.refresh(client: client, workspaceID: workspaceID, refreshFiles: tick % 3 == 0)
             }
             tick += 1
@@ -536,29 +601,28 @@ final class ServerWindowModel {
     }
 
     private func refreshTranscript(client: ServerClient, generation: Int) async throws {
-        guard let id = selectedSessionID else { return }
-        if transcriptSessionID != id {
-            transcriptSessionID = id
-            messages = []
-            questions = []
-            queuedPrompts = []
-            queueError = nil
-            streamingText = ""
-        }
-        let reply = try await client.request(
-            ServerRequest(.transcript(sessionID: id, afterSeq: messages.last?.seq ?? -1)), timeout: .seconds(15)
-        )
-        guard generation == connectionGeneration, selectedSessionID == id else { return }
-        if case .transcript(let value) = reply.result {
-            let cursor = messages.last?.seq ?? -1
-            messages += value.messages.filter { $0.seq > cursor }.map { messageIdentity.presentation($0) }
-            questions = value.pendingQuestions.compactMap { PermissionAsk.decode(payload: $0) }
-            permissionDecisions = value.permissionDecisions
-            queuedPrompts = value.queuedPrompts
-            queueError = value.queueError
-            isBusy = value.isBusy
-            streamingText = value.streamingText
-            conversationModels[id]?.receiveRemote(value, messages: messages)
+        guard let workspaceID = selectedWorkspace?.id else { return }
+        let ids = Set(conversationModels.keys.filter { id in
+            catalogue?.sessions.contains { $0.id == id && $0.workspaceID == workspaceID && $0.archivedAt == nil } == true
+        } + (selectedSessionID.map { [$0] } ?? []))
+        for id in ids {
+            let cursor = conversationModels[id]?.remoteCursor ?? -1
+            let reply = try await client.request(ServerRequest(.transcript(sessionID: id, afterSeq: cursor)), timeout: .seconds(15))
+            guard generation == connectionGeneration else { return }
+            guard case .transcript(let value) = reply.result else { continue }
+            let fresh = value.messages.map { messageIdentity.presentation($0) }
+            conversationModels[id]?.receiveRemote(value, messages: fresh)
+            if selectedSessionID == id {
+                if transcriptSessionID != id { messages = []; transcriptSessionID = id }
+                let previous = messages.last?.seq ?? -1
+                messages += fresh.filter { $0.seq > previous }
+                questions = value.pendingQuestions.compactMap { PermissionAsk.decode(payload: $0) }
+                permissionDecisions = value.permissionDecisions
+                queuedPrompts = value.queuedPrompts
+                queueError = value.queueError
+                isBusy = value.isBusy
+                streamingText = value.streamingText
+            }
         }
     }
 

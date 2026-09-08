@@ -14,6 +14,7 @@ struct ChatPaneView: View {
     /// Which pane of the tab this is, and the only thing it is used for is remembering where the
     /// reader had got to in the conversation. See `TranscriptPaneMemory`.
     var pane: String
+    var paneModel: (any WorkspacePaneModel)?
 
     /// Whether the user has scrolled away from the newest row, which is the only thing the jump
     /// pill is an answer to. Read here rather than passed on, because the pill is drawn here.
@@ -66,7 +67,7 @@ struct ChatPaneView: View {
         TranscriptView(
             transcript: transcript,
             isRunningSetup: model?.isRunningSetup ?? false,
-            memory: model.map { TranscriptPaneMemory(model: $0, pane: pane) }
+            memory: (paneModel ?? model).map { TranscriptPaneMemory(model: $0, pane: pane) }
         ) { isTranscriptScrolledUp = $0 }
         .environment(\.composerRoom, room)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -5,10 +5,10 @@ import BloomCore
 ///
 /// It exists so the dev server a workspace is running can be looked at without leaving the window
 /// the agent is working in, which is the whole reason a workspace gets a port of its own.
-struct BrowserTabView: View {
+struct BrowserTabView<Model: WorkspacePaneModel>: View {
     /// Whose conversation a snapshot of this page is attached to, and whose worktree it is written
     /// into. A browser tab belongs to a workspace, so there is never a question of which.
-    @Bindable var model: WorkspaceModel
+    @Bindable var model: Model
     var tab: CenterTab
     /// The menu the pane this tab is filling offers, which the page puts under its own. Handed
     /// down rather than reached for, for the reason `ToolPaneView.splitColumn` is: only the pane
@@ -40,7 +40,7 @@ struct BrowserTabView: View {
     /// The worktree is handed over with the tab, because a page opened from a file row is a
     /// `file://` address and the session cannot fetch that page's stylesheet without it. See
     /// `LocalPage.fileURL`.
-    private var session: BrowserSession { tabs.browser(for: tab, root: model.workspace.path) }
+    private var session: BrowserSession { tabs.browser(for: tab, root: model.remoteServer == nil ? model.workspace.path : "", resolve: model.browserAddressResolver) }
 
     /// Focused, and in the window the keys are going to.
     private var isRingVisible: Bool { isAddressFocused && activeState.showsFocusRing }
@@ -113,16 +113,30 @@ struct BrowserTabView: View {
             // switching workspace and coming back is. Nothing changed while this view was gone,
             // so no `onChange` will fire, and without this the strip would sit on the host until
             // the reader navigated.
-            tabs.setPage(session.page, for: tab)
+            recordPage(session)
         }
         // The page and the address travel together, so the strip is told once. Two `onChange`
         // bodies, one per fact, put the title and the navigation that brought it in an order
         // nothing promises. See `CenterTabStore.setPage`.
+        .onChange(of: model.remoteServer?.connectionGeneration) {
+            if model.remoteServer?.isConnected == true { session.load(tab.url) }
+        }
         .onChange(of: session.page) {
             // The page navigated on its own: a link, a redirect, a router. The field follows it,
             // unless the user is in the middle of typing a different address into it.
             if !isAddressFocused { address = session.displayAddress }
-            tabs.setPage(session.page, for: tab)
+            recordPage(session)
+        }
+    }
+
+    private func recordPage(_ session: BrowserSession) {
+        guard let server = model.remoteServer else { tabs.setPage(session.page, for: tab); return }
+        let page = session.page
+        Task {
+            let display = await server.displayAddress(page.address)
+            guard session.page == page else { return }
+            if !isAddressFocused { address = display }
+            tabs.setPage(BrowserTabTitle.BrowserPage(address: display, title: page.title), for: tab)
         }
     }
 
@@ -211,8 +225,19 @@ struct BrowserTabView: View {
                     .map(\.filename)
             )
             let name = BrowserSnapshot.filename(for: session.displayAddress, avoiding: taken)
+            if let remote = model.activeTranscript?.remote {
+                do {
+                    let paths = try await remote.attach([.image(data, format: .png, named: name)])
+                    if let transcript = model.activeTranscript {
+                        transcript.draft += paths.map { " `" + $0 + "` " }.joined()
+                        remote.saveDraft(transcript.draft)
+                    }
+                } catch { app.alert = BloomAlert(title: "That screenshot was not attached", message: error.localizedDescription) }
+                return
+            }
+            guard let local = model.localWorkspaceModel else { return }
             let outcome = await ComposerHandoff.attach(
-                [.image(data, format: .png, named: name)], to: model
+                [.image(data, format: .png, named: name)], to: local
             )
             guard let failure = outcome.failure else { return }
             app.alert = BloomAlert(title: "That screenshot was not attached", message: failure)

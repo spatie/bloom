@@ -109,6 +109,23 @@ public actor ServerRuntime {
             _ = try await storedSession(id)
             try await store.updateLastReadSeq(sessionID: id, seq: seq)
             return .accepted
+        case .renameSession(let id, let title):
+            _ = try await storedSession(id)
+            let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, name.utf8.count <= 1_024 else { throw ServerFailure("Enter a shorter conversation name.") }
+            try await store.updateSessionPreferences(id: id, title: name)
+            return .accepted
+        case .closeSession(let id):
+            stopping[id, default: 0] += 1
+            defer {
+                stopping[id, default: 1] -= 1
+                if stopping[id] == 0 { stopping.removeValue(forKey: id) }
+            }
+            _ = try await execute(.stop(sessionID: id))
+            await sessions[id]?.shutdown()
+            sessions.removeValue(forKey: id)
+            _ = try await store.update(sessionID: id) { $0.archivedAt = Date() }
+            return .accepted
         case .setComposer(let id, let controls):
             let session = try await storedSession(id)
             guard controls.agentKind.canRunWorkspaces, !controls.model.isEmpty else { throw ServerFailure("Choose an available agent and model.") }
@@ -177,6 +194,7 @@ public actor ServerRuntime {
             let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !body.isEmpty, body.utf8.count <= 1_048_576 else { throw ServerFailure("The prompt is empty or too large.") }
             let session = try await storedSession(id)
+            guard session.archivedAt == nil else { throw ServerFailure("This conversation is closed.") }
             guard let workspaceID = session.workspaceID else { throw ServerFailure("This session has no workspace.") }
             _ = try await workspace(workspaceID)
             try await queue().enqueue(body, sessionID: id)

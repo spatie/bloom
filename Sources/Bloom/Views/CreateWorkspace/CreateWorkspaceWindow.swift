@@ -82,7 +82,7 @@ private struct CreateWorkspaceWindowContent: View {
                 CreateWorkspaceView(initialRepo: app.repos.first { $0.id == repoID })
             }
         }
-        .onAppear { isRemote = app.selection.remoteSessionID != nil || (app.repos.isEmpty && !app.remoteServer.host.isEmpty) }
+        .onAppear { isRemote = app.selection.isRemote || (app.repos.isEmpty && !app.remoteServer.host.isEmpty) }
     }
 }
 

@@ -54,7 +54,7 @@ struct RemoteWorkspaceCreationView: View {
                 Button("Create Workspace") { Task {
                         await model.createWorkspace()
                         if !model.showsNewWorkspace, let id = model.selectedSessionID {
-                            app.selection = .remote(id)
+                            app.selectRemoteSession(id)
                             openWindow(id: BloomApp.mainWindowID)
                             dismiss()
                         }

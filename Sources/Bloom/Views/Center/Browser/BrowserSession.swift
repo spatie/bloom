@@ -120,7 +120,11 @@ final class BrowserSession {
     /// and empty is a session that will not load a local page at all. See `LocalPage.fileURL`.
     @ObservationIgnored private let root: String
 
-    init(url: String, root: String = "") {
+    private let resolve: (@MainActor (String) async throws -> String)?
+    private var navigationTask: Task<Void, Never>?
+
+    init(url: String, root: String = "", resolve: (@MainActor (String) async throws -> String)? = nil) {
+        self.resolve = resolve
         self.root = root
         Self.preferInspectorDocked()
         let configuration = WKWebViewConfiguration()
@@ -176,6 +180,22 @@ final class BrowserSession {
     /// ignored rather than handed to a search engine: this field is for the dev server next door,
     /// and shipping a half-typed line off to a third party is not what it is for.
     func load(_ text: String) {
+        navigationTask?.cancel()
+        guard !text.isEmpty else { return }
+        if let resolve {
+            navigationTask = Task { [weak self] in
+                do {
+                    let address = try await resolve(text)
+                    guard !Task.isCancelled else { return }
+                    self?.loadResolved(address)
+                } catch {
+                    // The connection model reports forwarding failures to the window.
+                }
+            }
+        } else { loadResolved(text) }
+    }
+
+    private func loadResolved(_ text: String) {
         // A page out of the worktree, which cannot go the way every other address goes. WebKit
         // drops a `file://` handed to it as a `URLRequest` and leaves the pane blank, and a page
         // loaded with read access to itself alone comes out unstyled, because the stylesheet
@@ -557,6 +577,7 @@ final class BrowserSession {
     }
 
     func stop() {
+        navigationTask?.cancel()
         observations = []
         // A question put to a page whose tab has gone. Nothing would come back through it, and a
         // sleeping task holding this session is one more thing keeping a closed web view alive.

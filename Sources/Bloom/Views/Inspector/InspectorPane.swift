@@ -25,7 +25,7 @@ struct InspectorPane: View {
 
     @ViewBuilder
     private var content: some View {
-        if app.selection.remoteSessionID != nil {
+        if app.selection.isRemote {
             ServerReviewView(model: app.remoteServer.review, server: app.remoteServer)
         } else if let model {
             InspectorView(model: model)

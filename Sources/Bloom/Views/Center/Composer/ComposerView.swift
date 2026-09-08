@@ -236,7 +236,7 @@ struct ComposerView: View {
             Task {
                 if let session = await remote.apply(new) {
                     remote.saveDraft(draft, for: session)
-                    app.selection = .remote(session.id)
+                    app.selectRemoteSession(session.id)
                 }
             }
             return
@@ -488,7 +488,7 @@ struct ComposerView: View {
             Task {
                 guard let session = await remote.newChat() else { return }
                 remote.saveDraft(prompt.text, for: session)
-                app.selection = .remote(session.id)
+                app.selectRemoteSession(session.id)
                 if sending { _ = await remote.submit(prompt.text, to: session.id); remote.saveDraft("", for: session) }
             }
             return
@@ -512,7 +512,7 @@ struct ComposerView: View {
                 guard let session = await remote.newChat() else { return }
                 transcript.draft = ""
                 await transcript.saveDraft()
-                app.selection = .remote(session.id)
+                app.selectRemoteSession(session.id)
             }
             return
         }

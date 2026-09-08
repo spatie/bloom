@@ -12,11 +12,14 @@ public enum ServerWorkspaceAction: Codable, Sendable, Equatable {
     case push
     case createPullRequest(title: String, body: String, draft: Bool)
     case terminal(name: String)
+    case closeTerminal(name: String)
+    case notes
+    case saveNotes(String)
     case newSession(agent: AgentKind, model: String, effort: String, permissionMode: PermissionMode)
 
     var mutates: Bool {
         switch self {
-        case .files, .download, .pullRequest, .runScripts: false
+        case .files, .download, .pullRequest, .runScripts, .notes: false
         default: true
         }
     }

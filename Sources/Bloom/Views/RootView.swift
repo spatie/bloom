@@ -105,7 +105,7 @@ struct RootView: View {
                     // column. Nothing it could reach was taken away with the field, which is the
                     // whole point of relocating it rather than replacing it. See `SearchPanelView`
                     // for the card and `SearchToolbarButton` for the glyph.
-                    .onChange(of: app.selectedWorkspace != nil || app.selection.remoteSessionID != nil, initial: true) { _, available in
+                    .onChange(of: app.selectedWorkspace != nil || app.selection.isRemote, initial: true) { _, available in
                         InspectorGeometry.shared.setWorkspaceAvailable(available)
                     }
             }

@@ -23,7 +23,7 @@ struct DetailColumn: View {
                 AskView()
             case .workspace(let id):
                 workspace(id)
-            case .remote:
+            case .remote, .remoteWorkspace:
                 RemoteWorkspaceContentView(model: app.remoteServer)
             case .crew(let workspaceID, let sessionID):
                 crew(sessionID, in: workspaceID)
