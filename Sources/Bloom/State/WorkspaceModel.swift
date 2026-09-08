@@ -405,8 +405,19 @@ final class WorkspaceModel {
     ///   numbered name the strip gives a new tab: `Chat`, then `Chat 2`. A caller passes one only
     ///   when the chat is being opened FOR something and the name says which, as the pull request
     ///   and merge buttons do. See `PaneNaming` for why a chat is never named after its content.
+    /// - Parameter draft: words the new chat opens with, for the one caller that has some: a
+    ///   backend fork carries the half-written prompt across, because a picker press must never be
+    ///   a way to lose a sentence somebody is in the middle of. It is written **before** the row
+    ///   becomes the active session, which is the whole reason it is an argument here rather than
+    ///   a `saveDraft` at the call site: activating the session builds a transcript, and that
+    ///   transcript reads the draft column on its first pass. A write that lands after that read
+    ///   is a draft the composer never shows.
     @discardableResult
-    func createSession(title: String? = nil, controls: ComposerControls? = nil) async -> Session? {
+    func createSession(
+        title: String? = nil,
+        controls: ComposerControls? = nil,
+        draft: String = ""
+    ) async -> Session? {
         guard !app.isArchiving(workspace.id), let store else { return nil }
         var session = Session(
             workspaceID: workspace.id,
@@ -421,6 +432,7 @@ final class WorkspaceModel {
         }
         guard let stored = try? await store.upsert(session) else { return nil }
         if let controls { await controls.store(sessionID: stored.id, in: store) }
+        if !draft.isEmpty { try? await store.saveDraft(sessionID: stored.id, body: draft) }
         await reloadSessions()
         activeSessionID = stored.id
         return stored
