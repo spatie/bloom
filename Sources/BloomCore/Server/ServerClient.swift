@@ -16,7 +16,7 @@ public actor ServerClient {
         self.process = process
     }
 
-    public static func connect(to endpoint: ServerEndpoint) async throws -> ServerClient {
+    public static func connect(to endpoint: ServerEndpoint, timeout: Duration = .seconds(15)) async throws -> ServerClient {
         let client: ServerClient
         switch endpoint {
         case .local(let directory):
@@ -31,7 +31,7 @@ public actor ServerClient {
         }
         await client.start()
         do {
-            let reply = try await client.request(ServerRequest(.hello), timeout: .seconds(15))
+            let reply = try await client.request(ServerRequest(.hello), timeout: timeout)
             guard case .hello = reply.result else { throw ServerFailure("This endpoint is not a Bloom server.") }
             return client
         } catch {

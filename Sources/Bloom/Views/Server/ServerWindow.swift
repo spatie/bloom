@@ -42,32 +42,53 @@ private struct ServerWindowView: View {
         .onChange(of: model.agent) { _, agent in
             model.agentModel = agent == .claudeCode ? AppDefaults.fallbackModel : ""
         }
+        .confirmationDialog("Stop the local server?", isPresented: $model.showsStopServerConfirmation, titleVisibility: .visible) {
+            Button("Stop Server", role: .destructive) { Task { await model.stopLocalServer() } }
+        } message: {
+            Text("All agents on this local server will stop. Their conversations remain available when you start it again.")
+        }
     }
 
     private var connectionForm: some View {
         Form {
             Section {
-                Picker("Machine", selection: $model.isRemote) {
-                    Text("Remote machine").tag(true)
-                    Text("This Mac").tag(false)
+                Picker("Machine", selection: $model.connectionMode) {
+                    Text("Remote machine").tag(ServerWindowModel.ConnectionMode.remote)
+                    Text("This Mac").tag(ServerWindowModel.ConnectionMode.local)
+                    Text("Existing local server").tag(ServerWindowModel.ConnectionMode.existingLocal)
                 }
-                if model.isRemote {
+                if model.connectionMode == .remote {
                     TextField("SSH host", text: $model.host, prompt: Text("user@machine or SSH alias"))
                     TextField("Server executable", text: $model.executable, prompt: Text("/absolute/path/to/bloom-server"))
                 }
-                TextField("Server data directory", text: $model.directory, prompt: Text("/absolute/path/to/server-data"))
+                if model.connectionMode != .local {
+                    TextField("Server data directory", text: $model.directory, prompt: Text("/absolute/path/to/server-data"))
+                }
             } header: {
                 Text("Connect to a Bloom server")
             } footer: {
-                Text(model.isRemote
-                     ? "Start the server on that machine first. Verify SSH access in Terminal and load your key into the SSH agent."
-                     : "Connect to a standalone server already running on this Mac.")
+                switch model.connectionMode {
+                case .remote:
+                    Text("Start the server on that machine first. Verify SSH access in Terminal and load your key into the SSH agent.")
+                case .local:
+                    Text("Bloom starts a background server on this Mac. It keeps agents running after Bloom closes and starts at login.")
+                case .existingLocal:
+                    Text("Connect to a standalone server already running on this Mac.")
+                }
             }
+            .disabled(model.isConnecting || model.isPerformingCommand)
             HStack {
                 if model.isConnecting { ProgressView().controlSize(.small) }
-                Button("Connect") { Task { await model.connect() } }
+                if model.needsBackgroundApproval {
+                    Button("Open Login Items") { model.localService.openLoginItems() }
+                }
+                Button(model.connectionMode == .local ? "Start Local Server" : "Connect") { Task { await model.connect() } }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(model.isConnecting || model.directory.isEmpty)
+                    .disabled(model.isConnecting || model.isPerformingCommand || (model.connectionMode != .local && model.directory.isEmpty))
+                if model.connectionMode == .local, model.localService.isRegistered {
+                    Button("Stop Local Server", role: .destructive) { model.showsStopServerConfirmation = true }
+                        .disabled(model.isConnecting || model.isPerformingCommand)
+                }
             }
         }
         .formStyle(.grouped)
@@ -96,6 +117,10 @@ private struct ServerWindowView: View {
                     .disabled(model.isPerformingCommand)
                 Button("Disconnect", systemImage: "network.slash") { Task { await model.disconnect() } }
                 Button("Show Changes", systemImage: "sidebar.right") { model.showsReview.toggle() }
+                if model.connectionMode == .local {
+                    Button("Stop Local Server", systemImage: "stop.circle") { model.showsStopServerConfirmation = true }
+                        .disabled(model.isPerformingCommand)
+                }
             }
         } detail: {
             if model.selectedSessionID != nil { conversation } else {
@@ -186,7 +211,9 @@ private struct ServerWindowView: View {
             }
             .formStyle(.grouped)
             HStack {
-                Button("Cancel") { model.showsNewWorkspace = false }.keyboardShortcut(.cancelAction)
+                Button("Cancel") { model.showsNewWorkspace = false }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(model.isPerformingCommand)
                 Spacer()
                 if model.isPerformingCommand { ProgressView().controlSize(.small) }
                 Button("Create Workspace") { Task { await model.createWorkspace() } }

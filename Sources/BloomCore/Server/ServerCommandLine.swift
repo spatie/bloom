@@ -8,12 +8,13 @@ import Glibc
 public enum ServerCommandLine {
     public static let usage = """
     Usage: bloom-server serve|connect --data-dir /absolute/path
+           bloom-server serve|connect --application-id be.spatie.bloom.dev
 
     serve     Run the standalone server in the foreground.
     connect   Relay the versioned JSON protocol over stdin/stdout.
 
     Use launchd to keep serve running independently of a terminal or SSH connection.
-    The directory is separate from the desktop app's data. This preview requires macOS 26.
+    The directory is separate from the desktop app's data. The server runs on macOS 26 or Linux.
     """
 
     public static func run(arguments: [String] = Array(CommandLine.arguments.dropFirst())) async -> Int32 {
@@ -22,17 +23,20 @@ public enum ServerCommandLine {
             print(usage)
             return 0
         }
-        guard arguments.count == 3, arguments[1] == "--data-dir",
+        guard arguments.count == 3, ["--data-dir", "--application-id"].contains(arguments[1]),
               ["serve", "connect"].contains(arguments[0]) else {
             complain(usage)
             return 64
         }
         do {
+            let directory = arguments[1] == "--application-id"
+                ? try LocalServerIdentity(bundleID: arguments[2]).directory()
+                : arguments[2]
             if arguments[0] == "connect" {
-                let connection = try UnixSocketConnection.connect(to: ServerDaemon.socketPath(directory: arguments[2]))
+                let connection = try UnixSocketConnection.connect(to: ServerDaemon.socketPath(directory: directory))
                 await relay(connection)
             } else {
-                let daemon = try await ServerDaemon.start(directory: arguments[2])
+                let daemon = try await ServerDaemon.start(directory: directory)
                 complain("Bloom server listening at \(daemon.socketPath)")
                 await waitForTermination()
                 await daemon.shutdown()
@@ -77,6 +81,9 @@ public enum ServerCommandLine {
     }
 
     private static func complain(_ text: String) {
+        #if canImport(os)
+        CoreLogger(subsystem: "be.spatie.bloom", category: "server").error("\(text, privacy: .public)")
+        #endif
         try? FileHandle.standardError.write(contentsOf: Data((text + "\n").utf8))
     }
 }

@@ -9,7 +9,10 @@ public enum ServerReview {
     public static let fileLimit = 2_097_152
 
     public static func changes(workspace: Workspace, scope: ServerDiffScope) async throws -> [ChangedFile] {
-        try await Git.changedFiles(worktree: workspace.path, base: workspace.baseBranch, scope: scope.gitScope)
+        try await Git.changedFiles(
+            worktree: workspace.path, base: workspace.baseBranch, scope: scope.gitScope,
+            maximumUntrackedFileBytes: fileLimit
+        )
     }
 
     public static func patch(workspace: Workspace, path: String, scope: ServerDiffScope) async throws -> String {

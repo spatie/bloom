@@ -31,3 +31,5 @@ jobs:
         run: swift test -j 4 -Xswiftc -warnings-as-errors
       - name: Exercise the server executable
         run: python3 Tools/server-smoke.py .build/debug/bloom-server
+      - name: Check service packaging
+        run: python3 Tools/test-server-packaging.py

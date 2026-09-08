@@ -7,7 +7,8 @@ import BloomCore
 @MainActor
 @Observable
 final class ServerWindowModel {
-    var isRemote = true
+    enum ConnectionMode { case remote, local, existingLocal }
+    var connectionMode = ConnectionMode.remote
     var host = ""
     var executable = ""
     var directory = ""
@@ -40,7 +41,10 @@ final class ServerWindowModel {
     var connectionGeneration = 0
     var showsNewWorkspace = false
     var showsReview = true
+    var showsStopServerConfirmation = false
+    var needsBackgroundApproval = false
     let review = ServerReviewModel()
+    let localService = LocalServerService()
     private var client: ServerClient?
     private var transcriptSessionID: SessionID?
     private var uncertainRequest: ServerRequest?
@@ -52,11 +56,15 @@ final class ServerWindowModel {
         await disconnect()
         let generation = connectionGeneration
         isConnecting = true
+        needsBackgroundApproval = false
         error = nil
         do {
-            let endpoint: ServerEndpoint = isRemote
-                ? .ssh(host: host, executable: executable, directory: directory)
-                : .local(directory: directory)
+            let endpoint: ServerEndpoint
+            switch connectionMode {
+            case .remote: endpoint = .ssh(host: host, executable: executable, directory: directory)
+            case .existingLocal: endpoint = .local(directory: directory)
+            case .local: endpoint = try await localService.start()
+            }
             if endpoint != lastEndpoint {
                 uncertainRequest = nil
                 draft = ""
@@ -74,6 +82,7 @@ final class ServerWindowModel {
             connectionGeneration += 1
         } catch {
             if generation == connectionGeneration {
+                needsBackgroundApproval = error is LocalServerServiceError
                 self.error = error.localizedDescription
                 await disconnect()
             }
@@ -94,6 +103,16 @@ final class ServerWindowModel {
         isBusy = false
         review.reset()
         await previous?.disconnect()
+    }
+
+    func stopLocalServer() async {
+        guard connectionMode == .local, !isPerformingCommand else { return }
+        isPerformingCommand = true
+        defer { isPerformingCommand = false }
+        do {
+            try await localService.stop()
+            await disconnect()
+        } catch { self.error = error.localizedDescription }
     }
 
     func poll() async {

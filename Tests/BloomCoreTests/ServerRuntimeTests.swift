@@ -118,6 +118,8 @@ struct ServerRuntimeTests {
         let directory = fixture.directory
         let runner = fixture.runner
         let first = try await ServerDaemon.start(directory: directory, makeRunner: { _, _, _ in runner })
+        let attributes = try FileManager.default.attributesOfItem(atPath: first.socketPath)
+        #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
         _ = await first.runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "Working")))
         do {
             _ = try await ServerDaemon.start(directory: directory)

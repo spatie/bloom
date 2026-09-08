@@ -36,19 +36,20 @@ public final class UnixSocketListener: Sendable {
         self.descriptor = descriptor
 
         unlink(path)
-        // The socket file is created with the process umask applied, which on a default macOS
-        // account leaves it group and world readable. Narrowed deliberately: anything that can
-        // open this socket can speak as any session whose token it also has, and the token is
-        // reachable by anything running as the user anyway, so this closes the one gap that is
-        // free to close rather than pretending to close the others.
-        let previousMask = umask(0o077)
+        // Set permissions before listen makes connections possible. Changing the process-wide
+        // umask here races other listeners and unrelated file creation on concurrent threads.
         let bound = UnixSocketAddress.withSocketAddress(&address) { socketAddress, length in
             bind(descriptor, socketAddress, length)
         }
-        umask(previousMask)
         guard bound == 0 else {
             let code = errno
             SystemCalls.close(descriptor)
+            throw UnixSocketError.couldNotBind(path: path, code: code)
+        }
+        guard chmod(path, 0o600) == 0 else {
+            let code = errno
+            SystemCalls.close(descriptor)
+            unlink(path)
             throw UnixSocketError.couldNotBind(path: path, code: code)
         }
         guard listen(descriptor, 16) == 0 else {

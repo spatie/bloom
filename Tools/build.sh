@@ -25,6 +25,7 @@ swift build -c "$CONFIG" --product Bloom
 # product, and a separate binary because that is what an MCP server registration can point at: the
 # CLI spawns it, it forwards to the app over a unix socket, and the app answers. See BridgeShim.
 swift build -c "$CONFIG" --product bloom-bridge
+swift build -c "$CONFIG" --product bloom-server
 
 BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
 APP="$BIN_DIR/Bloom.app"
@@ -37,6 +38,7 @@ cp "$BIN_DIR/Bloom" "$APP/Contents/MacOS/Bloom"
 # bundle without it is not broken: every chat simply has no bridge tools, which is what every chat
 # had before the bridge existed.
 cp "$BIN_DIR/bloom-bridge" "$APP/Contents/MacOS/bloom-bridge"
+cp "$BIN_DIR/bloom-server" "$APP/Contents/MacOS/bloom-server"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
 plist_set() {
@@ -374,6 +376,10 @@ PY
 }
 
 emit_app_intents_metadata
+
+# The dev scripts set their bundle identity before invoking this build. Derive the launch-agent
+# label from that final identity so a development app cannot register the release app's server.
+python3 Tools/prepare-server-service.py "$APP"
 
 # After the metadata, because the bundle has to be signed with everything already inside it.
 #

@@ -4,10 +4,10 @@ Bloom can connect to a standalone server while its existing local workspaces rem
 The server owns its agent processes, worktrees and SQLite database. Closing the server window,
 quitting the Mac client or disconnecting SSH leaves those agents running.
 
-This branch implements the first client/server slice. Both the server and the Mac app currently
-require macOS 26 and Swift 6.2 to build. Linux support and automatic management of a local server
-are subsequent work. Existing local sessions still run inside the desktop app; they are not
-automatically moved into this server.
+The Mac app requires macOS 26. The server has macOS and Linux build paths, sharing the same
+runtime and agent backends. Linux validation runs in the Server workflow using Swift 6.3.3 on
+Ubuntu 24.04. Existing local sessions still run inside the desktop app; they are not automatically
+moved into this server. New server workspaces can run locally or on another machine.
 
 ## Build and run
 
@@ -30,7 +30,18 @@ Use a dedicated data directory owned by the server user with mode 700. The datab
 acquired before opening SQLite or replacing the socket, so starting a second server cannot reset
 live session state or take over its socket.
 
-## Keep the server running
+On Linux, install Swift and the system development dependencies before building:
+
+```sh
+sudo apt-get install libsqlite3-dev pkg-config git
+swift build --product bloom-server
+```
+
+The Linux manifest omits the Mac app and its dependencies. It uses Swift Crypto for the existing
+CryptoKit operations and system SQLite. Inline setup scripts use `/bin/sh` on Linux and
+`/bin/zsh` on macOS; executable script files retain their own shebangs.
+
+## Keep a standalone server running
 
 On the server Mac, create `~/Library/LaunchAgents/be.spatie.bloom.server.plist`. Replace the example
 home directory with that account's absolute home path:
@@ -73,11 +84,34 @@ login. The server machine must stay awake and online; this preview does not chan
 settings. A server restart stops the old processes. Persisted conversations can be resumed by
 sending a new prompt, but interrupted tasks are not automatically replayed.
 
+For Linux, a user service at `~/.config/systemd/user/bloom-server.service` can run the same command:
+
+```ini
+[Unit]
+Description=Bloom server
+
+[Service]
+ExecStart=/home/developer/.local/bin/bloom-server serve --data-dir /home/developer/.bloom-server
+Environment=PATH=/home/developer/.local/bin:/usr/local/bin:/usr/bin:/bin
+Restart=on-failure
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target
+```
+
+Replace the account paths, then run `systemctl --user daemon-reload` and
+`systemctl --user enable --now bloom-server`. To keep a user service running after the last login
+session closes, enable lingering for that account with `loginctl enable-linger developer`, or run
+a system service configured with `User=developer`.
+
 ## Connect from Bloom
 
 Build the Mac app from the same branch. Choose **File > Connect to Server…**.
 
-- **This Mac:** supply the standalone server's absolute data directory.
+- **This Mac:** choose Start Local Server. Bloom registers its bundled helper through macOS
+  ServiceManagement, connects when it is ready and keeps it available after the app closes.
+- **Existing local server:** supply the standalone server's absolute data directory.
 - **Remote machine:** supply an SSH host or alias, the absolute `bloom-server` executable path,
   and its absolute data directory on that machine.
 
@@ -85,6 +119,21 @@ Before connecting remotely, verify ordinary SSH access in Terminal. The client r
 already trusted host key and non-interactive authentication, usually a key loaded into ssh-agent.
 Port, identity and jump-host configuration can live in `~/.ssh/config`. Bloom does not accept new
 host keys silently or collect SSH passwords.
+
+The managed local server starts at login. If macOS requires background approval, the connection
+window offers Open Login Items. Stop Local Server unregisters the service and stops its agents;
+Disconnect leaves them running. An incompatible running server is never silently restarted.
+Use Stop Local Server and Start Local Server when an app update requires a server restart.
+
+Managed server data lives under Application Support/Bloom Servers, in a directory named for the
+app's bundle identifier. Bloom, Bloom Dev and Bloom Subagents have distinct service labels and
+databases. The bundle preparation script generates the launch-agent plist after the development
+build has set its identity. A bare `swift build` executable cannot register a managed service;
+assemble a Bloom app bundle to use this option, or run the standalone command yourself.
+
+The app is distributed outside the Mac App Store without App Sandbox. This registration does not
+add sandbox entitlements. ServiceManagement registration must be exercised from an installed,
+signed app; the automated packaging checks do not register a service on the developer's Mac.
 
 The remote connection runs `bloom-server connect --data-dir ...` over SSH. That short-lived
 process relays protocol messages to the existing server's private Unix socket. It does not start
@@ -128,10 +177,9 @@ not stall the transcript. File editing and attachment downloads are not implemen
 
 ## Remaining work
 
-1. Move the existing desktop execution path onto the standalone runtime and automatically manage
-   a local server. Preserve workspace data, startup, shutdown and existing bridge behaviour.
-2. Port the runtime's Apple-specific system dependencies and shell assumptions to Linux, with a
-   Linux build and process integration tests.
+1. Move the existing desktop execution path onto the standalone runtime. Preserve workspace data,
+   startup, shutdown and existing bridge behaviour when migrating existing local workspaces.
+2. Add server distribution artifacts and broaden Linux integration coverage across agent backends.
 3. Add remote file editing, terminals, browser previews, attachments and the Bloom MCP
    bridge. The server preview currently launches agents without Bloom's custom MCP tools.
 4. Share the full workspace UI across local and remote connections, add saved machine profiles,

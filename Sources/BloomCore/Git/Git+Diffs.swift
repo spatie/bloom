@@ -27,6 +27,7 @@ public struct ChangedFile: Identifiable, Sendable, Hashable, Codable {
     public var additions: Int
     public var deletions: Int
     public var isBinary: Bool
+    /// An untracked file exceeded the caller's counting budget, so its line counts are unknown.
     public var hasIncompleteStats: Bool
 
     public var id: String { path }
@@ -123,7 +124,7 @@ extension Git {
     /// Throws if any of the git calls fail, because an empty list has to mean "nothing changed"
     /// and never "we could not find out".
     public static func changedFiles(
-        worktree: String, base: String, scope: DiffScope = .all
+        worktree: String, base: String, scope: DiffScope = .all, maximumUntrackedFileBytes: Int? = nil
     ) async throws -> [ChangedFile] {
         let mergeBase = try await revision(for: scope, base: base, in: worktree)
 
@@ -156,7 +157,7 @@ extension Git {
             // Counted the way git counts. `components(separatedBy:)` returns an empty trailing
             // piece after the final newline, and since practically every text file ends in one,
             // every untracked file used to read one addition too many.
-            let summary = untrackedText(path: path, worktree: worktree)
+            let summary = untrackedText(path: path, worktree: worktree, limit: maximumUntrackedFileBytes)
             let lineCount = summary.text.map(countLines) ?? 0
             byPath[path] = ChangedFile(
                 path: path, change: .untracked, additions: lineCount, deletions: 0,
@@ -168,7 +169,7 @@ extension Git {
         return byPath.values.sorted { $0.path < $1.path }
     }
 
-    private static func untrackedText(path: String, worktree: String) -> (text: String?, isLimited: Bool) {
+    private static func untrackedText(path: String, worktree: String, limit: Int?) -> (text: String?, isLimited: Bool) {
         let full = URL(fileURLWithPath: worktree).appendingPathComponent(path).path
         // Git records a symlink's target spelling, not the contents of whatever it points at.
         if let target = try? FileManager.default.destinationOfSymbolicLink(atPath: full) { return (target, false) }
@@ -176,7 +177,7 @@ extension Git {
               let attributes = try? FileManager.default.attributesOfItem(atPath: contained.path),
               attributes[.type] as? FileAttributeType == .typeRegular,
               let size = attributes[.size] as? NSNumber else { return (nil, false) }
-        guard size.int64Value <= 2_097_152 else { return (nil, true) }
+        if let limit, size.int64Value > limit { return (nil, true) }
         guard let text = try? String(contentsOf: contained, encoding: .utf8), !text.contains("\0") else { return (nil, false) }
         return (text, false)
     }

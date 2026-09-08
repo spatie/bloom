@@ -60,7 +60,7 @@ struct ServerReviewTests {
         try Data([0, 1, 2]).write(to: URL(fileURLWithPath: fixture.repo.path + "/binary"))
         try Data([0xff, 0xfe]).write(to: URL(fileURLWithPath: fixture.repo.path + "/non-utf8"))
         let large = fixture.repo.path + "/large"
-        FileManager.default.createFile(atPath: large, contents: nil)
+        _ = FileManager.default.createFile(atPath: large, contents: nil)
         let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: large))
         try handle.truncate(atOffset: UInt64(ServerReview.fileLimit + 1))
         try handle.close()
