@@ -75,6 +75,8 @@ struct BloomCommands: Commands {
         }
 
         CommandGroup(replacing: .newItem) {
+            Button("Connect to Server…") { openWindow(id: ServerWindow.id) }
+            Divider()
             MenuCommand(.newWorkspace) {
                 // `RootView` opens the window, and the sidebar and Home already ask for it this
                 // way. It is not `openWindow` from here because which project is meant depends on

@@ -212,6 +212,7 @@ it, so they answer "has this already been worked out" rather than touring the co
 - [`docs/BRIDGE.md`](docs/BRIDGE.md) is the bridge the other way round: what an agent can ask Bloom
   to do, and which callers may ask for what.
 - [`docs/MENUS.md`](docs/MENUS.md) is the menu bar and the keyboard shortcuts.
+- [`docs/SERVER.md`](docs/SERVER.md) covers the standalone server preview and connecting from the Mac app.
 - [`docs/PLAN.md`](docs/PLAN.md) is the build order this was written to, kept for the bug reports
   in it: what broke, why, and what now stops it.
 

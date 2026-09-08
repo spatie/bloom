@@ -12,6 +12,9 @@ production app or its database.
   views render state and forward intent rather than running shell commands.
 - `bloom-bridge` relays MCP requests to the running app. The registry establishes caller authority;
   dispatch checks tool roles. Existing connections revalidate tokens for each request.
+- `bloom-server` runs a standalone `ServerRuntime` with its own database and agent processes.
+  The Mac server window connects through a private socket or SSH. Existing local execution stays
+  in the app during this migration. See `SERVER.md` for the implemented slice and remaining work.
 
 Files are grouped by subject, not into generic helpers or services. Extract a component when it
 owns a coherent responsibility or removes repeated behaviour. Do not split a file merely to meet

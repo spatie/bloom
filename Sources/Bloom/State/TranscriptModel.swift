@@ -1298,26 +1298,7 @@ final class TranscriptModel {
         store: Store,
         bridge: BridgeHandle? = nil
     ) -> any SessionRunner {
-        switch session.agentKind {
-        case .codex:
-            return CodexRunner(
-                workspacePath: workspacePath,
-                session: session,
-                store: store,
-                bridge: bridge?.attachment
-            )
-        // Cursor and OpenCode have no runner, and `AgentKind.canRunWorkspaces` is what stops a
-        // chat ever being on one. A chat that somehow is falls back to Claude Code rather than
-        // refusing to start, because a transcript that cannot be typed into is a worse answer
-        // than one running the backend every existing chat already runs.
-        case .claudeCode, .cursor, .openCode:
-            return AgentRunner(
-                workspacePath: workspacePath,
-                session: session,
-                store: store,
-                mcpConfigPath: bridge?.mcpConfigPath
-            )
-        }
+        SessionRunnerFactory.make(session: session, workspacePath: workspacePath, store: store, bridge: bridge)
     }
 
     private func startPump(on runner: any SessionRunner) {

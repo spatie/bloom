@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .executable(name: "Bloom", targets: ["Bloom"]),
         .executable(name: "bloom-bridge", targets: ["bloom-bridge"]),
+        .executable(name: "bloom-server", targets: ["bloom-server"]),
         .library(name: "BloomCore", targets: ["BloomCore"]),
     ],
     dependencies: [
@@ -47,6 +48,11 @@ let package = Package(
         // suite and everything worth testing lives in `BridgeShim` instead.
         .executableTarget(
             name: "bloom-bridge",
+            dependencies: ["BloomCore"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .executableTarget(
+            name: "bloom-server",
             dependencies: ["BloomCore"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

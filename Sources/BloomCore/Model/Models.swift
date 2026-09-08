@@ -565,7 +565,7 @@ public enum MessageKind: String, Sendable, Codable, CaseIterable {
     case crew
 }
 
-public struct Message: Identifiable, Sendable, Hashable {
+public struct Message: Identifiable, Sendable, Hashable, Codable {
     public var id: Int64
     public var sessionID: SessionID
     public var seq: Int

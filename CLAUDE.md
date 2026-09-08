@@ -12,7 +12,7 @@ bridge an agent calls back in through and which callers may call what, `docs/PLA
 built and in what order, `docs/start-from.html` for the design note the create sheet's source picker
 was drawn from, which is a page to open in a browser rather than to read here.
 
-## Three targets, and the line between them
+## Targets, and the line between them
 
 `Sources/BloomCore` is everything that is not a view: `Store`, `Git`, `Shell`, `WorkspaceManager`,
 the agent protocols, the parsers, the models. **It never imports a UI framework.**
@@ -24,6 +24,10 @@ or Sparkle.
 relays lines to the running app over a unix socket. Three lines of `main.swift`; everything worth
 testing is `BridgeShim` in the core. It is a relay with nothing to draw, so it is held to the same
 line as the core.
+
+`Sources/bloom-server` is the standalone server entry point. Its runtime and client protocol live
+in `BloomCore/Server`, and it follows the same no-UI-framework rule. `docs/SERVER.md` describes
+the preview and the remaining migration of local execution.
 
 `make lint` holds that line for both, and it looks for the framework rather than for a literal,
 because `import Cocoa` re-exports the whole of AppKit and `import class AppKit.NSView` names
