@@ -89,6 +89,15 @@ The `.noindex` suffix keeps Spotlight out of them, which is what a dozen worktre
 need once each of them holds its own copy of `vendor` and `.build`. A workspace can also be started
 on an existing branch, or on a GitHub pull request, to review one rather than write one.
 
+To continue on an existing branch, open **New Workspace** (Cmd+N), choose the project, and click
+**Open existing branch…** beside the branch selector. Search for and select the branch, then
+create the workspace. Commits go onto that branch. Choose **Terminal** under **Start with** if
+you want to open it without starting an agent. The branch selector also offers this under its
+**Existing branch** tab.
+
+If the branch is already checked out in a Bloom workspace, selecting it opens that workspace.
+If another worktree holds it, Bloom shows its location so you can free the branch there first.
+
 **Panes.** A workspace holds tabs, and a tab can be split. A pane is a chat, a terminal standing in
 the worktree, or a browser, so the dev server the setup script started can be read beside the
 conversation that is changing it.

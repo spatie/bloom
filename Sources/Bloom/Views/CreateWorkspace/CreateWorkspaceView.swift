@@ -389,10 +389,8 @@ struct CreateWorkspaceView: View {
     /// Where the work comes from: a new branch cut from a base, an open pull request, or a branch
     /// that already exists.
     ///
-    /// One control rather than three, and it stays where the base branch picker was, because the
-    /// three are answers to the same question and only ever one of them is in force. Visible
-    /// rather than filed under the overflow menu for the reason the base branch always was: it is
-    /// the setting here whose wrong value is expensive.
+    /// The current source and a direct action for opening an existing branch. The latter makes
+    /// that route visible without having to discover it inside the base branch picker.
     ///
     /// Everything it draws is `WorkspaceSourcePicker`, including the search field a `Menu` could
     /// not have held. What is left here is what the window owns: which project's lists these are,
