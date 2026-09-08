@@ -220,6 +220,47 @@ struct WorkspaceManagerTests {
         #expect(try await store.workspace(id: workspace.id)?.setupState == .succeeded)
     }
 
+    /// The whole route, because the parts of it that can break are all outside the pure decision:
+    /// a variable the script cannot see, and a folder it cannot write into. See
+    /// `WorkspaceBrowserURL`.
+    @Test("a setup script can say where this workspace's browser panes open", .tags(.subprocess))
+    func setupScriptStatesTheBrowserAddress() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+
+        try repo.write(".conductor/settings.toml", """
+        [scripts]
+        setup = '''
+        echo "https://$BLOOM_PROJECT_NAME.test" > "$BLOOM_URL_FILE"
+        '''
+        """)
+
+        let store = try makeTestStore("wm")
+        let manager = WorkspaceManager(store: store)
+        let registered = try await manager.addRepository(at: repo.path)
+        let workspace = try await manager.createWorkspace(repo: registered, prompt: "Say where")
+
+        let succeeded = await manager.runSetup(
+            workspace: workspace, repo: registered, port: 3_100
+        ) { _ in }
+        #expect(succeeded)
+
+        let environment = manager.environment(for: workspace, repo: registered, port: 3_100)
+        let address = WorkspaceBrowserURL.read(
+            worktree: workspace.path,
+            settings: SettingsLoader.load(repo: repo.path),
+            environment: environment,
+            port: 3_100
+        )
+        #expect(address == "https://\(WorkspaceManager.projectName(for: registered)).test")
+
+        // Written into the worktree and invisible to git, which is the half a pull request would
+        // otherwise carry. See `WorktreeScratch`.
+        let worktree = TempRepo(existing: workspace.path)
+        #expect(worktree.exists(WorkspaceBrowserURL.file))
+        #expect(environment["CONDUCTOR_URL_FILE"] == environment["BLOOM_URL_FILE"])
+    }
+
     @Test("records a failing setup script rather than pretending it worked", .tags(.subprocess))
     func recordsFailingSetup() async throws {
         let repo = try await TempRepo()

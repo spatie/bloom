@@ -1073,6 +1073,40 @@ final class WorkspaceModel {
         return self.workspace.port
     }
 
+    /// Where a browser pane opened on this workspace should go.
+    ///
+    /// The port is allocated first because it is both the last-resort answer and a variable the
+    /// stated one may be written in terms of, and because a workspace nobody has opened a terminal
+    /// in yet holds no block at all. The decision itself is `WorkspaceBrowserURL`, which is where
+    /// the two ways a project can state an address, and the order between them, are written down.
+    ///
+    /// The settings are read again rather than taken from `settings`: this runs at the moment a
+    /// pane is opened, which is often the first thing that happens to a workspace, and an address
+    /// silently missing because the file had not been read yet is the sort of intermittent that
+    /// gets blamed on the script.
+    func browserAddress() async -> String {
+        let port = await ensurePort()
+        guard let repo, let store = app.store else {
+            return WorkspaceBrowserURL.resolve(
+                written: nil, stated: nil, environment: [:], port: port
+            )
+        }
+
+        let environment = WorkspaceManager(store: store).environment(
+            for: workspace, repo: repo, port: port
+        )
+        let worktree = workspace.path
+        let repoPath = repo.path
+        return await Task.detached(priority: .userInitiated) {
+            WorkspaceBrowserURL.read(
+                worktree: worktree,
+                settings: SettingsLoader.load(repo: repoPath),
+                environment: environment,
+                port: port
+            )
+        }.value
+    }
+
     /// One setup run: the state it resets, the output it streams, and what it leaves behind.
     ///
     /// Shared by the run a workspace opens with and by the re-run below, which differ only in what

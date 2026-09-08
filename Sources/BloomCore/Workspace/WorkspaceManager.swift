@@ -417,7 +417,18 @@ public struct WorkspaceManager: Sendable {
     /// One function for all three, so the three cannot drift into binding different names. The
     /// deprecated prefix carries exactly the same values as the real one, so a script written
     /// either way sees the same workspace.
+    ///
+    /// `URL_FILE` is the one an author writes to rather than reads: the address a browser pane
+    /// should open this workspace on, for the projects where that is not the port. See
+    /// `WorkspaceBrowserURL`.
     public func environment(for workspace: Workspace, repo: Repo, port: Int) -> [String: String] {
+        // The one place `$BLOOM_URL_FILE` is handed out, and therefore the place its folder has to
+        // be made to exist: a script told to write to a path whose directory is missing fails with
+        // a redirection error, in the middle of setup, over a folder that is Bloom's business
+        // rather than theirs. Cheap and idempotent, which is what lets it sit on a path a terminal
+        // pane also goes through. See `WorktreeScratch.shield`.
+        WorktreeScratch.shield(WorktreeScratch.generated, in: workspace.path)
+
         let pairs: [(String, String)] = [
             ("IS_LOCAL", "1"),
             ("WORKSPACE_NAME", workspace.branch.replacingOccurrences(of: "/", with: "-")),
@@ -427,6 +438,7 @@ public struct WorkspaceManager: Sendable {
             ("ROOT_PATH", repo.path),
             ("DEFAULT_BRANCH", repo.defaultBranch),
             ("PORT", String(port)),
+            ("URL_FILE", WorkspaceBrowserURL.path(inWorktree: workspace.path)),
         ]
 
         var env: [String: String] = [:]

@@ -215,6 +215,7 @@ struct SettingsWriterTests {
                 .branchPrefix("freek"),
                 .deleteBranchOnArchive(true),
                 .runMode("concurrent"),
+                .browserURL("http://localhost:$BLOOM_PORT/admin"),
             ],
             repo: repo,
             settings: settings
@@ -229,6 +230,7 @@ struct SettingsWriterTests {
         #expect(settings.branchPrefix == "freek")
         #expect(settings.deleteBranchOnArchive)
         #expect(settings.runMode == "concurrent")
+        #expect(settings.browserURL == "http://localhost:$BLOOM_PORT/admin")
     }
 
     @Test("clearing a value removes the key rather than writing an empty one")
