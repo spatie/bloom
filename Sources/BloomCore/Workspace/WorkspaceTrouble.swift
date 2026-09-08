@@ -50,11 +50,8 @@ public enum WorkspaceTrouble: Sendable, Equatable {
     case worktreeBaseBranchGone(branch: String, workspace: String)
     /// Archiving cannot go on because the worktree it would remove is not there.
     case archiveWorktreeGone(workspace: String)
-    /// Archiving cannot go on because the folder is there and git does not own it any more.
-    ///
-    /// The one case that names a worktree's path, against the rule above, because it is the one
-    /// case whose remedy is the owner opening that folder: git will not release a worktree it
-    /// does not recognise, so nothing in Bloom can finish this until the directory is gone.
+    /// Git could not read the folder after an archive failed. Names the path so the owner can
+    /// find the files that were kept. An unrecognized folder normally archives without removal.
     case archiveWorktreeNotACheckout(workspace: String, path: String)
     /// Archiving stopped because the worktree holds work that is in no commit.
     case archiveWorktreeNotEmpty(workspace: String)
@@ -191,10 +188,8 @@ public enum WorkspaceTrouble: Sendable, Equatable {
                 a worktree any more, which is what a folder that was deleted and then recreated \
                 looks like.
 
-                A worktree git no longer recognises cannot be handed back, so archiving cannot \
-                finish while that folder is there.
-
-                Look at what is in it, delete it yourself, and archive again.
+                Its files have been kept. Try archiving again. Bloom keeps folders that git \
+                no longer recognizes as a worktree.
                 """
 
         case let .archiveWorktreeNotEmpty(workspace):

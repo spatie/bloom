@@ -43,6 +43,23 @@ struct ArchiveConfirmationTests {
         "public/hot",
     ]
 
+    @Test("an unrecognized folder confirmation explains what is kept")
+    func unrecognizedFolderIsKept() {
+        let workspace = makeWorkspace()
+        var report = WorkspaceSafetyReport()
+        report.preservedFolderPath = workspace.path
+        let request = ArchiveRequest(
+            workspace: workspace, report: report,
+            hazards: ArchiveHazards(isDeletingBranch: true)
+        )
+
+        #expect(request.confirmLabel == "Archive")
+        #expect(request.losses.isEmpty)
+        #expect(request.message.contains("The folder at \(workspace.path) and the branch are kept."))
+        #expect(request.message.contains("The archive script is skipped."))
+        #expect(!request.message.contains("is deleted"))
+    }
+
     @Test("nothing at stake and a merged pull request reads as routine")
     func cleanAndMergedIsRoutine() {
         let request = ArchiveRequest(

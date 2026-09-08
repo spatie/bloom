@@ -93,7 +93,9 @@ struct DiffRunView: View, Equatable {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            VStack(spacing: 0) {
+            // A comment splits this run, so eagerly rebuilding up to 400 rows of controls stalls
+            // the main thread. Keep the selectable text whole and realise only nearby controls.
+            LazyVStack(spacing: 0) {
                 ForEach(rows) { row in
                     chrome(row)
                 }

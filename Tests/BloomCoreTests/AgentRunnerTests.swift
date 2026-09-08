@@ -166,6 +166,7 @@ struct AgentRunnerArgvTests {
             "--include-partial-messages",
             "--verbose",
             "--permission-mode", "acceptEdits",
+            "--allow-dangerously-skip-permissions",
             "--permission-prompt-tool", "stdio",
             "--model", "opus",
             "--effort", "high",
@@ -362,7 +363,7 @@ struct AgentRunnerArgvTests {
             isFastMode: true,
             outputStyle: "Concise"
         )
-        let valueless: Set<String> = ["--verbose", "--include-partial-messages"]
+        let valueless: Set<String> = ["--verbose", "--include-partial-messages", "--allow-dangerously-skip-permissions"]
 
         for (index, item) in argv.enumerated() where item.hasPrefix("--") && !valueless.contains(item) {
             #expect(argv.indices.contains(index + 1), "\(item) has nothing after it")
@@ -1044,6 +1045,81 @@ struct AgentRunnerPermissionTests {
     }
 
     // MARK: Answering
+
+    @Test("plan approval changes the running and persisted mode and survives a new runner", arguments: PlanApproval.modes)
+    func approvingPlan(mode: PermissionMode) async throws {
+        let store = try makeTestStore("plan-runner")
+        let session = try await makeSession(store, permissionMode: .plan)
+        let (runner, process) = try await running(store, session: session)
+        await runner.ingest(.permissionAsk(try PlanApprovalTests.ask()))
+
+        await runner.answer(requestID: "plan-1", decision: .approvePlan(mode: mode))
+        // A double click cannot send a second answer or change the approved mode.
+        await runner.answer(requestID: "plan-1", decision: .approvePlan(mode: .bypassPermissions))
+
+        let sent = answers(on: process)
+        #expect(sent.count == 1)
+        let answer = try #require(sent.first)
+        #expect(answer["response"]?["response"]?["updatedPermissions"]?[0]?["mode"]?.stringValue == mode.cliValue)
+        #expect(await runner.currentSession.permissionMode == mode)
+        #expect(await runner.currentSession.state == .running)
+        #expect(await runner.pendingAsks.isEmpty)
+        let stored = try #require(await store.session(id: session.id))
+        #expect(stored.permissionMode == mode)
+        #expect(try await store.permissionAskDecisions(sessionID: session.id)["plan-1"] == "approve-plan-\(mode.rawValue)")
+        let repo = try await repoID(of: session, in: store)
+        #expect(try await store.permissionGrants(repoID: repo).isEmpty)
+
+        let recorder = ProcessRecorder()
+        let resumed = AgentRunner(workspacePath: "/tmp/w", session: stored, store: store, makeProcess: recorder.factory)
+        try await resumed.send("continue")
+        let arguments = try #require(recorder.last).launch.arguments
+        let modeIndex = try #require(arguments.firstIndex(of: "--permission-mode"))
+        #expect(arguments[modeIndex + 1] == mode.cliValue)
+        await runner.cancel()
+        await resumed.cancel()
+    }
+
+    @Test("the plan card offers the remembered implementation mode after storing the question")
+    func planOffer() async throws {
+        let store = try makeTestStore("plan-offer")
+        let session = try await makeSession(store, permissionMode: .acceptEdits)
+        try await store.updateSessionPreferences(id: session.id, permissionMode: .plan)
+        let planned = try #require(await store.session(id: session.id))
+        let (runner, _) = try await running(store, session: planned)
+        await runner.ingest(.permissionAsk(try PlanApprovalTests.ask()))
+        let rows = try await store.messages(sessionID: session.id)
+        let row = try #require(rows.last { $0.kind == .permissionAsk })
+        #expect(PermissionAsk.decode(payload: row.payload)?.implementationMode == .acceptEdits)
+        #expect(await runner.pendingAsks.first?.implementationMode == .acceptEdits)
+        await runner.cancel()
+    }
+
+    @Test("rejecting a plan leaves planning permissions intact")
+    func rejectingPlan() async throws {
+        let store = try makeTestStore("plan-reject")
+        let session = try await makeSession(store, permissionMode: .plan)
+        let (runner, process) = try await running(store, session: session)
+        await runner.ingest(.permissionAsk(try PlanApprovalTests.ask()))
+        await runner.answer(requestID: "plan-1", decision: .deny(message: PlanApproval.keepPlanningMessage, endsTurn: false))
+        #expect(await runner.currentSession.permissionMode == .plan)
+        #expect(try await store.session(id: session.id)?.permissionMode == .plan)
+        #expect(answers(on: process).first?["response"]?["response"]?["updatedPermissions"] == nil)
+        await runner.cancel()
+    }
+
+    @Test("a plan approval decision cannot answer an ordinary permission request")
+    func invalidPlanApproval() async throws {
+        let store = try makeTestStore("plan-invalid")
+        let session = try await makeSession(store)
+        let (runner, process) = try await running(store, session: session)
+        await runner.ingest(.permissionAsk(ask()))
+        await runner.answer(requestID: "req-1", decision: .approvePlan(mode: .bypassPermissions))
+        #expect(answers(on: process).isEmpty)
+        #expect(await runner.pendingAsks.count == 1)
+        #expect(await runner.currentSession.permissionMode == .acceptEdits)
+        await runner.cancel()
+    }
 
     @Test("allowing writes an answer the CLI can act on and lets the turn run again")
     func allowing() async throws {

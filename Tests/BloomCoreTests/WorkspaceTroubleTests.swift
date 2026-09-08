@@ -221,8 +221,7 @@ struct WorkspaceTroubleTests {
         #expect(!trouble.sentence.contains("status --porcelain"))
     }
 
-    /// The one sentence in the type that names a worktree path, because deleting that folder is
-    /// the only thing that unblocks the archive.
+    /// A failed archive names the folder that was kept without asking the owner to delete it.
     @Test("names the folder when git no longer knows it as a worktree")
     func archivingAFolderGitHasLostTrackOf() async throws {
         let repo = try await TempRepo(defaultBranch: "main")
@@ -238,7 +237,8 @@ struct WorkspaceTroubleTests {
             workspace: "Limits panel", path: worktree, baseBranch: "main"
         )
         #expect(trouble == .archiveWorktreeNotACheckout(workspace: "Limits panel", path: worktree))
-        #expect(trouble.sentence.contains("delete it yourself"))
+        #expect(trouble.sentence.contains("Its files have been kept"))
+        #expect(!trouble.sentence.contains("delete it yourself"))
         #expect(!trouble.sentence.contains("not a working tree"))
     }
 

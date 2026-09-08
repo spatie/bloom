@@ -1837,6 +1837,7 @@ public actor Store {
     /// before the agent answered takes resume with it.
     @discardableResult
     public func upsert(_ session: Session) throws -> Session {
+        try rememberImplementationMode(for: session)
         try db.run(
             """
             INSERT INTO sessions (
@@ -1923,12 +1924,22 @@ public actor Store {
         model: String? = nil,
         effort: String? = nil,
         permissionMode: PermissionMode? = nil,
+        implementationMode: PermissionMode? = nil,
         /// Only ever set on a chat that has not spoken yet. Changing the backend of a chat that
         /// already has a message strands its transcript half in one vocabulary and half in the
         /// other, and its thread id on a server that knows nothing about the new one, so the
         /// picker forks a new chat instead. See docs/CODEX.md.
         agentKind: AgentKind? = nil
     ) throws {
+        // First-open defaults replace a placeholder session. Its fallback mode is not a user
+        // choice, so the composer supplies the configured implementation mode when opening Plan.
+        if permissionMode == .plan, let implementationMode {
+            try setSetting(PlanApproval.modeKey(sessionID: id), PlanApproval.implementationMode(implementationMode).rawValue)
+        }
+        if let permissionMode, var session = try session(id: id) {
+            session.permissionMode = permissionMode
+            try rememberImplementationMode(for: session)
+        }
         try db.run(
             """
             UPDATE sessions SET
@@ -3042,6 +3053,34 @@ public actor Store {
     }
 
     // MARK: - Settings
+
+    /// Planning temporarily replaces the mode in the session row. Keep the implementation
+    /// choice separately so starting in Plan and entering Plan through the composer agree.
+    private func rememberImplementationMode(for session: Session) throws {
+        let key = PlanApproval.modeKey(sessionID: session.id)
+        let remembered = try setting(key)
+        let mode: PermissionMode
+        if session.permissionMode != .plan {
+            mode = PlanApproval.implementationMode(session.permissionMode)
+        } else {
+            guard remembered == nil else { return }
+            mode = try planImplementationMode(sessionID: session.id, hasWorktree: session.workspaceID != nil)
+        }
+        if remembered != mode.rawValue { try setSetting(key, mode.rawValue) }
+    }
+
+    public func planImplementationMode(sessionID: SessionID, hasWorktree: Bool) throws -> PermissionMode {
+        if let session = try session(id: sessionID), session.permissionMode != .plan {
+            return PlanApproval.implementationMode(session.permissionMode)
+        }
+        if let raw = try setting(PlanApproval.modeKey(sessionID: sessionID)),
+           let mode = PermissionMode(rawValue: raw) {
+            return PlanApproval.implementationMode(mode)
+        }
+        guard hasWorktree else { return AskConversation.permissionMode }
+        let configured = try setting(AppDefaults.Key.permissionMode).flatMap(PermissionMode.init(rawValue:))
+        return PlanApproval.implementationMode(configured ?? AppDefaults.fallbackPermissionMode)
+    }
 
     public func setting(_ key: String) throws -> String? {
         try db.query("SELECT value FROM settings WHERE key = ?", [.text(key)]).first?.string("value")

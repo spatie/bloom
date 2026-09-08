@@ -148,8 +148,13 @@ public struct ArchiveRequest: Identifiable, Sendable {
     /// everywhere else in the app.
     public var message: String {
         var text = "\u{201C}\(workspace.name)\u{201D}\n\n"
-        text += "The worktree is deleted and the branch is "
-        text += hazards.isDeletingBranch ? "deleted too." : "kept."
+        if let path = report.preservedFolderPath {
+            text += "Git no longer recognizes this folder as a worktree. "
+            text += "The folder at \(path) and the branch are kept. The archive script is skipped."
+        } else {
+            text += "The worktree is deleted and the branch is "
+            text += hazards.isDeletingBranch ? "deleted too." : "kept."
+        }
         text += " The workspace moves to Archived."
 
         // Only where the stakes are already low. A merged pull request means the branch's code is
