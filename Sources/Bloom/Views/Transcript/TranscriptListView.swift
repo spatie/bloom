@@ -525,8 +525,8 @@ struct TranscriptListView: View {
 
         var out: [TranscriptTableEntry] = []
         // A workspace's setup script, its worktree events and its opening prompt. All three are
-        // things a worktree has, so a conversation with none skips the entry rather than drawing
-        // an empty one: see `TranscriptHome`.
+        // things a worktree has. Ask Bloom uses this opening entry only for the space below the
+        // title bar, since it has no setup information: see `TranscriptHome`.
         if let workspaceID = home.workspaceID {
             out.append(TranscriptTableEntry(
                 id: .setup,
@@ -554,6 +554,16 @@ struct TranscriptListView: View {
                         .padding(.top, TranscriptLayout.block)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     )
+                }
+            ))
+        } else {
+            // Ask Bloom has no setup row to supply the space below its title bar. Keep that
+            // space in the scrolling content so it leaves the viewport with the first message.
+            out.append(TranscriptTableEntry(
+                id: .setup,
+                contentKey: TranscriptContentKey { $0.combine("ask-top-spacing") },
+                content: {
+                    AnyView(Color.clear.frame(height: Metrics.pane).accessibilityHidden(true))
                 }
             ))
         }

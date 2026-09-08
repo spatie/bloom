@@ -7,10 +7,10 @@ struct BloomApp: App {
 
     init() {
         #if DEBUG
+        if AppChromeProbe.isRequested { AppChromeProbe.runAndExit() }
         if ComposerInputProbe.isRequested { ComposerInputProbe.runAndExit() }
         if InspectorVisibilityProbe.isRequested { InspectorVisibilityProbe.runAndExit() }
         if MarkdownTableProbe.isRequested { MarkdownTableProbe.runAndExit() }
-        if NativeTabsProbe.isRequested { NativeTabsProbe.runAndExit() }
         #endif
         // First, before anything else in the process. Every `@AppStorage` binding in the app
         // resolves its key the moment the view holding it is created, and a binding that has

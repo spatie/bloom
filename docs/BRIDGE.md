@@ -117,6 +117,7 @@ places: the listing, the dispatch and the gate.
 | `workspace_list` | Every workspace, its state, its worktree path, its chats and their cost, what an agent is stopped on, what is queued and why | | | ✓ |
 | `workspace_start` | Cut a worktree and put an agent in it with a task, on a new branch, existing branch or GitHub pull request | ✓ | | ✓ |
 | `workspace_rename` | Give a workspace the name the work in it turned out to be about. Its own, for a workspace agent; any of them, named out loud, for the owner | ✓ | | ✓ |
+| `workspace_archive` | Archive a workspace through normal safety checks, keeping its branch and history | | | ✓ |
 | `workspace_merge` | Ask a workspace's own agent to merge its pull request | | | ✓ |
 | `reveal` | Point Bloom's window at one workspace, or at Home narrowed by project, scope and search. Navigation and nothing else: it creates nothing and archives nothing | | | ✓ |
 | `pane_open` | Open a chat, a terminal or a browser in a new tab of the caller's own workspace | ✓ | | |
@@ -261,12 +262,13 @@ Nothing here opens or closes a tab except the tools whose whole subject that is.
 brings an existing tab forward and will not make one on the way, which is what keeps "go back to the
 terminal" from forking a second terminal.
 
-Nothing archives. `workspace_archive` is not one of the thirty-six: it removes a worktree and can
-remove a branch with it, and the whole reason Bloom asks before archiving by hand is that the
-answer is sometimes no. `reveal` is the answer to the request that wants one. Asked to clean up the
-finished workspaces, an agent ends by putting the candidates on screen, selected, with the owner
-looking at them and the button under their finger, which is a different thing from eight worktrees
-being gone.
+`workspace_archive` is owner-only and takes an exact workspace id from `workspace_list`.
+It runs the app's normal archive lifecycle, including the project archive script, and only answers
+success after completion. The worktree is removed; the branch, notes and chat history are kept.
+Running agents, uncommitted work, local files at risk and failed safety checks refuse the call.
+There is no force or branch-deletion argument. Already archived workspaces are a no-op.
+This tool is not self-approved: the caller's permission policy still applies. `reveal` can show
+candidates before the owner chooses which to archive.
 
 Nothing a rename touches is on disk. `workspace_rename` writes one column of one row: the branch,
 the worktree, the pull request and the directory keep the names they have. That is worth saying out

@@ -112,6 +112,11 @@ final class WorkspaceModel {
     /// not another subprocess. Not observed: nothing draws it, and a write on every file opened
     /// would invalidate every view watching this model. See `PatchCache`.
     @ObservationIgnored private var patches = PatchCache()
+    /// The files the review pane has already prepared, held so that coming back to one draws it on
+    /// the first frame rather than going through the parse, the preparation pass and the read of
+    /// the worktree copy again. Ignored by observation for the same reason as the patches above:
+    /// filing one is not a fact any view is watching. See `DiffPresentationCache`.
+    @ObservationIgnored private var presentations = DiffPresentationCache()
     /// Where each chat pane had got to in each conversation, so that coming back to a tab is not
     /// the session being opened all over again.
     ///
@@ -145,6 +150,12 @@ final class WorkspaceModel {
     }
 
     var isLoadingPullRequest = false
+    /// Whether any refresh has come back for this workspace this launch, whatever it said.
+    ///
+    /// Not the same question as `pullRequest != nil`, and that is the whole point: "this branch
+    /// has no pull request" is an answer, and reading it as "we have not looked yet" is what put
+    /// the spinner over the Create pull request button on every poll. See `PullRequestProgress`.
+    private(set) var hasReadPullRequest = false
 
     /// How this project's branches land, which is what the band's split button promises.
     ///
@@ -405,8 +416,19 @@ final class WorkspaceModel {
     ///   numbered name the strip gives a new tab: `Chat`, then `Chat 2`. A caller passes one only
     ///   when the chat is being opened FOR something and the name says which, as the pull request
     ///   and merge buttons do. See `PaneNaming` for why a chat is never named after its content.
+    /// - Parameter draft: words the new chat opens with, for the one caller that has some: a
+    ///   backend fork carries the half-written prompt across, because a picker press must never be
+    ///   a way to lose a sentence somebody is in the middle of. It is written **before** the row
+    ///   becomes the active session, which is the whole reason it is an argument here rather than
+    ///   a `saveDraft` at the call site: activating the session builds a transcript, and that
+    ///   transcript reads the draft column on its first pass. A write that lands after that read
+    ///   is a draft the composer never shows.
     @discardableResult
-    func createSession(title: String? = nil, controls: ComposerControls? = nil) async -> Session? {
+    func createSession(
+        title: String? = nil,
+        controls: ComposerControls? = nil,
+        draft: String = ""
+    ) async -> Session? {
         guard !app.isArchiving(workspace.id), let store else { return nil }
         var session = Session(
             workspaceID: workspace.id,
@@ -421,6 +443,7 @@ final class WorkspaceModel {
         }
         guard let stored = try? await store.upsert(session) else { return nil }
         if let controls { await controls.store(sessionID: stored.id, in: store) }
+        if !draft.isEmpty { try? await store.saveDraft(sessionID: stored.id, body: draft) }
         await reloadSessions()
         activeSessionID = stored.id
         return stored
@@ -1256,7 +1279,8 @@ final class WorkspaceModel {
                 let files = try await filesRead
                 let local = await localRead
                 let commits = await commitsRead
-                return .success(ChangesAnswer(files: files, local: local, commits: commits))
+                let revisions = ReviewedFileFingerprint.revisions(for: files, worktree: path, base: base, scope: scope)
+                return .success(ChangesAnswer(files: files, local: local, commits: commits, revisions: revisions))
             } catch {
                 // Diagnosed rather than reported, in the register `WorkspaceStartFailure` set. A
                 // worktree deleted underneath Bloom used to surface here as "`git rev-parse
@@ -1304,6 +1328,7 @@ final class WorkspaceModel {
             // which would rerun the inspector's body and rebuild the tree for nothing.
             if changesError != nil { changesError = nil }
             if changedFiles != answer.files { changedFiles = answer.files }
+            if viewedRevisions != answer.revisions { viewedRevisions = answer.revisions }
             // Only when git actually answered. A failed count leaves the last known one standing
             // rather than replacing it with "nothing local", which is a claim.
             if let local = answer.local, localWork != local { localWork = local }
@@ -1322,6 +1347,7 @@ final class WorkspaceModel {
         var local: LocalWork?
         /// Nil when this refresh did not ask, which is every quiet poll.
         var commits: BranchCommitList?
+        var revisions: [String: String] = [:]
     }
 
     /// Narrows or widens what the Changes tab is showing, and sends the pane back to git for it.
@@ -1420,7 +1446,7 @@ final class WorkspaceModel {
     /// upsert-vs-update rule allows it.
     func addReviewComment(
         filePath: String,
-        spot: ReviewSpot,
+        selection: ReviewSelection,
         anchor: ReviewCommentAnchor,
         body: String
     ) async {
@@ -1428,7 +1454,7 @@ final class WorkspaceModel {
         let comment = ReviewComment(
             workspaceID: workspace.id,
             filePath: filePath,
-            side: spot.side,
+            side: selection.side,
             anchor: anchor,
             body: body
         )
@@ -1508,6 +1534,111 @@ final class WorkspaceModel {
             reviewText.edits[id] = nil
         }
         if let refusal { report(refused: refusal) }
+    }
+
+    // MARK: - Viewed files
+
+    /// Which files this workspace has been ticked as read, by path, holding the fingerprint of the
+    /// diff each tick was given for.
+    ///
+    /// The fingerprints rather than the rows, because every question the window asks is "is this
+    /// file, as it stands now, one I have read", and `ReviewedFiles` answers it from exactly this.
+    /// In the store rather than only here for the reason the review comments are: a pass through a
+    /// forty file diff is real work, and it has to survive switching workspace and quitting.
+    private(set) var viewedFiles: [String: String] = [:]
+    private(set) var viewedRevisions: [String: String] = [:]
+    private(set) var hasReadViewedFiles = false
+
+    /// What the changed file list says over itself, or nil before anything has been ticked. The
+    /// sentence is `ReviewedFiles.summary`, in the core, so the list and any other reader of it
+    /// cannot come to two counts.
+    var viewedSummary: String? {
+        ReviewedFiles.summary(among: changedFiles, marks: viewedFiles, revisions: viewedRevisions)
+    }
+
+    func isViewed(_ file: ChangedFile) -> Bool {
+        ReviewedFiles.isViewed(file, marks: viewedFiles, revisions: viewedRevisions)
+    }
+
+    func reloadViewedFiles() async {
+        guard let store else { return }
+        let fresh = (try? await store.reviewedFiles(workspaceID: workspace.id)) ?? []
+        hasReadViewedFiles = true
+        let marks = Dictionary(
+            fresh.map { ($0.path, $0.fingerprint) }, uniquingKeysWith: { _, latest in latest }
+        )
+        // Conditional for the reason every reload here is: an identical write still invalidates
+        // every view reading the list, and this one is read by every row of the changed files.
+        if viewedFiles != marks { viewedFiles = marks }
+    }
+
+    /// Ticks a file, or takes the tick off.
+    ///
+    /// The mark is written against the diff the file has at this moment, which is what makes it
+    /// go stale honestly when the agent edits the file afterwards. See `ReviewedFileFingerprint`.
+    func setViewed(_ isViewed: Bool, file: ChangedFile) async {
+        guard let store else { return }
+        let fingerprint = ReviewedFileFingerprint.of(file, revision: viewedRevisions[file.path] ?? "")
+        do {
+            if isViewed {
+                try await store.markReviewed(ReviewedFile(
+                    workspaceID: workspace.id, path: file.path, fingerprint: fingerprint
+                ))
+            } else {
+                try await store.clearReviewed(workspaceID: workspace.id, path: file.path)
+            }
+        } catch {
+            app.alert = BloomAlert(
+                title: "That file was not marked",
+                message: WorkspaceTrouble.complaint(about: error)
+            )
+            return
+        }
+        // The list moves only if the row did, which is the rule `editReviewComment` above had to
+        // learn: a refused write must not change what is on screen and then be put back by the
+        // next reload with nothing said in between.
+        if isViewed {
+            viewedFiles[file.path] = fingerprint
+        } else {
+            viewedFiles[file.path] = nil
+        }
+    }
+
+    /// Starts the pass again: every tick on this workspace goes.
+    func clearViewedFiles() async {
+        guard let store, !viewedFiles.isEmpty else { return }
+        do {
+            try await store.clearReviewed(workspaceID: workspace.id)
+        } catch {
+            app.alert = BloomAlert(
+                title: "Those marks were not cleared",
+                message: WorkspaceTrouble.complaint(about: error)
+            )
+            return
+        }
+        viewedFiles = [:]
+    }
+
+    // MARK: - Where a review is sent
+
+    /// The chat the review pane's composer sends to, when the reader has picked one.
+    ///
+    /// Nil means "wherever this workspace is pointed", which is the active session and is what
+    /// every review sent before this existed went to. Held for the launch rather than written
+    /// down, and `ReviewDestination` carries the argument for why: it is a fact about the pass
+    /// being made now, and a destination remembered across a relaunch sends a later review
+    /// somewhere the reader has forgotten choosing.
+    var reviewDestinationID: SessionID?
+
+    /// The chat a review actually goes to: the chosen one while it still exists, then the active
+    /// one, then the first. Nil only when the workspace has no chat at all.
+    var reviewDestination: Session? {
+        let id = ReviewDestination.resolved(
+            chosen: reviewDestinationID,
+            active: activeSession?.id,
+            sessions: sessions.map(\.id)
+        )
+        return sessions.first { $0.id == id }
     }
 
     // MARK: - The worktree listing
@@ -1603,6 +1734,43 @@ final class WorkspaceModel {
         return patch
     }
 
+    /// What the review pane last drew for this file, if it has drawn it.
+    ///
+    /// Handed back without asking git anything, so the pane can put a diff on screen on the frame
+    /// the tab was picked and then go and check. What makes that honest, and what the key holds,
+    /// is `DiffPresentationCache`.
+    func heldDiff(for file: ChangedFile, ignoringWhitespace: Bool) -> DiffPresentation? {
+        presentations.presentation(for: presentationKey(file, ignoringWhitespace: ignoringWhitespace))
+    }
+
+    /// Files what the pane has just drawn, so the next visit to this file is a lookup.
+    func holdDiff(
+        _ presentation: DiffPresentation, for file: ChangedFile, ignoringWhitespace: Bool
+    ) {
+        presentations.store(
+            presentation, for: presentationKey(file, ignoringWhitespace: ignoringWhitespace)
+        )
+    }
+
+    /// Drops what is held for one file, for the two presses that rewrite it under the reader: the
+    /// revert in the header bar and a save from the in-place editor. Both are followed by a fresh
+    /// read, and neither may show what the file said before the press for even one frame.
+    func forgetHeldDiff(for path: String) {
+        presentations.forget(file: path)
+    }
+
+    private func presentationKey(
+        _ file: ChangedFile, ignoringWhitespace: Bool
+    ) -> DiffPresentationCache.Key {
+        DiffPresentationCache.Key(
+            worktree: workspace.path,
+            base: workspace.baseBranch,
+            file: file,
+            scope: diffScope,
+            ignoresWhitespace: ignoringWhitespace
+        )
+    }
+
     /// Full contents of a file in the worktree, for the All files tab.
     func contents(of relativePath: String) -> String? {
         Self.contents(of: relativePath, in: workspace.path)
@@ -1664,14 +1832,23 @@ final class WorkspaceModel {
             await GitHubBridge.pullRequest(for: asked, maxAge: maxAge)
         }
         pullRequestTask = task
-        // Only when there is nothing to show, for the same reason the changed file list only
-        // spins when it is empty.
-        if pullRequest == nil { isLoadingPullRequest = true }
+        // Only before there has been any answer at all, for the same reason the changed file list
+        // only spins when it has nothing: a refresh of something already on screen leaves it
+        // alone. The rule and what it cost to get wrong are `PullRequestProgress`.
+        if PullRequestProgress.announces(
+            hasAnswered: hasReadPullRequest, hasPullRequest: pullRequest != nil
+        ) {
+            isLoadingPullRequest = true
+        }
 
         let fresh = await task.value
 
         guard pullRequestTask == task, !task.isCancelled else { return }
         pullRequestTask = nil
+        // Before the write below, and set whatever came back: a nil from gh is still this
+        // workspace having been looked at, and the next refresh has an answer on screen to leave
+        // alone. Only a superseded or cancelled refresh, which returns above, says nothing.
+        hasReadPullRequest = true
         // A nil is not written, and that is the rule the shared cache has always had: nil is "gh
         // could not answer" at least as often as it is "there is no pull request", so a slow
         // network or a rate limit would otherwise drop the mark back to a plain branch.
@@ -1986,6 +2163,11 @@ final class WorkspaceModel {
             // in-memory list is the truth and re-reading it on every arrival buys nothing.
             if !hasReadReviewComments { await reloadReviewComments() }
             guard !Task.isCancelled else { return }
+            // The same, and for the same reason, for the ticks beside the changed files. Whether
+            // one still holds is decided against the file list below rather than here, so this
+            // read does not have to wait for git.
+            if !hasReadViewedFiles { await reloadViewedFiles() }
+            guard !Task.isCancelled else { return }
             // Concurrently, because neither is waiting for anything the other knows. The read
             // mark used to be written after `git` had finished walking the worktree.
             async let changes: Void = refreshChanges()
@@ -2047,6 +2229,12 @@ final class LineBuffer: Sendable {
 /// editor opened. See `WorkspaceModel.reviewDrafts` for why it outlives the diff view that is
 /// editing it, and `ReviewTextHost` for why the text it is being given is not in here.
 struct ReviewDraft: Hashable {
-    var spot: ReviewSpot
+    /// Every line the note will cover, which is one line for a `+` pressed and several for a
+    /// drag down the gutter.
+    var selection: ReviewSelection
     var anchor: ReviewCommentAnchor
+
+    /// Where the note anchors, which is also the row the editor opens under when the selection is
+    /// a single line.
+    var spot: ReviewSpot { selection.anchor }
 }

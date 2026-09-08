@@ -11,8 +11,8 @@ import BloomCore
 /// (Cmd+\) puts the conversation beside the diff instead of above it.
 ///
 /// It draws no chrome of its own. `DiffView` already carries the bar that names the file and
-/// holds revert, the layout toggles and the Diff / Edit pair, and a second bar over the top of it
-/// would say the same things twice.
+/// holds the Viewed tick, revert, the layout toggles and the Diff / Edit pair, and a second bar
+/// over the top of it would say the same things twice.
 struct ReviewPaneView: View {
     @Bindable var model: WorkspaceModel
     var tab: CenterTab
@@ -80,12 +80,17 @@ struct ReviewPaneView: View {
             // draft, so typing into this one put the same words in the one under the chat. The
             // rule is `ReviewComposer`, in the core: this box is for when the conversation it
             // sends to is not already on screen in this tab.
-            if drawsComposer, let transcript = composerTranscript {
+            if drawsComposer, let destination = model.reviewDestination,
+               let transcript = model.existingTranscript(for: destination.id) {
                 ComposerView(
                     transcript: transcript,
                     model: model,
                     room: room,
-                    destinationLabel: "Messages are sent to Chat"
+                    destinationLabel: ReviewDestination.label(for: destination.title),
+                    destinations: model.sessions.map {
+                        ComposerDestination(id: $0.id, title: $0.title)
+                    },
+                    onSelectDestination: choose(destination:)
                 )
                     .environment(\.fontScale, textSize.scale)
                     .environment(\.chatFont, ChatFont(rawValue: chatFontID))
@@ -96,11 +101,26 @@ struct ReviewPaneView: View {
             room.height = $0
         }
         .background(Palette.surface)
+        // Option+V ticks the file on screen as viewed, and does nothing at all when this pane is
+        // showing something with no diff to tick (an empty state, an image, a file nobody
+        // changed). Its own `NSView` rather than a hidden button carrying a key equivalent: see
+        // `ViewedShortcutHost` for the character it would otherwise have swallowed out of the
+        // composer below it and out of the terminal in the pane beside it.
+        .background {
+            ViewedShortcutHost(hasFile: changed != nil) {
+                guard let changed else { return }
+                let model = model
+                Task { await model.setViewed(!model.isViewed(changed), file: changed) }
+            }
+        }
         // A pane can be pointed at a session this launch has never opened, so the transcript is
         // built here rather than assumed, exactly as `CenterPaneView.prepare` does for a chat.
-        .task(id: model.activeSession?.id) {
-            guard let session = model.activeSession else { return }
-            model.prepareTranscript(for: session.id)
+        // Keyed on the destination rather than on the active session, because those are now two
+        // different questions: a review sent to a chat nobody has opened this launch needs that
+        // chat's transcript, and the active one may be somewhere else entirely.
+        .task(id: model.reviewDestination?.id) {
+            guard let destination = model.reviewDestination else { return }
+            model.prepareTranscript(for: destination.id)
         }
         // Keyed on the poll as well as the path, because a file can be deleted underneath a reader
         // who has not moved: the changes generation is what says the worktree has been looked at
@@ -114,27 +134,33 @@ struct ReviewPaneView: View {
         }
     }
 
-    /// The conversation a turn sent from here joins: the active session's, which already falls
-    /// back to the first. Nil only when the workspace has no session at all, and then there is
-    /// nothing to send to and no composer is drawn.
-    private var composerTranscript: TranscriptModel? {
-        model.activeSession.flatMap { model.existingTranscript(for: $0.id) }
+    /// Points this review at another chat.
+    ///
+    /// The transcript is prepared here rather than left to the `task` above, so the composer has
+    /// something to bind to on the frame the choice is made instead of a frame later, which would
+    /// read as the box blinking out and back.
+    private func choose(destination id: SessionID) {
+        guard model.reviewDestinationID != id else { return }
+        model.reviewDestinationID = id
+        model.prepareTranscript(for: id)
     }
 
     /// Whether this pane draws that composer at all. The rule and the reasoning are
     /// `ReviewComposer`; the two facts it needs are which conversation a turn from here would join
-    /// and what the panes of this tab are showing.
+    /// and what the panes of this tab are showing. The first of those is the chosen destination
+    /// now, not the active session, which is what makes the box appear again when the reader
+    /// points the review at a chat that is not on screen in this tab.
     private var drawsComposer: Bool {
-        ReviewComposer.isDrawn(destination: model.activeSession?.id, panes: siblings)
+        ReviewComposer.isDrawn(destination: model.reviewDestination?.id, panes: siblings)
     }
 
     @ViewBuilder
     private var content: some View {
         if let changed {
-            // Keyed on the path so walking to the next file builds a new view rather than
-            // reusing this one's loaded rows.
+            // A path can exist in several workspaces. Include the workspace so switching
+            // checkouts cannot reuse another workspace's diff, selection or expanded context.
             DiffView(model: model, file: changed)
-                .id(changed.path)
+                .id("\(model.workspace.id.rawValue):\(changed.path)")
         } else if tab.path.isEmpty {
             // Asked before the two branches below, because with no path there is nothing to look
             // for and `isPresent` answers optimistically until the first look comes back.

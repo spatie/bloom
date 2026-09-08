@@ -35,6 +35,9 @@ enum InstalledApps {
     /// Keyed by file extension. See `systemDefault(forFile:)`.
     private static var systemDefaults: [String: DetectedApp?] = [:]
     private static var defaultsScannedAt: Date?
+    /// The contents of each application folder, held for the length of one `scan` and thrown away
+    /// after it. See `listing(of:)`.
+    private static var listings: [URL: [String]] = [:]
 
     static var all: [DetectedApp] {
         if let scannedAt, Date.now.timeIntervalSince(scannedAt) < staleAfter { return cache }
@@ -44,7 +47,8 @@ enum InstalledApps {
     }
 
     private static func scan() -> [DetectedApp] {
-        EditorCatalog.known.compactMap { app in
+        defer { listings = [:] }
+        return EditorCatalog.known.compactMap { app in
             guard let url = locate(app) else { return nil }
             return DetectedApp(app: app, url: url, icon: icon(at: url))
         }
@@ -52,21 +56,59 @@ enum InstalledApps {
 
     /// Where this application is, if it is here at all.
     ///
-    /// LaunchServices first, because it knows about every copy wherever it was installed. The
-    /// folder sweep second, because LaunchServices is not always right: see `EditorCatalog`, where
-    /// the Xcode this was written against is a working installation it answers `nil` for. The
-    /// bundle identifier is checked either way, so a bundle that merely has the right file name is
-    /// never mistaken for the application.
+    /// LaunchServices first, because it knows about every copy wherever it was installed, and it
+    /// is asked for every identifier the application ships under rather than one: a bundle id
+    /// lookup is exact, and `com.jetbrains.PhpStorm` is not what a PhpStorm EAP or Light build
+    /// answers to. See `ExternalApp.variantIDs`, which is where the bug that forced this is
+    /// written down.
+    ///
+    /// The folder sweep second, because LaunchServices is not always right: see `EditorCatalog`,
+    /// where the Xcode this was written against is a working installation it answers `nil` for.
+    /// The bundle identifier is checked either way, through `ExternalApp.matches(bundleID:)`, so
+    /// a bundle that merely has the right file name is never mistaken for the application.
     private static func locate(_ app: ExternalApp) -> URL? {
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.bundleID) {
-            return url
+        for bundleID in app.bundleIDs {
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+                return url
+            }
         }
         for folder in folders {
             let url = folder.appendingPathComponent(app.fileName)
-            guard Bundle(url: url)?.bundleIdentifier == app.bundleID else { continue }
+            guard app.matches(bundleID: Bundle(url: url)?.bundleIdentifier) else { continue }
             return url
         }
+        return sweep(for: app)
+    }
+
+    /// The last resort: a bundle in one of the usual folders that is named after this application
+    /// without being named exactly what the catalogue expects.
+    ///
+    /// `PhpStorm EAP.app` and `PhpStorm 2025.2.app` sit beside `PhpStorm.app` on plenty of Macs,
+    /// and a JetBrains Toolbox that has lost its LaunchServices registration leaves one of those
+    /// as the only copy there is. `ExternalApp.matchesFileName` narrows a folder to a handful of
+    /// bundles worth opening and `matches(bundleID:)` decides, so this can only ever find the
+    /// application it was asked for, under a name nobody typed here.
+    ///
+    /// Reached only for an application neither LaunchServices nor the exact name found, which on
+    /// a normal Mac is most of the catalogue and is why the listing of each folder is read once
+    /// per scan rather than once per application.
+    private static func sweep(for app: ExternalApp) -> URL? {
+        for folder in folders {
+            for name in listing(of: folder) where app.matchesFileName(name) {
+                let url = folder.appendingPathComponent(name)
+                guard app.matches(bundleID: Bundle(url: url)?.bundleIdentifier) else { continue }
+                return url
+            }
+        }
         return nil
+    }
+
+    /// What is in a folder, read once for the whole of one `scan`.
+    private static func listing(of folder: URL) -> [String] {
+        if let cached = listings[folder] { return cached }
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        listings[folder] = names
+        return names
     }
 
     /// The folders applications are actually kept in. Setapp included, because it keeps its copies
@@ -78,6 +120,11 @@ enum InstalledApps {
         "/System/Applications",
         "/System/Applications/Utilities",
         NSHomeDirectory() + "/Applications",
+        // Where JetBrains Toolbox puts an IDE now that it installs into a folder of its own. Its
+        // older layout is four levels down under Application Support, keyed by build number, and
+        // that one is left to LaunchServices: a sweep that walks it would be reading directories
+        // on every scan to find a copy the system already knows about.
+        NSHomeDirectory() + "/Applications/JetBrains Toolbox",
     ].map { URL(fileURLWithPath: $0, isDirectory: true) }
 
     /// The application the user has themselves set as the default for this kind of file, when it
@@ -103,7 +150,7 @@ enum InstalledApps {
         var found: DetectedApp?
         if let url = NSWorkspace.shared.urlForApplication(toOpen: URL(fileURLWithPath: path)),
            let bundleID = Bundle(url: url)?.bundleIdentifier,
-           !EditorCatalog.knownIDs.contains(bundleID) {
+           !EditorCatalog.isKnown(bundleID: bundleID) {
             found = DetectedApp(
                 app: ExternalApp(bundleID: bundleID, name: name(of: url), targets: .file),
                 url: url,

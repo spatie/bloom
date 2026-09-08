@@ -25,6 +25,13 @@ struct ComposerView: View {
     /// inviting somebody to ask it to.
     var placeholder: String = ComposerEditor.chatPlaceholder
     var destinationLabel: String?
+    /// The chats this composer may be pointed at, when the caller is offering a choice. Empty,
+    /// the default, leaves the strip above the box a plain sentence. See
+    /// `ComposerDestinationStrip`.
+    var destinations: [ComposerDestination] = []
+    /// What picking one does. Nil leaves the strip unpressable however many destinations are
+    /// passed, which is what a composer already sitting in its own conversation wants.
+    var onSelectDestination: ((SessionID) -> Void)?
 
     @Environment(AppModel.self) private var app
 
@@ -58,14 +65,12 @@ struct ComposerView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let destinationLabel {
-                HStack(spacing: Metrics.spacingSmall) {
-                    Image(systemName: "bubble.left")
-                    Text(destinationLabel)
-                }
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .padding(.horizontal, Metrics.gutter)
-                .frame(maxWidth: .infinity, minHeight: Metrics.rowHeight, alignment: .leading)
+                ComposerDestinationStrip(
+                    label: destinationLabel,
+                    destinations: destinations,
+                    selected: transcript.session.id,
+                    onSelect: onSelectDestination
+                )
             }
 
             composer
@@ -262,7 +267,15 @@ struct ComposerView: View {
         switch BackendChange.decide(
             from: session.agentKind,
             to: new.agentKind,
-            hasSpoken: !transcript.rows.isEmpty
+            // Three signals rather than the row count alone. A transcript reads its history
+            // asynchronously, so a chat opened a moment ago has no rows yet and is not an empty
+            // chat, and changing such a chat in place put a Claude Code thread id on a row Codex
+            // was about to resume from. See `BackendChange.hasSpoken`.
+            hasSpoken: BackendChange.hasSpoken(
+                rowCount: transcript.rows.count,
+                agentSessionID: session.agentSessionID,
+                isTranscriptLoaded: transcript.isLoaded
+            )
         ) {
         case .fork(let kind):
             fork(onto: kind, with: new)
@@ -295,38 +308,51 @@ struct ComposerView: View {
     /// than losing the conversation that is on screen.
     private func fork(onto kind: AgentKind, with controls: ComposerControls) {
         let draft = transcript.draft
+        let from = transcript.session.agentKind
 
         // Ask Bloom has no workspace and therefore no tab beside this one to fork into. Its
         // equivalent is a fresh conversation: the old one is archived, so its transcript is
         // retained, while the new backend starts with a thread it actually owns.
         guard let model else {
             Task { @MainActor in
+                // The id, not a bare call and a sentence after it. `startFresh` returns nothing
+                // and has three ways of doing nothing at all, one of which raises its own alert,
+                // and a banner saying a conversation was replaced when it was not is worse than
+                // the silence this whole change is about removing.
+                let previous = app.ask.session?.id
                 await app.ask.startFresh(controls: controls, draft: draft)
+                guard let made = app.ask.session?.id, made != previous else { return }
+                app.notice = BloomNotice(
+                    message: BackendChange.replacementNotice(from: from, to: kind)
+                )
             }
             return
         }
 
-        guard let store = app.store else { return }
         let title = BackendChange.forkedTitle(transcript.session.title, to: kind)
 
         Task { @MainActor in
-            guard let session = await model.createSession(title: title) else { return }
-            // Narrow, as every write from this side has to be: `upsert` would put back the state
-            // and the counters a runner owns, and this row already exists by the time we get here.
-            try? await store.updateSessionPreferences(
-                id: session.id,
-                model: controls.model,
-                effort: controls.effort,
-                permissionMode: controls.permissionMode,
-                agentKind: kind
-            )
-            await controls.store(sessionID: session.id, in: store)
-            // The words that were typed go with it. A picker press must never be a way to lose a
-            // prompt somebody is halfway through writing.
-            if !draft.isEmpty {
-                try? await store.saveDraft(sessionID: session.id, body: draft)
+            // Made with the choices already on it rather than made and then patched. The patch
+            // used to land after the row had already become the active session, so the new chat's
+            // own first-open preparation could run against a row that still said Claude Code and
+            // write the app-wide defaults back over the model that had just been picked. The draft
+            // goes the same way and for the same reason: a picker press must never be a way to
+            // lose a prompt somebody is halfway through writing, and a `saveDraft` after the fact
+            // races the read that fills the new composer.
+            guard let session = await model.createSession(
+                title: title,
+                controls: controls,
+                draft: draft
+            ) else {
+                app.notice = BloomNotice(message: BackendChange.forkFailureNotice(to: kind))
+                return
             }
-            await model.reloadSessions()
+
+            // The whole point of the press, and what was missing. A fork nobody is shown is
+            // indistinguishable from a picker that does nothing: the reported bug was a menu
+            // dismissed, a chat made off screen, and a composer still saying Sonnet 5.
+            WorkspaceTabsStore.shared.reveal(.chat(session.id), in: model)
+            app.notice = BloomNotice(message: BackendChange.forkNotice(title: title, from: from))
         }
     }
 

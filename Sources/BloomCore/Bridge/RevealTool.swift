@@ -9,17 +9,8 @@ public typealias Revealing = @Sendable (RevealPlan) async -> RevealOutcome
 
 /// `reveal`: point Bloom's window at a workspace, or at Home under a scope and a search.
 ///
-/// ## Why this is the only verb Ask Bloom gained
-///
-/// The obvious missing tool is the one that cleans up. "Clean up the finished ones" is the second
-/// thing anybody asks a chat that can see every workspace, and the honest answer to it is not an
-/// archive tool. **Nothing on the bridge archives, deliberately:** archiving removes a worktree
-/// and can offer up the branch with it, and the whole reason Bloom asks before archiving by hand
-/// is that the answer is sometimes no. There is nobody on this connection to ask.
-///
-/// So the request ends here instead, with the eight candidates on screen, selected, and the owner
-/// looking at them. It changes what is being looked at and one click puts it back, which is the
-/// test `workspace_tab_select` already passes.
+/// Use this to show cleanup candidates before the owner chooses them. `workspace_archive`
+/// handles an explicit archive request through the app's normal safety checks.
 ///
 /// ## What it cannot do
 ///
@@ -60,9 +51,7 @@ public struct RevealTool: BridgeToolHandling {
             the list of names there are; it will not create a workspace, and workspace_start is \
             what does that.
 
-            This is how a request to tidy up ends. There is no tool that archives a workspace, on \
-            purpose, because archiving removes a worktree and the answer to whether that is wanted \
-            is sometimes no. Show the person the candidates and let them press the button.
+            To archive a workspace the owner has selected for cleanup, use workspace_archive.
 
             It changes what the person is looking at, so ask first if they are in the middle of \
             reading something.

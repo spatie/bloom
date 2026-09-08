@@ -21,3 +21,4 @@ copy_notice "$checkouts/Sparkle/LICENSE" Sparkle.txt
 copy_notice "$checkouts/swift-argument-parser/LICENSE.txt" SwiftArgumentParser.txt
 copy_notice "$checkouts/flare-client-swift/LICENSE.md" Flare.txt
 copy_notice "$checkouts/plcrashreporter/LICENSE" PLCrashReporter.txt
+copy_notice "$checkouts/swift-markdown-engine/LICENSE" MarkdownEngine.txt

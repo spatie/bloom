@@ -101,6 +101,10 @@ extension AppModel {
             BrowserScrollTool(browser),
             BrowserScreenshotTool(browser),
             BrowserTextTool(browser),
+            WorkspaceArchiveTool { [weak self] workspace in
+                guard let self else { return .refused("Bloom is still starting up.") }
+                return await self.archiveWorkspaceForBridge(workspace)
+            },
             WorkspaceMergeTool { [weak self] workspace, pullRequest, method in
                 guard let self else {
                     return .refused("Bloom is still starting up. Try again in a moment.")
@@ -130,6 +134,15 @@ extension AppModel {
                 return await self.stopCrewForBridge(name, from: sessionID, in: workspaceID)
             },
         ])
+    }
+
+    /// Uses the UI lifecycle so tabs, agents, terminals and selection cannot outlive the worktree.
+    /// A refusal goes back to the caller instead of asking the user to approve a destructive retry.
+    private func archiveWorkspaceForBridge(_ workspace: Workspace) async -> WorkspaceArchiveOutcome {
+        guard let current = workspaces.first(where: { $0.id == workspace.id }) else {
+            return .refused("This workspace is no longer active. Refresh workspace_list.")
+        }
+        return await archive(current, deleteBranch: false, allowsConfirmation: false)
     }
 
     /// Confirms that the path the model named is a real image or movie inside its own worktree.

@@ -1,4 +1,5 @@
 import AppKit
+import BloomCore
 import SwiftUI
 
 /// Hosts the welcome sequence without feeding SwiftUI's ideal size back into AppKit's constraint
@@ -52,9 +53,9 @@ final class WelcomeHostingController<Content: View>: NSHostingController<Content
         else { return }
 
         let oldFrame = window.frame
-        var newFrame = window.frameRect(forContentRect: NSRect(origin: .zero, size: size))
-        newFrame.origin.x = oldFrame.origin.x
-        newFrame.origin.y = oldFrame.maxY - newFrame.height
+        let fitted = window.frameRect(forContentRect: NSRect(origin: .zero, size: size))
+        let visible = window.screen?.visibleFrame ?? oldFrame
+        let newFrame = CentredWindowPlacement.frame(size: fitted.size, around: oldFrame, visible: visible)
         window.setFrame(newFrame, display: true)
     }
 

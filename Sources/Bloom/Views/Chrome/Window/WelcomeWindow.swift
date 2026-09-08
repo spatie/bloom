@@ -56,6 +56,7 @@ enum WelcomeWindow {
         restarting: Bool = false
     ) {
         let existing = prepare(trigger: trigger, restarting: restarting)
+        if !existing.isVisible { centre(existing) }
         existing.makeKeyAndOrderFront(nil)
         // Only when Bloom is already the front application, or when somebody asked for this
         // window by name. `NSApp.activate()` was unconditional, and the caller behind it is an
@@ -67,6 +68,19 @@ enum WelcomeWindow {
         // Asked again for the same reason the probes are: somebody who came back may have run the
         // command in between, and a window that kept offering it would not have noticed.
         registration?.resolve()
+    }
+
+    /// Position against Bloom's content after its main window exists. Screen centring during
+    /// construction can place a small welcome near the top of a larger, offset app window.
+    private static func centre(_ window: NSWindow) {
+        let owner = NSApp.orderedWindows.first {
+            $0 !== window && $0.isVisible && WindowRoles.target($0).role == .workspace
+        }
+        guard let screen = owner?.screen ?? window.screen ?? NSScreen.main else { return }
+        let anchor = owner.map { $0.convertToScreen($0.contentLayoutRect) } ?? screen.visibleFrame
+        window.setFrame(CentredWindowPlacement.frame(
+            size: window.frame.size, around: anchor, visible: screen.visibleFrame
+        ), display: false)
     }
 
     /// Preparing is separate from presentation so the lifecycle can be exercised offscreen.

@@ -20,12 +20,17 @@ struct ChangedFileRow: View, Equatable {
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.file == rhs.file
             && lhs.isSelected == rhs.isSelected
+            && lhs.isViewed == rhs.isViewed
             && lhs.fullPath == rhs.fullPath
             && lhs.depth == rhs.depth
     }
 
     var file: ChangedFile
     var isSelected: Bool
+    /// Whether this file has been read, at the diff it has now. A tick and a quieter row, which
+    /// is the whole point of the mark: the first version of this feature could be set and was
+    /// never visible anywhere except the control that set it. See `ReviewedFile`.
+    var isViewed: Bool = false
     /// The file's location in the worktree, for the menu items that hand it to another app.
     var fullPath: String
     /// How many levels down the tree this row is drawn. Zero in the flat list, which is what
@@ -38,6 +43,9 @@ struct ChangedFileRow: View, Equatable {
     /// model, so the row keeps comparing on its values alone: see `==` above.
     var onOpenPage: @MainActor () -> Void
     var onSplitPage: @MainActor (SplitAxis) -> Void
+    /// Ticks the file, or takes the tick off. The wording of the item is `ReviewedMarkAction`'s,
+    /// shared with the file bar's toggle.
+    var onSetViewed: @MainActor (Bool) -> Void = { _ in }
 
     @Environment(\.isOnEmphasizedSelection) private var isOnSelection
 
@@ -51,7 +59,21 @@ struct ChangedFileRow: View, Equatable {
                     .font(Typo.body)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    // Read rows step back rather than disappear. The diff is still there and the
+                    // reader may well come back to it; what the dimming says is "not this one" at
+                    // a glance down the column, which is the question a pass through twenty files
+                    // is actually asking. Never on a selected row, where the accent fill has
+                    // already made the row the loudest thing in the list and dimming its name
+                    // against that reads as unreadable rather than as quiet.
+                    .opacity(isViewed && !isOnSelection ? InspectorLayout.viewedOpacity : 1)
                 Spacer(minLength: Metrics.spacingSmall)
+                if isViewed {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(Typo.micro)
+                        .imageScale(.small)
+                        .foregroundStyle(isOnSelection ? Palette.selectedEmphasizedText : Palette.positive)
+                        .accessibilityLabel("Viewed")
+                }
                 if file.isBinary {
                     Chip(text: "bin")
                 } else {
@@ -76,6 +98,11 @@ struct ChangedFileRow: View, Equatable {
         // sentence about where it lives. One file per drag: the list carries a single selection.
         .fileDrag(path: fullPath)
         .contextMenu {
+            // First, because it is the one item here about the reader's pass through the diff
+            // rather than about handing the file to something else, and because it is the item
+            // this menu is most often opened for during a review.
+            Button(ReviewedMarkAction(isViewed: isViewed).title) { onSetViewed(!isViewed) }
+            Divider()
             OpenInItems(target: .file(fullPath))
             Button("Reveal in Finder") { Reveal.inFinder(fullPath) }
             // With the two above rather than beside Copy path: all of them hand this row to
@@ -88,6 +115,7 @@ struct ChangedFileRow: View, Equatable {
         }
         .help(file.path)
         .accessibilityInputLabels([file.filename])
+        .accessibilityValue(isViewed ? "Viewed" : "")
     }
 
     /// The status letter git uses, so the list reads the same as `git status` does. The letter is

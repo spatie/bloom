@@ -26,7 +26,7 @@ struct ReviewTurnChips: View {
                 }
                 .buttonStyle(.plain)
                 .help(chip.body)
-                .accessibilityLabel("Review comment on \(chip.fileName) line \(chip.line)")
+                .accessibilityLabel("Review comment on \(chip.fileName) \(chip.lineDescription)")
                 .accessibilityValue(chip.body)
             }
         }

@@ -28,6 +28,9 @@ struct DiffLineView: View, Equatable {
     /// this comparison are the two halves of one diff and always hand it the same kind of closure.
     /// `onEdit` is left out for the same reasons and answers to the same argument: whether the
     /// menu offers an edit is decided by `editableLine` from `line` and `numbers`, both compared.
+    /// The two drag closures are out on the same terms: whether a drag is offered at all follows
+    /// `offeredSpot`, and where one lands is decided by the row it began on rather than by
+    /// anything this comparison could see.
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.line == rhs.line
             && lhs.language == rhs.language
@@ -56,6 +59,13 @@ struct DiffLineView: View, Equatable {
     /// Opens the review comment editor at this line. Nil, the default, draws no `+` at all,
     /// which is what every caller that is not the review's own diff wants.
     var onComment: ((ReviewSpot) -> Void)?
+    /// A drag from this row's `+`, reporting where it began and where it has reached. A lone row
+    /// has nowhere to reach, so both are this row: the range a drag from here selects is one
+    /// line, which is what `DiffDragRange` calls being clamped to the block it began in. Most
+    /// rows of a diff are a `DiffRunView` instead, and there a drag really does travel.
+    var onDragComment: ((ReviewSpot, ReviewSpot) -> Void)?
+    /// The pointer let go, so the editor opens on whatever the drag selected.
+    var onEndCommentDrag: (() -> Void)?
     /// Opens the in-place editor on the lines around this one, by its new-side number. Nil, the
     /// default, offers nothing, which is what every caller outside the review's own diff wants.
     var onEdit: ((Int) -> Void)?
@@ -153,8 +163,23 @@ struct DiffLineView: View, Equatable {
     @ViewBuilder
     private var commentButton: some View {
         if let spot = offeredSpot, let onComment {
-            DiffCommentButton(spot: spot, isRowHovered: isHovered, onComment: onComment)
+            DiffCommentButton(
+                spot: spot,
+                isRowHovered: isHovered,
+                onComment: onComment,
+                onDrag: drag(from: spot),
+                onDragEnd: onEndCommentDrag
+            )
         }
+    }
+
+    /// A drag from this row, which has nowhere to travel to: a lone row is a block of one, so
+    /// however far the pointer goes the range is this line. Handed over all the same, so that a
+    /// press that turns into a drag ends by opening the editor rather than by doing nothing at
+    /// all, which is what it would do if the button's own click were the only path.
+    private func drag(from spot: ReviewSpot) -> ((CGFloat) -> Void)? {
+        guard let onDragComment else { return nil }
+        return { _ in onDragComment(spot, spot) }
     }
 
     // MARK: - Content

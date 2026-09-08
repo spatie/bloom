@@ -3,9 +3,8 @@ import Foundation
 /// The scratch text a workspace carries, and the rules about when it is written down.
 ///
 /// A note is the thing you notice at eleven at night and want the morning agent to fix. It belongs
-/// to the worktree rather than to any one conversation, it is not transcript, and nothing sends it
-/// anywhere on its own: the only way it reaches an agent is the button that copies it into the
-/// composer, where the user can still read it before pressing send.
+/// to the workspace rather than any one conversation. It is a standalone scratchpad, stored as
+/// plain Markdown, and is never added to a conversation automatically.
 ///
 /// **It is a row of its own rather than a column on `workspaces`, and that is the whole design.**
 /// A workspace row is written by a diff stat refresh every six seconds, by a finishing turn, by an
@@ -94,15 +93,4 @@ public struct WorkspaceNote: Sendable, Hashable {
     /// Leaving `saved` alone is what makes the next keystroke try again, which is why this says so.
     public static let unwritable = "Not saved. Bloom's database refused the write. Retried as you type."
 
-    /// The sentence this note becomes when it is handed to the composer, or nothing when there is
-    /// nothing to hand over.
-    ///
-    /// The text goes across as written, with no framing added. A note is already addressed to the
-    /// agent, and a preamble bolted on here would be one more thing to delete before sending. The
-    /// trailing whitespace goes because it arrives at the end of a draft that may already have a
-    /// sentence in it.
-    public static func handoff(_ body: String) -> String? {
-        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
 }

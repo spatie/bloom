@@ -113,6 +113,9 @@ struct FileEditPane: View {
         Task {
             await session.save(path: absolutePath)
             guard case .saved = session.status(for: absolutePath) else { return }
+            // Including whatever the review pane is holding for this file, which is a picture of
+            // the bytes that have just been replaced. See `WorkspaceModel.forgetHeldDiff`.
+            model.forgetHeldDiff(for: path)
             await model.refreshChanges()
             onSaved()
         }

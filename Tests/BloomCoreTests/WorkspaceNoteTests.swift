@@ -136,14 +136,6 @@ struct WorkspaceNoteTests {
         #expect(WorkspaceNote.storable("a\n") == "a\n")
     }
 
-    // MARK: - The composer
-
-    @Test("a note goes to the composer as written, without its surrounding whitespace")
-    func handsOffWhatWasWritten() {
-        #expect(WorkspaceNote.handoff("\nfix the retry\n\n") == "fix the retry")
-        #expect(WorkspaceNote.handoff("  \n ") == nil)
-        #expect(WorkspaceNote.handoff("") == nil)
-    }
 }
 
 /// What the pane says when the database will not answer.
