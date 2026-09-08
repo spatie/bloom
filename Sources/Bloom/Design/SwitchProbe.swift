@@ -108,6 +108,7 @@ enum SwitchProbe {
         // The case that breaks first: away before the asynchronous work has landed. Nothing from
         // the workspace being left may appear in the one being arrived at.
         let rapid = await rapidSwitches(contentView: contentView, ticker: ticker)
+        let background = await SwitchBackgroundProbe.run(order: order)
 
         SwitchTrace.isEnabled = false
         ticker.stop()
@@ -119,6 +120,7 @@ enum SwitchProbe {
             "settleMs": .integer(settle),
             "runs": .array(runs),
             "rapid": .object(rapid),
+            "backgroundUpdates": background,
             "keepsItsPlace": .object(kept),
         ]
         harness.write(.object(own.merging(harness.conditions(window: window)) { mine, _ in mine }))
