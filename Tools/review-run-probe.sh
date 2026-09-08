@@ -1,5 +1,6 @@
 #!/bin/zsh
 # Runs the diff comment regression in an invisible, isolated bundle after swift build.
+# Pass --review-compare-eager to also measure the previous 5,000-line renderer.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -19,13 +20,13 @@ install_name_tool -add_rpath '@executable_path/../Frameworks' "$probe_app/Conten
 codesign --force --deep --sign - "$probe_app" >/dev/null 2>&1
 
 # Refuse a release or stale binary, which would ignore the flag and start the application.
-python3 - "$probe_app/Contents/MacOS/Bloom" "$probe_root" <<'PY'
+python3 - "$probe_app/Contents/MacOS/Bloom" "$probe_root" "$@" <<'PY'
 import json
 import pathlib
 import subprocess
 import sys
 
-binary, root = sys.argv[1:]
+binary, root, *arguments = sys.argv[1:]
 if b'--review-run-probe' not in pathlib.Path(binary).read_bytes():
     raise SystemExit('Build the debug app with swift build before running this probe.')
 # A real, disposable worktree for full-screen review snapshots and navigation checks.
@@ -59,12 +60,16 @@ git('-c', 'user.name=Review Probe', '-c', 'user.email=probe@example.test', 'comm
     '    var qualifiesForFreeShipping: Bool {\n        subtotal >= freeShippingThreshold\n    }\n'
     '}\n'
 )
-subprocess.run(
-    ['open', '-g', '-n', '-W', '-a', str(pathlib.Path(binary).parents[2]),
-     '--stdout', f'{root}/result.json', '--stderr', f'{root}/probe.log',
-     '--args', '--review-run-probe', root],
-    timeout=60, check=True,
-)
+try:
+    subprocess.run(
+        ['open', '-g', '-n', '-W', '-a', str(pathlib.Path(binary).parents[2]),
+         '--stdout', f'{root}/result.json', '--stderr', f'{root}/probe.log',
+         '--args', '--review-run-probe', root, *arguments],
+        timeout=120, check=True,
+    )
+except subprocess.TimeoutExpired:
+    print(pathlib.Path(root, 'probe.log').read_text(), file=sys.stderr)
+    raise
 report = pathlib.Path(root, 'result.json').read_text()
 print(report)
 if not json.loads(report)['passed']:

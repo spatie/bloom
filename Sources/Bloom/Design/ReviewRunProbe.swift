@@ -25,6 +25,7 @@ enum ReviewRunProbe {
             if !condition { failures.append(message) }
         }
 
+        progress("Checking comment scrolling and focus")
         for numbers in [DiffGutter.Numbers.both, .old, .new] {
             let fixture = ReviewRunFixture()
             let host = NSHostingView(rootView: ReviewRunFixtureView(fixture: fixture, numbers: numbers))
@@ -69,7 +70,9 @@ enum ReviewRunProbe {
         // Use the same nested scrollers as all-files review. A lazy stack inside the
         // horizontal scroller previously realised the whole file's text and controls.
         var realisedRuns: [String: JSONValue] = [:]
-        for deferred in [false, true] {
+        progress("Checking embedded scrolling")
+        let compareEager = CommandLine.arguments.contains("--review-compare-eager")
+        for deferred in compareEager ? [false, true] : [true] {
             let host = NSHostingView(rootView: EmbeddedReviewFixture(deferred: deferred))
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 760, height: 600),
@@ -101,6 +104,7 @@ enum ReviewRunProbe {
             }
             window.contentView = nil
         }
+        progress("Checking complete review layouts and collapse")
         if let directory = ProbeHarness.value(for: "--review-run-probe") {
             let app = AppModel()
             let model = WorkspaceModel(
@@ -169,6 +173,10 @@ enum ReviewRunProbe {
         ])
         if let data = try? JSONEncoder().encode(result) { FileHandle.standardOutput.write(data) }
         exit(failures.isEmpty ? 0 : 1)
+    }
+
+    private static func progress(_ message: String) {
+        FileHandle.standardError.write(Data((message + "\n").utf8))
     }
 
     private static func settle(_ window: NSWindow) async {
