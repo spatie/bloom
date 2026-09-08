@@ -9,6 +9,7 @@ struct AllFilesReviewView: View {
     let navigationRevision: Int
     /// Keep the destination anchored while loading replaces short placeholders with full diffs.
     @State private var position = ScrollPosition(idType: String.self)
+    @State private var collapsedPaths: Set<String> = []
 
     var body: some View {
         if model.changedFiles.isEmpty {
@@ -22,7 +23,16 @@ struct AllFilesReviewView: View {
                 ScrollView(.vertical) {
                     LazyVStack(spacing: Metrics.spacingWide) {
                         ForEach(model.changedFiles) { file in
-                            DiffView(model: model, file: file, embeddedWidth: geometry.size.width)
+                            DiffView(
+                                model: model, file: file, embeddedWidth: geometry.size.width,
+                                embeddedViewportHeight: geometry.size.height,
+                                isCollapsed: collapsedPaths.contains(file.path),
+                                onToggleCollapsed: {
+                                    if !collapsedPaths.insert(file.path).inserted {
+                                        collapsedPaths.remove(file.path)
+                                    }
+                                }
+                            )
                                 .overlay(alignment: .bottom) { Hairline() }
                                 .id(file.path)
                         }
@@ -34,7 +44,11 @@ struct AllFilesReviewView: View {
                 .onChange(of: navigationRevision, initial: true) { _, _ in
                     let path = selectedPath.isEmpty ? model.changedFiles.first?.path : selectedPath
                     guard let path, model.changedFiles.contains(where: { $0.path == path }) else { return }
+                    collapsedPaths.remove(path)
                     position.scrollTo(id: path, anchor: .top)
+                }
+                .onChange(of: model.changedFiles.map(\.path)) { _, paths in
+                    collapsedPaths.formIntersection(paths)
                 }
             }
         }

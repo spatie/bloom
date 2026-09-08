@@ -12,6 +12,9 @@ struct DiffView: View {
     let file: ChangedFile
     /// Non-nil when the all-files review owns vertical scrolling.
     let embeddedWidth: CGFloat?
+    let embeddedViewportHeight: CGFloat?
+    let isCollapsed: Bool
+    var onToggleCollapsed: (() -> Void)?
 
     /// Above this many changed lines the diff is gated behind a tap. Rendering is lazy and would
     /// survive it, but the preparation pass and the user's attention would both rather not.
@@ -124,10 +127,17 @@ struct DiffView: View {
     /// The whitespace setting is read straight out of user defaults because `@AppStorage` is not
     /// available yet here, and it has to be part of the question: ignoring whitespace changes
     /// which hunks there are.
-    init(model: WorkspaceModel, file: ChangedFile, embeddedWidth: CGFloat? = nil) {
+    init(
+        model: WorkspaceModel, file: ChangedFile, embeddedWidth: CGFloat? = nil,
+        embeddedViewportHeight: CGFloat? = nil, isCollapsed: Bool = false,
+        onToggleCollapsed: (() -> Void)? = nil
+    ) {
         self.model = model
         self.file = file
         self.embeddedWidth = embeddedWidth
+        self.embeddedViewportHeight = embeddedViewportHeight
+        self.isCollapsed = isCollapsed
+        self.onToggleCollapsed = onToggleCollapsed
         let absolute = (model.workspace.path as NSString).appendingPathComponent(file.path)
         _mode = State(initialValue: FileEditSession.shared.isDirty(absolute) ? .edit : .diff)
 
@@ -153,6 +163,7 @@ struct DiffView: View {
         var workspaceID: WorkspaceID
         var file: ChangedFile
         var scope: DiffScope
+        var isCollapsed: Bool
     }
 
     /// One cancel that has been asked about: what would be lost, and which editor to close once
@@ -183,52 +194,63 @@ struct DiffView: View {
                 diff: source,
                 mode: $mode,
                 isEditable: isEditable,
-                onRevert: revert
+                onRevert: revert,
+                isCollapsed: isCollapsed,
+                onToggleCollapsed: onToggleCollapsed
             )
-            Hairline()
+            if !isCollapsed {
+                Hairline()
 
-            switch mode {
-            case .diff:
-                content
-                    // Empty states have an intrinsic size; centre them in the whole pane.
-                    // The actual diff fills this frame and owns its top-leading scroll anchor.
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    // Both of these hang on the diff rather than on the view around it, and that
-                    // is not tidiness: a second `.alert` and a second `.sheet` on one view is one
-                    // presentation modifier of each kind too many, and which of the pair wins is
-                    // not something to find out in a build. The revert's alert and the review's
-                    // discard sheet own the outer view; these two are about the diff and live on
-                    // it. Not on the band either, which is a row in a lazy stack: scrolled away,
-                    // it would take its own sheet with it.
-                    .alert(
-                        "Cannot edit these lines",
-                        isPresented: $editProblem.isPresent(),
-                        presenting: editProblem
-                    ) { _ in
-                    } message: { problem in
-                        Text(problem)
-                    }
-                    .confirmation($discardingEdit) { _ in
-                        Confirmation(
-                            title: DiffEdit.Discard.title,
-                            message: DiffEdit.Discard.message,
-                            confirmLabel: DiffEdit.Discard.confirmLabel,
-                            cancelLabel: DiffEdit.Discard.cancelLabel
-                        )
-                    } onConfirm: { _ in
-                        closeEdit()
-                    }
-            case .edit:
-                FileEditPane(model: model, path: file.path, session: session)
-                    .frame(height: embeddedWidth == nil ? nil : 400)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                switch mode {
+                case .diff:
+                    content
+                        // Empty states have an intrinsic size; centre them in the whole pane.
+                        // The actual diff fills this frame and owns its top-leading scroll anchor.
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        // Both of these hang on the diff rather than on the view around it, and that
+                        // is not tidiness: a second `.alert` and a second `.sheet` on one view is one
+                        // presentation modifier of each kind too many, and which of the pair wins is
+                        // not something to find out in a build. The revert's alert and the review's
+                        // discard sheet own the outer view; these two are about the diff and live on
+                        // it. Not on the band either, which is a row in a lazy stack: scrolled away,
+                        // it would take its own sheet with it.
+                        .alert(
+                            "Cannot edit these lines",
+                            isPresented: $editProblem.isPresent(),
+                            presenting: editProblem
+                        ) { _ in
+                        } message: { problem in
+                            Text(problem)
+                        }
+                        .confirmation($discardingEdit) { _ in
+                            Confirmation(
+                                title: DiffEdit.Discard.title,
+                                message: DiffEdit.Discard.message,
+                                confirmLabel: DiffEdit.Discard.confirmLabel,
+                                cancelLabel: DiffEdit.Discard.cancelLabel
+                            )
+                        } onConfirm: { _ in
+                            closeEdit()
+                        }
+                case .edit:
+                    FileEditPane(model: model, path: file.path, session: session)
+                        .frame(height: embeddedWidth == nil ? nil : 400)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
         .background(Palette.surface)
         .background {
             if embeddedWidth == nil { shortcut }
         }
-        .task(id: LoadID(workspaceID: model.workspace.id, file: file, scope: model.diffScope)) {
+        .task(id: LoadID(
+            workspaceID: model.workspace.id, file: file, scope: model.diffScope,
+            isCollapsed: isCollapsed
+        )) {
+            guard !isCollapsed else {
+                priming?.cancel()
+                return
+            }
             await load()
         }
         .onChange(of: isSideBySide) { _, _ in rebuild() }
@@ -348,6 +370,7 @@ struct DiffView: View {
         }
 
         let patch = await model.patch(for: file)
+        guard !Task.isCancelled else { return }
         let path = file.path
         let parsed = await Task.detached(priority: .userInitiated) {
             DiffDocument.parse(patch: patch, path: path)
@@ -375,8 +398,11 @@ struct DiffView: View {
         // Show anyway on is held as what it became, so coming back to it does not put the gate
         // in front of them a second time.
         if parsed != source {
-            source = parsed
             await apply(parsed)
+            guard !Task.isCancelled else { return }
+            // A collapse can cancel preparation. Only remember the patch once it was
+            // presented, so expanding retries instead of leaving a loading placeholder.
+            source = parsed
         }
 
         // Whether Edit mode is even offered is a question about the bytes on disk rather than
@@ -416,7 +442,7 @@ struct DiffView: View {
             phase = .gated(fileDiff, changed: changed)
             return
         }
-        await present(fileDiff)
+        await present(fileDiff, raw: raw)
     }
 
     /// Refolding drops what the reader expanded, because a run that was expanded no longer exists
@@ -445,7 +471,7 @@ struct DiffView: View {
         }
     }
 
-    private func present(_ fileDiff: FileDiff) async {
+    private func present(_ fileDiff: FileDiff, raw: FileDiff? = nil) async {
         let path = file.path
         let worktree = model.workspace.path
         // The worktree copy is read here rather than after the await, which is where it used to be
@@ -474,7 +500,7 @@ struct DiffView: View {
         // the whitespace setting was applied to it, which is what a later visit compares against.
         // See `DiffPresentationCache`.
         model.holdDiff(
-            DiffPresentation(source: source ?? fileDiff, document: document, lines: prepared.lines),
+            DiffPresentation(source: raw ?? source ?? fileDiff, document: document, lines: prepared.lines),
             for: file,
             ignoringWhitespace: ignoresWhitespace
         )
@@ -584,7 +610,16 @@ struct DiffView: View {
             ScrollView(.horizontal) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(rows) { row in
-                        rowView(row, document: document, width: width)
+                        if let count = row.codeLineCount, let embeddedViewportHeight {
+                            ReviewDiffBlock(
+                                height: CGFloat(count) * CodeMetrics.rowHeight,
+                                viewportHeight: embeddedViewportHeight
+                            ) {
+                                rowView(row, document: document, width: width)
+                            }
+                        } else {
+                            rowView(row, document: document, width: width)
+                        }
                     }
                 }
                 .frame(width: width, alignment: .leading)
