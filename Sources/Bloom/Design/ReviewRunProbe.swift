@@ -180,6 +180,13 @@ enum ReviewRunProbe {
                 await settle(window)
                 if loadedLongReview(in: host) { break }
             }
+            if !loadedLongReview(in: host) {
+                let tab = CenterTabStore.shared.review(for: model.workspace.id)
+                progress("Navigation target: \(tab?.path ?? "nil"), revision: \(tab?.reviewNavigationRevision ?? -1)")
+                if let scroll = scrollView(in: host) {
+                    progress("Review offset: \(scroll.contentView.bounds), document: \(scroll.documentView?.bounds ?? .zero)")
+                }
+            }
             check(loadedLongReview(in: host), "navigation did not load the destination file")
             if let scroll = scrollView(in: host) {
                 let lastFileOffset = scroll.contentView.bounds.origin.y

@@ -224,6 +224,7 @@ struct DiffView: View {
                     }
                 } header: {
                     fileHeader
+                        .id(file.path)
                         .onGeometryChange(for: Bool.self) { proxy in
                             let frame = proxy.frame(in: .scrollView(axis: .vertical))
                             return isCollapsed && frame.minY <= 0 && frame.maxY > 0

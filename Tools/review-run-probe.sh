@@ -77,6 +77,7 @@ except subprocess.TimeoutExpired:
 report = pathlib.Path(root, 'result.json').read_text()
 print(report)
 if not json.loads(report)['passed']:
+    print(pathlib.Path(root, 'probe.log').read_text(), file=sys.stderr)
     raise SystemExit(f'Probe failed; evidence: {root}')
 print(f'Probe evidence: {root}')
 PY

@@ -37,7 +37,6 @@ struct AllFilesReviewView: View {
                                     }
                                 }
                             )
-                                .id(file.path)
                         }
                     }
                     .scrollTargetLayout()
