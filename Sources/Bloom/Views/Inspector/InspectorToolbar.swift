@@ -48,9 +48,6 @@ struct InspectorToolbar: View {
     private var trailing: some View {
         HStack(spacing: Metrics.spacingTight) {
             if model.inspectorTab == .changes {
-                ReviewAllFilesToggle(model: model)
-                    .disabled(model.changedFiles.isEmpty)
-
                 Button {
                     isTree.toggle()
                 } label: {

@@ -15,7 +15,7 @@ struct AllFilesReviewView: View {
     @State private var hasNavigated = false
 
     var body: some View {
-        if model.changedFiles.isEmpty {
+        if model.reviewFiles.isEmpty {
             EmptyStateView(
                 glyph: "doc.text",
                 title: "No changes",
@@ -26,7 +26,7 @@ struct AllFilesReviewView: View {
                 ScrollViewReader { reader in
                     ScrollView(.vertical) {
                         LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                            ForEach(model.changedFiles) { file in
+                            ForEach(model.reviewFiles) { file in
                                 DiffView(
                                     model: model, file: file, embeddedWidth: geometry.size.width,
                                     embeddedViewportHeight: geometry.size.height,
@@ -58,7 +58,7 @@ struct AllFilesReviewView: View {
                     .onScrollGeometryChange(for: Bool.self) { geometry in
                         geometry.contentOffset.y <= geometry.contentInsets.top
                     } action: { _, atTop in
-                        if atTop, let path = model.changedFiles.first?.path,
+                        if atTop, let path = model.reviewFiles.first?.path,
                            model.selectedFilePath != path {
                             model.selectedFilePath = path
                         }
@@ -66,8 +66,8 @@ struct AllFilesReviewView: View {
                     .onChange(of: navigationRevision, initial: true) { _, _ in
                         let requested = hasNavigated ? selectedPath : model.selectedFilePath ?? selectedPath
                         hasNavigated = true
-                        let path = requested.isEmpty ? model.changedFiles.first?.path : requested
-                        guard let path, model.changedFiles.contains(where: { $0.path == path }) else { return }
+                        let path = requested.isEmpty ? model.reviewFiles.first?.path : requested
+                        guard let path, model.reviewFiles.contains(where: { $0.path == path }) else { return }
                         collapsedPaths.remove(path)
                         pendingDestination = preparedPaths.contains(path) ? nil : path
                         reader.scrollTo(path, anchor: .top)
@@ -78,7 +78,7 @@ struct AllFilesReviewView: View {
                             if preparedPaths.contains(path) { pendingDestination = nil }
                         }
                     }
-                    .onChange(of: model.changedFiles.map(\.path)) { _, paths in
+                    .onChange(of: model.reviewFiles.map(\.path)) { _, paths in
                         collapsedPaths.formIntersection(paths)
                         preparedPaths.formIntersection(paths)
                         if let pendingDestination, !paths.contains(pendingDestination) { self.pendingDestination = nil }

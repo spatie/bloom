@@ -64,6 +64,11 @@ public enum ChangedFileTree {
         return nodes(from: entries, prefix: "")
     }
 
+    /// The complete review follows the expanded tree, including files in closed folders.
+    public static func orderedFiles(from files: [ChangedFile]) -> [ChangedFile] {
+        rows(from: build(from: files), collapsed: []).compactMap { $0.node.file }
+    }
+
     /// Walks only the folders the user has closed out of, so first open shows everything and the
     /// row count still stays proportional to what is on screen.
     public static func rows(
