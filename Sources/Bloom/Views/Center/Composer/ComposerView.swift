@@ -382,25 +382,31 @@ struct ComposerView: View {
         // and a file that fails it is taken out of the sentence rather than sent as a path to
         // nothing.
         let worktree = transcript.cwd
-        let text = AttachmentDraft
-            .parse(transcript.draft, paths: attachments.map(\.path))
+        let sourceDraft = transcript.draft
+        let draftText = AttachmentDraft
+            .parse(sourceDraft, paths: attachments.map(\.path))
             .keeping { path in
                 FileManager.default.fileExists(
                     atPath: PromptAttachment.sent(path: path).url(in: worktree).path
                 )
             }
 
+        let imageComments = Dictionary(attachments.compactMap { attachment in
+            attachment.imageComment.map { (attachment.path, $0) }
+        }, uniquingKeysWith: { first, _ in first })
+        let text = BrowserImageComment.expand(draftText, comments: imageComments)
+
         // The records go and the files the message names stay. The prompt the agent is now reading
         // names those paths, and deleting them out from under it would break the one thing they
         // were for.
         PromptAttachmentStore.shared.settle(
-            sent: text, sessionID: transcript.session.id.rawValue, workspace: worktree
+            sent: draftText, sessionID: transcript.session.id.rawValue, workspace: worktree
         )
         caret = 0
         let transcript = transcript
         let comments = reviewComments
         guard !comments.isEmpty else {
-            Task { await transcript.submit(text) }
+            Task { await transcript.submit(text, clearingDraft: sourceDraft) }
             return
         }
 
@@ -421,7 +427,7 @@ struct ComposerView: View {
                     template: template
                 )
             }.value
-            await transcript.submit(composed)
+            await transcript.submit(composed, clearingDraft: sourceDraft)
             await model?.removeReviewComments(ids: comments.map(\.id))
         }
     }

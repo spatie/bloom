@@ -73,7 +73,7 @@ struct ToolPaneView: View {
             .task(id: tab.id) { await prepareTerminal() }
 
         case .browser:
-            BrowserTabView(model: model, tab: tab, paneMenu: paneMenu)
+            BrowserTabView(model: model, tab: tab, paneMenu: paneMenu, siblings: siblings)
                 .id(tab.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 

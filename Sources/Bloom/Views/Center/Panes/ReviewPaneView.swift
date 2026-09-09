@@ -50,14 +50,6 @@ struct ReviewPaneView: View {
     /// beside the box, every time the draft rewrapped a line.
     @State private var room = ComposerRoom()
 
-    /// The conversation's text size, face and line height, applied to the composer here exactly
-    /// as `ChatPaneView` applies them to its whole subtree. Without this the same composer would
-    /// change as the reader moved between the conversation and the review, which reads as a bug
-    /// rather than a setting.
-    @AppStorage(ChatTextSize.defaultsKey) private var textSize = ChatTextSize.defaultChoice
-    @AppStorage(ChatFont.defaultsKey) private var chatFontID = ChatFont.standardID
-    @AppStorage(ChatLineHeight.defaultsKey) private var lineHeight = ChatLineHeight.defaultChoice
-
     var body: some View {
         VStack(spacing: 0) {
             if !tab.isPinnedToPath {
@@ -71,32 +63,8 @@ struct ReviewPaneView: View {
                 // this holds reads top down, and the empty states inside them centre themselves.
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-            // The same composer the conversation shows, bound to the same transcript, so the
-            // chips a review has accumulated are visible from the diff they were written on and
-            // Return sends from here. It used to live only in the chat pane, which meant placing
-            // comments on this screen and then leaving it to send them. A second composer view
-            // was considered and rejected: one draft, one send path, nothing to keep in step.
-            //
-            // One draft is exactly why it is not always drawn. Split a tab so the conversation
-            // sits beside the file and both composers were on screen at once, bound to the same
-            // draft, so typing into this one put the same words in the one under the chat. The
-            // rule is `ReviewComposer`, in the core: this box is for when the conversation it
-            // sends to is not already on screen in this tab.
-            if drawsComposer, let destination = model.reviewDestination,
-               let transcript = model.existingTranscript(for: destination.id) {
-                ComposerView(
-                    transcript: transcript,
-                    model: model,
-                    room: room,
-                    destinationLabel: ReviewDestination.label(for: destination.title),
-                    destinations: model.sessions.map {
-                        ComposerDestination(id: $0.id, title: $0.title)
-                    },
-                    onSelectDestination: choose(destination:)
-                )
-                    .environment(\.fontScale, textSize.scale)
-                    .environment(\.chatFont, ChatFont(rawValue: chatFontID))
-                    .environment(\.chatLineHeight, lineHeight)
+            if drawsComposer {
+                ReviewPaneComposer(model: model, room: room)
             }
         }
         .onGeometryChange(for: CGFloat.self) { PaneMeasure.room($0.size.height) } action: {
@@ -115,15 +83,6 @@ struct ReviewPaneView: View {
                 Task { await model.setViewed(!model.isViewed(changed), file: changed) }
             }
         }
-        // A pane can be pointed at a session this launch has never opened, so the transcript is
-        // built here rather than assumed, exactly as `CenterPaneView.prepare` does for a chat.
-        // Keyed on the destination rather than on the active session, because those are now two
-        // different questions: a review sent to a chat nobody has opened this launch needs that
-        // chat's transcript, and the active one may be somewhere else entirely.
-        .task(id: model.reviewDestination?.id) {
-            guard let destination = model.reviewDestination else { return }
-            model.prepareTranscript(for: destination.id)
-        }
         // Keyed on the poll as well as the path, because a file can be deleted underneath a reader
         // who has not moved: the changes generation is what says the worktree has been looked at
         // again.
@@ -134,17 +93,6 @@ struct ReviewPaneView: View {
                 !path.isEmpty && FileManager.default.fileExists(atPath: absolute)
             }.value
         }
-    }
-
-    /// Points this review at another chat.
-    ///
-    /// The transcript is prepared here rather than left to the `task` above, so the composer has
-    /// something to bind to on the frame the choice is made instead of a frame later, which would
-    /// read as the box blinking out and back.
-    private func choose(destination id: SessionID) {
-        guard model.reviewDestinationID != id else { return }
-        model.reviewDestinationID = id
-        model.prepareTranscript(for: id)
     }
 
     /// Whether this pane draws that composer at all. The rule and the reasoning are

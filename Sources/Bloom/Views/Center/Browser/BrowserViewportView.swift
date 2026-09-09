@@ -7,6 +7,9 @@ struct BrowserViewportView: View {
     @Bindable var session: BrowserSession
     var paneMenu: (@MainActor () -> NSMenu)?
     var host = BrowserPaneHost()
+    var isSelectingRegion = false
+    var regionCapture: BrowserRegionCapture?
+    var onViewportFrame: @MainActor (CGRect) -> Void = { _ in }
     @State private var drag: ResizeStart?
 
     private let gutter: CGFloat = 18
@@ -19,15 +22,27 @@ struct BrowserViewportView: View {
                 availableWidth: geometry.size.width - padding * 2,
                 availableHeight: geometry.size.height - padding * 2
             )
-            let width = viewport.isEnabled ? CGFloat(viewport.width) * scale : geometry.size.width
-            let height = viewport.isEnabled ? CGFloat(viewport.height) * scale : geometry.size.height
+            let width = regionCapture?.viewportSize?.width
+                ?? (viewport.isEnabled ? CGFloat(viewport.width) * scale : geometry.size.width)
+            let height = regionCapture?.viewportSize?.height
+                ?? (viewport.isEnabled ? CGFloat(viewport.height) * scale : geometry.size.height)
             ScrollView([.horizontal, .vertical]) {
-                BrowserWebView(
-                    session: session, paneMenu: paneMenu, host: host,
-                    viewportSize: viewport.isEnabled
-                        ? CGSize(width: viewport.width, height: viewport.height) : nil
-                )
+                ZStack {
+                    BrowserWebView(
+                        session: session, paneMenu: paneMenu, host: host,
+                        viewportSize: viewport.isEnabled
+                            ? CGSize(width: viewport.width, height: viewport.height) : nil
+                    )
+                    .allowsHitTesting(!isSelectingRegion)
+                    .accessibilityHidden(isSelectingRegion)
+                    if let regionCapture {
+                        BrowserRegionCanvas(capture: regionCapture) { regionCapture.isEditing = true }
+                    }
+                }
                 .frame(width: width, height: height)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("browser-feedback-pane")) } action: {
+                    onViewportFrame($0)
+                }
                 .overlay {
                     if viewport.isEnabled {
                         Rectangle().strokeBorder(Palette.border, lineWidth: 1)
@@ -54,7 +69,7 @@ struct BrowserViewportView: View {
                 .padding(padding)
                 .frame(minWidth: geometry.size.width, minHeight: geometry.size.height, alignment: .top)
             }
-            .scrollDisabled(!viewport.isEnabled)
+            .scrollDisabled(regionCapture == nil && (!viewport.isEnabled || isSelectingRegion))
             .background(viewport.isEnabled ? Palette.surfaceSunken : Palette.surface)
         }
         .clipped()
@@ -66,6 +81,7 @@ struct BrowserViewportView: View {
             .frame(width: edge == .bottom ? 32 : 4, height: edge == .bottom ? 4 : 32)
             .frame(width: edge == .bottom ? 64 : gutter, height: edge == .bottom ? gutter : 64)
             .contentShape(Rectangle())
+            .allowsHitTesting(!isSelectingRegion)
             .pointerStyle(edge == .bottom ? .rowResize : .columnResize)
             .help(edge == .bottom ? "Drag to resize viewport height" : "Drag to resize viewport width")
             .accessibilityLabel(edge == .bottom ? "Viewport height" : "Viewport width")

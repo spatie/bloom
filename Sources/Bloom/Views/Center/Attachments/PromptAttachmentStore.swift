@@ -240,6 +240,16 @@ final class PromptAttachmentStore {
 
     // MARK: - Persistence
 
+    func annotate(paths: [String], with comment: BrowserImageComment, sessionID: String) {
+        let paths = Set(paths)
+        let updated = attachments(for: sessionID).map { attachment in
+            var attachment = attachment
+            if paths.contains(attachment.path) { attachment.imageComment = comment }
+            return attachment
+        }
+        apply(updated, to: sessionID)
+    }
+
     private func apply(_ attachments: [PromptAttachment], to sessionID: String) {
         box(for: sessionID).list = attachments
         Self.persist(attachments, sessionID: sessionID)
