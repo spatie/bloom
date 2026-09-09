@@ -15,12 +15,13 @@ import BloomCore
 enum FileReview {
     /// Opens the workspace's review on a file, or points the open one at it.
     static func open(path: String, in model: WorkspaceModel, focusing: Bool = false) {
-        // Unchanged files and attachments still open on their own.
+        if model.changedFiles.contains(where: { $0.path == path }) { model.selectedFilePath = path }
+        show(path: path, in: model, focusing: focusing)
+        // A new shared review defaults to all changes, but unchanged files open on their own.
         if !model.changedFiles.contains(where: { $0.path == path }),
            let tab = CenterTabStore.shared.review(for: model.workspace.id) {
             CenterTabStore.shared.setShowsAllFiles(false, for: tab)
         }
-        show(path: path, in: model, focusing: focusing)
     }
 
     /// The one door, with the one thing the two callers disagree about.
@@ -59,13 +60,20 @@ enum FileReview {
     /// saying nothing differs from the base branch yet. Refusing here, or greying the menu row
     /// out, is what made this read as a control that did nothing.
     static func open(in model: WorkspaceModel) {
-        let remembered = CenterTabStore.shared.review(for: model.workspace.id)?.path
-        let fallback = model.selectedFilePath ?? model.changedFiles.first?.path
+        let remembered = currentPath(in: model)
+        let fallback = model.selectedFilePath ?? model.reviewFiles.first?.path
         show(
             path: remembered.flatMap { $0.isEmpty ? nil : $0 } ?? fallback ?? "",
             in: model,
             focusing: true
         )
+    }
+
+    /// Scroll-follow is transient selection, not a navigation request. Keeping it out of
+    /// the tab store avoids rebuilding every tool pane and writing defaults while scrolling.
+    static func currentPath(in model: WorkspaceModel) -> String? {
+        let tab = CenterTabStore.shared.review(for: model.workspace.id)
+        return tab?.showsAllFiles == true ? model.selectedFilePath ?? tab?.path : tab?.path
     }
 
     static func openAll(in model: WorkspaceModel) {
@@ -77,10 +85,10 @@ enum FileReview {
     static func setShowsAllFiles(_ all: Bool, in model: WorkspaceModel) {
         let store = CenterTabStore.shared
         let remembered = store.review(for: model.workspace.id)?.path
-        let candidates = [remembered, model.selectedFilePath].compactMap { $0 }
+        let candidates = [model.selectedFilePath, remembered].compactMap { $0 }
         let path = candidates.first { candidate in
             model.changedFiles.contains { $0.path == candidate }
-        } ?? model.changedFiles.first?.path ?? ""
+        } ?? model.reviewFiles.first?.path ?? ""
         let tab = store.showReview(path: path, workspaceID: model.workspace.id)
         store.setShowsAllFiles(all, for: tab)
         WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
@@ -110,10 +118,10 @@ enum FileReview {
     /// goes round rather than stopping dead at the last file, and keeps the inspector's own
     /// selection in step so the list scrolls and highlights along with the diff.
     static func step(_ delta: Int, in model: WorkspaceModel) {
-        let files = model.changedFiles
+        let files = model.reviewFiles
         guard !files.isEmpty else { return }
 
-        let current = CenterTabStore.shared.review(for: model.workspace.id)?.path
+        let current = currentPath(in: model)
         let index = files.firstIndex { $0.path == current }
         let next = index.map { ($0 + delta + files.count) % files.count } ?? 0
 

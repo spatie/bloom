@@ -87,7 +87,11 @@ final class WorkspaceModel {
         get { InspectorTab.resolve(chosenInspectorTab, available: availableInspectorTabs) }
         set { chosenInspectorTab = newValue }
     }
-    var changedFiles: [ChangedFile] = []
+    var changedFiles: [ChangedFile] = [] {
+        didSet { reviewFiles = ChangedFileTree.orderedFiles(from: changedFiles) }
+    }
+    /// Retain tree order across scroll updates; rebuild it only when the changed files change.
+    private(set) var reviewFiles: [ChangedFile] = []
     var selectedFilePath: String?
     var isLoadingChanges = false
     /// Whether git has answered about this worktree at all, this launch.

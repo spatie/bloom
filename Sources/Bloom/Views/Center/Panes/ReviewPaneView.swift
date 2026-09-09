@@ -213,8 +213,8 @@ struct ReviewPaneView: View {
                 get: { tab.showsAllFiles },
                 set: { FileReview.setShowsAllFiles($0, in: model) }
             )) {
-                Text("Selected file").tag(false)
                 Text("All files").tag(true)
+                Text("Selected file").tag(false)
             }
             .pickerStyle(.segmented)
             .labelsHidden()

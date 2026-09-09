@@ -18,7 +18,6 @@ struct FileBarControlsTests {
             FileBarControls.copy(mode: .diff),
             FileBarControls.copy(mode: .edit),
             FileBarControls.copy(mode: .diff, didCopy: true),
-            FileBarControls.share(filename: "Handler.php"),
             FileBarControls.more,
             FileBarControls.mode(filename: "Handler.php", isEditable: true),
             FileBarControls.mode(filename: "Handler.php", isEditable: false),
@@ -124,14 +123,4 @@ struct FileBarControlsTests {
         #expect(FileBarControls.unified != FileBarControls.sideBySide)
     }
 
-    @Test("share still has copy, because it is still a route")
-    func shareSurvivesLosingItsButton() {
-        // The share button came out of the bar as clutter: a second glyph beside Copy doing nearly
-        // the same thing. What must not happen is the route going with it, so the menu item that
-        // replaces it is named here and named in one place.
-        let control = FileBarControls.share(filename: "Handler.php")
-
-        #expect(control.title == "Share the diff")
-        #expect(control.hint.contains("Handler.php"))
-    }
 }
