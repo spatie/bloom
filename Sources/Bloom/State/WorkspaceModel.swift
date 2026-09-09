@@ -87,7 +87,11 @@ final class WorkspaceModel {
         get { InspectorTab.resolve(chosenInspectorTab, available: availableInspectorTabs) }
         set { chosenInspectorTab = newValue }
     }
-    var changedFiles: [ChangedFile] = []
+    var changedFiles: [ChangedFile] = [] {
+        didSet { reviewFiles = ChangedFileTree.orderedFiles(from: changedFiles) }
+    }
+    /// Retain tree order across scroll updates; rebuild it only when the changed files change.
+    private(set) var reviewFiles: [ChangedFile] = []
     var selectedFilePath: String?
     var isLoadingChanges = false
     /// Whether git has answered about this worktree at all, this launch.
@@ -489,6 +493,22 @@ final class WorkspaceModel {
     func isRunning(_ session: Session) -> Bool {
         AgentTurns.session(.running, state: session.state, live: liveTurn(for: session.id))
             || transcripts[session.id]?.subagents.isWorking == true
+    }
+
+    /// Persist the replacement before stopping the old agent so a failed write leaves it usable.
+    func replaceSession(_ session: Session, controls: ComposerControls) async -> Session? {
+        guard !app.isArchiving(workspace.id), let store else { return nil }
+        do {
+            let next = try await store.replaceWorkspaceConversation(id: session.id, controls: controls)
+            transcripts.removeValue(forKey: session.id)?.teardown()
+            app.bridge?.retire(sessionID: session.id)
+            await reloadSessions()
+            activeSessionID = next.id
+            return next
+        } catch {
+            app.alert = BloomAlert(title: "Could not start a fresh chat", message: error.readableMessage)
+            return nil
+        }
     }
 
     func closeSession(_ session: Session) async {

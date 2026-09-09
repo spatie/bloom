@@ -122,6 +122,11 @@ struct BloomCommands: Commands {
                 NotificationCenter.default.post(name: .bloomNewAskConversation, object: nil)
             }
 
+            MenuCommand(.searchFiles) {
+                SearchPanelModel.shared.openFiles(app: model)
+            }
+            .disabled(model.selectedWorkspace == nil)
+
             MenuCommand(.newSession) {
                 if model.selection == .ask {
                     Task { await model.ask.newConversation() }

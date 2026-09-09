@@ -73,6 +73,11 @@ Open that copy when you want to try your changes. It does not replace the releas
 use its data. See [the architecture guide](docs/ARCHITECTURE.md) before contributing.
 The dev script builds a committed revision, so commit your changes locally before rebuilding it.
 
+Working with an AI agent? [AGENTS.md](AGENTS.md) indexes the shared project skills for Claude and
+Codex, including `bloom-dev-build` and `bloom-release`. In Claude, invoke `/bloom-dev-build` or
+`/bloom-release`; in Codex, use `$bloom-dev-build` or `$bloom-release`. The skills are stored in
+`.claude/skills/` and linked from `.agents/skills/`, so a normal clone includes both entry points.
+
 `make` on its own lists every target. `make build` compiles without installing or launching.
 `make app` and `make run` retain the production bundle identity, so use the isolated dev build for
 day-to-day development.
@@ -104,7 +109,11 @@ match. In Settings, General, choose where new projects are created and add other
 
 **Panes.** A workspace holds tabs, and a tab can be split. A pane is a chat, a terminal standing in
 the worktree, or a browser, so the dev server the setup script started can be read beside the
-conversation that is changing it.
+conversation that is changing it. Type `/close` to close the current chat and start a fresh one
+with the same model settings. The previous conversation is archived.
+
+Press Cmd+P to search files in the current workspace. Use the arrow keys and Return to open a
+file, or Escape to dismiss the search.
 
 **Review and ship.** The inspector lists the files the workspace changed and shows a
 syntax-highlighted diff against the merge base, with inline comments and an editor on the same

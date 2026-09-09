@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import BloomCore
 
 /// The keyboard for a floating list that has no field to type into.
 ///
@@ -58,7 +59,10 @@ final class MenuKeyHostView: NSView {
     }
 
     func takeFocus() {
-        guard !didFocus, let window else { return }
+        guard !didFocus, let window,
+              AutomaticFocus.mayUpdateResponder(applicationIsActive: NSApp.isActive,
+                                                windowIsKey: window.isKeyWindow,
+                                                windowIsVisible: window.isVisible) else { return }
         didFocus = window.makeFirstResponder(self)
     }
 

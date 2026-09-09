@@ -182,6 +182,9 @@ final class SoftwareUpdater: NSObject, SPUUpdaterDelegate {
 
         Log.updates.info("Install postponed until \(running, privacy: .public) agents finish")
         postponedInstall = installHandler
+        // Dismiss Sparkle's UI while we wait. The relaunch callback above belongs to the updater,
+        // so it remains available after the user driver releases its windows and button handlers.
+        controller?.userDriver.dismissUpdateInstallation()
         waitForAgentsThenInstall()
         return true
     }

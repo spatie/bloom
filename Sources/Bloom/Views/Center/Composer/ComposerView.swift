@@ -366,6 +366,11 @@ struct ComposerView: View {
         guard canSend else { return }
         draftSaveTask?.cancel()
 
+        if ChatCloseCommand.matches(transcript.draft) {
+            startFreshChat(closingPrevious: true)
+            return
+        }
+
         if ChatClearCommand.matches(transcript.draft) {
             startFreshChat()
             return
@@ -477,7 +482,7 @@ struct ComposerView: View {
         }
     }
 
-    private func startFreshChat() {
+    private func startFreshChat(closingPrevious: Bool = false) {
         guard !isClearingChat else { return }
         isClearingChat = true
         let previous = transcript
@@ -485,14 +490,35 @@ struct ComposerView: View {
         Task { @MainActor in
             defer { isClearingChat = false }
             if let model {
-                guard await model.createSession(controls: controls) != nil else { return }
+                let tabs = WorkspaceTabsStore.shared
+                let order = tabs.entries(in: model)
+                let owner = order.first { tab in
+                    tabs.layout(of: tab).panes.contains { tabs.content(of: $0, in: tab) == .chat(previous.session.id) }
+                }
+                let pane = owner.flatMap { tab in
+                    tabs.layout(of: tab).panes.first { tabs.content(of: $0, in: tab) == .chat(previous.session.id) }
+                }
+                let next = closingPrevious
+                    ? await model.replaceSession(previous.session, controls: controls)
+                    : await model.createSession(controls: controls)
+                guard let next else { return }
+                if closingPrevious {
+                    if let owner, let pane {
+                        tabs.replace(pane: pane, of: owner, with: .chat(next.id), in: model)
+                    }
+                    tabs.forget(.chat(previous.session.id), workspaceID: model.workspace.id)
+                    tabs.reorder(order.map { entry in
+                        entry == .chat(previous.session.id) ? .chat(next.id) : entry
+                    }, in: model)
+                }
+                tabs.reveal(.chat(next.id), in: model, focusing: true)
             } else {
                 await app.ask.startFresh(controls: controls)
                 guard let current = app.ask.session, current.id != previous.session.id else { return }
             }
             // Only remove the command after the new conversation exists. Previous messages,
             // pending attachments and review comments are not discarded by this action.
-            if ChatClearCommand.matches(previous.draft) {
+            if ChatClearCommand.matches(previous.draft) || ChatCloseCommand.matches(previous.draft) {
                 previous.draft = ""
                 await previous.saveDraft()
             }
