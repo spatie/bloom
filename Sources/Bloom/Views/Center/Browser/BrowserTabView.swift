@@ -51,6 +51,10 @@ struct BrowserTabView: View {
         VStack(spacing: 0) {
             toolbar(session)
             Hairline()
+            if session.viewport.isEnabled {
+                BrowserViewportBar(viewport: Binding(get: { session.viewport }, set: { session.viewport = $0 }))
+                Hairline()
+            }
             if session.find.isShowing {
                 BrowserFindBar(
                     find: session.find,
@@ -66,7 +70,7 @@ struct BrowserTabView: View {
                 )
             }
             ZStack {
-                BrowserWebView(session: session, paneMenu: pageMenu, host: host)
+                BrowserViewportView(session: session, paneMenu: pageMenu, host: host)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 // A tab nobody has given an address is a white rectangle under a toolbar, which
@@ -151,6 +155,8 @@ struct BrowserTabView: View {
                 if session.isLoading { session.webView.stopLoading() } else { session.reload() }
             },
             capture: capture,
+            isResponsive: session.viewport.isEnabled,
+            toggleResponsive: { session.viewport.isEnabled.toggle() },
             submit: {
                 session.load(address)
                 isAddressFocused = false
@@ -241,7 +247,9 @@ struct BrowserTabView: View {
     private func pageMenu() -> NSMenu {
         let menu = paneMenu?() ?? NSMenu()
 
-        var items: [NSMenuItem] = []
+        var items: [NSMenuItem] = [item(
+            session.viewport.isEnabled ? "Exit Responsive Preview" : "Responsive Preview"
+        ) { session.viewport.isEnabled.toggle() }]
         // Never the raw address. What may be handed to another application is `BrowserAddress`'s
         // decision, because the string was written by the page.
         if let url = BrowserAddress.external(from: session.displayAddress) {

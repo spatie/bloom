@@ -65,6 +65,8 @@ struct BrowserToolbarView: View {
     var goToHistory: @MainActor (Int) -> Void = { _ in }
     var reloadOrStop: @MainActor () -> Void = {}
     var capture: @MainActor () -> Void = {}
+    var isResponsive = false
+    var toggleResponsive: @MainActor () -> Void = {}
     var submit: @MainActor () -> Void = {}
 
     /// Drawn inside the field's own edge rather than outside it, so the bar does not have to give
@@ -157,6 +159,16 @@ struct BrowserToolbarView: View {
     /// action's hover and pressed feedback.
     private var pageActions: some View {
         HStack(spacing: 0) {
+            Button(action: toggleResponsive) {
+                Label("Responsive Preview", systemImage: "iphone.and.ipad")
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(isResponsive ? Palette.accent : Palette.textSecondary)
+            }
+            .buttonStyle(.accessoryBar)
+            .frame(width: pageActionWidth, height: Metrics.controlHeight)
+            .help(isResponsive ? "Exit responsive preview" : "Preview at phone, tablet and desktop sizes")
+            .accessibilityValue(isResponsive ? "On" : "Off")
+            Hairline(axis: .vertical)
             pageAction(toolbar.reload, action: reloadOrStop)
             Hairline(axis: .vertical)
             pageAction(toolbar.screenshot, action: capture)
