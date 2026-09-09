@@ -25,6 +25,7 @@ struct BloomCommands: Commands {
     /// The focused window's Save, when it has one. See `FocusedMenuValues`.
     @FocusedValue(\.saveAction) private var saveAction: SaveAction?
 
+    @FocusedValue(\.composerTranscript) private var composerTranscript: TranscriptModel?
     @FocusedValue(\.isTypingProse) private var isTypingProse: Bool?
 
     /// Opens the project settings window, which is a scene rather than a sheet.
@@ -550,9 +551,9 @@ struct BloomCommands: Commands {
             // stops the agent that row is about. It is `existingModel`, which only reads: a
             // workspace this launch has never opened has no transcript to stop anyway.
             MenuCommand(.stopAgent) {
-                subjectModel?.activeTranscript?.stop()
+                (composerTranscript ?? subjectModel?.activeTranscript)?.stop()
             }
-            .disabled(subjectModel?.activeTranscript?.isRunning != true)
+            .disabled((composerTranscript ?? subjectModel?.activeTranscript)?.isRunning != true)
         }
 
         CommandGroup(replacing: .help) {

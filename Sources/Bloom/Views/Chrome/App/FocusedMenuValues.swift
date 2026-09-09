@@ -13,6 +13,9 @@ import BloomCore
 /// `MainWindowFocus` is the same mechanism aimed at a different question, and it stays its own
 /// file: which SCENE has the keyboard, rather than what inside it is selected.
 extension FocusedValues {
+    /// The conversation receiving keyboard focus, including a floating transcript or composer.
+    @Entry var composerTranscript: TranscriptModel?
+
     /// The workspace a list has highlighted, when that list is not the sidebar.
     ///
     /// Published by Home and by the Archive, which are the two screens whose selection is their own
