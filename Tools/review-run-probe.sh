@@ -1,6 +1,7 @@
 #!/bin/zsh
 # Runs the diff comment regression in an invisible, isolated bundle after swift build.
 # Pass --review-compare-eager to also measure the previous 5,000-line renderer.
+# Pass --review-navigation-only to check file jumps without sending any input events.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -66,6 +67,17 @@ git('-c', 'commit.gpgsign=false', '-c', 'user.name=Review Probe',
 (fixture / 'Sources/LongReview.swift').write_text(
     ''.join(f'let reviewLine{line} = {line}\n' for line in range(1800 if '--review-scroll-profile' in arguments else 120))
 )
+navigation = pathlib.Path(root, 'navigation')
+navigation.mkdir()
+subprocess.run(['git', '-C', str(navigation), 'init', '-b', 'main'], check=True, capture_output=True)
+subprocess.run(['git', '-C', str(navigation), '-c', 'commit.gpgsign=false',
+                '-c', 'user.name=Review Probe', '-c', 'user.email=probe@example.test',
+                'commit', '--allow-empty', '-m', 'Fixture'], check=True, capture_output=True)
+for index in range(8):
+    (navigation / f'File{index:02}.swift').write_text(''.join(
+        f'let file{index}Line{line} = "' + ('wrapped text ' * (index + 4)) + '"\n'
+        for line in range(30 + index * 7)
+    ))
 try:
     subprocess.run(
         ['open', '-g', '-n', '-W', '-a', str(pathlib.Path(binary).parents[2]),
