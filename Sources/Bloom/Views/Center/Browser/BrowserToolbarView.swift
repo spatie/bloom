@@ -65,6 +65,7 @@ struct BrowserToolbarView: View {
     var goToHistory: @MainActor (Int) -> Void = { _ in }
     var reloadOrStop: @MainActor () -> Void = {}
     var capture: @MainActor () -> Void = {}
+    var viewport: Binding<BrowserViewport> = .constant(BrowserViewport())
     var submit: @MainActor () -> Void = {}
 
     /// Drawn inside the field's own edge rather than outside it, so the bar does not have to give
@@ -157,6 +158,18 @@ struct BrowserToolbarView: View {
     /// action's hover and pressed feedback.
     private var pageActions: some View {
         HStack(spacing: 0) {
+            BrowserViewportButton(viewport: viewport)
+                .frame(width: pageActionWidth, height: Metrics.controlHeight)
+            Hairline(axis: .vertical)
+            pageAction(BrowserToolbar.Control(
+                symbol: "arrow.up.left.and.arrow.down.right",
+                name: "Full size",
+                help: "Restore the page to the full browser pane",
+                isEnabled: viewport.wrappedValue.isEnabled
+            )) {
+                viewport.wrappedValue.isEnabled = false
+            }
+            Hairline(axis: .vertical)
             pageAction(toolbar.reload, action: reloadOrStop)
             Hairline(axis: .vertical)
             pageAction(toolbar.screenshot, action: capture)
