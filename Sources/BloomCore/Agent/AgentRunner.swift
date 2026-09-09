@@ -280,6 +280,9 @@ public actor AgentRunner {
         if let resume, !resume.isEmpty {
             arguments += ["--resume", resume]
         }
+        if session.workspaceID == nil {
+            arguments += ["--append-system-prompt", AskConversation.instructions]
+        }
         return arguments
     }
 
