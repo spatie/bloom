@@ -240,15 +240,20 @@ appear in the New Tab and Workspace menus, execute on the server and receive the
 environment and allocated port as local scripts. Retrying a completed command returns its original
 terminal rather than launching another copy.
 
-The Preview pane forwards localhost HTTP/HTTPS addresses over an SSH tunnel bound only to the
-Mac's loopback interface. Start the development server in the remote terminal, then open its
+The Preview pane first asks the server whether a localhost address has a private Tailscale Serve
+mapping. If it does, the browser opens that HTTPS address directly. The address can also be opened
+on another device connected to the same tailnet, without keeping the Mac running. Bloom refuses
+to use a mapping with public Funnel enabled. Unmapped localhost HTTP/HTTPS addresses use an SSH
+tunnel bound only to the Mac's loopback interface. Start the development server in the remote terminal, then open its
 address in Preview or click a localhost link in the conversation. Git controls can commit all
 changes, push the workspace branch and create a draft or regular pull request using the server's
 authenticated `gh`. Credentials remain on their respective execution host.
 
+See [Private remote previews](REMOTE-PREVIEWS.md) for Tailscale setup and Laravel/Vite configuration.
+
 ## Protocol and ownership
 
-`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 7). A protocol mismatch
+`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 8). A protocol mismatch
 is refused before dispatch. Commands and replies carry UUIDs, so a long setup command does not
 block transcript reads or controls on the same connection.
 

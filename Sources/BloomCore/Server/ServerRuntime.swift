@@ -97,6 +97,8 @@ public actor ServerRuntime {
         switch operation {
         case .hello:
             return .hello(name: ProcessInfo.processInfo.hostName)
+        case .previewAddress(let address):
+            return .text(try await ServerPreview.resolve(address))
         case .composer(let id):
             let session = try await storedSession(id)
             guard let workspaceID = session.workspaceID else { throw ServerFailure("This session has no workspace.") }

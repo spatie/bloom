@@ -241,7 +241,12 @@ final class ServerWindowModel {
         }
         let generation = connectionGeneration
         do {
-            if ["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"].contains(input.host ?? "") {
+            if ServerPreview.isLoopback(input) {
+                if case .text(let address) = try await read(.previewAddress(input.absoluteString)),
+                   address != input.absoluteString {
+                    guard generation == connectionGeneration, !Task.isCancelled else { throw CancellationError() }
+                    return address
+                }
                 let port = input.port ?? (input.scheme == "https" ? 443 : 80)
                 var forward = forwards[port]
                 if await forward?.isAlive != true {
