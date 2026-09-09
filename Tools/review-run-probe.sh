@@ -62,7 +62,7 @@ git('-c', 'commit.gpgsign=false', '-c', 'user.name=Review Probe',
     '}\n'
 )
 (fixture / 'Sources/LongReview.swift').write_text(
-    ''.join(f'let reviewLine{line} = {line}\n' for line in range(120))
+    ''.join(f'let reviewLine{line} = {line}\n' for line in range(1800 if '--review-scroll-profile' in arguments else 120))
 )
 try:
     subprocess.run(

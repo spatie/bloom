@@ -20,6 +20,7 @@ enum ReviewRunProbe {
     private static func run() async {
         var failures: [String] = []
         var checks = 0
+        var scrollSteps: [Double] = []
         func check(_ condition: Bool, _ message: String) {
             checks += 1
             if !condition { failures.append(message) }
@@ -70,6 +71,8 @@ enum ReviewRunProbe {
         // Use the same nested scrollers as all-files review. A lazy stack inside the
         // horizontal scroller previously realised the whole file's text and controls.
         var realisedRuns: [String: JSONValue] = [:]
+        progress("Checking wrapped code")
+        await ReviewWrappingProbe.run(check: check, save: { save($0, name: $1) })
         progress("Checking embedded scrolling")
         let compareEager = CommandLine.arguments.contains("--review-compare-eager")
         for deferred in compareEager ? [false, true] : [true] {
@@ -141,10 +144,8 @@ enum ReviewRunProbe {
             FileReview.setShowsAllFiles(true, in: model)
             await settle(inspectorWindow)
             save(inspector, name: "review-toggle-on")
-            inspectorWindow.contentView = nil
-            var tab = CenterTab(workspaceID: model.workspace.id, kind: .review, title: "All changes")
-            tab.showsAllFiles = true
-            let host = NSHostingView(rootView: ReviewPaneView(model: model, tab: tab))
+            FileReview.open(path: model.changedFiles.first?.path ?? "", in: model)
+            let host = NSHostingView(rootView: LinkedReviewFixture(model: model))
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1000, height: 680),
                 styleMask: [.borderless], backing: .buffered, defer: false
@@ -169,14 +170,12 @@ enum ReviewRunProbe {
             await settle(window)
             save(host, name: "all-files-split")
             UserDefaults.standard.set(false, forKey: DiffLayoutSetting.storageKey)
-            tab.path = "Sources/Checkout.swift"
-            tab.reviewNavigationRevision += 1
-            host.rootView = ReviewPaneView(model: model, tab: tab)
+            model.selectedFilePath = "Sources/Checkout.swift"
+            FileReview.open(path: "Sources/Checkout.swift", in: model)
             for _ in 0..<5 { await settle(window) }
             save(host, name: "all-files-jump")
-            tab.path = "Sources/LongReview.swift"
-            tab.reviewNavigationRevision += 1
-            host.rootView = ReviewPaneView(model: model, tab: tab)
+            model.selectedFilePath = "Sources/LongReview.swift"
+            FileReview.open(path: "Sources/LongReview.swift", in: model)
             for _ in 0..<5 { await settle(window) }
             if let scroll = scrollView(in: host) {
                 let origin = scroll.contentView.bounds.origin
@@ -184,6 +183,32 @@ enum ReviewRunProbe {
                 scroll.reflectScrolledClipView(scroll.contentView)
                 await settle(window)
                 save(host, name: "all-files-sticky")
+                let revision = CenterTabStore.shared.review(for: model.workspace.id)?.reviewNavigationRevision
+                check(model.selectedFilePath == "Sources/LongReview.swift", "inspector selection did not follow the sticky file")
+                check(FileReview.currentPath(in: model) == model.selectedFilePath,
+                      "review did not remember the file reached by scrolling")
+                if let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                                       wheelCount: 1, wheel1: 100_000, wheel2: 0, wheel3: 0),
+                   let event = NSEvent(cgEvent: wheel) {
+                    scroll.scrollWheel(with: event)
+                }
+                await settle(window)
+                check(model.selectedFilePath == model.changedFiles.first?.path, "scrolling upwards selected \(model.selectedFilePath ?? "nil") at \(scroll.contentView.bounds.origin.y)")
+                check(CenterTabStore.shared.review(for: model.workspace.id)?.reviewNavigationRevision == revision,
+                      "scroll-follow issued another navigation request")
+                if CommandLine.arguments.contains("--review-scroll-profile") {
+                    progress("Profiling continuous scroll")
+                    let bottom = max(0, (scroll.documentView?.bounds.height ?? 0) - scroll.contentView.bounds.height)
+                    for step in 0..<240 {
+                        let start = ProcessInfo.processInfo.systemUptime
+                        let fraction = CGFloat(step < 120 ? step : 239 - step) / 119
+                        scroll.contentView.scroll(to: NSPoint(x: 0, y: bottom * fraction))
+                        scroll.reflectScrolledClipView(scroll.contentView)
+                        host.layoutSubtreeIfNeeded()
+                        try? await Task.sleep(for: .milliseconds(16))
+                        scrollSteps.append(ProcessInfo.processInfo.systemUptime - start)
+                    }
+                }
             }
             check(!hoverViews(in: host).isEmpty, "review did not render code after jumping to a file")
             check(!window.isVisible && !window.isKeyWindow, "review probe activated its window")
@@ -219,9 +244,12 @@ enum ReviewRunProbe {
                 UserDefaults.standard.set(false, forKey: DiffWhitespaceSetting.storageKey)
                 window.contentView = nil
             }
+            inspectorWindow.contentView = nil
             withExtendedLifetime(app) {}
         }
         let result: JSONValue = .object([
+            "scrollStepP95Microseconds": .integer(scrollSteps.isEmpty ? 0
+                : Int(scrollSteps.sorted()[Int(Double(scrollSteps.count - 1) * 0.95)] * 1_000_000)),
             "realisedRuns": .object(realisedRuns),
             "checks": .integer(checks), "passed": .bool(failures.isEmpty), "failures": .strings(failures),
         ])
@@ -263,6 +291,16 @@ enum ReviewRunProbe {
         return view.subviews.flatMap { hoverViews(in: $0) }
     }
 
+}
+
+private struct LinkedReviewFixture: View {
+    let model: WorkspaceModel
+
+    var body: some View {
+        if let tab = CenterTabStore.shared.review(for: model.workspace.id) {
+            ReviewPaneView(model: model, tab: tab)
+        }
+    }
 }
 
 private struct ReviewCollapseFixture: View {

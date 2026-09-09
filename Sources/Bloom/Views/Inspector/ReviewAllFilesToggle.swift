@@ -19,13 +19,13 @@ struct ReviewAllFilesToggle: View {
                 Text("Review all")
             }
             .font(Typo.captionEmphasis)
-            .foregroundStyle(isOn ? Palette.selectedEmphasizedText : Palette.textSecondary)
+            .foregroundStyle(isOn ? Palette.textPrimary : Palette.textSecondary)
             .padding(.horizontal, InspectorLayout.gap)
             .padding(.vertical, InspectorLayout.tight)
             .background {
                 RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                    .fill(isOn ? Palette.accent : Palette.surface)
-                    .strokeBorder(isOn ? Palette.accent : Palette.border, lineWidth: Metrics.outline)
+                    .fill(isOn ? Palette.selected : Palette.surface)
+                    .strokeBorder(Palette.border, lineWidth: Metrics.outline)
             }
             .contentShape(Rectangle())
         }
