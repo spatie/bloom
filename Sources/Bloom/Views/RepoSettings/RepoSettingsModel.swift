@@ -152,9 +152,9 @@ final class RepoSettingsModel {
         Array(Set(edits.map { destination(for: $0.key) })).sorted()
     }
 
-    func save() async {
+    func save() async -> Bool {
         let pending = edits
-        guard !pending.isEmpty else { return }
+        guard !pending.isEmpty else { return false }
         let path = repo.path
         let settings = loaded
 
@@ -166,9 +166,10 @@ final class RepoSettingsModel {
             saveError = nil
         } catch {
             saveError = error.readableMessage
-            return
+            return false
         }
 
         await load()
+        return true
     }
 }
