@@ -89,11 +89,6 @@ struct PullRequestSummary: View {
                 ShareLink(item: url) { Text("Share") }
             }
         }
-        // The Workspace menu's copy of the merge, which had no item anywhere until now. It is
-        // published from here because here is the only place that can raise the confirmation
-        // above, so the menu item asks this view rather than growing a second path to a merge.
-        // See `MergeAction`.
-        .focusedSceneValue(\.mergeAction, mergeAction)
         .onChange(of: canConfirmMerge) { _, available in
             if !available { pendingMerge = nil }
         }
@@ -102,20 +97,6 @@ struct PullRequestSummary: View {
         }
         .onChange(of: worktree) { _, _ in dismissConfirmation() }
         .onChange(of: pullRequest.url) { _, _ in dismissConfirmation() }
-    }
-
-    /// What the menu bar's Merge item says and does, or nil when this strip has nothing to land:
-    /// a pull request that is closed or already merged has no merge to offer, and neither has one
-    /// whose band is mid request.
-    private var mergeAction: MergeAction? {
-        guard pullRequest.isOpen, !isWorking else { return nil }
-        return MergeAction(
-            title: mergeMethod.buttonLabel,
-            // The same two answers the button reads, in the same order: the cluster's, which is
-            // whether a turn may start at all, and then GitHub's.
-            isEnabled: branchActions.isAllowed && status.canMerge,
-            perform: { propose(mergeMethod) }
-        )
     }
 
     // MARK: - Parts

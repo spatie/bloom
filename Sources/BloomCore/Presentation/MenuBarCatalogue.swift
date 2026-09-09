@@ -155,20 +155,6 @@ public enum MenuBarCatalogue {
             alternateTitle: UnreadMarkAction.markRead.title, availability: .needsWorkspaceSubject
         ),
         MenuBarItem(.colour, in: .workspace, "Colour", availability: .needsWorkspaceSubject),
-        // Landing the branch, which had no item in any menu: `requestMerge` was reachable from the
-        // pull request band's button and from the bridge tool an agent calls, and from nothing at
-        // the top of the screen. Directly above Archive because those two are the ends of a
-        // workspace's life and that is the order they happen in.
-        //
-        // **No key, and that is the point of it having one fewer thing than the items around it.**
-        // A key is worth spending on something done every few minutes; this is the most
-        // consequential thing a person can ask Bloom to do to a branch and it happens once per
-        // workspace. The item alone is what was missing.
-        //
-        // The title here is the greyed one. When the band is on screen the item says which merge,
-        // because the method is a per-project mode and a row reading "Merge" over a project set to
-        // squash is the fault the split button was built to remove. See `MergeAction`.
-        MenuBarItem(.merge, in: .workspace, "Merge", availability: .sometimes),
         MenuBarItem(.archive, in: .workspace, "Archive Workspace", key: .init(.delete, .command), availability: .needsWorkspaceSubject),
         MenuBarItem(.restore, in: .workspace, "Restore Workspace", availability: .needsWorkspaceSubject),
         MenuBarItem(.openInEditor, in: .workspace, "Open in Editor", key: .init("e", .command, .shift), availability: .needsWorkspaceSubject),
@@ -262,7 +248,6 @@ public enum MenuBarAction: String, CaseIterable, Sendable {
     case pin
     case unreadMark
     case colour
-    case merge
     case archive
     case restore
     case openInEditor
