@@ -1267,13 +1267,19 @@ final class TranscriptModel {
             runner = nil
             runnerPreferences = nil
         }
+        // Registration mints a new token and revokes the previous one. Reusing a runner must
+        // keep its token too, or the next bridge call closes its still-connected transport.
+        if let runner {
+            if pumpTask == nil { startPump(on: runner) }
+            return runner
+        }
         // Two registrations, because there are two identities. A chat in a worktree gets a token
         // minted for that workspace and the role its origin says; Ask Bloom gets the owner's own,
         // which is the same door the owner's terminal comes in through and the reason every owner
         // tool works here without one of them being written twice.
         let bridge = workspace.map { app.bridge?.register(session: session, workspace: $0) }
             ?? app.bridge?.register(askSession: session)
-        let runner = self.runner ?? Self.makeRunner(
+        let runner = Self.makeRunner(
             session: session,
             workspacePath: cwd,
             store: store,
