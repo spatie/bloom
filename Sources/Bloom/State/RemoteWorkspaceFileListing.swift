@@ -151,7 +151,7 @@ final class RemoteWorkspaceFileListing: WorkspacePaneModel {
             if !Task.isCancelled, server.selectedWorkspace?.id == workspace.id { server.review.error = error.localizedDescription }
         }
     }
-    func showAllReview() { FileReview.openAll(in: self) }
+    func setShowsAllFiles(_ all: Bool) { FileReview.setShowsAllFiles(all, in: self) }
     func showReview(path: String) {
         guard server.selectedWorkspace?.id == workspace.id else { return }
         server.review.showsFile = !changedFiles.contains { $0.path == path }

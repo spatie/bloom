@@ -23,7 +23,7 @@ protocol WorkspaceFileListing: AnyObject {
     func reloadChanges() async
     func loadFileTree() async
     func showReview(path: String)
-    func showAllReview()
+    func setShowsAllFiles(_ all: Bool)
     func showTerminal(folder: String)
     func showPage(path: String, axis: SplitAxis?)
     func revertFile(_ file: ChangedFile) async -> String?
@@ -35,7 +35,7 @@ extension WorkspaceModel: WorkspaceFileListing {
     var supportsViewedMarks: Bool { true }
     func reloadChanges() async { await refreshChanges() }
     func loadFileTree() async { await refreshFileTree() }
-    func showAllReview() { FileReview.openAll(in: self) }
+    func setShowsAllFiles(_ all: Bool) { FileReview.setShowsAllFiles(all, in: self) }
     func showReview(path: String) { FileReview.open(path: path, in: self) }
     func showTerminal(folder: String) { FolderTerminalTab.open(folder: folder, in: self) }
     func showPage(path: String, axis: SplitAxis?) {

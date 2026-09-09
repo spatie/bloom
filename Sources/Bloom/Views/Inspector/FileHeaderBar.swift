@@ -43,6 +43,8 @@ struct FileHeaderBar<Model: WorkspaceFileReview>: View {
     /// Absent when the file cannot be edited: binary, gone, or too large to open.
     var isEditable: Bool
     var onRevert: () -> Void
+    var isCollapsed = false
+    var onToggleCollapsed: (() -> Void)?
 
     @AppStorage(DiffLayoutSetting.storageKey) private var isSideBySide = false
     @AppStorage(DiffWhitespaceSetting.storageKey) private var ignoresWhitespace = false
@@ -68,6 +70,18 @@ struct FileHeaderBar<Model: WorkspaceFileReview>: View {
 
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {
+            if let onToggleCollapsed {
+                Button(action: onToggleCollapsed) {
+                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                        .font(Typo.micro)
+                        .foregroundStyle(Palette.textSecondary)
+                        .frame(width: 20, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("\(isCollapsed ? "Expand" : "Collapse") \(file.filename)")
+                .accessibilityLabel("\(isCollapsed ? "Expand" : "Collapse") \(file.filename)")
+            }
             FilePathLabel(path: file.path, width: width)
 
             // Whether Edit mode is holding changes that are not on disk yet. Asked by
@@ -90,17 +104,21 @@ struct FileHeaderBar<Model: WorkspaceFileReview>: View {
             // boundary between two of `ViewThatFits`'s arrangements would swap them as the pointer
             // arrived. The controls have to be the one thing in this bar that never moves while
             // it is being pointed at.
-            FileBarHintLabel(text: hint ?? "")
-                .layoutPriority(-2)
+            if onToggleCollapsed != nil {
+                reviewControls
+            } else {
+                FileBarHintLabel(text: hint ?? "")
+                    .layoutPriority(-2)
 
-            ViewThatFits(in: .horizontal) {
-                controls
-                compact
-                collapsed
+                ViewThatFits(in: .horizontal) {
+                    controls
+                    compact
+                    collapsed
+                }
             }
         }
         .padding(.horizontal, InspectorLayout.inset)
-        .frame(height: InspectorLayout.barHeight)
+        .frame(height: onToggleCollapsed == nil ? InspectorLayout.barHeight : 40)
         .background(Palette.surfaceSunken)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .confirmationDialog(
@@ -139,6 +157,50 @@ struct FileHeaderBar<Model: WorkspaceFileReview>: View {
             copyButton(labelled: true)
             overflowMenu(full: false)
             modePicker
+        }
+    }
+
+    /// All-files review owns the layout settings. Keep each file's identity and progress
+    /// visible, with less frequent and destructive actions in its menu.
+    private var reviewControls: some View {
+        HStack(spacing: InspectorLayout.gap) {
+            if !file.isBinary {
+                HStack(spacing: 4) {
+                    Text("+\(file.additions)").foregroundStyle(Palette.positive)
+                    Text("−\(file.deletions)").foregroundStyle(Palette.negative)
+                }
+                .font(Typo.caption)
+                .monospacedDigit()
+                .fixedSize()
+                .accessibilityLabel("\(file.additions) additions, \(file.deletions) deletions")
+            }
+            ViewThatFits(in: .horizontal) {
+                viewedToggle(labelled: true)
+                viewedToggle(labelled: false)
+            }
+            Menu {
+                Button(FileBarControls.copy(mode: mode).title, action: copy)
+                ShareLink(item: sharedDiff, preview: SharePreview(file.filename)) {
+                    Text(FileBarControls.share(filename: file.filename).title)
+                }
+                if isEditable {
+                    Button(mode == .diff ? "Edit file" : "Show diff") {
+                        if isCollapsed { onToggleCollapsed?() }
+                        mode = mode == .diff ? .edit : .diff
+                    }
+                }
+                Divider()
+                Button(FileBarControls.revert(filename: file.filename).title, role: .destructive) {
+                    isConfirmingRevert = true
+                }.disabled(!model.supportsFileRevert)
+            } label: {
+                Label("File actions", systemImage: "ellipsis.circle")
+            }
+            .labelStyle(.iconOnly)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("File actions")
         }
     }
 

@@ -59,6 +59,16 @@ enum DiffRow: Identifiable {
         }
     }
 
+    /// Code rows have an exact height; comment and edit bands size themselves from their text.
+    var codeLineCount: Int? {
+        switch self {
+        case let .lineRun(lines): lines.count
+        case let .pairRun(pairs): pairs.count
+        case .line, .pair: 1
+        default: nil
+        }
+    }
+
     /// Whether this row may be drawn inside a run with its neighbours.
     ///
     /// Only plain lines may. A heading, either expander, a comment band and the open editor each

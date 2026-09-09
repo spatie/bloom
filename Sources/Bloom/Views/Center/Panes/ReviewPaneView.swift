@@ -9,8 +9,8 @@ import BloomCore
 /// trade: the list keeps the whole inspector, the file keeps the whole column, and the split
 /// (Cmd+\) puts the conversation beside the diff instead of above it.
 ///
-/// The shared review offers a choice between one file and all files. Each `DiffView` carries
-/// its own filename, Viewed tick, revert, layout controls and Diff / Edit pair.
+/// The shared review offers a choice between one file and all files. In all-files mode,
+/// layout controls live above the review and each file keeps a compact, collapsible header.
 struct ReviewPaneView<Model: WorkspacePaneModel>: View {
     @Bindable var model: Model
     var tab: CenterTab
@@ -215,13 +215,7 @@ struct ReviewPaneView<Model: WorkspacePaneModel>: View {
         HStack(spacing: InspectorLayout.gap) {
             Picker("Review files", selection: Binding(
                 get: { tab.showsAllFiles },
-                set: { all in
-                    let store = CenterTabStore.shared
-                    store.setShowsAllFiles(all, for: tab)
-                    if !all, changed == nil, let first = model.changedFiles.first {
-                        FileReview.open(path: first.path, in: model)
-                    }
-                }
+                set: { FileReview.setShowsAllFiles($0, in: model) }
             )) {
                 Text("Selected file").tag(false)
                 Text("All files").tag(true)
@@ -233,10 +227,14 @@ struct ReviewPaneView<Model: WorkspacePaneModel>: View {
 
             Spacer(minLength: 0)
 
-            Text(model.diffScope.badge)
-                .font(Typo.caption)
-                .foregroundStyle(Palette.textSecondary)
-                .lineLimit(1)
+            if tab.showsAllFiles {
+                AllFilesReviewControls(model: model)
+            } else {
+                Text(model.diffScope.badge)
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+            }
         }
         .padding(.horizontal, InspectorLayout.inset)
         .frame(height: InspectorLayout.barHeight)

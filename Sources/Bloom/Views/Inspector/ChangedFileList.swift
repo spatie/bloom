@@ -75,18 +75,12 @@ struct ChangedFileList<Model: WorkspaceFileListing>: View {
             // Only over a diff there is something to narrow. A filter above "No changes yet" is a
             // control that cannot do anything, offered at the one moment it is useless.
             if !model.changedFiles.isEmpty {
-                Button {
-                    model.showAllReview()
-                } label: {
-                    Label("Review all files", systemImage: "doc.text")
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 0) {
+                    InspectorFilterField(query: $query, onEscape: escape, onReturn: enterList)
+                    ReviewAllFilesToggle(model: model)
+                        .padding(.trailing, InspectorLayout.inset)
                 }
-                .buttonStyle(.plain)
-                .font(Typo.captionEmphasis)
-                .padding(.horizontal, InspectorLayout.inset)
-                .frame(height: InspectorLayout.barHeight)
-                Hairline()
-                InspectorFilterField(query: $query, onEscape: escape, onReturn: enterList)
+                .background(Palette.surfaceSunken)
                 Hairline()
             }
 
