@@ -552,15 +552,21 @@ final class TerminalHostView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard window != nil, isFocusedPane else { return }
-        // Give the shell the keyboard as soon as the tab is shown.
-        DispatchQueue.main.async { [weak self] in
-            self?.takeKeyboard()
+        guard let window, isFocusedPane else { return }
+        let previousResponder = window.firstResponder
+        // A later click wins over a focus request queued while this terminal was attaching.
+        DispatchQueue.main.async { [weak self, weak window, weak previousResponder] in
+            guard let self, let window, self.window === window,
+                  window.firstResponder === previousResponder else { return }
+            self.takeKeyboard()
         }
     }
 
     private func takeKeyboard() {
-        guard let terminal, let window, window.firstResponder !== terminal else { return }
+        guard isFocusedPane, let terminal, let window, window.firstResponder !== terminal,
+              AutomaticFocus.mayUpdateResponder(applicationIsActive: NSApp.isActive,
+                                                windowIsKey: window.isKeyWindow,
+                                                windowIsVisible: window.isVisible) else { return }
         window.makeFirstResponder(terminal)
     }
 }
