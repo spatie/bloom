@@ -1,3 +1,4 @@
+import BloomClient
 import Foundation
 
 /// A message somebody has asked for that has not gone to the agent yet.

@@ -64,6 +64,7 @@ find "$TMP" -maxdepth 1 \( -name 'bloom-core-build-*' -o -name 'bloom-core-tests
 
 rm -rf "$WORK"
 mkdir -p "$WORK/Sources" "$WORK/Tests"
+ln -sfn "$ROOT/Packages" "$WORK/Packages"
 ln -sfn "$ROOT/Sources/BloomCore" "$WORK/Sources/BloomCore"
 # The MCP shim, mirrored alongside. It depends on BloomCore and nothing else, so building it here
 # cannot be stopped by a broken view, which is the whole reason this mirror exists. It is built
@@ -82,8 +83,9 @@ import PackageDescription
 let package = Package(
     name: "BloomCoreOnly",
     platforms: [.macOS(.v26)],
+    dependencies: [.package(path: "Packages/BloomClient")],
     targets: [
-        .target(name: "BloomCore", swiftSettings: [.swiftLanguageMode(.v6)]),
+        .target(name: "BloomCore", dependencies: [.product(name: "BloomClient", package: "BloomClient")], swiftSettings: [.swiftLanguageMode(.v6)]),
         .executableTarget(
             name: "bloom-bridge",
             dependencies: ["BloomCore"],

@@ -76,7 +76,7 @@ struct ServerHTTPTests {
             observed.withLock { $0.append(request) }
             return (200, try JSONEncoder().encode(ServerReply(id: expected.id, result: .hello(name: "Remote"))))
         } }
-        defer { TestHTTPProtocol.responses.withLock { $0.removeValue(forKey: host) } }
+        defer { _ = TestHTTPProtocol.responses.withLock { $0.removeValue(forKey: host) } }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [TestHTTPProtocol.self]
         let transport = try ServerHTTPTransport(baseURL: URL(string: "https://" + host)!, accessToken: { "oauth:test-only" }, session: URLSession(configuration: config))
@@ -96,7 +96,7 @@ struct ServerHTTPTests {
             TestHTTPProtocol.responses.withLock { $0[host] = { _ in
                 (status, try JSONEncoder().encode(ServerReply(id: UUID(), result: .accepted)))
             } }
-            defer { TestHTTPProtocol.responses.withLock { $0.removeValue(forKey: host) } }
+            defer { _ = TestHTTPProtocol.responses.withLock { $0.removeValue(forKey: host) } }
             let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [TestHTTPProtocol.self]
             let transport = try ServerHTTPTransport(baseURL: URL(string: "https://" + host)!, accessToken: { "test" }, session: URLSession(configuration: config))
             defer { transport.close() }

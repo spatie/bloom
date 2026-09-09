@@ -1,3 +1,4 @@
+import BloomClient
 import Foundation
 
 public func newID() -> String { UUID().uuidString.lowercased() }

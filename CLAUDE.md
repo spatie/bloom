@@ -39,6 +39,19 @@ dependency and it is not the app. **So a decision taken inside a view is a decis
 test.** When behaviour needs a test, and most does, it belongs in BloomCore as a pure function or a
 type, with the view calling it. That is the whole reason the split exists.
 
+## Shared client and iOS boundary
+
+`Packages/BloomClient` contains portable HTTPS transport, wire values and remote client state.
+It imports no UI frameworks and owns no host execution or database lifecycle. `BloomCore`
+re-exports moved value types through aliases so the Mac app and server retain their typed API.
+`Packages/BloomAuthentication` shares AppAuth and Keychain handling between Mac and iOS, with
+small platform-specific presentation and callback code. `iOS/Bloom` is the UIKit client shell.
+
+The iOS application needs a signed bundle and scene metadata. `Tools/build-ios.sh` generates its
+ignored Xcode container in `/tmp` and builds without launching Simulator. This is separate from
+the Mac SwiftPM build and is not a second description of the Mac targets. Read `docs/IOS.md` for
+the current functionality, HTTPS requirements and verification limits.
+
 ## Build and test
 
 Everything real is a script in `Tools/`; the `Makefile` is the index.

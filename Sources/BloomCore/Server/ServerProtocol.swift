@@ -1,8 +1,9 @@
 import Foundation
+import BloomClient
 
 /// Versioned values cross the connection; database handles and local file URLs never do.
 public struct ServerRequest: Codable, Sendable, Equatable {
-    public static let protocolVersion = 13
+    public static let protocolVersion = BloomWire.version
     public var version: Int
     public var id: UUID
     public var operation: ServerOperation
@@ -194,16 +195,5 @@ struct ServerCommandRecord: Codable {
     var reply: ServerReply?
 }
 
-public struct ServerFailure: Error, LocalizedError, Sendable {
-    public var message: String
-    public var errorDescription: String? { message }
-    public init(_ message: String) { self.message = message }
-}
-
-/// A received refusal has a known outcome. Transport failures do not, so clients retain the
-/// command ID only for the latter when offering a retry after reconnecting.
-public struct ServerRefusal: Error, LocalizedError, Sendable {
-    public var message: String
-    public var errorDescription: String? { message }
-    public init(_ message: String) { self.message = message }
-}
+public typealias ServerFailure = BloomClient.ConnectionFailure
+public typealias ServerRefusal = BloomClient.ConnectionRefusal
