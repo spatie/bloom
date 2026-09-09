@@ -9,6 +9,7 @@ import BloomCore
 /// useless, and `git status` would flicker while you thought.
 struct RepoSettingsSaveBar: View {
     @Bindable var model: RepoSettingsModel
+    @Environment(AppModel.self) private var app
 
     var body: some View {
         HStack(spacing: Metrics.gutter) {
@@ -25,7 +26,7 @@ struct RepoSettingsSaveBar: View {
                 .disabled(!model.isDirty && !model.hasExternalChange)
 
             Button("Save Files") {
-                Task { await model.save() }
+                save()
             }
             .keyboardShortcut("s", modifiers: .command)
             .buttonStyle(.borderedProminent)
@@ -44,9 +45,18 @@ struct RepoSettingsSaveBar: View {
         .focusedValue(
             \.saveAction,
             SaveAction(subject: "project settings", isEnabled: model.isLoaded && !model.isSaving && model.isDirty) {
-                Task { await model.save() }
+                save()
             }
         )
+    }
+
+    private func save() {
+        Task {
+            guard await model.save() else { return }
+            if model.remote == nil {
+                app.refreshSettings(for: model.repo.id, savedPaths: model.savedPaths)
+            }
+        }
     }
 
     @ViewBuilder

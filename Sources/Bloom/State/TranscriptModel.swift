@@ -290,6 +290,8 @@ final class TranscriptModel {
     /// are two requests, and the composer has nothing to clear afterwards.
     private(set) var composerFocusRequests = 0
 
+    func focusComposer() { composerFocusRequests += 1 }
+
     private var runner: (any SessionRunner)?
 
     func codexSubagentTranscript(for id: SubagentID) async -> SubagentTranscript? {
@@ -636,9 +638,13 @@ final class TranscriptModel {
     /// screen from the frame the key went down, in the state `Delivery.goesImmediately` says it is
     /// in: as a sent bubble if nothing is holding the queue, as a pending one if something is. See
     /// `sending`.
-    func submit(_ text: String) async {
+    func submit(_ text: String, clearingDraft sourceDraft: String? = nil) async {
         if let remote {
-            if await remote.submit(text), draft == text { draft = ""; await saveDraft() }
+            let submittedDraft = SubmittedDraft.matching(current: draft, message: text, source: sourceDraft)
+            if await remote.submit(text), let submittedDraft, draft == submittedDraft {
+                draft = ""
+                await saveDraft()
+            }
             jumpToLiveEnd()
             return
         }
@@ -646,7 +652,9 @@ final class TranscriptModel {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, let store else { return }
 
-        let submittedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines) == body ? draft : nil
+        // Review payloads expand compact chips into comments. Clear the source draft, while
+        // retaining anything the reader typed after that payload began being prepared.
+        let submittedDraft = SubmittedDraft.matching(current: draft, message: body, source: sourceDraft)
         if submittedDraft != nil { draft = "" }
 
         // Built here rather than inside the enqueue, so the row that goes in the table and the
@@ -1326,13 +1334,19 @@ final class TranscriptModel {
             runner = nil
             runnerPreferences = nil
         }
+        // Registration mints a new token and revokes the previous one. Reusing a runner must
+        // keep its token too, or the next bridge call closes its still-connected transport.
+        if let runner {
+            if pumpTask == nil { startPump(on: runner) }
+            return runner
+        }
         // Two registrations, because there are two identities. A chat in a worktree gets a token
         // minted for that workspace and the role its origin says; Ask Bloom gets the owner's own,
         // which is the same door the owner's terminal comes in through and the reason every owner
         // tool works here without one of them being written twice.
         let bridge = workspace.map { app.bridge?.register(session: session, workspace: $0) }
             ?? app.bridge?.register(askSession: session)
-        let runner = self.runner ?? Self.makeRunner(
+        let runner = Self.makeRunner(
             session: session,
             workspacePath: cwd,
             store: store,

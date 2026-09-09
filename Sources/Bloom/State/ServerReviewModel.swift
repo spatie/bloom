@@ -6,7 +6,10 @@ import BloomCore
 @MainActor
 @Observable
 final class ServerReviewModel {
-    var files: [ChangedFile] = []
+    var files: [ChangedFile] = [] {
+        didSet { reviewFiles = ChangedFileTree.orderedFiles(from: files) }
+    }
+    private(set) var reviewFiles: [ChangedFile] = []
     var selectedPath: String? {
         didSet { if oldValue != selectedPath { invalidateContent() } }
     }

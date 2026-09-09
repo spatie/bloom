@@ -5,8 +5,7 @@ import SwiftUI
 /// Its own view, and it asks the session itself rather than being handed the answer, because
 /// `FileEditSession.drafts` is one `@Observable` dictionary and observation is per stored property
 /// rather than per key. A bar that read `isDirty` from its own body was invalidated by every
-/// keystroke in the editor beside it, which is written down in `SharedDiff` as the reason the
-/// share text is rendered on export. `FileHeaderBar` is the bar in question and it holds a
+/// keystroke in the editor beside it. `FileHeaderBar` is the bar in question and it holds a
 /// `ViewThatFits` over three clusters of seven controls, so every character typed measured all
 /// three of them. Asked here, a keystroke redraws a five point circle.
 struct UnsavedEditsDot: View {

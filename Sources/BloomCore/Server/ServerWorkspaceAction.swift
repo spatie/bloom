@@ -12,6 +12,7 @@ public enum ServerWorkspaceAction: Codable, Sendable, Equatable {
     case files
     case pullRequest
     case runScripts
+    case browserAddress
     case runScript(id: String)
     case download(path: String)
     case writeFile(path: String, text: String, revision: String)
@@ -27,7 +28,7 @@ public enum ServerWorkspaceAction: Codable, Sendable, Equatable {
 
     var mutates: Bool {
         switch self {
-        case .archivePreview, .files, .download, .pullRequest, .runScripts, .notes: false
+        case .archivePreview, .files, .download, .pullRequest, .runScripts, .browserAddress, .notes: false
         default: true
         }
     }

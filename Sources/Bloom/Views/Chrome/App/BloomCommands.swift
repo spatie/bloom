@@ -25,9 +25,7 @@ struct BloomCommands: Commands {
     /// The focused window's Save, when it has one. See `FocusedMenuValues`.
     @FocusedValue(\.saveAction) private var saveAction: SaveAction?
 
-    /// Landing the branch, published by the pull request band because that is where the
-    /// confirmation lives. Nil whenever that band is not on screen, which greys the item.
-    @FocusedValue(\.mergeAction) private var mergeAction
+    @FocusedValue(\.composerTranscript) private var composerTranscript: TranscriptModel?
     @FocusedValue(\.isTypingProse) private var isTypingProse: Bool?
 
     /// Opens the project settings window, which is a scene rather than a sheet.
@@ -126,6 +124,11 @@ struct BloomCommands: Commands {
             MenuCommand(.newAskConversation) {
                 NotificationCenter.default.post(name: .bloomNewAskConversation, object: nil)
             }
+
+            MenuCommand(.searchFiles) {
+                SearchPanelModel.shared.openFiles(app: model)
+            }
+            .disabled(model.selectedWorkspace == nil)
 
             MenuCommand(.newSession) {
                 if model.selection == .ask { Task { await model.ask.newConversation() } } else { openPane(.chat) }
@@ -481,15 +484,6 @@ struct BloomCommands: Commands {
 
             Divider()
 
-            // The title is the band's when the band is on screen, and the table's fallback when
-            // it is not, which is what lets a greyed row still say what the item is. It goes
-            // through the band's own `propose`, so the sign in gate and the confirmation are the
-            // ones the button raises rather than a second copy of them. See `MergeAction`.
-            Button(mergeAction?.title ?? MenuBarCatalogue[.merge].title) {
-                mergeAction?.perform()
-            }
-            .disabled(mergeAction?.isEnabled != true)
-
             // **Greyed while somebody is typing, and that is not tidiness.** Command-Backspace
             // deletes to the start of the line in every text box on macOS, and AppKit checks a
             // menu's key equivalents before the responder chain sees the key, so the text view
@@ -555,9 +549,9 @@ struct BloomCommands: Commands {
             // stops the agent that row is about. It is `existingModel`, which only reads: a
             // workspace this launch has never opened has no transcript to stop anyway.
             MenuCommand(.stopAgent) {
-                subjectModel?.activeTranscript?.stop()
+                (composerTranscript ?? subjectModel?.activeTranscript)?.stop()
             }
-            .disabled(subjectModel?.activeTranscript?.isRunning != true)
+            .disabled((composerTranscript ?? subjectModel?.activeTranscript)?.isRunning != true)
         }
 
         CommandGroup(replacing: .help) {
@@ -960,12 +954,11 @@ struct BloomCommands: Commands {
     }
 
     /// A browser on the workspace's own dev server, which is what the `+` opens and what a split
-    /// does not: this is the route that has a port to hand. See `SessionTabsView.newBrowser`.
+    /// does not: this is the route that knows where that is. See `SessionTabsView.newBrowser`.
     private func openBrowserPane() {
         guard let workspace = model.selectedPaneModel else { return }
         Task {
-            await workspace.ensurePort()
-            let address = workspace.port > 0 ? "http://localhost:\(workspace.port)" : ""
+            let address = await workspace.browserAddress()
             NewPane.open(.browser, in: workspace, url: address) {
                 WorkspaceTabsStore.shared.select($0, in: workspace)
             }

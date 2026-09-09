@@ -12,6 +12,7 @@ public enum SettingsEdit: Codable, Sendable, Hashable {
     case deleteBranchOnArchive(Bool)
     case mergeInstructions(String?)
     case conflictInstructions(String?)
+    case browserURL(String?)
 
     public var key: SettingsKey {
         switch self {
@@ -24,6 +25,7 @@ public enum SettingsEdit: Codable, Sendable, Hashable {
         case .deleteBranchOnArchive: .deleteBranchOnArchive
         case .mergeInstructions: .mergeInstructions
         case .conflictInstructions: .conflictInstructions
+        case .browserURL: .browserURL
         }
     }
 }
@@ -345,6 +347,8 @@ public enum SettingsWriter {
             document.set(.string(mode), at: SettingsKey.runMode.path)
         case .branchPrefix(let prefix):
             set(prefix, at: SettingsKey.branchPrefix.path, in: &document, overriding: overriding)
+        case .browserURL(let url):
+            set(url, at: SettingsKey.browserURL.path, in: &document, overriding: overriding)
         case .deleteBranchOnArchive(let flag):
             document.set(.boolean(flag), at: SettingsKey.deleteBranchOnArchive.path)
         case .filesToCopy(let globs):

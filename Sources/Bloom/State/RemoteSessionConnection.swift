@@ -94,6 +94,13 @@ final class RemoteSessionConnection {
         return session
     }
 
+    func close() async -> Bool {
+        guard await perform(.closeSession(sessionID: sessionID)) != nil else { return false }
+        server?.forgetConversation(sessionID)
+        server?.catalogue?.sessions.removeAll { $0.id == sessionID }
+        return true
+    }
+
     func saveDraft(_ text: String, for session: Session) {
         guard server?.endpoint == endpoint else { return }
         server?.saveRemoteDraft(text, sessionID: session.id)

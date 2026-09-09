@@ -5,6 +5,7 @@ import BloomCore
 /// The existing tab and pane system talks to this interface. Execution stays with its host.
 @MainActor
 protocol WorkspacePaneModel: WorkspaceFileReview, Observable {
+    var browserReviews: [String: BrowserRegionCapture] { get set }
     var sessions: [Session] { get set }
     var activeSessionID: SessionID? { get set }
     var activeSession: Session? { get }

@@ -588,7 +588,8 @@ struct SidebarView: View {
             break
 
         case .project(let id, let offset):
-            Task { await app.reorderProjects(id: id, to: offset) }
+            let visible = groups.map(\.id)
+            Task { await app.reorderProjects(id: id, visible: visible, to: offset) }
 
         case .workspace(let projectID, let offsets, let offset, let landedOutside):
             guard let group = groups.first(where: { $0.id == projectID }) else { return }

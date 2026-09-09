@@ -93,7 +93,6 @@ contribute for free.
 | Pin / Unpin | | a live workspace is the subject |
 | Mark as Unread / Mark as Read | | a live workspace is the subject |
 | Colour > None and ten colours | | a live workspace is the subject |
-| Merge / Squash and merge / Rebase and merge | | the pull request band is on screen and GitHub will take a merge |
 | Archive Workspace | `⌘⌫` | a live workspace is the subject |
 | Restore Workspace | | an archived workspace is the subject |
 | Open in Editor | `⇧⌘E` | a live workspace is the subject |
@@ -224,6 +223,12 @@ loud somewhere a user can read it.
 | Jump back or forward several pages | right click on an arrow | **no** | none |
 | Reload / Stop | toolbar | **no** | none |
 | Send a Screenshot to the Agent | toolbar, and the page menu | **no** | none |
+| Comment on an Area | labelled Comment button in the toolbar, and the page menu | **no** | none |
+| Add selected area and comment to the draft | inline review-comment editor | **no** | `Return` or `⌘Return` |
+| Finish reviewing the page | Done in the toolbar or selection controls | **no** | `Escape` outside the editor |
+| Select All / Clear Selection | region capture's Selection menu | **no** | none |
+| Edit / Remove image comment | saved comment band on the page | **no** | none |
+| Send image comments | composer below the browser, or the adjacent conversation | **no** | `Return` or `⌘Return` |
 | Share | toolbar | **no** | none |
 | Open in External Browser | page context menu | **no** | none |
 | Find in page, next, previous | find bar | yes, Edit > Find | `⌘F` `⌘G` `⇧⌘G` |
@@ -247,7 +252,7 @@ A browser with no Back in any menu is the second most obvious gap after the spli
 | Comment on This Line | diff line menu | **no** | none |
 | Send This Failure to the Agent | check row menu | **no** | none |
 | Open on GitHub, Copy link (pull request) | summary menu | **no** | none |
-| Merge, Squash and merge, Rebase and merge | the band's split button | yes | none |
+| Merge, Squash and merge, Rebase and merge | the band's split button | **no**, deliberately | none |
 | Choose the merge method | the split button's chevron | **no**, deliberately | none |
 | Create pull request, Continue, Archive, Fix merge conflicts | buttons | Archive only | `⌘⌫` |
 | Save an edited file | hidden button | greyed, always | `⌘S` |
@@ -339,9 +344,8 @@ decision about muscle memory rather than about menus.
 **This branch.** The split, which was the finding that started this: the View menu's two items take
 the same three kinds the context menus have, and `⌘\` and `⇧⌘\` move onto the row meaning "the same
 again". Then the actions that belong to the window and to a workspace: the Workspace menu becomes
-everything a workspace row's menu offers, plus the merge, which had no item in any menu at all; the
-tab actions are completed, the terminal pane's own actions are published, and the standard menus
-are checked for shape.
+everything a workspace row's menu offers. The tab actions are completed, the terminal pane's own
+actions are published, and the standard menus are checked for shape.
 
 **Left for a second pass**, in the order they are worth doing:
 
@@ -351,8 +355,7 @@ are checked for shape.
    are free.
 2. **The inspector.** The tab picker, the diff scope, the file bar's three toggles, Revert file,
    Copy path, and the remaining pull request items. Two of these need `⌘E` and `⌘S` moved off their
-   hidden buttons onto `@FocusedValue`s, which is what `FocusedMenuValues` already asks for and
-   what the merge item on this branch is the worked example of.
+   hidden buttons onto `@FocusedValue`s, which is what `FocusedMenuValues` already asks for.
 3. **A Project menu, or a project group in File.** Rename, Reveal in Finder, Hide, Remove. Four
    items that exist only on a right click.
 4. **The composer and the transcript.** Attach a file, insert a quick prompt, fast mode, and the
@@ -370,10 +373,9 @@ are checked for shape.
   a tree row. The tabs are in Go to Tab because nine keys hang off them and the selected tab is a
   real subject. The workspaces are in the sidebar and reachable with `⌥⌘↑↓`; a Workspaces submenu
   listing every workspace on the machine would be a second sidebar that goes stale.
-- **Choosing the merge method.** It is a per-project mode, set from the split button's chevron and
-  remembered. A submenu of the three in the menu bar would be a second place to set it, and a row
-  in it would have to both change the mode and merge, which is the one thing that button's own menu
-  refuses to do. The menu bar's item says which merge is in force and performs that one.
+- **Merging and choosing the merge method.** Both belong in the pull request panel, where the
+  checks, conflicts and target branch are visible. The split button performs the merge; its
+  chevron chooses the per-project method.
 - **Anything inside Settings or the project settings window.** Removing a run script is a button in
   the editor that owns it. A menu bar item for it would have to name which script.
 - **Discovered Seas.** A `Window` scene contributes its own Window menu item, and a command of our

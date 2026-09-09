@@ -49,6 +49,7 @@ struct RepoScriptsSection: View {
                     Text("Scripts run in the workspace folder without an interactive shell. Files use their shebang; inline commands use zsh.")
                     Text(Self.variables)
                         .font(Typo.codeTiny)
+                    Text(Self.urlFile)
                     Text(Self.alias)
                     Text(Self.rerun)
                 }
@@ -60,7 +61,15 @@ struct RepoScriptsSection: View {
 
     /// Named rather than described, because a script writer needs the exact spelling.
     private static let variables = "\(WorkspaceManager.environmentPrefix)_"
-        + "{WORKSPACE_NAME, WORKSPACE_ID, WORKSPACE_PATH, ROOT_PATH, DEFAULT_BRANCH, PORT, IS_LOCAL}"
+        + "{WORKSPACE_NAME, WORKSPACE_ID, WORKSPACE_PATH, PROJECT_NAME, ROOT_PATH, "
+        + "DEFAULT_BRANCH, PORT, IS_LOCAL, URL_FILE}"
+
+    /// The one variable a script writes to rather than reads. Said here rather than only in the
+    /// Workspaces pane, because the place somebody works out that they need it is while they are
+    /// looking at the script that would write it.
+    private static let urlFile = "Write an address to $"
+        + "\(WorkspaceManager.environmentPrefix)_URL_FILE and this workspace's browser panes open "
+        + "on it, for a site whose hostname only the setup script knows."
 
     /// Said once, quietly, and not given equal billing with the real names above it. A script
     /// written for Conductor keeps working; a script written today should not be written that way.

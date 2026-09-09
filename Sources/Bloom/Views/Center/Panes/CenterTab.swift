@@ -74,8 +74,8 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
     /// poll drops any selection git no longer reports, which would throw the reader out of a file
     /// they opened from the worktree tree a few seconds after they opened it.
     var path: String = ""
-    /// Review only: stack every changed file in one continuous scroll area.
-    var showsAllFiles: Bool = false
+    /// Shared reviews default to a continuous review; an explicit saved choice is retained.
+    var showsAllFiles: Bool
     /// A repeated click on the same file still asks the continuous review to scroll back to it.
     var reviewNavigationRevision: Int = 0
 
@@ -115,13 +115,14 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
         opensPreviewAfterSetup = try container.decodeIfPresent(Bool.self, forKey: .opensPreviewAfterSetup) ?? false
         url = try container.decodeIfPresent(String.self, forKey: .url) ?? ""
         path = try container.decodeIfPresent(String.self, forKey: .path) ?? ""
-        showsAllFiles = try container.decodeIfPresent(Bool.self, forKey: .showsAllFiles) ?? false
         pageTitle = try container.decodeIfPresent(String.self, forKey: .pageTitle) ?? ""
         isNamed = try container.decodeIfPresent(Bool.self, forKey: .isNamed) ?? false
         directory = try container.decodeIfPresent(String.self, forKey: .directory) ?? ""
         // False for every tab written before this existed, which is what all of them are: the one
         // shared review. See `isPinnedToPath`.
         isPinnedToPath = try container.decodeIfPresent(Bool.self, forKey: .isPinnedToPath) ?? false
+        showsAllFiles = try container.decodeIfPresent(Bool.self, forKey: .showsAllFiles)
+            ?? (kind == .review && !isPinnedToPath)
     }
 
     init(
@@ -130,6 +131,7 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
         directory: String = "", isPinnedToPath: Bool = false
     ) {
         self.isPinnedToPath = isPinnedToPath
+        self.showsAllFiles = kind == .review && !isPinnedToPath
         self.id = id
         self.workspaceID = workspaceID
         self.kind = kind

@@ -5,6 +5,7 @@ import BloomCore
 @MainActor
 @Observable
 final class RemoteWorkspaceFileListing: WorkspacePaneModel {
+    var browserReviews: [String: BrowserRegionCapture] = [:]
     var workspace: Workspace
     private unowned let server: ServerWindowModel
     private unowned let app: AppModel
@@ -62,6 +63,12 @@ final class RemoteWorkspaceFileListing: WorkspacePaneModel {
     var isRunningSetup: Bool { workspace.setupState == .running }
     var port: Int { workspace.port }
     func ensurePort() async -> Int { workspace.port }
+    func browserAddress() async -> String {
+        do {
+            if case .text(let address) = try await read(.workspace(workspaceID: workspace.id, action: .browserAddress)) { return address }
+        } catch { if !Task.isCancelled { server.error = error.localizedDescription } }
+        return WorkspacePreview.address(port: workspace.port) ?? ""
+    }
     func onAppear() async {
         await reloadSessions()
         if let id = activeSessionID { prepareTranscript(for: id) }
@@ -119,6 +126,7 @@ final class RemoteWorkspaceFileListing: WorkspacePaneModel {
         return try await server.read(operation)
     }
     var changedFiles: [ChangedFile] { server.review.files }
+    var reviewFiles: [ChangedFile] { server.review.reviewFiles }
     var selectedFilePath: String? {
         get { server.review.selectedPath }
         set { server.review.selectedPath = newValue }

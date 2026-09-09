@@ -22,6 +22,8 @@ codesign --force --deep --sign - "$probe_app" >/dev/null 2>&1
 # Refuse a release or stale binary, which would ignore the flag and start the application.
 python3 - "$probe_app/Contents/MacOS/Bloom" "$probe_root" "$@" <<'PY'
 import json
+import os
+import shutil
 import pathlib
 import subprocess
 import sys
@@ -62,7 +64,7 @@ git('-c', 'commit.gpgsign=false', '-c', 'user.name=Review Probe',
     '}\n'
 )
 (fixture / 'Sources/LongReview.swift').write_text(
-    ''.join(f'let reviewLine{line} = {line}\n' for line in range(120))
+    ''.join(f'let reviewLine{line} = {line}\n' for line in range(1800 if '--review-scroll-profile' in arguments else 120))
 )
 try:
     subprocess.run(
@@ -77,6 +79,13 @@ except subprocess.TimeoutExpired:
 report = pathlib.Path(root, 'result.json').read_text()
 print(report)
 if not json.loads(report)['passed']:
+    if os.environ.get('RUNNER_TEMP'):
+        evidence = pathlib.Path(os.environ['RUNNER_TEMP'], 'bloom-review-probe')
+        evidence.mkdir(exist_ok=True)
+        for item in pathlib.Path(root).iterdir():
+            if item.suffix in {'.png', '.json', '.log'}:
+                shutil.copy2(item, evidence / item.name)
+    print(pathlib.Path(root, 'probe.log').read_text(), file=sys.stderr)
     raise SystemExit(f'Probe failed; evidence: {root}')
 print(f'Probe evidence: {root}')
 PY

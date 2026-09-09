@@ -207,6 +207,11 @@ public actor Store {
                 "CREATE INDEX IF NOT EXISTS sessions_parent ON sessions(parent_session_id);"
             ),
             (
+                "sessions", "side_conversation_parent_id",
+                "ALTER TABLE sessions ADD COLUMN side_conversation_parent_id TEXT;",
+                "CREATE INDEX IF NOT EXISTS sessions_side_parent ON sessions(side_conversation_parent_id);"
+            ),
+            (
                 "deliveries", "crew_payload",
                 "ALTER TABLE deliveries ADD COLUMN crew_payload BLOB;",
                 nil
@@ -1045,6 +1050,23 @@ public actor Store {
                 PRIMARY KEY (workspace_id, file_path)
             );
             """),
+            { db in
+                let names = Set(try db.query("PRAGMA table_info(sessions);").compactMap { $0.string("name") })
+                if !names.contains("side_conversation_parent_id") {
+                    try db.execute("ALTER TABLE sessions ADD COLUMN side_conversation_parent_id TEXT;")
+                }
+                try db.execute("CREATE INDEX IF NOT EXISTS sessions_side_parent ON sessions(side_conversation_parent_id);")
+                // A closed parent must never strand a hidden, possibly still-running child.
+                try db.execute("""
+                CREATE TRIGGER IF NOT EXISTS sessions_keep_side_conversations
+                AFTER UPDATE OF archived_at ON sessions
+                WHEN NEW.archived_at IS NOT NULL
+                BEGIN
+                    UPDATE sessions SET side_conversation_parent_id = NULL
+                    WHERE side_conversation_parent_id = NEW.id;
+                END;
+                """)
+            },
         ]
 
         let current = Int(try db.readUserVersion())
@@ -1742,6 +1764,79 @@ public actor Store {
 
     // MARK: - Sessions
 
+    /// Creation and context capture commit together. Returning an existing detour makes two
+    /// panes opening /btw at once converge on one conversation without touching the parent.
+    public func openSideConversation(parentID: SessionID, streamingText: String = "") throws -> Session {
+        try db.transaction {
+            guard let parent = try session(id: parentID), let workspaceID = parent.workspaceID,
+                  parent.archivedAt == nil, parent.sideConversationParentID == nil,
+                  let workspace = try workspace(id: workspaceID), workspace.state == .active else {
+                throw SQLiteError(message: "This chat cannot start a side conversation.", sql: nil)
+            }
+            if let existing = try sessions(workspaceID: workspaceID).first(where: {
+                $0.sideConversationParentID == parentID
+            }) { return existing }
+            let recent = try db.query(
+                "SELECT * FROM messages WHERE session_id = ? ORDER BY seq DESC LIMIT 300",
+                [.text(parentID)]
+            ).map(Self.message(from:)).reversed()
+            let snapshot = SideConversation.Snapshot(
+                parentID: parentID, title: parent.title,
+                context: SideConversation.context(
+                    messages: Array(recent), streamingText: streamingText,
+                    inheritedContext: try sideConversationSnapshot(sessionID: parentID)?.context ?? ""
+                )
+            )
+            let next = Session(
+                workspaceID: workspaceID, sideConversationParentID: parentID,
+                title: PaneNaming.nextTitle(
+                    base: "Side conversation", taken: try sessions(workspaceID: workspaceID).map(\.title)
+                ),
+                model: parent.model, effort: parent.effort,
+                agentKind: parent.agentKind, permissionMode: parent.permissionMode,
+                sortOrder: try sessions(workspaceID: workspaceID).count
+            )
+            try upsert(next)
+            try setSetting(SideConversation.contextKey(next.id), String(decoding: JSONEncoder().encode(snapshot), as: UTF8.self))
+            // Preserve the values which live outside Session as well as the model and permissions.
+            for keys in [
+                (ComposerControls.fastModeKey(sessionID: parentID), ComposerControls.fastModeKey(sessionID: next.id)),
+                (ComposerControls.outputStyleKey(sessionID: parentID), ComposerControls.outputStyleKey(sessionID: next.id)),
+                (ComposerControls.contextWindowKey(sessionID: parentID), ComposerControls.contextWindowKey(sessionID: next.id))
+            ] { try setSetting(keys.1, setting(keys.0)) }
+            try setSetting(
+                PlanApproval.modeKey(sessionID: next.id),
+                planImplementationMode(sessionID: parentID, hasWorktree: true).rawValue
+            )
+            try setSetting(ComposerControls.defaultsAppliedKey(sessionID: next.id), "1")
+            return next
+        }
+    }
+
+    public func sideConversationSnapshot(sessionID: SessionID) throws -> SideConversation.Snapshot? {
+        guard let stored = try setting(SideConversation.contextKey(sessionID)) else { return nil }
+        return try JSONDecoder().decode(SideConversation.Snapshot.self, from: Data(stored.utf8))
+    }
+
+    /// The editable question stays untouched. Preparing at the provider boundary also keeps a
+    /// failed first send retryable even when the provider has already recorded a local user row.
+    public func sideConversationTurn(_ text: String, sessionID: SessionID) throws -> String {
+        guard try setting(SideConversation.contextDeliveredKey(sessionID)) != "1",
+              let snapshot = try sideConversationSnapshot(sessionID: sessionID) else { return text }
+        return try SideConversation.firstTurn(text, snapshot: snapshot)
+    }
+
+    public func acknowledgeSideConversationContext(sessionID: SessionID) throws {
+        try setSetting(SideConversation.contextDeliveredKey(sessionID), "1")
+    }
+
+    /// Promotion only changes presentation. The provider id, queued turns and context survive.
+    public func keepSideConversation(sessionID: SessionID) throws -> Session? {
+        try update(sessionID: sessionID) { row in
+            row.sideConversationParentID = nil
+        }
+    }
+
     public func sessions(workspaceID: WorkspaceID) throws -> [Session] {
         try db.query(
             "SELECT * FROM sessions WHERE workspace_id = ? AND archived_at IS NULL ORDER BY sort_order, created_at",
@@ -1870,11 +1965,12 @@ public actor Store {
         try db.run(
             """
             INSERT INTO sessions (
-                id, workspace_id, parent_session_id, title, agent_session_id, model, effort,
+                id, workspace_id, parent_session_id, side_conversation_parent_id, title, agent_session_id, model, effort,
                 agent_kind, permission_mode, state, sort_order, created_at, updated_at,
                 archived_at, last_read_seq, input_tokens, output_tokens, cost_usd, context_tokens
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+                side_conversation_parent_id = excluded.side_conversation_parent_id,
                 title = excluded.title,
                 agent_session_id = excluded.agent_session_id,
                 model = excluded.model,
@@ -1894,6 +1990,7 @@ public actor Store {
             [
                 .text(session.id), .text(session.workspaceID),
                 session.parentSessionID.map { .text($0) } ?? .null,
+                session.sideConversationParentID.map { .text($0) } ?? .null,
                 .text(session.title),
                 session.agentSessionID.map { .text($0) } ?? .null,
                 .text(session.model), .text(session.effort), .text(session.agentKind.rawValue),
@@ -3125,6 +3222,27 @@ public actor Store {
 
     /// Archive and replacement are one commit. A failed insert, preference or draft write must
     /// leave the original conversation reachable, and a second caller must not replace it twice.
+    public func replaceWorkspaceConversation(id: SessionID, controls: ComposerControls) throws -> Session {
+        try db.transaction {
+            guard let current = try session(id: id), let workspaceID = current.workspaceID,
+                  current.archivedAt == nil else {
+                throw SQLiteError(message: "This conversation is no longer current.", sql: nil)
+            }
+            var next = Session(workspaceID: workspaceID, title: current.title, sortOrder: current.sortOrder)
+            next.model = controls.model
+            next.effort = controls.effort
+            next.agentKind = controls.agentKind
+            next.permissionMode = controls.permissionMode
+            try upsert(next)
+            for (key, value) in controls.settings(sessionID: next.id) {
+                try setSetting(key, value)
+            }
+            _ = try update(sessionID: id) { $0.archivedAt = Date() }
+            return next
+        }
+    }
+
+    /// Ask tabs also carry their directory and persisted selection into the replacement.
     public func replaceAskConversation(
         id: SessionID, controls: ComposerControls, draft: String = ""
     ) throws -> Session {
@@ -3375,6 +3493,7 @@ public actor Store {
             // A row written before the column existed has no parent, which is what it was: a chat
             // the owner made.
             parentSessionID: row.string("parent_session_id").map(SessionID.init),
+            sideConversationParentID: row.string("side_conversation_parent_id").map(SessionID.init),
             title: row.string("title") ?? "Session",
             agentSessionID: row.string("agent_session_id"),
             model: row.string("model") ?? "opus",

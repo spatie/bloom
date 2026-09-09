@@ -1605,10 +1605,9 @@ final class AppModel {
 
     /// What a drag on a project header ends in.
     ///
-    /// The projects are a flat list with one number ordering them, so there is none of the
-    /// translation a workspace drag needs: no filter hides a project and nothing sorts ahead of
-    /// anything. `to` is already an offset into this list, worked out by `SidebarReorder` from the
-    /// flattened rows the pane actually draws.
+    /// `to` indexes the visible projects from the pane that produced the drag. Hidden projects
+    /// still exist in `repos`, so applying that offset directly to it can leave the dragged
+    /// project where it started. `SidebarReorder` translates it while preserving hidden slots.
     ///
     /// The new order is put on screen before it is written, for the reason `reorderWorkspaces`
     /// gives: a drop is the end of a movement the table has already animated, and waiting for the
@@ -1620,9 +1619,9 @@ final class AppModel {
     /// or an icon that landed while the drag was happening. See e47a3b7. It is one transaction for
     /// the same reason `reorderWorkspaces` gives: one commit, one announcement, and no moment at
     /// which the observer can reload a half written order.
-    func reorderProjects(id: RepoID, to: Int) async {
+    func reorderProjects(id: RepoID, visible: [RepoID], to: Int) async {
         guard let store else { return }
-        let changes = SidebarReorder.move(projects: repos, id: id, to: to)
+        let changes = SidebarReorder.move(projects: repos, visible: visible, id: id, to: to)
         guard !changes.isEmpty else { return }
 
         let byID = Dictionary(changes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })

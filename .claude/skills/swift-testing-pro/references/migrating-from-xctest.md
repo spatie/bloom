@@ -1,34 +1,21 @@
-# Migrating from XCTest
+# Requested XCTest migrations
 
-If the project has existing tests written using XCTest, do *not* rewrite to Swift Testing unless requested. Even then, remember that XCTest supports UI testing, whereas Swift Testing does not.
+Only migrate tests included in the requested work. Swift Testing and XCTest can coexist in a
+project; keep XCTest for UI automation.
 
-Most things in XCTest have a direct equivalent in Swift Testing:
+| XCTest | Swift Testing |
+| --- | --- |
+| `XCTAssertEqual(a, b)` | `#expect(a == b)` |
+| `XCTAssertLessThan(a, b)` | `#expect(a < b)` |
+| `XCTAssertThrowsError` | `#expect(throws:)` with the expected error |
+| `XCTUnwrap(value)` | `try #require(value)` |
+| `XCTFail(message)` | `Issue.record(message)` |
+| `XCTAssertIdentical(a, b)` | `#expect(a === b)` |
 
-- `XCTAssertEqual(a, b)` maps to `#expect(a == b)`
-- `XCTAssertLessThan(a, b)` maps to `#expect(a < b)`
-- `XCTAssertThrowsError` maps to `#expect(throws:)`
-- `XCTUnwrap(optional)` maps to `try #require(optional)` – both unwrap or fail, but `#require` works with any Boolean condition too.
-- `XCTFail("message")` maps to `Issue.record("message")` – use this to manually record a test failure.
-- `XCTAssertIdentical(a, b)` maps to `#expect(a === b)` – for checking two references point to the same object instance.
+Replace `XCTestCase` inheritance with an appropriate suite and mark tests with `@Test`. Preserve
+coverage, setup and cleanup semantics; use `init`, `defer`, or test scopes where appropriate.
+Check shared resources because migrated tests may now run concurrently. Await actual completion
+rather than translating XCTest expectations directly into `confirmation`.
 
-…and so on.
-
-However, Swift Testing does *not* offer built-in float tolerance when checking if two floating-point values are *close enough* to be considered the same.
-
-To do that, you must bring in Apple's Swift Numerics library and use its `isApproximatelyEqual(to:absoluteTolerance:)` method like this:
-
-```swift
-#expect(celsius.isApproximatelyEqual(to: 0, absoluteTolerance: 0.000001))
-```
-
-**Important:** Unless it is already imported into the project, do *not* add Swift Numerics as a library without first requesting permission from the user.
-
-
-## Converting from XCTest to Swift Testing
-
-If you are tasked with converting XCTest code to Swift Testing, you should:
-
-1. Start by keeping the same broad structure: the same type names (just going from a class to a struct), and the same test methods (just removing `test` from the names and using `@Test` instead), switching from old-style assertions to new-style expectations.
-2. Look for places where parameterized tests can either cut down on test code or improve coverage.
-3. Add any appropriate `#require` checks at the start of tests, for preconditions.
-4. Finish by adding traits where appropriate – `.timeLimit()`, `.enabled(if:)`, `.tags()`, etc, to replace XCTest conventions such as skipping tests.
+For floating-point tolerance, see [test design](writing-better-tests.md). No new dependency is
+required merely to replace `XCTAssertEqual` with an accuracy argument.

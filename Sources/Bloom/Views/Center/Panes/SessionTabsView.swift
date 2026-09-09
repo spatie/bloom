@@ -441,20 +441,12 @@ struct SessionTabsView<Model: WorkspacePaneModel>: View {
 
     /// The `+` opens a browser on the workspace's own dev server, where a split opens one on
     /// nothing. That is not drift: this item is the one that means "look at what this workspace is
-    /// running", and it is the only route that has a port to hand.
+    /// running", and it is the only route that knows where that is.
     private func newBrowser() {
         Task {
-            await preparePort()
-            let address = model.port > 0 ? "http://localhost:\(model.port)" : ""
+            let address = await model.browserAddress()
             NewPane.open(.browser, in: model, url: address) { store.select($0, in: model) }
         }
-    }
-
-    /// The workspace's own port, which is what its setup and run scripts were told to bind and so
-    /// what its dev server is answering on. Allocation lives on the model, where concurrent
-    /// callers get one block. See `WorkspaceModel.ensurePort`.
-    private func preparePort() async {
-        await model.ensurePort()
     }
 
     // MARK: - Reordering

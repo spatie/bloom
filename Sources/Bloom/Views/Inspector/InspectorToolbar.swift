@@ -1,8 +1,7 @@
 import SwiftUI
 import BloomCore
 
-/// The inspector's own tab row: which pane, and the two chrome level choices that outlive
-/// whichever file happens to be selected.
+/// The inspector's tab row and actions for reviewing and arranging its files.
 ///
 /// Tabs connect the selected scope to the pane below. When the inspector becomes too narrow for
 /// the labels, `ViewThatFits` falls back to a pop-up button.
@@ -62,10 +61,6 @@ struct InspectorToolbar<ScopeMenu: View, WorktreeMenu: View>: View {
     private var trailing: some View {
         HStack(spacing: Metrics.spacingTight) {
             if selection == .changes {
-                // No Review toggle. It existed to hide this list so that the diff under it had
-                // room, and the diff is not under it any more: it is a tab in the centre column
-                // at the full height of the window, and the list stays beside it the whole time.
-                // Walking the files one at a time is Cmd+Option+J and K.
                 Button {
                     isTree.toggle()
                 } label: {

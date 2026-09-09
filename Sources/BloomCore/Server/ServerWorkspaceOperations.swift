@@ -19,6 +19,12 @@ enum ServerWorkspaceOperations {
             guard value == nil || WorkspaceColour.all.contains(where: { $0.hex == value }) else { throw ServerFailure("Choose a workspace colour from the menu.") }
             _ = try await store.update(workspaceID: workspace.id) { $0.colour = value }
             return .accepted
+        case .browserAddress:
+            guard let repo = try await store.repo(id: workspace.repoID) else { throw ServerFailure("This project's settings are unavailable.") }
+            let environment = WorkspaceManager(store: store).environment(for: workspace, repo: repo, port: workspace.port)
+            return .text(WorkspaceBrowserURL.read(worktree: workspace.path,
+                settings: SettingsLoader.load(workspace: workspace.path, repo: repo.path),
+                environment: environment, port: workspace.port))
         case .runSetup:
             guard let repo = try await store.repo(id: workspace.repoID) else { throw ServerFailure("This project's settings are unavailable.") }
             guard workspace.setupState != .running else { throw ServerFailure("Workspace setup is already running.") }

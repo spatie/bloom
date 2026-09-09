@@ -6,6 +6,7 @@ import BloomCore
 protocol WorkspaceFileListing: AnyObject {
     var workspace: Workspace { get }
     var changedFiles: [ChangedFile] { get }
+    var reviewFiles: [ChangedFile] { get }
     var selectedFilePath: String? { get set }
     var changesError: String? { get }
     var isLoadingChanges: Bool { get }

@@ -24,6 +24,8 @@ struct ComposerView: View {
     /// passes its own, because a conversation that cannot change a file should not open by
     /// inviting somebody to ask it to.
     var placeholder: String = ComposerEditor.chatPlaceholder
+    var onDismiss: (() -> Void)?
+    var includesReviewComments = true
     var destinationLabel: String?
     /// The chats this composer may be pointed at, when the caller is offering a choice. Empty,
     /// the default, leaves the strip above the box a plain sentence. See
@@ -136,6 +138,7 @@ struct ComposerView: View {
                 onQuickPrompt: { fire($0, insert: actions.insert) },
                 onSend: send,
                 onStop: transcript.stop,
+                onSideConversation: canOpenSideConversation ? openSideConversation : nil,
                 remote: transcript.remote
             )
         }
@@ -149,6 +152,7 @@ struct ComposerView: View {
             isFocused = true
             caret = 0
         }
+        .focusedValue(\.composerTranscript, isFocused ? transcript : nil)
         .onDisappear(perform: saveDraftNow)
     }
 
@@ -197,7 +201,7 @@ struct ComposerView: View {
 
     /// The pending review, which rides with whatever is sent next from this workspace.
     private var reviewComments: [ReviewComment] {
-        model?.reviewComments ?? []
+        includesReviewComments ? (model?.reviewComments ?? []) : []
     }
 
     /// Attachments alone are a turn. Dropping a screenshot in and pressing send is a sentence, and
@@ -219,7 +223,7 @@ struct ComposerView: View {
             send()
             return true
         case .escape:
-            isFocused = false
+            if let onDismiss { onDismiss() } else { isFocused = false }
             return true
         case .up, .down, .tab:
             return false
@@ -375,9 +379,43 @@ struct ComposerView: View {
     /// `TranscriptModel.submit`'s decision, not this view's: they join the chat's queue and go
     /// when the queue is allowed to move. Deciding it here would be a second copy of the rule, and
     /// the rule already exists in a place the suite can reach it. See `DeliveryHold`.
+    private var canOpenSideConversation: Bool {
+        model != nil && transcript.session.sideConversationParentID == nil && onDismiss == nil
+    }
+
+    private func openSideConversation() {
+        model?.openSideConversation(from: transcript)
+    }
+
     private func send() {
         guard canSend else { return }
         draftSaveTask?.cancel()
+
+        if let question = SideConversation.question(in: transcript.draft) {
+            guard canOpenSideConversation, let model else {
+                app.notice = BloomNotice(message: transcript.remote == nil
+                    ? "Use /btw in a workspace chat to open a side conversation."
+                    : "Side conversations are not available on remote servers yet.")
+                return
+            }
+            // The command itself belongs to Bloom. Leave review comments on the main chat.
+            guard model.openSideConversation(from: transcript, question: question) else { return }
+            transcript.draft = ""
+            caret = 0
+            saveDraftNow()
+            return
+        }
+
+        if onDismiss != nil,
+           ChatClearCommand.matches(transcript.draft) || ChatCloseCommand.matches(transcript.draft) {
+            app.notice = BloomNotice(message: "Use Keep and start new in the side conversation menu.")
+            return
+        }
+
+        if ChatCloseCommand.matches(transcript.draft) {
+            startFreshChat(closingPrevious: true)
+            return
+        }
 
         if ChatClearCommand.matches(transcript.draft) {
             startFreshChat()
@@ -385,9 +423,13 @@ struct ComposerView: View {
         }
 
         if transcript.remote != nil {
-            let text = transcript.draft
+            let sourceDraft = transcript.draft
+            let comments = Dictionary(attachments.compactMap { attachment in
+                attachment.imageComment.map { (attachment.path, $0) }
+            }, uniquingKeysWith: { first, _ in first })
+            let text = BrowserImageComment.expand(sourceDraft, comments: comments)
             caret = 0
-            Task { await self.transcript.submit(text) }
+            Task { await self.transcript.submit(text, clearingDraft: sourceDraft) }
             return
         }
 
@@ -397,25 +439,31 @@ struct ComposerView: View {
         // and a file that fails it is taken out of the sentence rather than sent as a path to
         // nothing.
         let worktree = transcript.cwd
-        let text = AttachmentDraft
-            .parse(transcript.draft, paths: attachments.map(\.path))
+        let sourceDraft = transcript.draft
+        let draftText = AttachmentDraft
+            .parse(sourceDraft, paths: attachments.map(\.path))
             .keeping { path in
                 FileManager.default.fileExists(
                     atPath: PromptAttachment.sent(path: path).url(in: worktree).path
                 )
             }
 
+        let imageComments = Dictionary(attachments.compactMap { attachment in
+            attachment.imageComment.map { (attachment.path, $0) }
+        }, uniquingKeysWith: { first, _ in first })
+        let text = BrowserImageComment.expand(draftText, comments: imageComments)
+
         // The records go and the files the message names stay. The prompt the agent is now reading
         // names those paths, and deleting them out from under it would break the one thing they
         // were for.
         PromptAttachmentStore.shared.settle(
-            sent: text, sessionID: transcript.session.id.rawValue, workspace: worktree
+            sent: draftText, sessionID: transcript.session.id.rawValue, workspace: worktree
         )
         caret = 0
         let transcript = transcript
         let comments = reviewComments
         guard !comments.isEmpty else {
-            Task { await transcript.submit(text) }
+            Task { await transcript.submit(text, clearingDraft: sourceDraft) }
             return
         }
 
@@ -436,7 +484,7 @@ struct ComposerView: View {
                     template: template
                 )
             }.value
-            await transcript.submit(composed)
+            await transcript.submit(composed, clearingDraft: sourceDraft)
             await model?.removeReviewComments(ids: comments.map(\.id))
         }
     }
@@ -506,31 +554,54 @@ struct ComposerView: View {
         }
     }
 
-    private func startFreshChat() {
-        if let remote = transcript.remote {
-            Task {
-                guard let session = await remote.newChat() else { return }
-                transcript.draft = ""
-                await transcript.saveDraft()
-                app.selectRemoteSession(session.id)
-            }
-            return
-        }
+    private func startFreshChat(closingPrevious: Bool = false) {
         guard !isClearingChat else { return }
         isClearingChat = true
         let previous = transcript
         let controls = controls
         Task { @MainActor in
             defer { isClearingChat = false }
+            if let remote = previous.remote {
+                guard let session = await remote.newChat() else { return }
+                let closedPrevious = closingPrevious ? await remote.close() : false
+                if !closingPrevious || closedPrevious,
+                   ChatClearCommand.matches(previous.draft) || ChatCloseCommand.matches(previous.draft) {
+                    previous.draft = ""
+                    await previous.saveDraft()
+                }
+                app.selectRemoteSession(session.id)
+                return
+            }
             if let model {
-                guard await model.createSession(controls: controls) != nil else { return }
+                let tabs = WorkspaceTabsStore.shared
+                let order = tabs.entries(in: model)
+                let owner = order.first { tab in
+                    tabs.layout(of: tab).panes.contains { tabs.content(of: $0, in: tab) == .chat(previous.session.id) }
+                }
+                let pane = owner.flatMap { tab in
+                    tabs.layout(of: tab).panes.first { tabs.content(of: $0, in: tab) == .chat(previous.session.id) }
+                }
+                let next = closingPrevious
+                    ? await model.replaceSession(previous.session, controls: controls)
+                    : await model.createSession(controls: controls)
+                guard let next else { return }
+                if closingPrevious {
+                    if let owner, let pane {
+                        tabs.replace(pane: pane, of: owner, with: .chat(next.id), in: model)
+                    }
+                    tabs.forget(.chat(previous.session.id), workspaceID: model.workspace.id)
+                    tabs.reorder(order.map { entry in
+                        entry == .chat(previous.session.id) ? .chat(next.id) : entry
+                    }, in: model)
+                }
+                tabs.reveal(.chat(next.id), in: model, focusing: true)
             } else {
                 await app.ask.startFresh(controls: controls)
                 guard let current = app.ask.session, current.id != previous.session.id else { return }
             }
             // Only remove the command after the new conversation exists. Previous messages,
             // pending attachments and review comments are not discarded by this action.
-            if ChatClearCommand.matches(previous.draft) {
+            if ChatClearCommand.matches(previous.draft) || ChatCloseCommand.matches(previous.draft) {
                 previous.draft = ""
                 await previous.saveDraft()
             }

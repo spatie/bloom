@@ -327,7 +327,8 @@ public actor CodexClient {
         model: String? = nil,
         approvalPolicy: CodexApprovalPolicy? = nil,
         sandbox: CodexSandboxMode? = nil,
-        approvalsReviewer: CodexApprovalsReviewer? = nil
+        approvalsReviewer: CodexApprovalsReviewer? = nil,
+        developerInstructions: String? = nil
     ) async throws -> CodexThreadHandle {
         let result = try await send("thread/start", params: .object(omittingNil: [
             "cwd": .string(cwd ?? configuration.cwd),
@@ -335,6 +336,7 @@ public actor CodexClient {
             "approvalPolicy": approvalPolicy.map { .string($0.rawValue) },
             "sandbox": sandbox.map { .string($0.rawValue) },
             "approvalsReviewer": approvalsReviewer.map { .string($0.rawValue) },
+            "developerInstructions": developerInstructions.map(JSONValue.string),
         ]))
         guard let id = result["thread"]?["id"]?.stringValue else {
             throw CodexClientError.unexpectedResult(method: "thread/start")
@@ -353,10 +355,12 @@ public actor CodexClient {
         _ threadID: String,
         cwd: String? = nil,
         model: String? = nil,
-        sandbox: CodexSandboxMode? = nil
+        sandbox: CodexSandboxMode? = nil,
+        developerInstructions: String? = nil
     ) async throws -> CodexThreadHandle {
         let result = try await send("thread/resume", params: .object(omittingNil: [
             "threadId": .string(threadID),
+            "developerInstructions": developerInstructions.map(JSONValue.string),
             "cwd": .string(cwd ?? configuration.cwd),
             "model": model.map(JSONValue.string),
             "sandbox": sandbox.map { .string($0.rawValue) },

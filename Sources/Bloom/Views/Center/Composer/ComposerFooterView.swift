@@ -50,6 +50,7 @@ struct ComposerFooterView: View {
     var onQuickPrompt: (@MainActor (QuickPrompt) -> Void)?
     var onSend: @MainActor () -> Void
     var onStop: @MainActor () -> Void = {}
+    var onSideConversation: (@MainActor () -> Void)?
     /// Whether the row carries the choices the agent runs on.
     ///
     /// False for a terminal workspace, which has no agent: the create window was offering a model,
@@ -288,6 +289,15 @@ struct ComposerFooterView: View {
 
             // A paperclip, not the plus that used to sit here: a plus already means "new session"
             // in the tab strip directly above, and it says nothing about what is being added.
+            if let onSideConversation {
+                Button(action: onSideConversation) {
+                    Image(systemName: "arrow.turn.down.right")
+                }
+                .buttonStyle(.plain)
+                .help("Ask a side question (/btw)")
+                .accessibilityLabel("Ask a side question")
+            }
+
             // Gone with the rest when there is no agent: nothing reads an attachment into a shell.
             if showsAgentControls {
                 Button(action: onAttach) {
