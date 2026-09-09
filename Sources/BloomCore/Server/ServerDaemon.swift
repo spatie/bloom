@@ -20,6 +20,7 @@ public final class ServerDaemon: Sendable {
 
     public static func start(
         directory: String,
+        gatewayGroupID: UInt32? = nil,
         makeRunner: @escaping ServerRuntime.RunnerFactory = { session, path, store in
             SessionRunnerFactory.make(session: session, workspacePath: path, store: store)
         }
@@ -29,10 +30,10 @@ public final class ServerDaemon: Sendable {
         let store = try Store(path: database)
         try await store.resetRunningSessions()
         _ = try await store.abandonPendingPermissionAsks()
-        let runtime = ServerRuntime(store: store, makeRunner: makeRunner)
+        let runtime = ServerRuntime(store: store, gatewayGroupID: gatewayGroupID, makeRunner: makeRunner)
         try await runtime.restoreQueuedPrompts()
         let socketPath = try socketPath(directory: directory)
-        let listener = try UnixSocketListener(path: socketPath) { connection in
+        let listener = try UnixSocketListener(path: socketPath, groupID: gatewayGroupID) { connection in
             Task { await serve(connection, runtime: runtime) }
         }
         return ServerDaemon(runtime: runtime, socketPath: socketPath, lock: lock, listener: listener)

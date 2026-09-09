@@ -145,11 +145,11 @@ final class AppModel {
     /// with nothing.
     private func restoreLastSelection() {
         guard case .home = storedSelection else { return }
-        if !remoteServer.host.isEmpty, let id = UserDefaults.standard.string(forKey: Self.lastRemoteWorkspaceKey) {
+        if remoteServer.isConfigured, let id = UserDefaults.standard.string(forKey: Self.lastRemoteWorkspaceKey) {
             selection = .remoteWorkspace(WorkspaceID(id))
             return
         }
-        if !remoteServer.host.isEmpty, let remote = UserDefaults.standard.string(forKey: Self.lastRemoteSessionKey) {
+        if remoteServer.isConfigured, let remote = UserDefaults.standard.string(forKey: Self.lastRemoteSessionKey) {
             selection = .remote(SessionID(rawValue: remote))
             return
         }

@@ -5,20 +5,26 @@ import Foundation
 public actor ServerClient {
     private let socket: UnixSocketConnection?
     private let process: StreamingProcess?
+    private let http: ServerHTTPTransport?
     private var pump: Task<Void, Never>?
     private var errorPump: Task<Void, Never>?
     private var pending: [UUID: CheckedContinuation<ServerReply, Error>] = [:]
     private var isClosed = false
     private var stderr = ""
 
-    private init(socket: UnixSocketConnection?, process: StreamingProcess?) {
+    private init(socket: UnixSocketConnection?, process: StreamingProcess?, http: ServerHTTPTransport? = nil) {
         self.socket = socket
         self.process = process
+        self.http = http
     }
 
-    public static func connect(to endpoint: ServerEndpoint, timeout: Duration = .seconds(15)) async throws -> ServerClient {
+    public static func connect(to endpoint: ServerEndpoint, timeout: Duration = .seconds(15), accessToken: ServerHTTPTransport.AccessToken? = nil) async throws -> ServerClient {
         let client: ServerClient
         switch endpoint {
+        case .https(let address):
+            guard let accessToken else { throw ServerFailure("Sign in to the HTTPS server first.") }
+            let http = try ServerHTTPTransport(baseURL: ServerHTTPTransport.origin(address), accessToken: accessToken)
+            client = ServerClient(socket: nil, process: nil, http: http)
         case .local(let directory):
             let socket = try UnixSocketConnection.connect(to: ServerDaemon.socketPath(directory: directory))
             client = ServerClient(socket: socket, process: nil)
@@ -66,6 +72,7 @@ public actor ServerClient {
 
     public func request(_ request: ServerRequest, timeout: Duration = .seconds(660)) async throws -> ServerReply {
         guard !isClosed else { throw ServerFailure("The server connection is closed. Reconnect to continue.") }
+        if let http { return try await http.request(request, timeout: timeout) }
         guard pending[request.id] == nil else { throw ServerFailure("This command is already awaiting a reply.") }
         let line = String(decoding: try JSONEncoder().encode(request), as: UTF8.self)
         let deadline = Task { [weak self] in
@@ -109,6 +116,7 @@ public actor ServerClient {
     private func disconnect(message: String) {
         guard !isClosed else { return }
         isClosed = true
+        http?.close()
         socket?.close()
         process?.terminate()
         pump?.cancel()

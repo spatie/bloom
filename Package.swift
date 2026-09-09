@@ -3,7 +3,7 @@ import PackageDescription
 #if os(Linux)
 import Foundation
 
-let serverTests = ["ServerRuntimeTests.swift", "ServerReviewTests.swift", "ServerWorkspaceTests.swift", "ServerSidebarTests.swift", "ServerPreviewTests.swift", "ProcessPipeLifetimeTests.swift", "PlanApprovalTests.swift", "CodexTranslationTests.swift", "LocalServerIdentityTests.swift", "TestSupport.swift"]
+let serverTests = ["ServerRuntimeTests.swift", "ServerReviewTests.swift", "ServerWorkspaceTests.swift", "ServerSidebarTests.swift", "ServerPreviewTests.swift", "ServerHTTPTests.swift", "ServerTerminalStreamTests.swift", "ProcessPipeLifetimeTests.swift", "PlanApprovalTests.swift", "CodexTranslationTests.swift", "LocalServerIdentityTests.swift", "TestSupport.swift"]
 let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Tests/BloomCoreTests")
 let otherTests = (try FileManager.default.contentsOfDirectory(atPath: testDirectory.path)).filter { !serverTests.contains($0) }
 
@@ -42,6 +42,7 @@ let package = Package(
         .library(name: "BloomCore", targets: ["BloomCore"]),
     ],
     dependencies: [
+        .package(url: "https://github.com/openid/AppAuth-iOS.git", exact: "3.0.0"),
         // Native live Markdown editing for workspace notes. Pin the pre-1.0 API we integrate.
         .package(url: "https://github.com/nodes-app/swift-markdown-engine", exact: "0.12.0"),
         // The terminal panes. The upper bound is not tidiness: SwiftTerm tags 1.20.0 as a
@@ -65,6 +66,7 @@ let package = Package(
             name: "Bloom",
             dependencies: [
                 "BloomCore",
+                .product(name: "AppAuth", package: "AppAuth-iOS"),
                 .product(name: "MarkdownEngine", package: "swift-markdown-engine"),
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
                 .product(name: "Sparkle", package: "Sparkle"),

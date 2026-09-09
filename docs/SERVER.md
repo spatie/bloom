@@ -251,9 +251,17 @@ authenticated `gh`. Credentials remain on their respective execution host.
 
 See [Private remote previews](REMOTE-PREVIEWS.md) for Tailscale setup and Laravel/Vite configuration.
 
+An additional HTTPS transport is in development on this branch. Its native login and gateway
+accept administrator-configured OAuth providers, with no mandatory Cloudflare account or VPN.
+The gateway uses the same RPC protocol and streams the server's persistent tmux terminals.
+See [HTTPS gateway configuration](../Gateway/README.md) for the provider contract, preview
+isolation and remaining live sign-in/deployment checks. Installed validation builds may still
+use the previous protocol until the app and server are upgraded together.
+
+
 ## Protocol and ownership
 
-`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 8). A protocol mismatch
+`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 9). A protocol mismatch
 is refused before dispatch. Commands and replies carry UUIDs, so a long setup command does not
 block transcript reads or controls on the same connection.
 

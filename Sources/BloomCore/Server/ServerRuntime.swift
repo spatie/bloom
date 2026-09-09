@@ -8,6 +8,7 @@ public actor ServerRuntime {
     private let makeRunner: RunnerFactory
     private let repositories = ServerRepositoryResolver()
     private let terminals = ServerTerminalService()
+    private let terminalStreams: ServerTerminalStreams
     private let modelCatalogue = CodexModelCatalog.live()
     private var sessions: [SessionID: ServerSession] = [:]
     private var creating: [SessionID: Task<ServerSession, Error>] = [:]
@@ -19,10 +20,11 @@ public actor ServerRuntime {
     private var isClosed = false
     private var promptQueue: ServerPromptQueue?
 
-    public init(store: Store, makeRunner: @escaping RunnerFactory = { session, path, store in
+    public init(store: Store, gatewayGroupID: UInt32? = nil, makeRunner: @escaping RunnerFactory = { session, path, store in
         SessionRunnerFactory.make(session: session, workspacePath: path, store: store)
     }) {
         self.store = store
+        terminalStreams = ServerTerminalStreams(groupID: gatewayGroupID)
         self.makeRunner = makeRunner
     }
 
@@ -99,6 +101,11 @@ public actor ServerRuntime {
             return .hello(name: ProcessInfo.processInfo.hostName)
         case .previewAddress(let address):
             return .text(try await ServerPreview.resolve(address))
+        case .terminalStream(let id, let name):
+            let workspace = try await workspace(id)
+            let result = try await ServerWorkspaceOperations.perform(.terminal(name: name), workspace: workspace, store: store, terminals: terminals)
+            guard case .terminal(let terminal) = result else { throw ServerFailure("The terminal could not be started.") }
+            return .text(try await terminalStreams.open(terminal: terminal, workspace: workspace))
         case .composer(let id):
             let session = try await storedSession(id)
             guard let workspaceID = session.workspaceID else { throw ServerFailure("This session has no workspace.") }
@@ -312,6 +319,7 @@ public actor ServerRuntime {
                 return commands[key]
             }
             switch operation {
+            case .terminalStream(let target, _): return target == id ? commands[key] : nil
             case .send(let target, _), .setComposer(let target, _), .configure(let target, _, _, _),
                  .closeSession(let target), .stop(let target), .answer(let target, _, _):
                 return sessionIDs.contains(target) ? commands[key] : nil
@@ -335,6 +343,7 @@ public actor ServerRuntime {
         guard let repo = try await store.repo(id: workspace.repoID) else { throw ServerFailure("This project's repository is unavailable.") }
         try await WorkspaceManager(store: store).archive(workspace: workspace, repo: repo,
             deleteBranch: accepted.hazards.isDeletingBranch, force: true)
+        await terminalStreams.close(workspaceID: id)
         try await terminals.close(workspaceID: id, store: store, cwd: repo.path)
         archivePreviews = archivePreviews.filter { $0.value.workspace.id != id }
         return .accepted
@@ -397,6 +406,7 @@ public actor ServerRuntime {
         let runningCommands = Array(commands.values)
         for command in runningCommands { command.cancel() }
         await promptQueue?.shutdown()
+        await terminalStreams.shutdown()
         await terminals.shutdown()
         let liveSessions = Array(sessions.values)
         await withTaskGroup(of: Void.self) { group in

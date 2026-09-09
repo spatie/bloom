@@ -5,6 +5,7 @@ import Foundation
 public enum ServerEndpoint: Sendable, Equatable {
     case local(directory: String)
     case ssh(host: String, executable: String, directory: String, identityFile: String? = nil)
+    case https(url: String)
 
     public var launch: AgentLaunch? {
         get throws {
@@ -46,6 +47,7 @@ public enum ServerEndpoint: Sendable, Equatable {
     }
 
     public func terminalLaunch(_ terminal: ServerTerminal) throws -> AgentLaunch {
+        if case .https = self { throw ServerFailure("This terminal needs an SSH connection. Use the SSH connection for terminal panes.") }
         guard terminal.executable.hasPrefix("/"), terminal.socket.hasPrefix("/"), !terminal.session.isEmpty else {
             throw ServerFailure("The server returned an invalid terminal.")
         }

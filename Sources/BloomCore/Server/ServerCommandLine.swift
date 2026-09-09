@@ -36,7 +36,14 @@ public enum ServerCommandLine {
                 let connection = try UnixSocketConnection.connect(to: ServerDaemon.socketPath(directory: directory))
                 await relay(connection)
             } else {
-                let daemon = try await ServerDaemon.start(directory: directory)
+                var gatewayGroupID: UInt32?
+                if let value = ProcessInfo.processInfo.environment["BLOOM_SERVER_GATEWAY_GID"] {
+                    guard let parsed = UInt32(value), parsed > 0 else {
+                        throw ServerFailure("BLOOM_SERVER_GATEWAY_GID must name a non-root group ID.")
+                    }
+                    gatewayGroupID = parsed
+                }
+                let daemon = try await ServerDaemon.start(directory: directory, gatewayGroupID: gatewayGroupID)
                 complain("Bloom server listening at \(daemon.socketPath)")
                 await waitForTermination()
                 await daemon.shutdown()

@@ -81,6 +81,20 @@ struct TerminalLaunch: Sendable, Hashable {
 /// `TerminalSessionStore` and handed to SwiftUI as-is.
 final class BloomTerminalView: LocalProcessTerminalView {
     private(set) var hasExited = false
+    private var remoteConnection: RemoteTerminalConnection?
+
+    func startRemote(_ connection: RemoteTerminalConnection) {
+        hasExited = false
+        remoteConnection = connection
+        connection.start(view: self)
+    }
+
+    func remoteConnectionEnded(_ message: String) {
+        hasExited = true
+        feed(text: "\r\n" + message + "\r\n")
+    }
+
+    func remoteSizeChanged(columns: Int, rows: Int) { remoteConnection?.resize(columns: columns, rows: rows) }
 
     /// Set when Bloom is the one ending this shell rather than the shell ending by itself. The two
     /// have to be told apart: closing a tab, archiving a workspace and quitting all kill shells,
@@ -187,6 +201,8 @@ final class BloomTerminalView: LocalProcessTerminalView {
     }
 
     func shutdown() {
+        remoteConnection?.close()
+        remoteConnection = nil
         isStopping = true
         guard process.running else { return }
         terminate()
@@ -262,6 +278,7 @@ final class BloomTerminalView: LocalProcessTerminalView {
     /// terminal on this Mac does.
     override func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {
         guard !hasExited else { return }
+        if let remoteConnection { remoteConnection.send(Data(data)); return }
         super.send(source: source, data: data)
     }
 
@@ -493,7 +510,7 @@ final class BloomTerminalView: LocalProcessTerminalView {
 private final class TerminalProcessObserver: LocalProcessTerminalViewDelegate {
     weak var owner: BloomTerminalView?
 
-    func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
+    func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) { Task { @MainActor [weak owner] in owner?.remoteSizeChanged(columns: newCols, rows: newRows) } }
 
     func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
 

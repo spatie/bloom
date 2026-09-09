@@ -9,6 +9,12 @@ import BloomCore
 final class ServerWindowModel {
     enum ConnectionMode { case remote, local, existingLocal }
     var connectionMode = ConnectionMode.remote
+    var usesHTTPS = false
+    var httpsAddress = ""
+    var isSigningIn = false
+    let authentication = ServerAuthentication()
+    var isConfigured: Bool { usesHTTPS ? !httpsAddress.isEmpty : !host.isEmpty }
+    var connectionLabel: String { usesHTTPS ? (URL(string: httpsAddress)?.host ?? "Remote server") : (host.isEmpty ? "Remote server" : host) }
     var host = ""
     var executable = ""
     var identityFile = ""
@@ -191,6 +197,8 @@ final class ServerWindowModel {
         let seed = bundle.object(forInfoDictionaryKey: "BloomRemoteConnection") as? [String: String] ?? [:]
         let saved = preferences.dictionary(forKey: "server.connection") as? [String: String] ?? [:]
         let values = seed.merging(saved) { _, saved in saved }
+        usesHTTPS = values["usesHTTPS"] == "true"
+        httpsAddress = values["httpsAddress"] ?? ""
         drafts = preferences.dictionary(forKey: "server.drafts") as? [String: String] ?? [:]
         host = values["host"] ?? ""
         executable = values["executable"] ?? ""
@@ -220,6 +228,7 @@ final class ServerWindowModel {
 
     private func saveConnection() {
         preferences.set([
+            "usesHTTPS": usesHTTPS ? "true" : "false", "httpsAddress": httpsAddress,
             "host": host, "executable": executable, "directory": remoteDirectory, "identityFile": identityFile,
             "repository": remoteRepositoryPath, "localRepository": localRepositoryPath,
             "model": agentModel, "agent": agent.rawValue, "effort": effort, "permissionMode": permissionMode.rawValue,
@@ -247,6 +256,7 @@ final class ServerWindowModel {
                     guard generation == connectionGeneration, !Task.isCancelled else { throw CancellationError() }
                     return address
                 }
+                if case .https = endpoint { throw ServerFailure("Register this preview port with the HTTPS gateway first.") }
                 let port = input.port ?? (input.scheme == "https" ? 443 : 80)
                 var forward = forwards[port]
                 if await forward?.isAlive != true {
@@ -301,9 +311,9 @@ final class ServerWindowModel {
             let capturedEndpoint = endpoint
             let name = terminalName(for: tab)
             tabs.onClose(tab) { [weak self] in
-                guard let self, self.endpoint == capturedEndpoint else { return false }
+                guard let self, let capturedEndpoint, self.endpoint == capturedEndpoint else { return false }
                 guard await self.perform(.workspace(workspaceID: workspace.id, action: .closeTerminal(name: name))) != nil else { return false }
-                let key = self.host + self.remoteDirectory + workspace.id.rawValue + "/" + name
+                let key = String(reflecting: capturedEndpoint) + workspace.id.rawValue + "/" + name
                 self.terminals.removeValue(forKey: key)?.shutdown()
                 self.terminalNames[tab.id] = nil
                 return true
@@ -403,8 +413,15 @@ final class ServerWindowModel {
         guard let workspace = selectedWorkspace, let client, let endpoint = lastEndpoint else {
             throw ServerFailure("Connect to this workspace's server first.")
         }
-        let key = host + remoteDirectory + workspace.id.rawValue + "/" + name
+        let key = String(reflecting: endpoint) + workspace.id.rawValue + "/" + name
         if let terminal = terminals[key], !terminal.hasExited { return terminal }
+        if case .https(let address) = endpoint {
+            let view = BloomTerminalView(frame: .zero)
+            let connection = try RemoteTerminalConnection(address: address, workspaceID: workspace.id, name: name, authentication: authentication)
+            view.startRemote(connection)
+            terminals[key] = view
+            return view
+        }
         let reply = try await client.request(ServerRequest(.workspace(workspaceID: workspace.id, action: .terminal(name: name))))
         guard case .terminal(let terminal) = reply.result else { throw ServerFailure("The server did not return a terminal.") }
         let launch = try endpoint.terminalLaunch(terminal)
@@ -428,13 +445,14 @@ final class ServerWindowModel {
         let generation = connectionGeneration
         isConnecting = true
         defer { isConnecting = false }
-        var stage = "Connecting over SSH"
+        var stage = usesHTTPS ? "Connecting over HTTPS" : "Connecting over SSH"
         needsBackgroundApproval = false
         error = nil
         do {
             let endpoint: ServerEndpoint
             switch connectionMode {
-            case .remote: endpoint = .ssh(host: host, executable: executable, directory: directory, identityFile: identityFile.isEmpty ? nil : identityFile)
+            case .remote:
+                if usesHTTPS { endpoint = .https(url: try ServerHTTPTransport.origin(httpsAddress).absoluteString) } else { endpoint = .ssh(host: host, executable: executable, directory: directory, identityFile: identityFile.isEmpty ? nil : identityFile) }
             case .existingLocal: endpoint = .local(directory: directory)
             case .local: endpoint = try await localService.start()
             }
@@ -447,6 +465,8 @@ final class ServerWindowModel {
                 archiveConfirmations = [:]
                 uncertainRequest = nil
                 if lastEndpoint != nil {
+                    for terminal in terminals.values { terminal.shutdown() }
+                    terminals.removeAll()
                     selectedSessionID = nil
                     selectedWorkspaceID = nil
                     catalogue = nil
@@ -457,7 +477,11 @@ final class ServerWindowModel {
                 }
                 lastEndpoint = endpoint
             }
-            let connected = try await ServerClient.connect(to: endpoint)
+            var accessToken: ServerHTTPTransport.AccessToken?
+            if case .https(let address) = endpoint {
+                accessToken = { [authentication] in try await authentication.token(for: address) }
+            }
+            let connected = try await ServerClient.connect(to: endpoint, accessToken: accessToken)
             guard generation == connectionGeneration, !Task.isCancelled else {
                 await connected.disconnect()
                 return
@@ -517,7 +541,7 @@ final class ServerWindowModel {
     func maintainConnection() async {
         var delay = 1
         while !Task.isCancelled {
-            if shouldReconnect, !isEditingConnection, !isConnected, !isConnecting, !host.isEmpty {
+            if shouldReconnect, !isEditingConnection, !isConnected, !isConnecting, isConfigured {
                 await connect()
                 delay = isConnected ? 1 : min(30, delay * 2)
             } else { delay = 1 }

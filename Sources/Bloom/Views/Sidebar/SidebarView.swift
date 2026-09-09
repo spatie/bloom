@@ -254,7 +254,7 @@ struct SidebarView: View {
             .onMove(perform: move)
             if let catalogue = app.remoteServer.catalogue {
                 remoteProjects(catalogue)
-            } else if !app.remoteServer.host.isEmpty {
+            } else if app.remoteServer.isConfigured {
                 Button {
                     Task { await app.remoteServer.connect() }
                 } label: {
@@ -343,7 +343,7 @@ struct SidebarView: View {
             reorderNote = nil
         }
         .overlay {
-            if app.repos.isEmpty, app.remoteServer.host.isEmpty, app.isLoaded {
+            if app.repos.isEmpty, !app.remoteServer.isConfigured, app.isLoaded {
                 noProjects
             }
         }

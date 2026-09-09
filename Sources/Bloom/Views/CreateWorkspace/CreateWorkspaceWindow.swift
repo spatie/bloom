@@ -71,7 +71,7 @@ private struct CreateWorkspaceWindowContent: View {
         VStack(spacing: 0) {
             Picker("Create on", selection: $isRemote) {
                 Text("This Mac").tag(false)
-                Text(app.remoteServer.host.isEmpty ? "Remote server" : app.remoteServer.host).tag(true)
+                Text(app.remoteServer.connectionLabel).tag(true)
             }
             .pickerStyle(.segmented)
             .padding()
@@ -86,7 +86,7 @@ private struct CreateWorkspaceWindowContent: View {
             if let repo = app.remoteServer.catalogue?.repositories.first(where: { $0.id == repoID }) {
                 app.remoteServer.remoteRepositoryPath = repo.path
                 isRemote = true
-            } else { isRemote = app.selection.isRemote || (app.repos.isEmpty && !app.remoteServer.host.isEmpty) }
+            } else { isRemote = app.selection.isRemote || (app.repos.isEmpty && app.remoteServer.isConfigured) }
         }
     }
 }

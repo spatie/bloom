@@ -27,7 +27,7 @@ public final class UnixSocketListener: Sendable {
     /// it is safe for exactly one reason: the name carries a fingerprint of the database path, so
     /// the only process that could have created it is another instance holding the same database,
     /// and two of those cannot usefully run at once anyway.
-    public init(path: String, accept handler: @escaping @Sendable (UnixSocketConnection) -> Void) throws {
+    public init(path: String, groupID: UInt32? = nil, accept handler: @escaping @Sendable (UnixSocketConnection) -> Void) throws {
         self.path = path
 
         var address = try UnixSocketAddress.make(path: path)
@@ -46,7 +46,16 @@ public final class UnixSocketListener: Sendable {
             SystemCalls.close(descriptor)
             throw UnixSocketError.couldNotBind(path: path, code: code)
         }
-        guard chmod(path, 0o600) == 0 else {
+        // Only the standalone server opts into a dedicated gateway group. App and MCP sockets
+        // retain owner-only access, and this process cannot grant access to files owned by root.
+        if let groupID, chown(path, uid_t.max, gid_t(groupID)) != 0 {
+            let code = errno
+            SystemCalls.close(descriptor)
+            unlink(path)
+            throw UnixSocketError.couldNotBind(path: path, code: code)
+        }
+        let permissions: mode_t = groupID == nil ? 0o600 : 0o660
+        guard chmod(path, permissions) == 0 else {
             let code = errno
             SystemCalls.close(descriptor)
             unlink(path)
