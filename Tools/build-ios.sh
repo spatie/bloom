@@ -7,4 +7,4 @@ build_dir="${BLOOM_IOS_BUILD_DIR:-/tmp/bloom-ios-build}"
 Tools/prepare-ios.sh
 xcodebuild -project "$project_dir/Bloom.xcodeproj" -scheme Bloom \
     -configuration Debug -destination 'generic/platform=iOS Simulator' \
-    -derivedDataPath "$build_dir" -jobs 2 CODE_SIGNING_ALLOWED=NO build
+    -derivedDataPath "$build_dir" -jobs 2 CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- build

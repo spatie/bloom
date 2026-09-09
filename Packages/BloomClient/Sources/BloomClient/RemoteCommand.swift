@@ -34,30 +34,22 @@ public protocol RemoteRequesting: Sendable {
 }
 
 public final class RemoteClient: RemoteRequesting, Sendable {
-    private let connection: HTTPSConnection
+    private let wire: RemoteWireSession
 
-    public init(connection: HTTPSConnection) { self.connection = connection }
-
-    public func request(_ command: RemoteCommand) async throws -> JSONValue {
-        let data = try await connection.exchange(JSONEncoder().encode(command))
-        return try Self.decode(data, commandID: command.id)
+    public init(connection: HTTPSConnection) {
+        wire = RemoteWireSession { try await connection.exchange($0) }
     }
 
-    public static func decode(_ data: Data, commandID: UUID) throws -> JSONValue {
-        let reply = try JSONDecoder().decode(Reply.self, from: data)
-        guard reply.version == BloomWire.version else {
-            throw ConnectionRefusal("This server uses Bloom protocol \(reply.version), but this app needs \(BloomWire.version). Update Bloom Server and the app to matching versions, then reconnect.")
-        }
-        guard reply.id == commandID else {
-            throw ConnectionFailure("The server replied to a different request. Reconnect before retrying.")
+    public func request(_ command: RemoteCommand) async throws -> JSONValue {
+        try await wire.request(command)
+    }
+
+    public static func decode(_ data: Data, commandID: UUID, expectedVersion: Int = BloomWire.version) throws -> JSONValue {
+        let reply = try RemoteWireReply.decode(data, commandID: commandID)
+        guard [12, BloomWire.version].contains(expectedVersion), reply.version == expectedVersion else {
+            throw ConnectionRefusal("This server uses Bloom protocol \(reply.version), but this app needs \(expectedVersion). Update Bloom Server and the app to matching versions, then reconnect.")
         }
         if let failure = reply.result["failure"]?["_0"]?.stringValue { throw ConnectionRefusal(failure) }
         return reply.result
-    }
-
-    private struct Reply: Decodable {
-        let version: Int
-        let id: UUID
-        let result: JSONValue
     }
 }

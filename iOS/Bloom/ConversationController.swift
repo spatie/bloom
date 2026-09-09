@@ -199,6 +199,8 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     }
 
     #if DEBUG
+    var liveMessageCount: Int { buffer.messages.count }
+
     /// Exercises the production snapshot and table-update path without requesting a server.
     func exerciseTranscriptUpdates(_ snapshots: [RemoteTranscript]) throws {
         let resultURL = URL.documentsDirectory.appendingPathComponent("bloom-transcript-updates-passed.txt")

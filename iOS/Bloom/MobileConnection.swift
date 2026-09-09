@@ -15,6 +15,8 @@ final class MobileConnection {
     var changed: (() -> Void)?
     private var connection: HTTPSConnection?
     private var sshConnection: SSHConnection?
+    private var sshConfiguration: SSHConfiguration?
+    private var previewLeases: [UUID: MobilePreviewLease] = [:]
     private var generation = 0
     private var refreshTask: Task<Void, Never>?
 
@@ -63,6 +65,7 @@ final class MobileConnection {
             let catalogue = try await RemoteCatalogue.decode(connection.request(.call("catalogue")))
             guard generation == self.generation else { throw CancellationError() }
             sshConnection = connection
+            sshConfiguration = configuration
             service = RemoteWorkspaceService(client: connection)
             self.catalogue = catalogue
             address = configuration.identity
@@ -88,9 +91,73 @@ final class MobileConnection {
         connection = nil
         if let sshConnection { Task { await sshConnection.close() } }
         sshConnection = nil
+        sshConfiguration = nil
+        let leases = Array(previewLeases.values)
+        previewLeases.removeAll()
+        leases.forEach { $0.close() }
         service = nil
         catalogue = nil
         changed?()
+    }
+
+    /// Loopback addresses name the server's interface, never another device on its network.
+    func preparePreview(address: String) async throws -> MobilePreviewLease {
+        guard let service else { throw ConnectionFailure("Reconnect to this server to open a preview.") }
+        let generation = generation
+        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let input = URL(string: trimmed), input.user == nil, input.password == nil,
+              input.host?.isEmpty == false, ["http", "https"].contains(input.scheme?.lowercased() ?? "") else {
+            throw ConnectionFailure("Enter the app's local HTTP address or an HTTPS preview address.")
+        }
+        if let configuration = sshConfiguration, Self.isLoopback(input) {
+            guard input.scheme?.lowercased() == "http" else {
+                throw ConnectionFailure("Use the app's local HTTP address for an SSH preview. Bloom encrypts the connection to your server.")
+            }
+            let remotePort = input.port ?? 80
+            guard (1...65_535).contains(remotePort) else { throw ConnectionFailure("Enter a preview port between 1 and 65535.") }
+            guard let fingerprint = try SSHCredentials.fingerprint(for: configuration.hostIdentity) else {
+                throw ConnectionFailure("Reconnect and verify this server's SSH fingerprint before opening a preview.")
+            }
+            let tunnel = try await SSHPreviewTunnel.open(configuration: configuration,
+                                                        privateKey: SSHCredentials.identity(),
+                                                        fingerprint: fingerprint, remotePort: remotePort)
+            guard generation == self.generation, !Task.isCancelled else {
+                await tunnel.close()
+                throw CancellationError()
+            }
+            guard var target = URLComponents(url: input, resolvingAgainstBaseURL: false) else {
+                await tunnel.close()
+                throw ConnectionFailure("This preview address is invalid.")
+            }
+            target.host = "127.0.0.1"
+            target.port = tunnel.localPort
+            guard let url = target.url else {
+                await tunnel.close()
+                throw ConnectionFailure("Could not create the local preview address.")
+            }
+            let lease = MobilePreviewLease(url: url, tunnel: tunnel)
+            retain(lease)
+            return lease
+        }
+        let reply = try await service.client.request(.call("previewAddress", ["_0": .string(trimmed)]))
+        guard generation == self.generation, !Task.isCancelled else { throw CancellationError() }
+        guard let resolved = reply["text"]?["_0"]?.stringValue, let url = URL(string: resolved),
+              url.scheme?.lowercased() == "https", url.host?.isEmpty == false,
+              url.user == nil, url.password == nil, !Self.isLoopback(url) else {
+            throw ConnectionFailure("Connect with SSH to preview the app's local port, or enter an HTTPS preview address.")
+        }
+        let lease = MobilePreviewLease(url: url)
+        retain(lease)
+        return lease
+    }
+
+    private func retain(_ lease: MobilePreviewLease) {
+        previewLeases[lease.id] = lease
+        lease.didClose = { [weak self] id in self?.previewLeases[id] = nil }
+    }
+
+    private static func isLoopback(_ url: URL) -> Bool {
+        ["localhost", "127.0.0.1", "::1", "[::1]"].contains(url.host?.lowercased() ?? "")
     }
 
     func suspend() { isActive = false; refreshTask?.cancel() }
@@ -98,5 +165,42 @@ final class MobileConnection {
         isActive = true
         refreshTask?.cancel()
         refreshTask = Task { try? await refresh() }
+    }
+}
+
+/// A browser owns one preview lease. Closing a tab or disconnecting revokes its local HTTP origin.
+@MainActor
+final class MobilePreviewLease {
+    let id = UUID()
+    let url: URL
+    private(set) var isClosed = false
+    var onRevoked: (() -> Void)?
+    fileprivate var didClose: ((UUID) -> Void)?
+    private let tunnel: SSHPreviewTunnel?
+
+    fileprivate init(url: URL, tunnel: SSHPreviewTunnel? = nil) {
+        self.url = url
+        self.tunnel = tunnel
+    }
+
+    var isTunnel: Bool { tunnel != nil }
+
+    func allowsHTTP(_ target: URL) -> Bool {
+        !isClosed && isTunnel && target.scheme?.lowercased() == "http" && target.host == "127.0.0.1"
+            && target.port == url.port && target.user == nil && target.password == nil
+    }
+
+    func close() {
+        guard !isClosed else { return }
+        isClosed = true
+        onRevoked?()
+        onRevoked = nil
+        if let tunnel { Task { await tunnel.close() } }
+        didClose?(id)
+        didClose = nil
+    }
+
+    deinit {
+        if let tunnel { Task { await tunnel.close() } }
     }
 }

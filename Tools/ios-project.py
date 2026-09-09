@@ -68,6 +68,7 @@ with (output / 'Info.plist').open('wb') as info:
         'CFBundleShortVersionString': '$(MARKETING_VERSION)', 'CFBundleVersion': '$(CURRENT_PROJECT_VERSION)',
         'LSRequiresIPhoneOS': True, 'UILaunchScreen': {},
         'NSLocalNetworkUsageDescription': 'Connect to your Bloom Server on your local network.',
+        'NSAppTransportSecurity': {'NSAllowsLocalNetworking': True},
         'UIApplicationSceneManifest': {'UIApplicationSupportsMultipleScenes': True},
         'UISupportedInterfaceOrientations': ['UIInterfaceOrientationPortrait', 'UIInterfaceOrientationPortraitUpsideDown', 'UIInterfaceOrientationLandscapeLeft', 'UIInterfaceOrientationLandscapeRight'],
         'CFBundleURLTypes': [{'CFBundleURLSchemes': ['be.spatie.bloom.ios']}],

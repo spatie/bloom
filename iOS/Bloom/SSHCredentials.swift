@@ -32,7 +32,12 @@ enum SSHCredentials {
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess, let data = result as? Data else { throw ConnectionFailure("Unlock your device to access its SSH credentials (Keychain \(status)).") }
+        guard status == errSecSuccess, let data = result as? Data else {
+            if status == errSecMissingEntitlement {
+                throw ConnectionFailure("This app build is missing its Keychain entitlement. Reinstall a signed Bloom build to connect with SSH.")
+            }
+            throw ConnectionFailure("Could not access SSH credentials. Unlock your device and try again (Keychain \(status)).")
+        }
         return data
     }
     private static func write(_ data: Data, account: String) throws {

@@ -5,12 +5,14 @@ import BloomClient
 final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationControllerDelegate, UITabBarDelegate {
     private let connection: MobileConnection
     private let workspace: RemoteWorkspace
+    var preferredSessionID: SessionID?
     let review: MobileWorkspaceReview
     private let panes = UIStackView()
     private let compactTabs = UITabBar()
     private var compactTabsHeight: NSLayoutConstraint?
     private var usesCompactTabs = false
     private var browser: PreviewController?
+    private var previewTask: Task<Void, Never>?
     private let conversationHost = UIView()
     private let toolHost = UIView()
     private let filesHost = UIView()
@@ -119,6 +121,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         super.viewDidDisappear(animated)
         refreshTask?.cancel()
         refreshTask = nil
+        previewTask?.cancel()
         review.cancel()
     }
 
@@ -163,7 +166,8 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
 
     private func openConversation() {
         guard conversation == nil else { return }
-        if let session = connection.catalogue?.sessions.first(where: { $0.workspaceID == workspace.id }) {
+        let sessions = connection.catalogue?.sessions.filter { $0.workspaceID == workspace.id } ?? []
+        if let session = sessions.first(where: { $0.id == preferredSessionID }) ?? sessions.first {
             let content: ConversationController
             #if DEBUG
             if let fixtureTranscript { content = ConversationController(model: connection, session: session, preview: fixtureTranscript) } else {
@@ -207,7 +211,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
             return
         }
         #endif
-        let alert = UIAlertController(title: "Open preview", message: "Enter your workspace's HTTPS preview address.", preferredStyle: .alert)
+        let alert = UIAlertController(title: "Open preview", message: "Enter the app's local address on your server, or an HTTPS preview address.", preferredStyle: .alert)
         alert.addTextField {
             $0.text = self.workspace.port > 0 ? "http://localhost:\(self.workspace.port)" : ""
             $0.placeholder = "https://preview.example.com"
@@ -217,21 +221,39 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Open", style: .default) { [weak self] _ in
-            guard let self, let address = alert.textFields?.first?.text, let service = self.review.service else { return }
-            Task {
-                do {
-                    let reply = try await service.client.request(.call("previewAddress", ["_0": .string(address)]))
-                    guard let resolved = reply["text"]?["_0"]?.stringValue,
-                          let url = URL(string: resolved), url.scheme == "https", url.host != nil,
-                          url.user == nil, url.password == nil else {
-                        throw ConnectionFailure("This preview needs an HTTPS address. Configure Bloom Gateway or Tailscale Serve for this port; iOS SSH preview forwarding is not available yet.")
-                    }
-                    self.showBrowser(PreviewController(url: url))
-                } catch { self.show(error) }
+            guard let self, let address = alert.textFields?.first?.text else { return }
+            previewTask?.cancel()
+            previewTask = Task { [weak self] in
+                do { try await self?.openPreview(address: address) } catch {
+                    guard !Task.isCancelled else { return }
+                    self?.show(error)
+                }
             }
         })
         present(alert, animated: true)
     }
+
+    private func openPreview(address: String) async throws {
+        let preview = try await connection.preparePreview(address: address)
+        guard !Task.isCancelled else { preview.close(); throw CancellationError() }
+        browser?.closePreview()
+        showBrowser(PreviewController(preview: preview))
+    }
+
+    #if DEBUG
+    var livePreviewReady: Bool { browser?.hasLoadedPage == true }
+    var livePreviewFailure: String? { browser?.lastPageFailure }
+    var livePreviewTitle: String { browser?.loadedPageTitle ?? "" }
+    var liveMessageCount: Int {
+        conversation?.children.compactMap { $0 as? ConversationController }.first?.liveMessageCount ?? 0
+    }
+
+    /// The live harness uses the production connection and preview path, without entering an alert.
+    func openLivePreview(address: String) async throws {
+        loadViewIfNeeded()
+        try await openPreview(address: address)
+    }
+    #endif
 
     private func showBrowser(_ browser: PreviewController) {
         self.browser = browser
@@ -251,7 +273,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     }
 
     private func closeTool() {
-        if tool === browser { browser = nil }
+        if tool === browser { browser?.closePreview(); browser = nil }
         compactTabs.selectedItem = compactTabs.items?.first
         if let tool { remove(tool) }
         tool = nil

@@ -16,7 +16,8 @@ commands, read projections, transcript merging, question drafts and a durable co
 It also owns the shared markdown parser, syntax highlighter, palette values and transcript row update decisions.
 Both Mac and iOS compile this package. Question parsing and answer construction use the same
 types as Mac's existing question cards, re-exported by BloomCore.
-The shared wire version is 13. Diagnostics use the same value type as Bloom Server; the collector
+The current wire version is 13. The SSH client also negotiates the known compatible
+version 12; only a hello is retried, and diagnostics remain unavailable on that older server. Diagnostics use the same value type as Bloom Server; the collector
 and its process probes stay server-side. The mobile service can read that report, but a mobile
 diagnostics screen is not included yet.
 `make lint` enforces its UI boundary.
@@ -57,6 +58,7 @@ protocol extraction can happen incrementally as more features need it.
 
 Run `Tools/build-ios.sh`. It generates an ignored Xcode application container under
 `/tmp/bloom-ios-project` and builds iPhone/iPad Simulator slices in `/tmp/bloom-ios-build`.
+It signs the Simulator build ad hoc so Xcode supplies the simulated Keychain entitlement.
 It does not launch Simulator, install an app, or take focus. The generated application container
 supplies iOS bundle metadata, scenes, signing and URL registration; package manifests remain
 the source of truth for shared code. This leaves the existing Mac SwiftPM build unchanged.
@@ -98,10 +100,12 @@ Each RPC currently opens a bounded SSH connection; it closes after one response.
 multiplexing is a future optimisation. TCP connection timeout, request timeout, cancellation,
 connection loss, key refusal and response-size limits are handled explicitly.
 
-No domain, HTTPS gateway or VPN is required for SSH. The app and server must use matching protocol
-versions. A mismatch explains both versions and asks you to update, rather than silently changing
-the wire version. The current production validation daemon still uses protocol 12; this branch
-uses 13 and needs a coordinated server update before connecting to that daemon.
+No domain, HTTPS gateway or VPN is required for SSH. The SSH client negotiates versions 12 and 13
+using a read-only hello. Version 12 is accepted only after its matching-ID, explicit incompatibility
+reply and a successful version-12 hello. The v12-to-v13 protocol change added diagnostics without
+changing the existing operations. Unknown versions are refused, diagnostics are gated on v12,
+and user commands are never automatically retried during negotiation. The existing production
+validation daemon can therefore be used without interrupting the Mac app's older connection.
 
 ## Connect with HTTPS
 
@@ -167,19 +171,36 @@ Rich tool rendering, terminal emulation, diff editing, attachments, archive conf
 background notifications are not implemented yet. Server selection currently connects one origin per window and remembers
 the latest origin. A saved multi-server catalogue is future work.
 
-A preview must be a registered, browser-authenticated HTTPS address or a Tailscale Serve URL
-(the latter requires Tailscale on the device). Loopback previews without a mapping are refused
-with an explanation because SSH preview forwarding is not implemented in the mobile transport yet. The API bearer
-credential is never injected into WebKit, a preview URL, cookies or JavaScript. Gateway browser
-login must be configured separately as described in `Gateway/README.md`.
+An SSH connection can open a server-local HTTP preview such as `http://localhost:3190` directly.
+Bloom opens a pinned SSH connection and a loopback-only device listener, then forwards its HTTP
+and WebSocket connections to that one server port. It probes the destination before presenting
+WebKit, bounds accepted connections, forwards backpressure and half-closes, and closes all
+connections when the lease ends. It never opens a public server port.
+
+The browser permits HTTP only for its active lease's exact local origin, uses an isolated
+nonpersistent browser store for that port and blocks other HTTP subresources. Revocation stops
+loading and clears the document. The ATS setting allows local networking, not arbitrary HTTP.
+An HTTPS connection instead uses a registered browser-authenticated HTTPS address or Tailscale
+Serve URL. API bearer credentials never enter WebKit, URLs, cookies or JavaScript. Gateway
+browser login remains separate as described in `Gateway/README.md`.
 
 The Simulator build verifies compilation and packaging. Portable and contract tests verify
 wire compatibility and state behaviour. A headless Mac integration harness using the exact mobile SSH transport and workspace service
 verified unknown-host refusal, changed-host refusal and authenticated relay against Ubuntu.
 Against an isolated protocol-13 daemon on that server it registered a fresh repository, created
 a workspace and received an exact assistant reply from a real Codex prompt. This verifies the
-shared mobile workflow, not an interactive Simulator session or a physical device. SSH previews,
-live HTTPS sign-in and physical-device keyboard/background behaviour remain unverified.
+shared mobile workflow. The actual iPad Simulator application has now also connected to the
+production validation server, loaded the existing There There workspace and its 13-message
+conversation, and displayed that workspace's running Laravel homepage through the app's own
+SSH preview tunnel. No sample replies or HTML were used for that live capture. Live HTTPS
+sign-in and physical-device keyboard/background behaviour remain unverified.
+
+The opt-in DEBUG driver `--bloom-live-export-key` exports only the device public key.
+`--bloom-live-session` reads public connection settings from `bloom-live-connection.json` in the
+app's Documents directory and uses the production connection, transcript and browser paths.
+Its host fingerprint must be obtained through an already trusted SSH connection. It never
+learns or accepts the host key from the connection under test. The private identity remains in
+Keychain. These flags and the driver are absent from Release builds.
 
 ## App Store preparation
 

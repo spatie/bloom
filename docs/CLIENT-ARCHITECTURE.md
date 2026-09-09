@@ -40,7 +40,7 @@ Then consolidate conversation state. Shared markdown cannot make queue controls,
 
 Command recovery belongs in the shared layer too. iOS persists uncertain message sends, but creation intentions are still held in memory; Mac also has in-memory uncertain-request state. Keep a durable command identity and explicit pending, acknowledged, rejected or unknown outcome. A crash between a server side effect and its receipt remains uncertain. Neither UUIDs nor retries promise exactly-once execution.
 
-For external clients, publish a real contract rather than requiring people to read Swift enums. The current protocol is already ordinary JSON over SSH and HTTPS, so other languages can use it. Its weaknesses are the implicit Swift-associated-value shapes such as `_0`, opaque/base64 payloads, string-only failures, and exact wire-version matching. That is not a stable public SDK boundary yet.
+For external clients, publish a real contract rather than requiring people to read Swift enums. The current protocol is already ordinary JSON over SSH and HTTPS, so other languages can use it. Its weaknesses are the implicit Swift-associated-value shapes such as `_0`, opaque/base64 payloads, string-only failures, and limited wire-version negotiation (the Apple client now knows v12 and v13). That is not a stable public SDK boundary yet.
 
 Use a canonical, versioned JSON Schema description for commands, replies and events. Give every operation an explicit name and named fields, document nullability, timestamp formats, safe numeric ranges and path semantics, and define structured errors. The same operations and handlers must serve SSH and HTTPS. There is no need for a second REST implementation with separate behaviour.
 

@@ -13,14 +13,17 @@ public actor SSHConnection: RemoteRequesting {
     private let fingerprint: String?
     private var channels: [UUID: any Channel] = [:]
     private var closed = false
+    private lazy var wire = RemoteWireSession { [weak self] body in
+        guard let self else { throw CancellationError() }
+        return try await self.exchange(body)
+    }
 
     public init(configuration: SSHConfiguration, privateKey: Data, fingerprint: String?) {
         self.configuration = configuration; self.privateKey = privateKey; self.fingerprint = fingerprint
     }
 
     public func request(_ command: RemoteCommand) async throws -> JSONValue {
-        let response = try await exchange(JSONEncoder().encode(command))
-        return try RemoteClient.decode(response, commandID: command.id)
+        try await wire.request(command)
     }
 
     public func close() {
@@ -76,33 +79,6 @@ private final class ReplyCompletion {
     private var promise: EventLoopPromise<Data>?
     init(_ promise: EventLoopPromise<Data>) { self.promise = promise }
     func finish(_ result: Result<Data, Error>) { let promise = promise; self.promise = nil; promise?.completeWith(result) }
-}
-
-private final class KeyAuthentication: NIOSSHClientUserAuthenticationDelegate {
-    let username: String
-    let key: NIOSSHPrivateKey
-    private var offered = false
-    init(username: String, key: NIOSSHPrivateKey) { self.username = username; self.key = key }
-    func nextAuthenticationType(availableMethods: NIOSSHAvailableUserAuthenticationMethods, nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>) {
-        guard !offered, availableMethods.contains(.publicKey) else {
-            nextChallengePromise.fail(ConnectionFailure("The server refused this device's SSH key. Add its public key to the selected account's authorised keys.")); return
-        }
-        offered = true
-        nextChallengePromise.succeed(.init(username: username, serviceName: "ssh-connection", offer: .privateKey(.init(privateKey: key))))
-    }
-}
-
-private final class HostAuthentication: NIOSSHClientServerAuthenticationDelegate {
-    let expected: String?
-    init(expected: String?) { self.expected = expected }
-    func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
-        do {
-            let fingerprint = try SSHIdentity.fingerprint(publicKey: String(openSSHPublicKey: hostKey))
-            guard let expected else { throw SSHHostTrustRequired(fingerprint: fingerprint) }
-            guard expected == fingerprint else { throw ConnectionFailure("The server's SSH host key has changed. Connection refused. Verify the new key with your server administrator before removing its saved trust.") }
-            validationCompletePromise.succeed(())
-        } catch { validationCompletePromise.fail(error) }
-    }
 }
 
 private final class ConnectionErrors: ChannelInboundHandler {

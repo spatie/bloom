@@ -7,8 +7,14 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         didSet { if isViewLoaded { updateToolbar() } }
     }
 
+    private(set) var hasLoadedPage = false
+    private(set) var lastPageFailure: String?
+    var loadedPageTitle: String { browser.title ?? "" }
+
     private let url: URL
-    private let browser = WKWebView(frame: .zero)
+    private let browser: WKWebView
+    private var previewLease: MobilePreviewLease?
+    private var preparing: Task<Void, Never>?
     private let toolbar = UIToolbar()
     private let address = UILabel()
     private let activity = UIActivityIndicatorView(style: .medium)
@@ -31,7 +37,36 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     init(url: URL) {
         self.url = url
+        browser = WKWebView(frame: .zero)
         super.init(nibName: nil, bundle: nil)
+    }
+
+    init(preview: MobilePreviewLease) {
+        url = preview.url
+        previewLease = preview
+        let configuration = WKWebViewConfiguration()
+        // An ephemeral local port must never inherit another workspace's browser cookies.
+        if preview.isTunnel { configuration.websiteDataStore = .nonPersistent() }
+        browser = WKWebView(frame: .zero, configuration: configuration)
+        super.init(nibName: nil, bundle: nil)
+        preview.onRevoked = { [weak self] in
+            self?.preparing?.cancel()
+            self?.browser.stopLoading()
+            self?.browser.loadHTMLString("", baseURL: nil)
+            self?.showFailure("This preview connection has closed. Reconnect to the server and reopen the preview.")
+        }
+    }
+
+    deinit {
+        preparing?.cancel()
+        let lease = previewLease
+        Task { @MainActor in lease?.close() }
+    }
+
+    func closePreview() {
+        preparing?.cancel()
+        browser.stopLoading()
+        previewLease?.close()
     }
 
     #if DEBUG
@@ -50,7 +85,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         configureToolbar()
         configureBrowser()
         configureErrorView()
-        loadInitialPage()
+        prepareBrowser()
     }
 
     override func viewDidLayoutSubviews() {
@@ -147,6 +182,39 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         ])
     }
 
+    private func prepareBrowser() {
+        if previewLease?.isClosed == true {
+            showFailure("This preview connection has closed. Reconnect to the server and reopen the preview.")
+            return
+        }
+        guard let previewLease, previewLease.isTunnel, let port = previewLease.url.port else {
+            loadInitialPage()
+            return
+        }
+        // Navigation delegates do not inspect fetches, images or other subresources. The rule list
+        // keeps the local-network ATS exception scoped to this lease for those requests too.
+        let rules = """
+        [
+          {"trigger":{"url-filter":"^http://"},"action":{"type":"block"}},
+          {"trigger":{"url-filter":"^http://127[.]0[.]0[.]1:\(port)/"},"action":{"type":"ignore-previous-rules"}}
+        ]
+        """
+        preparing = Task { [weak self] in
+            do {
+                let rules = try await WKContentRuleListStore.default().compileContentRuleList(
+                    forIdentifier: "bloom-preview-\(previewLease.id.uuidString)", encodedContentRuleList: rules
+                )
+                guard !Task.isCancelled, !previewLease.isClosed, let self, let rules else { return }
+                browser.configuration.userContentController.add(rules)
+                loadInitialPage()
+            } catch {
+                guard !Task.isCancelled else { return }
+                NSLog("Bloom preview rule error: %@", error.localizedDescription)
+                self?.showFailure("Could not secure this preview. Close it and try again.")
+            }
+        }
+    }
+
     private func loadInitialPage() {
         #if DEBUG
         if let previewHTML {
@@ -162,6 +230,10 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
 
     private func reload() {
+        if previewLease?.isClosed == true {
+            showFailure("This preview connection has closed. Reconnect to the server and reopen the preview.")
+            return
+        }
         if isLoading {
             browser.stopLoading()
             finishLoading()
@@ -178,7 +250,9 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
 
     private func allows(_ target: URL) -> Bool {
-        target.scheme?.lowercased() == "https" && target.host?.isEmpty == false && target.user == nil && target.password == nil
+        guard previewLease?.isClosed != true, target.user == nil, target.password == nil else { return false }
+        return (target.scheme?.lowercased() == "https" && target.host?.isEmpty == false)
+            || previewLease?.allowsHTTP(target) == true
     }
 
     private func updateToolbar() {
@@ -186,7 +260,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         forwardItem.isEnabled = browser.canGoForward
         reloadItem.image = UIImage(systemName: isLoading ? "xmark" : "arrow.clockwise")
         reloadItem.accessibilityLabel = isLoading ? "Stop loading" : "Reload preview"
-        let current = browser.url.flatMap { $0.scheme == "https" ? $0 : nil } ?? url
+        let current = browser.url.flatMap { allows($0) ? $0 : nil } ?? url
         address.text = current.host.map { host in
             let port = current.port.map { ":\($0)" } ?? ""
             return host + port + (current.path == "/" ? "" : current.path)
@@ -207,6 +281,8 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
 
     private func showFailure(_ message: String) {
+        lastPageFailure = message
+        hasLoadedPage = false
         finishLoading()
         errorDetail.text = message
         errorView.isHidden = false
@@ -214,6 +290,8 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         isLoading = true
+        hasLoadedPage = false
+        lastPageFailure = nil
         errorView.isHidden = true
         retryURL = webView.url
         activity.startAnimating()
@@ -221,6 +299,8 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        hasLoadedPage = true
+        lastPageFailure = nil
         retryURL = nil
         finishLoading()
     }

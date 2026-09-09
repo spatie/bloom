@@ -21,7 +21,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         self.window = window
         window.makeKeyAndVisible()
         #if DEBUG
-        IOSPreviewFixture.install(in: window)
+        if !IOSLiveSession.install(in: window, model: model) { IOSPreviewFixture.install(in: window) }
         #endif
     }
 
