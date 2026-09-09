@@ -18,7 +18,7 @@ public enum GrokPermission {
     public static func ask(for request: GrokPermissionRequest) -> PermissionAsk {
         let name = GrokTranslation.toolName(for: request.toolCall)
         let input = GrokTranslation.input(for: request.toolCall)
-        let allowsAlways = request.options.contains(where: \.isAlways)
+        let allowsAlways = request.options.contains { $0.kind == "allow_always" }
         let ask = PermissionAsk(
             requestID: requestID(request.id, sessionID: request.sessionID),
             toolName: name,

@@ -44,6 +44,7 @@ struct GrokTranslationTests {
         )))
         #expect(second.contains { if case .streamDelta(.text("lo")) = $0 { return true }; return false })
         let done = translation.translate(.promptCompleted(GrokPromptResult(
+            requestID: .number(1),
             sessionID: "sess-1",
             stopReason: "end_turn",
             raw: .object([:])
@@ -149,5 +150,28 @@ struct GrokTranslationTests {
             for: .deny(message: "no", endsTurn: false),
             in: request
         ) == "reject-once")
+    }
+
+    @Test("reject_always without allow_always does not offer Bloom's persistent grant")
+    func rejectAlwaysDoesNotOfferAlwaysAllow() {
+        let request = GrokPermissionRequest(
+            id: .number(3),
+            sessionID: "sess-1",
+            toolCall: GrokToolCall.decode(.object([
+                "toolCallId": .string("call_1"),
+                "toolName": .string("read_file"),
+                "rawInput": .object(["path": .string("a.rs")]),
+            ]), isUpdate: false),
+            options: [
+                GrokPermissionOption(id: "allow-once", name: "Allow once", kind: "allow_once"),
+                GrokPermissionOption(id: "reject-once", name: "Reject", kind: "reject_once"),
+                GrokPermissionOption(id: "reject-always", name: "Always reject", kind: "reject_always"),
+            ],
+            raw: Data()
+        )
+        let ask = GrokPermission.ask(for: request)
+        #expect(ask.suppressesAlwaysAllow)
+        #expect(ask.suggestions.isEmpty)
+        #expect(GrokPermission.optionID(for: .allow(scope: .session), in: request) == "allow-once")
     }
 }

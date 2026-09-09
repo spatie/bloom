@@ -123,6 +123,8 @@ public actor GrokClient {
 
     public nonisolated var isProcessAlive: Bool { live.current?.isRunning ?? false }
 
+    public var isClosed: Bool { closedReason != nil }
+
     public var isReady: Bool { handshakeCompleted }
 
     public var diagnostics: [String] { stderrTail }
@@ -275,7 +277,13 @@ public actor GrokClient {
 
     /// Starts a turn without waiting for it. The `session/prompt` reply arrives later as
     /// `.promptCompleted`. Waiting here is how a two minute timeout would kill a real turn.
-    public func beginPrompt(sessionID: String, text: String) {
+    ///
+    /// The returned id is the turn id. The ACP session id is stable across turns, so it cannot
+    /// be used to tell a cancelled prompt's reply from the next send's.
+    @discardableResult
+    public func beginPrompt(sessionID: String, text: String) throws -> GrokRequestID {
+        if let closedReason { throw GrokClientError.connectionClosed(closedReason) }
+        guard process != nil else { throw GrokClientError.notInitialized }
         let id = GrokRequestID.number(nextRequestID)
         nextRequestID += 1
         promptIDs.insert(id)
@@ -290,6 +298,7 @@ public actor GrokClient {
                 ])]),
             ])
         ))
+        return id
     }
 
     public func cancel(sessionID: String) {
@@ -345,6 +354,7 @@ public actor GrokClient {
         case .response(let id, let result, _):
             if promptIDs.remove(id) != nil {
                 sink.yield(.promptCompleted(GrokPromptResult(
+                    requestID: id,
                     sessionID: result["sessionId"]?.stringValue ?? "",
                     stopReason: result["stopReason"]?.stringValue ?? "end_turn",
                     raw: result
@@ -356,6 +366,7 @@ public actor GrokClient {
         case .failure(let id, let error, _):
             if promptIDs.remove(id) != nil {
                 sink.yield(.promptCompleted(GrokPromptResult(
+                    requestID: id,
                     sessionID: "",
                     stopReason: "refusal",
                     raw: .object(["message": .string(error.message)])
@@ -401,6 +412,7 @@ public actor GrokClient {
 
         sink.yield(.closed(reason: reason))
         sink.finish()
+        process = nil
         readTask = nil
         stderrTask = nil
     }

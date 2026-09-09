@@ -99,6 +99,29 @@ struct GrokClientTests {
         #expect(box.process.sentMethods.contains("session/new"))
         await client.stop()
     }
+
+    @Test("beginPrompt throws once the connection has closed")
+    func beginPromptThrowsAfterClose() async throws {
+        let box = ProcessBox()
+        box.reply(to: "initialize", with: .object(["_meta": .object([:])]))
+        let client = GrokClient(
+            configuration: GrokClient.Configuration(cwd: "/tmp/w", environment: [:]),
+            makeProcess: box.factory
+        )
+        try await client.start()
+        await client.stop()
+        do {
+            _ = try await client.beginPrompt(sessionID: "sess-1", text: "hello")
+            Issue.record("expected connectionClosed")
+        } catch let error as GrokClientError {
+            guard case .connectionClosed = error else {
+                Issue.record("expected connectionClosed, got \(error)")
+                return
+            }
+        } catch {
+            Issue.record("expected connectionClosed, got \(error)")
+        }
+    }
 }
 
 @Suite("Grok model rank")

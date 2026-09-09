@@ -22,6 +22,9 @@ public actor GrokRunner: SessionRunner {
     private var pumpTask: Task<Void, Never>?
     private var translation: GrokTranslation
     private var grokSessionID: String?
+    /// Invalidates in-flight pump events when the client is replaced. A late `.closed` from a
+    /// dead process must not drop the replacement.
+    private var connectionGeneration: UInt64 = 0
 
     private let grants: SessionGrants
     private var wireModel: String { ModelIdentifier.resolve(session.model).model }
@@ -93,12 +96,12 @@ public actor GrokRunner: SessionRunner {
         }
         try handle.check(generation)
 
-        guard handle.begin(turnID: grokSessionID, generation: generation) else {
+        let promptID = try await client.beginPrompt(sessionID: grokSessionID, text: text)
+        guard handle.begin(turnID: promptID.turnID, generation: generation) else {
             await client.cancel(sessionID: grokSessionID)
             throw CancellationError()
         }
 
-        await client.beginPrompt(sessionID: grokSessionID, text: text)
         session.apply(.turnStarted)
         await save(session)
     }
@@ -110,7 +113,7 @@ public actor GrokRunner: SessionRunner {
 
     private func stopTurn(_ stopped: CodexTurnHandle.Stopped) async {
         if handle.generation == stopped.generation, handle.wasCancelled {
-            await filePendingAsks(decision: .deny(message: PermissionDecision.stoppedMessage, endsTurn: true))
+            await filePendingAsks()
         }
         if handle.generation == stopped.generation, handle.wasCancelled,
            session.apply(.cancelled).moves { await save(session) }
@@ -134,28 +137,36 @@ public actor GrokRunner: SessionRunner {
     }
 
     public func shutdown() async {
-        await filePendingAsks(decision: .deny(message: PermissionDecision.quittingMessage, endsTurn: true))
+        await filePendingAsks()
         if session.apply(.cancelled).moves { await save(session) }
         await dropConnection()
     }
 
     private func dropConnection() async {
-        if let grokSessionID {
-            await client?.closeSession(grokSessionID)
-        }
-        await client?.stop()
+        connectionGeneration += 1
+        let closing = client
+        let sessionToClose = grokSessionID
         client = nil
         grokSessionID = nil
         pumpTask?.cancel()
         pumpTask = nil
         handle.end()
         approvals.removeAll()
+        if let sessionToClose {
+            await closing?.closeSession(sessionToClose)
+        }
+        await closing?.stop()
     }
 
     // MARK: - Connecting
 
     private func connected() async throws -> GrokClient {
-        if let client { return client }
+        if let client {
+            if client.isProcessAlive, await client.isClosed == false {
+                return client
+            }
+            await dropConnection()
+        }
 
         let stored = try? await store.setting(AgentCatalog.executablePathSettingKey(.grok))
         let client = makeClient(GrokClient.Configuration(
@@ -170,9 +181,10 @@ public actor GrokRunner: SessionRunner {
         self.client = client
         connection.attach(client)
         let events = client.events
+        let generation = connectionGeneration
         pumpTask = Task { [weak self] in
             for await event in events {
-                await self?.handle(event)
+                await self?.handle(event, from: generation)
             }
         }
         try await client.start()
@@ -225,11 +237,12 @@ public actor GrokRunner: SessionRunner {
     private func applyComposerSettings(on client: GrokClient, sessionID: String) async throws {
         let model = wireModel
         if !model.isEmpty {
-            try? await client.setConfigOption(sessionID: sessionID, configID: "model", value: model)
+            try await applyConfigOption(on: client, sessionID: sessionID, configID: "model", value: model)
             translation.context.model = model
         }
         if !session.effort.isEmpty {
-            try? await client.setConfigOption(
+            try await applyConfigOption(
+                on: client,
                 sessionID: sessionID,
                 configID: "reasoning_effort",
                 value: session.effort
@@ -237,9 +250,31 @@ public actor GrokRunner: SessionRunner {
         }
     }
 
+    /// A missing or rejected config option must not fail the turn. A dead connection must: that
+    /// is the last RPC before the turn is marked running, and swallowing it left send hanging.
+    private func applyConfigOption(
+        on client: GrokClient,
+        sessionID: String,
+        configID: String,
+        value: String
+    ) async throws {
+        do {
+            try await client.setConfigOption(sessionID: sessionID, configID: configID, value: value)
+        } catch let error as GrokClientError {
+            switch error {
+            case .connectionClosed, .notInitialized: throw error
+            case .timedOut, .unexpectedResult: return
+            }
+        } catch {
+            return
+        }
+    }
+
     // MARK: - Events
 
-    private func handle(_ event: GrokEvent) async {
+    private func handle(_ event: GrokEvent, from generation: UInt64) async {
+        guard generation == connectionGeneration else { return }
+
         if case .closed = event, handle.wasCancelled || trouble.hasStopped { return }
 
         if case .permission(let request) = event {
@@ -247,7 +282,7 @@ public actor GrokRunner: SessionRunner {
             return
         }
 
-        let ending = if case .promptCompleted = event { grokSessionID } else { nil as String? }
+        let ending = if case .promptCompleted(let result) = event { result.requestID.turnID } else { nil as String? }
         if let ending, !handle.acceptsTerminal(turnID: ending) { return }
 
         for translated in translation.translate(event) {
@@ -319,11 +354,16 @@ public actor GrokRunner: SessionRunner {
         await save(session)
     }
 
-    private func filePendingAsks(decision: PermissionDecision) async {
+    /// Stop and quit answer pending asks as ACP `cancelled`, not `reject_always`. The latter can
+    /// persist a deny in Grok's session for a tool the user only meant to interrupt.
+    private func filePendingAsks() async {
         for ask in pending.drain() {
-            await write(answerTo: ask, decision: decision, request: approvals[ask.requestID])
+            if let request = approvals[ask.requestID] {
+                await client?.answer(request.id, with: GrokPermission.cancelledResult)
+            }
             await close(ask, as: PermissionAskOutcome.stopped, note: "")
         }
+        if session.apply(.unblocked).moves { await save(session) }
     }
 
     private func write(

@@ -50,6 +50,15 @@ public enum GrokRequestID: Sendable, Hashable, Codable {
         }
     }
 
+    /// The turn handle's id for this request. Distinct from the ACP session id, which is stable
+    /// across turns and must not be reused as a turn id.
+    var turnID: String {
+        switch self {
+        case .number(let value): String(value)
+        case .text(let value): value
+        }
+    }
+
     init?(_ json: JSONValue?) {
         switch json {
         case .integer(let value): self = .number(value)

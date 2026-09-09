@@ -155,9 +155,22 @@ public struct GrokToolCall: Sendable, Hashable {
 }
 
 public struct GrokPromptResult: Sendable, Hashable {
+    public let requestID: GrokRequestID
     public let sessionID: String
     public let stopReason: String
     public let raw: JSONValue
+
+    public init(
+        requestID: GrokRequestID,
+        sessionID: String,
+        stopReason: String,
+        raw: JSONValue
+    ) {
+        self.requestID = requestID
+        self.sessionID = sessionID
+        self.stopReason = stopReason
+        self.raw = raw
+    }
 
     public var wasCancelled: Bool { stopReason == "cancelled" }
     public var isError: Bool {
