@@ -1,5 +1,8 @@
 # Bloom
 
+Project skills for development builds, releases and Swift work are indexed in [AGENTS.md](AGENTS.md).
+Claude and Codex share the same skill files; load only the skill and references relevant to the task.
+
 A macOS 26 app for running coding agents in git worktrees. One window: a sidebar of projects and
 their workspaces, a transcript in the centre, a terminal, an inspector. A workspace is a real
 worktree on disk, which is why so much of what follows is about not destroying one.

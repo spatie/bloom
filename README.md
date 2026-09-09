@@ -73,6 +73,11 @@ Open that copy when you want to try your changes. It does not replace the releas
 use its data. See [the architecture guide](docs/ARCHITECTURE.md) before contributing.
 The dev script builds a committed revision, so commit your changes locally before rebuilding it.
 
+Working with an AI agent? [AGENTS.md](AGENTS.md) indexes the shared project skills for Claude and
+Codex, including `bloom-dev-build` and `bloom-release`. In Claude, invoke `/bloom-dev-build` or
+`/bloom-release`; in Codex, use `$bloom-dev-build` or `$bloom-release`. The skills are stored in
+`.claude/skills/` and linked from `.agents/skills/`, so a normal clone includes both entry points.
+
 `make` on its own lists every target. `make build` compiles without installing or launching.
 `make app` and `make run` retain the production bundle identity, so use the isolated dev build for
 day-to-day development.
