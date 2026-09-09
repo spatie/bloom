@@ -304,12 +304,15 @@ public actor CodexRunner: SessionRunner {
     /// The chat can be sent to again afterwards: the thread id is stored, so the next turn
     /// reconnects and resumes rather than starting a new conversation.
     public func shutdown() async {
+        let intent = handle.intent
+        // Settle the old connection's questions before making a replacement possible.
         await filePendingAsks()
-        // Stated here as well as in `interrupt`, because a chat can be closed while it is idle
-        // and can be closed while it is mid turn. `SessionLifecycle` refuses a stop on a session
-        // with no turn open, so the one that did not happen writes nothing.
-        if session.apply(.cancelled).moves { await save(session) }
-        await dropConnection()
+        let previous = detachConnection()
+        previous?.terminateNow()
+        // Detach before publishing cancellation: that row lets a caller send again, and it must
+        // not find the dying client. A new turn begun during bookkeeping owns its own state.
+        if handle.intent == intent, session.apply(.cancelled).moves { await save(session) }
+        await previous?.stop()
     }
 
     /// Kill the server and forget everything that belonged to it, leaving the chat resumable.
@@ -319,7 +322,14 @@ public actor CodexRunner: SessionRunner {
     /// no cancellation to record, and writing either would say a turn had been interrupted when
     /// none was running.
     private func dropConnection() async {
-        await client?.stop()
+        let previous = detachConnection()
+        await previous?.stop()
+    }
+
+    /// No suspension while removing the old connection. Stopping its client may let another
+    /// send resume, and cleanup from this connection must never clear that replacement.
+    private func detachConnection() -> CodexClient? {
+        let previous = client
         client = nil
         // The thread belonged to the process that has just been killed. Held on to, the next
         // message would open a turn on a thread the new server has never heard of; cleared, the
@@ -330,6 +340,7 @@ public actor CodexRunner: SessionRunner {
         pumpTask?.cancel()
         pumpTask = nil
         handle.end()
+        return previous
     }
 
     /// Pick up a context window chosen since this server started, by starting another one.

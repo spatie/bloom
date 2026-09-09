@@ -677,7 +677,8 @@ private func eventually(
 
         try await runner.send("hello")
         runner.terminateNow()
-        // The connection is dropped by the bookkeeping behind the signal, not by the signal.
+        // Cancellation must only be published after detaching the dying connection. CI caught
+        // a new send finding that client while the old shutdown was still awaiting its stop.
         await eventually("the teardown to finish") {
             (try? await store.session(id: session.id))??.state == .cancelled
         }
