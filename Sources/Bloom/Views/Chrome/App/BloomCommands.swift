@@ -955,12 +955,11 @@ struct BloomCommands: Commands {
     }
 
     /// A browser on the workspace's own dev server, which is what the `+` opens and what a split
-    /// does not: this is the route that has a port to hand. See `SessionTabsView.newBrowser`.
+    /// does not: this is the route that knows where that is. See `SessionTabsView.newBrowser`.
     private func openBrowserPane() {
         guard let workspace = model.selectedModel else { return }
         Task {
-            await workspace.ensurePort()
-            let address = workspace.port > 0 ? "http://localhost:\(workspace.port)" : ""
+            let address = await workspace.browserAddress()
             NewPane.open(.browser, in: workspace, url: address) {
                 WorkspaceTabsStore.shared.select($0, in: workspace)
             }
