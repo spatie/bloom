@@ -12,7 +12,7 @@ struct BrowserViewportButton: View {
             if !viewport.isEnabled { viewport.isEnabled = true }
             showsControls.toggle()
         } label: {
-            Label("Responsive Preview", systemImage: "iphone.and.ipad")
+            Label("Responsive Preview", systemImage: "ipad.and.iphone")
                 .labelStyle(.iconOnly)
                 .foregroundStyle(viewport.isEnabled ? Palette.accent : Palette.textSecondary)
         }
@@ -22,7 +22,7 @@ struct BrowserViewportButton: View {
             : "Preview at phone, tablet and desktop sizes")
         .accessibilityValue(viewport.isEnabled ? "\(viewport.width) × \(viewport.height)" : "Full size")
         .popover(isPresented: $showsControls, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: Metrics.spacingWide) {
+            VStack(alignment: .leading, spacing: 16) {
                 HStack {
                     Text("Responsive preview").font(Typo.labelEmphasis)
                     Spacer()
@@ -33,12 +33,14 @@ struct BrowserViewportButton: View {
                     .disabled(!viewport.isEnabled)
                     .help("Restore the page to the full browser pane")
                 }
-                .padding(.horizontal, Metrics.spacingWide)
                 BrowserViewportBar(viewport: $viewport)
             }
             .controlSize(.small)
-            .padding(.vertical, Metrics.spacingWide)
-            .frame(width: 410)
+            .padding(20)
+            .frame(width: 430)
+        }
+        .onChange(of: viewport.isEnabled) {
+            if !viewport.isEnabled { showsControls = false }
         }
     }
 }

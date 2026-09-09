@@ -19,8 +19,6 @@ struct BrowserViewportBar: View {
         }
         .controlSize(.small)
         .font(Typo.label)
-        .padding(.horizontal, Metrics.spacingWide)
-        .padding(.vertical, Metrics.spacingSmall)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -51,7 +49,7 @@ struct BrowserViewportBar: View {
         }
         // Native menu buttons derive their intrinsic size from the title, ignoring a frame on
         // the label. Constrain the control itself so Phone, Custom and Small phone align alike.
-        .frame(width: 110)
+        .frame(width: 110, alignment: .leading)
         .help("Choose a viewport size")
         .accessibilityLabel("Viewport preset")
     }

@@ -161,6 +161,15 @@ struct BrowserToolbarView: View {
             BrowserViewportButton(viewport: viewport)
                 .frame(width: pageActionWidth, height: Metrics.controlHeight)
             Hairline(axis: .vertical)
+            pageAction(BrowserToolbar.Control(
+                symbol: "arrow.up.left.and.arrow.down.right",
+                name: "Full size",
+                help: "Restore the page to the full browser pane",
+                isEnabled: viewport.wrappedValue.isEnabled
+            )) {
+                viewport.wrappedValue.isEnabled = false
+            }
+            Hairline(axis: .vertical)
             pageAction(toolbar.reload, action: reloadOrStop)
             Hairline(axis: .vertical)
             pageAction(toolbar.screenshot, action: capture)
