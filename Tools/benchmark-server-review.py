@@ -53,7 +53,7 @@ try:
         if not line: raise RuntimeError('Benchmark daemon did not start: ' + ''.join(startup))
     client = subprocess.Popen(ssh + [shlex.join([args.binary, 'connect', '--data-dir', fixture['data']])], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
     def rpc(operation, delay=True):
-        request = json.dumps({'version': 11, 'id': str(uuid.uuid4()), 'operation': operation}, separators=(',', ':')) + '\n'
+        request = json.dumps({'version': 12, 'id': str(uuid.uuid4()), 'operation': operation}, separators=(',', ':')) + '\n'
         started = time.perf_counter()
         if delay: time.sleep(args.added_rtt_ms / 1000)
         client.stdin.write(request); client.stdin.flush()

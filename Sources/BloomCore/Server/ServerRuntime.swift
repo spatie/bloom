@@ -164,8 +164,7 @@ public actor ServerRuntime {
             try await configure(id, controls: controls)
             return .accepted
         case .project(let id, let action):
-            try await ServerSidebar.project(action, id: id, store: store)
-            return .accepted
+            return try await ServerSidebar.project(action, id: id, store: store)
         case .catalogue:
             let workspaces = try await store.workspaces()
             var storedSessions: [Session] = []

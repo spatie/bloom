@@ -11,6 +11,9 @@ import BloomCore
 @Observable
 final class RepoSettingsModel {
     let repo: Repo
+    let remote: ServerWindowModel?
+    private let endpoint: ServerEndpoint?
+    private(set) var isSaving = false
 
     /// What the settings files say right now. The baseline every edit is compared against.
     private(set) var loaded = RepoSettings()
@@ -37,19 +40,41 @@ final class RepoSettingsModel {
 
     private var resolveTask: Task<Void, Never>?
 
-    init(repo: Repo) {
+    init(repo: Repo, remote: ServerWindowModel? = nil) {
         self.repo = repo
+        self.remote = remote
+        endpoint = remote?.endpoint
+    }
+
+    private func remoteRead(_ action: ServerProjectAction) async throws -> ServerResult {
+        guard let remote, remote.endpoint == endpoint else { throw ServerFailure("Reconnect to this project's server.") }
+        let result = try await remote.read(.project(repoID: repo.id, action: action))
+        if case .failure(let message) = result { throw ServerFailure(message) }
+        return result
+    }
+
+    private func readSettings() async throws -> (RepoSettings, [ProjectInstructions.Subject: String]) {
+        if remote != nil {
+            guard case .projectSettings(let snapshot) = try await remoteRead(.settings) else {
+                throw ServerFailure("The server did not return project settings.")
+            }
+            return (snapshot.settings, snapshot.instructionFiles)
+        }
+        let path = repo.path
+        return await Task.detached { (SettingsLoader.load(repo: path), ProjectInstructions.files(in: path)) }.value
     }
 
     // MARK: - Reading
 
     func load() async {
-        let path = repo.path
-        let settings = await Task.detached { SettingsLoader.load(repo: path) }.value
-        instructionFiles = await Task.detached { ProjectInstructions.files(in: path) }.value
-        apply(settings)
-        isLoaded = true
-        scheduleResolve(immediately: true)
+        do {
+            let (settings, files) = try await readSettings()
+            instructionFiles = files
+            apply(settings)
+            saveError = nil
+            isLoaded = true
+            scheduleResolve(immediately: true)
+        } catch { saveError = error.readableMessage }
     }
 
     /// Rereads the files. Called when the window comes back to the front, because the usual way a
@@ -59,11 +84,13 @@ final class RepoSettingsModel {
     /// and Revert is the way to take the new version.
     func refresh() async {
         guard isLoaded else { return }
-        let path = repo.path
-        let settings = await Task.detached { SettingsLoader.load(repo: path) }.value
-        // Outside the guard below, because a `git pull` that adds `.bloom/merge-instructions.md`
-        // changes which of the two sources wins without changing a line of any settings file.
-        instructionFiles = await Task.detached { ProjectInstructions.files(in: path) }.value
+        let settings: RepoSettings
+        do {
+            let snapshot = try await readSettings()
+            settings = snapshot.0
+            instructionFiles = snapshot.1
+            saveError = nil
+        } catch { saveError = error.readableMessage; return }
         guard settings != loaded else {
             scheduleResolve()
             return
@@ -108,12 +135,21 @@ final class RepoSettingsModel {
                 try? await Task.sleep(for: .milliseconds(250))
                 if Task.isCancelled { return }
             }
-            let resolved = await Task.detached {
-                FilesToCopyResolver.resolve(patterns: patterns, in: path)
-            }.value
-            guard !Task.isCancelled else { return }
-            self?.plan = resolved
-            self?.isResolving = false
+            guard let self else { return }
+            defer { if !Task.isCancelled { self.isResolving = false } }
+            do {
+                let resolved: FilesToCopyPlan
+                if self.remote != nil {
+                    guard case .filesToCopy(let value) = try await self.remoteRead(.filesToCopy(patterns: patterns)) else {
+                        throw ServerFailure("The server did not return the files to copy.")
+                    }
+                    resolved = value
+                } else {
+                    resolved = await Task.detached { FilesToCopyResolver.resolve(patterns: patterns, in: path) }.value
+                }
+                guard !Task.isCancelled else { return }
+                self.plan = resolved
+            } catch { if !Task.isCancelled { self.saveError = error.readableMessage } }
         }
     }
 
@@ -154,18 +190,32 @@ final class RepoSettingsModel {
 
     func save() async {
         let pending = edits
-        guard !pending.isEmpty else { return }
+        guard isLoaded, !isSaving, !pending.isEmpty else { return }
+        isSaving = true
+        defer { isSaving = false }
         let path = repo.path
         let settings = loaded
 
         do {
-            let written = try await Task.detached {
+            if remote != nil {
+                guard case .projectSettings(let snapshot) = try await remoteRead(.saveSettings(edits: pending, expected: settings)) else {
+                    throw ServerFailure("The server did not confirm the settings save.")
+                }
+                savedPaths = snapshot.savedPaths
+                instructionFiles = snapshot.instructionFiles
+                apply(snapshot.settings)
+                scheduleResolve(immediately: true)
+                saveError = nil
+                return
+            }
+            savedPaths = try await Task.detached {
                 try SettingsWriter.write(pending, repo: path, settings: settings)
             }.value
-            savedPaths = written
             saveError = nil
         } catch {
-            saveError = error.readableMessage
+            let message = error.readableMessage
+            if remote != nil { await refresh() }
+            saveError = message
             return
         }
 

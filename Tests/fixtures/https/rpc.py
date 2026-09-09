@@ -12,7 +12,7 @@ context = ssl.create_default_context(cafile=str(root / 'cert.pem'))
 base = 'https://control.127.0.0.1.sslip.io:19444'
 
 def rpc(operation, id=None, expected_failure=False):
-    body = {'version': 11, 'id': id or str(uuid.uuid4()), 'operation': operation}
+    body = {'version': 12, 'id': id or str(uuid.uuid4()), 'operation': operation}
     request = urllib.request.Request(base + '/v1/rpc', data=json.dumps(body).encode(), headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (root / 'access-token.txt').read_text()})
     with urllib.request.urlopen(request, context=context, timeout=60) as response:
         reply = json.load(response)

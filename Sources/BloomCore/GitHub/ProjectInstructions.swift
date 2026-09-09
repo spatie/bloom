@@ -37,7 +37,7 @@ import Foundation
 /// agent to go and read nothing.
 public enum ProjectInstructions {
     /// One turn Bloom composes itself and that a project may add to.
-    public enum Subject: String, Sendable, Hashable, CaseIterable {
+    public enum Subject: String, Codable, Sendable, Hashable, CaseIterable {
         case merge
         case fixConflicts
     }

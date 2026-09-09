@@ -347,7 +347,6 @@ struct RepoHeaderRow: View {
                 .frame(width: Metrics.repoIcon, height: Metrics.repoIcon)
                 .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
         }
-        .disabled(remote != nil)
         .buttonStyle(.plain)
         .help("Settings for \(repo.name)")
     }

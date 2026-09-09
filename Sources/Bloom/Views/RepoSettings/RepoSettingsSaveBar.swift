@@ -17,6 +17,10 @@ struct RepoSettingsSaveBar: View {
 
             Spacer(minLength: Metrics.spacingSmall)
 
+            if !model.isLoaded {
+                Button("Retry") { Task { await model.load() } }
+            }
+
             Button("Revert File Changes", action: model.revert)
                 .disabled(!model.isDirty && !model.hasExternalChange)
 
@@ -27,7 +31,7 @@ struct RepoSettingsSaveBar: View {
             .buttonStyle(.borderedProminent)
             // The same system control accent as every other primary action in the app.
             .tint(Palette.controlAccent)
-            .disabled(!model.isDirty)
+            .disabled(!model.isLoaded || model.isSaving || !model.isDirty)
         }
         .padding(.horizontal, Metrics.pane)
         .padding(.vertical, Metrics.inset)
@@ -39,7 +43,7 @@ struct RepoSettingsSaveBar: View {
         // `FocusedMenuValues`.
         .focusedValue(
             \.saveAction,
-            SaveAction(subject: "project settings", isEnabled: model.isDirty) {
+            SaveAction(subject: "project settings", isEnabled: model.isLoaded && !model.isSaving && model.isDirty) {
                 Task { await model.save() }
             }
         )

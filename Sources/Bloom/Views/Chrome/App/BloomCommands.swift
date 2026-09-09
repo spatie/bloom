@@ -40,7 +40,9 @@ struct BloomCommands: Commands {
     /// Which project the settings item opens: the selected workspace's, or the only sensible
     /// fallback, which is the first one.
     private var projectSettingsRepo: Repo? {
-        guard !model.selection.isRemote else { return nil }
+        if model.selection.isRemote {
+            return model.remoteServer.catalogue?.repositories.first { $0.id == model.remoteServer.selectedWorkspace?.repoID }
+        }
         return model.selectedWorkspace.flatMap(model.repo(for:)) ?? model.repos.first
     }
 

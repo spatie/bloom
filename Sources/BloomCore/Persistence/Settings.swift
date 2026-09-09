@@ -19,7 +19,7 @@ public struct RunScript: Identifiable, Sendable, Hashable, Codable {
 /// The raw value is the TOML key path the writer uses. `runScripts` is the exception: the run
 /// scripts are a table of tables, so the writer addresses each script under `scripts.run` by id
 /// rather than writing this path directly.
-public enum SettingsKey: String, Sendable, Hashable, CaseIterable {
+public enum SettingsKey: String, Codable, Sendable, Hashable, CaseIterable {
     case setupScript = "scripts.setup"
     case archiveScript = "scripts.archive"
     case runScripts = "scripts.run"
@@ -36,7 +36,7 @@ public enum SettingsKey: String, Sendable, Hashable, CaseIterable {
 
 /// Which script a `ScriptFile` belongs to. Run scripts are named by their table under
 /// `scripts.run`, which is the same id a `RunScript` carries.
-public enum ScriptLocation: Sendable, Hashable {
+public enum ScriptLocation: Codable, Sendable, Hashable {
     case setup
     case archive
     case run(String)
@@ -49,7 +49,7 @@ public enum ScriptLocation: Sendable, Hashable {
 /// settings file, where the container's own escaping rules start applying to the user's shell
 /// quoting. So `scripts.setup_file` names a real executable file and `scripts.setup` is what is
 /// still read from settings written before that, and from Conductor's.
-public struct ScriptFile: Sendable, Hashable {
+public struct ScriptFile: Codable, Sendable, Hashable {
     /// As the settings file states it, which is relative to the repository unless it is absolute.
     public var path: String
     /// The settings file names this path and nothing is there. The script does not run, and the
@@ -64,7 +64,7 @@ public struct ScriptFile: Sendable, Hashable {
 
 /// The effective configuration for one repository, after layering every settings file that
 /// applies. Conductor's own files are read as-is so an existing repo needs no new config.
-public struct RepoSettings: Sendable, Hashable {
+public struct RepoSettings: Codable, Sendable, Hashable {
     public var setupScript: String?
     public var archiveScript: String?
     public var runScripts: [RunScript] = []

@@ -9,8 +9,8 @@ import Foundation
 ///
 /// The copier consumes this same plan, so preview and execution share matching and source-path
 /// containment. The copier additionally checks destination paths before writing.
-public struct FilesToCopyPlan: Sendable, Hashable {
-    public struct Match: Sendable, Hashable, Identifiable {
+public struct FilesToCopyPlan: Codable, Sendable, Hashable {
+    public struct Match: Codable, Sendable, Hashable, Identifiable {
         /// Relative to the repository root, which is how the pattern is written.
         public var path: String
         /// Matched by the pattern, but skipped: the copier copies files, not trees.

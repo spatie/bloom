@@ -61,7 +61,7 @@ struct ProjectMenuItems: View {
         // not always the same thing.
         Button("Project settings…") {
             openWindow(id: RepoSettingsWindow.id, value: repo.id)
-        }.disabled(remote != nil)
+        }
         Button("Reveal in Finder") { Reveal.inFinder(repo.path) }.disabled(remote != nil)
         // "Unhide" rather than "Show", because Show workspaces stood in this menu until today and
         // an owner who reads Show project as the other half of that pair would expect it to unfold
