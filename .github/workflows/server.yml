@@ -35,6 +35,8 @@ jobs:
         run: python3 Tools/server-smoke.py .build/debug/bloom-server
       - name: Check service packaging
         run: |
+          python3 Tools/test-install-bloom-server.py
+          python3 Tools/test-embed-server-setup.py
           python3 Tools/test-server-packaging.py
           python3 Tools/test-remote-packaging.py
       - name: Package the server and its runtime

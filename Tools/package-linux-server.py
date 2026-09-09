@@ -79,7 +79,8 @@ def package(binary, output):
                 if notice.is_file() and notice.name.upper().startswith(("LICENSE", "NOTICE")):
                     copy_notice(notice, notices / dependency / notice.relative_to(checkout))
 
-        manifest = {"architecture": platform.machine(), "glibc": run("getconf", "GNU_LIBC_VERSION"),
+        protocol = int(re.search(r"protocolVersion = (\d+)", (root / "Sources/BloomCore/Server/ServerProtocol.swift").read_text())[1])
+        manifest = {"protocolVersion": protocol, "architecture": platform.machine(), "glibc": run("getconf", "GNU_LIBC_VERSION"),
                     "swift": swift_version, "libraries": {}}
         for name, source in sorted(libraries.items()):
             destination = bundle / "lib" / name

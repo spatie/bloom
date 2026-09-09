@@ -3,7 +3,7 @@ import PackageDescription
 #if os(Linux)
 import Foundation
 
-let serverTests = ["ServerDiagnosticsTests.swift", "SetupOutputTests.swift", "WorkspacePreviewTests.swift", "BrowserAddressDisplayTests.swift", "WorkspaceExecutionTests.swift", "ServerProjectSettingsTests.swift", "ServerReviewCacheTests.swift", "CodexRunnerTests.swift", "CodexTestSupport.swift", "ServerRuntimeTests.swift", "ServerReviewTests.swift", "ServerWorkspaceTests.swift", "ServerSidebarTests.swift", "ServerPreviewTests.swift", "ServerHTTPTests.swift", "ServerTerminalStreamTests.swift", "ProcessPipeLifetimeTests.swift", "PlanApprovalTests.swift", "CodexTranslationTests.swift", "LocalServerIdentityTests.swift", "TestSupport.swift"]
+let serverTests = ["ServerSetupTests.swift", "ServerDiagnosticsTests.swift", "SetupOutputTests.swift", "WorkspacePreviewTests.swift", "BrowserAddressDisplayTests.swift", "WorkspaceExecutionTests.swift", "ServerProjectSettingsTests.swift", "ServerReviewCacheTests.swift", "CodexRunnerTests.swift", "CodexTestSupport.swift", "ServerRuntimeTests.swift", "ServerReviewTests.swift", "ServerWorkspaceTests.swift", "ServerSidebarTests.swift", "ServerPreviewTests.swift", "ServerHTTPTests.swift", "ServerTerminalStreamTests.swift", "ProcessPipeLifetimeTests.swift", "PlanApprovalTests.swift", "CodexTranslationTests.swift", "LocalServerIdentityTests.swift", "TestSupport.swift"]
 let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Tests/BloomCoreTests")
 let otherTests = (try FileManager.default.contentsOfDirectory(atPath: testDirectory.path)).filter { !serverTests.contains($0) }
 

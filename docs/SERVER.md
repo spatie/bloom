@@ -9,6 +9,39 @@ runtime and agent backends. Linux validation runs in the Server workflow using S
 Ubuntu 24.04. Existing local sessions still run inside the desktop app; they are not automatically
 moved into this server. New server workspaces can run locally or on another machine.
 
+## Add Server assistant
+
+Choose Add Server, enter `root@server-ip` (or an administrative SSH account with passwordless
+sudo), and select a key or use your SSH agent. Existing trusted host keys are copied into the
+app's private trust store. New hosts show their Ed25519 fingerprint for explicit verification;
+changed and revoked keys are refused. Automatic first-time key discovery supports direct IPv4
+and DNS connections; advanced SSH routes need their host verified with SSH first.
+
+The assistant checks Ubuntu 24.04/26.04 x86_64, systemd, administrator access, free disk space and
+existing installation ownership. Set Up Server uploads the package bundled with Bloom, verifies
+its checksum, installs Git, tmux, gh, Node and npm, and creates a dedicated `bloom` account. The
+account has no sudo privileges. Its home, data and SSH keys are private; the app generates a
+separate client key and uploads only its public half. Normal connections and agents run as that
+account. No TCP control listener or public development port is opened.
+
+GitHub, Codex and Claude sign-in use an embedded terminal under the service account. Agent CLIs
+are installed into its own `~/.local` directory when selected. Account setup is optional for
+browsing an empty server, but private GitHub repositories and agent turns require their respective
+sign-ins. Reopen Guided Setup to return to the account step for a managed server. The final step
+opens Bloom's existing repository picker.
+
+Failures retain the address and selected key. Installation progress is bounded, and raw SSH or
+package-manager output is not copied into alerts. Repeating a successful installation of the same
+package adds the client key if needed and reuses the service. Updating a different package refuses
+a running server; stop it when idle before retrying. Startup failure restores the prior binary and
+database. This conservative update path does not yet provide a maintenance-mode handover.
+
+Release builds bundle a matching Ubuntu package automatically. Development builds can set
+`BLOOM_LINUX_SERVER_ARCHIVE=/absolute/path/bloom-server-linux-x86_64.tar.gz` before building the
+app. The archive must include the matching protocol version from `Tools/package-linux-server.py`.
+A build without that payload explains that installation is unavailable and retains advanced
+connection settings. The assistant configures SSH; HTTPS gateway deployment remains separate.
+
 ## Build and run
 
 ### Bloom Remote verification app

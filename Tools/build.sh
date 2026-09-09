@@ -385,6 +385,7 @@ emit_app_intents_metadata
 
 # The dev scripts set their bundle identity before invoking this build. Derive the launch-agent
 # label from that final identity so a development app cannot register the release app's server.
+python3 Tools/embed-server-setup.py "$APP"
 python3 Tools/prepare-server-service.py "$APP"
 
 # After the metadata, because the bundle has to be signed with everything already inside it.

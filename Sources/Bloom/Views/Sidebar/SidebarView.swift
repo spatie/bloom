@@ -253,7 +253,7 @@ struct SidebarView: View {
             } else if app.remoteServer.isConfigured {
                 SidebarServerHeader(server: app.remoteServer).selectionDisabled()
             } else {
-                Button("Connect a Server…", systemImage: "server.rack") { openWindow(id: ServerWindow.id) }
+                Button("Add Server…", systemImage: "server.rack") { openWindow(id: ServerWindow.id) }
                     .buttonStyle(.plain).foregroundStyle(Palette.textSecondary).selectionDisabled()
             }
         }

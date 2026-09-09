@@ -4,12 +4,12 @@ import Foundation
 /// separately from SSH's argument vector because OpenSSH sends that command through a shell.
 public enum ServerEndpoint: Sendable, Equatable {
     case local(directory: String)
-    case ssh(host: String, executable: String, directory: String, identityFile: String? = nil)
+    case ssh(host: String, executable: String, directory: String, identityFile: String? = nil, knownHostsFile: String? = nil)
     case https(url: String)
 
     public var launch: AgentLaunch? {
         get throws {
-            guard case .ssh(let host, let executable, let directory, let identityFile) = self else { return nil }
+            guard case .ssh(let host, let executable, let directory, let identityFile, let knownHostsFile) = self else { return nil }
             guard !host.isEmpty, !host.hasPrefix("-"),
                   host.unicodeScalars.allSatisfy({ !CharacterSet.whitespacesAndNewlines.contains($0) && $0.value >= 32 }),
                   executable.hasPrefix("/"), directory.hasPrefix("/"),
@@ -20,6 +20,11 @@ public enum ServerEndpoint: Sendable, Equatable {
             if let identityFile, !identityFile.isEmpty {
                 guard identityFile.hasPrefix("/"), !identityFile.contains("\0") else { throw ServerFailure("Use an absolute SSH key path on this Mac.") }
                 identityArguments = ["-o", "IdentityAgent=none", "-o", "IdentitiesOnly=yes", "-i", identityFile]
+            }
+            if let knownHostsFile {
+                guard let path = try ServerSetupSSH.validateIdentityFile(knownHostsFile) else { throw ServerSetupFailure(code: .invalidAddress) }
+                let quoted = "\"" + path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+                identityArguments += ["-o", "UserKnownHostsFile=" + quoted, "-o", "GlobalKnownHostsFile=/dev/null", "-o", "UpdateHostKeys=no", "-o", "ControlPath=none"]
             }
             let command = [executable, "connect", "--data-dir", directory].map(Self.quote).joined(separator: " ")
             return AgentLaunch(
@@ -38,7 +43,7 @@ public enum ServerEndpoint: Sendable, Equatable {
 
     public func forwardLaunch(remotePort: Int, localPort: Int) throws -> AgentLaunch {
         guard (1...65_535).contains(remotePort), (1...65_535).contains(localPort),
-              case .ssh(let host, _, _, _) = self, let relay = try launch else {
+              case .ssh(let host, _, _, _, _) = self, let relay = try launch else {
             throw ServerFailure("Choose a remote port between 1 and 65535.")
         }
         let arguments = Array(relay.arguments.dropLast(2)) + ["-N", "-v", "-o", "ExitOnForwardFailure=yes",

@@ -18,6 +18,7 @@ final class ServerWindowModel {
     var host = ""
     var executable = ""
     var identityFile = ""
+    var knownHostsFile = ""
     var remoteDirectory = ""
     var existingLocalDirectory = ""
     var directory: String {
@@ -217,6 +218,7 @@ final class ServerWindowModel {
         host = values["host"] ?? ""
         executable = values["executable"] ?? ""
         identityFile = values["identityFile"] ?? ""
+        knownHostsFile = values["knownHostsFile"] ?? ""
         remoteDirectory = values["directory"] ?? ""
         remoteRepositoryPath = values["repository"] ?? ""
         localRepositoryPath = values["localRepository"] ?? ""
@@ -243,7 +245,7 @@ final class ServerWindowModel {
     private func saveConnection() {
         preferences.set([
             "usesHTTPS": usesHTTPS ? "true" : "false", "httpsAddress": httpsAddress,
-            "host": host, "executable": executable, "directory": remoteDirectory, "identityFile": identityFile,
+            "host": host, "executable": executable, "directory": remoteDirectory, "identityFile": identityFile, "knownHostsFile": knownHostsFile,
             "repository": remoteRepositoryPath, "localRepository": localRepositoryPath,
             "model": agentModel, "agent": agent.rawValue, "effort": effort, "permissionMode": permissionMode.rawValue,
         ], forKey: "server.connection")
@@ -484,7 +486,7 @@ final class ServerWindowModel {
             let endpoint: ServerEndpoint
             switch connectionMode {
             case .remote:
-                if usesHTTPS { endpoint = .https(url: try ServerHTTPTransport.origin(httpsAddress).absoluteString) } else { endpoint = .ssh(host: host, executable: executable, directory: directory, identityFile: identityFile.isEmpty ? nil : identityFile) }
+                if usesHTTPS { endpoint = .https(url: try ServerHTTPTransport.origin(httpsAddress).absoluteString) } else { endpoint = .ssh(host: host, executable: executable, directory: directory, identityFile: identityFile.isEmpty ? nil : identityFile, knownHostsFile: knownHostsFile.isEmpty ? nil : knownHostsFile) }
             case .existingLocal: endpoint = .local(directory: directory)
             case .local: endpoint = try await localService.start()
             }

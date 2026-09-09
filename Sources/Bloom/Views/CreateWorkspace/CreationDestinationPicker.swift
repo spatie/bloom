@@ -18,7 +18,7 @@ struct CreationDestinationPicker: View {
             }
             .pickerStyle(.inline)
             Divider()
-            Button("Configure Server…") { openWindow(id: ServerWindow.id) }
+            Button(app.remoteServer.isConfigured ? "Server Settings…" : "Add Server…") { openWindow(id: ServerWindow.id) }
         } label: {
             Label(isRemote ? (serverLabel) : "This Mac",
                 systemImage: isRemote ? "server.rack" : "laptopcomputer")
