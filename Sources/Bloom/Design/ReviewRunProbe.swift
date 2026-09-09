@@ -176,24 +176,26 @@ enum ReviewRunProbe {
             save(host, name: "all-files-jump")
             model.selectedFilePath = "Sources/LongReview.swift"
             FileReview.open(path: "Sources/LongReview.swift", in: model)
-            for _ in 0..<5 { await settle(window) }
+            for _ in 0..<40 {
+                await settle(window)
+                if loadedLongReview(in: host) { break }
+            }
+            check(loadedLongReview(in: host), "navigation did not load the destination file")
             if let scroll = scrollView(in: host) {
-                let origin = scroll.contentView.bounds.origin
-                scroll.contentView.scroll(to: NSPoint(x: origin.x, y: origin.y + 300))
-                scroll.reflectScrolledClipView(scroll.contentView)
+                let lastFileOffset = scroll.contentView.bounds.origin.y
+                wheel(-300, in: scroll)
                 await settle(window)
                 save(host, name: "all-files-sticky")
                 let revision = CenterTabStore.shared.review(for: model.workspace.id)?.reviewNavigationRevision
-                check(model.selectedFilePath == "Sources/LongReview.swift", "inspector selection did not follow the sticky file")
+                check(model.selectedFilePath == "Sources/LongReview.swift", "inspector selected \(model.selectedFilePath ?? "nil") at \(scroll.contentView.bounds.origin.y) after scrolling the last file")
                 check(FileReview.currentPath(in: model) == model.selectedFilePath,
                       "review did not remember the file reached by scrolling")
-                if let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
-                                       wheelCount: 1, wheel1: 100_000, wheel2: 0, wheel3: 0),
-                   let event = NSEvent(cgEvent: wheel) {
-                    scroll.scrollWheel(with: event)
-                }
-                await settle(window)
+                await Self.scroll(to: 0, in: scroll, window: window)
                 check(model.selectedFilePath == model.changedFiles.first?.path, "scrolling upwards selected \(model.selectedFilePath ?? "nil") at \(scroll.contentView.bounds.origin.y)")
+                await Self.scroll(to: lastFileOffset + 300, in: scroll, window: window)
+                save(host, name: "all-files-scroll-down")
+                check(model.selectedFilePath == "Sources/LongReview.swift",
+                      "downward scrolling selected \(model.selectedFilePath ?? "nil") at \(scroll.contentView.bounds.origin.y), target \(lastFileOffset + 300)")
                 check(CenterTabStore.shared.review(for: model.workspace.id)?.reviewNavigationRevision == revision,
                       "scroll-follow issued another navigation request")
                 if CommandLine.arguments.contains("--review-scroll-profile") {
@@ -259,6 +261,28 @@ enum ReviewRunProbe {
 
     private static func progress(_ message: String) {
         FileHandle.standardError.write(Data((message + "\n").utf8))
+    }
+
+    private static func loadedLongReview(in view: NSView) -> Bool {
+        if let text = view as? WrappedCodeText.TextView, text.string.contains("let reviewLine0 = 0") { return true }
+        return view.subviews.contains { loadedLongReview(in: $0) }
+    }
+
+    private static func scroll(to target: CGFloat, in scroll: NSScrollView, window: NSWindow) async {
+        for _ in 0..<40 {
+            let remaining = target - scroll.contentView.bounds.origin.y
+            if abs(remaining) < 1 { return }
+            // AppKit limits the distance of one wheel event, even for a precise pixel event.
+            wheel(Int32(-max(-300, min(300, remaining))), in: scroll)
+            await settle(window)
+        }
+    }
+
+    private static func wheel(_ pixels: Int32, in scroll: NSScrollView) {
+        guard let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                                  wheelCount: 1, wheel1: pixels, wheel2: 0, wheel3: 0) else { return }
+        wheel.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        if let event = NSEvent(cgEvent: wheel) { scroll.scrollWheel(with: event) }
     }
 
     private static func settle(_ window: NSWindow) async {
