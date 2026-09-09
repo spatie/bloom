@@ -6,7 +6,12 @@ import SwiftUI
 /// isolated app, so checking layout never opens a workspace or talks to an agent.
 @MainActor
 enum BrowserViewportDemo {
-    static var isRequested: Bool { CommandLine.arguments.contains("--browser-viewport-demo") }
+    static var isRequested: Bool {
+        CommandLine.arguments.contains("--browser-viewport-demo") || checksAreHidden
+    }
+    private static var checksAreHidden: Bool {
+        CommandLine.arguments.contains("--browser-viewport-checks")
+    }
     private static var window: NSWindow?
 
     static func schedule() {
@@ -25,11 +30,17 @@ enum BrowserViewportDemo {
             demo.isReleasedWhenClosed = false
             demo.contentView = NSHostingView(rootView: BrowserViewportDemoView(session: session))
             demo.center()
-            demo.orderFrontRegardless()
+            if !checksAreHidden { demo.orderFrontRegardless() }
+            demo.contentView?.layoutSubtreeIfNeeded()
             window = demo
-            if let index = CommandLine.arguments.firstIndex(of: "--viewport-checks"),
+            if let index = CommandLine.arguments.firstIndex(of: "--browser-viewport-checks")
+                ?? CommandLine.arguments.firstIndex(of: "--viewport-checks"),
                CommandLine.arguments.indices.contains(index + 1) {
                 await check(session, window: demo, output: CommandLine.arguments[index + 1])
+                if checksAreHidden {
+                    demo.close()
+                    window = nil
+                }
             }
         }
     }
@@ -41,7 +52,7 @@ enum BrowserViewportDemo {
                 try await Task.sleep(for: .milliseconds(100))
             }
             _ = try await session.webView.evaluateJavaScript("document.querySelector('input').value = 'Kept across resizing'")
-            for (width, height, fit) in [(390, 844, true), (1440, 900, true), (768, 1024, true), (844, 390, true), (1440, 900, false)] {
+            for (width, height, fit) in [(390, 844, true), (1440, 900, true), (768, 1024, true), (844, 390, true), (1440, 900, false), (703, 1002, true)] {
                 session.viewport.resize(width: width, height: height)
                 session.viewport.fitsPane = fit
                 try await Task.sleep(for: .milliseconds(450))
@@ -49,11 +60,13 @@ enum BrowserViewportDemo {
                 let actual = try await session.webView.evaluateJavaScript(
                     "[innerWidth, innerHeight, document.querySelector('input').value, matchMedia('(min-width: 1000px)').matches]"
                 ) as? [Any] ?? []
+                let fillsViewport = try await paintedToEdges(session)
                 results.append([
+                    "paintedToEdges": fillsViewport,
                     "requested": [width, height], "fit": fit, "actual": actual,
                     "passed": (actual.first as? Int == width) && (actual.dropFirst().first as? Int == height)
                         && (actual.dropFirst(2).first as? String == "Kept across resizing")
-                        && (actual.last as? Bool == (width >= 1000)),
+                        && (actual.last as? Bool == (width >= 1000)) && fillsViewport,
                 ])
             }
             session.viewport.isEnabled = false
@@ -77,8 +90,23 @@ enum BrowserViewportDemo {
         }
     }
 
+    /// A correct innerWidth alone missed a white strip at the right and bottom of large
+    /// previews. The fixture has a cream background at both right corners at every breakpoint.
+    private static func paintedToEdges(_ session: BrowserSession) async throws -> Bool {
+        let image = try await session.webView.takeSnapshot(configuration: nil)
+        guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff) else { return false }
+        return [12, bitmap.pixelsHigh - 12].allSatisfy { y in
+            guard let colour = bitmap.colorAt(x: bitmap.pixelsWide - 12, y: y)?.usingColorSpace(.sRGB) else {
+                return false
+            }
+            return abs(colour.redComponent - 245.0 / 255) < 0.02
+                && abs(colour.greenComponent - 243.0 / 255) < 0.02
+                && abs(colour.blueComponent - 236.0 / 255) < 0.02
+        }
+    }
+
     private static let page = """
-    <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+    <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
     * { box-sizing: border-box } body { margin: 0; color: #24392f; background: #f5f3ec;
     font: 16px -apple-system, sans-serif } header { padding: 24px 28px; border-bottom: 1px solid #d9ded3;

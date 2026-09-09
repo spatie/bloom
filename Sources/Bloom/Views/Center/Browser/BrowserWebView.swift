@@ -11,9 +11,6 @@ import BloomCore
 /// any `NSView` for that reason.
 final class BrowserHostView: NSView {
     private weak var page: NSView?
-    var viewportSize: CGSize? {
-        didSet { if oldValue != viewportSize { needsLayout = true } }
-    }
 
     func attach(_ view: NSView) {
         guard page !== view || view.superview !== self else { return }
@@ -28,11 +25,7 @@ final class BrowserHostView: NSView {
 
     override func layout() {
         super.layout()
-        guard let page else { return }
-        page.frame = bounds
-        // Transform the native coordinate space, not WebKit's page zoom. CSS still sees the
-        // requested size and AppKit converts pointer coordinates through the same transform.
-        page.bounds = CGRect(origin: .zero, size: viewportSize ?? bounds.size)
+        page?.frame = bounds
     }
 }
 
@@ -177,15 +170,15 @@ struct BrowserWebView: NSViewRepresentable {
     var host = BrowserPaneHost()
     var viewportSize: CGSize?
 
-    func makeNSView(context: Context) -> BrowserHostView {
-        let view = BrowserHostView()
+    func makeNSView(context: Context) -> BrowserViewportHostView {
+        let view = BrowserViewportHostView()
         view.viewportSize = viewportSize
         view.attach(session.pageView)
         wire()
         return view
     }
 
-    func updateNSView(_ nsView: BrowserHostView, context: Context) {
+    func updateNSView(_ nsView: BrowserViewportHostView, context: Context) {
         nsView.viewportSize = viewportSize
         nsView.attach(session.pageView)
         wire()

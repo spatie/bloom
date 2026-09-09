@@ -9,12 +9,12 @@ struct BrowserViewportBar: View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: Metrics.spacingSmall) {
                 presets
-                dimensions
-                actions
+                dimensions.disabled(!viewport.isEnabled)
+                actions.disabled(!viewport.isEnabled)
             }
             VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                HStack { presets; Spacer(); actions }
-                dimensions
+                HStack { presets; Spacer(); actions.disabled(!viewport.isEnabled) }
+                dimensions.disabled(!viewport.isEnabled)
             }
         }
         .controlSize(.small)
@@ -24,9 +24,12 @@ struct BrowserViewportBar: View {
 
     private var presets: some View {
         Menu {
+            Button("Full size") { viewport.isEnabled = false }
+            Divider()
             ForEach(BrowserViewport.Preset.allCases, id: \.self) { preset in
                 Button("\(preset.rawValue) (\(preset.width) × \(preset.height))") {
                     viewport.select(preset)
+                    viewport.isEnabled = true
                 }
             }
             if !viewport.savedSizes.isEmpty {
@@ -34,6 +37,7 @@ struct BrowserViewportBar: View {
                     ForEach(viewport.savedSizes, id: \.self) { size in
                         Button("\(size.width) × \(size.height)") {
                             viewport.resize(width: size.width, height: size.height)
+                            viewport.isEnabled = true
                         }
                     }
                 }
@@ -45,7 +49,7 @@ struct BrowserViewportBar: View {
                 Button("Remove Saved Sizes") { viewport.removeSavedSizes() }
             }
         } label: {
-            Text(viewport.preset?.rawValue ?? "Custom")
+            Text(viewport.isEnabled ? (viewport.preset?.rawValue ?? "Custom") : "Full size")
         }
         // Native menu buttons derive their intrinsic size from the title, ignoring a frame on
         // the label. Constrain the control itself so Phone, Custom and Small phone align alike.
