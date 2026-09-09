@@ -223,11 +223,12 @@ loud somewhere a user can read it.
 | Jump back or forward several pages | right click on an arrow | **no** | none |
 | Reload / Stop | toolbar | **no** | none |
 | Send a Screenshot to the Agent | toolbar, and the page menu | **no** | none |
-| Comment on an Area | crop button in the toolbar, and the page menu | **no** | none |
-| Add selected area and comment to the draft | review-comment popover | **no** | `Return` or `⌘Return` |
-| Cancel region capture | region capture controls | **no** | `Escape` |
+| Comment on an Area | labelled Comment button in the toolbar, and the page menu | **no** | none |
+| Add selected area and comment to the draft | inline review-comment editor | **no** | `Return` or `⌘Return` |
+| Finish reviewing the page | Done in the toolbar or selection controls | **no** | `Escape` outside the editor |
 | Select All / Clear Selection | region capture's Selection menu | **no** | none |
-| View Draft after capture | confirmation above the browser page | **no** | none |
+| Edit / Remove image comment | saved comment band on the page | **no** | none |
+| Send image comments | composer below the browser, or the adjacent conversation | **no** | `Return` or `⌘Return` |
 | Share | toolbar | **no** | none |
 | Open in External Browser | page context menu | **no** | none |
 | Find in page, next, previous | find bar | yes, Edit > Find | `⌘F` `⌘G` `⇧⌘G` |

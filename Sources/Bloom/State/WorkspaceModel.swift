@@ -1466,6 +1466,9 @@ final class WorkspaceModel {
     /// be a reason to make one.
     var reviewDrafts: [String: ReviewDraft] = [:]
 
+    /// A browser review survives switching tabs, just like a half-written diff comment.
+    var browserReviews: [String: BrowserRegionCapture] = [:]
+
     /// Which comments are open for editing in place. Here for the same reason `reviewDrafts` is,
     /// and the reason is not hypothetical for an edit either: the band being edited sits in the
     /// same lazy stack, so scrolling it out of sight destroys it, and `ReviewPaneView` keys the

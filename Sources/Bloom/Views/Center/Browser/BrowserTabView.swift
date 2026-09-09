@@ -14,6 +14,7 @@ struct BrowserTabView: View {
     /// down rather than reached for, for the reason `ToolPaneView.splitColumn` is: only the pane
     /// above knows which pane it is.
     var paneMenu: (@MainActor () -> NSMenu)?
+    var siblings: [PaneContent] = []
 
     /// What the field shows, which is not where the page is. Typing has to be allowed to disagree
     /// with the page until Return is pressed, so this is local state and the session is only told
@@ -32,7 +33,8 @@ struct BrowserTabView: View {
     @State private var isCapturing = false
     @State private var isSelectingRegion = false
     @State private var regionCapture: BrowserRegionCapture?
-    @State private var regionNotice: (sessionID: SessionID, conversation: String)?
+    @State private var viewportFrame: CGRect = .zero
+    @State private var room = ComposerRoom()
 
     @Environment(AppModel.self) private var app
 
@@ -53,7 +55,6 @@ struct BrowserTabView: View {
 
         VStack(spacing: 0) {
             toolbar(session)
-                .disabled(isSelectingRegion)
             Hairline()
             if session.find.isShowing {
                 BrowserFindBar(
@@ -73,7 +74,7 @@ struct BrowserTabView: View {
                 BrowserViewportView(
                     session: session, paneMenu: pageMenu, host: host,
                     isSelectingRegion: isSelectingRegion, regionCapture: regionCapture,
-                    cancelRegion: cancelRegion, addRegion: addRegion
+                    onViewportFrame: { viewportFrame = $0 }
                 )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -102,31 +103,13 @@ struct BrowserTabView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .overlay(alignment: .top) {
-                if let regionNotice {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(Palette.accent)
-                            .accessibilityHidden(true)
-                        Text("Added to draft").font(Typo.labelEmphasis)
-                        Spacer(minLength: 0)
-                        if model.sessions.contains(where: { $0.id == regionNotice.sessionID }) {
-                            Button("View Draft") {
-                                WorkspaceTabsStore.shared.reveal(.chat(regionNotice.sessionID), in: model)
-                                self.regionNotice = nil
-                            }
-                            .controlSize(.small)
-                            .help(regionNotice.conversation)
-                        }
-                        Button("Dismiss", systemImage: "xmark") { self.regionNotice = nil }
-                            .labelStyle(.iconOnly)
-                            .buttonStyle(.accessoryBar)
-                    }
-                    .padding(12)
-                    .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: 10))
-                    .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.border, lineWidth: Metrics.outline) }
-                    .elevation(.resting)
-                    .padding(12)
+            .coordinateSpace(name: "browser-feedback-pane")
+            .overlay(alignment: .topLeading) {
+                if let regionCapture {
+                    BrowserRegionCaptureView(
+                        capture: regionCapture, model: model, viewportFrame: viewportFrame,
+                        add: addRegion
+                    )
                 }
             }
             .overlay(alignment: .bottom) {
@@ -134,7 +117,11 @@ struct BrowserTabView: View {
                     regionControls
                 }
             }
+            if ReviewComposer.isDrawn(destination: regionCapture?.sessionID ?? model.reviewDestination?.id, panes: siblings) {
+                ReviewPaneComposer(model: model, room: room, destinationID: regionCapture?.sessionID)
+            }
         }
+        .onGeometryChange(for: CGFloat.self) { PaneMeasure.room($0.size.height) } action: { room.height = $0 }
         .background(Palette.surface)
         .task(id: isSelectingRegion) {
             guard isSelectingRegion, regionCapture == nil else { return }
@@ -152,6 +139,10 @@ struct BrowserTabView: View {
         // keyboard off the composer next to it.
         .task(id: tab.id) {
             address = session.displayAddress
+            if let held = model.browserReviews[tab.id] {
+                regionCapture = held
+                isSelectingRegion = true
+            }
             if address.isEmpty { isAddressFocused = true }
             // A pane redrawn onto a session that has been loading all along, which is what
             // switching workspace and coming back is. Nothing changed while this view was gone,
@@ -195,7 +186,9 @@ struct BrowserTabView: View {
                 if session.isLoading { session.webView.stopLoading() } else { session.reload() }
             },
             capture: capture,
-            captureRegion: beginRegion,
+            captureRegion: isSelectingRegion ? cancelRegion : beginRegion,
+            isReviewing: isSelectingRegion,
+            isSavingReview: regionCapture?.isAdding == true,
             viewport: Binding(get: { session.viewport }, set: { session.viewport = $0 }),
             submit: {
                 session.load(address)
@@ -225,7 +218,7 @@ struct BrowserTabView: View {
     // MARK: - Screenshot
 
     @ViewBuilder private var regionControls: some View {
-        if regionCapture?.isEditing != true {
+        if regionCapture?.isEditing != true && regionCapture?.focusedComment == nil {
             HStack(spacing: Metrics.spacingWide) {
                 if let regionCapture {
                     Menu {
@@ -251,7 +244,7 @@ struct BrowserTabView: View {
                     ProgressView().controlSize(.mini)
                     Text("Capturing page…").font(Typo.caption)
                 }
-                Button("Cancel", action: cancelRegion)
+                Button(regionCapture == nil ? "Cancel" : "Done", action: cancelRegion)
                     .buttonStyle(.borderless)
                     .font(Typo.caption)
                     .keyboardShortcut(.cancelAction)
@@ -269,24 +262,23 @@ struct BrowserTabView: View {
     private func addRegion() {
         guard let regionCapture else { return }
         regionCapture.add(to: model) {
-            regionNotice = (regionCapture.sessionID, regionCapture.conversation)
-            cancelRegion()
+            model.browserReviews[tab.id] = regionCapture
         }
     }
 
     private func beginRegion() {
         guard !isCapturing, !isSelectingRegion else { return }
-        regionNotice = nil
         isSelectingRegion = true
     }
 
     private func cancelRegion() {
         isSelectingRegion = false
         regionCapture = nil
+        model.browserReviews[tab.id] = nil
     }
 
     private func prepareRegion() async {
-        guard let destination = model.activeSession else {
+        guard let destination = model.reviewDestination else {
             cancelRegion()
             app.alert = BloomAlert(
                 title: "No conversation yet",
@@ -308,7 +300,11 @@ struct BrowserTabView: View {
                 )
                 return
             }
-            regionCapture = try BrowserRegionCapture(data: data, address: address, session: destination, pageRect: pageRect)
+            regionCapture = try BrowserRegionCapture(
+                data: data, address: address, session: destination,
+                pageRect: pageRect, viewportSize: viewportFrame.size
+            )
+            model.browserReviews[tab.id] = regionCapture
         } catch {
             guard !Task.isCancelled else { return }
             cancelRegion()

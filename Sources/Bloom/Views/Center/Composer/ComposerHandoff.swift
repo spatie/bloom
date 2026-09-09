@@ -21,6 +21,7 @@ enum ComposerHandoff {
     /// promise is that the file is now in the prompt.
     struct Outcome: Sendable {
         var failure: String?
+        var paths: [String] = []
     }
 
     /// Attaches to the workspace's active session, writes `body` at the end of that draft, and
@@ -43,6 +44,7 @@ enum ComposerHandoff {
         to model: WorkspaceModel,
         sessionID: SessionID? = nil,
         revealConversation: Bool = true,
+        imageComment: BrowserImageComment? = nil,
         body: @escaping @Sendable ([String]) -> String = { $0.map(AttachmentDraft.token(for:)).joined(separator: " ") }
     ) async -> Outcome {
         // A review can stay open while another chat becomes active. An explicit destination
@@ -71,10 +73,11 @@ enum ComposerHandoff {
             return Outcome(failure: added.failures.first ?? "Nothing could be attached.")
         }
 
+        if let imageComment { store.annotate(paths: added.paths, with: imageComment, sessionID: key) }
         append(body(added.paths), to: transcript)
         if revealConversation { WorkspaceTabsStore.shared.reveal(.chat(session.id), in: model) }
 
-        return Outcome(failure: added.failures.first)
+        return Outcome(failure: added.failures.first, paths: added.paths)
     }
 
     /// A sentence with nothing attached to it, put in the same place by the same rules.

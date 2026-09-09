@@ -8,6 +8,7 @@ struct BrowserRegionCanvas: View {
     var finishSelection: @MainActor () -> Void
     @State private var moveStart: CGRect?
     @State private var resizeStart: CGRect?
+    @State private var isSelecting = false
 
     private let coordinateSpace = "browser-region-canvas"
 
@@ -31,6 +32,28 @@ struct BrowserRegionCanvas: View {
                     .contentShape(Rectangle())
                     .pointerStyle(.rectSelection)
                     .gesture(select(in: frame))
+                ForEach(capture.comments) { note in
+                    let rect = BrowserRegion.rect(note.selection, in: frame)
+                    Rectangle().stroke(Palette.accent.opacity(0.65), lineWidth: 1)
+                        .frame(width: rect.width, height: rect.height)
+                        .offset(x: rect.minX, y: rect.minY)
+                        .allowsHitTesting(false)
+                    Button {
+                        capture.focusedCommentPath = note.id
+                        capture.selection = nil
+                        capture.isEditing = false
+                    } label: {
+                        Image(systemName: "text.bubble.fill")
+                            .font(Typo.caption)
+                            .foregroundStyle(Palette.accent)
+                            .padding(4)
+                            .background(Palette.reviewBand, in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+                    }
+                    .buttonStyle(.plain)
+                    .position(x: max(rect.minX, 12), y: max(rect.minY, 12))
+                    .help(note.body)
+                    .accessibilityLabel("Show image comment: \(note.body)")
+                }
                 if let selected {
                     selectionOutline(selected, frame: frame)
                     dimensions(selected, canvas: proxy.size)
@@ -63,9 +86,14 @@ struct BrowserRegionCanvas: View {
         DragGesture(minimumDistance: 0, coordinateSpace: .named(coordinateSpace))
             .onChanged { value in
                 guard frame.contains(value.startLocation) else { return }
+                if !isSelecting {
+                    capture.beginSelection()
+                    isSelecting = true
+                }
                 capture.selection = BrowserRegion.selection(from: value.startLocation, to: value.location, in: frame)
             }
             .onEnded { _ in
+                isSelecting = false
                 if capture.selection != nil { finishSelection() }
             }
     }
@@ -81,7 +109,10 @@ struct BrowserRegionCanvas: View {
             .pointerStyle(moveStart == nil ? .grabIdle : .grabActive)
             .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named(coordinateSpace))
                 .onChanged { value in
-                    if moveStart == nil { moveStart = capture.selection }
+                    if moveStart == nil {
+                        moveStart = capture.selection
+                        capture.isEditing = false
+                    }
                     guard let moveStart, frame.width > 0, frame.height > 0 else { return }
                     capture.selection = BrowserRegion.moved(moveStart, by: CGSize(
                         width: value.translation.width / frame.width,
@@ -106,7 +137,10 @@ struct BrowserRegionCanvas: View {
             .pointerStyle(.frameResize(position: resizePosition(corner)))
             .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named(coordinateSpace))
                 .onChanged { value in
-                    if resizeStart == nil { resizeStart = capture.selection }
+                    if resizeStart == nil {
+                        resizeStart = capture.selection
+                        capture.isEditing = false
+                    }
                     guard let resizeStart, frame.width > 0, frame.height > 0 else { return }
                     capture.selection = BrowserRegion.resized(resizeStart, corner: corner, to: CGPoint(
                         x: (value.location.x - frame.minX) / frame.width,

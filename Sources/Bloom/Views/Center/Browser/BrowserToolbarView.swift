@@ -66,6 +66,8 @@ struct BrowserToolbarView: View {
     var reloadOrStop: @MainActor () -> Void = {}
     var capture: @MainActor () -> Void = {}
     var captureRegion: @MainActor () -> Void = {}
+    var isReviewing = false
+    var isSavingReview = false
     var viewport: Binding<BrowserViewport> = .constant(BrowserViewport())
     var submit: @MainActor () -> Void = {}
 
@@ -88,8 +90,8 @@ struct BrowserToolbarView: View {
         // exactly what the three groups above must not become.
         GlassEffectContainer(spacing: 0) {
             HStack(spacing: Metrics.spacingWide) {
-                navigation
-                addressField
+                navigation.disabled(isReviewing)
+                addressField.disabled(isReviewing)
                 pageActions
             }
         }
@@ -161,10 +163,20 @@ struct BrowserToolbarView: View {
                     viewport.wrappedValue.isEnabled = false
                 }
             }
+            .disabled(isReviewing)
             actionGroup {
                 pageAction(toolbar.screenshot, action: capture)
                 Hairline(axis: .vertical)
-                pageAction(toolbar.regionCapture, action: captureRegion)
+                Button(action: captureRegion) {
+                    Label(isReviewing ? "Done" : "Comment", systemImage: isReviewing ? "checkmark" : "text.bubble")
+                        .font(Typo.label)
+                        .padding(.horizontal, Metrics.spacingSmall)
+                }
+                .buttonStyle(.accessoryBar)
+                .fixedSize(horizontal: true, vertical: false)
+                .foregroundStyle(isReviewing ? Palette.accent : Palette.textSecondary)
+                .disabled(isSavingReview || (!isReviewing && !toolbar.regionCapture.isEnabled))
+                .help(isReviewing ? "Finish reviewing this page" : "Drag over part of this page to leave a comment")
             }
             actionGroup {
                 BrowserShareButton(

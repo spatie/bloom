@@ -3,6 +3,32 @@ import Foundation
 /// A selection uses top-left, unit coordinates so resizing the pane never changes the crop.
 /// Pixel rounding happens only at export, retaining the retina detail in the original snapshot.
 public enum BrowserRegion {
+    /// The editor is drawn over the page. Prefer space beside the selection, then the smallest
+    /// overlap available, without changing the viewport or placing controls beyond the pane.
+    public static func commentFrame(near selection: CGRect, in bounds: CGRect, size: CGSize) -> CGRect {
+        let margin: CGFloat = 8
+        let width = min(size.width, max(0, bounds.width - margin * 2))
+        let height = min(size.height, max(0, bounds.height - margin * 2))
+        let origins = [
+            CGPoint(x: selection.minX, y: selection.maxY + margin),
+            CGPoint(x: selection.minX, y: selection.minY - height - margin),
+            CGPoint(x: selection.maxX + margin, y: selection.minY),
+            CGPoint(x: selection.minX - width - margin, y: selection.minY),
+        ]
+        let candidates = origins.map { origin in
+            CGRect(
+                x: max(bounds.minX + margin, min(origin.x, bounds.maxX - margin - width)),
+                y: max(bounds.minY + margin, min(origin.y, bounds.maxY - margin - height)),
+                width: width, height: height
+            )
+        }
+        return candidates.min { first, second in
+            let firstOverlap = first.intersection(selection)
+            let secondOverlap = second.intersection(selection)
+            return firstOverlap.width * firstOverlap.height < secondOverlap.width * secondOverlap.height
+        } ?? .zero
+    }
+
     public enum Corner: String, CaseIterable, Sendable {
         case topLeft, topRight, bottomLeft, bottomRight
 
