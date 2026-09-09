@@ -9,22 +9,16 @@ struct BrowserRegionCanvas: View {
     @State private var moveStart: CGRect?
     @State private var resizeStart: CGRect?
 
-    private let inset: CGFloat = 16
     private let coordinateSpace = "browser-region-canvas"
 
     var body: some View {
         GeometryReader { proxy in
-            let available = CGSize(width: max(0, proxy.size.width - inset * 2), height: max(0, proxy.size.height - inset * 2))
-            let frame = BrowserRegion.imageFrame(image: capture.imageSize, canvas: available)
-                .offsetBy(dx: inset, dy: inset)
+            let frame = BrowserRegion.rect(capture.pageRect, in: CGRect(origin: .zero, size: proxy.size))
             let selected = capture.selection.map { BrowserRegion.rect($0, in: frame) }
             ZStack(alignment: .topLeading) {
-                Palette.surfaceSunken
                 Image(decorative: capture.image, scale: 1)
                     .resizable()
                     .frame(width: frame.width, height: frame.height)
-                    .overlay { Rectangle().strokeBorder(.black.opacity(0.12), lineWidth: 0.5) }
-                    .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
                     .offset(x: frame.minX, y: frame.minY)
                     .allowsHitTesting(false)
                 Path { path in

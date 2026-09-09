@@ -10,8 +10,11 @@ final class BrowserRegionCapture {
     let address: String
     let sessionID: SessionID
     let conversation: String
+    /// The web content's position within the viewport, excluding an attached web inspector.
+    let pageRect: CGRect
     var selection: CGRect?
     var comment = ""
+    var isEditing = false
     var isAdding = false
     var failure: String?
 
@@ -20,7 +23,10 @@ final class BrowserRegionCapture {
         selection != nil && !comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isAdding
     }
 
-    init(data: Data, address: String, session: Session) throws {
+    init(
+        data: Data, address: String, session: Session,
+        pageRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+    ) throws {
         guard let bitmap = NSBitmapImageRep(data: data), let image = bitmap.cgImage else {
             throw BrowserSnapshotFailure()
         }
@@ -28,6 +34,15 @@ final class BrowserRegionCapture {
         self.address = address
         sessionID = session.id
         conversation = session.title
+        self.pageRect = pageRect
+    }
+
+    static func pageRect(in browser: BrowserSession) -> CGRect {
+        BrowserRegion.pageFrame(
+            content: browser.webView.convert(browser.webView.bounds, to: browser.pageView),
+            viewport: browser.pageView.bounds,
+            originAtTop: browser.pageView.isFlipped
+        )
     }
 
     func add(to model: WorkspaceModel, completion: @escaping @MainActor () -> Void) {

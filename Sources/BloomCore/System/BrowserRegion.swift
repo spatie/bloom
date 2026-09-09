@@ -31,15 +31,14 @@ public enum BrowserRegion {
         return CGRect(x: left, y: top, width: right - left, height: bottom - top)
     }
 
-    public static func imageFrame(image: CGSize, canvas: CGSize) -> CGRect {
-        guard image.width > 0, image.height > 0, canvas.width > 0, canvas.height > 0 else {
-            return .zero
-        }
-        let scale = min(canvas.width / image.width, canvas.height / image.height)
-        let size = CGSize(width: image.width * scale, height: image.height * scale)
+    /// WebKit can share its native container with an inspector. Only the content's rectangle is
+    /// replaced by the snapshot, using the same top-left coordinates as the selection overlay.
+    public static func pageFrame(content: CGRect, viewport: CGRect, originAtTop: Bool) -> CGRect {
+        guard viewport.width > 0, viewport.height > 0 else { return .zero }
         return CGRect(
-            x: (canvas.width - size.width) / 2, y: (canvas.height - size.height) / 2,
-            width: size.width, height: size.height
+            x: (content.minX - viewport.minX) / viewport.width,
+            y: (originAtTop ? content.minY - viewport.minY : viewport.maxY - content.maxY) / viewport.height,
+            width: content.width / viewport.width, height: content.height / viewport.height
         )
     }
 

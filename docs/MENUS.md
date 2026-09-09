@@ -224,7 +224,7 @@ loud somewhere a user can read it.
 | Reload / Stop | toolbar | **no** | none |
 | Send a Screenshot to the Agent | toolbar, and the page menu | **no** | none |
 | Comment on an Area | crop button in the toolbar, and the page menu | **no** | none |
-| Add selected area and comment to the draft | region capture controls | **no** | `⌘Return` |
+| Add selected area and comment to the draft | review-comment popover | **no** | `Return` or `⌘Return` |
 | Cancel region capture | region capture controls | **no** | `Escape` |
 | Select All / Clear Selection | region capture's Selection menu | **no** | none |
 | View Draft after capture | confirmation above the browser page | **no** | none |

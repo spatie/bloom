@@ -7,6 +7,10 @@ struct BrowserViewportView: View {
     @Bindable var session: BrowserSession
     var paneMenu: (@MainActor () -> NSMenu)?
     var host = BrowserPaneHost()
+    var isSelectingRegion = false
+    var regionCapture: BrowserRegionCapture?
+    var cancelRegion: @MainActor () -> Void = {}
+    var addRegion: @MainActor () -> Void = {}
     @State private var drag: ResizeStart?
 
     private let gutter: CGFloat = 18
@@ -22,11 +26,18 @@ struct BrowserViewportView: View {
             let width = viewport.isEnabled ? CGFloat(viewport.width) * scale : geometry.size.width
             let height = viewport.isEnabled ? CGFloat(viewport.height) * scale : geometry.size.height
             ScrollView([.horizontal, .vertical]) {
-                BrowserWebView(
-                    session: session, paneMenu: paneMenu, host: host,
-                    viewportSize: viewport.isEnabled
-                        ? CGSize(width: viewport.width, height: viewport.height) : nil
-                )
+                ZStack {
+                    BrowserWebView(
+                        session: session, paneMenu: paneMenu, host: host,
+                        viewportSize: viewport.isEnabled
+                            ? CGSize(width: viewport.width, height: viewport.height) : nil
+                    )
+                    .allowsHitTesting(!isSelectingRegion)
+                    .accessibilityHidden(isSelectingRegion)
+                    if let regionCapture {
+                        BrowserRegionCaptureView(capture: regionCapture, cancel: cancelRegion, add: addRegion)
+                    }
+                }
                 .frame(width: width, height: height)
                 .overlay {
                     if viewport.isEnabled {
@@ -54,7 +65,7 @@ struct BrowserViewportView: View {
                 .padding(padding)
                 .frame(minWidth: geometry.size.width, minHeight: geometry.size.height, alignment: .top)
             }
-            .scrollDisabled(!viewport.isEnabled)
+            .scrollDisabled(!viewport.isEnabled || isSelectingRegion)
             .background(viewport.isEnabled ? Palette.surfaceSunken : Palette.surface)
         }
         .clipped()
@@ -66,6 +77,7 @@ struct BrowserViewportView: View {
             .frame(width: edge == .bottom ? 32 : 4, height: edge == .bottom ? 4 : 32)
             .frame(width: edge == .bottom ? 64 : gutter, height: edge == .bottom ? gutter : 64)
             .contentShape(Rectangle())
+            .allowsHitTesting(!isSelectingRegion)
             .pointerStyle(edge == .bottom ? .rowResize : .columnResize)
             .help(edge == .bottom ? "Drag to resize viewport height" : "Drag to resize viewport width")
             .accessibilityLabel(edge == .bottom ? "Viewport height" : "Viewport width")

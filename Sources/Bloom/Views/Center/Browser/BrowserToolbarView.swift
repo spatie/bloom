@@ -102,27 +102,17 @@ struct BrowserToolbarView: View {
         .background(Palette.surfaceSunken)
     }
 
-    /// The pair, as one control with a divider through it, which is what `NSToolbarItemGroup`
-    /// draws for Safari and what nothing in a pane can ask for.
+    /// Navigation stays together, including the action that refreshes the current page.
     private var navigation: some View {
-        HStack(spacing: 0) {
+        actionGroup {
             BrowserToolbarButton(control: toolbar.back, action: goBack)
                 .modifier(HistoryMenu(entries: backHistory, go: goToHistory))
             Hairline(axis: .vertical)
             BrowserToolbarButton(control: toolbar.forward, action: goForward)
                 .modifier(HistoryMenu(entries: forwardHistory, go: goToHistory))
+            Hairline(axis: .vertical)
+            pageAction(toolbar.reload, action: reloadOrStop)
         }
-        .frame(height: Metrics.controlHeight)
-        // Clipped before the glass, not after it. `glassEffect` shapes only its own background, so
-        // the two hover fills still need this to stop at the capsule.
-        .clipShape(Capsule())
-        // `.interactive()` here and nowhere else in the bar: this shape is nothing but controls,
-        // and the material answering the pointer is what separates glass from a picture of it.
-        // Which arrow is under the pointer is still said by `.accessoryBar`'s own fill inside.
-        .glassEffect(.regular.interactive(), in: Capsule())
-        // The rim is drawn rather than left to the material's, because it is what still says where
-        // the capsule ends once Reduce Transparency has turned the glass opaque.
-        .overlay { Capsule().strokeBorder(Palette.border, lineWidth: Metrics.outline) }
     }
 
     private var addressField: some View {
@@ -154,40 +144,45 @@ struct BrowserToolbarView: View {
         }
     }
 
-    /// Reload, capture and share are one family of page actions. A joined glass capsule gives
-    /// them equal hit targets and one boundary, while the native button style still supplies each
-    /// action's hover and pressed feedback.
+    /// Separate capsules distinguish preview sizing, feedback capture and system sharing.
+    /// Joining all six buttons made unrelated actions read as one segmented control.
     private var pageActions: some View {
-        HStack(spacing: 0) {
-            BrowserViewportButton(viewport: viewport)
-                .frame(width: pageActionWidth, height: Metrics.controlHeight)
-            Hairline(axis: .vertical)
-            pageAction(BrowserToolbar.Control(
-                symbol: "arrow.up.left.and.arrow.down.right",
-                name: "Full size",
-                help: "Restore the page to the full browser pane",
-                isEnabled: viewport.wrappedValue.isEnabled
-            )) {
-                viewport.wrappedValue.isEnabled = false
+        HStack(spacing: Metrics.spacing) {
+            actionGroup {
+                BrowserViewportButton(viewport: viewport)
+                    .frame(width: pageActionWidth, height: Metrics.controlHeight)
+                Hairline(axis: .vertical)
+                pageAction(BrowserToolbar.Control(
+                    symbol: "arrow.up.left.and.arrow.down.right",
+                    name: "Full size",
+                    help: "Restore the page to the full browser pane",
+                    isEnabled: viewport.wrappedValue.isEnabled
+                )) {
+                    viewport.wrappedValue.isEnabled = false
+                }
             }
-            Hairline(axis: .vertical)
-            pageAction(toolbar.reload, action: reloadOrStop)
-            Hairline(axis: .vertical)
-            pageAction(toolbar.screenshot, action: capture)
-            Hairline(axis: .vertical)
-            pageAction(toolbar.regionCapture, action: captureRegion)
-            Hairline(axis: .vertical)
-            BrowserShareButton(
-                control: toolbar.share,
-                shareable: toolbar.shareable,
-                opticalOffsetY: -0.5
-            )
+            actionGroup {
+                pageAction(toolbar.screenshot, action: capture)
+                Hairline(axis: .vertical)
+                pageAction(toolbar.regionCapture, action: captureRegion)
+            }
+            actionGroup {
+                BrowserShareButton(
+                    control: toolbar.share,
+                    shareable: toolbar.shareable,
+                    opticalOffsetY: -0.5
+                )
                 .frame(width: pageActionWidth, height: Metrics.controlHeight)
+            }
         }
-        .frame(height: Metrics.controlHeight)
-        .clipShape(Capsule())
-        .glassEffect(.regular.interactive(), in: Capsule())
-        .overlay { Capsule().strokeBorder(Palette.border, lineWidth: Metrics.outline) }
+    }
+
+    private func actionGroup<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: 0, content: content)
+            .frame(height: Metrics.controlHeight)
+            .clipShape(Capsule())
+            .glassEffect(.regular.interactive(), in: Capsule())
+            .overlay { Capsule().strokeBorder(Palette.border, lineWidth: Metrics.outline) }
     }
 
     private func pageAction(

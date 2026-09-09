@@ -39,13 +39,20 @@ struct BrowserRegionTests {
         #expect(tiny.origin == .zero && tiny.width > 0 && tiny.height > 0)
     }
 
-    @Test("Letterboxing keeps the screenshot's aspect ratio")
-    func fitsImage() {
-        let frame = BrowserRegion.imageFrame(
-            image: CGSize(width: 1600, height: 900), canvas: CGSize(width: 800, height: 600)
-        )
-        #expect(frame == CGRect(x: 0, y: 75, width: 800, height: 450))
-        #expect(BrowserRegion.imageFrame(image: .zero, canvas: CGSize(width: 800, height: 600)) == .zero)
+    @Test("Capturing a page keeps its exact viewport frame")
+    func preservesPageFrame() {
+        let viewport = CGRect(x: 0, y: 0, width: 800, height: 600)
+        let placement = BrowserRegion.pageFrame(content: viewport, viewport: viewport, originAtTop: false)
+        #expect(BrowserRegion.rect(placement, in: viewport) == viewport)
+        #expect(BrowserRegion.pageFrame(content: .zero, viewport: .zero, originAtTop: false) == .zero)
+    }
+
+    @Test("An attached inspector does not stretch the captured web content", arguments: [false, true])
+    func excludesInspector(originAtTop: Bool) {
+        let viewport = CGRect(x: 0, y: 0, width: 800, height: 600)
+        let content = CGRect(x: 0, y: originAtTop ? 0 : 200, width: 800, height: 400)
+        let placement = BrowserRegion.pageFrame(content: content, viewport: viewport, originAtTop: originAtTop)
+        #expect(BrowserRegion.rect(placement, in: viewport) == CGRect(x: 0, y: 0, width: 800, height: 400))
     }
 
     @Test("Dragging in either direction selects the same pixels", arguments: [false, true])
@@ -69,7 +76,7 @@ struct BrowserRegionTests {
         #expect(selection == CGRect(x: 0, y: 0.5, width: 0.5, height: 0.5))
     }
 
-    @Test("Clicks, thin slivers and drags starting in the letterbox do not make attachments")
+    @Test("Clicks, thin slivers and drags outside the page do not make attachments")
     func rejectsEmptySelections() {
         let frame = CGRect(x: 0, y: 75, width: 800, height: 450)
         #expect(BrowserRegion.selection(from: CGPoint(x: 10, y: 10), to: CGPoint(x: 200, y: 200), in: frame) == nil)
@@ -81,9 +88,9 @@ struct BrowserRegionTests {
     func resizePreservesCrop() throws {
         let image = CGSize(width: 1200, height: 800)
         let selection = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
-        let frame = BrowserRegion.imageFrame(image: image, canvas: CGSize(width: 300, height: 300))
+        let frame = CGRect(x: 0, y: 0, width: 300, height: 200)
         let outline = BrowserRegion.rect(selection, in: frame)
-        #expect(outline == CGRect(x: 75, y: 100, width: 150, height: 100))
+        #expect(outline == CGRect(x: 75, y: 50, width: 150, height: 100))
         let redrawn = try #require(BrowserRegion.selection(
             from: outline.origin, to: CGPoint(x: outline.maxX, y: outline.maxY), in: frame
         ))

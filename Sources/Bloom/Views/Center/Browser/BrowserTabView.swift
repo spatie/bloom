@@ -70,10 +70,12 @@ struct BrowserTabView: View {
                 )
             }
             ZStack {
-                BrowserViewportView(session: session, paneMenu: pageMenu, host: host)
+                BrowserViewportView(
+                    session: session, paneMenu: pageMenu, host: host,
+                    isSelectingRegion: isSelectingRegion, regionCapture: regionCapture,
+                    cancelRegion: cancelRegion, addRegion: addRegion
+                )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .allowsHitTesting(!isSelectingRegion)
-                    .accessibilityHidden(isSelectingRegion)
 
                 // A tab nobody has given an address is a white rectangle under a toolbar, which
                 // reads as a page that failed to load rather than as a pane waiting to be told
@@ -127,23 +129,9 @@ struct BrowserTabView: View {
                     .padding(12)
                 }
             }
-            .overlay {
+            .overlay(alignment: .bottom) {
                 if isSelectingRegion {
-                    if let regionCapture {
-                        BrowserRegionCaptureView(capture: regionCapture, cancel: cancelRegion) {
-                            regionCapture.add(to: model) {
-                                regionNotice = (regionCapture.sessionID, regionCapture.conversation)
-                                cancelRegion()
-                            }
-                        }
-                    } else {
-                        VStack(spacing: Metrics.spacingWide) {
-                            ProgressView("Capturing page…")
-                            Button("Cancel", action: cancelRegion).keyboardShortcut(.cancelAction)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Palette.surface)
-                    }
+                    regionControls
                 }
             }
         }
@@ -236,6 +224,56 @@ struct BrowserTabView: View {
 
     // MARK: - Screenshot
 
+    @ViewBuilder private var regionControls: some View {
+        if regionCapture?.isEditing != true {
+            HStack(spacing: Metrics.spacingWide) {
+                if let regionCapture {
+                    Menu {
+                        Button("Select All") {
+                            regionCapture.selection = CGRect(x: 0, y: 0, width: 1, height: 1)
+                            regionCapture.isEditing = true
+                        }
+                        Button("Clear Selection") { regionCapture.selection = nil }
+                            .disabled(regionCapture.selection == nil)
+                    } label: {
+                        Image(systemName: "rectangle.dashed")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .accessibilityLabel("Selection")
+                    Text(regionCapture.selection == nil ? "Drag to select an area" : "Area selected")
+                        .font(Typo.caption)
+                    if regionCapture.selection != nil {
+                        Button("Comment") { regionCapture.isEditing = true }
+                            .controlSize(.small)
+                    }
+                } else {
+                    ProgressView().controlSize(.mini)
+                    Text("Capturing page…").font(Typo.caption)
+                }
+                Button("Cancel", action: cancelRegion)
+                    .buttonStyle(.borderless)
+                    .font(Typo.caption)
+                    .keyboardShortcut(.cancelAction)
+            }
+            .disabled(regionCapture?.isAdding == true)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Metrics.corner))
+            .overlay { RoundedRectangle(cornerRadius: Metrics.corner).strokeBorder(Palette.border, lineWidth: Metrics.outline) }
+            .elevation(.resting)
+            .padding(12)
+        }
+    }
+
+    private func addRegion() {
+        guard let regionCapture else { return }
+        regionCapture.add(to: model) {
+            regionNotice = (regionCapture.sessionID, regionCapture.conversation)
+            cancelRegion()
+        }
+    }
+
     private func beginRegion() {
         guard !isCapturing, !isSelectingRegion else { return }
         regionNotice = nil
@@ -258,6 +296,7 @@ struct BrowserTabView: View {
         }
         let session = self.session
         let address = session.displayAddress
+        let pageRect = BrowserRegionCapture.pageRect(in: session)
         do {
             let data = try await session.snapshot()
             try Task.checkCancellation()
@@ -269,7 +308,7 @@ struct BrowserTabView: View {
                 )
                 return
             }
-            regionCapture = try BrowserRegionCapture(data: data, address: address, session: destination)
+            regionCapture = try BrowserRegionCapture(data: data, address: address, session: destination, pageRect: pageRect)
         } catch {
             guard !Task.isCancelled else { return }
             cancelRegion()
