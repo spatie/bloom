@@ -82,6 +82,16 @@ func validHost(host string) bool {
 	return len(host) <= 253
 }
 
+// A private deployment can use a dedicated HTTPS port without rewriting its authority.
+func validAuthority(authority string) bool {
+	if !strings.Contains(authority, ":") {
+		return validHost(authority)
+	}
+	host, port, err := net.SplitHostPort(authority)
+	number, parseErr := strconv.Atoi(port)
+	return err == nil && parseErr == nil && validHost(host) && number > 0 && number <= 65535 && number != 443 && strconv.Itoa(number) == port
+}
+
 func secureURL(value string) bool {
 	parsed, err := url.Parse(value)
 	return err == nil && parsed.Scheme == "https" && parsed.Hostname() != "" && parsed.User == nil && parsed.RawQuery == "" && !parsed.ForceQuery && parsed.Fragment == ""
@@ -162,7 +172,7 @@ func (config Config) Validate() error {
 	if number, err := strconv.Atoi(port); err != nil || number < 1 || number > 65535 || strconv.Itoa(number) != port {
 		return errors.New("invalid gateway listen port")
 	}
-	if !validHost(config.APIHost) || config.ServerID == "" {
+	if !validAuthority(config.APIHost) || config.ServerID == "" {
 		return errors.New("API hostname and stable server ID are required")
 	}
 	if !filepath.IsAbs(config.RuntimeSocket) {
@@ -177,12 +187,19 @@ func (config Config) Validate() error {
 		}
 	}
 	hosts := map[string]bool{config.APIHost: true}
+	apiURL, _ := url.Parse("https://" + config.APIHost)
+	cookieHosts := map[string]string{apiURL.Hostname(): ""}
 	ports := map[int]bool{}
 	audiences := map[string]string{}
 	for _, preview := range config.Previews {
-		if !validHost(preview.Host) || hosts[preview.Host] || preview.WorkspaceID == "" || preview.Port < 1024 || preview.Port > 65535 {
+		if !validAuthority(preview.Host) || hosts[preview.Host] || preview.WorkspaceID == "" || preview.Port < 1024 || preview.Port > 65535 {
 			return errors.New("preview requires a unique hostname, workspace ID and unprivileged port")
 		}
+		previewURL, _ := url.Parse("https://" + preview.Host)
+		if owner, found := cookieHosts[previewURL.Hostname()]; found && owner != preview.WorkspaceID {
+			return errors.New("host-only cookies require separate hostnames for control and different workspaces")
+		}
+		cookieHosts[previewURL.Hostname()] = preview.WorkspaceID
 		hosts[preview.Host] = true
 		if ports[preview.Port] || fmtPort(preview.Port) == port {
 			return errors.New("preview ports must be unique and cannot target the gateway")
@@ -202,11 +219,11 @@ func (config Config) Validate() error {
 	for _, preview := range config.Previews {
 		for _, origin := range preview.AllowedOrigins {
 			parsed, err := url.Parse(origin)
-			if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Port() != "" || !hosts[parsed.Hostname()] || parsed.Hostname() == config.APIHost {
+			if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || !hosts[parsed.Host] || parsed.Host == config.APIHost {
 				return errors.New("preview origins must name configured preview HTTPS hosts")
 			}
 			for _, other := range config.Previews {
-				if other.Host == parsed.Hostname() && other.WorkspaceID != preview.WorkspaceID {
+				if other.Host == parsed.Host && other.WorkspaceID != preview.WorkspaceID {
 					return errors.New("preview origins cannot cross workspace boundaries")
 				}
 			}

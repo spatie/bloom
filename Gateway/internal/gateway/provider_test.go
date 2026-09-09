@@ -197,3 +197,51 @@ func TestActivePolicyCannotBeChangedThroughCallerOwnedConfig(t *testing.T) {
 		t.Fatal("configuration mutation granted access")
 	}
 }
+
+func TestExplicitHTTPSPortsRetainAuthorityBoundaries(t *testing.T) {
+	f := newFixture(t)
+	f.config.APIHost = "control.example.com:19444"
+	f.config.Previews[0].Host = "app.preview.example.com:19444"
+	f.config.Previews[0].AllowedOrigins = []string{"https://app.preview.example.com:19444"}
+	if err := f.server.Reload(f.config); err != nil {
+		t.Fatal(err)
+	}
+	token := f.token(t, "control", nil)
+	if f.request("GET", f.config.APIHost, "/v1/info", token, "https://"+f.config.APIHost, "").Code != 200 {
+		t.Fatal("configured port refused")
+	}
+	if f.request("GET", f.config.APIHost, "/v1/info", token, "https://control.example.com:19445", "").Code != 403 {
+		t.Fatal("different origin port accepted")
+	}
+	if f.request("GET", "control.example.com:19445", "/v1/info", token, "", "").Code != 404 {
+		t.Fatal("unconfigured authority accepted")
+	}
+	for _, host := range []string{"control.example.com:0", "control.example.com:65536", "control.example.com:00443", "control.example.com:https", "control.example.com:443", "control.example.com:19444@evil.example"} {
+		config := f.config
+		config.APIHost = host
+		if config.Validate() == nil {
+			t.Fatal("invalid authority accepted", host)
+		}
+	}
+}
+
+func TestCookiesCannotCrossWorkspacesThroughDifferentPorts(t *testing.T) {
+	f := newFixture(t)
+	other := f.config.Previews[0]
+	other.Host = f.config.Previews[0].Host + ":19445"
+	other.Port = 18173
+	f.config.Previews = append(f.config.Previews, other)
+	if err := f.config.Validate(); err != nil {
+		t.Fatal("one workspace should support application and Vite ports", err)
+	}
+	f.config.Previews[1].WorkspaceID = "workspace-b"
+	f.config.Previews[1].Access.Audience = "workspace-b"
+	if f.config.Validate() == nil {
+		t.Fatal("different workspaces shared a browser cookie hostname")
+	}
+	f.config.Previews = f.config.Previews[:1]
+	f.config.Previews[0].Host = f.config.APIHost + ":19445"
+	if f.config.Validate() == nil {
+		t.Fatal("preview shared control's browser cookie hostname")
+	}
+}

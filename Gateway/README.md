@@ -10,7 +10,12 @@ Start with `deploy/config.example.json` and replace every example value with you
 actual configuration. The endpoint paths are illustrative, not a tested preset for a particular
 identity product. Run `go run ./cmd/bloom-gateway --config /absolute/path/config.json` behind an
 HTTPS reverse proxy such as Caddy. The gateway deliberately accepts only a fixed loopback listener.
-The reverse proxy must preserve the original Host and support WebSocket upgrades. Do not expose
+The reverse proxy must preserve the original Host and support WebSocket upgrades. `api_host`
+and preview `host` may include an explicit HTTPS port, such as `server.example.com:8443`.
+Omit the default `:443`. Origins and preview URLs retain a configured non-default port.
+Different workspaces and agent control require different hostnames because cookies ignore ports.
+For an identity provider using a private CA, pass `--identity-ca-file /path/to/ca.pem`.
+The gateway still verifies certificate chains and hostnames; it never disables TLS verification. Do not expose
 the runtime socket or development ports to the internet.
 
 Configure a public native OAuth client with authorisation-code flow, PKCE S256 and no client
@@ -86,9 +91,11 @@ JWKS retrieval, hostile identities, ID-token substitution, audience separation, 
 RPC boundaries, WebSocket expiry/revocation and terminal byte transport. Core Swift tests cover
 native metadata validation, HTTPS replies and persistent tmux reconnection.
 
-The gateway is still a development implementation. No public identity provider is deployed or
-certified by these tests. Real browser sign-in, provider refresh behaviour and physical iOS
-verification remain deployment checks. Independent security review is still outstanding.
+The gateway is still a development implementation. An isolated integration run now exercises
+Keycloak 26.7.3, Caddy and OAuth2 Proxy 7.15.0 with the actual Mac authentication code, Keychain,
+refresh flow, standalone runtime and browser WebSockets. See
+[HTTPS validation](../docs/HTTPS-VALIDATION.md) for results and limits. No public identity provider
+is deployed. Physical iOS verification and independent security review remain outstanding.
 
 Standards: [JWT access tokens](https://www.rfc-editor.org/rfc/rfc9068.html),
 [native OAuth](https://www.rfc-editor.org/rfc/rfc8252.html).

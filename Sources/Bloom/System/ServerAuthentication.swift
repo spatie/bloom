@@ -10,7 +10,13 @@ final class ServerAuthentication {
     private var states: [String: OIDAuthState] = [:]
     private var listener: OIDRedirectHTTPHandler?
     private var signingIn = false
-    private let service = (Bundle.main.bundleIdentifier ?? "be.spatie.bloom.dev") + ".server-oauth"
+    private let service: String
+    private let signInSession: URLSession?
+
+    init(signInSession: URLSession? = nil, credentialService: String? = nil) {
+        self.signInSession = signInSession
+        service = credentialService ?? (Bundle.main.bundleIdentifier ?? "be.spatie.bloom.dev") + ".server-oauth"
+    }
 
     func token(for address: String) async throws -> String {
         let origin = try ServerHTTPTransport.origin(address).absoluteString
@@ -31,16 +37,21 @@ final class ServerAuthentication {
         }
     }
 
-    func signIn(address: String) async throws {
-        guard !signingIn, let window = NSApp.keyWindow else { throw ServerFailure("Open server settings to sign in.") }
+    func signIn(address: String, externalUserAgent: (any OIDExternalUserAgent)? = nil) async throws {
+        guard !signingIn else { throw ServerFailure("A server sign-in is already in progress.") }
+        let userAgent: any OIDExternalUserAgent
+        if let externalUserAgent { userAgent = externalUserAgent } else {
+            guard let window = NSApp.keyWindow else { throw ServerFailure("Open server settings to sign in.") }
+            userAgent = OIDExternalUserAgentMac(presenting: window)
+        }
         signingIn = true
         defer { signingIn = false; listener?.cancelHTTPListener(); listener = nil }
         let origin = try ServerHTTPTransport.origin(address)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
         configuration.timeoutIntervalForResource = 20
-        let session = URLSession(configuration: configuration)
-        defer { session.invalidateAndCancel() }
+        let session = signInSession ?? URLSession(configuration: configuration)
+        defer { if signInSession == nil { session.invalidateAndCancel() } }
         let (data, response) = try await session.data(from: origin.appendingPathComponent(".well-known/bloom-auth"))
         guard let response = response as? HTTPURLResponse, response.statusCode == 200, data.count < 65_536,
               response.url?.scheme == origin.scheme, response.url?.host == origin.host, response.url?.port == origin.port else {
@@ -75,7 +86,7 @@ final class ServerAuthentication {
             additionalParameters: metadata.tokenParameters)
         let authorization: OIDAuthorizationResponse = try await withCheckedThrowingContinuation { continuation in
             listener.currentAuthorizationFlow = OIDAuthorizationService.present(request,
-                externalUserAgent: OIDExternalUserAgentMac(presenting: window)) { response, error in
+                externalUserAgent: userAgent) { response, error in
                     if let response { continuation.resume(returning: response) } else { continuation.resume(throwing: error ?? ServerFailure("Server sign-in was cancelled.")) }
                 }
         }

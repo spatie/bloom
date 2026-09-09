@@ -59,10 +59,11 @@ actor ServerTerminalStreams {
         let lines = process.lines
         process.writeLine("refresh-client -C 80,24")
         process.writeLine("capture-pane -p -e -t =" + terminal.session + ":")
+        process.writeLine("display-message -p -t =" + terminal.session + ": '#{cursor_x} #{cursor_y}'")
         entry.task = Task { [weak self] in
             await withTaskGroup(of: Void.self) { group in
                 group.addTask {
-                    var decoder = TmuxControlOutput()
+                    var decoder = TmuxControlOutput(restoringScreen: true)
                     do {
                         for try await line in lines {
                             guard !Task.isCancelled else { break }
@@ -103,13 +104,31 @@ actor ServerTerminalStreams {
 
 struct TmuxControlOutput {
     private var block: String?
+    // The initial replies are attach, resize, screen capture and cursor position, in order.
+    private var blockNumber = -1
+    private var captured: [String] = []
+    private let restoringScreen: Bool
+
+    init(restoringScreen: Bool = false) { self.restoringScreen = restoringScreen }
 
     mutating func take(_ line: String) -> Data? {
         if let block {
-            if line == "%end " + block || line == "%error " + block { self.block = nil; return nil }
+            if line == "%end " + block || line == "%error " + block {
+                self.block = nil
+                defer { captured.removeAll() }
+                guard restoringScreen, line.hasPrefix("%end ") else { return nil }
+                if blockNumber == 2 { return Data(("\u{1b}[2J\u{1b}[H" + captured.joined(separator: "\r\n")).utf8) }
+                if blockNumber == 3, let position = captured.first {
+                    let values = position.split(separator: " ").compactMap { Int($0) }
+                    guard values.count == 2, values.allSatisfy({ (0..<10_000).contains($0) }) else { return nil }
+                    return Data("\u{1b}[\(values[1] + 1);\(values[0] + 1)H".utf8)
+                }
+                return nil
+            }
+            if restoringScreen, blockNumber <= 3 { captured.append(line); return nil }
             return Data((line + "\r\n").utf8)
         }
-        if line.hasPrefix("%begin ") { block = String(line.dropFirst(7)); return nil }
+        if line.hasPrefix("%begin ") { block = String(line.dropFirst(7)); blockNumber += 1; return nil }
         guard line.hasPrefix("%output "), let separator = line.dropFirst(8).firstIndex(of: " ") else { return nil }
         let bytes = Array(line[line.index(after: separator)...].utf8)
         var output = Data(); var index = 0

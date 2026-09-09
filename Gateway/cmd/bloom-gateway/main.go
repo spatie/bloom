@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"log"
 	"net/http"
@@ -15,6 +17,7 @@ import (
 
 func main() {
 	path := flag.String("config", "", "absolute path to the administrator-owned gateway configuration")
+	identityCA := flag.String("identity-ca-file", "", "optional PEM certificate authority for the configured identity provider")
 	flag.Parse()
 	if *path == "" {
 		log.Fatal("--config is required")
@@ -26,6 +29,22 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	if *identityCA != "" {
+		pem, err := os.ReadFile(*identityCA)
+		if err != nil {
+			log.Fatal(err)
+		}
+		roots, err := x509.SystemCertPool()
+		if err != nil {
+			log.Fatal(err)
+		}
+		if !roots.AppendCertsFromPEM(pem) {
+			log.Fatal("identity CA file contains no certificates")
+		}
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+		client.Transport = transport
+	}
 	verifier := gateway.NewVerifier(gateway.VerifierContext(ctx, client))
 	handler, err := gateway.New(config, verifier)
 	if err != nil {
