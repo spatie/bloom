@@ -113,6 +113,7 @@ struct SearchPanelWindowOverlay: View {
         Group {
             if let files = panel.files {
                 FileSearchView(app: app, panel: panel, model: files)
+                    .id(files.workspace.id)
                     .frame(width: SearchPanelLayout.width(inWindow: windowWidth))
             } else {
                 SearchPanelView(
