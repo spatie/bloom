@@ -2,14 +2,16 @@
 
 The iOS foundation is a native UIKit client of Bloom Server. It shares HTTPS transport,
 OAuth metadata, AppAuth sign-in and token refresh, Keychain persistence, typed identifiers and
-JSON handling with the Mac app. Server workspaces, sessions and processes remain on the server.
+JSON handling and question parsing with the Mac app. Server workspaces, sessions and processes remain on the server.
 Closing the app or iOS suspending it never cancels an agent turn.
 
 ## Architecture
 
 `Packages/BloomClient` is plain Swift and Foundation. It has no UI imports, subprocesses,
 filesystem execution or database ownership. It contains the shared HTTPS connection, versioned
-commands, read projections and transcript merging. Both Mac and iOS compile this package.
+commands, read projections, transcript merging, question drafts and a durable conversation outbox.
+Both Mac and iOS compile this package. Question parsing and answer construction use the same
+types as Mac's existing question cards, re-exported by BloomCore.
 `make lint` enforces its UI boundary.
 
 `Packages/BloomAuthentication` wraps AppAuth and Keychain. Its small platform boundary presents
@@ -83,10 +85,27 @@ stops turns, merges incremental transcripts, runs configured scripts and opens H
 Failed create/send requests retain their command IDs for explicit retry. They are not retried
 as new commands, because a network failure can follow a completed server mutation.
 
-Approvals and questions are shown as waiting, with an instruction to answer on Mac or stop the
-turn. Rich tool rendering, mobile approval controls, terminal emulation, diff editing,
-attachments, archive confirmations, background notifications and offline draft persistence are
-not implemented yet. Server selection currently connects one origin per window and remembers
+Native question forms support offered choices, multiple selection, custom answers where allowed,
+and secure text fields for secret answers. Known command, file and search requests show their
+full input, description and reason before explicit Allow once or Deny. No mobile button creates
+session or project permission grants. Plan approval, MCP elicitation, unknown tools and requests
+requiring a special interaction surface remain unsupported and direct the user to Mac.
+An uncertain decision stays locked for retry with the same command ID and decision. Question
+form contents remain in memory while the form is open and are not written to the draft store.
+
+Conversation drafts are saved on each edit in the application's protected support directory,
+separately for each normalised HTTPS origin and session. The default HTTPS port is canonicalised;
+other ports and hosts remain distinct. A submission and its exact command ID are written before
+network transmission. Relaunch restores an interrupted submission as Retry, without sending it
+automatically. Transport errors, refusals, unexpected replies and failed persistence keep the
+draft. Only a matching accepted submission can clear its own text; a later edit survives that
+acknowledgement. The shared store serialises edits across windows. iOS file protection and mode
+0600 protect the file; OAuth tokens remain exclusively in the authentication package's Keychain.
+An unresolved submission stays locked until acknowledged; resolving a permanently rejected
+submission with an explicit discard/reconcile flow is still future work.
+
+Rich tool rendering, terminal emulation, diff editing, attachments, archive confirmations and
+background notifications are not implemented yet. Server selection currently connects one origin per window and remembers
 the latest origin. A saved multi-server catalogue is future work.
 
 A preview must be a registered, browser-authenticated HTTPS address or a Tailscale Serve URL

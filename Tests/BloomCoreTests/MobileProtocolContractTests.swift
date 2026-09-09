@@ -4,6 +4,50 @@ import BloomClient
 @testable import BloomCore
 
 struct MobileProtocolContractTests {
+    @Test func codexQuestionsRoundTripThroughMobileAndServerToAgent() throws {
+        let request = CodexApprovalRequest(id: .number(42), kind: .toolUserInput, threadID: "thread", turnID: "turn", itemID: "item", params: .object([
+            "questions": .array([.object(["id": .string("choice"), "question": .string("Which?"),
+                                         "options": .array([.object(["label": .string("First")])])])])
+        ]))
+        let ask = CodexPermission.ask(for: request, item: nil)
+        let approval = try #require(RemoteApproval(data: ask.raw))
+        #expect(approval.isSupported)
+        #expect(approval.questions.first?.allowsOther == false)
+        var draft = AgentQuestionDraft()
+        draft.toggle("First", on: approval.questions[0])
+        let command = try approval.answer(sessionID: SessionID("session"), draft: draft)
+        let decoded = try JSONDecoder().decode(ServerRequest.self, from: JSONEncoder().encode(command))
+        guard case .answer(_, _, .question(let input)) = decoded.operation else { Issue.record("Expected a question answer"); return }
+        let agentReply = CodexQuestionnaire.result(input: input, request: request)
+        #expect(agentReply["answers"]?["choice"]?["answers"] == .array([.string("First")]))
+    }
+
+    @Test func mobileDecisionsDecodeAsActualServerAnswers() throws {
+        let ask = PermissionAsk(requestID: "ask-1", toolName: "Bash", input: .object(["command": .string("git status")]))
+        let approval = try #require(RemoteApproval(data: CodexPermission.envelope(for: ask)))
+        for allow in [true, false] {
+            let command = try approval.decision(sessionID: SessionID("session"), allow: allow)
+            let decoded = try JSONDecoder().decode(ServerRequest.self, from: JSONEncoder().encode(command))
+            #expect(decoded.operation == .answer(sessionID: SessionID("session"), requestID: ask.requestID, answer: allow ? .allowOnce : .deny))
+        }
+    }
+
+    @Test func mobileQuestionAnswerUsesActualServerWireAndOriginalQuestionIDs() throws {
+        for answerID in ["Claude question?", "codex-question-id"] {
+            let question: JSONValue = .object(["question": .string("Claude question?"), "bloomAnswerID": .string(answerID),
+                                              "options": .array([.object(["label": .string("Yes")])])])
+            let input: JSONValue = .object(["questions": .array([question]), "context": .string("unchanged")])
+            let ask = PermissionAsk(requestID: "question-1", toolName: "AskUserQuestion", input: input, requiresUserInteraction: true)
+            let approval = try #require(RemoteApproval(data: CodexPermission.envelope(for: ask)))
+            var draft = AgentQuestionDraft()
+            draft.toggle("Yes", on: approval.questions[0])
+            let command = try approval.answer(sessionID: SessionID("session"), draft: draft)
+            let decoded = try JSONDecoder().decode(ServerRequest.self, from: JSONEncoder().encode(command))
+            let expected = AgentQuestionnaire.answered(input, answers: [answerID: "Yes"])
+            #expect(decoded.operation == .answer(sessionID: SessionID("session"), requestID: ask.requestID, answer: .question(input: expected)))
+        }
+    }
+
     @Test func sharedCommandsDecodeAsRealServerOperations() throws {
         let id = SessionID("session")
         let cases: [(RemoteCommand, ServerOperation)] = [

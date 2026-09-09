@@ -1,0 +1,103 @@
+import Foundation
+import Testing
+@testable import BloomClient
+
+@MainActor
+struct DraftTests {
+    private func location() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("drafts.json") }
+
+    @Test func transportFailureAndUnexpectedReplyKeepRetryIdentityAfterRelaunch() async throws {
+        let file = location()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let origin = "https://server.example"
+        let session = SessionID("one")
+        let store = ConversationDraftStore(file: file)
+        try store.save(text: "Run tests", origin: origin, sessionID: session)
+        let connection = DraftConnection()
+        await #expect(throws: ConnectionFailure.self) { try await store.submit(using: connection, origin: origin, sessionID: session) }
+        let failed = try store.draft(origin: origin, sessionID: session)
+        let relaunched = ConversationDraftStore(file: file)
+        await connection.respond(.object(["unexpected": .object([:])]))
+        await #expect(throws: ConnectionFailure.self) { try await relaunched.submit(using: connection, origin: origin, sessionID: session) }
+        #expect(try relaunched.draft(origin: origin, sessionID: session) == failed)
+        await connection.respond(.object(["accepted": .object([:])]))
+        try await relaunched.submit(using: connection, origin: origin, sessionID: session)
+        #expect(try relaunched.draft(origin: origin, sessionID: session).text.isEmpty)
+        let sent = await connection.commands
+        #expect(sent.count == 3)
+        #expect(Set(sent.map(\.id)).count == 1)
+        #expect(sent.allSatisfy { $0 == failed.submission })
+    }
+
+    @Test func relaunchRetainsExactSubmissionAndNewerDraft() throws {
+        let file = location()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = ConversationDraftStore(file: file)
+        let session = SessionID("one")
+        try store.save(text: "Original turn", origin: "https://SERVER.example:443/", sessionID: session)
+        let command = try store.prepare(origin: "https://server.example", sessionID: session)
+        try store.save(text: "Next thought", origin: "https://server.example", sessionID: session)
+        let relaunched = ConversationDraftStore(file: file)
+        #expect(try relaunched.prepare(origin: "https://server.example/", sessionID: session) == command)
+        #expect(command.operation["send"]?["text"]?.stringValue == "Original turn")
+        try relaunched.acknowledge(command, origin: "https://server.example", sessionID: session)
+        let remaining = try relaunched.draft(origin: "https://server.example", sessionID: session)
+        #expect(remaining.text == "Next thought")
+        #expect(remaining.submission == nil)
+    }
+
+    @Test func acknowledgementsOnlyClearTheirOwnExactSubmission() throws {
+        let file = location()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = ConversationDraftStore(file: file)
+        let session = SessionID("same")
+        try store.save(text: "One", origin: "https://first.example", sessionID: session)
+        try store.save(text: "Two", origin: "https://second.example", sessionID: session)
+        try store.save(text: "Port", origin: "https://first.example:444", sessionID: session)
+        try store.save(text: "Other session", origin: "https://first.example", sessionID: SessionID("other"))
+        let command = try store.prepare(origin: "https://first.example", sessionID: session)
+        try store.acknowledge(.send(sessionID: session, text: "One"), origin: "https://first.example", sessionID: session)
+        #expect(try store.draft(origin: "https://first.example", sessionID: session).submission == command)
+        try store.acknowledge(command, origin: "https://second.example", sessionID: session)
+        #expect(try store.draft(origin: "https://second.example", sessionID: session).text == "Two")
+        try store.acknowledge(command, origin: "https://first.example", sessionID: session)
+        #expect(try store.draft(origin: "https://first.example", sessionID: session).text.isEmpty)
+        #expect(try store.draft(origin: "https://first.example:444", sessionID: session).text == "Port")
+        #expect(try store.draft(origin: "https://first.example", sessionID: SessionID("other")).text == "Other session")
+    }
+
+    @Test func corruptedStorageAndCredentialAddressesCannotOverwriteDrafts() throws {
+        let file = location()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = ConversationDraftStore(file: file)
+        try store.save(text: "Saved", origin: "https://server.example", sessionID: SessionID("one"))
+        let original = try Data(contentsOf: file)
+        #expect(throws: (any Error).self) {
+            try store.save(text: "Secret", origin: "https://user:password@server.example", sessionID: SessionID("one"))
+        }
+        #expect(try Data(contentsOf: file) == original)
+        try Data("invalid".utf8).write(to: file)
+        #expect(throws: (any Error).self) { try store.prepare(origin: "https://server.example", sessionID: SessionID("one")) }
+        #expect(try Data(contentsOf: file) == Data("invalid".utf8))
+    }
+
+    @Test func diskFailurePreventsPreparingNetworkCommand() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data("file".utf8).write(to: directory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ConversationDraftStore(file: directory.appendingPathComponent("drafts.json"))
+        #expect(throws: (any Error).self) { try store.save(text: "Do work", origin: "https://server.example", sessionID: SessionID("one")) }
+        #expect(throws: (any Error).self) { try store.prepare(origin: "https://server.example", sessionID: SessionID("one")) }
+    }
+}
+
+private actor DraftConnection: RemoteRequesting {
+    var commands: [RemoteCommand] = []
+    private var result: JSONValue?
+    func respond(_ result: JSONValue) { self.result = result }
+    func request(_ command: RemoteCommand) async throws -> JSONValue {
+        commands.append(command)
+        guard let result else { throw ConnectionFailure("Connection lost after sending") }
+        return result
+    }
+}

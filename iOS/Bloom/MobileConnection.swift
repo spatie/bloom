@@ -5,6 +5,7 @@ import BloomAuthentication
 /// Each window owns its selection and connection. The server owns workspaces and agent lifetime.
 @MainActor
 final class MobileConnection {
+    static let drafts = ConversationDraftStore(file: URL.applicationSupportDirectory.appendingPathComponent("ConversationDrafts/drafts.json"))
     let authentication = ServerAuthentication()
     private(set) var address = UserDefaults.standard.string(forKey: "server.address") ?? ""
     private(set) var service: RemoteWorkspaceService?

@@ -1,20 +1,22 @@
 import UIKit
 import BloomClient
 
-final class ConversationController: UIViewController, UITableViewDataSource {
+final class ConversationController: UIViewController, UITableViewDataSource, UITextViewDelegate {
     private let model: MobileConnection
     private let session: RemoteSession
     private let table = UITableView(frame: .zero, style: .plain)
     private let composer = UITextView()
     private let send = UIButton(type: .system)
     private let status = UILabel()
+    private let review = UIButton(type: .system)
+    private let origin: String
     private var buffer = TranscriptBuffer()
     private var poll: Task<Void, Never>?
-    private var pending: RemoteCommand?
     private var isSending = false
 
     init(model: MobileConnection, session: RemoteSession) {
         self.model = model; self.session = session
+        origin = model.address
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("Use init(model:session:)") }
@@ -34,14 +36,18 @@ final class ConversationController: UIViewController, UITableViewDataSource {
         composer.layer.cornerRadius = 10
         composer.accessibilityLabel = "Message"
         composer.isScrollEnabled = true
+        composer.delegate = self
         send.setTitle("Send", for: .normal)
         send.addAction(UIAction { [weak self] _ in self?.submit() }, for: .touchUpInside)
         status.font = .preferredFont(forTextStyle: .footnote)
         status.textColor = .secondaryLabel
         status.numberOfLines = 0
+        review.setTitle("Review waiting request", for: .normal)
+        review.isHidden = true
+        review.addAction(UIAction { [weak self] _ in self?.reviewRequest() }, for: .touchUpInside)
         let compose = UIStackView(arrangedSubviews: [composer, send])
         compose.spacing = 12; compose.alignment = .bottom
-        let stack = UIStackView(arrangedSubviews: [table, status, compose])
+        let stack = UIStackView(arrangedSubviews: [table, status, review, compose])
         stack.axis = .vertical; stack.spacing = 8; stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -57,6 +63,7 @@ final class ConversationController: UIViewController, UITableViewDataSource {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        restoreDraft()
         poll?.cancel()
         poll = Task { [weak self] in
             while !Task.isCancelled {
@@ -69,7 +76,7 @@ final class ConversationController: UIViewController, UITableViewDataSource {
     override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); poll?.cancel(); poll = nil }
 
     private func refresh() async {
-        guard let service = model.service else { status.text = "Disconnected. Reconnect to see progress."; return }
+        guard model.address == origin, let service = model.service else { status.text = "Disconnected. Reconnect to this server to see progress."; return }
         do {
             let transcript = try await service.transcript(sessionID: session.id, after: buffer.sequence)
             guard !Task.isCancelled else { return }
@@ -84,8 +91,9 @@ final class ConversationController: UIViewController, UITableViewDataSource {
                 table.scrollToRow(at: IndexPath(row: table.numberOfRows(inSection: 0) - 1, section: 0), at: .bottom, animated: false)
             }
             if !buffer.pendingQuestions.isEmpty {
-                status.text = "An approval or question is waiting. Open this conversation in Bloom on Mac to answer, or stop the turn here."
+                status.text = "The agent is waiting for your answer."
             } else { status.text = buffer.queueError ?? (buffer.isBusy ? "Working on the server" : "Ready") }
+            review.isHidden = buffer.pendingQuestions.isEmpty
             navigationItem.rightBarButtonItem?.isEnabled = buffer.isBusy || !buffer.pendingQuestions.isEmpty
         } catch {
             if !Task.isCancelled { status.text = error.localizedDescription }
@@ -93,34 +101,62 @@ final class ConversationController: UIViewController, UITableViewDataSource {
     }
 
     private func submit() {
-        guard !isSending, let service = model.service else { return }
-        let text = composer.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard pending != nil || !text.isEmpty else { return }
-        let command = pending ?? .send(sessionID: session.id, text: composer.text)
-        pending = command
+        guard !isSending, model.address == origin, let service = model.service else { return }
+        do {
+            let existing = try MobileConnection.drafts.draft(origin: origin, sessionID: session.id)
+            if existing.submission == nil {
+                try MobileConnection.drafts.save(text: composer.text, origin: origin, sessionID: session.id)
+            }
+            _ = try MobileConnection.drafts.prepare(origin: origin, sessionID: session.id)
+        } catch { show(error); return }
+        restoreDraft()
         isSending = true
         send.isEnabled = false; composer.isEditable = false
         Task {
             defer { self.isSending = false; self.send.isEnabled = true }
             do {
-                _ = try await service.client.request(command)
-                self.pending = nil
-                self.composer.text = ""
+                try await MobileConnection.drafts.submit(using: service.client, origin: self.origin, sessionID: self.session.id)
+                self.restoreDraft()
                 self.composer.undoManager?.removeAllActions()
-                self.composer.isEditable = true
-                self.send.setTitle("Send", for: .normal)
                 await self.refresh()
             } catch {
-                if error is ConnectionRefusal { self.pending = nil; self.composer.isEditable = true }
-                self.send.setTitle(self.pending == nil ? "Send" : "Retry", for: .normal)
+                self.send.setTitle("Retry", for: .normal)
                 self.show(error)
             }
         }
     }
 
     private func stop() {
-        guard let service = model.service else { return }
+        guard model.address == origin, let service = model.service else { return }
         Task { do { _ = try await service.client.request(.stop(sessionID: session.id)); await self.refresh() } catch { self.show(error) } }
+    }
+
+    func textViewDidChange(_ textView: UITextView) {
+        do { try MobileConnection.drafts.save(text: composer.text, origin: origin, sessionID: session.id) } catch {
+            status.text = "Draft could not be saved: " + error.localizedDescription
+        }
+    }
+
+    private func restoreDraft() {
+        do {
+            let draft = try MobileConnection.drafts.draft(origin: origin, sessionID: session.id)
+            composer.text = draft.submission?.operation["send"]?["text"]?.stringValue ?? draft.text
+            composer.isEditable = draft.submission == nil
+            send.setTitle(draft.submission == nil ? "Send" : "Retry", for: .normal)
+        } catch { status.text = "Draft could not be restored: " + error.localizedDescription }
+    }
+
+    private func reviewRequest() {
+        guard model.address == origin, let service = model.service,
+              let data = buffer.pendingQuestions.first else { return }
+        guard let request = RemoteApproval(data: data) else {
+            show(ConnectionFailure("This request is not supported on iPhone or iPad yet. Answer it in Bloom on Mac, or stop the turn."))
+            return
+        }
+        let controller = ApprovalController(request: request, sessionID: session.id, service: service) { [weak self] in
+            await self?.refresh()
+        }
+        present(UINavigationController(rootViewController: controller), animated: true)
     }
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
