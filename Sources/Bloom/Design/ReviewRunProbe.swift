@@ -7,6 +7,7 @@ import SwiftUI
 /// Checks the real diff controls in an invisible window without opening the app or its database.
 @MainActor
 enum ReviewRunProbe {
+    static var preparedLayouts: [String: String] = [:]
     static var isRequested: Bool { CommandLine.arguments.contains("--review-run-probe") }
 
     static func runAndExit() -> Never {
@@ -20,6 +21,7 @@ enum ReviewRunProbe {
     private static func run() async {
         var failures: [String] = []
         var checks = 0
+        var scrollSteps: [Double] = []
         func check(_ condition: Bool, _ message: String) {
             checks += 1
             if !condition { failures.append(message) }
@@ -70,6 +72,8 @@ enum ReviewRunProbe {
         // Use the same nested scrollers as all-files review. A lazy stack inside the
         // horizontal scroller previously realised the whole file's text and controls.
         var realisedRuns: [String: JSONValue] = [:]
+        progress("Checking wrapped code")
+        await ReviewWrappingProbe.run(check: check, save: { save($0, name: $1) })
         progress("Checking embedded scrolling")
         let compareEager = CommandLine.arguments.contains("--review-compare-eager")
         for deferred in compareEager ? [false, true] : [true] {
@@ -130,7 +134,12 @@ enum ReviewRunProbe {
                   "review-all toggle did not return to one file")
             check(CenterTabStore.shared.review(for: model.workspace.id)?.path == "README.md",
                   "review-all toggle forgot the selected file")
-            let inspector = NSHostingView(rootView: ChangedFileList(model: model).background(Palette.surface))
+            model.inspectorTab = .changes
+            let inspector = NSHostingView(rootView: VStack(spacing: 0) {
+                InspectorToolbar(model: model)
+                Hairline()
+                ChangedFileList(model: model)
+            }.background(Palette.surface))
             let inspectorWindow = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 340, height: 560),
                 styleMask: [.borderless], backing: .buffered, defer: false
@@ -141,10 +150,8 @@ enum ReviewRunProbe {
             FileReview.setShowsAllFiles(true, in: model)
             await settle(inspectorWindow)
             save(inspector, name: "review-toggle-on")
-            inspectorWindow.contentView = nil
-            var tab = CenterTab(workspaceID: model.workspace.id, kind: .review, title: "All changes")
-            tab.showsAllFiles = true
-            let host = NSHostingView(rootView: ReviewPaneView(model: model, tab: tab))
+            FileReview.open(path: model.changedFiles.first?.path ?? "", in: model)
+            let host = NSHostingView(rootView: LinkedReviewFixture(model: model))
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1000, height: 680),
                 styleMask: [.borderless], backing: .buffered, defer: false
@@ -169,21 +176,63 @@ enum ReviewRunProbe {
             await settle(window)
             save(host, name: "all-files-split")
             UserDefaults.standard.set(false, forKey: DiffLayoutSetting.storageKey)
-            tab.path = "Sources/Checkout.swift"
-            tab.reviewNavigationRevision += 1
-            host.rootView = ReviewPaneView(model: model, tab: tab)
+            model.selectedFilePath = "Sources/Checkout.swift"
+            FileReview.open(path: "Sources/Checkout.swift", in: model)
             for _ in 0..<5 { await settle(window) }
             save(host, name: "all-files-jump")
-            tab.path = "Sources/LongReview.swift"
-            tab.reviewNavigationRevision += 1
-            host.rootView = ReviewPaneView(model: model, tab: tab)
-            for _ in 0..<5 { await settle(window) }
+            model.selectedFilePath = "Sources/LongReview.swift"
+            FileReview.open(path: "Sources/LongReview.swift", in: model)
+            for _ in 0..<40 {
+                await settle(window)
+                if loadedLongReview(in: host) { break }
+            }
+            if !loadedLongReview(in: host) {
+                let tab = CenterTabStore.shared.review(for: model.workspace.id)
+                progress("Navigation target: \(tab?.path ?? "nil"), revision: \(tab?.reviewNavigationRevision ?? -1)")
+                progress("Prepared layouts: \(preparedLayouts)")
+                if let file = model.changedFiles.first(where: { $0.path == "Sources/LongReview.swift" }) {
+                    let held = model.heldDiff(for: file, ignoringWhitespace: false)
+                    progress("Long review held additions: \(held?.document.file.additions ?? -1)")
+                    do {
+                        let patch = try await Git.patch(worktree: model.workspace.path, base: "main", file: file)
+                        progress("Long review patch: \(patch.prefix(250))")
+                    } catch { progress("Long review read failed: \(error)") }
+                }
+                if let scroll = scrollView(in: host) {
+                    progress("Review offset: \(scroll.contentView.bounds), document: \(scroll.documentView?.bounds ?? .zero)")
+                }
+            }
+            check(loadedLongReview(in: host), "navigation did not load the destination file")
             if let scroll = scrollView(in: host) {
-                let origin = scroll.contentView.bounds.origin
-                scroll.contentView.scroll(to: NSPoint(x: origin.x, y: origin.y + 300))
-                scroll.reflectScrolledClipView(scroll.contentView)
+                let lastFileOffset = scroll.contentView.bounds.origin.y
+                wheel(-300, in: scroll)
                 await settle(window)
                 save(host, name: "all-files-sticky")
+                let revision = CenterTabStore.shared.review(for: model.workspace.id)?.reviewNavigationRevision
+                check(model.selectedFilePath == "Sources/LongReview.swift", "inspector selected \(model.selectedFilePath ?? "nil") at \(scroll.contentView.bounds.origin.y) after scrolling the last file")
+                check(FileReview.currentPath(in: model) == model.selectedFilePath,
+                      "review did not remember the file reached by scrolling")
+                await Self.scroll(to: 0, in: scroll, window: window)
+                check(model.selectedFilePath == model.changedFiles.first?.path, "scrolling upwards selected \(model.selectedFilePath ?? "nil") at \(scroll.contentView.bounds.origin.y)")
+                await Self.scroll(to: lastFileOffset + 300, in: scroll, window: window)
+                save(host, name: "all-files-scroll-down")
+                check(model.selectedFilePath == "Sources/LongReview.swift",
+                      "downward scrolling selected \(model.selectedFilePath ?? "nil") at \(scroll.contentView.bounds.origin.y), target \(lastFileOffset + 300)")
+                check(CenterTabStore.shared.review(for: model.workspace.id)?.reviewNavigationRevision == revision,
+                      "scroll-follow issued another navigation request")
+                if CommandLine.arguments.contains("--review-scroll-profile") {
+                    progress("Profiling continuous scroll")
+                    let bottom = max(0, (scroll.documentView?.bounds.height ?? 0) - scroll.contentView.bounds.height)
+                    for step in 0..<240 {
+                        let start = ProcessInfo.processInfo.systemUptime
+                        let fraction = CGFloat(step < 120 ? step : 239 - step) / 119
+                        scroll.contentView.scroll(to: NSPoint(x: 0, y: bottom * fraction))
+                        scroll.reflectScrolledClipView(scroll.contentView)
+                        host.layoutSubtreeIfNeeded()
+                        try? await Task.sleep(for: .milliseconds(16))
+                        scrollSteps.append(ProcessInfo.processInfo.systemUptime - start)
+                    }
+                }
             }
             check(!hoverViews(in: host).isEmpty, "review did not render code after jumping to a file")
             check(!window.isVisible && !window.isKeyWindow, "review probe activated its window")
@@ -219,9 +268,12 @@ enum ReviewRunProbe {
                 UserDefaults.standard.set(false, forKey: DiffWhitespaceSetting.storageKey)
                 window.contentView = nil
             }
+            inspectorWindow.contentView = nil
             withExtendedLifetime(app) {}
         }
         let result: JSONValue = .object([
+            "scrollStepP95Microseconds": .integer(scrollSteps.isEmpty ? 0
+                : Int(scrollSteps.sorted()[Int(Double(scrollSteps.count - 1) * 0.95)] * 1_000_000)),
             "realisedRuns": .object(realisedRuns),
             "checks": .integer(checks), "passed": .bool(failures.isEmpty), "failures": .strings(failures),
         ])
@@ -233,11 +285,41 @@ enum ReviewRunProbe {
         FileHandle.standardError.write(Data((message + "\n").utf8))
     }
 
+    private static func loadedLongReview(in view: NSView) -> Bool {
+        if let text = view as? WrappedCodeText.TextView, text.string.contains("let reviewLine0 = 0") { return true }
+        return view.subviews.contains { loadedLongReview(in: $0) }
+    }
+
+    private static func scroll(to target: CGFloat, in scroll: NSScrollView, window: NSWindow) async {
+        for _ in 0..<40 {
+            let remaining = target - scroll.contentView.bounds.origin.y
+            if abs(remaining) < 1 { return }
+            // AppKit limits the distance of one wheel event, even for a precise pixel event.
+            wheel(Int32(-max(-300, min(300, remaining))), in: scroll)
+            await settle(window)
+        }
+    }
+
+    private static func wheel(_ pixels: Int32, in scroll: NSScrollView) {
+        guard let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                                  wheelCount: 1, wheel1: pixels, wheel2: 0, wheel3: 0) else { return }
+        wheel.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        if let event = NSEvent(cgEvent: wheel) { scroll.scrollWheel(with: event) }
+    }
+
     private static func settle(_ window: NSWindow) async {
         for _ in 0..<3 {
             window.contentView?.layoutSubtreeIfNeeded()
+            if CommandLine.arguments.contains("--review-legacy-scrollers"), let view = window.contentView {
+                useLegacyScrollers(in: view)
+            }
             try? await Task.sleep(for: .milliseconds(30))
         }
+    }
+
+    private static func useLegacyScrollers(in view: NSView) {
+        if let scroll = view as? NSScrollView { scroll.scrollerStyle = .legacy }
+        for child in view.subviews { useLegacyScrollers(in: child) }
     }
 
     private static func scrollView(in view: NSView) -> NSScrollView? {
@@ -263,6 +345,16 @@ enum ReviewRunProbe {
         return view.subviews.flatMap { hoverViews(in: $0) }
     }
 
+}
+
+private struct LinkedReviewFixture: View {
+    let model: WorkspaceModel
+
+    var body: some View {
+        if let tab = CenterTabStore.shared.review(for: model.workspace.id) {
+            ReviewPaneView(model: model, tab: tab)
+        }
+    }
 }
 
 private struct ReviewCollapseFixture: View {

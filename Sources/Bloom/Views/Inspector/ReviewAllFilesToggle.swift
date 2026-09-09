@@ -13,21 +13,17 @@ struct ReviewAllFilesToggle: View {
             get: { isOn },
             set: { FileReview.setShowsAllFiles($0, in: model) }
         )) {
-            HStack(spacing: InspectorLayout.tight) {
-                Image(systemName: isOn ? "checkmark" : "doc.text")
-                    .frame(width: 12)
-                Text("Review all")
-            }
-            .font(Typo.captionEmphasis)
-            .foregroundStyle(isOn ? Palette.selectedEmphasizedText : Palette.textSecondary)
-            .padding(.horizontal, InspectorLayout.gap)
-            .padding(.vertical, InspectorLayout.tight)
-            .background {
-                RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                    .fill(isOn ? Palette.accent : Palette.surface)
-                    .strokeBorder(isOn ? Palette.accent : Palette.border, lineWidth: Metrics.outline)
-            }
-            .contentShape(Rectangle())
+            Image(systemName: "doc.text")
+                .foregroundStyle(isOn ? Palette.textPrimary : Palette.textSecondary)
+                .frame(width: Metrics.controlHeight + 4, height: Metrics.controlHeight)
+                .background {
+                    if isOn {
+                        RoundedRectangle(cornerRadius: Metrics.cornerSmall)
+                            .fill(Palette.selected)
+                    }
+                }
+                .frame(width: Metrics.controlHeight + 8, height: InspectorLayout.barHeight)
+                .contentShape(Rectangle())
         }
         .toggleStyle(.button)
         .buttonStyle(.plain)

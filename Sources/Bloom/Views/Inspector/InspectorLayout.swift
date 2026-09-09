@@ -17,6 +17,7 @@ enum InspectorLayout {
     static let inset = Metrics.inset
     /// The tab row, and every other strip in the column.
     static let barHeight = Metrics.barHeight
+    static let reviewHeaderHeight: CGFloat = 40
     /// The pull request strip, which is taller than the rest of them on purpose.
     ///
     /// Derived from the type it holds, measured rather than guessed. `NSFont` reports the line
