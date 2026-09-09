@@ -1,6 +1,6 @@
 # Bloom on iPhone and iPad
 
-The iOS foundation is a native UIKit client of Bloom Server. It shares HTTPS transport,
+The iOS foundation is a native UIKit client of Bloom Server. It supports direct SSH connections by IP address or hostname, and shares HTTPS transport,
 OAuth metadata, AppAuth sign-in and token refresh, Keychain persistence, typed identifiers and
 JSON handling and question parsing with the Mac app. Server workspaces, sessions and processes remain on the server.
 Closing the app or iOS suspending it never cancels an agent turn.
@@ -63,11 +63,40 @@ BLOOM_TEST_ID=ios-client BLOOM_TEST_SWIFT_ARGS='-j 2' \
   Tools/test-core.sh 'MobileProtocolContract|ServerHTTP|Identifier|JSONValue'
 ```
 
-## Connect
+## Connect with SSH
+
+Choose Server, select SSH and enter the server IP address or hostname and SSH account.
+The default account is `bloom`. Advanced defaults match Bloom's installer:
+`/opt/bloom-server/current/bin/bloom-server` with data directory `/var/lib/bloom`.
+Existing installations can override both paths and the SSH port.
+
+Tap Copy Public Key and add it to the account's `~/.ssh/authorized_keys` using your existing
+trusted server connection. This generates an Ed25519 identity on the device. Its private key
+is stored as a non-synchronising, device-only Keychain item and is never copied to the clipboard,
+preferences, source tree or application bundle. Key import and automatic device enrolment are
+not implemented yet.
+
+The first connection refuses authentication until you explicitly verify and trust the server's
+SHA-256 SSH host fingerprint. Compare it through your existing trusted SSH connection, for example
+with `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`. A changed host key is refused, without an
+automatic replacement or fallback to password authentication.
+
+`Packages/BloomSSH` uses Apple's compiled SwiftNIO SSH implementation. It opens the existing
+`bloom-server connect --data-dir ...` relay through SSH exec and exchanges the same versioned
+JSON requests as the Mac app. It has no subprocess, downloaded executable or local agent runtime.
+Each RPC currently opens a bounded SSH connection; it closes after one response. Persistent
+multiplexing is a future optimisation. TCP connection timeout, request timeout, cancellation,
+connection loss, key refusal and response-size limits are handled explicitly.
+
+No domain, HTTPS gateway or VPN is required for SSH. The app and server must use matching protocol
+versions. A mismatch explains both versions and asks you to update, rather than silently changing
+the wire version. The current production validation daemon still uses protocol 12; this branch
+uses 13 and needs a coordinated server update before connecting to that daemon.
+
+## Connect with HTTPS
 
 The server must expose the existing Bloom Gateway HTTPS API with a trusted TLS certificate and
-`/.well-known/bloom-auth` metadata. iOS does not execute SSH, install a Swift runtime or read the
-server's SQLite database. It uses the same `/v1/rpc` service as Mac HTTPS connections.
+`/.well-known/bloom-auth` metadata. iOS does not install a Swift runtime or read the server's SQLite database. It uses the same `/v1/rpc` service as Mac HTTPS connections.
 
 For a pre-registered OAuth public client, the identity provider must allow the exact redirect
 `be.spatie.bloom.ios:/oauth/callback`, authorisation code with PKCE, and refresh tokens. Providers
@@ -77,8 +106,7 @@ callback explicitly; do not relax redirect matching or add a client secret to th
 
 On iOS choose Server, enter its HTTPS origin and sign in using the system authentication browser.
 Only the origin is remembered in preferences. Sign out removes the Keychain entry.
-The root validation server is currently configured for SSH, so it cannot validate this iOS flow
-until an HTTPS Gateway deployment and provider configuration are supplied.
+HTTPS sign-in still needs a configured Gateway and identity provider for live verification.
 
 ## Included and remaining
 
@@ -97,8 +125,8 @@ An uncertain decision stays locked for retry with the same command ID and decisi
 form contents remain in memory while the form is open and are not written to the draft store.
 
 Conversation drafts are saved on each edit in the application's protected support directory,
-separately for each normalised HTTPS origin and session. The default HTTPS port is canonicalised;
-other ports and hosts remain distinct. A submission and its exact command ID are written before
+separately for each normalised server identity and session. Default HTTPS and SSH ports are canonicalised;
+other ports and hosts remain distinct. SSH account and server data directory also separate drafts. A submission and its exact command ID are written before
 network transmission. Relaunch restores an interrupted submission as Retry, without sending it
 automatically. Transport errors, refusals, unexpected replies and failed persistence keep the
 draft. Only a matching accepted submission can clear its own text; a later edit survives that
@@ -117,11 +145,46 @@ the latest origin. A saved multi-server catalogue is future work.
 
 A preview must be a registered, browser-authenticated HTTPS address or a Tailscale Serve URL
 (the latter requires Tailscale on the device). Loopback previews without a mapping are refused
-with an explanation because iOS has no desktop SSH port-forward subprocess. The API bearer
+with an explanation because SSH preview forwarding is not implemented in the mobile transport yet. The API bearer
 credential is never injected into WebKit, a preview URL, cookies or JavaScript. Gateway browser
 login must be configured separately as described in `Gateway/README.md`.
 
 The Simulator build verifies compilation and packaging. Portable and contract tests verify
-wire compatibility and state behaviour. Neither is a claim of live device sign-in, interactive
-keyboard testing or a preview against the current SSH-only server. Those require the HTTPS
-configuration and a device or an authorised interactive Simulator session.
+wire compatibility and state behaviour. A headless Mac integration harness using the exact mobile SSH transport and workspace service
+verified unknown-host refusal, changed-host refusal and authenticated relay against Ubuntu.
+Against an isolated protocol-13 daemon on that server it registered a fresh repository, created
+a workspace and received an exact assistant reply from a real Codex prompt. This verifies the
+shared mobile workflow, not an interactive Simulator session or a physical device. SSH previews,
+live HTTPS sign-in and physical-device keyboard/background behaviour remain unverified.
+
+## App Store preparation
+
+`Tools/archive-ios.sh` creates a Release archive for generic iOS devices at
+`/tmp/Bloom-iOS.xcarchive`. It is unsigned by default for build verification. Set
+`BLOOM_IOS_TEAM_ID` to archive using a development team already configured in Xcode;
+`BLOOM_IOS_ARCHIVE_PATH` controls the destination. It never installs, opens or uploads the app.
+A signed archive still needs distribution export, App Store Connect setup and review before
+TestFlight or App Store distribution. Simulator builds cannot be uploaded to App Store Connect.
+
+The generated target includes the Bloom icon, iPhone/iPad orientations, SDK licence notices
+from the resolved dependency checkouts, the SDKs' own privacy manifests, and Bloom's manifest.
+Bloom declares its own preferences access (`CA92.1`) and app-container file access (`C617.1`).
+There is no advertising, analytics or tracking SDK. Reassess both the manifest and App Store privacy
+answers if telemetry, hosted accounts or additional data collection are added. The manifest does
+not replace App Store Connect privacy disclosures or a published privacy policy. Apple's
+[required-reason API documentation](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype)
+and [SDK requirements](https://developer.apple.com/support/third-party-SDK-requirements/) describe those requirements.
+
+SSH transport uses SwiftNIO SSH and `Crypto`; the pinned Swift Crypto package re-exports system
+CryptoKit on iOS, without its BoringSSL targets. HTTPS uses URLSession and AppAuth. SSH protocol
+implementation is nevertheless bundled code, so `ITSAppUsesNonExemptEncryption` is intentionally
+not declared automatically. Complete Apple's export-compliance assessment for the actual shipping
+binary and distribution countries, then supply the resulting answer/documentation. Do not infer
+an exemption solely because SSH is a standard algorithm. See Apple's
+[export-compliance overview](https://developer.apple.com/help/app-store-connect/manage-app-information/overview-of-export-compliance).
+
+The application is a native workspace and agent client. Agents and project tools execute on the
+user's server; iOS does not download or execute those tools, use JIT, or render a streamed desktop.
+That architecture is relevant to review, but does not guarantee App Store approval. The final
+submission still needs a reviewable server/demo account, screenshots, privacy/support URLs,
+completed export answers and device testing.

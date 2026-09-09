@@ -13,6 +13,16 @@ struct ClientTests {
         #expect(origin.absoluteString == "https://example.com:8443")
     }
 
+    @Test func versionMismatchExplainsWhichSideNeedsUpdating() throws {
+        let id = UUID()
+        let data = try JSONEncoder().encode(JSONValue.object([
+            "version": .integer(BloomWire.version - 1), "id": .string(id.uuidString), "result": .object([:]),
+        ]))
+        let error = #expect(throws: ConnectionRefusal.self) { try RemoteClient.decode(data, commandID: id) }
+        #expect(error?.localizedDescription.contains("Update Bloom Server") == true)
+        #expect(error?.localizedDescription.contains(String(BloomWire.version)) == true)
+    }
+
     @Test func refusesMismatchedReply() throws {
         let command = RemoteCommand.call("hello")
         let data = try JSONEncoder().encode(JSONValue.object([

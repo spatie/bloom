@@ -123,7 +123,8 @@ struct MobileProtocolContractTests {
         #expect(creation.controls == controls)
         #expect(creation.repositoryPath == repo.path)
         #expect(creation.runSetupScript == true)
-        #expect(creation.mode == .chat)
+        #expect(creation.mode == nil)
+        #expect(creation.name == "Task")
     }
 }
 

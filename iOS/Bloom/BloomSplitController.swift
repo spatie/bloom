@@ -2,20 +2,31 @@ import UIKit
 import BloomClient
 @preconcurrency import AppAuth
 
-final class BloomSplitController: UISplitViewController {
+final class BloomSplitController: UISplitViewController, UISplitViewControllerDelegate {
     init(model: MobileConnection) {
         super.init(style: .doubleColumn)
+        delegate = self
         preferredDisplayMode = .oneBesideSecondary
+        preferredSplitBehavior = .tile
+        minimumPrimaryColumnWidth = 300
+        maximumPrimaryColumnWidth = 380
+        view.tintColor = BloomTheme.accent
         let projects = ProjectsController(model: model)
-        setViewController(UINavigationController(rootViewController: projects), for: .primary)
+        setViewController(BloomTheme.navigation(projects), for: .primary)
         let empty = UIViewController()
-        empty.view.backgroundColor = .systemBackground
+        empty.view.backgroundColor = BloomTheme.background
         var content = UIContentUnavailableConfiguration.empty()
         content.text = "Your work, wherever you are"
         content.secondaryText = "Connect to Bloom Server to open a workspace."
         content.image = UIImage(systemName: "leaf")
         empty.contentUnavailableConfiguration = content
-        setViewController(UINavigationController(rootViewController: empty), for: .secondary)
+        setViewController(BloomTheme.navigation(empty), for: .secondary)
+    }
+
+    func splitViewController(_ splitViewController: UISplitViewController,
+                             topColumnForCollapsingToProposedTopColumn proposedTopColumn: UISplitViewController.Column) -> UISplitViewController.Column {
+        let detail = (viewController(for: .secondary) as? UINavigationController)?.topViewController
+        return detail is WorkspaceController || detail is ConversationController ? proposedTopColumn : .primary
     }
 
     required init?(coder: NSCoder) { fatalError("Use init(model:)") }
@@ -32,8 +43,12 @@ final class ProjectsController: UITableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Bloom"
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Server", primaryAction: UIAction { [weak self] _ in self?.connect() })
+        navigationController?.navigationBar.prefersLargeTitles = true
+        BloomTheme.list(tableView)
+        navigationItem.leftBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "server.rack"), primaryAction: UIAction { [weak self] _ in self?.connect() })
         navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .add, primaryAction: UIAction { [weak self] _ in self?.importProject() })
+        navigationItem.leftBarButtonItem?.accessibilityLabel = "Server connection"
+        navigationItem.rightBarButtonItem?.accessibilityLabel = "Add project"
         refreshControl = UIRefreshControl()
         refreshControl?.addAction(UIAction { [weak self] _ in
             guard let self else { return }
@@ -48,15 +63,30 @@ final class ProjectsController: UITableViewController {
         if displayedAddress != currentAddress {
             displayedAddress = currentAddress
             let empty = UIViewController()
-            empty.view.backgroundColor = .systemBackground
+            empty.view.backgroundColor = BloomTheme.background
             var content = UIContentUnavailableConfiguration.empty()
             content.text = "Choose a workspace"
             content.secondaryText = "Your agents keep running on Bloom Server."
             empty.contentUnavailableConfiguration = content
-            splitViewController?.setViewController(UINavigationController(rootViewController: empty), for: .secondary)
+            splitViewController?.setViewController(BloomTheme.navigation(empty), for: .secondary)
         }
         tableView.reloadData()
-        navigationItem.prompt = model.service == nil ? "Connect to Bloom Server" : URL(string: model.address)?.host
+        navigationItem.prompt = nil
+        updateHeader()
+        if projects.isEmpty {
+            var content = UIContentUnavailableConfiguration.empty()
+            content.image = UIImage(systemName: model.service == nil ? "leaf" : "folder.badge.plus")
+            content.text = model.service == nil ? "Your workspace, anywhere" : "Make room for your next idea"
+            content.secondaryText = model.service == nil
+                ? "Connect your server and pick up where you left off. Your agents keep working while you're away."
+                : "Add a GitHub project to start your first workspace on this server."
+            content.button.title = model.service == nil ? "Connect to server" : "Add project"
+            content.buttonProperties.primaryAction = UIAction { [weak self] _ in
+                guard let self else { return }
+                if self.model.service == nil { self.connect() } else { self.importProject() }
+            }
+            contentUnavailableConfiguration = content
+        } else { contentUnavailableConfiguration = nil }
         navigationItem.rightBarButtonItem?.isEnabled = model.service != nil
     }
 
@@ -67,53 +97,54 @@ final class ProjectsController: UITableViewController {
     }
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { workspaces(section).count + 1 }
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
         let workspaces = workspaces(indexPath.section)
         if indexPath.row < workspaces.count {
             let workspace = workspaces[indexPath.row]
-            cell.textLabel?.text = workspace.name
-            cell.detailTextLabel?.text = workspace.branch
-            cell.imageView?.image = UIImage(systemName: "folder")
-            cell.accessoryType = .disclosureIndicator
-        } else {
-            cell.textLabel?.text = "New workspace"
-            cell.textLabel?.textColor = .tintColor
-            cell.imageView?.image = UIImage(systemName: "plus")
+            let sessions = model.catalogue?.sessions.filter { $0.workspaceID == workspace.id } ?? []
+            let busy = sessions.contains { $0.state == "running" }
+            let waiting = sessions.contains { $0.state == "waiting" }
+            let state = waiting ? "Needs your answer" : busy ? "Agent working" : workspace.branch
+            return BloomTheme.cell(title: workspace.name, detail: state,
+                                   symbol: waiting ? "hand.raised" : busy ? "circle.dotted.circle" : "square.stack.3d.up",
+                                   tint: waiting ? BloomTheme.colour(PaletteInk.warning) : BloomTheme.accent)
         }
+        let cell = BloomTheme.cell(title: "New workspace", symbol: "plus", disclosure: false)
+        var content = cell.contentConfiguration as? UIListContentConfiguration
+        content?.textProperties.font = .preferredFont(forTextStyle: .body)
+        content?.textProperties.color = BloomTheme.accent
+        cell.contentConfiguration = content
         return cell
     }
+
+    private func updateHeader() {
+        guard model.service != nil else { tableView.tableHeaderView = nil; return }
+        let host = URL(string: model.address)?.host ?? model.address
+        let label = BloomTheme.label(host, style: .subheadline)
+        let detail = BloomTheme.label("Connected · \(model.catalogue?.workspaces.count ?? 0) workspaces", style: .footnote, secondary: true)
+        let icon = UIImageView(image: UIImage(systemName: "server.rack", withConfiguration: UIImage.SymbolConfiguration(textStyle: .title2)))
+        icon.tintColor = BloomTheme.accent
+        icon.setContentHuggingPriority(.required, for: .horizontal)
+        let text = UIStackView(arrangedSubviews: [label, detail]); text.axis = .vertical; text.spacing = 4
+        let stack = UIStackView(arrangedSubviews: [icon, text]); stack.spacing = 14; stack.alignment = .center
+        stack.isLayoutMarginsRelativeArrangement = true
+        stack.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 16, leading: 24, bottom: 12, trailing: 24)
+        stack.frame = CGRect(x: 0, y: 0, width: tableView.bounds.width, height: 76)
+        let fitting = stack.systemLayoutSizeFitting(CGSize(width: tableView.bounds.width, height: 0), withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel)
+        stack.frame.size.height = max(76, fitting.height)
+        tableView.tableHeaderView = stack
+    }
+
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         let workspaces = workspaces(indexPath.section)
         if indexPath.row < workspaces.count {
             let controller = WorkspaceController(model: model, workspace: workspaces[indexPath.row])
-            splitViewController?.showDetailViewController(UINavigationController(rootViewController: controller), sender: self)
+            splitViewController?.showDetailViewController(BloomTheme.navigation(controller), sender: self)
         } else { createWorkspace(projects[indexPath.section]) }
     }
 
     private func connect() {
-        let alert = UIAlertController(title: "Bloom Server", message: "Enter the HTTPS address configured for Bloom Gateway. SSH-only servers cannot connect from iOS.", preferredStyle: .alert)
-        alert.addTextField { field in field.text = self.model.address; field.placeholder = "https://bloom.example.com"; field.keyboardType = .URL; field.autocapitalizationType = .none; field.autocorrectionType = .no }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Connect", style: .default) { [weak self] _ in
-            guard let self, let address = alert.textFields?.first?.text else { return }
-            Task {
-                do {
-                    do { try await self.model.connect(address: address) } catch {
-                        let userAgent = OIDExternalUserAgentIOS(presenting: self)
-                        try await self.model.authentication.signIn(address: address, externalUserAgent: userAgent)
-                        try await self.model.connect(address: address)
-                    }
-                } catch { self.show(error) }
-            }
-        })
-        if model.service != nil {
-            alert.addAction(UIAlertAction(title: "Sign out", style: .destructive) { [weak self] _ in
-                guard let self else { return }
-                do { try self.model.authentication.signOut(address: self.model.address); self.model.disconnect() } catch { self.show(error) }
-            })
-        }
-        present(alert, animated: true)
+        present(BloomTheme.navigation(ServerConnectionController(model: model)), animated: true)
     }
 
     private func importProject() {
@@ -130,7 +161,7 @@ final class ProjectsController: UITableViewController {
 
     private func createWorkspace(_ project: RemoteProject) {
         let controller = CreateWorkspaceController(model: model, project: project)
-        present(UINavigationController(rootViewController: controller), animated: true)
+        present(BloomTheme.navigation(controller), animated: true)
     }
 
     private func execute(_ command: RemoteCommand, service: RemoteWorkspaceService) {

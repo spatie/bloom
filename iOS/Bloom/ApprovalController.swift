@@ -27,7 +27,7 @@ final class ApprovalController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = request.questions.isEmpty ? "Review request" : "Answer questions"
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = BloomTheme.background
         navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) })
         let scroll = UIScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
@@ -49,6 +49,9 @@ final class ApprovalController: UIViewController {
         if request.questions.isEmpty {
             let context = UITextView()
             context.text = request.context; context.isEditable = false; context.isScrollEnabled = false
+            context.backgroundColor = BloomTheme.panel
+            context.layer.cornerRadius = 12
+            context.textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
             context.font = .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular)
             context.adjustsFontForContentSizeCategory = true
             stack.addArrangedSubview(context)

@@ -20,6 +20,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.rootViewController = BloomSplitController(model: model)
         self.window = window
         window.makeKeyAndVisible()
+        #if DEBUG
+        IOSPreviewFixture.install(in: window)
+        #endif
     }
 
     func sceneDidEnterBackground(_ scene: UIScene) { model.suspend() }

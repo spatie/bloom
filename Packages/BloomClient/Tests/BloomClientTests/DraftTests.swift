@@ -6,6 +6,18 @@ import Testing
 struct DraftTests {
     private func location() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("drafts.json") }
 
+    @Test func sshDraftsAreScopedToAccountAndRuntime() throws {
+        let file = location()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = ConversationDraftStore(file: file)
+        let session = SessionID("same")
+        try store.save(text: "SSH draft", origin: "ssh://bloom@SERVER.example:22/var/lib/bloom", sessionID: session)
+        #expect(try store.draft(origin: "ssh://bloom@server.example/var/lib/bloom", sessionID: session).text == "SSH draft")
+        #expect(try store.draft(origin: "ssh://other@server.example/var/lib/bloom", sessionID: session).text.isEmpty)
+        #expect(try store.draft(origin: "ssh://bloom@server.example/var/lib/another", sessionID: session).text.isEmpty)
+        #expect(throws: ConnectionFailure.self) { try store.save(text: "no", origin: "ssh://bloom:secret@server.example/var/lib/bloom", sessionID: session) }
+    }
+
     @Test func matchingServerFailureDoesNotProveTheCommandNeverRan() async throws {
         let file = location()
         defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }

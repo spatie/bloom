@@ -32,7 +32,7 @@ public struct RemoteWorkspaceService: Sendable {
         return .call("create", ["_0": .object([
             "repositoryPath": .string(project.path), "name": .string(name), "prompt": .string(prompt),
             "agent": .string(agent), "model": model, "effort": effort, "permissionMode": mode,
-            "controls": controls, "mode": .string("chat"), "runSetupScript": .bool(true)
+            "controls": controls, "runSetupScript": .bool(true)
         ])])
     }
 

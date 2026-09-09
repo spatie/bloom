@@ -15,6 +15,8 @@ final class WorkspaceController: UITableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = workspace.name
+        BloomTheme.list(tableView)
+        navigationItem.largeTitleDisplayMode = .never
         navigationItem.prompt = workspace.branch
         navigationItem.rightBarButtonItems = [
             UIBarButtonItem(title: "Preview", primaryAction: UIAction { [weak self] _ in self?.preview() }),
@@ -29,20 +31,20 @@ final class WorkspaceController: UITableViewController {
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { section == 0 ? "Conversations" : "Setup" }
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { section == 0 ? sessions.count : 1 }
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
         if indexPath.section == 0 {
             let session = sessions[indexPath.row]
-            cell.textLabel?.text = session.title
-            cell.detailTextLabel?.text = "\(session.model) · \(session.state)"
-            cell.accessoryType = .disclosureIndicator
-        } else {
-            let current = model.catalogue?.workspaces.first { $0.id == workspace.id } ?? workspace
-            cell.textLabel?.text = current.setupState.capitalized
-            cell.detailTextLabel?.text = current.setupLog
-            cell.detailTextLabel?.numberOfLines = 8
+            let state = session.state == "running" ? "Working" : session.state == "waiting" ? "Needs your answer" : "Ready"
+            return BloomTheme.cell(title: session.title, detail: "\(session.model) · \(state)", symbol: "bubble.left.and.bubble.right")
         }
+        let current = model.catalogue?.workspaces.first { $0.id == workspace.id } ?? workspace
+        let succeeded = current.setupState == "succeeded" || current.setupState == "skipped"
+        let title = succeeded ? "Workspace ready" : current.setupState == "running" ? "Setting up workspace" : current.setupState == "failed" ? "Setup needs attention" : "Preparing workspace"
+        let cell = BloomTheme.cell(title: title, detail: succeeded ? "Everything is in place. Start a conversation or open your preview." : current.setupLog,
+                                  symbol: succeeded ? "checkmark.circle" : "wrench.and.screwdriver", disclosure: false)
+        cell.selectionStyle = .none
         return cell
     }
+
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         guard indexPath.section == 0 else { return }

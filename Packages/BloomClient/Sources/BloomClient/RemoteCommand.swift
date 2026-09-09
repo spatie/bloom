@@ -45,8 +45,11 @@ public final class RemoteClient: RemoteRequesting, Sendable {
 
     public static func decode(_ data: Data, commandID: UUID) throws -> JSONValue {
         let reply = try JSONDecoder().decode(Reply.self, from: data)
-        guard reply.version == BloomWire.version, reply.id == commandID else {
-            throw ConnectionFailure("The server returned an incompatible Bloom reply.")
+        guard reply.version == BloomWire.version else {
+            throw ConnectionRefusal("This server uses Bloom protocol \(reply.version), but this app needs \(BloomWire.version). Update Bloom Server and the app to matching versions, then reconnect.")
+        }
+        guard reply.id == commandID else {
+            throw ConnectionFailure("The server replied to a different request. Reconnect before retrying.")
         }
         if let failure = reply.result["failure"]?["_0"]?.stringValue { throw ConnectionRefusal(failure) }
         return reply.result
