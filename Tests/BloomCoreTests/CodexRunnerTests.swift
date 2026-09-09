@@ -199,6 +199,31 @@ private func eventually(
         #expect(stored?.state == .running)
     }
 
+    @Test("Ask Bloom sends host instructions when starting and resuming Codex",
+          arguments: [false, true], [false, true])
+    func askBloomInstructions(hasWorkspace: Bool, resumed: Bool) async throws {
+        let store = try makeTestStore("codex-ask-instructions")
+        var session: Session
+        if hasWorkspace {
+            (session, _) = try await makeCodexSession(store)
+        } else {
+            session = Session(workspaceID: nil, agentKind: .codex)
+        }
+        if resumed { session.agentSessionID = "existing-chat" }
+        session = try await store.upsert(session)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+
+        try await runner.send("create a workspace and explore the project")
+
+        let method = resumed ? "thread/resume" : "thread/start"
+        let frame = try #require(box.process.sentFrame { $0["method"]?.stringValue == method })
+        #expect(frame["params"]?["developerInstructions"]?.stringValue ==
+                (hasWorkspace ? nil : AskConversation.instructions))
+        #expect(frame["params"]?["baseInstructions"] == nil)
+        await runner.shutdown()
+    }
+
     @Test func childOutputAndCompletionNeverEnterOrFinishTheParentChat() async throws {
         let store = try makeTestStore("codex-child-isolation")
         let (session, _) = try await makeCodexSession(store)

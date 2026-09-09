@@ -390,16 +390,20 @@ public actor CodexRunner: SessionRunner {
         if let threadID { return threadID }
 
         let sandbox = Self.sandboxMode(for: session.permissionMode)
+        let instructions = session.workspaceID == nil ? AskConversation.instructions : nil
         let handle: CodexThreadHandle
         if let stored = session.agentSessionID, !stored.isEmpty {
-            handle = try await client.resumeThread(stored, cwd: workspacePath, sandbox: sandbox)
+            handle = try await client.resumeThread(
+                stored, cwd: workspacePath, sandbox: sandbox, developerInstructions: instructions
+            )
         } else {
             handle = try await client.startThread(
                 cwd: workspacePath,
                 model: wireModel,
                 approvalPolicy: Self.approvalPolicy(for: session.permissionMode),
                 sandbox: sandbox,
-                approvalsReviewer: Self.approvalsReviewer(for: session.permissionMode)
+                approvalsReviewer: Self.approvalsReviewer(for: session.permissionMode),
+                developerInstructions: instructions
             )
         }
 
