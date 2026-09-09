@@ -32,7 +32,7 @@ struct BrowserTabView: View {
     @State private var isCapturing = false
     @State private var isSelectingRegion = false
     @State private var regionCapture: BrowserRegionCapture?
-    @State private var regionNotice: String?
+    @State private var regionNotice: (sessionID: SessionID, conversation: String)?
 
     @Environment(AppModel.self) private var app
 
@@ -102,13 +102,29 @@ struct BrowserTabView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: .top) {
                 if let regionNotice {
-                    HStack {
-                        Text(regionNotice).font(Typo.caption).lineLimit(2)
-                        Spacer()
-                        Button("Dismiss") { self.regionNotice = nil }.controlSize(.small)
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Palette.accent)
+                            .accessibilityHidden(true)
+                        Text("Added to draft").font(Typo.labelEmphasis)
+                        Spacer(minLength: 0)
+                        if model.sessions.contains(where: { $0.id == regionNotice.sessionID }) {
+                            Button("View Draft") {
+                                WorkspaceTabsStore.shared.reveal(.chat(regionNotice.sessionID), in: model)
+                                self.regionNotice = nil
+                            }
+                            .controlSize(.small)
+                            .help(regionNotice.conversation)
+                        }
+                        Button("Dismiss", systemImage: "xmark") { self.regionNotice = nil }
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(.accessoryBar)
                     }
-                    .padding(Metrics.spacingSmall)
-                    .background(Palette.surface)
+                    .padding(12)
+                    .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.border, lineWidth: Metrics.outline) }
+                    .elevation(.resting)
+                    .padding(12)
                 }
             }
             .overlay {
@@ -116,7 +132,7 @@ struct BrowserTabView: View {
                     if let regionCapture {
                         BrowserRegionCaptureView(capture: regionCapture, cancel: cancelRegion) {
                             regionCapture.add(to: model) {
-                                regionNotice = "Added to the draft in \(regionCapture.conversation)"
+                                regionNotice = (regionCapture.sessionID, regionCapture.conversation)
                                 cancelRegion()
                             }
                         }

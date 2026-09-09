@@ -3,6 +3,34 @@ import Foundation
 /// A selection uses top-left, unit coordinates so resizing the pane never changes the crop.
 /// Pixel rounding happens only at export, retaining the retina detail in the original snapshot.
 public enum BrowserRegion {
+    public enum Corner: String, CaseIterable, Sendable {
+        case topLeft, topRight, bottomLeft, bottomRight
+
+        public var isLeft: Bool { self == .topLeft || self == .bottomLeft }
+        public var isTop: Bool { self == .topLeft || self == .topRight }
+    }
+
+    /// Moving keeps the size intact, even when the pointer travels beyond the screenshot.
+    public static func moved(_ selection: CGRect, by delta: CGSize) -> CGRect {
+        CGRect(
+            x: min(max(selection.minX + delta.width, 0), 1 - selection.width),
+            y: min(max(selection.minY + delta.height, 0), 1 - selection.height),
+            width: selection.width, height: selection.height
+        )
+    }
+
+    /// A handle cannot cross its opposite corner or escape the image. Keeping that corner fixed
+    /// avoids a selection flipping under the pointer while someone is making a small adjustment.
+    public static func resized(_ selection: CGRect, corner: Corner, to point: CGPoint) -> CGRect {
+        let minimumWidth = min(0.01, selection.width)
+        let minimumHeight = min(0.01, selection.height)
+        let left = corner.isLeft ? min(max(point.x, 0), selection.maxX - minimumWidth) : selection.minX
+        let right = corner.isLeft ? selection.maxX : max(min(point.x, 1), selection.minX + minimumWidth)
+        let top = corner.isTop ? min(max(point.y, 0), selection.maxY - minimumHeight) : selection.minY
+        let bottom = corner.isTop ? selection.maxY : max(min(point.y, 1), selection.minY + minimumHeight)
+        return CGRect(x: left, y: top, width: right - left, height: bottom - top)
+    }
+
     public static func imageFrame(image: CGSize, canvas: CGSize) -> CGRect {
         guard image.width > 0, image.height > 0, canvas.width > 0, canvas.height > 0 else {
             return .zero

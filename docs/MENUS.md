@@ -226,6 +226,8 @@ loud somewhere a user can read it.
 | Comment on an Area | crop button in the toolbar, and the page menu | **no** | none |
 | Add selected area and comment to the draft | region capture controls | **no** | `⌘Return` |
 | Cancel region capture | region capture controls | **no** | `Escape` |
+| Select All / Clear Selection | region capture's Selection menu | **no** | none |
+| View Draft after capture | confirmation above the browser page | **no** | none |
 | Share | toolbar | **no** | none |
 | Open in External Browser | page context menu | **no** | none |
 | Find in page, next, previous | find bar | yes, Edit > Find | `⌘F` `⌘G` `⇧⌘G` |

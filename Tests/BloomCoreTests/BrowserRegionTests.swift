@@ -4,6 +4,41 @@ import Testing
 
 @Suite("Browser region feedback")
 struct BrowserRegionTests {
+    @Test("Moving a selection preserves its size and stops at each image edge")
+    func moveSelection() {
+        let selection = CGRect(x: 0.2, y: 0.3, width: 0.4, height: 0.5)
+        #expect(BrowserRegion.moved(selection, by: CGSize(width: -1, height: -1))
+            == CGRect(x: 0, y: 0, width: 0.4, height: 0.5))
+        #expect(BrowserRegion.moved(selection, by: CGSize(width: 1, height: 1))
+            == CGRect(x: 0.6, y: 0.5, width: 0.4, height: 0.5))
+        #expect(BrowserRegion.moved(CGRect(x: 0, y: 0, width: 1, height: 1), by: CGSize(width: 1, height: -1))
+            == CGRect(x: 0, y: 0, width: 1, height: 1))
+    }
+
+    @Test("Each resize handle keeps its opposite corner fixed", arguments: BrowserRegion.Corner.allCases)
+    func resizeSelection(corner: BrowserRegion.Corner) {
+        let selection = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+        let point = CGPoint(x: corner.isLeft ? 0 : 1, y: corner.isTop ? 0 : 1)
+        let resized = BrowserRegion.resized(selection, corner: corner, to: point)
+        #expect(resized.width == 0.75)
+        #expect(resized.height == 0.75)
+        #expect(corner.isLeft ? resized.maxX == selection.maxX : resized.minX == selection.minX)
+        #expect(corner.isTop ? resized.maxY == selection.maxY : resized.minY == selection.minY)
+    }
+
+    @Test("Handles cannot cross the opposite corner or escape the screenshot")
+    func clampsResize() {
+        let selection = CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+        let crossed = BrowserRegion.resized(selection, corner: .topLeft, to: CGPoint(x: 2, y: 2))
+        #expect(abs(crossed.width - 0.01) < 0.0001)
+        #expect(abs(crossed.height - 0.01) < 0.0001)
+        #expect(crossed.maxX == selection.maxX && crossed.maxY == selection.maxY)
+        let expanded = BrowserRegion.resized(selection, corner: .bottomRight, to: CGPoint(x: 2, y: 2))
+        #expect(expanded.maxX == 1 && expanded.maxY == 1)
+        let tiny = BrowserRegion.resized(CGRect(x: 0, y: 0, width: 0.005, height: 0.005), corner: .topLeft, to: .zero)
+        #expect(tiny.origin == .zero && tiny.width > 0 && tiny.height > 0)
+    }
+
     @Test("Letterboxing keeps the screenshot's aspect ratio")
     func fitsImage() {
         let frame = BrowserRegion.imageFrame(
