@@ -195,7 +195,7 @@ struct CreateWorkspaceView: View {
     /// two ways to finish and only one of them used what had been typed. The mode answers it
     /// first, so there is nothing left to disagree about.
     private var canCreate: Bool {
-        WorkspaceStartPlan.canStart(
+        (!isRemote || !mode.runsAnAgent || creationSource.models.offers(controls.agentKind)) && WorkspaceStartPlan.canStart(
             hasProject: repo != nil,
             prompt: task,
             hasCheckout: checkout != nil,
@@ -239,6 +239,11 @@ struct CreateWorkspaceView: View {
                     .padding(Metrics.gutter)
             } else {
                 composer
+                if isRemote, mode.runsAnAgent, !creationSource.models.offers(controls.agentKind) {
+                    Callout(text: "No usable agent models are available on this server. Check agent installation and sign-in.", symbol: "exclamationmark.triangle", tone: .warning)
+                        .padding(.horizontal, Metrics.gutter)
+                        .padding(.bottom, Metrics.spacingWide)
+                }
                 if hasSetupScript {
                     WorkspaceSetupOption(isEnabled: $runSetupScript)
                         .disabled(isLoading)

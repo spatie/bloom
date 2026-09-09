@@ -9,7 +9,7 @@ struct ServerWorkspaceTests {
         let store = try makeTestStore("notes")
         let storedRepo = try await store.upsert(Repo(name: "Test", path: repo.path))
         let workspace = try await store.upsert(Workspace(repoID: storedRepo.id, name: "Test", branch: "main", path: repo.path, baseBranch: "main"))
-        let runtime = ServerRuntime(store: store)
+        let runtime = ServerRuntime(store: store, installedAgents: { _ in [.claudeCode, .codex] })
         let saved = await runtime.respond(to: ServerRequest(.workspace(workspaceID: workspace.id, action: .saveNotes("Remember this\n"))))
         if case .accepted = saved.result {} else { Issue.record("Note save refused") }
         let loaded = await runtime.respond(to: ServerRequest(.workspace(workspaceID: workspace.id, action: .notes)))
@@ -46,7 +46,7 @@ struct ServerWorkspaceTests {
         let request = ServerRequest(.setComposer(sessionID: session.id, controls: controls))
         let roundTrip = try JSONDecoder().decode(ServerRequest.self, from: JSONEncoder().encode(request))
         #expect(roundTrip == request)
-        let runtime = ServerRuntime(store: store)
+        let runtime = ServerRuntime(store: store, installedAgents: { _ in [.claudeCode, .codex] })
         guard case .accepted = await runtime.respond(to: request).result else { Issue.record("Settings were refused"); return }
         let saved = try #require(try await store.session(id: session.id))
         #expect(try await ServerComposer.controls(session: saved, store: store) == controls)
@@ -70,7 +70,7 @@ struct ServerWorkspaceTests {
         let store = try makeTestStore("run-script")
         let storedRepo = try await store.upsert(Repo(name: "Test", path: repo.path))
         let workspace = try await store.upsert(Workspace(repoID: storedRepo.id, name: "Test", branch: "main", path: repo.path, baseBranch: "main"))
-        let runtime = ServerRuntime(store: store)
+        let runtime = ServerRuntime(store: store, installedAgents: { _ in [.claudeCode, .codex] })
         let request = ServerRequest(.workspace(workspaceID: workspace.id, action: .runScript(id: "verify")))
         let first = await runtime.respond(to: request)
         guard case .terminalPane(let pane) = first.result else { Issue.record("Script failed: \(first.result)"); await runtime.shutdown(); return }
@@ -126,7 +126,7 @@ struct ServerWorkspaceTests {
         let storedRepo = try await store.upsert(Repo(name: "Test", path: repo.path))
         let workspace = try await store.upsert(Workspace(repoID: storedRepo.id, name: "Test", branch: "main", path: repo.path, baseBranch: "main"))
         try "change\n".write(toFile: repo.path + "/changed.txt", atomically: true, encoding: .utf8)
-        let runtime = ServerRuntime(store: store)
+        let runtime = ServerRuntime(store: store, installedAgents: { _ in [.claudeCode, .codex] })
         let request = ServerRequest(.workspace(workspaceID: workspace.id, action: .commit(message: "Remote change")))
         let first = await runtime.respond(to: request)
         if case .text = first.result {} else { Issue.record("Commit failed") }

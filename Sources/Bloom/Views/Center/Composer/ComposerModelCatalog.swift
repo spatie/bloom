@@ -27,6 +27,7 @@ struct ComposerModelSection: Identifiable, Equatable {
 final class ComposerModelCatalog {
     static let shared = ComposerModelCatalog()
 
+    private(set) var availableAgents: [AgentKind]?
     private(set) var codexModels: [CodexModel] = []
     private(set) var isLoading = false
     /// Set when a fetch failed, so a menu can say why its section is short rather than pretending
@@ -40,7 +41,11 @@ final class ComposerModelCatalog {
         self.catalog = catalog
     }
 
-    func receive(_ models: [CodexModel]) { codexModels = models; lastFailure = nil }
+    func receive(_ models: [CodexModel], availableAgents: [AgentKind]? = nil) {
+        codexModels = models; self.availableAgents = availableAgents; lastFailure = nil
+    }
+
+    func offers(_ kind: AgentKind) -> Bool { availableAgents?.contains(kind) ?? true }
 
     /// Fetches once, and again only after `refresh()`. Cheap to call on every menu appearance,
     /// which is exactly how the footer calls it.
@@ -78,7 +83,7 @@ final class ComposerModelCatalog {
     /// empty section is a heading over nothing.
     func sections(includingCurrent current: String, on kind: AgentKind) -> [ComposerModelSection] {
         let owner = backend(ofModel: current, current: kind)
-        return AgentKind.allCases.filter(\.canRunWorkspaces).compactMap { backend in
+        return AgentKind.allCases.filter { $0.canRunWorkspaces && offers($0) }.compactMap { backend in
             var options = self.options(for: backend)
             // Whatever this chat is set to stays on the list even when nothing recognises it: a
             // settings file can pin an id Bloom has never heard of, and a picker that dropped it

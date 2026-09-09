@@ -48,7 +48,7 @@ final class RemoteSessionConnection {
         do {
             guard case .composer(let state) = try await request(.composer(sessionID: sessionID)) else { return }
             controls = state.controls
-            models.receive(state.models)
+            models.receive(state.models, availableAgents: state.availableAgents)
             // Source-file previews require a fetched local copy. Never hand a server path to a
             // component that reads the Mac filesystem.
             commands.receive(state.commands.map { var command = $0; command.path = nil; return command })

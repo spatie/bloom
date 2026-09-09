@@ -72,7 +72,7 @@ public enum ProjectCreationOperations {
             identityProblem: await RepositoryStarter.identityProblem(at: home))
     }
 
-    public static func perform(_ operation: ServerCreationOperation, store: Store, models: [CodexModel] = []) async throws -> ServerCreationResult {
+    public static func perform(_ operation: ServerCreationOperation, store: Store, models: [CodexModel] = [], availableAgents: [AgentKind]? = nil) async throws -> ServerCreationResult {
         switch operation {
         case .githubRepositories(let query, let page):
             return .repositories(try await GitHubRepositoryBrowser.repositories(query: query, page: page))
@@ -106,13 +106,14 @@ public enum ProjectCreationOperations {
             let repo = try await repository(id, store: store)
             let context = await WorkspaceStartContext.load(repoPath: repo.path)
             let defaults = await AppDefaults.load(from: store)
-            let controls = ComposerControls(defaults: ComposerDefaults.resolve(repo: context.settings, app: defaults),
+            var controls = ComposerControls(defaults: ComposerDefaults.resolve(repo: context.settings, app: defaults),
                 isFastMode: defaults.fastMode, outputStyle: defaults.outputStyle, codexContextWindow: defaults.codexContextWindow)
+            if let availableAgents { controls = ServerAgentAvailability.defaults(controls, available: availableAgents, models: models) }
             let home = FileManager.default.homeDirectoryForCurrentUser.path
             let listing = try await Git.checkRaw(["ls-files", "-z", "--cached"], in: repo.path)
             let files = String(decoding: listing.stdout, as: UTF8.self).split(separator: "\0").map(String.init)
             return .workspaceContext(ServerWorkspaceContext(branches: context.branches, branchPrefix: context.settings.branchPrefix,
-                hasSetupScript: !(context.settings.setupScript ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, composer: ServerComposerState(controls: controls, models: models, commands: SlashCommandIndex.discover(home: home, project: repo.path), styles: OutputStyleIndex.discover(home: home, project: repo.path)), files: files))
+                hasSetupScript: !(context.settings.setupScript ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, composer: ServerComposerState(controls: controls, models: models, commands: SlashCommandIndex.discover(home: home, project: repo.path), styles: OutputStyleIndex.discover(home: home, project: repo.path), availableAgents: availableAgents), files: files))
         case .checkouts(let id):
             let repo = try await repository(id, store: store)
             return .checkouts(await WorkspaceCheckoutOptions.load(repoPath: repo.path, repoID: repo.id, defaultBranch: repo.defaultBranch, workspaces: try await store.workspaces()))

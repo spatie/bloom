@@ -3,6 +3,8 @@ import Foundation
 /// The standalone runtime is the single owner of its store and its session runners. Clients
 /// request snapshots and commands, never open its SQLite file or launch a second runner.
 public actor ServerRuntime {
+    public typealias AgentDiscovery = @Sendable (Store) async -> [AgentKind]
+    private let installedAgents: AgentDiscovery
     public typealias RunnerFactory = @Sendable (Session, String, Store) -> any SessionRunner
     private let store: Store
     private let makeRunner: RunnerFactory
@@ -20,10 +22,11 @@ public actor ServerRuntime {
     private var isClosed = false
     private var promptQueue: ServerPromptQueue?
 
-    public init(store: Store, gatewayGroupID: UInt32? = nil, makeRunner: @escaping RunnerFactory = { session, path, store in
+    public init(store: Store, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery = ServerAgentAvailability.installed, makeRunner: @escaping RunnerFactory = { session, path, store in
         SessionRunnerFactory.make(session: session, workspacePath: path, store: store)
     }) {
         self.store = store
+        self.installedAgents = installedAgents
         terminalStreams = ServerTerminalStreams(groupID: gatewayGroupID)
         self.makeRunner = makeRunner
     }
@@ -100,7 +103,7 @@ public actor ServerRuntime {
         case .creation(let action):
             var models: [CodexModel] = []
             if case .workspaceContext = action { models = (try? await modelCatalogue.pickerModels()) ?? [] }
-            return .creation(try await ProjectCreationOperations.perform(action, store: store, models: models))
+            return .creation(try await ProjectCreationOperations.perform(action, store: store, models: models, availableAgents: await installedAgents(store)))
         case .hello:
             return .hello(name: ProcessInfo.processInfo.hostName)
         case .previewAddress(let address):
@@ -119,7 +122,7 @@ public actor ServerRuntime {
             let home = FileManager.default.homeDirectoryForCurrentUser.path
             return .composer(ServerComposerState(controls: controls, models: models,
                 commands: SlashCommandIndex.discover(home: home, project: path),
-                styles: OutputStyleIndex.discover(home: home, project: path)))
+                styles: OutputStyleIndex.discover(home: home, project: path), availableAgents: await installedAgents(store)))
         case .markRead(let id, let seq):
             _ = try await storedSession(id)
             try await store.updateLastReadSeq(sessionID: id, seq: seq)
@@ -142,6 +145,7 @@ public actor ServerRuntime {
             _ = try await store.update(sessionID: id) { $0.archivedAt = Date() }
             return .accepted
         case .setComposer(let id, let controls):
+            try ServerAgentAvailability.require(controls.agentKind, in: await installedAgents(store))
             let session = try await storedSession(id)
             guard controls.agentKind.canRunWorkspaces, !controls.model.isEmpty else { throw ServerFailure("Choose an available agent and model.") }
             if controls.agentKind != session.agentKind {
@@ -173,6 +177,7 @@ public actor ServerRuntime {
                   !mode.runsAnAgent || !(request.prompt ?? request.name).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw ServerFailure("Choose a project, a model and a task for the workspace.")
             }
+            if mode.runsAnAgent { try ServerAgentAvailability.require(controls.agentKind, in: await installedAgents(store)) }
             let attachments = request.attachments ?? []
             guard attachments.reduce(0, { $0 + $1.data.count }) <= 10_000_000 else { throw ServerFailure("Use up to 10 MB of attachments in the first message.") }
             guard Set(attachments.map(\.sourcePath)).count == attachments.count else { throw ServerFailure("Attach each file once.") }
@@ -224,6 +229,9 @@ public actor ServerRuntime {
                 return .archivePreview(try await prepareArchive(workspace(id)))
             case .archive(let confirmation): return try await archiveWorkspace(id, confirmation: confirmation)
             case .restore: return try await restoreWorkspace(id)
+            case .newSession(let agent, _, _, _):
+                try ServerAgentAvailability.require(agent, in: await installedAgents(store))
+                return try await ServerWorkspaceOperations.perform(action, workspace: workspace(id), store: store, terminals: terminals)
             case .runSetup:
                 let selected = try await workspace(id)
                 changingWorkspaces.insert(id)
@@ -244,6 +252,7 @@ public actor ServerRuntime {
             let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !body.isEmpty, body.utf8.count <= 1_048_576 else { throw ServerFailure("The prompt is empty or too large.") }
             let session = try await storedSession(id)
+            try ServerAgentAvailability.require(session.agentKind, in: await installedAgents(store))
             guard session.archivedAt == nil else { throw ServerFailure("This conversation is closed.") }
             guard let workspaceID = session.workspaceID else { throw ServerFailure("This session has no workspace.") }
             _ = try await workspace(workspaceID)

@@ -5,12 +5,58 @@ import Testing
 
 @Suite("ServerRuntime", .tags(.persistence, .subprocess), .scratchDirectory)
 struct ServerRuntimeTests {
+    @Test func missingAgentIsRefusedBeforeCreatingAWorkspaceOrQueuingAPrompt() async throws {
+        let fixture = try await ServerFixture()
+        let runtime = fixture.runtime(availableAgents: [.codex])
+        var request = ServerWorkspaceRequest(repositoryPath: fixture.directory, name: "Uninstalled agent")
+        request.mode = .chat
+        request.prompt = "What is in this repo?"
+        let creation = await runtime.respond(to: ServerRequest(.create(request)))
+        guard case .failure(let reason) = creation.result else { Issue.record("Missing agent was accepted"); return }
+        #expect(reason.contains("Claude Code is not installed on this server"))
+        #expect(try await fixture.store.workspaces().count == 1)
+        let sent = await runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "Do not queue")))
+        #expect(!sent.isAccepted)
+        #expect(await fixture.runner.sends.isEmpty)
+        await runtime.shutdown()
+    }
+
+    @Test func remoteDefaultsUseAnInstalledAgentAndKeepExplicitAvailableChoices() {
+        let preferred = ComposerControls(model: "opus", effort: "max", agentKind: .claudeCode, permissionMode: .plan)
+        let models = [CodexModel(id: "test-codex-model", displayName: "Test", isDefault: true, defaultEffort: "low")]
+        let resolved = ServerAgentAvailability.defaults(preferred, available: [.codex], models: models)
+        #expect(resolved.agentKind == .codex)
+        #expect(resolved.model == "test-codex-model")
+        #expect(resolved.effort == "low")
+        #expect(resolved.permissionMode == preferred.permissionMode.nearest(on: .codex))
+        #expect(ServerAgentAvailability.defaults(preferred, available: [.claudeCode, .codex], models: models) == preferred)
+        #expect(ServerAgentAvailability.defaults(preferred, available: [], models: []) == preferred)
+    }
+
+    @Test func remoteAgentDiscoveryHonoursServerExecutableOverrides() async throws {
+        let fixture = try await ServerFixture()
+        try await fixture.store.setSetting(AgentCatalog.executablePathSettingKey(.claudeCode), fixture.directory + "/missing-claude")
+        try await fixture.store.setSetting(AgentCatalog.executablePathSettingKey(.codex), "/bin/sh")
+        let installed = await ServerAgentAvailability.installed(store: fixture.store)
+        #expect(installed == [.codex])
+    }
+
+    @Test func agentAvailabilityIsAnOptionalWireField() throws {
+        let state = ServerComposerState(controls: ComposerControls(), models: [], commands: [], styles: [])
+        let legacy = try JSONEncoder().encode(state)
+        #expect(try JSONDecoder().decode(ServerComposerState.self, from: legacy).availableAgents == nil)
+        var current = state
+        current.availableAgents = [.codex]
+        let encoded = try JSONEncoder().encode(current)
+        #expect(try JSONDecoder().decode(ServerComposerState.self, from: encoded).availableAgents == [.codex])
+    }
+
     @Test func sharedCreationPreservesControlsAndUploadsTheOpeningPrompt() async throws {
         let repository = try await TempRepo()
         defer { repository.cleanUp() }
         let fixture = try await ServerFixture()
         let captured = Mutex<ServerTestRunner?>(nil)
-        let runtime = ServerRuntime(store: fixture.store, makeRunner: { session, _, store in
+        let runtime = ServerRuntime(store: fixture.store, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { session, _, store in
             let runner = ServerTestRunner(sessionID: session.id, store: store)
             captured.withLock { $0 = runner }
             return runner
@@ -55,7 +101,7 @@ struct ServerRuntimeTests {
         let repository = try await TempRepo()
         defer { repository.cleanUp() }
         let fixture = try await ServerFixture()
-        let runtime = fixture.runtime()
+        let runtime = fixture.runtime(availableAgents: [])
         var request = ServerWorkspaceRequest(repositoryPath: repository.path, name: "Explore")
         request.mode = mode
         request.runSetupScript = false
@@ -162,7 +208,7 @@ struct ServerRuntimeTests {
     @Test func concurrentReconnectsCannotReuseDescriptorsStillBeingWatched() async throws {
         let fixture = try await ServerFixture()
         let runner = fixture.runner
-        let daemon = try await ServerDaemon.start(directory: fixture.directory, makeRunner: { _, _, _ in runner })
+        let daemon = try await ServerDaemon.start(directory: fixture.directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { _, _, _ in runner })
         do {
             try await withThrowingTaskGroup(of: Void.self) { group in
                 for _ in 0..<8 {
@@ -191,7 +237,7 @@ struct ServerRuntimeTests {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script)
         try await fixture.store.setSetting(AgentCatalog.executablePathSettingKey(.claudeCode), script)
         let child = Mutex<StreamingProcess?>(nil)
-        let daemon = try await ServerDaemon.start(directory: fixture.directory, makeRunner: { session, path, store in
+        let daemon = try await ServerDaemon.start(directory: fixture.directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { session, path, store in
             AgentRunner(workspacePath: path, session: session, store: store, makeProcess: { launch in
                 #expect(launch.executable == script)
                 // Always run the fixture, even if executable selection regresses. This test must
@@ -286,7 +332,7 @@ struct ServerRuntimeTests {
     @Test func disconnectLeavesAgentAliveAndAnotherClientCanContinue() async throws {
         let fixture = try await ServerFixture()
         let runner = fixture.runner
-        let daemon = try await ServerDaemon.start(directory: fixture.directory, makeRunner: { _, _, _ in runner })
+        let daemon = try await ServerDaemon.start(directory: fixture.directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { _, _, _ in runner })
         let first = try await ServerClient.connect(to: .local(directory: fixture.directory))
         _ = try await first.request(ServerRequest(.send(sessionID: fixture.session.id, text: "Keep working")))
         await first.disconnect()
@@ -370,7 +416,7 @@ struct ServerRuntimeTests {
         let fixture = try await ServerFixture()
         let directory = fixture.directory
         let runner = fixture.runner
-        let first = try await ServerDaemon.start(directory: directory, makeRunner: { _, _, _ in runner })
+        let first = try await ServerDaemon.start(directory: directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { _, _, _ in runner })
         let attributes = try FileManager.default.attributesOfItem(atPath: first.socketPath)
         #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
         _ = await first.runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "Working")))
@@ -494,9 +540,9 @@ private struct ServerFixture {
         runner = ServerTestRunner(sessionID: session.id, store: store)
     }
 
-    func runtime() -> ServerRuntime {
+    func runtime(availableAgents: [AgentKind] = [.claudeCode, .codex]) -> ServerRuntime {
         let runner = runner
-        return ServerRuntime(store: store, makeRunner: { _, _, _ in runner })
+        return ServerRuntime(store: store, installedAgents: { _ in availableAgents }, makeRunner: { _, _, _ in runner })
     }
 }
 
