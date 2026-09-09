@@ -10,6 +10,10 @@ public struct RemoteWorkspaceService: Sendable {
         try await RemoteCatalogue.decode(client.request(.call("catalogue")))
     }
 
+    public func diagnostics() async throws -> ServerDiagnostics {
+        try await ServerDiagnostics.decode(client.request(.call("diagnostics")))
+    }
+
     public func workspaceCommand(project: RemoteProject, name: String, prompt: String) async throws -> RemoteCommand {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {

@@ -12,6 +12,9 @@ filesystem execution or database ownership. It contains the shared HTTPS connect
 commands, read projections, transcript merging, question drafts and a durable conversation outbox.
 Both Mac and iOS compile this package. Question parsing and answer construction use the same
 types as Mac's existing question cards, re-exported by BloomCore.
+The shared wire version is 13. Diagnostics use the same value type as Bloom Server; the collector
+and its process probes stay server-side. The mobile service can read that report, but a mobile
+diagnostics screen is not included yet.
 `make lint` enforces its UI boundary.
 
 `Packages/BloomAuthentication` wraps AppAuth and Keychain. Its small platform boundary presents

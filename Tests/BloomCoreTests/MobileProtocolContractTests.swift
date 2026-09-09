@@ -4,6 +4,21 @@ import BloomClient
 @testable import BloomCore
 
 struct MobileProtocolContractTests {
+    @Test func protocol13DiagnosticsShareTheActualServerValue() throws {
+        let command = RemoteCommand.call("diagnostics")
+        let request = try JSONDecoder().decode(ServerRequest.self, from: JSONEncoder().encode(command))
+        #expect(request.version == 13)
+        #expect(request.operation == .diagnostics)
+        #expect(!request.operation.mutates)
+        let report = ServerDiagnostics(checkedAt: Date(timeIntervalSince1970: 10), hostname: "server", operatingSystem: "Linux", account: "bloom", checks: [
+            .init(id: .docker, title: "Docker", status: .ready, detail: "Available"),
+            .init(id: .disk, title: "Disk", status: .attention, detail: "Low space"),
+        ])
+        let reply = ServerReply(id: command.id, result: .diagnostics(report))
+        let result = try RemoteClient.decode(JSONEncoder().encode(reply), commandID: command.id)
+        #expect(try BloomClient.ServerDiagnostics.decode(result) == report)
+    }
+
     @Test func codexQuestionsRoundTripThroughMobileAndServerToAgent() throws {
         let request = CodexApprovalRequest(id: .number(42), kind: .toolUserInput, threadID: "thread", turnID: "turn", itemID: "item", params: .object([
             "questions": .array([.object(["id": .string("choice"), "question": .string("Which?"),
@@ -53,6 +68,7 @@ struct MobileProtocolContractTests {
         let cases: [(RemoteCommand, ServerOperation)] = [
             (.call("hello"), .hello),
             (.call("catalogue"), .catalogue),
+            (.call("diagnostics"), .diagnostics),
             (.send(sessionID: id, text: "Run tests"), .send(sessionID: id, text: "Run tests")),
             (.stop(sessionID: id), .stop(sessionID: id)),
             (.call("transcript", ["sessionID": .string(id.rawValue), "afterSeq": .integer(12)]), .transcript(sessionID: id, afterSeq: 12)),

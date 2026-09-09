@@ -1,30 +1,7 @@
 import Foundation
+import BloomClient
 
-/// Public facts only. Command output, environment variables and credentials never cross the wire.
-public struct ServerDiagnostics: Codable, Sendable, Equatable {
-    public struct Check: Codable, Sendable, Equatable, Identifiable {
-        public enum Status: String, Codable, Sendable { case ready, attention, unavailable }
-        public enum Kind: String, Codable, Sendable { case git, tmux, github, docker, agents, disk, memory, watches }
-        public var id: Kind
-        public var title: String
-        public var status: Status
-        public var detail: String
-    }
-
-    public var checkedAt: Date
-    public var hostname: String
-    public var operatingSystem: String
-    public var account: String
-    public var checks: [Check]
-
-    public var needsAttention: Bool { checks.contains { $0.status == .attention } }
-    public var summary: String { needsAttention ? "Some checks need attention" : "Server checks complete" }
-    public var text: String {
-        (["\(hostname) (\(operatingSystem)), account \(account)"] + checks.map {
-            "\($0.title) [\($0.status.rawValue)]: \($0.detail)"
-        }).joined(separator: "\n")
-    }
-}
+public typealias ServerDiagnostics = BloomClient.ServerDiagnostics
 
 public enum ServerDiagnosticsCollector {
     typealias Probe = @Sendable (String, [String]) async -> Bool?
