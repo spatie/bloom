@@ -332,6 +332,10 @@ struct TempRepo {
 /// walking up from this file. Symlinks are resolved too, because the core suite is run from a mirrored
 /// package that has no app target (see Tools/test-core.sh).
 func bloomFixtureLines(_ name: String) throws -> [String] {
+    if let root = ProcessInfo.processInfo.environment["BLOOM_TEST_FIXTURES_DIR"] {
+        return try String(contentsOf: URL(fileURLWithPath: root).appendingPathComponent(name), encoding: .utf8)
+            .components(separatedBy: "\n").filter { !$0.isEmpty }
+    }
     let starts = [
         URL(fileURLWithPath: #filePath),
         URL(fileURLWithPath: #filePath).resolvingSymlinksInPath(),
