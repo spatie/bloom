@@ -52,7 +52,16 @@ struct TurnFooterView: View {
             succeeded: result?.succeeded != false,
             denials: result?.permissionDenials ?? 0
         )
-        let summaryText = result?.summary ?? ""
+        let answerText = TurnAnswer.text(
+            summary: result?.summary ?? "",
+            rows: rows.lazy.map {
+                TurnAnswer.Row(
+                    seq: $0.seq, kind: $0.kind, payload: $0.payload,
+                    isNested: $0.parentToolUseID != nil
+                )
+            },
+            endingAt: row.seq
+        )
 
         return VStack(alignment: .leading, spacing: 0) {
             // Inset to the column the footer's own contents start on, rather than to the pane.
@@ -127,7 +136,8 @@ struct TurnFooterView: View {
                     Color.clear.frame(width: 0, height: 0)
                 }
 
-                CopyButton(text: summaryText, title: "Copy this answer")
+                CopyButton(text: answerText, title: "Copy this answer")
+                    .disabled(answerText.isEmpty)
             }
             .foregroundStyle(Palette.textSecondary)
             .padding(.horizontal, TranscriptLayout.inset)
