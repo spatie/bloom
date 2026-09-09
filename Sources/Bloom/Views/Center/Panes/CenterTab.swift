@@ -32,6 +32,8 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
     /// Browser only, and kept up to date as the user navigates, so reopening the workspace lands
     /// on the page they were looking at rather than back on the dev server's front door.
     var url: String = ""
+    /// A fresh Browser workspace waits for setup before its first preview navigation.
+    var opensPreviewAfterSetup = false
     /// Browser only: the last title the page reported for itself, tidied by
     /// `BrowserTabTitle.tidy`, and cleared the moment the tab leaves that host. Empty while a
     /// first page loads, and empty for a page that never says what it is.
@@ -110,6 +112,7 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
         workspaceID = try container.decode(WorkspaceID.self, forKey: .workspaceID)
         kind = try container.decode(Kind.self, forKey: .kind)
         title = try container.decode(String.self, forKey: .title)
+        opensPreviewAfterSetup = try container.decodeIfPresent(Bool.self, forKey: .opensPreviewAfterSetup) ?? false
         url = try container.decodeIfPresent(String.self, forKey: .url) ?? ""
         path = try container.decodeIfPresent(String.self, forKey: .path) ?? ""
         showsAllFiles = try container.decodeIfPresent(Bool.self, forKey: .showsAllFiles) ?? false

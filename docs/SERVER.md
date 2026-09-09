@@ -392,3 +392,35 @@ These are transport/Git measurements, not a measurement of UI frame rate.
 Server labels are stored in the Mac client's connection preferences; renaming one does not alter
 the hostname. This Mac and the server label form flat sidebar groups. Server settings, connection
 controls, project creation and archived workspaces are available from the server heading.
+
+### Setup and server checks
+
+Setup output is saved as a bounded tail while the script runs, including its last line before a
+quiet download. Reconnecting clients see the current attempt. Retry clears the old failure and
+runs once even when a connection resends the same command. The server refuses a new setup while
+agents are running, awaiting approval or have queued prompts. Read-only workspace queries keep
+working during setup.
+
+Browser-first workspaces open their allocated preview after successful setup. The intent belongs
+to the original untouched tab, survives reconnecting, and waits through a failed attempt until a
+retry succeeds. Typing another address or closing the tab cancels it. Open Preview is also available
+from the shared tab menu and browser empty state.
+
+Protocol 13 adds read-only server checks. In Server Connection, choose Check Server to inspect
+Git, tmux, GitHub authentication, Docker access, agent CLI discovery, disk space and Linux memory
+and file-watch limits. Checks describe the service account, not the connected Mac. Optional missing
+tools do not prevent ordinary projects from working. Authentication errors and slow probes return
+advice without exposing command output or credentials. Container-provided tools and other mounted
+disks are not inspected.
+
+An administrator can run the same checks without starting a daemon:
+
+```sh
+bloom-server doctor --data-dir /var/lib/bloom/data
+bloom-server doctor --data-dir /var/lib/bloom/data --json
+```
+
+Run this as the account that runs Bloom Server. It changes no configuration and exits 1 when a
+check needs attention, 0 otherwise, or 64 for invalid arguments. Update the server, Mac client and
+HTTPS gateway together: all enforce the same protocol version. The gateway contract test checks
+its version against the Swift source to catch future drift.

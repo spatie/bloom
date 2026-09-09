@@ -350,6 +350,8 @@ struct SessionTabsView<Model: WorkspacePaneModel>: View {
                 .keyboardShortcut("t", modifiers: .command)
             Button(PaneKind.terminal.title, systemImage: PaneKind.terminal.symbol, action: newTerminal)
                 .keyboardShortcut("t", modifiers: [.command, .shift])
+            Button("Open Preview", systemImage: "play.rectangle") { BrowserTab.openPreview(in: model) }
+                .disabled(model.isRunningSetup)
             Button(PaneKind.browser.title, systemImage: PaneKind.browser.symbol, action: newBrowser)
                 .keyboardShortcut("b", modifiers: [.command, .shift])
             Divider()

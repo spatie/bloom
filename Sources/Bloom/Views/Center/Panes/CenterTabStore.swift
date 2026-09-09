@@ -360,6 +360,28 @@ final class CenterTabStore {
         return tab
     }
 
+    func awaitPreviewAfterSetup(for tab: CenterTab) {
+        update(tab) { $0.opensPreviewAfterSetup = true }
+    }
+
+    func cancelOpeningPreview(for tab: CenterTab) {
+        guard tabs(for: tab.workspaceID).contains(where: { $0.id == tab.id && $0.opensPreviewAfterSetup }) else { return }
+        update(tab) { $0.opensPreviewAfterSetup = false }
+    }
+
+    /// Claim before navigation, so redraws, reconnects and relaunches cannot repeat it.
+    func claimOpeningPreview(for tab: CenterTab, setup: SetupState, port: Int, address: String, hasNavigated: Bool) -> String? {
+        guard let current = tabs(for: tab.workspaceID).first(where: { $0.id == tab.id }) else { return nil }
+        let decision = WorkspacePreview.opening(
+            pending: current.opensPreviewAfterSetup, setup: setup, port: port,
+            address: address, storedAddress: current.url, hasNavigated: hasNavigated
+        )
+        if decision != .wait { cancelOpeningPreview(for: current) }
+        guard case .open(let url) = decision else { return nil }
+        setURL(url, for: current)
+        return url
+    }
+
     /// Called as the page navigates, so the tab remembers where it got to.
     ///
     /// **The only thing that ever clears a page title.** A navigation within one host keeps the

@@ -94,6 +94,27 @@ enum BrowserTab {
         WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
     }
 
+    /// Reuse a preview already at this origin, leaving other browser tabs alone.
+    static func openPreview(in model: any WorkspacePaneModel) {
+        Task {
+            guard let address = WorkspacePreview.address(port: await model.ensurePort()) else { return }
+            let tabs = CenterTabStore.shared
+            tabs.load(workspaceID: model.workspace.id)
+            let existing = tabs.tabs(for: model.workspace.id).first {
+                guard $0.kind == .browser, let url = BrowserAddress.url(from: $0.url) else { return false }
+                return BrowserAddress.shows(url) && ServerPreview.isLoopback(url) && url.port == model.port
+            }
+            if let existing {
+                let session = tabs.browser(for: existing, root: model.remoteServer == nil ? model.workspace.path : "",
+                    resolve: model.browserAddressResolver)
+                if session.failure != nil { session.reload() }
+                WorkspaceTabsStore.shared.reveal(.tool(existing.id), in: model)
+            } else {
+                NewPane.open(.browser, in: model, url: address) { WorkspaceTabsStore.shared.reveal($0, in: model) }
+            }
+        }
+    }
+
     static func open(_ url: URL, in model: any WorkspacePaneModel) {
         guard canOpen(url) else { return }
         show(url.absoluteString, in: model)

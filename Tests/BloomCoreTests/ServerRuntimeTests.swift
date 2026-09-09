@@ -5,6 +5,55 @@ import Testing
 
 @Suite("ServerRuntime", .tags(.persistence, .subprocess), .scratchDirectory)
 struct ServerRuntimeTests {
+    @Test func setupPublishesOutputWhileQuietAndReplaysTheSameCommandWithoutRerunning() async throws {
+        let fixture = try await ServerFixture()
+        let workspaceID = try #require(fixture.session.workspaceID)
+        let settings = fixture.directory + "/.bloom"
+        try FileManager.default.createDirectory(atPath: settings, withIntermediateDirectories: true)
+        try """
+        [scripts]
+        setup = "echo attempt >> attempts.txt; echo current-output; sleep 2; echo complete"
+        """.write(toFile: settings + "/settings.toml", atomically: true, encoding: .utf8)
+        let old = try await fixture.store.beginSetupAttempt(workspaceID: workspaceID)
+        try await fixture.store.finishSetupAttempt(workspaceID: workspaceID, attempt: old, succeeded: false, log: "previous failure")
+        let runtime = fixture.runtime()
+        let request = ServerRequest(.workspace(workspaceID: workspaceID, action: .runSetup))
+        let running = Task { await runtime.respond(to: request) }
+        await waitUntil("live setup output reaches catalogue while the script is quiet") {
+            guard let row = try? await fixture.store.workspace(id: workspaceID) else { return false }
+            return row.setupState == .running && row.setupLog.contains("current-output")
+        }
+        let live = try #require(try await fixture.store.workspace(id: workspaceID))
+        #expect(!live.setupLog.contains("previous failure"))
+        #expect(!live.setupLog.contains("complete"))
+        // The normal client polls scripts alongside the catalogue. Refusing that read used to
+        // disconnect it as soon as setup acquired the workspace lifecycle lock.
+        let scripts = await runtime.respond(to: ServerRequest(.workspace(workspaceID: workspaceID, action: .runScripts)))
+        if case .runScripts = scripts.result {} else { Issue.record("Setup blocked client polling") }
+        let replay = Task { await runtime.respond(to: request) }
+        let duplicate = await runtime.respond(to: ServerRequest(.workspace(workspaceID: workspaceID, action: .runSetup)))
+        #expect(!duplicate.isAccepted)
+        #expect(await running.value.isAccepted)
+        #expect(await replay.value.isAccepted)
+        let repeated = await runtime.respond(to: request)
+        #expect(repeated.isAccepted)
+        #expect(try String(contentsOfFile: fixture.directory + "/attempts.txt", encoding: .utf8) == "attempt\n")
+        #expect(try await fixture.store.workspace(id: workspaceID)?.setupLog == "current-output\ncomplete\n")
+        await runtime.shutdown()
+    }
+
+    @Test(arguments: [SessionState.running, .waiting])
+    func setupRefusesActiveAgentsAtTheServerBoundary(state: SessionState) async throws {
+        let fixture = try await ServerFixture()
+        let workspaceID = try #require(fixture.session.workspaceID)
+        _ = try await fixture.store.update(sessionID: fixture.session.id) { $0.state = state }
+        let runtime = fixture.runtime()
+        let response = await runtime.respond(to: ServerRequest(.workspace(workspaceID: workspaceID, action: .runSetup)))
+        #expect(response.failure?.contains("Stop the workspace's agents") == true)
+        #expect(try await fixture.store.workspace(id: workspaceID)?.setupState != .running)
+        await runtime.shutdown()
+    }
+
     @Test func missingAgentIsRefusedBeforeCreatingAWorkspaceOrQueuingAPrompt() async throws {
         let fixture = try await ServerFixture()
         let runtime = fixture.runtime(availableAgents: [.codex])

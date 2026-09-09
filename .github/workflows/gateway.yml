@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - Gateway/**
+      - Sources/BloomCore/Server/ServerProtocol.swift
       - .github/workflows/gateway.yml
   push:
     branches: [main]
     paths:
       - Gateway/**
+      - Sources/BloomCore/Server/ServerProtocol.swift
       - .github/workflows/gateway.yml
   workflow_dispatch:
 

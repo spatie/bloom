@@ -474,7 +474,15 @@ public struct WorkspaceManager: Sendable {
             break
         }
 
-        _ = try? await store.update(workspaceID: workspace.id) { $0.apply(.runStarted) }
+        let attempt = try? await store.beginSetupAttempt(workspaceID: workspace.id)
+        let output = SetupOutputBuffer(store: store, workspaceID: workspace.id, attempt: attempt)
+        let persistence = Task {
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { break }
+                await output.flush()
+            }
+        }
+        defer { persistence.cancel() }
 
         let env = environment(for: workspace, repo: repo, port: port)
         let runner = StreamingProcess(
@@ -484,27 +492,27 @@ public struct WorkspaceManager: Sendable {
             environment: Shell.environment(extra: env)
         )
 
-        var log = ""
         do {
             for try await line in runner.lines {
-                log += line + "\n"
+                await output.append(line)
                 onOutput(line)
             }
         } catch {
-            log += "\n\(error)\n"
+            await output.append("\(error)")
             onOutput("\(error)")
         }
 
         let status = await runner.exitStatus
         onExit?(Int(status))
         let succeeded = status == 0
-        let printed = log
+        let printed = await output.snapshot()
         // The whole `workspace` value here is as old as the run, and a run can take minutes, so
         // upserting it would clobber every other write to the row made in the meantime. `update`
         // re-reads inside the actor; `apply` writes the state and the log in one statement and
         // caps the log, so there is no shape of this that files an outcome without its output.
-        _ = try? await store.update(workspaceID: workspace.id) {
-            $0.apply(.runFinished(succeeded: succeeded, log: printed))
+        if let attempt {
+            try? await store.finishSetupAttempt(workspaceID: workspace.id, attempt: attempt,
+                                               succeeded: succeeded, log: printed)
         }
         return succeeded
     }

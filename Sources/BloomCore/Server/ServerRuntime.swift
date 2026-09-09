@@ -19,6 +19,7 @@ public actor ServerRuntime {
     private var commandOperations: [UUID: ServerOperation] = [:]
     private var stopping: [SessionID: Int] = [:]
     private var changingWorkspaces: Set<WorkspaceID> = []
+    private var settingUpWorkspaces: Set<WorkspaceID> = []
     private var archivePreviews: [UUID: ServerArchivePreview] = [:]
     private var isClosed = false
     private var promptQueue: ServerPromptQueue?
@@ -106,9 +107,11 @@ public actor ServerRuntime {
             if case .workspaceContext = action { models = (try? await modelCatalogue.pickerModels()) ?? [] }
             return .creation(try await ProjectCreationOperations.perform(action, store: store, models: models, availableAgents: await installedAgents(store)))
         case .reviewSnapshot(let id, let scope, let revision, let wait):
-            return .reviewSnapshot(try await reviewCache.snapshot(workspace: workspace(id), scope: scope, knownRevision: revision, wait: wait))
+            return .reviewSnapshot(try await reviewCache.snapshot(workspace: workspace(id, readingDuringSetup: true), scope: scope, knownRevision: revision, wait: wait))
         case .reviewPatch(let id, let path, let scope, let revision):
-            return .reviewPatch(try await reviewCache.patch(workspace: workspace(id), path: path, scope: scope, knownRevision: revision))
+            return .reviewPatch(try await reviewCache.patch(workspace: workspace(id, readingDuringSetup: true), path: path, scope: scope, knownRevision: revision))
+        case .diagnostics:
+            return .diagnostics(await ServerDiagnosticsCollector.collect(directory: (store.path as NSString).deletingLastPathComponent))
         case .hello:
             return .hello(name: ProcessInfo.processInfo.hostName)
         case .previewAddress(let address):
@@ -121,7 +124,7 @@ public actor ServerRuntime {
         case .composer(let id):
             let session = try await storedSession(id)
             guard let workspaceID = session.workspaceID else { throw ServerFailure("This session has no workspace.") }
-            let path = try await workspace(workspaceID).path
+            let path = try await workspace(workspaceID, readingDuringSetup: true).path
             let controls = try await ServerComposer.controls(session: session, store: store)
             let models = (try? await modelCatalogue.pickerModels()) ?? []
             let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -238,11 +241,25 @@ public actor ServerRuntime {
                 return try await ServerWorkspaceOperations.perform(action, workspace: workspace(id), store: store, terminals: terminals)
             case .runSetup:
                 let selected = try await workspace(id)
-                changingWorkspaces.insert(id)
-                defer { changingWorkspaces.remove(id) }
+                guard changingWorkspaces.insert(id).inserted else { throw ServerFailure("This workspace is already being changed.") }
+                settingUpWorkspaces.insert(id)
+                defer {
+                    changingWorkspaces.remove(id)
+                    settingUpWorkspaces.remove(id)
+                }
+                let chats = try await store.sessions(workspaceID: id)
+                for chat in chats {
+                    let pending = try await store.pendingDeliveries(sessionID: chat.id)
+                    let busy = await sessions[chat.id]?.isBusy == true
+                    guard pending.isEmpty, !busy, creating[chat.id] == nil,
+                          chat.state != .running, chat.state != .waiting else {
+                        throw ServerFailure("Stop the workspace's agents and clear queued prompts before running setup again.")
+                    }
+                }
                 return try await ServerWorkspaceOperations.perform(action, workspace: selected, store: store, terminals: terminals)
             default:
-                return try await ServerWorkspaceOperations.perform(action, workspace: workspace(id), store: store, terminals: terminals)
+                return try await ServerWorkspaceOperations.perform(action,
+                    workspace: workspace(id, readingDuringSetup: !action.mutates), store: store, terminals: terminals)
             }
         case .configure(let id, let model, let effort, let permissionMode):
             var controls = try await ServerComposer.controls(session: storedSession(id), store: store)
@@ -266,11 +283,11 @@ public actor ServerRuntime {
             try await queue().cancel(deliveryID, sessionID: id)
             return .accepted
         case .changes(let id, let scope):
-            return .changes(try await ServerReview.changes(workspace: workspace(id), scope: scope))
+            return .changes(try await ServerReview.changes(workspace: workspace(id, readingDuringSetup: true), scope: scope))
         case .patch(let id, let path, let scope):
-            return .patch(try await ServerReview.patch(workspace: workspace(id), path: path, scope: scope))
+            return .patch(try await ServerReview.patch(workspace: workspace(id, readingDuringSetup: true), path: path, scope: scope))
         case .file(let id, let path):
-            let selected = try await workspace(id)
+            let selected = try await workspace(id, readingDuringSetup: true)
             return .file(try ServerReview.file(workspace: selected, path: path))
         case .stop(let id):
             stopping[id, default: 0] += 1
@@ -322,8 +339,8 @@ public actor ServerRuntime {
         try await ServerComposer.save(controls, session: session, store: store)
     }
 
-    private func workspace(_ id: WorkspaceID) async throws -> Workspace {
-        guard !changingWorkspaces.contains(id) else { throw ServerFailure("This workspace is being archived or restored. Try again shortly.") }
+    private func workspace(_ id: WorkspaceID, readingDuringSetup: Bool = false) async throws -> Workspace {
+        guard !changingWorkspaces.contains(id) || (readingDuringSetup && settingUpWorkspaces.contains(id)) else { throw ServerFailure("This workspace is being set up, archived or restored. Try again shortly.") }
         guard let workspace = try await store.workspace(id: id), workspace.state == .active else {
             throw ServerFailure("This workspace is no longer available.")
         }
@@ -401,7 +418,7 @@ public actor ServerRuntime {
         if !changingWorkspaces.isEmpty {
             let stored = try await storedSession(id)
             if let workspaceID = stored.workspaceID, changingWorkspaces.contains(workspaceID) {
-                throw ServerFailure("This workspace is being archived or restored.")
+                throw ServerFailure("This workspace is being set up, archived or restored.")
             }
         }
         if let session = sessions[id] { return session }

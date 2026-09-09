@@ -11,7 +11,7 @@ import (
 
 func writeInfo(writer http.ResponseWriter, config Config) {
 	writer.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(writer).Encode(map[string]any{"serverID": config.ServerID, "protocolVersion": 11, "authentication": "oauth2", "capabilities": []string{"rpc", "private-previews"}})
+	json.NewEncoder(writer).Encode(map[string]any{"serverID": config.ServerID, "protocolVersion": protocolVersion, "authentication": "oauth2", "capabilities": []string{"rpc", "private-previews"}})
 }
 
 func stripCredentials(header http.Header, access Access) {

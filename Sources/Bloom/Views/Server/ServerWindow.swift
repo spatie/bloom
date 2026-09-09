@@ -47,6 +47,7 @@ private struct ServerConnectionView: View {
                 TextField("Server data directory", text: $directory)
                 TextField("SSH key (optional)", text: $identityFile, prompt: Text("Leave empty to use your SSH agent"))
             } }
+            if model.isConnected { ServerDiagnosticsView(model: model) }
             if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
                 if model.isConnecting || model.isSigningIn { ProgressView().controlSize(.small) }
@@ -72,7 +73,7 @@ private struct ServerConnectionView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 660, height: usesHTTPS ? 300 : 390)
+        .frame(width: 660, height: (usesHTTPS ? 300 : 390) + (model.isConnected ? 160 : 0))
         .disabled(model.isConnecting || model.isSigningIn)
         .onAppear { model.isEditingConnection = true; host = model.host; executable = model.executable; directory = model.remoteDirectory; identityFile = model.identityFile; usesHTTPS = model.usesHTTPS; httpsAddress = model.httpsAddress }
         .onDisappear { model.isEditingConnection = false }

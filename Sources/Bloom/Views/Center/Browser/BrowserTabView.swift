@@ -88,7 +88,9 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
                     EmptyStateView(
                         glyph: "globe",
                         title: "No page yet",
-                        message: "Type an address above, or ask the agent to open one here."
+                        message: model.isRunningSetup ? "Your workspace is being set up. Its preview will be available when setup finishes." : "Open this workspace’s preview, or type an address above.",
+                        actionTitle: model.isRunningSetup ? nil : "Open Preview",
+                        action: { openPreview(session) }
                     )
                     .background(Palette.surface)
                 }
@@ -107,7 +109,7 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
         // focus, so the `+` menu's browser still opens on the dev server without stealing the
         // keyboard off the composer next to it.
         .task(id: tab.id) {
-            address = session.displayAddress
+            address = model.remoteServer == nil ? session.displayAddress : tab.url
             if address.isEmpty { isAddressFocused = true }
             // A pane redrawn onto a session that has been loading all along, which is what
             // switching workspace and coming back is. Nothing changed while this view was gone,
@@ -121,11 +123,37 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
         .onChange(of: model.remoteServer?.connectionGeneration) {
             if model.remoteServer?.isConnected == true { session.load(tab.url) }
         }
+        .task(id: model.workspace.setupState) {
+            let port = await model.ensurePort()
+            guard !Task.isCancelled else { return }
+            if let url = tabs.claimOpeningPreview(
+                for: tab, setup: model.workspace.setupState, port: port,
+                address: address, hasNavigated: session.hasRequestedNavigation
+            ) {
+                address = url
+                isAddressFocused = false
+                session.load(url)
+            }
+        }
+        .onChange(of: address) {
+            if !address.isEmpty { tabs.cancelOpeningPreview(for: tab) }
+        }
         .onChange(of: session.page) {
             // The page navigated on its own: a link, a redirect, a router. The field follows it,
             // unless the user is in the middle of typing a different address into it.
-            if !isAddressFocused { address = session.displayAddress }
+            if model.remoteServer == nil, !isAddressFocused { address = session.displayAddress }
             recordPage(session)
+        }
+    }
+
+    private func openPreview(_ session: BrowserSession) {
+        Task {
+            guard let address = WorkspacePreview.address(port: await model.ensurePort()) else { return }
+            tabs.cancelOpeningPreview(for: tab)
+            tabs.setURL(address, for: tab)
+            self.address = address
+            isAddressFocused = false
+            session.load(address)
         }
     }
 
@@ -156,6 +184,7 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
             address: $address,
             addressFocus: $isAddressFocused,
             isRingVisible: isRingVisible,
+            remoteServer: model.remoteServer.flatMap { $0.connectionMode == .remote ? $0.displayName : nil },
             backHistory: session.backHistory,
             forwardHistory: session.forwardHistory,
             goBack: session.goBack,

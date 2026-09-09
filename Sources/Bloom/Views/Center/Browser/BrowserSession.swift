@@ -122,6 +122,9 @@ final class BrowserSession {
 
     private let resolve: (@MainActor (String) async throws -> String)?
     private var navigationTask: Task<Void, Never>?
+    /// The address before forwarding, so a first failed load can establish a fresh connection.
+    private var requestedAddress = ""
+    var hasRequestedNavigation: Bool { !requestedAddress.isEmpty }
 
     init(url: String, root: String = "", resolve: (@MainActor (String) async throws -> String)? = nil) {
         self.resolve = resolve
@@ -182,6 +185,7 @@ final class BrowserSession {
     func load(_ text: String) {
         navigationTask?.cancel()
         guard !text.isEmpty else { return }
+        requestedAddress = text
         if let resolve {
             navigationTask = Task { [weak self] in
                 do {
@@ -249,8 +253,8 @@ final class BrowserSession {
         }
         // A dev server that was not up when the tab opened has no page to reload, so an empty
         // view reloads the address instead of reloading nothing.
-        if webView.url == nil, let url = currentURL {
-            webView.load(URLRequest(url: url))
+        if webView.url == nil, !requestedAddress.isEmpty {
+            load(requestedAddress)
         } else {
             webView.reload()
         }

@@ -46,7 +46,11 @@ final class ServerWindowModel {
         serverLabels[labelKey] = name.isEmpty ? nil : name
         preferences.set(serverLabels, forKey: "server.labels")
     }
-    var catalogue: ServerCatalogue?
+    var catalogue: ServerCatalogue? {
+        didSet {
+            for workspace in catalogue?.workspaces ?? [] { workspaceModels[workspace.id]?.workspace = workspace }
+        }
+    }
     var selectedWorkspaceID: WorkspaceID?
     private var activeSessions: [WorkspaceID: SessionID] = [:]
     var selectedSessionID: SessionID? {
@@ -87,6 +91,7 @@ final class ServerWindowModel {
     var runScripts: [RunScript] = []
     private var terminalPanes: [String: [ServerTerminalPane]] = [:]
     private var forwards: [Int: ServerPortForward] = [:]
+    private var previewAddresses: [BrowserPreviewAddress] = []
     var isBusy = false
     var isConnecting = false
     var isPerformingCommand = false
@@ -137,7 +142,6 @@ final class ServerWindowModel {
     }
     func receiveSidebarCatalogue(_ value: ServerCatalogue) {
         catalogue = value
-        for workspace in value.workspaces { workspaceModels[workspace.id]?.workspace = workspace }
     }
 
     func existingWorkspaceModel(_ id: WorkspaceID) -> RemoteWorkspaceFileListing? { workspaceModels[id] }
@@ -264,6 +268,7 @@ final class ServerWindowModel {
                 if case .text(let address) = try await read(.previewAddress(input.absoluteString)),
                    address != input.absoluteString {
                     guard generation == connectionGeneration, !Task.isCancelled else { throw CancellationError() }
+                    rememberPreviewAddress(original: input.absoluteString, resolved: address)
                     return address
                 }
                 if case .https = endpoint { throw ServerFailure("Register this preview port with the HTTPS gateway first.") }
@@ -281,6 +286,7 @@ final class ServerWindowModel {
                 components.port = await forward?.localPort
             }
             guard generation == connectionGeneration, let result = components.url else { throw CancellationError() }
+            rememberPreviewAddress(original: input.absoluteString, resolved: result.absoluteString)
             return result.absoluteString
         } catch {
             if !Task.isCancelled { self.error = error.localizedDescription }
@@ -288,7 +294,16 @@ final class ServerWindowModel {
         }
     }
 
+    private func rememberPreviewAddress(original: String, resolved: String) {
+        guard let mapping = BrowserPreviewAddress(original: original, resolved: resolved) else { return }
+        previewAddresses.removeAll { $0.resolved.scheme == mapping.resolved.scheme && $0.resolved.host == mapping.resolved.host && $0.resolved.port == mapping.resolved.port }
+        previewAddresses.append(mapping)
+    }
+
     func displayAddress(_ text: String) async -> String {
+        for mapping in previewAddresses.reversed() {
+            if let address = mapping.display(text) { return address }
+        }
         guard var url = URLComponents(string: text), url.host == "127.0.0.1", let port = url.port else { return text }
         for (remote, forward) in forwards where await forward.localPort == port {
             url.host = "localhost"
@@ -491,6 +506,7 @@ final class ServerWindowModel {
                     review.reset()
                     for forward in forwards.values { await forward.close() }
                     forwards.removeAll()
+                    previewAddresses.removeAll()
                 }
                 lastEndpoint = endpoint
             }
@@ -651,6 +667,13 @@ final class ServerWindowModel {
             } catch {
                 guard !Task.isCancelled, generation == connectionGeneration else { return }
                 self.error = error.localizedDescription
+                // A refused operation is a valid reply, so the connection is still usable.
+                // Workspace lifecycle changes can briefly refuse reads on older servers.
+                if error is ServerRefusal {
+                    do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                    tick += 1
+                    continue
+                }
                 await disconnect()
                 return
             }
