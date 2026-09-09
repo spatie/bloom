@@ -16,12 +16,12 @@ enum FileReview {
     /// Opens the workspace's review on a file, or points the open one at it.
     static func open(path: String, in model: WorkspaceModel) {
         if model.changedFiles.contains(where: { $0.path == path }) { model.selectedFilePath = path }
-        // Unchanged files and attachments still open on their own.
+        show(path: path, in: model, focusing: false)
+        // A new shared review defaults to all changes, but unchanged files open on their own.
         if !model.changedFiles.contains(where: { $0.path == path }),
            let tab = CenterTabStore.shared.review(for: model.workspace.id) {
             CenterTabStore.shared.setShowsAllFiles(false, for: tab)
         }
-        show(path: path, in: model, focusing: false)
     }
 
     /// The one door, with the one thing the two callers disagree about.
@@ -61,7 +61,7 @@ enum FileReview {
     /// out, is what made this read as a control that did nothing.
     static func open(in model: WorkspaceModel) {
         let remembered = currentPath(in: model)
-        let fallback = model.selectedFilePath ?? model.changedFiles.first?.path
+        let fallback = model.selectedFilePath ?? model.reviewFiles.first?.path
         show(
             path: remembered.flatMap { $0.isEmpty ? nil : $0 } ?? fallback ?? "",
             in: model,
@@ -88,7 +88,7 @@ enum FileReview {
         let candidates = [model.selectedFilePath, remembered].compactMap { $0 }
         let path = candidates.first { candidate in
             model.changedFiles.contains { $0.path == candidate }
-        } ?? model.changedFiles.first?.path ?? ""
+        } ?? model.reviewFiles.first?.path ?? ""
         let tab = store.showReview(path: path, workspaceID: model.workspace.id)
         store.setShowsAllFiles(all, for: tab)
         WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
@@ -118,7 +118,7 @@ enum FileReview {
     /// goes round rather than stopping dead at the last file, and keeps the inspector's own
     /// selection in step so the list scrolls and highlights along with the diff.
     static func step(_ delta: Int, in model: WorkspaceModel) {
-        let files = model.changedFiles
+        let files = model.reviewFiles
         guard !files.isEmpty else { return }
 
         let current = currentPath(in: model)

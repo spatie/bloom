@@ -125,13 +125,37 @@ enum ReviewRunProbe {
             )
             await model.refreshChanges()
             check(model.changedFiles.count == 6, "review fixture did not load its six changed files")
+            check(model.reviewFiles.last?.path == "README.md", "review order did not put root files after folders")
+            let fresh = CenterTab(workspaceID: model.workspace.id, kind: .review, title: CenterTab.reviewTitle)
+            check(fresh.showsAllFiles, "a new review did not default to all files")
+            let pinned = CenterTab(workspaceID: model.workspace.id, kind: .review, title: "Pinned", isPinnedToPath: true)
+            check(!pinned.showsAllFiles, "a pinned review defaulted to all files")
+            do {
+                var selected = fresh
+                selected.showsAllFiles = false
+                let stored = try JSONEncoder().encode(selected)
+                let restored = try JSONDecoder().decode(CenterTab.self, from: stored)
+                check(!restored.showsAllFiles, "restoring a tab lost its explicit selected-file choice")
+                var legacy = try JSONSerialization.jsonObject(with: stored) as? [String: Any] ?? [:]
+                legacy.removeValue(forKey: "showsAllFiles")
+                let oldData = try JSONSerialization.data(withJSONObject: legacy)
+                let oldReview = try JSONDecoder().decode(CenterTab.self, from: oldData)
+                check(oldReview.showsAllFiles, "a legacy review did not adopt the all-files default")
+                legacy["isPinnedToPath"] = true
+                let pinnedData = try JSONSerialization.data(withJSONObject: legacy)
+                let oldPinned = try JSONDecoder().decode(CenterTab.self, from: pinnedData)
+                check(!oldPinned.showsAllFiles, "a legacy pinned tab switched to all files")
+            } catch { check(false, "review defaults could not be restored: \(error)") }
             model.selectedFilePath = "README.md"
-            FileReview.setShowsAllFiles(true, in: model)
+            FileReview.open(in: model)
             check(CenterTabStore.shared.review(for: model.workspace.id)?.showsAllFiles == true,
                   "review-all toggle did not activate all-files mode")
             FileReview.setShowsAllFiles(false, in: model)
             check(CenterTabStore.shared.review(for: model.workspace.id)?.showsAllFiles == false,
                   "review-all toggle did not return to one file")
+            FileReview.open(path: "README.md", in: model)
+            check(CenterTabStore.shared.review(for: model.workspace.id)?.showsAllFiles == false,
+                  "reopening a review forgot the selected-file choice")
             check(CenterTabStore.shared.review(for: model.workspace.id)?.path == "README.md",
                   "review-all toggle forgot the selected file")
             model.inspectorTab = .changes
@@ -146,11 +170,15 @@ enum ReviewRunProbe {
             )
             inspectorWindow.contentView = inspector
             await settle(inspectorWindow)
-            save(inspector, name: "review-toggle-off")
+            save(inspector, name: "review-selected-mode")
             FileReview.setShowsAllFiles(true, in: model)
             await settle(inspectorWindow)
-            save(inspector, name: "review-toggle-on")
-            FileReview.open(path: model.changedFiles.first?.path ?? "", in: model)
+            save(inspector, name: "review-all-mode")
+            FileReview.open(path: "Unchanged.swift", in: model)
+            check(CenterTabStore.shared.review(for: model.workspace.id)?.showsAllFiles == false,
+                  "opening an unchanged file switched to all changes")
+            FileReview.setShowsAllFiles(true, in: model)
+            FileReview.open(path: model.reviewFiles.first?.path ?? "", in: model)
             let host = NSHostingView(rootView: LinkedReviewFixture(model: model))
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1000, height: 680),
