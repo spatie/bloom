@@ -261,7 +261,7 @@ use the previous protocol until the app and server are upgraded together.
 
 ## Protocol and ownership
 
-`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 10). A protocol mismatch
+`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 11). A protocol mismatch
 is refused before dispatch. Commands and replies carry UUIDs, so a long setup command does not
 block transcript reads or controls on the same connection.
 
@@ -357,3 +357,38 @@ choice and staged attachments to the server. Chat creation queues its opening pr
 terminal and browser creation do not create an agent session. A failed setup retains the prompt
 as a draft. Project folder inspection and creation use the same core planner on both machines,
 and the server refuses creation if the inspected folder facts have changed.
+
+### Remote review performance
+
+Protocol 11 adds conditional review snapshots and per-file patches. An unchanged response carries
+only its revision. The client holds one review request open for up to 15 seconds; filesystem
+notifications wake it when a review changes. FSEvents is used on macOS and inotify on Linux,
+including the worktree's separate Git directory and common refs. A 30-second full scan is a
+backstop for missed events; watch-limit failures on Linux reduce that interval to two seconds.
+
+The server shares scans and concurrent patch requests across clients, limits patch generation to
+four concurrent jobs, and retains at most 32 MiB or 128 patches. It watches at most eight recently
+used worktrees, with up to 4,096 directories per Linux watcher. File revisions include the resolved
+base and inode, size, mode, nanosecond modification/change timestamps, including renamed paths.
+This catches edits that keep the same line counts or restore the modification time. A patch is
+checked again before it enters the cache.
+
+The Mac retains up to 16 MiB or 64 raw patches per visited workspace and reuses parsed
+presentations for small patches (up to 256 KiB, eight presentations). The shared lazy review list
+loads file sections near the viewport. A file's revision participates in the view's load identity,
+so another file changing does not invalidate every visible diff. Scope changes cancel outstanding
+client waits. The existing 2 MiB per-file/patch safety limit remains.
+
+Run `Tools/benchmark-server-review.py` against a packaged server to compare the legacy and new
+RPCs in an isolated repository and daemon. It launches no agent and cleans up its own fixture.
+The recorded run in `benchmarks/remote-review-2026-09-09.json` used real SSH, 1,000 changed files
+(400 changed lines each), 30 opened files, and an additional 100 ms delay per request. This models
+extra round-trip latency, not packet loss or a bandwidth-limited mobile connection. Thirty patch
+loads took 9.644 seconds with the legacy path and 5.276 seconds with the cached path; its initial
+snapshot took another 0.690 seconds. Ten unchanged list checks fell from 1,142,230 bytes to 4,110
+bytes. The changed-file notification arrived in 0.903 seconds, including the artificial delay.
+These are transport/Git measurements, not a measurement of UI frame rate.
+
+Server labels are stored in the Mac client's connection preferences; renaming one does not alter
+the hostname. This Mac and the server label form flat sidebar groups. Server settings, connection
+controls, project creation and archived workspaces are available from the server heading.

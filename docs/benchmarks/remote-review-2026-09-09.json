@@ -1,0 +1,49 @@
+{
+  "transport": "persistent SSH",
+  "files": 1000,
+  "changed_lines_per_file": 400,
+  "opened_files": 30,
+  "added_latency_ms_per_request": 100.0,
+  "measurements": {
+    "legacy_open_files": {
+      "requests": 30,
+      "elapsed_seconds": 9.644,
+      "wire_bytes": 119550
+    },
+    "cached_initial_list": {
+      "requests": 1,
+      "elapsed_seconds": 0.69,
+      "wire_bytes": 199359
+    },
+    "cached_open_files": {
+      "requests": 30,
+      "elapsed_seconds": 5.276,
+      "wire_bytes": 123180
+    },
+    "cached_repeat_files": {
+      "requests": 30,
+      "elapsed_seconds": 5.229,
+      "wire_bytes": 123180
+    },
+    "unchanged_files": {
+      "requests": 30,
+      "elapsed_seconds": 5.232,
+      "wire_bytes": 12450
+    },
+    "legacy_idle_refreshes": {
+      "requests": 10,
+      "elapsed_seconds": 6.166,
+      "wire_bytes": 1142230
+    },
+    "cached_idle_checks": {
+      "requests": 10,
+      "elapsed_seconds": 1.746,
+      "wire_bytes": 4110
+    },
+    "change_notification": {
+      "requests": 1,
+      "elapsed_seconds": 0.903,
+      "wire_bytes": 199420
+    }
+  }
+}

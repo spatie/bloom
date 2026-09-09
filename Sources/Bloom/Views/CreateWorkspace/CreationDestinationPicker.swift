@@ -6,7 +6,7 @@ struct CreationDestinationPicker: View {
     @Environment(AppModel.self) private var app
     @Environment(\.openWindow) private var openWindow
 
-    private var serverLabel: String { app.remoteServer.serverName.isEmpty ? app.remoteServer.connectionLabel : app.remoteServer.serverName }
+    private var serverLabel: String { app.remoteServer.displayName }
 
     var body: some View {
         Menu {

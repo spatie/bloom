@@ -29,6 +29,7 @@ private struct ServerConnectionView: View {
 
     var body: some View {
         Form {
+            TextField("Server label", text: Binding(get: { model.customLabel }, set: { model.renameServer($0) }), prompt: Text("Use server hostname"))
             Picker("Connection", selection: $usesHTTPS) {
                 Text("HTTPS").tag(true)
                 Text("SSH").tag(false)

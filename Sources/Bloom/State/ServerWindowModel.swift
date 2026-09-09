@@ -37,6 +37,15 @@ final class ServerWindowModel {
     var effort = AppDefaults.fallbackEffort
     var permissionMode = PermissionMode.plan
     var serverName = ""
+    private var serverLabels: [String: String] = [:]
+    private var labelKey: String { usesHTTPS ? "https:" + httpsAddress : "ssh:" + host + ":" + remoteDirectory }
+    var customLabel: String { serverLabels[labelKey] ?? "" }
+    var displayName: String { customLabel.isEmpty ? (serverName.isEmpty ? connectionLabel : serverName) : customLabel }
+    func renameServer(_ label: String) {
+        let name = String(label.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        serverLabels[labelKey] = name.isEmpty ? nil : name
+        preferences.set(serverLabels, forKey: "server.labels")
+    }
     var catalogue: ServerCatalogue?
     var selectedWorkspaceID: WorkspaceID?
     private var activeSessions: [WorkspaceID: SessionID] = [:]
@@ -189,6 +198,7 @@ final class ServerWindowModel {
 
     init(preferences: UserDefaults = .standard, bundle: Bundle = .main) {
         self.preferences = preferences
+        serverLabels = preferences.dictionary(forKey: "server.labels") as? [String: String] ?? [:]
         if let saved = preferences.dictionary(forKey: "server.activeSessions") as? [String: String] {
             activeSessions = Dictionary(uniqueKeysWithValues: saved.map { (WorkspaceID($0.key), SessionID($0.value)) })
         }

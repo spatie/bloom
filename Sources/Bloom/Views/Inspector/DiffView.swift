@@ -391,6 +391,13 @@ struct DiffView<Model: WorkspaceFileReview>: View {
             isEditable = false
         }
 
+        if file.contentRevision != nil, let held = model.heldDiff(for: file, ignoringWhitespace: ignoringWhitespace) {
+            source = held.source; phase = .ready(held.document); fileLines = held.lines
+            presented = file.path; preparedWhitespace = ignoringWhitespace
+            isEditable = !file.isBinary && session.draft(for: absolutePath) != nil
+            rebuild(); prime(held.document)
+            return
+        }
         let patch = await model.patch(for: file)
         guard !Task.isCancelled else { return }
         let path = file.path

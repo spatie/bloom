@@ -28,6 +28,7 @@ public struct ChangedFile: Identifiable, Sendable, Hashable, Codable {
     public var deletions: Int
     public var isBinary: Bool
     /// An untracked file exceeded the caller's counting budget, so its line counts are unknown.
+    public var contentRevision: String?
     public var hasIncompleteStats: Bool
 
     public var id: String { path }

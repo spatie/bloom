@@ -44,7 +44,7 @@ func runtimeRequest(ctx context.Context, socket string, body []byte, id string) 
 		Version int             `json:"version"`
 		Result  json.RawMessage `json:"result"`
 	}
-	if json.Unmarshal(line, &reply) != nil || !strings.EqualFold(reply.ID, id) || reply.Version != 10 || len(reply.Result) == 0 {
+	if json.Unmarshal(line, &reply) != nil || !strings.EqualFold(reply.ID, id) || reply.Version != 11 || len(reply.Result) == 0 {
 		return nil, errors.New("invalid runtime response")
 	}
 	return line, nil
@@ -72,7 +72,7 @@ func (server *Server) rpc(writer http.ResponseWriter, request *http.Request, con
 	var input rpcRequest
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&input) != nil || input.Version != 10 || len(input.ID) != 36 || len(input.Operation) != 1 {
+	if decoder.Decode(&input) != nil || input.Version != 11 || len(input.ID) != 36 || len(input.Operation) != 1 {
 		http.Error(writer, "Invalid Bloom request", 400)
 		return
 	}
@@ -100,7 +100,7 @@ func (server *Server) rpc(writer http.ResponseWriter, request *http.Request, con
 			value = map[string]any{"failure": map[string]string{"_0": err.Error()}}
 		}
 		writer.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(writer).Encode(map[string]any{"version": 10, "id": input.ID, "result": value})
+		json.NewEncoder(writer).Encode(map[string]any{"version": 11, "id": input.ID, "result": value})
 		return
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), rpcTimeout)

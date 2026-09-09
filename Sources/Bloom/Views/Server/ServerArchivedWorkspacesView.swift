@@ -10,7 +10,7 @@ struct ServerArchivedWorkspacesView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.spacingWide) {
             Text("Archived workspaces").font(Typo.title)
-            Text(server.serverName).foregroundStyle(.secondary)
+            Text(server.displayName).foregroundStyle(.secondary)
             List(server.catalogue?.archivedWorkspaces ?? []) { workspace in
                 HStack {
                     VStack(alignment: .leading) {

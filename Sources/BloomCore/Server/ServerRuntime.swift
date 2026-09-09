@@ -8,6 +8,7 @@ public actor ServerRuntime {
     public typealias RunnerFactory = @Sendable (Session, String, Store) -> any SessionRunner
     private let store: Store
     private let makeRunner: RunnerFactory
+    private let reviewCache = ServerReviewCache()
     private let repositories = ServerRepositoryResolver()
     private let terminals = ServerTerminalService()
     private let terminalStreams: ServerTerminalStreams
@@ -104,6 +105,10 @@ public actor ServerRuntime {
             var models: [CodexModel] = []
             if case .workspaceContext = action { models = (try? await modelCatalogue.pickerModels()) ?? [] }
             return .creation(try await ProjectCreationOperations.perform(action, store: store, models: models, availableAgents: await installedAgents(store)))
+        case .reviewSnapshot(let id, let scope, let revision, let wait):
+            return .reviewSnapshot(try await reviewCache.snapshot(workspace: workspace(id), scope: scope, knownRevision: revision, wait: wait))
+        case .reviewPatch(let id, let path, let scope, let revision):
+            return .reviewPatch(try await reviewCache.patch(workspace: workspace(id), path: path, scope: scope, knownRevision: revision))
         case .hello:
             return .hello(name: ProcessInfo.processInfo.hostName)
         case .previewAddress(let address):
@@ -437,6 +442,7 @@ public actor ServerRuntime {
         isClosed = true
         let runningCommands = Array(commands.values)
         for command in runningCommands { command.cancel() }
+        await reviewCache.shutdown()
         await promptQueue?.shutdown()
         await terminalStreams.shutdown()
         await terminals.shutdown()

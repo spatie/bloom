@@ -22,6 +22,10 @@ final class RemoteWorkspaceFileListing: WorkspacePaneModel {
     var reviewDrafts: [String: ReviewDraft] = [:]
     var reviewEdits: Set<ReviewCommentID> = []
     let reviewText = ReviewTextHost()
+    private var presentations = DiffPresentationCache()
+    private var patchCache: [String: (revision: String, patch: String)] = [:]
+    private var patchOrder: [String] = []
+    private var patchBytes = 0
     private var heldContents: [String: String] = [:]
     var reviewComments: [ReviewComment] { [] }
     var supportsReviewComments: Bool { false }
@@ -162,14 +166,45 @@ final class RemoteWorkspaceFileListing: WorkspacePaneModel {
     func showPage(path: String, axis: SplitAxis?) {}
     func revertFile(_ file: ChangedFile) async -> String? { "Remote file revert is not available yet." }
     func patch(for file: ChangedFile) async -> String {
+        let key = server.review.scope.rawValue + "/" + file.path
+        if let held = patchCache[key], held.revision == file.contentRevision { return held.patch }
         do {
-            if case .patch(let patch) = try await read(.patch(workspaceID: workspace.id, path: file.path, scope: server.review.scope)) { return patch }
+            if case .reviewPatch(let value) = try await read(.reviewPatch(workspaceID: workspace.id, path: file.path,
+                scope: server.review.scope, knownRevision: patchCache[key]?.revision)) {
+                if let patch = value.patch {
+                    patchBytes -= patchCache[key]?.patch.utf8.count ?? 0
+                    patchCache[key] = (value.revision, patch); patchBytes += patch.utf8.count
+                    patchOrder.removeAll { $0 == key }; patchOrder.append(key)
+                    while patchBytes > 16 * 1_024 * 1_024 || patchOrder.count > 64 {
+                        patchBytes -= patchCache.removeValue(forKey: patchOrder.removeFirst())?.patch.utf8.count ?? 0
+                    }
+                    return patch
+                }
+                return patchCache[key]?.patch ?? ""
+            }
         } catch { if !Task.isCancelled { server.error = error.localizedDescription } }
         return ""
     }
-    func heldDiff(for file: ChangedFile, ignoringWhitespace: Bool) -> DiffPresentation? { nil }
-    func holdDiff(_ presentation: DiffPresentation, for file: ChangedFile, ignoringWhitespace: Bool) {}
-    func forgetHeldDiff(for path: String) { heldContents[path] = nil }
+    private func presentationKey(_ file: ChangedFile, ignoringWhitespace: Bool) -> DiffPresentationCache.Key {
+        DiffPresentationCache.Key(worktree: workspace.path, base: workspace.baseBranch + (file.contentRevision ?? ""),
+            file: file, scope: diffScope, ignoresWhitespace: ignoringWhitespace)
+    }
+    func heldDiff(for file: ChangedFile, ignoringWhitespace: Bool) -> DiffPresentation? {
+        presentations.presentation(for: presentationKey(file, ignoringWhitespace: ignoringWhitespace))
+    }
+    func holdDiff(_ presentation: DiffPresentation, for file: ChangedFile, ignoringWhitespace: Bool) {
+        let key = server.review.scope.rawValue + "/" + file.path
+        guard let size = patchCache[key]?.patch.utf8.count, size <= 256 * 1_024 else { return }
+        presentations.store(presentation, for: presentationKey(file, ignoringWhitespace: ignoringWhitespace))
+    }
+    func forgetHeldDiff(for path: String) {
+        heldContents[path] = nil; presentations.forget(file: path)
+        for scope in ServerDiffScope.allCases {
+            let key = scope.rawValue + "/" + path
+            patchBytes -= patchCache.removeValue(forKey: key)?.patch.utf8.count ?? 0
+            patchOrder.removeAll { $0 == key }
+        }
+    }
     func contents(of path: String) -> String? { heldContents[path] }
     func readContents(of path: String) async -> String? {
         do {

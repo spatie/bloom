@@ -21,6 +21,13 @@ public enum ServerReview {
         guard let file = files.first(where: { $0.path == path }) else {
             throw ServerFailure("This file has no changes in the selected scope. Refresh the file list.")
         }
+        let base = scope == .branch ? try await Git.baseline(workspace.baseBranch, in: workspace.path) : try await Git.check(["rev-parse", "HEAD"], in: workspace.path).trimmed
+        return try await patch(workspace: workspace, file: file, base: base)
+    }
+
+    static func patch(workspace: Workspace, file: ChangedFile, base: String) async throws -> String {
+        let path = file.path
+        try validateRelativePath(path)
         try validatePatchFile(path, workspace: workspace)
         let arguments: [String]
         if file.change == .untracked {
@@ -28,7 +35,6 @@ public enum ServerReview {
             arguments = ["--literal-pathspecs", "diff", "--no-index", "--no-ext-diff", "--no-textconv",
                          "--no-color", "--", "/dev/null", path]
         } else {
-            let base = scope == .branch ? try await Git.baseline(workspace.baseBranch, in: workspace.path) : "HEAD"
             let oldPath = file.oldPath ?? path
             try validateRelativePath(oldPath)
             let oldSize = try await Git.run(["cat-file", "-s", "\(base):\(oldPath)"], in: workspace.path, timeout: .seconds(10))
@@ -92,7 +98,7 @@ public enum ServerReview {
         }
     }
 
-    private static func validateRelativePath(_ path: String) throws {
+    static func validateRelativePath(_ path: String) throws {
         guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\0"),
               !path.split(separator: "/").contains("..") else {
             throw ServerFailure("Use a relative path inside this workspace.")

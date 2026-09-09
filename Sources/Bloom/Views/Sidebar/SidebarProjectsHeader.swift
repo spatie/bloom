@@ -19,13 +19,14 @@ import BloomCore
 /// and a second one would be two filters for one list. It stays at the foot of the pane, which is
 /// where Xcode and Finder put the control that narrows a source list.
 struct SidebarProjectsHeader: View {
+    var title = "This Mac"
     var onStartProject: () -> Void
 
     @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: Metrics.spacing) {
-            Text("Projects")
+            Text(title)
                 .font(Typo.captionEmphasis)
                 .foregroundStyle(Palette.textSecondary)
                 .accessibilityAddTraits(.isHeader)

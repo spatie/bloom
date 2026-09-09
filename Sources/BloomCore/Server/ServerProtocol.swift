@@ -2,7 +2,7 @@ import Foundation
 
 /// Versioned values cross the connection; database handles and local file URLs never do.
 public struct ServerRequest: Codable, Sendable, Equatable {
-    public static let protocolVersion = 10
+    public static let protocolVersion = 11
     public var version: Int
     public var id: UUID
     public var operation: ServerOperation
@@ -16,6 +16,8 @@ public struct ServerRequest: Codable, Sendable, Equatable {
 
 public enum ServerOperation: Codable, Sendable, Equatable {
     case hello
+    case reviewSnapshot(workspaceID: WorkspaceID, scope: ServerDiffScope, knownRevision: String?, wait: Bool)
+    case reviewPatch(workspaceID: WorkspaceID, path: String, scope: ServerDiffScope, knownRevision: String?)
     case creation(ServerCreationOperation)
     case catalogue
     case previewAddress(String)
@@ -40,7 +42,7 @@ public enum ServerOperation: Codable, Sendable, Equatable {
 
     var mutates: Bool {
         switch self {
-        case .hello, .catalogue, .previewAddress, .transcript, .changes, .patch, .file, .composer: false
+        case .reviewSnapshot, .reviewPatch, .hello, .catalogue, .previewAddress, .transcript, .changes, .patch, .file, .composer: false
         case .creation(let action): action.mutates
         case .project, .create, .send, .stop, .answer, .configure, .cancelQueued, .setComposer, .markRead, .renameSession, .closeSession, .terminalStream: true
         case .workspace(_, let action): action.mutates
@@ -123,6 +125,8 @@ public struct ServerReply: Codable, Sendable {
 }
 
 public enum ServerResult: Codable, Sendable {
+    case reviewSnapshot(ServerReviewSnapshot)
+    case reviewPatch(ServerPatchSnapshot)
     case hello(name: String)
     case creation(ServerCreationResult)
     case catalogue(ServerCatalogue)

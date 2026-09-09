@@ -29,13 +29,18 @@ final class ServerReviewModel {
     var fileFilter = ""
     var error: String?
     var isLoading = false
+    private var snapshotRevision: String?
+    private var snapshotScope: ServerDiffScope?
+    private var snapshotGeneration = 0
     private var workspaceID: WorkspaceID?
     private var generation = 0
-    var contentGeneration: Int { generation }
+    var contentGeneration: Int { snapshotGeneration }
+    private var pendingSnapshot: Task<ServerReply, Error>?
     private var needsContent = true
     private(set) var hasReadFiles = false
 
     func reset() {
+        snapshotRevision = nil
         workspaceID = nil
         files = []
         allFiles = []
@@ -45,6 +50,7 @@ final class ServerReviewModel {
     }
 
     private func invalidateContent() {
+        pendingSnapshot?.cancel()
         generation += 1
         patch = ""
         fileText = ""
@@ -61,25 +67,34 @@ final class ServerReviewModel {
         }
         let observed = generation
         do {
-            if refreshFiles || !hasReadFiles {
-                if showsAllFiles {
-                    let listing = try await client.request(ServerRequest(.workspace(workspaceID: workspaceID, action: .files)), timeout: .seconds(25))
-                    guard generation == observed else { return }
-                    if case .files(let paths) = listing.result { allFiles = paths }
-                }
-                let reply = try await client.request(ServerRequest(.changes(workspaceID: workspaceID, scope: scope)), timeout: .seconds(25))
-                guard generation == observed else { return }
-                if case .changes(let changed) = reply.result {
-                    if files != changed { needsContent = true }
+            if snapshotScope != scope { snapshotScope = scope; snapshotRevision = nil }
+            let request = ServerRequest(.reviewSnapshot(workspaceID: workspaceID,
+                scope: scope, knownRevision: snapshotRevision, wait: hasReadFiles && !needsContent))
+            let pending = Task { try await client.request(request, timeout: .seconds(25)) }
+            pendingSnapshot = pending
+            defer { pendingSnapshot = nil }
+            let snapshotReply = try await pending.value
+            guard generation == observed else { return }
+            if case .reviewSnapshot(let snapshot) = snapshotReply.result {
+                if let changed = snapshot.files {
+                    if snapshotRevision != snapshot.revision { snapshotGeneration += 1 }
+                    snapshotRevision = snapshot.revision
+                    needsContent = true
                     files = changed
                     hasReadFiles = true
                     error = nil
-                    if !showsFile, let selectedPath, !changed.contains(where: { $0.path == selectedPath }) {
-                        self.selectedPath = nil
+                    if showsAllFiles {
+                        let listing = try await client.request(ServerRequest(.workspace(workspaceID: workspaceID, action: .files)), timeout: .seconds(25))
+                        guard generation == observed else { return }
+                        if case .files(let paths) = listing.result { allFiles = paths }
                     }
+                    if !showsFile, let selectedPath, !changed.contains(where: { $0.path == selectedPath }) { self.selectedPath = nil }
                 }
             }
-            guard generation == observed, let selectedPath, needsContent || refreshFiles else { return }
+            // Shared DiffView owns patch loading and caching. The review loop only publishes
+            // revisions, so it cannot download the selected patch a second time.
+            if !showsFile { needsContent = false; isLoading = false; return }
+            guard generation == observed, let selectedPath, needsContent else { return }
             isLoading = patch.isEmpty && fileText.isEmpty
             let operation: ServerOperation = showsFile
                 ? .file(workspaceID: workspaceID, path: selectedPath)

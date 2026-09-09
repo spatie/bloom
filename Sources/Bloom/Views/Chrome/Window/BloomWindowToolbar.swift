@@ -63,7 +63,7 @@ struct BloomWindowToolbar: ToolbarContent {
             if let workspace = app.selectedRemoteWorkspace {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(workspace.name).fontWeight(.semibold)
-                    Label(app.remoteServer.serverName, systemImage: "server.rack")
+                    Label(app.remoteServer.displayName, systemImage: "server.rack")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } else {

@@ -549,7 +549,11 @@ public actor CodexRunner: SessionRunner {
         // agent stopped in <workspace>", so a chat whose workspace was archived, removed or simply
         // closed produced a modal saying the Codex process had ended: true, and the owner is the
         // one who ended it. Only a server that went away on its own is worth a word.
-        if case .closed = event, handle.wasCancelled || trouble.hasStopped { return }
+        if case .closed = event {
+            client = nil
+            threadID = nil
+            if handle.wasCancelled || trouble.hasStopped || (session.state != .running && session.state != .waiting) { return }
+        }
 
         if case .approval(let request) = event {
             await ask(request)

@@ -22,6 +22,7 @@ import BloomCore
 /// custom label away and draws only the indicator, which is why it rendered as a lone letter.
 struct SidebarView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Whether this window is the one being used, which is what tells a loud selection from a
     /// resting one. See `selectionFill(for:)` for what this can and cannot say.
@@ -123,13 +124,8 @@ struct SidebarView: View {
                             }
                         }
                     }
-                    if !catalogue.archivedWorkspaces.isEmpty {
-                        Button { app.remoteServer.showsArchivedWorkspaces = true } label: {
-                            Label("Archived workspaces", systemImage: "archivebox")
-                        }.selectionDisabled()
-                    }
                 } header: {
-                    Label(app.remoteServer.serverName, systemImage: "server.rack")
+                    SidebarServerHeader(server: app.remoteServer)
                 }
                 .task(id: app.remoteServer.connectionGeneration) { app.remoteServer.loadSidebarPreferences() }
     }
@@ -162,7 +158,7 @@ struct SidebarView: View {
             // themselves sections and a list cannot nest one inside another. It carries no tag
             // and refuses selection, so it stays a label. Home keeps its own section above it,
             // which is what stops it reading as the first project.
-            SidebarProjectsHeader(onStartProject: startProject)
+            SidebarProjectsHeader(onStartProject: { StartProjectOpening.shared.isRemote = false; startProject() })
                 .selectionDisabled()
                 .listRowSeparator(.hidden)
 
@@ -255,13 +251,10 @@ struct SidebarView: View {
             if let catalogue = app.remoteServer.catalogue {
                 remoteProjects(catalogue)
             } else if app.remoteServer.isConfigured {
-                Button {
-                    Task { await app.remoteServer.connect() }
-                } label: {
-                    Label(app.remoteServer.isConnecting ? "Connecting to server…" : "Reconnect to server", systemImage: "server.rack")
-                }
-                .disabled(app.remoteServer.isConnecting)
-                .selectionDisabled()
+                SidebarServerHeader(server: app.remoteServer).selectionDisabled()
+            } else {
+                Button("Connect a Server…", systemImage: "server.rack") { openWindow(id: ServerWindow.id) }
+                    .buttonStyle(.plain).foregroundStyle(Palette.textSecondary).selectionDisabled()
             }
         }
         // The list draws its own row height, and that is left to it. Its selection is not.

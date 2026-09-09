@@ -84,6 +84,39 @@ private func eventually(
 // MARK: - Tests
 
 @Suite(.scratchDirectory) struct CodexRunnerTests {
+    @Test func closingAnIdleProcessKeepsSuccessAndReconnectsOnNextTurn() async throws {
+        let store = try makeTestStore("codex-idle-exit")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.send("First")
+        for line in try bloomFixtureLines("codex-turn.ndjson") {
+            guard JSONValue.parse(line)?["method"] != nil else { continue }
+            box.process.emit(line)
+        }
+        await eventually("completed") { await runner.currentSession.state == .idle }
+        let before = try await store.messages(sessionID: session.id).count
+        box.process.endOutput()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(try await store.messages(sessionID: session.id).count == before)
+        #expect(await runner.currentSession.state == .idle)
+        try await runner.send("Second")
+        #expect(box.process.sentMethods.contains("thread/resume"))
+        runner.terminateNow()
+    }
+
+    @Test func processExitDuringATurnStillFails() async throws {
+        let store = try makeTestStore("codex-running-exit")
+        let (session, _) = try await makeCodexSession(store)
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        try await runner.send("Still working")
+        box.process.endOutput()
+        await eventually("failed") { await runner.currentSession.state == .failed }
+        let rows = try await store.messages(sessionID: session.id)
+        #expect(rows.contains { $0.kind == .error })
+    }
+
     @Test(arguments: [false, true])
     func lateStoppedCompletionCannotEndTheNextIntentionalTurn(delayStart: Bool) async throws {
         let store = try makeTestStore("codex-late-stop")
