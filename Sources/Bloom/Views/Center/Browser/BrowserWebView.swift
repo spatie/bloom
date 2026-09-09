@@ -168,15 +168,18 @@ struct BrowserWebView: NSViewRepresentable {
     /// What the page can ask the window for, handed down for the same reason and on the same
     /// schedule as the menu above. See `BrowserPaneHost`.
     var host = BrowserPaneHost()
+    var viewportSize: CGSize?
 
-    func makeNSView(context: Context) -> BrowserHostView {
-        let view = BrowserHostView()
+    func makeNSView(context: Context) -> BrowserViewportHostView {
+        let view = BrowserViewportHostView()
+        view.viewportSize = viewportSize
         view.attach(session.pageView)
         wire()
         return view
     }
 
-    func updateNSView(_ nsView: BrowserHostView, context: Context) {
+    func updateNSView(_ nsView: BrowserViewportHostView, context: Context) {
+        nsView.viewportSize = viewportSize
         nsView.attach(session.pageView)
         wire()
     }
