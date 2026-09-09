@@ -295,6 +295,13 @@ final class ServerWindowModel {
 
     func terminalName(for tab: CenterTab) -> String { terminalNames[tab.id] ?? tab.id }
 
+    func prepareCreatedWorkspace(_ workspace: Workspace, opensWith mode: WorkspaceStartMode) {
+        // Fresh workspaces have no legacy terminal to migrate. The shared pane system opens
+        // exactly the tab requested by the creation window.
+        preferences.set(true, forKey: "server.sharedTabs." + workspace.id.rawValue)
+        WorkspaceStartMode.record(mode, workspaceID: workspace.id)
+    }
+
     func prepareTabs(for workspace: Workspace) {
         let tabs = CenterTabStore.shared
         tabs.load(workspaceID: workspace.id)

@@ -59,10 +59,10 @@ struct ProjectCreationBackend {
             case .creation(.workspaceStarted(let workspace, let session, _, let draft)) = result else {
             throw ServerFailure(server.error ?? "Could not create the workspace.")
         }
+        server.prepareCreatedWorkspace(workspace, opensWith: mode)
         if server.catalogue?.workspaces.contains(where: { $0.id == workspace.id }) == false { server.catalogue?.workspaces.append(workspace) }
         if let session, server.catalogue?.sessions.contains(where: { $0.id == session.id }) == false { server.catalogue?.sessions.append(session) }
         try? await refreshRemote()
-        WorkspaceStartMode.record(mode, workspaceID: workspace.id)
         server.selectWorkspace(workspace.id)
         app.selection = .remoteWorkspace(workspace.id)
         if let session {

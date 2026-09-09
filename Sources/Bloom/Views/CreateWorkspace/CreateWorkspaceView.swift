@@ -279,6 +279,10 @@ struct CreateWorkspaceView: View {
         // either way; the picker fills in behind it.
         .task(id: creationKey) { await loadCheckouts() }
         // The draft's chips and the files behind them belong to a window that is going away.
+        .onChange(of: repoID) { _, _ in
+            checkout = nil; baseBranch = ""; referenceProblem = nil
+            isEnteringReference = false; checkoutOptions = WorkspaceCheckoutOptions()
+        }
         .onChange(of: isRemote) { _, _ in
             repoID = nil; checkout = nil; baseBranch = ""; checkoutOptions = WorkspaceCheckoutOptions()
             creationSource = CreationComposerSource(); creationProblem = nil
@@ -318,10 +322,10 @@ struct CreateWorkspaceView: View {
 
             Spacer(minLength: 0)
 
-            if isLoading {
+            if isLoading || isCreatingRemote {
                 ProgressView()
                     .controlSize(.small)
-                    .accessibilityLabel("Loading branches")
+                    .accessibilityLabel(isCreatingRemote ? "Creating workspace" : "Loading branches")
             }
         }
         // The same padding as `ProjectSetupSheet`'s header, which is the app's other header
@@ -1049,6 +1053,7 @@ struct CreateWorkspaceView: View {
     private func resolveReference(_ text: String) {
         guard let repo, !isResolvingReference else { return }
         let path = repo.path
+        let key = creationKey
         isResolvingReference = true
         referenceProblem = nil
         Task {
@@ -1060,6 +1065,7 @@ struct CreateWorkspaceView: View {
                 } catch { resolution = .failure(error.localizedDescription) }
             } else { resolution = await WorkspaceCheckoutResolver.resolve(text, repoPath: path) }
             isResolvingReference = false
+            guard key == creationKey else { return }
             switch resolution {
             case .checkout(let resolved): offer(resolved)
             case .failure(let sentence): referenceProblem = sentence

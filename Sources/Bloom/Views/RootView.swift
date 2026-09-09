@@ -444,7 +444,10 @@ struct RootView: View {
     /// which is the empty state that offers to add one; every control that could ask is disabled
     /// or diverted in that state anyway.
     private func openCreateWindow(in repo: Repo?) {
-        let target = repo ?? app.selectedWorkspace.flatMap(app.repo(for:)) ?? app.repos.first
+        let selected: Repo? = if app.selection.isRemote {
+            app.remoteServer.catalogue?.repositories.first { $0.id == app.selectedRemoteWorkspace?.repoID }
+        } else { app.selectedWorkspace.flatMap(app.repo(for:)) ?? app.repos.first }
+        let target = repo ?? selected
         guard let target else { return openWindow(id: CreateWorkspaceWindow.id) }
         openWindow(id: CreateWorkspaceWindow.id, value: target.id)
     }
