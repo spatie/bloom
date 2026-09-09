@@ -133,7 +133,8 @@ struct WrappedCodeText: NSViewRepresentable {
             value.append(paragraph)
         }
         let selection = view.selectedRanges
-        let sameText = view.string == value.string
+        // Canonically equal text can be shorter in UTF-16, invalidating the old selection.
+        let sameText = view.string.utf8.elementsEqual(value.string.utf8)
         view.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
         view.textStorage?.setAttributedString(value)
         if sameText { view.selectedRanges = selection }
