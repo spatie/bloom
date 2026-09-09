@@ -224,6 +224,9 @@ loud somewhere a user can read it.
 | Jump back or forward several pages | right click on an arrow | **no** | none |
 | Reload / Stop | toolbar | **no** | none |
 | Send a Screenshot to the Agent | toolbar, and the page menu | **no** | none |
+| Comment on an Area | crop button in the toolbar, and the page menu | **no** | none |
+| Add selected area and comment to the draft | region capture controls | **no** | `⌘Return` |
+| Cancel region capture | region capture controls | **no** | `Escape` |
 | Share | toolbar | **no** | none |
 | Open in External Browser | page context menu | **no** | none |
 | Find in page, next, previous | find bar | yes, Edit > Find | `⌘F` `⌘G` `⇧⌘G` |

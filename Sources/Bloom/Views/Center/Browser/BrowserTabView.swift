@@ -30,6 +30,9 @@ struct BrowserTabView: View {
     /// then the file is written into the worktree off the main actor. A second press in the middle
     /// of that would attach the same page twice, so the button goes quiet rather than counting.
     @State private var isCapturing = false
+    @State private var isSelectingRegion = false
+    @State private var regionCapture: BrowserRegionCapture?
+    @State private var regionNotice: String?
 
     @Environment(AppModel.self) private var app
 
@@ -50,6 +53,7 @@ struct BrowserTabView: View {
 
         VStack(spacing: 0) {
             toolbar(session)
+                .disabled(isSelectingRegion)
             Hairline()
             if session.find.isShowing {
                 BrowserFindBar(
@@ -68,6 +72,8 @@ struct BrowserTabView: View {
             ZStack {
                 BrowserWebView(session: session, paneMenu: pageMenu, host: host)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .allowsHitTesting(!isSelectingRegion)
+                    .accessibilityHidden(isSelectingRegion)
 
                 // A tab nobody has given an address is a white rectangle under a toolbar, which
                 // reads as a page that failed to load rather than as a pane waiting to be told
@@ -94,8 +100,42 @@ struct BrowserTabView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .top) {
+                if let regionNotice {
+                    HStack {
+                        Text(regionNotice).font(Typo.caption).lineLimit(2)
+                        Spacer()
+                        Button("Dismiss") { self.regionNotice = nil }.controlSize(.small)
+                    }
+                    .padding(Metrics.spacingSmall)
+                    .background(Palette.surface)
+                }
+            }
+            .overlay {
+                if isSelectingRegion {
+                    if let regionCapture {
+                        BrowserRegionCaptureView(capture: regionCapture, cancel: cancelRegion) {
+                            regionCapture.add(to: model) {
+                                regionNotice = "Added to the draft in \(regionCapture.conversation)"
+                                cancelRegion()
+                            }
+                        }
+                    } else {
+                        VStack(spacing: Metrics.spacingWide) {
+                            ProgressView("Capturing page…")
+                            Button("Cancel", action: cancelRegion).keyboardShortcut(.cancelAction)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Palette.surface)
+                    }
+                }
+            }
         }
         .background(Palette.surface)
+        .task(id: isSelectingRegion) {
+            guard isSelectingRegion, regionCapture == nil else { return }
+            await prepareRegion()
+        }
         // Per tab, so switching between two browser tabs puts each field back where its own page
         // is rather than leaving the address of the one that was showing a moment ago.
         //
@@ -137,7 +177,7 @@ struct BrowserTabView: View {
                 canGoForward: session.canGoForward,
                 isLoading: session.isLoading,
                 loadProgress: session.loadProgress,
-                isCapturing: isCapturing
+                isCapturing: isCapturing || isSelectingRegion
             ),
             address: $address,
             addressFocus: $isAddressFocused,
@@ -151,6 +191,7 @@ struct BrowserTabView: View {
                 if session.isLoading { session.webView.stopLoading() } else { session.reload() }
             },
             capture: capture,
+            captureRegion: beginRegion,
             submit: {
                 session.load(address)
                 isAddressFocused = false
@@ -178,6 +219,47 @@ struct BrowserTabView: View {
 
     // MARK: - Screenshot
 
+    private func beginRegion() {
+        guard !isCapturing, !isSelectingRegion else { return }
+        regionNotice = nil
+        isSelectingRegion = true
+    }
+
+    private func cancelRegion() {
+        isSelectingRegion = false
+        regionCapture = nil
+    }
+
+    private func prepareRegion() async {
+        guard let destination = model.activeSession else {
+            cancelRegion()
+            app.alert = BloomAlert(
+                title: "No conversation yet",
+                message: "Open a conversation in this workspace before adding feedback."
+            )
+            return
+        }
+        let session = self.session
+        let address = session.displayAddress
+        do {
+            let data = try await session.snapshot()
+            try Task.checkCancellation()
+            guard address == session.displayAddress else {
+                cancelRegion()
+                app.alert = BloomAlert(
+                    title: "The page changed during capture",
+                    message: "Wait for the page to finish loading, then select the area again."
+                )
+                return
+            }
+            regionCapture = try BrowserRegionCapture(data: data, address: address, session: destination)
+        } catch {
+            guard !Task.isCancelled else { return }
+            cancelRegion()
+            app.alert = BloomAlert(title: "That page could not be captured", message: error.readableMessage)
+        }
+    }
+
     /// Takes the page as it is on screen and puts it in the composer, in one press.
     ///
     /// **One press, with no confirmation.** The alternative, a sheet asking where the picture
@@ -189,7 +271,7 @@ struct BrowserTabView: View {
     /// **It does not send the turn.** Nobody wants an agent handed a screenshot with no sentence
     /// attached. What lands is an attachment and a caret, and the user writes what is wrong with it.
     private func capture() {
-        guard !isCapturing else { return }
+        guard !isCapturing, !isSelectingRegion else { return }
         isCapturing = true
         Task {
             defer { isCapturing = false }
@@ -249,10 +331,13 @@ struct BrowserTabView: View {
             // `TranscriptLinkMenu`.
             items.append(item("Open in External Browser") { NSWorkspace.shared.open(url) })
         }
-        if !isCapturing {
+        if !isCapturing, !isSelectingRegion {
             // The same words as the toolbar's own camera, taken from the one place that says them,
             // so the glyph and the menu item cannot drift into naming the same thing two ways.
             items.append(item(BrowserToolbar().screenshot.name, perform: capture))
+            if BrowserToolbar(page: session.page).regionCapture.isEnabled {
+                items.append(item(BrowserToolbar().regionCapture.name, perform: beginRegion))
+            }
         }
         guard !items.isEmpty else { return menu }
 

@@ -65,6 +65,7 @@ struct BrowserToolbarView: View {
     var goToHistory: @MainActor (Int) -> Void = { _ in }
     var reloadOrStop: @MainActor () -> Void = {}
     var capture: @MainActor () -> Void = {}
+    var captureRegion: @MainActor () -> Void = {}
     var submit: @MainActor () -> Void = {}
 
     /// Drawn inside the field's own edge rather than outside it, so the bar does not have to give
@@ -160,6 +161,8 @@ struct BrowserToolbarView: View {
             pageAction(toolbar.reload, action: reloadOrStop)
             Hairline(axis: .vertical)
             pageAction(toolbar.screenshot, action: capture)
+            Hairline(axis: .vertical)
+            pageAction(toolbar.regionCapture, action: captureRegion)
             Hairline(axis: .vertical)
             BrowserShareButton(
                 control: toolbar.share,
