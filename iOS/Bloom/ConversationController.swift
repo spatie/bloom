@@ -13,6 +13,9 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     private var buffer = TranscriptBuffer()
     private var poll: Task<Void, Never>?
     private var isSending = false
+    private var hasPendingSubmission = false
+
+    private let uncertainSend = "The last send has not been confirmed. Reconnect to this server and check the conversation before retrying. Retry uses the same message ID."
 
     init(model: MobileConnection, session: RemoteSession) {
         self.model = model; self.session = session
@@ -76,7 +79,10 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); poll?.cancel(); poll = nil }
 
     private func refresh() async {
-        guard model.address == origin, let service = model.service else { status.text = "Disconnected. Reconnect to this server to see progress."; return }
+        guard model.address == origin, let service = model.service else {
+            status.text = hasPendingSubmission ? uncertainSend : "Disconnected. Reconnect to this server to see progress."
+            return
+        }
         do {
             let transcript = try await service.transcript(sessionID: session.id, after: buffer.sequence)
             guard !Task.isCancelled else { return }
@@ -90,13 +96,11 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
             if wasAtBottom, table.numberOfRows(inSection: 0) > 0 {
                 table.scrollToRow(at: IndexPath(row: table.numberOfRows(inSection: 0) - 1, section: 0), at: .bottom, animated: false)
             }
-            if !buffer.pendingQuestions.isEmpty {
-                status.text = "The agent is waiting for your answer."
-            } else { status.text = buffer.queueError ?? (buffer.isBusy ? "Working on the server" : "Ready") }
+            updateStatus()
             review.isHidden = buffer.pendingQuestions.isEmpty
             navigationItem.rightBarButtonItem?.isEnabled = buffer.isBusy || !buffer.pendingQuestions.isEmpty
         } catch {
-            if !Task.isCancelled { status.text = error.localizedDescription }
+            if !Task.isCancelled { status.text = hasPendingSubmission ? uncertainSend : error.localizedDescription }
         }
     }
 
@@ -113,7 +117,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         isSending = true
         send.isEnabled = false; composer.isEditable = false
         Task {
-            defer { self.isSending = false; self.send.isEnabled = true }
+            defer { self.isSending = false; self.send.isEnabled = true; self.updateStatus() }
             do {
                 try await MobileConnection.drafts.submit(using: service.client, origin: self.origin, sessionID: self.session.id)
                 self.restoreDraft()
@@ -121,7 +125,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
                 await self.refresh()
             } catch {
                 self.send.setTitle("Retry", for: .normal)
-                self.show(error)
+                self.show(ConnectionFailure(self.uncertainSend + "\n\n" + error.localizedDescription))
             }
         }
     }
@@ -140,10 +144,20 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     private func restoreDraft() {
         do {
             let draft = try MobileConnection.drafts.draft(origin: origin, sessionID: session.id)
+            hasPendingSubmission = draft.submission != nil
             composer.text = draft.submission?.operation["send"]?["text"]?.stringValue ?? draft.text
             composer.isEditable = draft.submission == nil
             send.setTitle(draft.submission == nil ? "Send" : "Retry", for: .normal)
+            updateStatus()
         } catch { status.text = "Draft could not be restored: " + error.localizedDescription }
+    }
+
+    private func updateStatus() {
+        if isSending { status.text = "Sending to the server" } else if hasPendingSubmission {
+            status.text = uncertainSend
+        } else if !buffer.pendingQuestions.isEmpty { status.text = "The agent is waiting for your answer." } else {
+            status.text = buffer.queueError ?? (buffer.isBusy ? "Working on the server" : "Ready")
+        }
     }
 
     private func reviewRequest() {

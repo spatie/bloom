@@ -6,6 +6,22 @@ import Testing
 struct DraftTests {
     private func location() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("drafts.json") }
 
+    @Test func matchingServerFailureDoesNotProveTheCommandNeverRan() async throws {
+        let file = location()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = ConversationDraftStore(file: file)
+        let origin = "https://server.example"
+        let session = SessionID("one")
+        try store.save(text: "Run tests", origin: origin, sessionID: session)
+        let command = try store.prepare(origin: origin, sessionID: session)
+        await #expect(throws: ConnectionRefusal.self) {
+            try await store.submit(using: InterruptedJournalClient(), origin: origin, sessionID: session)
+        }
+        let relaunched = ConversationDraftStore(file: file)
+        #expect(try relaunched.prepare(origin: origin, sessionID: session) == command)
+        #expect(try relaunched.draft(origin: origin, sessionID: session).text == "Run tests")
+    }
+
     @Test func transportFailureAndUnexpectedReplyKeepRetryIdentityAfterRelaunch() async throws {
         let file = location()
         defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
@@ -88,6 +104,16 @@ struct DraftTests {
         let store = ConversationDraftStore(file: directory.appendingPathComponent("drafts.json"))
         #expect(throws: (any Error).self) { try store.save(text: "Do work", origin: "https://server.example", sessionID: SessionID("one")) }
         #expect(throws: (any Error).self) { try store.prepare(origin: "https://server.example", sessionID: SessionID("one")) }
+    }
+}
+
+private struct InterruptedJournalClient: RemoteRequesting {
+    func request(_ command: RemoteCommand) async throws -> JSONValue {
+        let reply: JSONValue = .object([
+            "version": .integer(BloomWire.version), "id": .string(command.id.uuidString),
+            "result": .object(["failure": .object(["_0": .string("The server stopped while handling this command. Inspect the workspace before submitting a new command.")])])
+        ])
+        return try RemoteClient.decode(JSONEncoder().encode(reply), commandID: command.id)
     }
 }
 

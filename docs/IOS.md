@@ -104,8 +104,12 @@ automatically. Transport errors, refusals, unexpected replies and failed persist
 draft. Only a matching accepted submission can clear its own text; a later edit survives that
 acknowledgement. The shared store serialises edits across windows. iOS file protection and mode
 0600 protect the file; OAuth tokens remain exclusively in the authentication package's Keychain.
-An unresolved submission stays locked until acknowledged; resolving a permanently rejected
-submission with an explicit discard/reconcile flow is still future work.
+An unresolved submission stays locked until acknowledged. The UI explains that its outcome is
+unknown and asks the user to reconnect and inspect the conversation before retrying. A matching
+server failure is not necessarily a rejection: the server can return it after a command ran but
+its final journal update failed. Safe recovery needs structured command-outcome reconciliation
+that distinguishes a definite rejection from an interrupted or partially completed command.
+That protocol and its explicit discard/reconcile flow remain foundation work.
 
 Rich tool rendering, terminal emulation, diff editing, attachments, archive confirmations and
 background notifications are not implemented yet. Server selection currently connects one origin per window and remembers
