@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import BloomCore
+@testable import BloomClient
 
 @Suite("How a drawn transcript changed")
 struct TranscriptEntryChangeTests {

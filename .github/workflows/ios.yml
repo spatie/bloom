@@ -5,6 +5,7 @@ on:
     paths:
       - 'iOS/**'
       - 'Packages/BloomClient/**'
+      - 'Packages/BloomUI/**'
       - 'Packages/BloomAuthentication/**'
       - 'Packages/BloomSSH/**'
       - 'Sources/BloomCore/Presentation/PaletteInk.swift'

@@ -1,5 +1,6 @@
 import SwiftUI
 import BloomCore
+import BloomUI
 
 /// The line number columns of a diff row.
 ///
@@ -15,43 +16,16 @@ struct DiffGutter: View {
     /// Here rather than on `DiffLineView`, which is where it used to live, because the run view
     /// needs it too and neither of them owns the other. `DiffLineView.Numbers` still resolves, so
     /// the diff's own signatures did not have to move with it.
-    enum Numbers {
-        case both
-        case old
-        case new
-    }
+    typealias Numbers = BloomDiffGutter.Numbers
 
     var line: DiffLine?
     var numbers: Numbers
+    @Environment(\.fontScale) private var fontScale
 
     var body: some View {
-        HStack(spacing: 0) {
-            switch numbers {
-            case .both:
-                number(line?.oldNumber)
-                number(line?.newNumber)
-            case .old:
-                number(line?.oldNumber)
-            case .new:
-                number(line?.newNumber)
-            }
-        }
-        // No tint of its own. A grey column against the white the code sits on put a hard vertical
-        // edge down the left of every diff, and a hard edge is read as a boundary between two
-        // things rather than as the margin of one. The row's wash runs under this and under the
-        // code alike, which leaves the numbers to be told apart by being dimmed and monospaced,
-        // and that is what separates a ruler from content anyway.
-    }
-
-    /// Right aligned, dimmed and monospaced, so a column of numbers reads as a ruler rather than
-    /// as content competing with the code beside it.
-    private func number(_ value: Int?) -> some View {
-        Text(value.map(String.init) ?? "")
-            .font(Typo.codeTiny)
-            .monospacedDigit()
-            .foregroundStyle(Palette.textTertiary)
-            .frame(width: CodeMetrics.numberWidth, alignment: .trailing)
-            .padding(.trailing, CodeMetrics.gutterPadding)
+        BloomDiffGutter(line: line, numbers: numbers, font: Typo.codeTiny.resolved(scale: fontScale),
+                        foreground: Palette.textTertiary,
+                        numberWidth: CodeMetrics.numberWidth, padding: CodeMetrics.gutterPadding)
     }
 
     /// How wide this column comes out, which the run view needs as a number because it paints the
@@ -67,21 +41,8 @@ struct DiffGutter: View {
     /// four unrelated fragments, "128", "129", "+", and then the code, and whether a line was
     /// added or removed reached the reader only as a background wash and a one-character marker
     /// that is a bare space on a context line. A colour is not a label.
-    static func speech(for line: DiffLine?) -> String {
-        guard let line else { return "" }
-        if line.kind == .noNewline { return "No newline at end of file" }
+    static func speech(for line: DiffLine?) -> String { BloomDiffGutter.speech(for: line) }
 
-        let number = line.newNumber ?? line.oldNumber
-        let place = number.map { " \($0)" } ?? ""
-        let state = switch line.kind {
-        case .addition: "Added line\(place)"
-        case .deletion: "Removed line\(place)"
-        default: "Line\(place)"
-        }
-
-        let text = line.text.trimmingCharacters(in: .whitespaces)
-        return text.isEmpty ? "\(state), empty" : "\(state), \(text)"
-    }
 }
 
 /// The one character column that says whether a line was added, removed or left alone.
@@ -93,22 +54,13 @@ struct DiffGutter: View {
 /// column's leading edge.
 struct DiffMarker: View {
     var line: DiffLine?
+    @Environment(\.fontScale) private var fontScale
 
     var body: some View {
-        Text(text)
-            .font(Typo.codeTiny)
-            .foregroundStyle(Palette.textTertiary)
-            .frame(width: CodeMetrics.markerWidth, alignment: .center)
+        BloomDiffMarker(line: line, font: Typo.codeTiny.resolved(scale: fontScale),
+                        foreground: Palette.textTertiary, width: CodeMetrics.markerWidth)
     }
 
-    private var text: String {
-        switch line?.kind {
-        case .addition: "+"
-        case .deletion: "-"
-        case .noNewline: "\\"
-        default: " "
-        }
-    }
 }
 
 /// The `+` in the gutter, sitting over the line number the way Conductor draws it.

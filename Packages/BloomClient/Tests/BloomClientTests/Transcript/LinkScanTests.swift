@@ -1,5 +1,5 @@
 import Testing
-@testable import BloomCore
+@testable import BloomClient
 
 @Suite("Link detection")
 struct LinkScanTests {
@@ -50,9 +50,9 @@ struct LinkScanTests {
     }
 
     @Test("a link is found where the text is a range, not a copy")
-    func rangeIsExact() {
+    func rangeIsExact() throws {
         let sentence = "go to https://example.com now"
-        let link = try! #require(LinkScan.links(in: sentence).first)
+        let link = try #require(LinkScan.links(in: sentence).first)
         #expect(String(sentence[link.range]) == "https://example.com")
     }
 

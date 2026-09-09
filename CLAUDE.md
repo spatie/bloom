@@ -17,8 +17,11 @@ was drawn from, which is a page to open in a browser rather than to read here.
 `Sources/BloomCore` is everything that is not a view: `Store`, `Git`, `Shell`, `WorkspaceManager`,
 the agent protocols, the parsers, the models. **It never imports a UI framework.**
 
-`Sources/Bloom` is the SwiftUI app and the only target allowed to import SwiftUI, AppKit, SwiftTerm
-or Sparkle.
+`Sources/Bloom` is the macOS app and owns AppKit, SwiftTerm and Sparkle integration.
+`iOS/Bloom` owns UIKit navigation, tables, editing and WebKit previews. `Packages/BloomUI` owns
+shared SwiftUI presentation used by both apps, including transcript bubbles and markdown layout.
+`Packages/BloomClient` owns portable client logic, parsers and presentation decisions, without UI
+framework imports. Keep native interaction adapters in their app and reusable rendering in BloomUI.
 
 `Sources/bloom-bridge` is the MCP stdio shim an agent CLI launches as a child process, which
 relays lines to the running app over a unix socket. Three lines of `main.swift`; everything worth

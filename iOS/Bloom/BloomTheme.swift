@@ -1,4 +1,5 @@
 import UIKit
+import BloomClient
 
 /// The Mac and mobile clients share the measured colour ramp. UIKit supplies semantic ink,
 /// scalable type and native controls, so Bloom's identity does not cost platform behaviour.

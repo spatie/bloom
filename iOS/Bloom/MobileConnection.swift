@@ -21,10 +21,10 @@ final class MobileConnection {
     init() {}
 
     #if DEBUG
-    init(previewCatalogue: RemoteCatalogue) {
+    init(previewCatalogue: RemoteCatalogue, client: any RemoteRequesting = PreviewRequestClient()) {
         catalogue = previewCatalogue
         address = "ssh://bloom@preview.bloom.invalid/var/lib/bloom"
-        service = RemoteWorkspaceService(client: PreviewRequestClient())
+        service = RemoteWorkspaceService(client: client)
     }
     #endif
 

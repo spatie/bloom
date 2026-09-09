@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import BloomCore
+@testable import BloomClient
 
 /// Tokenizes a line and checks the invariants every language has to satisfy: tokens in order,
 /// none empty, none reaching past the line. `sourceLocation` is threaded through so a violation
@@ -41,7 +41,7 @@ private func has(_ kind: TokenKind, text expected: String, in line: String, toke
     tokens.contains { $0.kind == kind && text(of: $0, in: line) == expected }
 }
 
-@Suite("Syntax highlighter", .tags(.agentProtocol))
+@Suite("Syntax highlighter")
 struct SyntaxHighlighterTests {
     @Test("detects languages from paths")
     func detectsPaths() {

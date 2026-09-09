@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import BloomCore
+import BloomUI
 
 /// Code gets a dedicated surface so syntax state can flow across lines without flattening the transcript.
 public struct CodeBlockView: View {
@@ -27,48 +28,27 @@ public struct CodeBlockView: View {
         )
         let visibleCount = showsAllLines ? prepared.lines.count : min(prepared.lines.count, Self.lineCap)
 
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: Metrics.spacing) {
-                // The fence's only label, and the one thing that says what the block is. It was
-                // at the floor of the scale, a rung under the smallest thing it names.
-                Text(Self.displayName(for: language))
-                    .font(Typo.caption)
-                    .foregroundStyle(Palette.textTertiary)
-                Spacer(minLength: MarkdownMetrics.blockGap)
-                CopyButton(text: code, title: "Copy code", size: MarkdownMetrics.iconButton)
-            }
-            .padding(.horizontal, MarkdownMetrics.blockGap)
-            .padding(.vertical, Metrics.spacing)
-
-            Hairline()
-
-            ScrollView(.horizontal) {
-                Text(highlighted(prepared, upTo: visibleCount))
-                    .font(Typo.code)
-                    .foregroundStyle(Palette.textPrimary)
-                    .textSelection(.enabled)
-                    .padding(MarkdownMetrics.blockGap)
-            }
-
-            // No `!showsAllLines`: an opened fence keeps the control, now reading the other way.
-            // A fence unfolded once could not be folded again, and two thousand lines is a lot of
-            // pane to have put between the reader and whatever they were scrolling towards.
-            if prepared.lines.count > Self.lineCap {
-                Hairline()
-                Button(TextFold.title(isExpanded: showsAllLines, lines: prepared.lines.count)) {
-                    showsAllLines.toggle()
-                }
-                .linkButton()
+        BloomCodeBlockFrame(
+            surface: Palette.surfaceSunken,
+            border: Palette.border,
+            canFold: prepared.lines.count > Self.lineCap
+        ) {
+            Text(Self.displayName(for: language))
                 .font(Typo.caption)
-                .padding(.horizontal, MarkdownMetrics.blockGap)
-                .padding(.vertical, Metrics.spacing)
+                .foregroundStyle(Palette.textTertiary)
+        } copy: {
+            CopyButton(text: code, title: "Copy code", size: MarkdownMetrics.iconButton)
+        } content: {
+            Text(highlighted(prepared, upTo: visibleCount))
+                .font(Typo.code)
+                .foregroundStyle(Palette.textPrimary)
+                .textSelection(.enabled)
+        } fold: {
+            Button(TextFold.title(isExpanded: showsAllLines, lines: prepared.lines.count)) {
+                showsAllLines.toggle()
             }
-        }
-        .background(Palette.surfaceSunken)
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
-        .overlay {
-            RoundedRectangle(cornerRadius: Metrics.corner)
-                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
+            .linkButton()
+            .font(Typo.caption)
         }
     }
 

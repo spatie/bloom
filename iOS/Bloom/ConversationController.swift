@@ -17,6 +17,8 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     #endif
     private var buffer = TranscriptBuffer()
     private var poll: Task<Void, Never>?
+    private var isRefreshing = false
+    private var needsRefresh = false
     private var isSending = false
     private var hasPendingSubmission = false
 
@@ -157,6 +159,16 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); poll?.cancel(); poll = nil }
 
     private func refresh() async {
+        if isRefreshing { needsRefresh = true; return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        repeat {
+            needsRefresh = false
+            await refreshTranscript()
+        } while needsRefresh && !Task.isCancelled
+    }
+
+    private func refreshTranscript() async {
         guard model.address == origin, let service = model.service else {
             status.text = hasPendingSubmission ? uncertainSend : "Disconnected. Reconnect to this server to see progress."
             return
@@ -164,21 +176,98 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         do {
             let transcript = try await service.transcript(sessionID: session.id, after: buffer.sequence)
             guard !Task.isCancelled else { return }
-            let previousMessages = buffer.messages
-            let previousStreamingText = buffer.streamingText
-            buffer.apply(transcript)
-            let wasAtBottom = table.contentOffset.y + table.bounds.height >= table.contentSize.height - 100
-            if previousMessages != buffer.messages || previousStreamingText != buffer.streamingText {
-                table.reloadData()
-            }
-            if wasAtBottom, table.numberOfRows(inSection: 0) > 0 {
-                table.scrollToRow(at: IndexPath(row: table.numberOfRows(inSection: 0) - 1, section: 0), at: .bottom, animated: false)
-            }
-            updateStatus()
-            review.isHidden = buffer.pendingQuestions.isEmpty
-            navigationItem.rightBarButtonItem?.isEnabled = buffer.isBusy || !buffer.pendingQuestions.isEmpty
+            applyTranscript(transcript)
         } catch {
             if !Task.isCancelled { status.text = hasPendingSubmission ? uncertainSend : error.localizedDescription }
+        }
+    }
+
+    private func applyTranscript(_ transcript: RemoteTranscript) {
+        let previousMessages = buffer.messages
+        let previousStreamingText = buffer.streamingText
+        buffer.apply(transcript)
+        let wasAtBottom = table.contentOffset.y + table.bounds.height >= table.contentSize.height - 100
+        if previousMessages != buffer.messages || previousStreamingText != buffer.streamingText {
+            updateRows(previousMessages: previousMessages, previousStreamingText: previousStreamingText)
+        }
+        if wasAtBottom, table.numberOfRows(inSection: 0) > 0 {
+            table.scrollToRow(at: IndexPath(row: table.numberOfRows(inSection: 0) - 1, section: 0), at: .bottom, animated: false)
+        }
+        updateStatus()
+        review.isHidden = buffer.pendingQuestions.isEmpty
+        navigationItem.rightBarButtonItem?.isEnabled = buffer.isBusy || !buffer.pendingQuestions.isEmpty
+    }
+
+    #if DEBUG
+    /// Exercises the production snapshot and table-update path without requesting a server.
+    func exerciseTranscriptUpdates(_ snapshots: [RemoteTranscript]) throws {
+        let resultURL = URL.documentsDirectory.appendingPathComponent("bloom-transcript-updates-passed.txt")
+        try? FileManager.default.removeItem(at: resultURL)
+        table.layoutIfNeeded()
+        let firstPath = IndexPath(row: 0, section: 0)
+        guard let firstCell = table.cellForRow(at: firstPath) else {
+            throw ConnectionFailure("Transcript fixture did not realise its first cell.")
+        }
+        for (index, snapshot) in snapshots.enumerated() {
+            applyTranscript(snapshot)
+            table.layoutIfNeeded()
+            let expected = snapshot.messages.count + (snapshot.streamingText.isEmpty ? 0 : 1)
+            guard table.numberOfRows(inSection: 0) == expected,
+                  buffer.messages == snapshot.messages,
+                  buffer.streamingText == snapshot.streamingText,
+                  table.cellForRow(at: firstPath) === firstCell else {
+                throw ConnectionFailure("Transcript update fixture failed at step \(index + 1).")
+            }
+        }
+        try "Passed \(snapshots.count) transcript updates; first cell retained.\n".write(
+            to: resultURL, atomically: true, encoding: .utf8
+        )
+    }
+    #endif
+
+    private func updateRows(previousMessages: [RemoteMessage], previousStreamingText: String) {
+        let oldIDs = previousMessages.map { String($0.id) } + (previousStreamingText.isEmpty ? [] : ["stream"])
+        let newIDs = buffer.messages.map { String($0.id) } + (buffer.streamingText.isEmpty ? [] : ["stream"])
+        let change = TranscriptEntryChange.between(oldIDs, newIDs)
+        let plan = TranscriptTableUpdate.plan(change: change, environmentMoved: false)
+        UIView.performWithoutAnimation {
+            switch plan {
+            case .reload:
+                // A streamed answer gaining its permanent ID replaces only that row.
+                // The standard diff also handles reordering without discarding retained cells.
+                let difference = newIDs.difference(from: oldIDs)
+                table.performBatchUpdates {
+                    for operation in difference {
+                        switch operation {
+                        case .remove(let offset, _, _):
+                            table.deleteRows(at: [IndexPath(row: offset, section: 0)], with: .none)
+                        case .insert(let offset, _, _):
+                            table.insertRows(at: [IndexPath(row: offset, section: 0)], with: .none)
+                        }
+                    }
+                }
+            case .rows(.grew(let head, let tail)):
+                table.performBatchUpdates {
+                    table.insertRows(at: (Array(head) + Array(tail)).map { IndexPath(row: $0, section: 0) }, with: .none)
+                }
+            case .rows(.shrank(let head, let tail)):
+                table.performBatchUpdates {
+                    table.deleteRows(at: (Array(head) + Array(tail)).map { IndexPath(row: $0, section: 0) }, with: .none)
+                }
+            case .nothing, .rows(.same), .rows(.rebuilt):
+                break
+            }
+            // Retain unchanged hosting cells so streaming does not reset their selection or folds.
+            let previous = Dictionary(uniqueKeysWithValues: previousMessages.map { ($0.id, $0) })
+            var changed = buffer.messages.enumerated().compactMap { index, message -> IndexPath? in
+                guard let old = previous[message.id], old != message else { return nil }
+                return IndexPath(row: index, section: 0)
+            }
+            if !previousStreamingText.isEmpty, !buffer.streamingText.isEmpty, previousStreamingText != buffer.streamingText {
+                changed.append(IndexPath(row: buffer.messages.count, section: 0))
+            }
+            if !changed.isEmpty { table.reconfigureRows(at: changed) }
+            table.layoutIfNeeded()
         }
     }
 
@@ -277,8 +366,8 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         guard let cell = tableView.dequeueReusableCell(withIdentifier: "message", for: indexPath) as? TranscriptCell else { return UITableViewCell() }
         if indexPath.row < buffer.messages.count {
             let message = buffer.messages[indexPath.row]
-            cell.configure(kind: message.kind, text: message.text)
-        } else { cell.configure(kind: "assistant", text: buffer.streamingText) }
+            cell.configure(kind: message.kind, text: message.text, identity: String(message.id))
+        } else { cell.configure(kind: "assistant", text: buffer.streamingText, identity: "stream", isStreaming: true) }
         return cell
     }
 }

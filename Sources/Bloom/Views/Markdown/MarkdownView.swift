@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import BloomCore
+import BloomUI
 
 /// A parsed answer, and everything derived from the parse that a caller would otherwise derive
 /// again on every pass.
@@ -149,24 +150,6 @@ private struct MarkdownBlocksView: View {
     let blocks: [MarkdownBlock]
     var foreground = Palette.textPrimary
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: MarkdownMetrics.blockGap) {
-            // Over the indices rather than over `Array(blocks.enumerated())`, which allocates a
-            // second array of pairs every pass to draw the same blocks. The same change is made
-            // everywhere below it, and the identity is what it always was: a block's position.
-            ForEach(blocks.indices, id: \.self) { offset in
-                MarkdownBlockView(block: blocks[offset], foreground: foreground, isFirst: offset == 0)
-            }
-        }
-    }
-}
-
-private struct MarkdownBlockView: View {
-    let block: MarkdownBlock
-    let foreground: Color
-    /// A heading only claims space above it when there is something above it to be separated from.
-    var isFirst = false
-
     /// The marker column follows the conversation's text size, otherwise a raised body size pushes
     /// "10." straight out of a column sized for the default one. This was a `@ScaledMetric`, which
     /// on macOS never moves: there is no Dynamic Type for it to track.
@@ -180,7 +163,6 @@ private struct MarkdownBlockView: View {
     @Environment(\.markdownLinkActions) private var linkActions
     @Environment(\.markdownLineSpacingOverride) private var lineSpacingOverride
 
-    private var markerWidth: CGFloat { MarkdownMetrics.markerWidth * fontScale }
     private var proseListLineSpacing: CGFloat {
         TranscriptLayout.proseLeading(
             Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight
@@ -203,44 +185,45 @@ private struct MarkdownBlockView: View {
         )
     }
 
-    @ViewBuilder
     var body: some View {
-        switch block {
-        case let .paragraph(inline):
-            inlineText(inline, rung: Typo.body, color: foreground)
-        case let .heading(level, inline):
-            // Three real steps rather than one. Every level used to land on reading size and
-            // differ only in weight, so an agent that structured its answer with headings got a
-            // wall of bold sentences and no structure at all.
-            inlineText(inline, rung: Self.headingFont(level), color: foreground)
-                .padding(.top, isFirst ? 0 : MarkdownMetrics.headingLead)
-        case let .codeBlock(code, language, _):
-            CodeBlockView(code: code, language: language)
-        case let .bulletList(items, tight):
-            list(items: items, start: nil, tight: tight)
-        case let .numberedList(start, items, tight):
-            list(items: items, start: start, tight: tight)
-        case let .taskList(items):
-            taskList(items)
-        case let .blockQuote(blocks):
-            HStack(alignment: .top, spacing: TranscriptLayout.block) {
-                Rectangle()
-                    .fill(Palette.border)
-                    .frame(width: TranscriptLayout.rule)
-                MarkdownBlocksView(blocks: blocks, foreground: Palette.textSecondary)
+        BloomMarkdownBlocks(blocks: blocks, style: sharedStyle, spacing: lineSpacingOverride) { text, role, colour, spacing in
+            if let spacing {
+                inlineText(text, rung: Self.font(for: role), color: colour, spacing: spacing)
+                    .lineSpacing(spacing)
+            } else {
+                inlineText(text, rung: Self.font(for: role), color: colour)
             }
-        case let .table(headers, rows, alignments):
-            table(headers: headers, rows: rows, alignments: alignments)
-        case .thematicBreak:
-            Hairline()
+        } code: { code, language in
+            CodeBlockView(code: code, language: language)
         }
     }
 
-    private static func headingFont(_ level: Int) -> ScaledFont {
-        switch level {
-        case 1: Typo.heading
-        case 2: Typo.title
-        default: Typo.bodyEmphasis
+    private var sharedStyle: BloomMarkdownStyle {
+        var style = BloomMarkdownStyle()
+        style.foreground = foreground
+        style.secondary = Palette.textSecondary
+        style.tertiary = Palette.textTertiary
+        style.border = Palette.border
+        style.surface = Palette.surfaceSunken
+        style.positive = Palette.positive
+        style.markerFont = Typo.body.resolved(scale: fontScale, face: chatFont)
+        style.markerWidth = MarkdownMetrics.markerWidth * fontScale
+        style.proseListSpacing = proseListLineSpacing
+        style.taskLineSpacing = listLineSpacing
+        style.tightListGap = listItemGap(tight: true, prose: true)
+        style.looseListGap = listItemGap(tight: false, prose: true)
+        style.taskGap = listItemGap(tight: true)
+        return style
+    }
+
+    private static func font(for role: BloomMarkdownInlineRole) -> ScaledFont {
+        switch role {
+        case .body: Typo.body
+        case .heading(1): Typo.heading
+        case .heading(2): Typo.title
+        case .heading: Typo.bodyEmphasis
+        case .tableHeader: Typo.labelEmphasis
+        case .tableCell: Typo.label
         }
     }
 
@@ -300,113 +283,6 @@ private struct MarkdownBlockView: View {
         }
     }
 
-    private func marker(_ text: String) -> some View {
-        Text(text)
-            .font(Typo.body)
-            // Tertiary is the shade a disabled control gets. A bullet is quiet, not switched off,
-            // and at a quarter ink it all but vanished against the line it belongs to.
-            .foregroundStyle(Palette.textSecondary)
-            .monospacedDigit()
-            .frame(width: markerWidth, alignment: .trailing)
-    }
-
-    private func list(items: [[MarkdownBlock]], start: Int?, tight: Bool) -> some View {
-        VStack(alignment: .leading, spacing: listItemGap(tight: tight, prose: true)) {
-            ForEach(items.indices, id: \.self) { offset in
-                // Baseline, not top: this is the alignment the task list beside it already used,
-                // and top alignment sat the marker a fraction above the line it marks.
-                HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
-                    marker(start.map { "\($0 + offset)." } ?? "\u{2022}")
-                    MarkdownBlocksView(blocks: items[offset], foreground: foreground)
-                        .lineSpacing(proseListLineSpacing)
-                        .environment(\.markdownLineSpacingOverride, proseListLineSpacing)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
-    }
-
-    private func taskList(_ items: [(checked: Bool, inline: [MarkdownInline])]) -> some View {
-        // Tight, always: a task list carries no blank-line flag out of the parser, and it is
-        // written as a checklist rather than as a run of paragraphs.
-        VStack(alignment: .leading, spacing: listItemGap(tight: true)) {
-            ForEach(items.indices, id: \.self) { index in
-                let item = items[index]
-                HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
-                    Image(systemName: item.checked ? "checkmark.square.fill" : "square")
-                        .font(Typo.body)
-                        .foregroundStyle(item.checked ? Palette.positive : Palette.textTertiary)
-                        .frame(width: markerWidth, alignment: .trailing)
-                        .accessibilityLabel(item.checked ? "Done" : "Not done")
-                    // The AppKit link renderer reads spacing here, before a modifier below can
-                    // override the environment. Nested checklists must not inherit prose leading.
-                    inlineText(item.inline, rung: Typo.body, color: foreground, spacing: listLineSpacing)
-                        .lineSpacing(listLineSpacing)
-                        .environment(\.markdownLineSpacingOverride, listLineSpacing)
-                }
-            }
-        }
-    }
-
-    private func table(headers: [[MarkdownInline]], rows: [[[MarkdownInline]]], alignments: [TableAlignment]) -> some View {
-        MarkdownTableLayout(columns: headers.count) {
-            ForEach(headers.indices, id: \.self) { column in
-                tableCell(
-                    headers[column],
-                    rung: Typo.labelEmphasis,
-                    alignment: alignment(at: column, in: alignments),
-                    isLastColumn: column == headers.count - 1,
-                    isLastRow: rows.isEmpty
-                )
-                .background(Palette.surfaceSunken)
-            }
-            ForEach(rows.indices, id: \.self) { index in
-                let row = rows[index]
-                ForEach(row.indices, id: \.self) { column in
-                    tableCell(
-                        row[column],
-                        rung: Typo.label,
-                        alignment: alignment(at: column, in: alignments),
-                        isLastColumn: column == row.count - 1,
-                        isLastRow: index == rows.count - 1
-                    )
-                }
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
-        .overlay {
-            RoundedRectangle(cornerRadius: Metrics.cornerSmall)
-                .strokeBorder(Palette.border, lineWidth: Metrics.outline)
-        }
-    }
-
-    private func tableCell(
-        _ inline: [MarkdownInline],
-        rung: ScaledFont,
-        alignment: Alignment,
-        isLastColumn: Bool,
-        isLastRow: Bool
-    ) -> some View {
-        inlineText(inline, rung: rung, color: foreground)
-            .padding(.horizontal, Metrics.spacingWide)
-            .padding(.vertical, Metrics.spacing)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
-            .overlay(alignment: .trailing) {
-                if !isLastColumn { Hairline(axis: .vertical) }
-            }
-            .overlay(alignment: .bottom) {
-                if !isLastRow { Hairline() }
-            }
-    }
-
-    private func alignment(at index: Int, in alignments: [TableAlignment]) -> Alignment {
-        guard alignments.indices.contains(index) else { return .leading }
-        return switch alignments[index] {
-        case .leading: .topLeading
-        case .center: .top
-        case .trailing: .topTrailing
-        }
-    }
 }
 
 /// The same inline tree as an `NSAttributedString`, for the rows that hold a link.

@@ -3,7 +3,7 @@ import PackageDescription
 #if os(Linux)
 import Foundation
 
-let serverTests = ["MobileProtocolContractTests.swift", "ServerDiagnosticsTests.swift", "SetupOutputTests.swift", "WorkspacePreviewTests.swift", "BrowserAddressDisplayTests.swift", "WorkspaceExecutionTests.swift", "ServerProjectSettingsTests.swift", "ServerReviewCacheTests.swift", "CodexRunnerTests.swift", "CodexTestSupport.swift", "ServerRuntimeTests.swift", "ServerReviewTests.swift", "ServerWorkspaceTests.swift", "ServerSidebarTests.swift", "ServerPreviewTests.swift", "ServerHTTPTests.swift", "ServerTerminalStreamTests.swift", "ProcessPipeLifetimeTests.swift", "PlanApprovalTests.swift", "CodexTranslationTests.swift", "LocalServerIdentityTests.swift", "TestSupport.swift"]
+let serverTests = ["RemoteReviewContractTests.swift", "MobileProtocolContractTests.swift", "ServerDiagnosticsTests.swift", "SetupOutputTests.swift", "WorkspacePreviewTests.swift", "BrowserAddressDisplayTests.swift", "WorkspaceExecutionTests.swift", "ServerProjectSettingsTests.swift", "ServerReviewCacheTests.swift", "CodexRunnerTests.swift", "CodexTestSupport.swift", "ServerRuntimeTests.swift", "ServerReviewTests.swift", "ServerWorkspaceTests.swift", "ServerSidebarTests.swift", "ServerPreviewTests.swift", "ServerHTTPTests.swift", "ServerTerminalStreamTests.swift", "ProcessPipeLifetimeTests.swift", "PlanApprovalTests.swift", "CodexTranslationTests.swift", "LocalServerIdentityTests.swift", "TestSupport.swift"]
 let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Tests/BloomCoreTests")
 let otherTests = (try FileManager.default.contentsOfDirectory(atPath: testDirectory.path)).filter { !serverTests.contains($0) }
 
@@ -44,6 +44,7 @@ let package = Package(
     dependencies: [
         .package(path: "Packages/BloomClient"),
         .package(path: "Packages/BloomAuthentication"),
+        .package(path: "Packages/BloomUI"),
         .package(url: "https://github.com/openid/AppAuth-iOS.git", exact: "3.0.0"),
         // Native live Markdown editing for workspace notes. Pin the pre-1.0 API we integrate.
         .package(url: "https://github.com/nodes-app/swift-markdown-engine", exact: "0.12.0"),
@@ -70,6 +71,7 @@ let package = Package(
             dependencies: [
                 "BloomCore",
                 .product(name: "BloomAuthentication", package: "BloomAuthentication"),
+                .product(name: "BloomUI", package: "BloomUI"),
                 .product(name: "AppAuth", package: "AppAuth-iOS"),
                 .product(name: "MarkdownEngine", package: "swift-markdown-engine"),
                 .product(name: "SwiftTerm", package: "SwiftTerm"),

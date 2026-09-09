@@ -10,6 +10,10 @@ enum IOSPreviewFixture {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: "--bloom-ui-preview"), arguments.indices.contains(index + 1) else { return }
         do {
+            if arguments[index + 1].hasPrefix("workspace-") {
+                try WorkspacePreviewFixture.install(in: window, mode: String(arguments[index + 1].dropFirst("workspace-".count)))
+                return
+            }
             let catalogue = try JSONDecoder().decode(RemoteCatalogue.self, from: Data(catalogueJSON.utf8))
             let model = MobileConnection(previewCatalogue: catalogue)
             let split = BloomSplitController(model: model)
@@ -18,15 +22,29 @@ enum IOSPreviewFixture {
             (split.viewController(for: .primary) as? UINavigationController)?.topViewController?.loadViewIfNeeded()
             if arguments[index + 1] == "conversation" {
                 let session = catalogue.sessions[0]
-                let messages: [[String: Any]] = [
+                var messages: [[String: Any]] = [
                     ["id": 1, "seq": 1, "kind": "user", "payload": try JSONSerialization.data(withJSONObject: ["text": "Add a quick reply to the inbox. It should feel effortless, and keep the conversation in view."]).base64EncodedString()],
                     ["id": 2, "seq": 2, "kind": "assistantText", "payload": try JSONSerialization.data(withJSONObject: ["text": "I'll add an inline composer to the ticket view and keep the focus on your conversation.\n\n**Here's the approach**\n\n1. Reuse the existing reply action.\n2. Keep drafts as you move between tickets.\n3. Add a keyboard shortcut for sending.\n\nThe reply action now accepts the draft directly:\n\n```php\n$ticket->reply(\n    message: $draft->body,\n    author: $user,\n);\n```\n\nThe focused tests are passing. I'm checking the empty and error states next."]).base64EncodedString()],
                 ]
+                if arguments.contains("--markdown-stress") {
+                    messages[1]["payload"] = try JSONSerialization.data(withJSONObject: ["text": markdownStress]).base64EncodedString()
+                }
+                if arguments.contains("--exercise-transcript-updates") {
+                    messages = [try message(1, kind: "user", text: "Keep this message in place.")]
+                }
                 let sessionData = try JSONSerialization.jsonObject(with: Data(sessionJSON.utf8))
                 let data = try JSONSerialization.data(withJSONObject: ["session": sessionData, "messages": messages, "pendingQuestions": [], "isBusy": true, "streamingText": "", "queueError": NSNull()])
                 let transcript = try JSONDecoder().decode(RemoteTranscript.self, from: data)
-                split.setViewController(BloomTheme.navigation(ConversationController(model: model, session: session, preview: transcript)), for: .secondary)
+                let conversation = ConversationController(model: model, session: session, preview: transcript)
+                split.setViewController(BloomTheme.navigation(conversation), for: .secondary)
                 split.show(.secondary)
+                if arguments.contains("--exercise-transcript-updates") {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                        do { try conversation.exerciseTranscriptUpdates(updateSnapshots()) } catch {
+                            assertionFailure("Transcript update fixture: \(error)")
+                        }
+                    }
+                }
                 if arguments.contains("--render-landscape") {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                         window.bounds = CGRect(x: 0, y: 0, width: 1210, height: 834)
@@ -43,6 +61,46 @@ enum IOSPreviewFixture {
             }
         } catch { assertionFailure("Invalid UI preview: \(error)") }
     }
+
+    private static func message(_ id: Int, kind: String, text: String) throws -> [String: Any] {
+        ["id": id, "seq": id, "kind": kind,
+         "payload": try JSONSerialization.data(withJSONObject: ["text": text]).base64EncodedString()]
+    }
+
+    private static func updateSnapshots() throws -> [RemoteTranscript] {
+        let first = try message(1, kind: "user", text: "Keep this message in place.")
+        let second = try message(2, kind: "assistantText", text: "A short reply.")
+        let settled = try message(3, kind: "assistantText", text: "The streamed reply.")
+        let corrected = try message(2, kind: "assistantText", text: "A corrected reply.")
+        let states: [([[String: Any]], String)] = [
+            ([first, second], ""), ([first, second], "The streamed"),
+            ([first, second], "The streamed reply."), ([first, second, settled], ""),
+            ([first, corrected, settled], ""), ([first, corrected, settled], "Temporary tail"),
+            ([first, corrected, settled], ""),
+        ]
+        let session = try JSONSerialization.jsonObject(with: Data(sessionJSON.utf8))
+        return try states.map { messages, stream in
+            let data = try JSONSerialization.data(withJSONObject: ["session": session, "messages": messages,
+                "pendingQuestions": [], "isBusy": !stream.isEmpty, "streamingText": stream, "queueError": NSNull()])
+            return try JSONDecoder().decode(RemoteTranscript.self, from: data)
+        }
+    }
+
+    private static let markdownStress = """
+    ## Workspace services
+
+    | Service | Address | Purpose | Status |
+    | --- | --- | --- | --- |
+    | Laravel | localhost:3190 | Application requests | Running |
+    | PostgreSQL | postgres:5432 | Workspace database | Healthy |
+    | Vite | localhost:5173 | Frontend development | Watching |
+
+    1. Create a workspace.
+       - Install the project dependencies.
+         - Keep database data between restarts.
+       - Start the preview server.
+    2. Open the browser preview.
+    """
 
     private static let sessionJSON = #"{"id":"11111111-1111-4111-8111-111111111111","workspaceID":"22222222-2222-4222-8222-222222222222","title":"A faster way to reply","model":"GPT-5.4","agentKind":"codex","state":"running"}"#
     private static var catalogueJSON: String {

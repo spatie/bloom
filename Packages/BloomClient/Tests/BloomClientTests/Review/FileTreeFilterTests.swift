@@ -1,5 +1,5 @@
 import Testing
-@testable import BloomCore
+@testable import BloomClient
 
 /// The All files tab's filter field, which is a pure function over the listing and the needle.
 @Suite("File tree filter")

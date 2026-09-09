@@ -7,9 +7,13 @@ Closing the app or iOS suspending it never cancels an agent turn.
 
 ## Architecture
 
+See [Shared clients and a public Bloom protocol](CLIENT-ARCHITECTURE.md) for the proposed next
+extractions, feature-parity workflow and language-independent contract.
+
 `Packages/BloomClient` is plain Swift and Foundation. It has no UI imports, subprocesses,
 filesystem execution or database ownership. It contains the shared HTTPS connection, versioned
 commands, read projections, transcript merging, question drafts and a durable conversation outbox.
+It also owns the shared markdown parser, syntax highlighter, palette values and transcript row update decisions.
 Both Mac and iOS compile this package. Question parsing and answer construction use the same
 types as Mac's existing question cards, re-exported by BloomCore.
 The shared wire version is 13. Diagnostics use the same value type as Bloom Server; the collector
@@ -31,9 +35,15 @@ This follows Apple's [Swift package guidance](https://developer.apple.com/docume
 for sharing logic while preserving platform-appropriate interfaces. Apple's
 [split view controller](https://developer.apple.com/documentation/uikit/uisplitviewcontroller)
 handles size-class adaptation, and its [text view](https://developer.apple.com/documentation/uikit/uitextview)
-provides native editing. UIKit is the foundation here. SwiftUI is not a dependency. Small hosted
-SwiftUI views could be introduced where they prove useful without replacing the editing or
-navigation infrastructure.
+provides native editing. UIKit remains the navigation, scrolling and editing foundation.
+
+`Packages/BloomUI` holds shared SwiftUI presentation: outgoing bubbles, assistant prose, markdown
+block and table layout, code-block frames, diff gutters and hunk headers, syntax rows and file labels. Both the Mac transcript and iOS hosting cells use
+these components. Mac adapters retain native rich text, link actions, font preferences and caches;
+iOS uses the package's Dynamic Type renderer and system clipboard. Both renderers consume the
+same markdown parser and syntax highlighter. Native table adapters share row-change decisions,
+so incremental streaming updates leave unchanged cells in place. Tool cards, approvals and
+composers remain platform-specific and can adopt shared presentation incrementally.
 
 The current server's complete Codable graph includes execution-only planners, settings loaders
 and database lifecycle setters. Moving it wholesale would expose those setters to clients or
@@ -113,6 +123,20 @@ HTTPS sign-in still needs a configured Gateway and identity provider for live ve
 The foundation lists projects, workspaces and sessions, imports a GitHub repository using the
 server's credentials, creates a workspace using server-advertised composer defaults, sends and
 stops turns, merges incremental transcripts, runs configured scripts and opens HTTPS previews.
+
+The iPad workspace keeps its native conversation controller beside a WebKit preview or review,
+with a searchable Changes/Files inspector. Narrow windows use a native tab bar to switch tools and put the
+file list in a native sheet. Branch and uncommitted scopes use the existing server review API;
+diffs load lazily with at most two requests at once. All-files review, per-file diffs and read-only
+source browsing reuse the Mac diff parser, file tree/filter logic and BloomUI components. A
+refresh failure remains visible above cached changes. Source files and previews execute no code
+on the device beyond WebKit's normal web content.
+
+DEBUG launch fixtures `--bloom-ui-preview workspace-browser`, `workspace-review` and
+`workspace-files` render the actual native controllers with protocol-shaped sample replies and
+an embedded WebKit sample page. They export light-mode 13-inch iPad landscape layouts into the
+Simulator app's Documents directory. Add `--native-size` to keep the device's actual geometry.
+These are UI fixtures, not evidence of a live server session, and are absent from Release builds.
 Failed create/send requests retain their command IDs for explicit retry. They are not retried
 as new commands, because a network failure can follow a completed server mutation.
 

@@ -1,5 +1,5 @@
 import Testing
-@testable import BloomCore
+@testable import BloomClient
 
 @Suite("Markdown parsing")
 struct MarkdownParserTests {
@@ -197,6 +197,42 @@ struct MarkdownParserTests {
             return
         }
         #expect(items.first == [.paragraph(inline: [.text("one more")])])
+    }
+
+    @Test("nested lists preserve their hierarchy, starting number and inline links")
+    func nestedLists() {
+        let source = """
+        - Prepare the server
+          3. Open [settings](https://bloom.test/settings)
+          4. Run `bloom-server doctor`
+        - Create a workspace
+        """
+        #expect(MarkdownParser.parse(source) == [
+            .bulletList(items: [
+                [
+                    .paragraph(inline: [.text("Prepare the server")]),
+                    .numberedList(start: 3, items: [
+                        [.paragraph(inline: [
+                            .text("Open "),
+                            .link(text: [.text("settings")], url: "https://bloom.test/settings"),
+                        ])],
+                        [.paragraph(inline: [.text("Run "), .code("bloom-server doctor")])],
+                    ], tight: true),
+                ],
+                [.paragraph(inline: [.text("Create a workspace")])],
+            ], tight: true),
+        ])
+    }
+
+    @Test("an incomplete fence inside a list keeps code separate from the instruction")
+    func nestedStreamingFence() {
+        let source = "- Run this command\n  ```sh\n  echo hello"
+        #expect(MarkdownParser.parse(source) == [
+            .bulletList(items: [[
+                .paragraph(inline: [.text("Run this command")]),
+                .codeBlock(code: "echo hello", language: .shell, info: "sh"),
+            ]], tight: true),
+        ])
     }
 
     // MARK: Tables

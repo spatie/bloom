@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import BloomCore
+@testable import BloomClient
 
 /// **The three minute beach ball on the first launch after updating to 1.1.0.**
 ///

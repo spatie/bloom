@@ -1,5 +1,5 @@
 import Testing
-@testable import BloomCore
+@testable import BloomClient
 
 @Suite("Streaming inline parse cache")
 struct MarkdownInlineCacheTests {

@@ -8,8 +8,9 @@ final class BloomSplitController: UISplitViewController, UISplitViewControllerDe
         delegate = self
         preferredDisplayMode = .oneBesideSecondary
         preferredSplitBehavior = .tile
-        minimumPrimaryColumnWidth = 300
-        maximumPrimaryColumnWidth = 380
+        minimumPrimaryColumnWidth = 220
+        preferredPrimaryColumnWidthFraction = 0.19
+        maximumPrimaryColumnWidth = 320
         view.tintColor = BloomTheme.accent
         let projects = ProjectsController(model: model)
         setViewController(BloomTheme.navigation(projects), for: .primary)
@@ -26,7 +27,7 @@ final class BloomSplitController: UISplitViewController, UISplitViewControllerDe
     func splitViewController(_ splitViewController: UISplitViewController,
                              topColumnForCollapsingToProposedTopColumn proposedTopColumn: UISplitViewController.Column) -> UISplitViewController.Column {
         let detail = (viewController(for: .secondary) as? UINavigationController)?.topViewController
-        return detail is WorkspaceController || detail is ConversationController ? proposedTopColumn : .primary
+        return detail is WorkspaceDeskController || detail is WorkspaceController || detail is ConversationController ? proposedTopColumn : .primary
     }
 
     required init?(coder: NSCoder) { fatalError("Use init(model:)") }
@@ -138,7 +139,7 @@ final class ProjectsController: UITableViewController {
         tableView.deselectRow(at: indexPath, animated: true)
         let workspaces = workspaces(indexPath.section)
         if indexPath.row < workspaces.count {
-            let controller = WorkspaceController(model: model, workspace: workspaces[indexPath.row])
+            let controller = WorkspaceDeskController(connection: model, workspace: workspaces[indexPath.row])
             splitViewController?.showDetailViewController(BloomTheme.navigation(controller), sender: self)
         } else { createWorkspace(projects[indexPath.section]) }
     }

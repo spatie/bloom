@@ -18,22 +18,21 @@ def quote(value):
 
 sources = []
 references = []
-shared_sources = [root / 'Sources/BloomCore/Presentation/PaletteInk.swift']
-for index, source in enumerate(sorted((root / 'iOS/Bloom').glob('*.swift')) + shared_sources):
+for index, source in enumerate(sorted((root / 'iOS/Bloom').glob('*.swift'))):
     ref, build = f'F{index:023X}', f'B{index:023X}'
     add(ref, f'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = {quote(source)}; sourceTree = "<absolute>";')
     add(build, f'isa = PBXBuildFile; fileRef = {ref};')
     sources.append(build)
     references.append(ref)
 
-add('ROOT', 'isa = PBXProject; attributes = { LastUpgradeCheck = 2650; }; buildConfigurationList = PROJECTCONFIG; compatibilityVersion = "Xcode 16.0"; developmentRegion = en; knownRegions = (en, Base); mainGroup = GROUP; productRefGroup = PRODUCTS; projectDirPath = ""; projectRoot = ""; targets = (APP); packageReferences = (CLIENT, AUTH, SSH, APPAUTH);')
+add('ROOT', 'isa = PBXProject; attributes = { LastUpgradeCheck = 2650; }; buildConfigurationList = PROJECTCONFIG; compatibilityVersion = "Xcode 16.0"; developmentRegion = en; knownRegions = (en, Base); mainGroup = GROUP; productRefGroup = PRODUCTS; projectDirPath = ""; projectRoot = ""; targets = (APP); packageReferences = (CLIENT, AUTH, SSH, UI, APPAUTH);')
 add('GROUP', f'isa = PBXGroup; children = ({",".join(references)}, PRODUCTS); sourceTree = "<group>";')
 add('PRODUCTS', 'isa = PBXGroup; children = (PRODUCT); name = Products; sourceTree = "<group>";')
 add('PRODUCT', 'isa = PBXFileReference; explicitFileType = wrapper.application; path = Bloom.app; sourceTree = BUILT_PRODUCTS_DIR;')
-add('APP', 'isa = PBXNativeTarget; buildConfigurationList = APPCONFIG; buildPhases = (SOURCES, FRAMEWORKS, RESOURCES); buildRules = (); dependencies = (); name = Bloom; productName = Bloom; productReference = PRODUCT; productType = "com.apple.product-type.application"; packageProductDependencies = (CLIENTPRODUCT, AUTHPRODUCT, SSHPRODUCT, APPAUTHPRODUCT);')
+add('APP', 'isa = PBXNativeTarget; buildConfigurationList = APPCONFIG; buildPhases = (SOURCES, FRAMEWORKS, RESOURCES); buildRules = (); dependencies = (); name = Bloom; productName = Bloom; productReference = PRODUCT; productType = "com.apple.product-type.application"; packageProductDependencies = (CLIENTPRODUCT, AUTHPRODUCT, SSHPRODUCT, UIPRODUCT, APPAUTHPRODUCT);')
 add('SOURCES', f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({",".join(sources)}); runOnlyForDeploymentPostprocessing = 0;')
-add('FRAMEWORKS', 'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (CLIENTBUILD, AUTHBUILD, SSHBUILD, APPAUTHBUILD); runOnlyForDeploymentPostprocessing = 0;')
-for key, name in [('CLIENT', 'BloomClient'), ('AUTH', 'BloomAuthentication'), ('SSH', 'BloomSSH')]:
+add('FRAMEWORKS', 'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (CLIENTBUILD, AUTHBUILD, SSHBUILD, UIBUILD, APPAUTHBUILD); runOnlyForDeploymentPostprocessing = 0;')
+for key, name in [('CLIENT', 'BloomClient'), ('AUTH', 'BloomAuthentication'), ('SSH', 'BloomSSH'), ('UI', 'BloomUI')]:
     add(key, f'isa = XCLocalSwiftPackageReference; relativePath = {quote(root / "Packages" / name)};')
     add(key + 'PRODUCT', f'isa = XCSwiftPackageProductDependency; package = {key}; productName = {name};')
     add(key + 'BUILD', f'isa = PBXBuildFile; productRef = {key}PRODUCT;')

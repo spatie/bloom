@@ -124,7 +124,7 @@ for prefix in "${baton_allowed[@]}"; do
   fi
 done
 
-echo "==> only the app target imports a UI framework"
+echo "==> UI frameworks stay in app and presentation targets"
 # The split only means anything while it holds. Everything in BloomCore is
 # reachable by the test target and everything in Sources/Bloom is not, so a
 # decision that drifts into a view is a decision nothing can test. One import is
@@ -148,7 +148,7 @@ echo "==> only the app target imports a UI framework"
 ui_import='(^|[^A-Za-z0-9_])import[[:space:]]+([a-z]+[[:space:]]+)?(SwiftUI|AppKit|UIKit|Cocoa)([^A-Za-z0-9_]|$)'
 if hits="$(git grep --untracked -n -I -E "$ui_import" -- 'Sources/BloomCore/*' 'Sources/bloom-bridge/*' 'Sources/bloom-server/*' 'Packages/BloomClient/Sources/*' || true)" && [ -n "$hits" ]; then
   echo "$hits" | show
-  report "A target that is not Sources/Bloom imports a UI framework. Move the view part into Sources/Bloom and leave the decision behind, where the suite can reach it."
+  report "A core or transport target imports a UI framework. Keep views in Sources/Bloom, iOS/Bloom or Packages/BloomUI, and decisions in the portable core."
 fi
 
 echo "==> one way to start a workspace"

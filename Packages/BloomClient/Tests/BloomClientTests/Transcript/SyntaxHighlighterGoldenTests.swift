@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import BloomCore
+@testable import BloomClient
 
 /// The whole token stream for a sample of every language the highlighter knows, recorded once and
 /// compared whole. The scanner was rewritten for speed (hoisted word sets, hoisted UTF-16 needles,
@@ -8,7 +8,7 @@ import Testing
 /// work was that nothing observable changes, which no assertion about one construct at a time can
 /// show. A failure here prints the two dumps, so the line and the token that moved are readable
 /// from the diff. Re-record it only when a highlighting change is intended.
-@Suite("Syntax highlighter goldens", .tags(.agentProtocol))
+@Suite("Syntax highlighter goldens")
 struct SyntaxHighlighterGoldenTests {
     @Test("tokenizes every language exactly as recorded")
     func matchesTheRecordedTokens() {
