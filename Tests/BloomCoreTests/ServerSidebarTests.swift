@@ -39,8 +39,10 @@ struct ServerSidebarTests {
     }
 
     @Test func failingArchiveScriptPreservesTheWorktree() async throws {
-        let (repo, store, workspace, _, runtime) = try await fixture()
-        try repo.write(".bloom/settings.toml", "[git]\ndelete_branch_on_archive = false\n[scripts]\narchive = \"exit 7\"\n")
+        let (_, store, workspace, _, runtime) = try await fixture()
+        try "[git]\ndelete_branch_on_archive = false\n[scripts]\narchive = \"exit 7\"\n".write(
+            toFile: workspace.path + "/.bloom/settings.toml", atomically: true, encoding: .utf8
+        )
         let first = await runtime.respond(to: ServerRequest(.workspace(workspaceID: workspace.id, action: .archivePreview)))
         guard case .archivePreview(let preview) = first.result else { Issue.record("Missing preview"); return }
         let reply = await runtime.respond(to: ServerRequest(.workspace(workspaceID: workspace.id, action: .archive(confirmation: preview.id))))
@@ -56,7 +58,7 @@ struct ServerSidebarTests {
         let (repo, store, workspace, _, runtime) = try await fixture()
         // Cleanup records outside the worktree, which is removed by a successful archive.
         let script = "[git]\ndelete_branch_on_archive = false\n[scripts]\narchive = \"echo once >> '" + repo.path + "/archive-count'; sleep 0.1\"\n"
-        try repo.write(".bloom/settings.toml", script)
+        try repo.write(".bloom/settings.local.toml", script)
         let checked = await runtime.respond(to: ServerRequest(.workspace(workspaceID: workspace.id, action: .archivePreview)))
         guard case .archivePreview(let preview) = checked.result else { Issue.record("Missing preview"); return }
         let operation = ServerOperation.workspace(workspaceID: workspace.id, action: .archive(confirmation: preview.id))
