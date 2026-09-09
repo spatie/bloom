@@ -64,7 +64,10 @@ struct BloomWindowToolbar: ToolbarContent {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(workspace.name).fontWeight(.semibold)
                     Label(app.remoteServer.displayName, systemImage: "server.rack")
+                        // Toolbars otherwise inherit icon-only labels, leaving a stray glyph below the title.
+                        .labelStyle(.titleAndIcon)
                         .font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             } else {
                 WindowTitleControl(app: app)
