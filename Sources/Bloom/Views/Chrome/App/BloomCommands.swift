@@ -28,6 +28,7 @@ struct BloomCommands: Commands {
     /// Landing the branch, published by the pull request band because that is where the
     /// confirmation lives. Nil whenever that band is not on screen, which greys the item.
     @FocusedValue(\.mergeAction) private var mergeAction
+    @FocusedValue(\.composerTranscript) private var composerTranscript: TranscriptModel?
     @FocusedValue(\.isTypingProse) private var isTypingProse: Bool?
 
     /// Opens the project settings window, which is a scene rather than a sheet.
@@ -562,9 +563,9 @@ struct BloomCommands: Commands {
             // stops the agent that row is about. It is `existingModel`, which only reads: a
             // workspace this launch has never opened has no transcript to stop anyway.
             MenuCommand(.stopAgent) {
-                subjectModel?.activeTranscript?.stop()
+                (composerTranscript ?? subjectModel?.activeTranscript)?.stop()
             }
-            .disabled(subjectModel?.activeTranscript?.isRunning != true)
+            .disabled((composerTranscript ?? subjectModel?.activeTranscript)?.isRunning != true)
         }
 
         CommandGroup(replacing: .help) {

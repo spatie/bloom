@@ -24,6 +24,8 @@ struct ComposerView: View {
     /// passes its own, because a conversation that cannot change a file should not open by
     /// inviting somebody to ask it to.
     var placeholder: String = ComposerEditor.chatPlaceholder
+    var onDismiss: (() -> Void)?
+    var includesReviewComments = true
     var destinationLabel: String?
     /// The chats this composer may be pointed at, when the caller is offering a choice. Empty,
     /// the default, leaves the strip above the box a plain sentence. See
@@ -134,7 +136,8 @@ struct ComposerView: View {
                 onAttach: actions.attach,
                 onQuickPrompt: { fire($0, insert: actions.insert) },
                 onSend: send,
-                onStop: transcript.stop
+                onStop: transcript.stop,
+                onSideConversation: canOpenSideConversation ? openSideConversation : nil
             )
         }
         .task(id: transcript.session.id) { await prepare() }
@@ -146,6 +149,7 @@ struct ComposerView: View {
             isFocused = true
             caret = 0
         }
+        .focusedValue(\.composerTranscript, isFocused ? transcript : nil)
         .onDisappear(perform: saveDraftNow)
     }
 
@@ -194,7 +198,7 @@ struct ComposerView: View {
 
     /// The pending review, which rides with whatever is sent next from this workspace.
     private var reviewComments: [ReviewComment] {
-        model?.reviewComments ?? []
+        includesReviewComments ? (model?.reviewComments ?? []) : []
     }
 
     /// Attachments alone are a turn. Dropping a screenshot in and pressing send is a sentence, and
@@ -216,7 +220,7 @@ struct ComposerView: View {
             send()
             return true
         case .escape:
-            isFocused = false
+            if let onDismiss { onDismiss() } else { isFocused = false }
             return true
         case .up, .down, .tab:
             return false
@@ -362,9 +366,36 @@ struct ComposerView: View {
     /// `TranscriptModel.submit`'s decision, not this view's: they join the chat's queue and go
     /// when the queue is allowed to move. Deciding it here would be a second copy of the rule, and
     /// the rule already exists in a place the suite can reach it. See `DeliveryHold`.
+    private var canOpenSideConversation: Bool {
+        model != nil && transcript.session.sideConversationParentID == nil && onDismiss == nil
+    }
+
+    private func openSideConversation() {
+        model?.openSideConversation(from: transcript)
+    }
+
     private func send() {
         guard canSend else { return }
         draftSaveTask?.cancel()
+
+        if let question = SideConversation.question(in: transcript.draft) {
+            guard canOpenSideConversation, let model else {
+                app.notice = BloomNotice(message: "Use /btw in a workspace chat to open a side conversation.")
+                return
+            }
+            // The command itself belongs to Bloom. Leave review comments on the main chat.
+            guard model.openSideConversation(from: transcript, question: question) else { return }
+            transcript.draft = ""
+            caret = 0
+            saveDraftNow()
+            return
+        }
+
+        if onDismiss != nil,
+           ChatClearCommand.matches(transcript.draft) || ChatCloseCommand.matches(transcript.draft) {
+            app.notice = BloomNotice(message: "Use Keep and start new in the side conversation menu.")
+            return
+        }
 
         if ChatCloseCommand.matches(transcript.draft) {
             startFreshChat(closingPrevious: true)

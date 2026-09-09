@@ -857,3 +857,40 @@ private func eventually(
         #expect(sessions.first?.agentKind == .codex)
     }
 }
+
+@Suite("Side conversation Codex transport", .scratchDirectory)
+struct SideConversationCodexRunnerTests {
+    @Test func failedStartRetriesWithContextWithoutChangingTheEditableQuestion() async throws {
+        let store = try makeTestStore("side-codex-wire")
+        let (createdParent, _) = try await makeCodexSession(store, agentSessionID: "parent-thread")
+        let parent = try #require(try await store.session(id: createdParent.id))
+        let child = try await store.openSideConversation(parentID: parent.id, streamingText: "Original context")
+        let box = scriptedBox()
+        let runner = makeRunner(store: store, session: child, box: box)
+        box.fail("turn/start", code: -32000, message: "Try again")
+        do {
+            try await runner.send("Why?")
+            Issue.record("Expected the scripted first start to fail")
+        } catch {
+            #expect((error as? CodexRPCError)?.message == "Try again")
+        }
+        #expect(try await store.setting(SideConversation.contextDeliveredKey(child.id)) == nil)
+        await runner.shutdown()
+        let resumed = try #require(try await store.session(id: child.id))
+        let retryBox = scriptedBox()
+        let retryRunner = makeRunner(store: store, session: resumed, box: retryBox)
+        try await retryRunner.send("Why?")
+        let frames = box.process.stdin + retryBox.process.stdin
+        let starts = frames.compactMap(JSONValue.parse).filter { $0["method"]?.stringValue == "turn/start" }
+        #expect(starts.count == 2)
+        for start in starts {
+            #expect(start["params"]?["input"]?[0]?["text"]?.stringValue?.contains("Original context") == true)
+        }
+        #expect(!box.process.sentMethods.contains("thread/resume"))
+        #expect(try await store.setting(SideConversation.contextDeliveredKey(child.id)) == "1")
+        let messages = try await store.messages(sessionID: child.id).filter { $0.kind == .user }
+        #expect(messages.allSatisfy { UserTurnPrompt.text(in: $0.payload) == "Why?" })
+        #expect(try await store.session(id: parent.id) == parent)
+        await retryRunner.shutdown()
+    }
+}

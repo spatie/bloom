@@ -397,6 +397,9 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     ///
     /// Nil for every chat the owner made, which is nearly all of them.
     public var parentSessionID: SessionID?
+    /// A temporary conversation opened by the owner, separate from agent-created crew.
+    /// Cleared when kept as a regular chat; its context retains the link to the origin.
+    public var sideConversationParentID: SessionID?
     public var title: String
     public var agentSessionID: String?
     public var model: String
@@ -451,6 +454,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         id: SessionID = .new(),
         workspaceID: WorkspaceID?,
         parentSessionID: SessionID? = nil,
+        sideConversationParentID: SessionID? = nil,
         title: String = PaneNaming.chat,
         agentSessionID: String? = nil,
         model: String = AppDefaults.fallbackModel,
@@ -471,6 +475,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         self.id = id
         self.workspaceID = workspaceID
         self.parentSessionID = parentSessionID
+        self.sideConversationParentID = sideConversationParentID
         self.title = title
         self.agentSessionID = agentSessionID
         self.model = model
@@ -497,6 +502,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         id: SessionID = .new(),
         workspaceID: WorkspaceID?,
         parentSessionID: SessionID? = nil,
+        sideConversationParentID: SessionID? = nil,
         title: String = PaneNaming.chat,
         agentSessionID: String? = nil,
         model: String = AppDefaults.fallbackModel,
@@ -516,6 +522,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
             id: id,
             workspaceID: workspaceID,
             parentSessionID: parentSessionID,
+            sideConversationParentID: sideConversationParentID,
             title: title,
             agentSessionID: agentSessionID,
             model: model,

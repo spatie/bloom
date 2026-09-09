@@ -137,6 +137,7 @@ public actor CodexRunner: SessionRunner {
         let generation = handle.generation
         let replacement = handle.prepareReplacement()
         defer { handle.finishReplacement(replacement) }
+        let prompt = try await store.sideConversationTurn(text, sessionID: sessionID)
         await applyContextWindowChange()
         try handle.check(generation)
         let client = try await connected()
@@ -160,14 +161,14 @@ public actor CodexRunner: SessionRunner {
         // a turn the server has been told to abandon is not a turn a message belongs in, whatever
         // the server answers about it.
         if let turnID = handle.steerableTurnID,
-           await steer(text, threadID: threadID, turnID: turnID, on: client) {
+           await steer(prompt, threadID: threadID, turnID: turnID, on: client) {
             return
         }
         try handle.check(generation)
 
         let turn = try await client.startTurn(
             threadID: threadID,
-            input: [.text(text)],
+            input: [.text(prompt)],
             model: wireModel,
             effort: session.effort,
             approvalPolicy: Self.approvalPolicy(for: session.permissionMode),
@@ -183,6 +184,10 @@ public actor CodexRunner: SessionRunner {
 
         session.apply(.turnStarted)
         await save(session)
+        if prompt != text {
+            // startTurn succeeded. A rejection leaves the context available for the next retry.
+            try? await store.acknowledgeSideConversationContext(sessionID: sessionID)
+        }
     }
 
     /// Stop the turn that is running, and leave the server where it is.

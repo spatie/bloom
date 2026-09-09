@@ -74,6 +74,7 @@ public enum SlashCommandIndex {
     /// be offers that go nowhere. So this is only the ones that are a prompt in their own right
     /// and that a Bloom session can actually carry out. Adding to it is a decision, not a sweep.
     public static let builtIns: [SlashCommand] = [
+        SlashCommand(name: "btw", detail: "Ask a side question while the main agent works", kind: .command, scope: .builtIn),
         SlashCommand(
             name: "close",
             detail: "Close this chat and start a fresh one",

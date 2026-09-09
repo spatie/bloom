@@ -288,6 +288,8 @@ final class TranscriptModel {
     /// are two requests, and the composer has nothing to clear afterwards.
     private(set) var composerFocusRequests = 0
 
+    func focusComposer() { composerFocusRequests += 1 }
+
     private var runner: (any SessionRunner)?
 
     func codexSubagentTranscript(for id: SubagentID) async -> SubagentTranscript? {
