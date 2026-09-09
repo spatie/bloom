@@ -681,7 +681,6 @@ struct DiffView: View {
             }
         } else {
             standaloneDiff(document)
-                .id(document.file)
         }
     }
 
@@ -694,6 +693,7 @@ struct DiffView: View {
                         rowView(row, document: document, width: width)
                     }
                 }
+                .id(document.file)
                 .frame(width: width, alignment: .leading)
             }
             // A scroll view with two axes CENTRES content that does not fill it, so a short diff

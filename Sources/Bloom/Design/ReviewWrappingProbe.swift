@@ -83,6 +83,12 @@ enum ReviewWrappingProbe {
             menu.performActionForItem(at: 0)
             check(commented == [2, 0, 0], "native menu changed its anchor after a refresh")
         } else { check(false, "wrapped gutter offered no comment menu") }
+        key(125)
+        view.commentable = [true]
+        view.heights = [18]
+        view.onComment = { commented.append($0) }
+        key(36)
+        check(commented.last == 0, "keyboard focus retained a row removed by a diff refresh")
         window.contentView = nil
     }
 

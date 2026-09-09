@@ -67,6 +67,10 @@ struct WrappedDiffChrome: NSViewRepresentable {
         }
 
         override func keyDown(with event: NSEvent) {
+            if let row = keyboardRow, !commentable.indices.contains(row) || !commentable[row] {
+                keyboardRow = commentable.firstIndex(of: true)
+                needsDisplay = true
+            }
             guard let row = keyboardRow else { super.keyDown(with: event); return }
             switch event.keyCode {
             case 125, 126:
