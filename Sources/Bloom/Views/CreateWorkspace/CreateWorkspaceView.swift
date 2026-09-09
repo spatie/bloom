@@ -348,25 +348,25 @@ struct CreateWorkspaceView: View {
                 // arrives as a bitmap of the same `RepoIcon` the chip and the sidebar draw. See
                 // `RepoIconImage`.
                 //
-                // No heading over them. The rows are project names wearing their own badges and
-                // the control that opened the menu is showing one of them, so "Project" written
-                // above would be a word to read past. `labelsHidden` takes the heading off the
-                // picker without taking its name away from VoiceOver.
+                // One picker keeps a single selection across both visibility groups.
                 Picker("Project", selection: Binding(
                     get: { repoID ?? RepoID("") },
                     set: { repoID = $0.rawValue.isEmpty ? nil : $0 }
                 )) {
-                    ForEach(app.repos) { candidate in
-                        Label {
-                            Text(candidate.name)
-                        } icon: {
-                            if let mark = RepoIconImage.of(candidate) {
-                                // `.original`, because the tile is the project's colour and a
-                                // template image in a menu is painted flat in the label colour.
-                                Image(nsImage: mark).renderingMode(.original)
+                    ForEach(ProjectMenuGroup.grouped(app.repos)) { group in
+                        Section(group.title) {
+                            ForEach(group.repos) { candidate in
+                                Label {
+                                    Text(candidate.name)
+                                } icon: {
+                                    if let mark = RepoIconImage.of(candidate) {
+                                        // Keep the project's colours in the menu's image slot.
+                                        Image(nsImage: mark).renderingMode(.original)
+                                    }
+                                }
+                                .tag(candidate.id)
                             }
                         }
-                        .tag(candidate.id)
                     }
                 }
                 .pickerStyle(.inline)
