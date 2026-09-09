@@ -5,6 +5,124 @@ import Testing
 
 @Suite("ServerRuntime", .tags(.persistence, .subprocess), .scratchDirectory)
 struct ServerRuntimeTests {
+    @Test func sharedCreationPreservesControlsAndUploadsTheOpeningPrompt() async throws {
+        let repository = try await TempRepo()
+        defer { repository.cleanUp() }
+        let fixture = try await ServerFixture()
+        let captured = Mutex<ServerTestRunner?>(nil)
+        let runtime = ServerRuntime(store: fixture.store, makeRunner: { session, _, store in
+            let runner = ServerTestRunner(sessionID: session.id, store: store)
+            captured.withLock { $0 = runner }
+            return runner
+        })
+        var request = ServerWorkspaceRequest(repositoryPath: repository.path, name: "Attachment test")
+        request.mode = .chat
+        request.prompt = "Read .bloom/attachments/draft/notes.txt"
+        request.controls = ComposerControls(model: "test-model", effort: "high", agentKind: .claudeCode, permissionMode: .plan)
+        request.baseBranch = "main"
+        request.runSetupScript = false
+        request.attachments = [ServerInitialAttachment(sourcePath: ".bloom/attachments/draft/notes.txt", name: "notes.txt", data: Data("Attached content".utf8))]
+        let wire = ServerRequest(.create(request))
+        let encoded = try JSONEncoder().encode(wire)
+        #expect(try JSONDecoder().decode(ServerRequest.self, from: encoded) == wire)
+        let response = await runtime.respond(to: wire)
+        guard case .creation(.workspaceStarted(let workspace, let session, _, _)) = response.result else {
+            Issue.record("Creation failed: \(String(describing: response.result))"); await runtime.shutdown(); return
+        }
+        defer { try? FileManager.default.removeItem(atPath: workspace.path) }
+        let id = try #require(session?.id)
+        let stored = try #require(try await fixture.store.session(id: id))
+        #expect(stored.model == "test-model")
+        #expect(stored.effort == "high")
+        #expect(workspace.baseBranch == "main")
+        await waitUntil("opening prompt reaches runner") {
+            guard let runner = captured.withLock({ $0 }) else { return false }
+            return await runner.sends.count == 1
+        }
+        let runner = try #require(captured.withLock { $0 })
+        let sent = try #require(await runner.sends.first)
+        #expect(!sent.contains("/draft/"))
+        let path = String(sent.dropFirst("Read ".count))
+        #expect(try String(contentsOfFile: workspace.path + "/" + path, encoding: .utf8) == "Attached content")
+        let replay = await runtime.respond(to: wire)
+        if case .creation(.workspaceStarted(let repeated, _, _, _)) = replay.result { #expect(repeated.id == workspace.id) } else { Issue.record("Missing replay") }
+        #expect(try await fixture.store.workspaces().count == 2)
+        await runtime.shutdown()
+    }
+
+    @Test(arguments: [WorkspaceStartMode.terminal, .browser])
+    func sharedCreationWithoutAnAgent(mode: WorkspaceStartMode) async throws {
+        let repository = try await TempRepo()
+        defer { repository.cleanUp() }
+        let fixture = try await ServerFixture()
+        let runtime = fixture.runtime()
+        var request = ServerWorkspaceRequest(repositoryPath: repository.path, name: "Explore")
+        request.mode = mode
+        request.runSetupScript = false
+        let response = await runtime.respond(to: ServerRequest(.create(request)))
+        guard case .creation(.workspaceStarted(let workspace, let session, _, _)) = response.result else {
+            Issue.record("Missing workspace: \(String(describing: response.result))"); await runtime.shutdown(); return
+        }
+        defer { try? FileManager.default.removeItem(atPath: workspace.path) }
+        #expect(session == nil)
+        #expect(try await fixture.store.sessions(workspaceID: workspace.id).isEmpty)
+        #expect(await fixture.runner.sends.isEmpty)
+        await runtime.shutdown()
+    }
+
+    @Test func sharedProjectInspectionAndRegistrationRejectChangedFolders() async throws {
+        let repository = try await TempRepo()
+        defer { repository.cleanUp() }
+        let fixture = try await ServerFixture()
+        let runtime = fixture.runtime()
+        let inspected = await runtime.respond(to: ServerRequest(.creation(.inspectProject(repository.path))))
+        guard case .creation(.inspection(let inspection)) = inspected.result else { Issue.record("Missing inspection"); return }
+        var changed = inspection.facts
+        changed.path += "/different"
+        let refused = await runtime.respond(to: ServerRequest(.creation(.startProject(typed: repository.path, expected: changed))))
+        #expect(!refused.isAccepted)
+        let added = await runtime.respond(to: ServerRequest(.creation(.startProject(typed: repository.path, expected: inspection.facts))))
+        guard case .creation(.project(let repo)) = added.result else { Issue.record("Missing project"); return }
+        let root = try await Git.topLevel(of: repository.path)
+        #expect(repo.path == root)
+        let branches = await runtime.respond(to: ServerRequest(.creation(.checkouts(repo.id))))
+        if case .creation(.checkouts) = branches.result {} else { Issue.record("Missing checkouts") }
+        await runtime.shutdown()
+    }
+
+    @Test func failedRemoteSetupRetainsThePromptWithoutStartingAnAgent() async throws {
+        let repository = try await TempRepo()
+        defer { repository.cleanUp() }
+        try repository.write(".conductor/settings.toml", "[scripts]\nsetup = \"exit 3\"\n")
+        let fixture = try await ServerFixture()
+        let runtime = fixture.runtime()
+        var request = ServerWorkspaceRequest(repositoryPath: repository.path, name: "Setup failure")
+        request.mode = .chat
+        request.prompt = "Keep this task"
+        request.runSetupScript = true
+        let reply = await runtime.respond(to: ServerRequest(.create(request)))
+        guard case .creation(.workspaceStarted(let workspace, let session, let succeeded, let draft)) = reply.result else {
+            Issue.record("Missing failed setup result"); await runtime.shutdown(); return
+        }
+        defer { try? FileManager.default.removeItem(atPath: workspace.path) }
+        #expect(succeeded == false)
+        #expect(session != nil)
+        #expect(draft == "Keep this task")
+        #expect(await fixture.runner.sends.isEmpty)
+        await runtime.shutdown()
+    }
+
+    @Test func githubRepositoryNamesCannotEscapeTheCloneDirectory() throws {
+        #expect(try GitHubRepositoryBrowser.validatedName("spatie/bloom") == "spatie/bloom")
+        for input in ["../bloom", "spatie/..", "/tmp/owned", "--config/x", "spatie/-x", "a/b/c", "a/b\n", "a/$(whoami)"] {
+            #expect(throws: (any Error).self) { try GitHubRepositoryBrowser.validatedName(input) }
+        }
+        let json = Data(#"{"full_name":"spatie/bloom","description":null,"private":true}"#.utf8)
+        let repo = try JSONDecoder().decode(GitHubRepositoryListing.self, from: json)
+        #expect(repo.nameWithOwner == "spatie/bloom")
+        #expect(repo.isPrivate)
+    }
+
     @Test func closingAConversationStopsItsRunnerAndRefusesFurtherPrompts() async throws {
         let fixture = try await ServerFixture()
         let runtime = fixture.runtime()

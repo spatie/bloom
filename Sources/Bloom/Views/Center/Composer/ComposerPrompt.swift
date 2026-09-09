@@ -57,6 +57,7 @@ struct ComposerPrompt<Footer: View>: View {
     var onOpenCommand: (@MainActor (String) -> Void)?
     var isFloating = false
     var remote: RemoteSessionConnection?
+    var creationSource: CreationComposerSource?
     /// The footer, handed what it can ask this view to write into the draft. Passed in rather than
     /// reached for, because everything an attachment and a quick prompt do lives here and the
     /// footer is only the buttons. See `ComposerPromptActions`.
@@ -246,6 +247,7 @@ struct ComposerPrompt<Footer: View>: View {
         }
         .task(id: mentionRoot + (remote?.sessionID.rawValue ?? "")) {
             if let remote { slashCatalog = remote.commands; return }
+            if let creationSource { slashCatalog = creationSource.commands; return }
             let catalog = SlashCommandCatalog.shared(for: mentionRoot)
             slashCatalog = catalog
             await catalog.load(workspacePath: mentionRoot)
@@ -254,7 +256,7 @@ struct ComposerPrompt<Footer: View>: View {
         // worth re-reading one. A skill written in another window while Bloom stayed open is in
         // the list by the time the user has finished typing the slash.
         .task(id: openMenu.kind == .slash) {
-            guard remote == nil else { return }
+            guard remote == nil, creationSource == nil else { return }
             guard openMenu.kind == .slash else { return }
             await slashCatalog.refreshIfStale(workspacePath: mentionRoot)
         }
@@ -500,7 +502,7 @@ struct ComposerPrompt<Footer: View>: View {
             return
         }
         let paths: [String]
-        if let remote { paths = await remote.files() } else { paths = await FileIndex.shared.files(workspacePath: mentionRoot) }
+        if let remote { paths = await remote.files() } else if let creationSource { paths = creationSource.files } else { paths = await FileIndex.shared.files(workspacePath: mentionRoot) }
         let query = token.query
         // Off the main actor: a large repository has tens of thousands of tracked files and this
         // runs on every keystroke after the `@`.
@@ -719,7 +721,7 @@ struct ComposerPrompt<Footer: View>: View {
         // `@mention` already says "this directory" without pretending it is one attachment.
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
-        if remote == nil { panel.directoryURL = URL(filePath: mentionRoot) }
+        if remote == nil, creationSource == nil { panel.directoryURL = URL(filePath: mentionRoot) }
 
         guard await panel.present() == .OK else { return }
 

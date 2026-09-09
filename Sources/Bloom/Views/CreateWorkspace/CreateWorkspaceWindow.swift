@@ -65,29 +65,10 @@ private struct CreateWorkspaceWindowContent: View {
     let repoID: RepoID?
 
     @Environment(AppModel.self) private var app
-    @State private var isRemote = false
-
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("Create on", selection: $isRemote) {
-                Text("This Mac").tag(false)
-                Text(app.remoteServer.connectionLabel).tag(true)
-            }
-            .pickerStyle(.segmented)
-            .padding()
-            Divider()
-            if isRemote {
-                RemoteWorkspaceCreationView(model: app.remoteServer)
-            } else {
-                CreateWorkspaceView(initialRepo: app.repos.first { $0.id == repoID })
-            }
-        }
-        .onAppear {
-            if let repo = app.remoteServer.catalogue?.repositories.first(where: { $0.id == repoID }) {
-                app.remoteServer.remoteRepositoryPath = repo.path
-                isRemote = true
-            } else { isRemote = app.selection.isRemote || (app.repos.isEmpty && app.remoteServer.isConfigured) }
-        }
+        let remoteRepo = app.remoteServer.catalogue?.repositories.first { $0.id == repoID }
+        let isRemote = remoteRepo != nil || (repoID == nil && app.selection.isRemote)
+        CreateWorkspaceView(initialRepo: remoteRepo ?? app.repos.first { $0.id == repoID }, initialIsRemote: isRemote)
     }
 }
 

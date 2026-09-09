@@ -51,11 +51,15 @@ public enum ServerFileOperations {
         return ServerDownload(path: path, data: data)
     }
 
-    public static func upload(workspace: Workspace, name: String, data: Data) throws -> String {
+    static func validateUpload(name: String, data: Data) throws {
         guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains("\0"),
               name.utf8.count <= 240, data.count <= transferLimit else {
             throw ServerFailure("Choose a file up to 8 MB with a valid filename.")
         }
+    }
+
+    public static func upload(workspace: Workspace, name: String, data: Data) throws -> String {
+        try validateUpload(name: name, data: data)
         let path = ".bloom/attachments/\(UUID().uuidString)/\(name)"
         let url = try contained(path, workspace: workspace)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

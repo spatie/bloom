@@ -261,7 +261,7 @@ use the previous protocol until the app and server are upgraded together.
 
 ## Protocol and ownership
 
-`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 9). A protocol mismatch
+`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 10). A protocol mismatch
 is refused before dispatch. Commands and replies carry UUIDs, so a long setup command does not
 block transcript reads or controls on the same connection.
 
@@ -344,3 +344,16 @@ a process and resuming its conversation. The deterministic fixture makes no mode
 provider authentication and model execution are separate checks. A real Codex turn has also been
 verified on the Ubuntu 26.04 host: it continued after SSH disconnected, requested approval for a
 file change, completed after approval and returned the expected file through the server API.
+
+### Shared creation
+
+New Workspace and Start a Project use the same views for This Mac and the configured server.
+The machine menu selects where repositories, branches, pull requests and project folders are
+read. Browse GitHub lists repositories using that machine's authenticated `gh` account and
+clones the selected repository there. Credentials are never copied between machines.
+
+Remote workspace creation carries the selected base or checkout, composer controls, setup
+choice and staged attachments to the server. Chat creation queues its opening prompt once;
+terminal and browser creation do not create an agent session. A failed setup retains the prompt
+as a draft. Project folder inspection and creation use the same core planner on both machines,
+and the server refuses creation if the inspected folder facts have changed.

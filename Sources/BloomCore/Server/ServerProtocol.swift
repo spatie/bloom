@@ -2,7 +2,7 @@ import Foundation
 
 /// Versioned values cross the connection; database handles and local file URLs never do.
 public struct ServerRequest: Codable, Sendable, Equatable {
-    public static let protocolVersion = 9
+    public static let protocolVersion = 10
     public var version: Int
     public var id: UUID
     public var operation: ServerOperation
@@ -16,6 +16,7 @@ public struct ServerRequest: Codable, Sendable, Equatable {
 
 public enum ServerOperation: Codable, Sendable, Equatable {
     case hello
+    case creation(ServerCreationOperation)
     case catalogue
     case previewAddress(String)
     case terminalStream(workspaceID: WorkspaceID, name: String)
@@ -40,6 +41,7 @@ public enum ServerOperation: Codable, Sendable, Equatable {
     var mutates: Bool {
         switch self {
         case .hello, .catalogue, .previewAddress, .transcript, .changes, .patch, .file, .composer: false
+        case .creation(let action): action.mutates
         case .project, .create, .send, .stop, .answer, .configure, .cancelQueued, .setComposer, .markRead, .renameSession, .closeSession, .terminalStream: true
         case .workspace(_, let action): action.mutates
         }
@@ -53,6 +55,14 @@ public struct ServerWorkspaceRequest: Codable, Sendable, Equatable {
     public var model: String
     public var effort: String
     public var permissionMode: PermissionMode
+
+    public var prompt: String?
+    public var baseBranch: String?
+    public var checkout: WorkspaceCheckout?
+    public var controls: ComposerControls?
+    public var mode: WorkspaceStartMode?
+    public var runSetupScript: Bool?
+    public var attachments: [ServerInitialAttachment]?
 
     public init(
         repositoryPath: String, name: String, agent: AgentKind = .claudeCode,
@@ -114,6 +124,7 @@ public struct ServerReply: Codable, Sendable {
 
 public enum ServerResult: Codable, Sendable {
     case hello(name: String)
+    case creation(ServerCreationResult)
     case catalogue(ServerCatalogue)
     case composer(ServerComposerState)
     case created(session: Session, workspace: Workspace, setupSucceeded: Bool?)

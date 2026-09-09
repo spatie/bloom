@@ -52,9 +52,9 @@ func runtimeFixture(t *testing.T, f *fixture, handle func(net.Conn, rpcRequest))
 func TestRPCRequiresAuthenticationBeforeConnectingAndPreservesIDs(t *testing.T) {
 	f := newFixture(t)
 	count := runtimeFixture(t, f, func(connection net.Conn, request rpcRequest) {
-		json.NewEncoder(connection).Encode(map[string]any{"version": 9, "id": request.ID, "result": map[string]any{"hello": map[string]string{"name": "test"}}})
+		json.NewEncoder(connection).Encode(map[string]any{"version": 10, "id": request.ID, "result": map[string]any{"hello": map[string]string{"name": "test"}}})
 	})
-	body := `{"version":9,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{}}}`
+	body := `{"version":10,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{}}}`
 	if response := f.request("POST", f.config.APIHost, "/v1/rpc", "", "", body); response.Code != 401 {
 		t.Fatal(response.Code)
 	}
@@ -75,8 +75,8 @@ func TestRPCRejectsMalformedAndOversizedBodies(t *testing.T) {
 	token := f.token(t, "control", nil)
 	for _, body := range []string{
 		`{}`, `{"version":8,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{}}}`,
-		`{"version":9,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{},"catalogue":{}}}`,
-		`{"version":9,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{}}}{"extra":true}`,
+		`{"version":10,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{},"catalogue":{}}}`,
+		`{"version":10,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{}}}{"extra":true}`,
 	} {
 		if response := f.request("POST", f.config.APIHost, "/v1/rpc", token, "", body); response.Code != 400 {
 			t.Fatal(response.Code)
@@ -150,7 +150,7 @@ func TestTerminalStreamRequiresControlAccessAndRelaysBinaryInput(t *testing.T) {
 		if _, ok := request.Operation["terminalStream"]; !ok {
 			t.Error("wrong operation")
 		}
-		json.NewEncoder(connection).Encode(map[string]any{"version": 9, "id": request.ID, "result": map[string]any{"text": map[string]string{"_0": path}}})
+		json.NewEncoder(connection).Encode(map[string]any{"version": 10, "id": request.ID, "result": map[string]any{"text": map[string]string{"_0": path}}})
 	})
 	server := httptest.NewServer(f.server)
 	defer server.Close()

@@ -97,6 +97,10 @@ public actor ServerRuntime {
     private func execute(_ operation: ServerOperation) async throws -> ServerResult {
         guard !isClosed else { throw ServerFailure("The server is shutting down.") }
         switch operation {
+        case .creation(let action):
+            var models: [CodexModel] = []
+            if case .workspaceContext = action { models = (try? await modelCatalogue.pickerModels()) ?? [] }
+            return .creation(try await ProjectCreationOperations.perform(action, store: store, models: models))
         case .hello:
             return .hello(name: ProcessInfo.processInfo.hostName)
         case .previewAddress(let address):
@@ -162,22 +166,41 @@ public actor ServerRuntime {
                 archivedWorkspaces: try await store.workspaces(includeArchived: true).filter { $0.state == .archived }
             ))
         case .create(let request):
-            guard request.agent.canRunWorkspaces else { throw ServerFailure("This agent backend is not supported.") }
-            guard !request.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  !request.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  !request.repositoryPath.isEmpty else {
-                throw ServerFailure("Enter a workspace name, model and repository path or Git URL.")
+            let controls = request.controls ?? ComposerControls(model: request.model, effort: request.effort,
+                agentKind: request.agent, permissionMode: request.permissionMode)
+            let mode = request.mode ?? .chat
+            guard controls.agentKind.canRunWorkspaces, !controls.model.isEmpty, !request.repositoryPath.isEmpty,
+                  !mode.runsAnAgent || !(request.prompt ?? request.name).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ServerFailure("Choose a project, a model and a task for the workspace.")
+            }
+            let attachments = request.attachments ?? []
+            guard attachments.reduce(0, { $0 + $1.data.count }) <= 10_000_000 else { throw ServerFailure("Use up to 10 MB of attachments in the first message.") }
+            guard Set(attachments.map(\.sourcePath)).count == attachments.count else { throw ServerFailure("Attach each file once.") }
+            for attachment in attachments {
+                guard attachment.sourcePath.hasPrefix(".bloom/attachments/"), !attachment.sourcePath.contains("..") else { throw ServerFailure("Invalid staged attachment path.") }
+                try ServerFileOperations.validateUpload(name: attachment.name, data: attachment.data)
             }
             let manager = WorkspaceManager(store: store)
             let path = try await repositories.resolve(request.repositoryPath, dataDirectory: URL(fileURLWithPath: store.path).deletingLastPathComponent())
             let repo = try await manager.addRepository(at: path)
             let started = try await manager.start(WorkspaceStartRequest(
-                repo: repo, prompt: request.name, origin: .user, name: request.name,
-                controls: ComposerControls(
-                    model: request.model, effort: request.effort, agentKind: request.agent,
-                    permissionMode: request.permissionMode
-                ), setupPolicy: .run
+                repo: repo, prompt: request.prompt ?? request.name, origin: .user, baseBranch: request.baseBranch,
+                name: request.mode == nil ? request.name : nil, checkout: request.checkout, controls: controls,
+                opensSession: mode.runsAnAgent, setupPolicy: request.runSetupScript == false ? .skip : .run
             ))
+            var prompt = request.prompt ?? ""
+            for attachment in attachments {
+                let uploaded = try ServerFileOperations.upload(workspace: started.workspace, name: attachment.name, data: attachment.data)
+                prompt = prompt.replacingOccurrences(of: attachment.sourcePath, with: uploaded)
+            }
+            if let session = started.session {
+                try await ServerComposer.save(controls, session: session, store: store)
+                if !prompt.isEmpty, started.setupSucceeded != false { try await queue().enqueue(prompt, sessionID: session.id) }
+            }
+            if request.mode != nil {
+                return .creation(.workspaceStarted(workspace: started.workspace, session: started.session,
+                    setupSucceeded: started.setupSucceeded, draft: started.setupSucceeded == false ? prompt : nil))
+            }
             guard let session = started.session else { throw ServerFailure("The workspace has no session.") }
             return .created(session: session, workspace: started.workspace, setupSucceeded: started.setupSucceeded)
         case .transcript(let id, let afterSeq):

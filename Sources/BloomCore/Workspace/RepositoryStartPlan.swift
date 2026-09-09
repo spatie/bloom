@@ -451,8 +451,8 @@ public enum FolderPath {
 // MARK: - What would be committed
 
 /// A file that will be kept out of the first commit, and why.
-public struct ExcludedPath: Sendable, Equatable, Identifiable {
-    public enum Reason: Sendable, Equatable {
+public struct ExcludedPath: Sendable, Equatable, Identifiable, Codable {
+    public enum Reason: Sendable, Equatable, Codable {
         /// Looks like it holds a credential.
         case sensitive
         /// A git repository of its own. Committed as-is it becomes a gitlink with no submodule
@@ -483,7 +483,7 @@ public struct ExcludedPath: Sendable, Equatable, Identifiable {
 }
 
 /// What a folder holds, as far as a first commit is concerned.
-public struct FolderContents: Sendable, Equatable {
+public struct FolderContents: Sendable, Equatable, Codable {
     /// How many files the walk saw, not counting anything under an excluded path.
     public var fileCount: Int
     public var byteSize: Int64

@@ -84,7 +84,7 @@ func TestLiveRuntimeTerminalIntegration(t *testing.T) {
 		return string(data)
 	}
 	rpc := func(operation map[string]any) map[string]json.RawMessage {
-		body, _ := json.Marshal(map[string]any{"version": 9, "id": requestID(), "operation": operation})
+		body, _ := json.Marshal(map[string]any{"version": 10, "id": requestID(), "operation": operation})
 		request, _ := http.NewRequest("POST", "https://"+config.APIHost+"/v1/rpc", bytes.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Authorization", "Bearer "+token())

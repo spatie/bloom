@@ -39,7 +39,7 @@ func (server *Server) terminal(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	id := requestID()
-	body, _ := json.Marshal(map[string]any{"version": 9, "id": id, "operation": map[string]any{"terminalStream": map[string]string{"workspaceID": query.Get("workspace_id"), "name": query.Get("name")}}})
+	body, _ := json.Marshal(map[string]any{"version": 10, "id": id, "operation": map[string]any{"terminalStream": map[string]string{"workspaceID": query.Get("workspace_id"), "name": query.Get("name")}}})
 	ctx, cancel := context.WithTimeout(request.Context(), 15*time.Second)
 	reply, err := runtimeRequest(ctx, config.RuntimeSocket, body, id)
 	cancel()

@@ -101,7 +101,7 @@ public struct ExistingBranch: Sendable, Hashable, Identifiable, Codable {
 /// delegated and never where work is reviewed. A checkout is the other direction, and the two
 /// cases below are the same shape of thing, an existing head somebody else wrote, which is why
 /// they travel as one value through `WorkspaceStartRequest`.
-public enum WorkspaceCheckout: Sendable, Hashable {
+public enum WorkspaceCheckout: Sendable, Hashable, Codable {
     case pullRequest(PullRequestListing)
     case branch(ExistingBranch)
 }
@@ -425,7 +425,7 @@ public struct PullRequestReference: Sendable, Hashable {
 /// The three answers are deliberately three: a pull request to open, a sentence explaining why
 /// there is not one, and nothing at all for an empty box. A view that had to tell those apart from
 /// an optional and a thrown error would be making the decision itself, out of reach of the suite.
-public enum WorkspaceCheckoutResolution: Sendable, Equatable {
+public enum WorkspaceCheckoutResolution: Sendable, Equatable, Codable {
     case checkout(WorkspaceCheckout)
     case failure(String)
 }
