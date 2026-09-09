@@ -285,7 +285,10 @@ struct ComposerTextEditor: NSViewRepresentable {
         /// An update can precede attachment to a window, even from a SwiftUI task. Retry the
         /// current request on attachment, without retaining a stale request after focus moved.
         func applyFocus(to textView: ComposerTextView) {
-            guard let window = textView.window else { return }
+            guard let window = textView.window,
+                  AutomaticFocus.mayUpdateResponder(applicationIsActive: NSApp.isActive,
+                                                    windowIsKey: window.isKeyWindow,
+                                                    windowIsVisible: window.isVisible) else { return }
             let holdsKeyboard = window.firstResponder === textView
             if ComposerFocus.shouldTakeKeyboard(
                 wantsFocus: parent.isFocused, holdsKeyboard: holdsKeyboard,
