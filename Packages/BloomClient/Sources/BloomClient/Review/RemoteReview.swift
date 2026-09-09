@@ -9,18 +9,24 @@ public enum RemoteDiffScope: String, Codable, Sendable, CaseIterable {
 public struct RemoteReviewSnapshot: Decodable, Sendable {
     public let revision: String
     public let files: [ChangedFile]?
+
+    public init(revision: String, files: [ChangedFile]?) { self.revision = revision; self.files = files }
 }
 
 /// A nil patch leaves the caller's matching revision intact.
 public struct RemotePatchSnapshot: Decodable, Sendable {
     public let revision: String
     public let patch: String?
+
+    public init(revision: String, patch: String?) { self.revision = revision; self.patch = patch }
 }
 
 public struct RemoteTextFile: Decodable, Sendable {
     public let path: String
     public let text: String
     public let revision: String
+
+    public init(path: String, text: String, revision: String) { self.path = path; self.text = text; self.revision = revision }
 }
 
 public extension RemoteWorkspaceService {

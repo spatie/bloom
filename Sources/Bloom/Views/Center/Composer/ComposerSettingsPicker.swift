@@ -63,7 +63,7 @@ struct ComposerSettingsPicker: View {
 
     private var summary: String {
         let effort = ComposerOption.label(for: controls.effort, in: efforts)
-        return "\(modelLabel), \(effort), \(controls.permissionMode.label)"
+        return "\(modelLabel), \(effort), \(controls.permissionMode.label(on: controls.agentKind))"
     }
 }
 
@@ -120,21 +120,23 @@ private struct ComposerSettingsPanel: View {
             }
             .padding(Metrics.gutter)
 
-            Hairline()
+            if controls.offersFastMode {
+                Hairline()
 
-            HStack(spacing: Metrics.spacing) {
-                Text("Prefer faster replies")
-                    .font(Typo.label)
+                HStack(spacing: Metrics.spacing) {
+                    Text("Prefer faster replies")
+                        .font(Typo.label)
 
-                Spacer(minLength: Metrics.spacing)
+                    Spacer(minLength: Metrics.spacing)
 
-                Toggle("Prefer faster replies", isOn: fastBinding)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
+                    Toggle("Prefer faster replies", isOn: fastBinding)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                }
+                .padding(.horizontal, Metrics.gutter)
+                .padding(.vertical, Metrics.inset)
             }
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.vertical, Metrics.inset)
         }
         .frame(width: Self.width)
     }

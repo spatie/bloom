@@ -1,6 +1,6 @@
 # Shared clients and a public Bloom protocol
 
-Proposal, 9 September 2026. The shared transcript/review components and iPad panes exist on this branch. The feature-store consolidation and public schema described below are the next work, not implemented claims.
+Status and direction, 10 September 2026. Shared review state, composer choices, transcript/review content and native iPad panes are implemented on this branch. The current wire contract is documented in [SERVER-PROTOCOL.md](SERVER-PROTOCOL.md), with schemas and an executable Python client under `Protocol/`. Generated application DTOs, a new public envelope and full feature parity remain future work.
 
 Keep one repository and one set of feature rules. Share reusable presentation between Apple apps, with native navigation, editing, tables, menus, browser and window behaviour. A web client should consume the same server capabilities through a generated TypeScript client; it needs its own web presentation.
 
@@ -32,9 +32,11 @@ flowchart LR
 
 A local workspace must continue to work without a remote server, account or network round trip. Its in-process service adapter should satisfy the same capability interfaces as the remote adapter. Native views should not branch repeatedly on whether their execution host is local or remote.
 
-The next extraction should be review state. `Sources/Bloom/State/ServerReviewModel.swift` and `iOS/Bloom/MobileWorkspaceReview.swift` currently make separate decisions about revision invalidation, cancellation, listing refreshes and errors. Mac long-polls and preserves individual patch identities; iOS currently polls and invalidates its diff cache more broadly. One `WorkspaceReviewStore`, exercised through local and remote service fakes, should own these rules. Pane selection and scroll position stay with each native window.
+Review state is now shared. `WorkspaceReviewStore` owns revision invalidation, coalesced reads, scope changes, cancellation, errors and per-file patch caching. `ServerReviewModel` and `MobileWorkspaceReview` adapt it to each app. Mac keeps its existing `DiffView` patch loader, so the adapter does not duplicate those reads. Mobile diff loads are limited to two at once; its cache retains visible sections and bounds offscreen entries. The pure changed-file tree, compressed folder chains and fuzzy filtering also live in BloomClient.
 
-Creation/composer state comes next. iOS currently walks raw JSON in `RemoteWorkspaceService.workspaceCommand` and exposes fewer branch, model, effort, attachment and start-mode choices than Mac. Its create screen even says an empty prompt is allowed while that service rejects one. Extract the typed choices and validation from the existing implementation, then make both forms consume them. Do not copy Mac's form and leave the validation behind.
+Composer values and decisions now live in BloomClient: controls, backend/model identity, model catalogues, supported reasoning levels, permission vocabulary, output styles and context choices. Mac's native picker and the iOS native option form consume those same decisions. `RemoteComposerStore` loads acknowledged server settings and preserves the command ID when an uncertain save is retried. Changing agent backends opens the session created by the server instead of continuing to send into the old conversation. Codex fast mode is hidden because the runner does not implement it.
+
+Creation remains the next extraction. iOS still walks raw JSON in `RemoteWorkspaceService.workspaceCommand` and exposes fewer branch, attachment and start-mode choices than Mac. Its create form now accurately requires a prompt. Move typed creation choices and validation behind the shared service before expanding both native forms.
 
 Then consolidate conversation state. Shared markdown cannot make queue controls, approvals or tool results appear automatically. `RemoteTranscript` currently omits some of the server's queue/permission projections, and `RemoteMessage.text` flattens rich payloads. A shared conversation store should expose typed turns, tools, queued messages, approval requests and connection states. Each shell renders the capabilities it supports and explains unavailable ones.
 
@@ -59,6 +61,6 @@ The contract must cover behaviour as well as shapes:
 
 A browser cannot use the native SSH transport directly. It should connect through authenticated HTTPS. Prefer a same-origin web deployment initially and deliberately define browser sessions, CSRF/origin checks and reconnect behaviour. Keep agent-control credentials separate from workspace preview origins, as the existing gateway already requires.
 
-Roll this out incrementally. First consolidate review and creation state, keeping both Apple clients building in each change. Capture the current v13 wire examples and their behaviour in contract tests. Then add generated wire types and the explicit public envelope behind a compatibility adapter to the existing runtime. Keep legacy clients working during a documented transition; do not replace v13 silently.
+Roll this out incrementally. Continue from the shared review and composer stores into creation state, keeping both Apple clients building in each change. Maintain the current v13 wire examples and their behaviour in contract tests. Then add generated wire types and the explicit public envelope behind a compatibility adapter to the existing runtime. Keep legacy clients working during a documented transition; do not replace v13 silently.
 
 For each feature, review the server contract, shared state and presentation independently. Add a parity row for Mac local, Mac remote, iPhone and iPad, with deliberate unsupported cases. Shared tests prove feature behaviour; native smoke tests prove each shell exposes it. Adding a reusable component can reach both Apple apps automatically. A new Mac window, terminal integration or platform permission still needs an intentional mobile counterpart.

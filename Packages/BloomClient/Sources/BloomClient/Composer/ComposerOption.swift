@@ -1,0 +1,94 @@
+import Foundation
+
+/// One entry in a footer picker. The id is what gets written to `Session`, the label is what the
+/// user reads, and the two are different on purpose: the CLI wants `opus`, the user wants Opus 5.
+public struct ComposerOption: Identifiable, Hashable, Sendable {
+    public var id: String
+    public var label: String
+    /// One line saying what picking this row would do, drawn under the name in the pickers that
+    /// open a list rather than a menu. See `ComposerOptionRow`.
+    ///
+    /// Nil for the two pickers whose rows have nothing to add: a model is a name and an effort is
+    /// a word on a scale, and a sentence under either would be Bloom inventing copy about
+    /// somebody else's product. The two that have one are the two that were printing it as a
+    /// footnote under the whole menu, which is what the owner could not read before choosing.
+    public var detail: String?
+
+    public init(id: String, label: String, detail: String? = nil) {
+        self.id = id; self.label = label; self.detail = detail
+    }
+
+    /// Most capable first, which here means most expensive first: see `ClaudeModelRank`, whose
+    /// head carries the prices this order is read off. The order is not left to this literal.
+    /// `ranked` sorts it, so a model pinned in a settings file lands among these rather than
+    /// under them.
+    public static let models = [
+        ComposerOption(id: "fable", label: "Fable 5.1"),
+        ComposerOption(id: "opus", label: "Opus 5"),
+        ComposerOption(id: "sonnet", label: "Sonnet 5"),
+        ComposerOption(id: "haiku", label: "Haiku 4.5"),
+    ]
+
+    public static let efforts = [
+        ComposerOption(id: "low", label: "Low"),
+        ComposerOption(id: "medium", label: "Medium"),
+        ComposerOption(id: "high", label: "High"),
+        // "Extra high", not "Xhigh": the same value already reads that way in
+        // `CodexModelCatalog`, whose head says why, and one id spelled two ways in one window is
+        // two settings as far as anybody reading them is concerned.
+        ComposerOption(id: "xhigh", label: "Extra high"),
+        ComposerOption(id: "max", label: "Max"),
+    ]
+
+    /// The built-in list plus any id the app is in, or has been in, that is not on it.
+    ///
+    /// Model and effort ids are an open set. A repository's settings file, `~/.conductor` or the
+    /// Models screen can pin one Bloom has no name for, and `opus-5-1m` in a settings file is a
+    /// real example: the chip read "Opus 5 1m" and the agent ran on it, while the menu offered
+    /// three models, none of them the one in force. Picking any of the three was then a one-way
+    /// door, because the id that was configured had disappeared from the only control that could
+    /// have put it back.
+    ///
+    /// So whatever the app has been set to is on the list, and it stays on the list. It goes after
+    /// the named ones, because those are the ones almost every reader wants.
+    ///
+    /// **This row was blamed for a bug it only reported, and it keeps its job.** A settings file
+    /// pinned `codex:gpt-5.6-sol`, nothing recognised it, and it was drawn here as a fifth Claude
+    /// Code model reading "Codex:gpt 5.6 Sol". Deleting the row would have hidden the broken value
+    /// while leaving the chat running on it, which is precisely the one-way door above: the id
+    /// would have been in force and off every control that could change it. The fix is upstream,
+    /// where an id that names its own backend is now read rather than stored whole
+    /// (`ModelIdentifier`), so a row like that no longer appears and, if an old one does, it
+    /// appears in the section it belongs to and can be pressed away.
+    public static func adding(_ extras: [String], to options: [ComposerOption]) -> [ComposerOption] {
+        var known = Set(options.map(\.id))
+        var result = options
+        for id in extras {
+            let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, known.insert(trimmed).inserted else { continue }
+            result.append(ComposerOption(id: trimmed, label: label(for: trimmed, in: options)))
+        }
+        return result
+    }
+
+    /// Falls back to a tidied form of the raw value, so a model set in a settings file that Bloom
+    /// has never heard of is still shown rather than silently rewritten. Ids such as `opus-5-1m`
+    /// and `claude-opus-5[1m]` reach us verbatim and read as "Opus 5 1m" and "Opus 5 (1m)".
+    public static func label(for id: String, in options: [ComposerOption]) -> String {
+        if let match = options.first(where: { $0.id == id }) { return match.label }
+        guard !id.isEmpty else { return options.first?.label ?? id }
+        return titleCased(id)
+    }
+
+    /// Model rows in the order `ClaudeModelRank` puts them, keeping each row's label.
+    ///
+    /// Only for a model menu. `adding` is also what fills the effort and output style menus, and
+    /// those are a scale and a set of names respectively, neither of which a model's price ranks.
+    public static func ranked(_ options: [ComposerOption]) -> [ComposerOption] {
+        let byID = Dictionary(options.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return ClaudeModelRank.ordered(options.map(\.id)).compactMap { byID[$0] }
+    }
+
+    /// `ModelLabel.readable` in the core, where it can be tested. See its head for why it moved.
+    public static func titleCased(_ id: String) -> String { ModelLabel.readable(id) }
+}

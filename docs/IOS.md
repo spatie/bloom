@@ -7,13 +7,15 @@ Closing the app or iOS suspending it never cancels an agent turn.
 
 ## Architecture
 
-See [Shared clients and a public Bloom protocol](CLIENT-ARCHITECTURE.md) for the proposed next
-extractions, feature-parity workflow and language-independent contract.
+See [Shared clients and a public Bloom protocol](CLIENT-ARCHITECTURE.md) for the implemented shared stores, next
+extractions and feature-parity workflow. [Server protocol](SERVER-PROTOCOL.md) documents the current
+wire contract for other client languages.
 
 `Packages/BloomClient` is plain Swift and Foundation. It has no UI imports, subprocesses,
 filesystem execution or database ownership. It contains the shared HTTPS connection, versioned
 commands, read projections, transcript merging, question drafts and a durable conversation outbox.
-It also owns the shared markdown parser, syntax highlighter, palette values and transcript row update decisions.
+It also owns the shared markdown parser, syntax highlighter, palette values, transcript row updates,
+review lifecycle, changed-file tree and composer model/permission decisions.
 Both Mac and iOS compile this package. Question parsing and answer construction use the same
 types as Mac's existing question cards, re-exported by BloomCore.
 The current wire version is 13. The SSH client also negotiates the known compatible
@@ -53,6 +55,27 @@ server records. These are not another database model: `MobileProtocolContractTes
 actual server replies and decodes them with the portable client, and decodes client commands
 using the actual server protocol. Shared values are extracted instead of copied. Further
 protocol extraction can happen incrementally as more features need it.
+
+## Review and composer controls
+
+Changes are grouped into the same compressed directory tree as Mac, with folder disclosure,
+fuzzy path filtering and context menus for copying paths, opening source and reviewing changes.
+Filtering preserves the unfiltered folder state. All-file review loads visible patches with two
+concurrent reads; unchanged files retain their parsed diff when another file changes.
+
+The composer model button opens a native options form: model, supported reasoning levels,
+backend-specific permissions, context window and output styles. Settings come from the execution
+server. Apply saves them there; failures preserve the last acknowledged settings and offer a retry
+with the same command ID. Changing agent backends starts the server-created conversation.
+Fast replies appear only for the supported Claude backend, not for Codex's unimplemented tier.
+An uncertain save locks further edits until retried or explicitly forgotten with confirmation.
+Fresh loads prevent cached settings from silently replacing another client's older choices.
+The current protocol has no compare-and-swap revision for composer writes, so concurrent edits
+made after opening the form still use last-writer-wins semantics.
+
+These controls are available on iPhone and iPad. iPad uses a popover; iPhone uses adaptive sheet
+presentation. Full parity still needs typed creation choices, richer tool results, all approval
+variants, attachments, terminal interaction and further workspace/session management.
 
 ## Build
 
@@ -189,18 +212,25 @@ wire compatibility and state behaviour. A headless Mac integration harness using
 verified unknown-host refusal, changed-host refusal and authenticated relay against Ubuntu.
 Against an isolated protocol-13 daemon on that server it registered a fresh repository, created
 a workspace and received an exact assistant reply from a real Codex prompt. This verifies the
-shared mobile workflow. The actual iPad Simulator application has now also connected to the
-production validation server, loaded the existing There There workspace and its 13-message
-conversation, and displayed that workspace's running Laravel homepage through the app's own
-SSH preview tunnel. No sample replies or HTML were used for that live capture. Live HTTPS
-sign-in and physical-device keyboard/background behaviour remain unverified.
+shared mobile workflow. The actual iPad and iPhone Simulator applications have connected to the production validation
+server, loaded the existing There There workspace and its 13-message conversation, and displayed
+that workspace's running Laravel homepage through each app's own SSH preview tunnel. Both also
+loaded real composer settings and visible patches for all-files review. The changed-file tree
+exercised disclosure, filtering and restoration across 16 directories and 38 files. No sample
+replies or HTML were used for these captures. The captures use UIKit rendering in headless
+Simulators, not physical devices. Live HTTPS sign-in and physical-device keyboard/background
+behaviour remain unverified.
 
 The opt-in DEBUG driver `--bloom-live-export-key` exports only the device public key.
 `--bloom-live-session` reads public connection settings from `bloom-live-connection.json` in the
 app's Documents directory and uses the production connection, transcript and browser paths.
 Its host fingerprint must be obtained through an already trusted SSH connection. It never
 learns or accepts the host key from the connection under test. The private identity remains in
-Keychain. These flags and the driver are absent from Release builds.
+Keychain. Add `--bloom-live-options` to capture the native settings form after loading it from the server.
+Add `--bloom-live-phone` for the device's native compact size, and `--bloom-live-review` to load
+and capture the real visible patches. The driver also exercises disclosure, filtering and
+restoration of the real changed-file tree.
+These flags and the driver are absent from Release builds.
 
 ## App Store preparation
 

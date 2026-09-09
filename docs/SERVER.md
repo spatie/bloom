@@ -1,5 +1,7 @@
 # Standalone server preview
 
+Client implementers: see [the wire protocol guide](SERVER-PROTOCOL.md) and [schemas and Python example](../Protocol/README.md).
+
 Bloom can connect to a standalone server while its existing local workspaces remain available.
 The server owns its agent processes, worktrees and SQLite database. Closing the server window,
 quitting the Mac client or disconnecting SSH leaves those agents running.

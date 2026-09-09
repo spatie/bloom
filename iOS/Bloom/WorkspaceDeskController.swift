@@ -176,6 +176,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
             #else
             content = ConversationController(model: connection, session: session)
             #endif
+            content.onOpenSession = { [weak self] session in self?.replaceConversation(with: session) }
             let wrapped = WorkspacePaneController(title: session.title, image: "bubble.left.and.bubble.right", content: content)
             conversation = wrapped
             install(wrapped, in: conversationHost)
@@ -186,8 +187,22 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         }
     }
 
+    private func replaceConversation(with session: RemoteSession) {
+        if let conversation { remove(conversation) }
+        let content = ConversationController(model: connection, session: session)
+        content.onOpenSession = { [weak self] session in self?.replaceConversation(with: session) }
+        let wrapped = WorkspacePaneController(title: session.title, image: "bubble.left.and.bubble.right", content: content)
+        conversation = wrapped
+        preferredSessionID = session.id
+        install(wrapped, in: conversationHost)
+        focusesConversation = true
+        layoutPanes()
+        Task { try? await connection.refresh() }
+    }
+
     func openReview(all: Bool, path: String? = nil) {
         loadViewIfNeeded()
+        if files.parent !== self { dismissFileSheetIfNeeded() }
         reviewController.selectedPath = path
         reviewController.showsAllFiles = all
         setTool(reviewController)
@@ -241,6 +256,22 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     }
 
     #if DEBUG
+    func focusLiveConversation() {
+        compactTabs.selectedItem = compactTabs.items?.first
+        focusesConversation = true
+        layoutPanes()
+    }
+    func showLiveFiles() { toggleFiles() }
+    var liveReviewReady: Bool { reviewController.liveReviewReady }
+    var liveReviewFailure: String? { review.error ?? review.errors.values.first }
+    var liveFilesReady: Bool { review.hasLoaded }
+    func verifyLiveTree() throws -> Int { try files.verifyLiveTree() }
+    func showLiveOptions() async throws {
+        guard let content = conversation?.children.compactMap({ $0 as? ConversationController }).first else {
+            throw ConnectionFailure("No conversation is open.")
+        }
+        try await content.showLiveOptions()
+    }
     var livePreviewReady: Bool { browser?.hasLoadedPage == true }
     var livePreviewFailure: String? { browser?.lastPageFailure }
     var livePreviewTitle: String { browser?.loadedPageTitle ?? "" }
@@ -308,6 +339,8 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     private func restoreFiles() {
         files.navigationController?.setViewControllers([], animated: false)
         install(files, in: filesHost)
+        let index = tool == nil || focusesConversation ? 0 : tool is PreviewController ? 1 : tool is WorkspaceReviewController ? 2 : 3
+        compactTabs.selectedItem = compactTabs.items?[index]
         layoutPanes()
     }
 
@@ -334,6 +367,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         conversationHost.isHidden = hasTool && !splitConversation && !compactConversation
         conversationRule.isHidden = !splitConversation
         toolHost.isHidden = !hasTool || compactConversation
+        reviewController.isReviewVisible = tool === reviewController && !toolHost.isHidden
         filesHost.isHidden = !inlineFiles
         filesRule.isHidden = !inlineFiles
         filesWidth?.constant = width > 1100 ? 240 : 220

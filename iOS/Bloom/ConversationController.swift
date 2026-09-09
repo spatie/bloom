@@ -4,6 +4,10 @@ import BloomClient
 final class ConversationController: UIViewController, UITableViewDataSource, UITextViewDelegate {
     private let model: MobileConnection
     private let session: RemoteSession
+    var onOpenSession: ((RemoteSession) -> Void)?
+    private let options = UIButton(type: .system)
+    private var optionsStore: RemoteComposerStore?
+    private var optionsTask: Task<Void, Never>?
     private let table = UITableView(frame: .zero, style: .plain)
     private let composer = UITextView()
     private let send = UIButton(type: .system)
@@ -88,9 +92,11 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         review.configuration = reviewConfiguration
         review.isHidden = true
         review.addAction(UIAction { [weak self] _ in self?.reviewRequest() }, for: .touchUpInside)
-        let footer = UIStackView(arrangedSubviews: [status, send])
+        configureOptionsButton()
+        let spacer = UIView()
+        let footer = UIStackView(arrangedSubviews: [options, spacer, send])
         footer.spacing = 12; footer.alignment = .center
-        let compose = UIStackView(arrangedSubviews: [composer, footer])
+        let compose = UIStackView(arrangedSubviews: [composer, status, footer])
         compose.axis = .vertical; compose.spacing = 2
         compose.isLayoutMarginsRelativeArrangement = true
         compose.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 6, bottom: 10, trailing: 10)
@@ -139,6 +145,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         send.isEnabled = model.service != nil && model.address == origin && !isSending && (hasPendingSubmission || !composer.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         send.configuration?.image = UIImage(systemName: hasPendingSubmission ? "arrow.clockwise" : "arrow.up")
         send.accessibilityLabel = hasPendingSubmission ? "Retry message" : "Send message"
+        options.isEnabled = model.service != nil && model.address == origin && !isSending && !hasPendingSubmission
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -147,6 +154,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         if fixture != nil { return }
         #endif
         restoreDraft()
+        loadOptions()
         poll?.cancel()
         poll = Task { [weak self] in
             while !Task.isCancelled {
@@ -157,6 +165,69 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         }
     }
     override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); poll?.cancel(); poll = nil }
+
+    private func configureOptionsButton() {
+        var configuration = UIButton.Configuration.plain()
+        configuration.title = ModelLabel.readable(session.model)
+        configuration.image = UIImage(systemName: "slider.horizontal.3")
+        configuration.imagePadding = 7
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var result = incoming
+            result.font = .preferredFont(forTextStyle: .footnote)
+            return result
+        }
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 6, bottom: 10, trailing: 6)
+        options.configuration = configuration
+        options.accessibilityLabel = "Agent options"
+        options.accessibilityValue = configuration.title
+        options.accessibilityIdentifier = "composer-options"
+        options.addAction(UIAction { [weak self] _ in self?.showOptions() }, for: .touchUpInside)
+    }
+
+    private func loadOptions() {
+        guard optionsStore == nil, model.address == origin, let service = model.service else { return }
+        let store = RemoteComposerStore(service: service, sessionID: session.id)
+        optionsStore = store
+        optionsTask = Task { [weak self] in
+            try? await store.load()
+            guard !Task.isCancelled else { return }
+            self?.updateOptionsLabel()
+        }
+    }
+
+    private func updateOptionsLabel() {
+        let controls = optionsStore?.state?.controls
+        let label = ModelLabel.readable(controls?.model ?? session.model)
+        options.configuration?.title = label
+        options.accessibilityValue = label
+        navigationItem.prompt = label
+    }
+
+    private func showOptions() {
+        loadOptions()
+        guard let store = optionsStore, model.address == origin, let service = model.service else { return }
+        do { try store.reconnect(using: service) } catch { show(error); return }
+        let controller = ComposerOptionsController(store: store) { [weak self] fork in
+            guard let self else { return }
+            self.updateOptionsLabel()
+            guard let fork else { return }
+            if let onOpenSession = self.onOpenSession { onOpenSession(fork) } else {
+                self.navigationController?.pushViewController(ConversationController(model: self.model, session: fork), animated: true)
+            }
+        }
+        let navigation = BloomTheme.navigation(controller)
+        navigation.preferredContentSize = controller.preferredContentSize
+        if traitCollection.horizontalSizeClass == .compact {
+            navigation.modalPresentationStyle = .pageSheet
+            navigation.sheetPresentationController?.detents = traitCollection.preferredContentSizeCategory.isAccessibilityCategory ? [.large()] : [.medium(), .large()]
+            navigation.sheetPresentationController?.prefersGrabberVisible = true
+        } else {
+            navigation.modalPresentationStyle = .popover
+            navigation.popoverPresentationController?.sourceView = options
+            navigation.popoverPresentationController?.sourceRect = options.bounds
+        }
+        present(navigation, animated: true)
+    }
 
     private func refresh() async {
         if isRefreshing { needsRefresh = true; return }
@@ -200,6 +271,16 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
 
     #if DEBUG
     var liveMessageCount: Int { buffer.messages.count }
+
+    func showLiveOptions() async throws {
+        loadOptions()
+        for _ in 0..<30 {
+            if optionsStore?.state != nil { showOptions(); return }
+            if let error = optionsStore?.error { throw ConnectionFailure(error) }
+            try await Task.sleep(for: .seconds(1))
+        }
+        throw ConnectionFailure("Composer settings did not load from the server.")
+    }
 
     /// Exercises the production snapshot and table-update path without requesting a server.
     func exerciseTranscriptUpdates(_ snapshots: [RemoteTranscript]) throws {

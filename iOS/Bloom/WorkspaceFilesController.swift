@@ -28,7 +28,9 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
     private let segments = UISegmentedControl(items: ["Changes", "Files"])
     private let search = UISearchBar()
     private let toolbar = UIToolbar()
-    private var visibleChanges: [ChangedFile] = []
+    private var changedRows: [ChangedFileTreeRow] = []
+    private var collapsedChanges: Set<String> = []
+    private var filteredCollapsedChanges: Set<String> = []
     private var rows: [FileTreeRowItem] = []
     private var expanded: Set<String> = []
     private var needsSelectionReveal = true
@@ -130,7 +132,10 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
             treeChildren = FileTreeNode.index(indexedPaths)
         }
         revealSelectionIfNeeded()
-        visibleChanges = review.changes.filter { needle.isEmpty || $0.path.localizedCaseInsensitiveContains(needle) }
+        let filteredChanges = ChangedFileFilter.apply(to: review.changes, needle: needle)
+        if filteredChanges == nil { filteredCollapsedChanges = [] }
+        changedRows = ChangedFileTree.rows(from: ChangedFileTree.build(from: filteredChanges ?? review.changes),
+                                           collapsed: needle.isEmpty ? collapsedChanges : filteredCollapsedChanges)
         if let filtered = FileTreeFilter.apply(to: treeChildren, needle: needle) {
             rows = FileTreeRowItem.flatten(children: filtered.children, expanded: expanded.union(filtered.open))
         } else {
@@ -155,7 +160,8 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
     }
 
     private func updateEmptyState() {
-        let isEmpty = showsAllFiles ? rows.isEmpty : visibleChanges.isEmpty
+        let isEmpty = showsAllFiles ? rows.isEmpty : changedRows.isEmpty
+        updateRefreshNotice(isEmpty: isEmpty)
         guard isEmpty else { table.backgroundView = nil; return }
         var configuration: UIContentUnavailableConfiguration
         if review.isLoading && !review.hasLoaded {
@@ -182,6 +188,25 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
         table.backgroundView = UIContentUnavailableView(configuration: configuration)
     }
 
+    private func updateRefreshNotice(isEmpty: Bool) {
+        guard !isEmpty, let error = review.error else { table.tableHeaderView = nil; return }
+        let label = BloomTheme.label("Could not refresh. " + error, style: .footnote, secondary: true)
+        let button = UIButton(type: .system)
+        button.setTitle("Retry", for: .normal)
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        button.addAction(UIAction { [weak self] _ in self?.retry() }, for: .touchUpInside)
+        let stack = UIStackView(arrangedSubviews: [label, button])
+        stack.spacing = 8
+        stack.alignment = .center
+        stack.isLayoutMarginsRelativeArrangement = true
+        stack.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 8, leading: 14, bottom: 8, trailing: 14)
+        let width = max(100, table.bounds.width)
+        let size = stack.systemLayoutSizeFitting(CGSize(width: width, height: 0), withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel)
+        stack.frame = CGRect(x: 0, y: 0, width: width, height: size.height)
+        table.tableHeaderView = stack
+    }
+
     private func retry() {
         refreshing?.cancel()
         let review = review
@@ -193,7 +218,7 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
     }
 
     private func updateSelection() {
-        let index = showsAllFiles ? rows.firstIndex { $0.node.path == selectedPath } : visibleChanges.firstIndex { $0.path == selectedPath }
+        let index = showsAllFiles ? rows.firstIndex { $0.node.path == selectedPath } : changedRows.firstIndex { $0.node.path == selectedPath }
         if let index {
             table.selectRow(at: IndexPath(row: index, section: 0), animated: false, scrollPosition: .none)
         } else if let selection = table.indexPathForSelectedRow {
@@ -202,12 +227,12 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
     }
 
     func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
-        needle = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        needle = FileNeedle.canonical(searchText)
         refreshUI()
     }
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        showsAllFiles ? rows.count : visibleChanges.count
+        showsAllFiles ? rows.count : changedRows.count
     }
 
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
@@ -235,11 +260,28 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
                 cell.accessibilityHint = "Open file"
             }
         } else {
-            let file = visibleChanges[indexPath.row]
+            let row = changedRows[indexPath.row]
             cell.contentConfiguration = UIHostingConfiguration {
-                BloomFileRow(file: file).frame(minHeight: 44)
-            }.margins(.vertical, 4).margins(.horizontal, 14)
-            cell.accessibilityHint = "Review changes"
+                if let file = row.node.file {
+                    BloomFileRow(file: file, showsDirectory: false).frame(minHeight: 44)
+                } else {
+                    BloomFileRow {
+                        BloomFileIcon(isDirectory: true)
+                    } name: {
+                        Text(verbatim: row.node.name).font(.subheadline.weight(.medium))
+                    } trailing: {
+                        EmptyView()
+                    }.frame(minHeight: 44)
+                }
+            }.margins(.vertical, 2).margins(.leading, 14 + CGFloat(min(row.depth, 8)) * 12).margins(.trailing, 10)
+            if row.node.isFolder {
+                let closed = (needle.isEmpty ? collapsedChanges : filteredCollapsedChanges).contains(row.node.path)
+                let indicator = UIImageView(image: UIImage(systemName: closed ? "chevron.right" : "chevron.down"))
+                indicator.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption2)
+                indicator.tintColor = .tertiaryLabel
+                cell.accessoryView = indicator
+                cell.accessibilityHint = closed ? "Expand folder" : "Collapse folder"
+            } else { cell.accessibilityHint = "Review changes" }
         }
         return cell
     }
@@ -255,9 +297,66 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
             selectedPath = node.path
             onSelect?(node.path, false)
         } else {
-            let path = visibleChanges[indexPath.row].path
-            selectedPath = path
-            onSelect?(path, true)
+            let node = changedRows[indexPath.row].node
+            if node.isFolder {
+                if needle.isEmpty {
+                    if !collapsedChanges.insert(node.path).inserted { collapsedChanges.remove(node.path) }
+                } else {
+                    if !filteredCollapsedChanges.insert(node.path).inserted { filteredCollapsedChanges.remove(node.path) }
+                }
+                refreshUI()
+                return
+            }
+            selectedPath = node.path
+            onSelect?(node.path, true)
         }
     }
+    func tableView(_ tableView: UITableView, contextMenuConfigurationForRowAt indexPath: IndexPath,
+                   point: CGPoint) -> UIContextMenuConfiguration? {
+        let path = showsAllFiles ? rows[indexPath.row].node.path : changedRows[indexPath.row].node.path
+        let folder = showsAllFiles ? rows[indexPath.row].node.isDirectory : changedRows[indexPath.row].node.isFolder
+        return UIContextMenuConfiguration(identifier: path as NSString, previewProvider: nil) { [weak self] _ in
+            guard let self else { return nil }
+            var actions = [UIAction(title: "Copy path", image: UIImage(systemName: "doc.on.doc")) { _ in
+                UIPasteboard.general.string = path
+            }]
+            if !folder {
+                if self.review.changes.contains(where: { $0.path == path }) {
+                    actions.append(UIAction(title: "Review changes", image: UIImage(systemName: "doc.text.magnifyingglass")) { [weak self] _ in
+                        self?.selectedPath = path
+                        self?.onSelect?(path, true)
+                    })
+                }
+                if self.review.paths.contains(path) {
+                    actions.append(UIAction(title: "Open file", image: UIImage(systemName: "doc.text")) { [weak self] _ in
+                        self?.selectedPath = path
+                        self?.onSelect?(path, false)
+                    })
+                }
+            }
+            return UIMenu(children: actions)
+        }
+    }
+
+    #if DEBUG
+    /// Exercise disclosure and filtered navigation through the production table adapter.
+    func verifyLiveTree() throws -> Int {
+        refreshUI()
+        let count = changedRows.filter { $0.node.isFolder }.count
+        guard let index = changedRows.firstIndex(where: { $0.node.isFolder }) else { return count }
+        let folder = changedRows[index].node
+        let original = changedRows.map(\.id)
+        tableView(table, didSelectRowAt: IndexPath(row: index, section: 0))
+        guard changedRows.count < original.count else { throw ConnectionFailure("Folder disclosure did not hide its children.") }
+        searchBar(search, textDidChange: folder.path)
+        guard !changedRows.isEmpty else { throw ConnectionFailure("Filtering could not find the closed folder.") }
+        searchBar(search, textDidChange: "")
+        guard changedRows.count < original.count else { throw ConnectionFailure("Filtering discarded folder disclosure state.") }
+        guard let closedIndex = changedRows.firstIndex(where: { $0.id == folder.id }) else { throw ConnectionFailure("Closed folder disappeared.") }
+        tableView(table, didSelectRowAt: IndexPath(row: closedIndex, section: 0))
+        guard changedRows.map(\.id) == original else { throw ConnectionFailure("Reopening the folder did not restore its children.") }
+        return count
+    }
+    #endif
+
 }

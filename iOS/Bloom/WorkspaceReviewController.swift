@@ -16,6 +16,16 @@ final class WorkspaceReviewController: UIViewController, UITableViewDataSource, 
     var selectedPath: String? { didSet { if isViewLoaded { refreshUI() } } }
     var showsAllFiles = true { didSet { if isViewLoaded { mode.selectedSegmentIndex = showsAllFiles ? 0 : 1; refreshUI() } } }
     var onClose: (() -> Void)?
+    var isReviewVisible = false {
+        didSet {
+            guard isReviewVisible != oldValue else { return }
+            if isReviewVisible { refreshUI() } else {
+                review.setVisiblePaths([])
+                renderedDiffs = [:]
+                renderedErrors = [:]
+            }
+        }
+    }
 
     init(review: MobileWorkspaceReview) { self.review = review; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError("Use init(review:)") }
@@ -70,7 +80,7 @@ final class WorkspaceReviewController: UIViewController, UITableViewDataSource, 
     }
 
     func refreshUI() {
-        guard isViewLoaded else { return }
+        guard isViewLoaded, isReviewVisible else { return }
         let previous = displayed
         let path = selectedPath.flatMap { selected in review.changes.contains { $0.path == selected } ? selected : nil } ?? review.changes.first?.path
         displayed = showsAllFiles ? review.changes : review.changes.filter { $0.path == path }
@@ -92,15 +102,24 @@ final class WorkspaceReviewController: UIViewController, UITableViewDataSource, 
         } else { table.backgroundView = nil }
         if previous.map(\.path) != displayed.map(\.path) { table.reloadData() } else {
             let changed = (table.indexPathsForVisibleRows ?? []).filter { index in
+                guard displayed.indices.contains(index.row) else { return false }
                 let path = displayed[index.row].path
                 return renderedDiffs[path] != review.diffs[path] || renderedErrors[path] != review.errors[path]
             }
             if !changed.isEmpty { table.reconfigureRows(at: changed) }
         }
+        updateVisiblePaths()
         for index in table.indexPathsForVisibleRows ?? [] where displayed.indices.contains(index.row) {
             review.loadDiff(path: displayed[index.row].path)
         }
     }
+
+    #if DEBUG
+    var liveReviewReady: Bool {
+        let paths = (table.indexPathsForVisibleRows ?? []).compactMap { displayed.indices.contains($0.row) ? displayed[$0.row].path : nil }
+        return isReviewVisible && !paths.isEmpty && paths.allSatisfy { review.diffs[$0] != nil }
+    }
+    #endif
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { displayed.count }
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -133,7 +152,32 @@ final class WorkspaceReviewController: UIViewController, UITableViewDataSource, 
         }
         return cell
     }
+    private func updateVisiblePaths(including index: IndexPath? = nil, excluding removed: IndexPath? = nil) {
+        guard isReviewVisible else { review.setVisiblePaths([]); return }
+        var indices = Set(table.indexPathsForVisibleRows ?? [])
+        if let index { indices.insert(index) }
+        if let removed { indices.remove(removed) }
+        let paths = Set(indices.compactMap { displayed.indices.contains($0.row) ? displayed[$0.row].path : nil })
+        review.setVisiblePaths(paths)
+        renderedDiffs = renderedDiffs.filter { paths.contains($0.key) }
+        renderedErrors = renderedErrors.filter { paths.contains($0.key) }
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        review.setVisiblePaths([])
+        renderedDiffs = [:]
+        renderedErrors = [:]
+    }
+
     func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        updateVisiblePaths(including: indexPath)
+        guard isReviewVisible, displayed.indices.contains(indexPath.row) else { return }
         review.loadDiff(path: displayed[indexPath.row].path)
+    }
+
+    func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        if let current = tableView.cellForRow(at: indexPath), current !== cell { return }
+        updateVisiblePaths(excluding: indexPath)
     }
 }

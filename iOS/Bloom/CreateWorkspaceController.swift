@@ -44,7 +44,7 @@ final class CreateWorkspaceController: UIViewController {
         label.numberOfLines = 0
         label.adjustsFontForContentSizeCategory = true
         let note = UILabel()
-        note.text = "Bloom creates a branch, prepares the workspace and starts your agent on the server. You can leave the prompt blank to explore first."
+        note.text = "Bloom creates a branch, prepares the workspace and starts your agent on the server. Enter a prompt to start your first conversation."
         note.numberOfLines = 0
         note.font = .preferredFont(forTextStyle: .footnote)
         note.textColor = BloomTheme.secondary
@@ -79,7 +79,7 @@ final class CreateWorkspaceController: UIViewController {
                 try await self.model.refresh()
                 self.dismiss(animated: true)
             } catch {
-                        if self.pending == nil { self.name.isEnabled = true; self.prompt.isEditable = true }
+                if self.pending == nil { self.name.isEnabled = true; self.prompt.isEditable = true }
                 self.navigationItem.rightBarButtonItem?.title = self.pending == nil ? "Create" : "Retry"
                 self.show(error)
             }

@@ -4,7 +4,8 @@ import BloomClient
 /// Narrow inspectors give the filename its own line before spending width on counts.
 public struct BloomChangedFileName: View {
     private let file: ChangedFile
-    public init(file: ChangedFile) { self.file = file }
+    private let showsDirectory: Bool
+    public init(file: ChangedFile, showsDirectory: Bool = true) { self.file = file; self.showsDirectory = showsDirectory }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -16,7 +17,7 @@ public struct BloomChangedFileName: View {
                 .accessibilityLabel(file.path)
             HStack(spacing: 8) {
                 let directory = (file.path as NSString).deletingLastPathComponent
-                if !directory.isEmpty {
+                if showsDirectory && !directory.isEmpty {
                     Text(verbatim: directory)
                         .font(.caption2)
                         .foregroundStyle(.secondary)

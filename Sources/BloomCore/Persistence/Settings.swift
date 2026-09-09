@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 import Synchronization
 
 public struct RunScript: Identifiable, Sendable, Hashable, Codable {
@@ -409,8 +410,8 @@ public struct AppDefaults: Sendable, Hashable {
 
     /// The built-in fallbacks, which `Session`'s own initialiser now reads rather than restates.
     /// Nothing else may invent a second set of hard-coded defaults.
-    public static let fallbackModel = "opus"
-    public static let fallbackEffort = "high"
+    public static let fallbackModel = ComposerFallbacks.model
+    public static let fallbackEffort = ComposerFallbacks.effort
     /// What a copy of Bloom with no row for `defaults.backend` runs on, which is every copy that
     /// was configured before the key existed: the only models the screen could offer then were
     /// Claude Code's, so a stored value with no backend beside it has exactly one honest reading.
@@ -422,7 +423,7 @@ public struct AppDefaults: Sendable, Hashable {
     /// This is a fallback, not an override. The moment `defaults.permissionMode` holds anything
     /// at all, the Settings, Models picker wins, which is why a copy of Bloom whose Models tab
     /// has ever been saved keeps whatever that tab last wrote. See `AppDefaults.load`.
-    public static let fallbackPermissionMode = PermissionMode.bypassPermissions
+    public static let fallbackPermissionMode = ComposerFallbacks.permissionMode
 
     public var model: String
     public var effort: String

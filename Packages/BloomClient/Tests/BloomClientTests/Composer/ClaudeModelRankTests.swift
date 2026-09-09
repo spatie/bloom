@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import BloomCore
+@testable import BloomClient
 
 /// The bug this file is about: the model menu opened with Opus, put Fable third, and drew the
 /// model the chat was actually pinned to underneath Haiku.

@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 import Synchronization
 
 /// One `codex app-server` process, spoken to in JSON-RPC.

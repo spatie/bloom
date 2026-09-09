@@ -47,25 +47,65 @@ enum IOSLiveSession {
                 window.rootViewController = split
                 split.loadViewIfNeeded()
                 (split.viewController(for: .primary) as? UINavigationController)?.topViewController?.loadViewIfNeeded()
-                let desk = WorkspaceDeskController(connection: model, workspace: workspace)
-                desk.preferredSessionID = session.id
-                split.setViewController(BloomTheme.navigation(desk), for: .secondary)
-                split.show(.secondary)
-                window.bounds = CGRect(x: 0, y: 0, width: 1376, height: 1032)
+                let desk = split.openWorkspace(workspace, preferredSessionID: session.id)
+                let phone = arguments.contains("--bloom-live-phone")
+                if !phone { window.bounds = CGRect(x: 0, y: 0, width: 1376, height: 1032) }
                 split.view.frame = window.bounds
                 window.layoutIfNeeded()
                 try status("Opening the real Laravel preview over SSH", workspace: workspace.id.rawValue, session: session.id.rawValue)
+                if phone {
+                    for _ in 0..<30 where desk.liveMessageCount == 0 {
+                        try await Task.sleep(for: .seconds(1))
+                    }
+                }
                 try await desk.openLivePreview(address: configuration.previewAddress)
                 for _ in 0..<90 {
                     try Task.checkCancellation()
                     if let failure = desk.livePreviewFailure { throw ConnectionFailure(failure) }
-                    if desk.livePreviewReady && desk.liveMessageCount > 0 {
+                    if desk.livePreviewReady && desk.liveMessageCount > 0 && desk.liveFilesReady {
                         try await Task.sleep(for: .seconds(2))
+                        let folderCount = try desk.verifyLiveTree()
+                        try "Verified \(folderCount) real change folders: disclosure, filtering and restoration.\n".write(
+                            to: URL.documentsDirectory.appendingPathComponent("bloom-live-tree-status.txt"), atomically: true, encoding: .utf8)
+                        (split.viewController(for: .primary) as? UINavigationController)?.viewControllers.compactMap { $0 as? ProjectsController }.first?.selectWorkspace(workspace.id, reveal: true)
                         window.layoutIfNeeded()
                         let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
                             window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
                         }
                         try image.pngData()?.write(to: URL.documentsDirectory.appendingPathComponent("bloom-ipad-live.png"))
+                        if phone {
+                            desk.focusLiveConversation()
+                            try await Task.sleep(for: .seconds(1))
+                            window.layoutIfNeeded()
+                            let chatImage = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+                            }
+                            try chatImage.pngData()?.write(to: URL.documentsDirectory.appendingPathComponent("bloom-iphone-live-chat.png"))
+                        }
+                        if arguments.contains("--bloom-live-options") {
+                            try await desk.showLiveOptions()
+                            try await Task.sleep(for: .seconds(2))
+                            window.layoutIfNeeded()
+                            let optionsImage = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+                            }
+                            try optionsImage.pngData()?.write(to: URL.documentsDirectory.appendingPathComponent("bloom-ipad-live-options.png"))
+                        }
+                        if arguments.contains("--bloom-live-review") {
+                            split.dismiss(animated: false)
+                            desk.openReview(all: true)
+                            for _ in 0..<45 {
+                                if let failure = desk.liveReviewFailure { throw ConnectionFailure(failure) }
+                                if desk.liveReviewReady { break }
+                                try await Task.sleep(for: .seconds(1))
+                            }
+                            guard desk.liveReviewReady else { throw ConnectionFailure("Visible review patches did not load.") }
+                            window.layoutIfNeeded()
+                            let reviewImage = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+                            }
+                            try reviewImage.pngData()?.write(to: URL.documentsDirectory.appendingPathComponent("bloom-live-review.png"))
+                        }
                         try status("Captured live server workspace", workspace: workspace.id.rawValue, session: session.id.rawValue,
                                    messages: desk.liveMessageCount, page: desk.livePreviewTitle)
                         return

@@ -3,7 +3,9 @@ import BloomClient
 @preconcurrency import AppAuth
 
 final class BloomSplitController: UISplitViewController, UISplitViewControllerDelegate {
+    private let model: MobileConnection
     init(model: MobileConnection) {
+        self.model = model
         super.init(style: .doubleColumn)
         delegate = self
         preferredDisplayMode = .oneBesideSecondary
@@ -30,12 +32,22 @@ final class BloomSplitController: UISplitViewController, UISplitViewControllerDe
         return detail is WorkspaceDeskController || detail is WorkspaceController || detail is ConversationController ? proposedTopColumn : .primary
     }
 
+    @discardableResult
+    func openWorkspace(_ workspace: RemoteWorkspace, preferredSessionID: SessionID? = nil) -> WorkspaceDeskController {
+        let controller = WorkspaceDeskController(connection: model, workspace: workspace)
+        controller.preferredSessionID = preferredSessionID
+        (viewController(for: .primary) as? UINavigationController)?.viewControllers.compactMap { $0 as? ProjectsController }.first?.selectWorkspace(workspace.id, reveal: true)
+        showDetailViewController(BloomTheme.navigation(controller), sender: self)
+        return controller
+    }
+
     required init?(coder: NSCoder) { fatalError("Use init(model:)") }
 }
 
 final class ProjectsController: UITableViewController {
     private let model: MobileConnection
     private var displayedAddress: String?
+    private var selectedWorkspaceID: WorkspaceID?
     private var projects: [RemoteProject] { model.catalogue?.repositories.filter { !$0.hidden } ?? [] }
 
     init(model: MobileConnection) { self.model = model; super.init(style: .insetGrouped) }
@@ -72,6 +84,7 @@ final class ProjectsController: UITableViewController {
             splitViewController?.setViewController(BloomTheme.navigation(empty), for: .secondary)
         }
         tableView.reloadData()
+        if let selectedWorkspaceID { selectWorkspace(selectedWorkspaceID, reveal: false) }
         navigationItem.prompt = nil
         updateHeader()
         if projects.isEmpty {
@@ -135,13 +148,24 @@ final class ProjectsController: UITableViewController {
         tableView.tableHeaderView = stack
     }
 
+    func selectWorkspace(_ id: WorkspaceID, reveal: Bool) {
+        selectedWorkspaceID = id
+        for section in projects.indices {
+            if let row = workspaces(section).firstIndex(where: { $0.id == id }) {
+                tableView.selectRow(at: IndexPath(row: row, section: section), animated: false, scrollPosition: reveal ? .top : .none)
+                return
+            }
+        }
+    }
+
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        tableView.deselectRow(at: indexPath, animated: true)
         let workspaces = workspaces(indexPath.section)
         if indexPath.row < workspaces.count {
-            let controller = WorkspaceDeskController(connection: model, workspace: workspaces[indexPath.row])
-            splitViewController?.showDetailViewController(BloomTheme.navigation(controller), sender: self)
-        } else { createWorkspace(projects[indexPath.section]) }
+            (splitViewController as? BloomSplitController)?.openWorkspace(workspaces[indexPath.row])
+        } else {
+            tableView.deselectRow(at: indexPath, animated: true)
+            createWorkspace(projects[indexPath.section])
+        }
     }
 
     private func connect() {

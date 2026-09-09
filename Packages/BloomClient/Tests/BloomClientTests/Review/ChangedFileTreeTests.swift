@@ -1,5 +1,5 @@
 import Testing
-@testable import BloomCore
+@testable import BloomClient
 
 @Suite("Changed file tree")
 struct ChangedFileTreeTests {

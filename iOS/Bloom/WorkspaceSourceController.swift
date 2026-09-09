@@ -59,8 +59,7 @@ final class WorkspaceSourceController: UIViewController {
         let path = path
         loading = Task { [weak self] in
             do {
-                guard let service = review.service else { throw ConnectionFailure("Reconnect to this server to read the file.") }
-                let file = try await service.readFile(workspaceID: review.workspace.id, path: path)
+                let file = try await review.readFile(path: path)
                 guard !Task.isCancelled else { return }
                 guard review.service != nil else {
                     throw ConnectionFailure("Reconnect to this server to read the file.")

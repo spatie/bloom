@@ -1,13 +1,7 @@
 import Foundation
+import BloomClient
 
-/// Presentation choices are read on the host that will execute the next turn.
-public struct ServerComposerState: Codable, Sendable {
-    public var controls: ComposerControls
-    public var models: [CodexModel]
-    public var commands: [SlashCommand]
-    public var styles: [OutputStyle]
-    public var availableAgents: [AgentKind]?
-}
+public typealias ServerComposerState = BloomClient.RemoteComposerState
 
 enum ServerComposer {
     static func controls(session: Session, store: Store) async throws -> ComposerControls {

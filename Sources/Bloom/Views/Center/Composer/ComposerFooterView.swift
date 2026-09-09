@@ -348,16 +348,7 @@ struct ComposerFooterView: View {
     /// The caller decides what changing the backend means, because a chat that has already spoken
     /// forks rather than changing. See `BackendChange`.
     private func selectModel(_ id: String) {
-        let backend = catalog.backend(ofModel: id, current: controls.agentKind)
-        edit {
-            $0.model = id
-            $0.agentKind = backend
-            $0.effort = catalog.resolvedEffort($0.effort, for: backend, model: id)
-            // The permission mode moves itself. A mode the new backend does not have cannot
-            // survive the move (Codex has no Plan, Claude Code has no Approve for me), and that
-            // used to be arranged here, in a view, by one of the four places a backend changes.
-            // It is an invariant of `ComposerControls` now: see the property's own note.
-        }
+        edit { $0 = catalog.selecting(id, in: $0) }
     }
 
 }
