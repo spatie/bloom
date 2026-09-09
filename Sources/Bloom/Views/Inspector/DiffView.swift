@@ -15,6 +15,10 @@ struct DiffView: View {
     let embeddedViewportHeight: CGFloat?
     let isCollapsed: Bool
     var onScrollFocus: (() -> Void)?
+    /// Only the clicked section reports its frame. Prepared rows have not necessarily been
+    /// laid out yet, and lazy height estimates can move this section after its own load ends.
+    let navigationTarget: Bool
+    var onNavigationLayout: (() -> Void)?
     var onPrepared: (() -> Void)?
     var onToggleCollapsed: (() -> Void)?
 
@@ -150,7 +154,8 @@ struct DiffView: View {
     init(
         model: WorkspaceModel, file: ChangedFile, embeddedWidth: CGFloat? = nil,
         embeddedViewportHeight: CGFloat? = nil, isCollapsed: Bool = false,
-        onScrollFocus: (() -> Void)? = nil, onPrepared: (() -> Void)? = nil,
+        onScrollFocus: (() -> Void)? = nil, navigationTarget: Bool = false,
+        onNavigationLayout: (() -> Void)? = nil, onPrepared: (() -> Void)? = nil,
         onToggleCollapsed: (() -> Void)? = nil
     ) {
         self.model = model
@@ -159,6 +164,8 @@ struct DiffView: View {
         self.embeddedViewportHeight = embeddedViewportHeight
         self.isCollapsed = isCollapsed
         self.onScrollFocus = onScrollFocus
+        self.navigationTarget = navigationTarget
+        self.onNavigationLayout = onNavigationLayout
         self.onPrepared = onPrepared
         self.onToggleCollapsed = onToggleCollapsed
         let absolute = (model.workspace.path as NSString).appendingPathComponent(file.path)
@@ -217,6 +224,13 @@ struct DiffView: View {
                 Section {
                     if !isCollapsed {
                         fileContent
+                            .onGeometryChange(for: CGRect?.self) { proxy in
+                                navigationTarget ? proxy.frame(in: .scrollView(axis: .vertical)) : nil
+                            } action: { frame in
+                                if let frame, abs(frame.minY - InspectorLayout.reviewHeaderHeight) > 1 {
+                                    onNavigationLayout?()
+                                }
+                            }
                             .onGeometryChange(for: Bool.self) { proxy in
                                 let frame = proxy.frame(in: .scrollView(axis: .vertical))
                                 let edge = InspectorLayout.reviewHeaderHeight
