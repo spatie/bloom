@@ -727,10 +727,10 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
     }
 
     /// Kept separate from the executable so Settings can use the binary it actually detected,
-    /// including an override outside the external terminal's PATH.
+    /// including an override outside PATH.
     public var loginArguments: [String] {
         switch self {
-        case .claudeCode: ["/login"]
+        case .claudeCode: ["auth", "login"]
         case .codex, .cursor: ["login"]
         case .openCode: ["auth", "login"]
         }

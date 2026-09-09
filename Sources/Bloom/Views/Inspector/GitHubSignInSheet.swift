@@ -23,7 +23,7 @@ struct GitHubSignInSheet: View {
     /// Moves as the flow does: a missing gh becomes a signed out gh once Homebrew has finished.
     @State private var access: GitHubAvailability.State
     @State private var phase: Phase = .idle
-    @State private var session: GitHubLoginSession?
+    @State private var session: LoginTerminalSession?
     @State private var isShowingOptions = false
 
     private enum Phase: Equatable {
@@ -82,7 +82,7 @@ struct GitHubSignInSheet: View {
         }
     }
 
-    private func terminal(_ session: GitHubLoginSession) -> some View {
+    private func terminal(_ session: LoginTerminalSession) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: InspectorLayout.gap) {
                 Text("Running \(session.label)")
@@ -109,7 +109,7 @@ struct GitHubSignInSheet: View {
             // the device URL are both readable on one line, which matters because the code is the
             // one thing the user has to copy by eye. Roughly ninety columns at the default
             // terminal size, and eighteen rows.
-            GitHubLoginTerminal(session: session)
+            LoginTerminal(session: session)
                 .frame(height: 280)
         }
         .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
@@ -261,7 +261,7 @@ struct GitHubSignInSheet: View {
         let executable = access == .notInstalled ? "brew" : "gh"
         let arguments = access == .notInstalled ? ["install", "gh"] : ["auth", "login"]
 
-        guard let session = GitHubLoginSession(
+        guard let session = LoginTerminalSession(
             executable: executable,
             arguments: arguments,
             directory: request.directory,
