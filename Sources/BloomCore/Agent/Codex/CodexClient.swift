@@ -151,6 +151,10 @@ public actor CodexClient {
 
     public var isRunning: Bool { process?.isRunning ?? false }
 
+    /// A process can end before the runner consumes its final event. A closed output stream
+    /// also makes the connection unusable while the process remains alive.
+    public var isConnected: Bool { closedReason == nil && isRunning }
+
     /// The same answer, readable without the actor, which is what a quit path polling for the
     /// process to actually be gone needs.
     public nonisolated var isProcessAlive: Bool { live.current?.isRunning ?? false }

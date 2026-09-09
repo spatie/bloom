@@ -84,7 +84,8 @@ private func eventually(
 // MARK: - Tests
 
 @Suite(.scratchDirectory) struct CodexRunnerTests {
-    @Test func closingAnIdleProcessKeepsSuccessAndReconnectsOnNextTurn() async throws {
+    @Test(arguments: [false, true])
+    func closingAnIdleProcessKeepsSuccessAndReconnectsOnNextTurn(outputPipeStaysOpen: Bool) async throws {
         let store = try makeTestStore("codex-idle-exit")
         let (session, _) = try await makeCodexSession(store)
         let box = scriptedBox()
@@ -96,12 +97,20 @@ private func eventually(
         }
         await eventually("completed") { await runner.currentSession.state == .idle }
         let before = try await store.messages(sessionID: session.id).count
-        box.process.endOutput()
-        try await Task.sleep(for: .milliseconds(100))
+        let previousProcess = box.process
+        if outputPipeStaysOpen {
+            previousProcess.exitWithoutClosingOutput()
+        } else {
+            previousProcess.endOutput()
+        }
         #expect(try await store.messages(sessionID: session.id).count == before)
         #expect(await runner.currentSession.state == .idle)
         try await runner.send("Second")
+        #expect(box.processes.count == 2)
+        #expect(previousProcess.sentMethods.filter { $0 == "turn/start" }.count == 1)
         #expect(box.process.sentMethods.contains("thread/resume"))
+        #expect(box.process.sentMethods.filter { $0 == "turn/start" }.count == 1)
+        #expect(try await store.messages(sessionID: session.id).filter { $0.kind == .error }.isEmpty)
         runner.terminateNow()
     }
 
@@ -115,6 +124,33 @@ private func eventually(
         await eventually("failed") { await runner.currentSession.state == .failed }
         let rows = try await store.messages(sessionID: session.id)
         #expect(rows.contains { $0.kind == .error })
+        #expect(box.processes.count == 1)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func aLostTurnStartReplyDoesNotRetryTheTurn() async throws {
+        let store = try makeTestStore("codex-start-reply-lost")
+        let (session, _) = try await makeCodexSession(store)
+        let (requests, requestSink) = AsyncStream<String>.makeStream()
+        defer { requestSink.finish() }
+        let box = scriptedBox { requestSink.yield($0) }
+        box.ignore("turn/start")
+        let runner = makeRunner(store: store, session: session, box: box)
+        let sending = Task { try await runner.send("May already be running") }
+        let request = await requests.first { JSONValue.parse($0)?["method"]?.stringValue == "turn/start" }
+        #expect(request != nil)
+        box.process.endOutput()
+
+        do {
+            try await sending.value
+            Issue.record("A lost turn/start reply returned success")
+        } catch CodexClientError.connectionClosed {
+            // The original turn may have started. Its missing reply cannot justify a replay.
+        }
+
+        #expect(box.processes.count == 1)
+        #expect(box.process.sentMethods.filter { $0 == "turn/start" }.count == 1)
+        await runner.shutdown()
     }
 
     @Test(arguments: [false, true])

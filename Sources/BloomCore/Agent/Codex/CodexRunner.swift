@@ -314,8 +314,9 @@ public actor CodexRunner: SessionRunner {
     /// no cancellation to record, and writing either would say a turn had been interrupted when
     /// none was running.
     private func dropConnection() async {
-        await client?.stop()
+        let previousClient = client
         client = nil
+        connectionID = UUID()
         // The thread belonged to the process that has just been killed. Held on to, the next
         // message would open a turn on a thread the new server has never heard of; cleared, the
         // stored id on the session row makes that message a `thread/resume`, which is the whole
@@ -325,6 +326,7 @@ public actor CodexRunner: SessionRunner {
         pumpTask?.cancel()
         pumpTask = nil
         handle.end()
+        await previousClient?.stop()
     }
 
     /// Pick up a context window chosen since this server started, by starting another one.
@@ -356,7 +358,16 @@ public actor CodexRunner: SessionRunner {
     // MARK: - Connecting
 
     private func connected() async throws -> CodexClient {
-        if let client { return client }
+        if let client {
+            guard session.state != .running && session.state != .waiting else { return client }
+            let connected = await client.isConnected
+            guard self.client === client else { return try await self.connected() }
+            guard !connected, session.state != .running && session.state != .waiting else { return client }
+            // The event pump may still be draining the previous process's output. Reconnect
+            // before starting a new turn, never by retrying a turn whose request was sent.
+            await dropConnection()
+            if let client = self.client { return client }
+        }
 
         let stored = try? await store.setting(AgentCatalog.executablePathSettingKey(.codex))
         let execution = try await WorkspaceExecution.resolve(store: store, session: session)
