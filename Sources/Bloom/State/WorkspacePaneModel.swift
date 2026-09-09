@@ -26,6 +26,7 @@ protocol WorkspacePaneModel: WorkspaceFileReview, Observable {
     func existingTranscript(for id: SessionID) -> TranscriptModel?
     func prepareTranscript(for id: SessionID)
     @discardableResult func ensurePort() async -> Int
+    func browserAddress() async -> String
     func readNote() async throws -> String
     func writeNote(_ body: String) async throws
     func panePosition(pane: String, session: SessionID) -> TranscriptPaneState?
@@ -33,6 +34,11 @@ protocol WorkspacePaneModel: WorkspaceFileReview, Observable {
 }
 
 extension WorkspacePaneModel {
+    func browserAddress() async -> String {
+        let port = await ensurePort()
+        return port > 0 ? "http://localhost:\(port)" : ""
+    }
+
     var browserAddressResolver: (@MainActor (String) async throws -> String)? {
         guard let server = remoteServer else { return nil }
         return { try await server.forwardedAddress($0) }
