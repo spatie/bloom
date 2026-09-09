@@ -39,6 +39,7 @@ import BloomCore
 /// `contextMenu` hands out no `NSMenu` to set it on in any case.
 struct ProjectMenuItems: View {
     var repo: Repo
+    var remote: ServerWindowModel?
     /// Raised to the sidebar, which asks for the create window.
     var onCreateWorkspace: (Repo) -> Void
     /// The rename is a field on the row itself, so the row starts it.
@@ -60,15 +61,18 @@ struct ProjectMenuItems: View {
         // not always the same thing.
         Button("Project settings…") {
             openWindow(id: RepoSettingsWindow.id, value: repo.id)
-        }
-        Button("Reveal in Finder") { Reveal.inFinder(repo.path) }
+        }.disabled(remote != nil)
+        Button("Reveal in Finder") { Reveal.inFinder(repo.path) }.disabled(remote != nil)
         // "Unhide" rather than "Show", because Show workspaces stood in this menu until today and
         // an owner who reads Show project as the other half of that pair would expect it to unfold
         // the rows. Unhide can only mean the one thing, and it names the state the project is in.
         Button(repo.hidden ? "Unhide project" : "Hide project") {
-            Task { await app.toggleHidden(repo) }
+            Task {
+                if let remote { await remote.updateProject(repo, action: .setHidden(!repo.hidden)) } else { await app.toggleHidden(repo) }
+            }
         }
+        if let remote { Button("Archived workspaces…") { remote.showsArchivedWorkspaces = true } }
         Divider()
-        Button("Remove project", role: .destructive, action: onRemove)
+        Button("Remove project", role: .destructive, action: onRemove).disabled(remote != nil)
     }
 }

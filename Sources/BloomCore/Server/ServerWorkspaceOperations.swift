@@ -3,6 +3,30 @@ import Foundation
 enum ServerWorkspaceOperations {
     static func perform(_ action: ServerWorkspaceAction, workspace: Workspace, store: Store, terminals: ServerTerminalService) async throws -> ServerResult {
         switch action {
+        case .archivePreview, .archive, .restore:
+            throw ServerFailure("Workspace lifecycle actions must go through the owning runtime.")
+        case .rename(let title):
+            let name = try ServerSidebar.name(title)
+            _ = try await store.update(workspaceID: workspace.id) { $0.name = name }
+            return .accepted
+        case .setPinned(let value):
+            _ = try await store.update(workspaceID: workspace.id) { $0.pinned = value }
+            return .accepted
+        case .setUnread(let value):
+            _ = try await store.update(workspaceID: workspace.id) { $0.unread = value }
+            return .accepted
+        case .setColour(let value):
+            guard value == nil || WorkspaceColour.all.contains(where: { $0.hex == value }) else { throw ServerFailure("Choose a workspace colour from the menu.") }
+            _ = try await store.update(workspaceID: workspace.id) { $0.colour = value }
+            return .accepted
+        case .runSetup:
+            guard let repo = try await store.repo(id: workspace.repoID) else { throw ServerFailure("This project's settings are unavailable.") }
+            guard workspace.setupState != .running else { throw ServerFailure("Workspace setup is already running.") }
+            let manager = WorkspaceManager(store: store)
+            let port = await manager.ensurePort(for: workspace)
+            guard await manager.runSetup(workspace: workspace, repo: repo, port: port, onOutput: { _ in }) else { throw ServerFailure("Workspace setup failed. Check the setup output before trying again.") }
+            return .accepted
+
         case .notes:
             return .text(try await store.note(workspaceID: workspace.id)?.body ?? "")
         case .saveNotes(let body):

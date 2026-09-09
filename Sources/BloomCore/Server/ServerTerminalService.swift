@@ -38,6 +38,18 @@ actor ServerTerminalService {
         throw ServerFailure("The server terminal did not become ready.")
     }
 
+    func close(workspaceID: WorkspaceID, store: Store, cwd: String) async throws {
+        guard let executable = Shell.which("tmux") else { return }
+        let command = TmuxCommand(executable: executable, socketName: TmuxSessions.socketName(databasePath: store.path),
+            configPath: URL(fileURLWithPath: store.path).deletingLastPathComponent().appendingPathComponent("tmux.conf").path)
+        let listed = try await Shell.run(executable, command.arguments(["list-sessions", "-F", "#{session_name}"]), cwd: cwd)
+        guard listed.ok else { return }
+        let owner = TmuxSessions.workspaceID(ofSessionName: TmuxSessions.sessionName(workspaceID: workspaceID, paneID: "main"))
+        for name in listed.stdout.split(separator: "\n").map(String.init) where TmuxSessions.workspaceID(ofSessionName: name) == owner {
+            _ = try await Shell.run(executable, command.arguments(["kill-session", "-t", "=" + name]), cwd: cwd)
+        }
+    }
+
     func shutdown() async {
         isClosed = true
         for start in starts.values { start.cancel() }

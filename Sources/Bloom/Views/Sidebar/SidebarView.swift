@@ -95,6 +95,45 @@ struct SidebarView: View {
     /// Home's list uses.
     @State private var arrival = RowArrival<WorkspaceID>()
 
+    private func presentRemoteCreate(_ repo: Repo) {
+        app.remoteServer.remoteRepositoryPath = repo.path
+        app.remoteServer.workspaceName = ""
+        presentCreate(in: repo)
+    }
+
+    private func remoteProjects(_ catalogue: ServerCatalogue) -> some View {
+                Section {
+                    ForEach(SidebarRepoGroup.build(repos: app.remoteServer.sidebarRepositories,
+                        workspaces: catalogue.workspaces, filter: filter, showingHidden: showsHiddenProjects)) { group in
+                        RepoHeaderRow(repo: group.repo, remote: app.remoteServer,
+                            hasUnreadWork: group.hasUnreadWork, workspaceCount: group.workspaces.count,
+                            onCreateWorkspace: presentRemoteCreate)
+                            .selectionDisabled()
+                            .moveDisabled(true)
+                        if !group.repo.collapsed {
+                            if group.workspaces.isEmpty { SidebarEmptyNoticeRow(isFiltered: filter != .all).selectionDisabled() }
+                            ForEach(group.workspaces) { workspace in
+                                SidebarWorkspaceRow(workspace: workspace, remote: app.remoteServer,
+                                    arrival: arrival, projectName: group.repo.name,
+                                    renaming: $renaming, archivePresentation: $archivePresentation)
+                                    .tag(SidebarSelection.remoteWorkspace(workspace.id))
+                                    .listRowBackground(selectionFill(for: .remoteWorkspace(workspace.id)))
+                                    .selectedRowInk(isEmphasized: isEmphasized(.remoteWorkspace(workspace.id)))
+                                    .moveDisabled(true)
+                            }
+                        }
+                    }
+                    if !catalogue.archivedWorkspaces.isEmpty {
+                        Button { app.remoteServer.showsArchivedWorkspaces = true } label: {
+                            Label("Archived workspaces", systemImage: "archivebox")
+                        }.selectionDisabled()
+                    }
+                } header: {
+                    Label(app.remoteServer.serverName, systemImage: "server.rack")
+                }
+                .task(id: app.remoteServer.connectionGeneration) { app.remoteServer.loadSidebarPreferences() }
+    }
+
     var body: some View {
         List(selection: $listSelection) {
             // One row, and it is the root of the list rather than one of three destinations:
@@ -214,26 +253,7 @@ struct SidebarView: View {
             // settle on drop are all AppKit's, and none of it is drawn here.
             .onMove(perform: move)
             if let catalogue = app.remoteServer.catalogue {
-                Section {
-                    ForEach(catalogue.workspaces) { workspace in
-                        let session = catalogue.sessions.first { $0.workspaceID == workspace.id && $0.id == app.remoteServer.activeSession(in: workspace.id) }
-                            ?? catalogue.sessions.first { $0.workspaceID == workspace.id }
-                        HStack(spacing: 8) {
-                            Image(systemName: "server.rack").foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(workspace.name).lineLimit(1)
-                                Text(session?.state.rawValue.capitalized ?? "No conversations").font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: 0)
-                            if session?.state == .running { ProgressView().controlSize(.mini) }
-                        }
-                        .tag(SidebarSelection.remoteWorkspace(workspace.id))
-                        .listRowBackground(selectionFill(for: .remoteWorkspace(workspace.id)))
-                        .help("\(workspace.name) on \(app.remoteServer.serverName)")
-                    }
-                } header: {
-                    Text(app.remoteServer.serverName)
-                }
+                remoteProjects(catalogue)
             } else if !app.remoteServer.host.isEmpty {
                 Button {
                     Task { await app.remoteServer.connect() }
@@ -260,6 +280,9 @@ struct SidebarView: View {
         // that. What was in reach was making the rhythm EVEN, which is what a project header's
         // own top padding is spent on. See `SidebarMetrics.headerLead`.
         .listStyle(.sidebar)
+        .sheet(isPresented: Binding(get: { app.remoteServer.showsArchivedWorkspaces }, set: { app.remoteServer.showsArchivedWorkspaces = $0 })) {
+            ServerArchivedWorkspacesView(server: app.remoteServer)
+        }
         .confirmation($stoppingCrew) { pending in
             Confirmation(
                 title: "Stop \(pending.name)?",

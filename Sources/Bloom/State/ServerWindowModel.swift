@@ -77,6 +77,11 @@ final class ServerWindowModel {
     var isPerformingCommand = false
     var error: String?
     var connectionGeneration = 0
+    var showsArchivedWorkspaces = false
+    var sidebarCollapsed: Set<RepoID> = []
+    var sidebarCollapseLoaded = false
+    var archiveConfirmations: [UUID: (ServerEndpoint, ServerArchivePreview)] = [:]
+    var archivingWorkspaceIDs: Set<WorkspaceID> = []
     var showsNewWorkspace = false
     var showsReview = true
     var showsStopServerConfirmation = false
@@ -115,6 +120,11 @@ final class ServerWindowModel {
         workspaceModels[workspace.id] = model
         return model
     }
+    func receiveSidebarCatalogue(_ value: ServerCatalogue) {
+        catalogue = value
+        for workspace in value.workspaces { workspaceModels[workspace.id]?.workspace = workspace }
+    }
+
     func existingWorkspaceModel(_ id: WorkspaceID) -> RemoteWorkspaceFileListing? { workspaceModels[id] }
     func existingConversation(_ id: SessionID) -> TranscriptModel? { conversationModels[id] }
     func forgetConversation(_ id: SessionID) { conversationModels[id] = nil }
@@ -159,6 +169,16 @@ final class ServerWindowModel {
         editingSessions[key] = session
         return session
     }
+    func forgetArchivedWorkspace(_ id: WorkspaceID) {
+        workspaceModels[id] = nil
+        let prefix = String(reflecting: endpoint ?? .local(directory: "")) + "/" + id.rawValue
+        editingSessions = editingSessions.filter { $0.key != prefix }
+        fileBuffers = fileBuffers.filter { !$0.key.hasPrefix(prefix + "/") }
+        let terminalPrefix = host + remoteDirectory + id.rawValue + "/"
+        for key in terminals.keys.filter({ $0.hasPrefix(terminalPrefix) }) { terminals.removeValue(forKey: key)?.shutdown() }
+        for session in catalogue?.sessions.filter({ $0.workspaceID == id }) ?? [] { conversationModels[session.id] = nil }
+    }
+
     private let preferences: UserDefaults
 
     init(preferences: UserDefaults = .standard, bundle: Bundle = .main) {
@@ -417,6 +437,9 @@ final class ServerWindowModel {
                 messageIdentity.reset()
                 conversationModels.removeAll()
                 workspaceModels.removeAll()
+                sidebarCollapseLoaded = false
+                sidebarCollapsed = []
+                archiveConfirmations = [:]
                 uncertainRequest = nil
                 if lastEndpoint != nil {
                     selectedSessionID = nil

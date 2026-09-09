@@ -74,7 +74,7 @@ public enum ReproduciblePaths {
 /// Removing a worktree and deleting its branch leaves nothing to recover from: the files are
 /// gone from disk and, once no ref points at them, the commits are unreachable and eventually
 /// pruned. So every field here is computed and shown before anything is deleted.
-public struct WorkspaceSafetyReport: Sendable, Hashable {
+public struct WorkspaceSafetyReport: Codable, Sendable, Hashable {
     /// Tracked files with modifications that were never committed.
     public var hasUncommittedChanges: Bool
     /// Files git has never seen. These are the easiest to lose and the hardest to notice.

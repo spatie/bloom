@@ -224,6 +224,7 @@ struct ServerRuntimeTests {
         let fixture = try await ServerFixture()
         let runtime = fixture.runtime()
         _ = await runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "Wait")))
+        await waitUntil("the queued turn starts before its permission question") { await fixture.runner.sends.count == 1 }
         let raw = Data(#"{"type":"control_request","request_id":"question-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"pwd"}}}"#.utf8)
         let ask = try #require(PermissionAsk.decode(payload: raw))
         try await fixture.store.appendPermissionAsk(sessionID: fixture.session.id, ask: ask)

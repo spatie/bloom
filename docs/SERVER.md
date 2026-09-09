@@ -36,7 +36,10 @@ creates a worktree and runs the project's setup script. Remote conversations ope
 window using the same tab strip, split panes, composer, transcript, inspector, diff viewer and
 file editor as local workspaces. Tabs can be closed, renamed and rearranged. Remote notes are
 stored on the server. Closing a terminal tab stops that server shell; quitting the client only
-detaches it.
+detaches it. Remote projects group their workspaces using the same sidebar rows and menus.
+Names, colours, pins, unread marks and archive status live on the server. Collapsed projects
+and tab layouts stay on each client. Archive confirmations are computed and rechecked on the
+server; archived workspaces can be restored with their conversation history and notes.
 
 ### Standalone executable
 
@@ -245,7 +248,7 @@ authenticated `gh`. Credentials remain on their respective execution host.
 
 ## Protocol and ownership
 
-`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 6). A protocol mismatch
+`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 7). A protocol mismatch
 is refused before dispatch. Commands and replies carry UUIDs, so a long setup command does not
 block transcript reads or controls on the same connection.
 
@@ -286,7 +289,7 @@ server starts, even without a connected Mac.
 1. Move the existing desktop execution path onto the standalone runtime. Preserve workspace data,
    startup, shutdown and existing bridge behaviour when migrating existing local workspaces.
 2. Add stable release downloads and installers, and broaden Linux coverage across agent backends.
-3. Bring Bloom's custom MCP bridge, crew/subagent management, archive/restore,
+3. Bring Bloom's custom MCP bridge, crew/subagent management,
    merge workflows and start-from-PR/branch controls to remote workspaces.
 4. Add saved machine profiles, push events and remote transcript search.
 5. Broaden attachment limits and preview navigation across multiple forwarded origins.

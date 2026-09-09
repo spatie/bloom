@@ -34,7 +34,7 @@ def check(binary):
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                 )
                 clients.append(client)
-                request = {"version": 6, "id": str(uuid.uuid4()), "operation": {"hello": {}}}
+                request = {"version": 7, "id": str(uuid.uuid4()), "operation": {"hello": {}}}
                 client.stdin.write(json.dumps(request) + "\n")
                 client.stdin.flush()
                 reply = json.loads(read_line(client.stdout))

@@ -1,6 +1,14 @@
 import Foundation
 
 public enum ServerWorkspaceAction: Codable, Sendable, Equatable {
+    case rename(String)
+    case setPinned(Bool)
+    case setUnread(Bool)
+    case setColour(String?)
+    case runSetup
+    case archivePreview
+    case archive(confirmation: UUID)
+    case restore
     case files
     case pullRequest
     case runScripts
@@ -19,7 +27,7 @@ public enum ServerWorkspaceAction: Codable, Sendable, Equatable {
 
     var mutates: Bool {
         switch self {
-        case .files, .download, .pullRequest, .runScripts, .notes: false
+        case .archivePreview, .files, .download, .pullRequest, .runScripts, .notes: false
         default: true
         }
     }

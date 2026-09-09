@@ -8,7 +8,7 @@ import Foundation
 /// cached above the core. Putting them on the report would mean a report that is wrong until
 /// whoever built it remembers to correct it, which is the kind of half-filled safety check that
 /// decides whether work gets destroyed.
-public struct ArchiveHazards: Sendable, Hashable {
+public struct ArchiveHazards: Codable, Sendable, Hashable {
     /// An agent is mid turn in this workspace, right now.
     public var isAgentRunning: Bool
     /// GitHub says this branch's pull request was merged.

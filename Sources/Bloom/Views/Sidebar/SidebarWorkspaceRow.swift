@@ -13,6 +13,7 @@ import BloomCore
 /// right clicked exactly as it was.
 struct SidebarWorkspaceRow: View {
     var workspace: Workspace
+    var remote: ServerWindowModel?
     /// Which rows have only just been added to the list, so they fade in rather than appear.
     /// Handed down from `SidebarView`, which owns the one tracker the whole pane shares: a
     /// workspace can move between projects, and two trackers would each read that as an arrival
@@ -38,9 +39,9 @@ struct SidebarWorkspaceRow: View {
 
     var body: some View {
         WorkspaceRow(
-            workspace: workspace,
-            isRunning: app.isRunning(workspace),
-            isAwaitingPermission: app.isAwaitingPermission(workspace),
+            workspace: workspace, remote: remote,
+            isRunning: remote?.isRunning(workspace) ?? app.isRunning(workspace),
+            isAwaitingPermission: remote?.isAwaitingPermission(workspace) ?? app.isAwaitingPermission(workspace),
             renaming: $renaming,
             onArchive: confirmRowArchive,
             onMenuArchive: { archive(from: .menu) },
@@ -105,7 +106,7 @@ struct SidebarWorkspaceRow: View {
         // The row's own hover ellipsis draws the same view, so a press and a right click on one
         // row cannot come up with different menus. See `WorkspaceRow.moreMenu`.
         .contextMenu {
-            WorkspaceMenuItems(workspace: workspace, onArchive: { archive(from: .row) }) {
+            WorkspaceMenuItems(workspace: workspace, remote: remote, onArchive: { archive(from: .row) }) {
                 renaming = $0
             }
         }
@@ -152,9 +153,8 @@ struct SidebarWorkspaceRow: View {
         let generation = beginArchive(from: source)
         Task {
             defer { archivePresentation.finish(generation: generation) }
-            await app.archive(workspace, alwaysConfirm: alwaysConfirm) { request in
-                archivePresentation.present(request, generation: generation)
-            }
+            let present: (ArchiveRequest) -> Void = { request in archivePresentation.present(request, generation: generation) }
+            if let remote { await remote.archive(workspace, app: app, alwaysConfirm: alwaysConfirm, present: present) } else { await app.archive(workspace, alwaysConfirm: alwaysConfirm, presentConfirmation: present) }
         }
     }
 
@@ -162,9 +162,8 @@ struct SidebarWorkspaceRow: View {
         let generation = beginArchive(from: archivePresentation.source)
         Task {
             defer { archivePresentation.finish(generation: generation) }
-            await app.confirmArchive(request) { fresh in
-                archivePresentation.present(fresh, generation: generation)
-            }
+            let present: (ArchiveRequest) -> Void = { fresh in archivePresentation.present(fresh, generation: generation) }
+            if let remote { await remote.confirmArchive(request, app: app, present: present) } else { await app.confirmArchive(request, presentConfirmation: present) }
         }
     }
 
@@ -184,11 +183,11 @@ struct SidebarWorkspaceRow: View {
     /// card over the window showing the name being replaced is a card about a fact that is in the
     /// middle of changing.
     private func hoverCard() -> WorkspaceHoverCard? {
-        guard renaming != workspace.id, !isArchiveActive else { return nil }
+        guard remote == nil, renaming != workspace.id, !isArchiveActive else { return nil }
         return WorkspaceHoverCard.make(
             workspace: workspace,
             isRunning: app.isRunning(workspace),
-            isAwaitingPermission: app.isAwaitingPermission(workspace),
+            isAwaitingPermission: remote?.isAwaitingPermission(workspace) ?? app.isAwaitingPermission(workspace),
             pullRequest: WorkspacePullRequests.shared.pullRequest(for: workspace.id)
         )
     }

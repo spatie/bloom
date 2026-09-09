@@ -14,6 +14,8 @@ public actor ServerRuntime {
     private var commands: [UUID: Task<ServerReply, Never>] = [:]
     private var commandOperations: [UUID: ServerOperation] = [:]
     private var stopping: [SessionID: Int] = [:]
+    private var changingWorkspaces: Set<WorkspaceID> = []
+    private var archivePreviews: [UUID: ServerArchivePreview] = [:]
     private var isClosed = false
     private var promptQueue: ServerPromptQueue?
 
@@ -139,12 +141,16 @@ public actor ServerRuntime {
             }
             try await configure(id, controls: controls)
             return .accepted
+        case .project(let id, let action):
+            try await ServerSidebar.project(action, id: id, store: store)
+            return .accepted
         case .catalogue:
             let workspaces = try await store.workspaces()
             var storedSessions: [Session] = []
             for workspace in workspaces { storedSessions += try await store.sessions(workspaceID: workspace.id) }
             return .catalogue(ServerCatalogue(
-                repositories: try await store.repos(), workspaces: workspaces, sessions: storedSessions
+                repositories: try await store.repos(), workspaces: workspaces, sessions: storedSessions,
+                archivedWorkspaces: try await store.workspaces(includeArchived: true).filter { $0.state == .archived }
             ))
         case .create(let request):
             guard request.agent.canRunWorkspaces else { throw ServerFailure("This agent backend is not supported.") }
@@ -181,7 +187,19 @@ public actor ServerRuntime {
                 queuedPrompts: queued.0, queueError: queued.1
             ))
         case .workspace(let id, let action):
-            return try await ServerWorkspaceOperations.perform(action, workspace: workspace(id), store: store, terminals: terminals)
+            switch action {
+            case .archivePreview:
+                return .archivePreview(try await prepareArchive(workspace(id)))
+            case .archive(let confirmation): return try await archiveWorkspace(id, confirmation: confirmation)
+            case .restore: return try await restoreWorkspace(id)
+            case .runSetup:
+                let selected = try await workspace(id)
+                changingWorkspaces.insert(id)
+                defer { changingWorkspaces.remove(id) }
+                return try await ServerWorkspaceOperations.perform(action, workspace: selected, store: store, terminals: terminals)
+            default:
+                return try await ServerWorkspaceOperations.perform(action, workspace: workspace(id), store: store, terminals: terminals)
+            }
         case .configure(let id, let model, let effort, let permissionMode):
             var controls = try await ServerComposer.controls(session: storedSession(id), store: store)
             controls.model = model
@@ -260,13 +278,85 @@ public actor ServerRuntime {
     }
 
     private func workspace(_ id: WorkspaceID) async throws -> Workspace {
+        guard !changingWorkspaces.contains(id) else { throw ServerFailure("This workspace is being archived or restored. Try again shortly.") }
         guard let workspace = try await store.workspace(id: id), workspace.state == .active else {
             throw ServerFailure("This workspace is no longer available.")
         }
         return workspace
     }
 
+    private func prepareArchive(_ workspace: Workspace) async throws -> ServerArchivePreview {
+        let preview = try await ServerSidebar.preview(workspace: workspace, store: store)
+        archivePreviews = archivePreviews.filter { Date().timeIntervalSince($0.value.createdAt) < 600 }
+        archivePreviews[preview.id] = preview
+        return preview
+    }
+
+    private func archiveWorkspace(_ id: WorkspaceID, confirmation: UUID) async throws -> ServerResult {
+        guard changingWorkspaces.insert(id).inserted else { throw ServerFailure("This workspace is already being changed.") }
+        defer { changingWorkspaces.remove(id) }
+        guard let workspace = try await store.workspace(id: id) else { throw ServerFailure("This workspace no longer exists.") }
+        if workspace.state == .archived { return .accepted }
+        guard let accepted = archivePreviews[confirmation], accepted.workspace.id == id,
+              Date().timeIntervalSince(accepted.createdAt) < 600 else {
+            return .archivePreview(try await prepareArchive(workspace))
+        }
+        let sessionIDs = Set(try await store.sessions(workspaceID: id).map(\.id))
+        // Finish commands already accepted before checking what the confirmation covers.
+        let pending = commandOperations.compactMap { key, operation -> Task<ServerReply, Never>? in
+            if case .workspace(let target, let action) = operation, target == id, action.mutates {
+                if case .archive = action { return nil }
+                if case .restore = action { return nil }
+                return commands[key]
+            }
+            switch operation {
+            case .send(let target, _), .setComposer(let target, _), .configure(let target, _, _, _),
+                 .closeSession(let target), .stop(let target), .answer(let target, _, _):
+                return sessionIDs.contains(target) ? commands[key] : nil
+            default: return nil
+            }
+        }
+        for task in pending { _ = await task.value }
+        let fresh = try await prepareArchive(workspace)
+        guard fresh.report == accepted.report, fresh.hazards == accepted.hazards else { return .archivePreview(fresh) }
+        let chats = try await store.sessions(workspaceID: id)
+        for chat in chats {
+            _ = try await execute(.stop(sessionID: chat.id))
+            if let pending = creating[chat.id] { _ = try? await pending.value }
+            await sessions[chat.id]?.shutdown()
+            sessions.removeValue(forKey: chat.id)
+        }
+        let settled = try await prepareArchive(workspace)
+        guard settled.report == accepted.report, settled.hazards.isDeletingBranch == accepted.hazards.isDeletingBranch else {
+            return .archivePreview(settled)
+        }
+        guard let repo = try await store.repo(id: workspace.repoID) else { throw ServerFailure("This project's repository is unavailable.") }
+        try await WorkspaceManager(store: store).archive(workspace: workspace, repo: repo,
+            deleteBranch: accepted.hazards.isDeletingBranch, force: true)
+        try await terminals.close(workspaceID: id, store: store, cwd: repo.path)
+        archivePreviews = archivePreviews.filter { $0.value.workspace.id != id }
+        return .accepted
+    }
+
+    private func restoreWorkspace(_ id: WorkspaceID) async throws -> ServerResult {
+        guard !changingWorkspaces.contains(id) else { throw ServerFailure("This workspace is already being changed.") }
+        changingWorkspaces.insert(id)
+        defer { changingWorkspaces.remove(id) }
+        guard let workspace = try await store.workspace(id: id), let repo = try await store.repo(id: workspace.repoID) else {
+            throw ServerFailure("This workspace's project is unavailable.")
+        }
+        if workspace.state == .active { return .accepted }
+        _ = try await WorkspaceManager(store: store).restore(workspace: workspace, repo: repo)
+        return .accepted
+    }
+
     private func liveSession(_ id: SessionID) async throws -> ServerSession {
+        if !changingWorkspaces.isEmpty {
+            let stored = try await storedSession(id)
+            if let workspaceID = stored.workspaceID, changingWorkspaces.contains(workspaceID) {
+                throw ServerFailure("This workspace is being archived or restored.")
+            }
+        }
         if let session = sessions[id] { return session }
         if let task = creating[id] {
             let live = try await task.value
