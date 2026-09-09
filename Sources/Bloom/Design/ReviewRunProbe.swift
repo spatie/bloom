@@ -183,6 +183,14 @@ enum ReviewRunProbe {
             if !loadedLongReview(in: host) {
                 let tab = CenterTabStore.shared.review(for: model.workspace.id)
                 progress("Navigation target: \(tab?.path ?? "nil"), revision: \(tab?.reviewNavigationRevision ?? -1)")
+                if let file = model.changedFiles.first(where: { $0.path == "Sources/LongReview.swift" }) {
+                    let held = model.heldDiff(for: file, ignoringWhitespace: false)
+                    progress("Long review held additions: \(held?.document.file.additions ?? -1)")
+                    do {
+                        let patch = try await Git.patch(worktree: model.workspace.path, base: "main", file: file)
+                        progress("Long review patch: \(patch.prefix(250))")
+                    } catch { progress("Long review read failed: \(error)") }
+                }
                 if let scroll = scrollView(in: host) {
                     progress("Review offset: \(scroll.contentView.bounds), document: \(scroll.documentView?.bounds ?? .zero)")
                 }
