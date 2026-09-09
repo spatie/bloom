@@ -241,6 +241,17 @@ final class TerminalSessionStore {
             )
         }
 
+        let execution: WorkspaceExecution
+        do {
+            execution = try repo.map { try WorkspaceExecution.resolve(workspace: workspace, repo: $0, environment: extra) }
+                ?? WorkspaceExecution(environment: extra)
+        } catch {
+            view.feed(text: error.localizedDescription + "\r\n")
+            view.willStop()
+            terminals[tab.id.rawValue] = view
+            return view
+        }
+
         // `tab.id.rawValue` is the pane id here: a split hands each pane a `TerminalTab` carrying its own id,
         // and an unsplit tab is its own single pane.
         paneOwner[tab.id.rawValue] = workspace.id
@@ -250,10 +261,10 @@ final class TerminalSessionStore {
         if let command = persistence?.command, let session = decision.session {
             paneSession[tab.id.rawValue] = session
             view.start(TerminalLaunch.tmux(
-                command: command, session: session, directory: start, extra: extra
+                command: command, session: session, directory: start, extra: extra, execution: execution
             ))
         } else {
-            view.start(TerminalLaunch.loginShell(directory: start, extra: extra))
+            view.start(TerminalLaunch.loginShell(directory: start, extra: extra, execution: execution))
         }
 
         terminals[tab.id.rawValue] = view

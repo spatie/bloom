@@ -239,7 +239,7 @@ public extension WorkspaceManager {
             replacingPrunableWorktreeAt: workspace.path
         )
 
-        let settings = SettingsLoader.load(repo: repo.path)
+        let settings = SettingsLoader.load(workspace: path, repo: repo.path)
         try copyFiles(settings.filesToCopy, from: repo.path, to: path)
 
         // Nothing is installed in this worktree, and the row has to say so.

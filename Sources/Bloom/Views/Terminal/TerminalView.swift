@@ -17,7 +17,7 @@ struct TerminalLaunch: Sendable, Hashable {
     /// The user's login shell, with the app's augmented PATH and the workspace variables layered
     /// on top. A GUI-launched app inherits a nearly empty PATH, so without `Shell.environment()`
     /// the shell would not find homebrew, mise, nvm or anything else the user installed.
-    static func loginShell(directory: String, extra: [String: String]) -> TerminalLaunch {
+    static func loginShell(directory: String, extra: [String: String], execution: WorkspaceExecution = WorkspaceExecution()) -> TerminalLaunch {
         let shell = LoginShell.path()
 
         var variables = Shell.environment(extra: extra)
@@ -27,11 +27,11 @@ struct TerminalLaunch: Sendable, Hashable {
         if variables["LANG"] == nil { variables["LANG"] = "en_US.UTF-8" }
 
         return TerminalLaunch(
-            executable: shell,
+            executable: execution.commandPrefix.first ?? shell,
             // From the shell that will actually run, not from `SHELL`. This used to test the
             // path, fall back, and then name the shell from the value it had just rejected.
-            execName: LoginShell.argumentZero(for: shell),
-            arguments: [],
+            execName: execution.commandPrefix.first ?? LoginShell.argumentZero(for: shell),
+            arguments: execution.commandPrefix.isEmpty ? [] : Array(execution.commandPrefix.dropFirst()) + ["/bin/bash", "-l"],
             environment: variables.map { "\($0.key)=\($0.value)" }.sorted(),
             directory: directory
         )
@@ -50,7 +50,8 @@ struct TerminalLaunch: Sendable, Hashable {
         command: TmuxCommand,
         session: String,
         directory: String,
-        extra: [String: String]
+        extra: [String: String],
+        execution: WorkspaceExecution = WorkspaceExecution()
     ) -> TerminalLaunch {
         var variables = Shell.environment()
         variables["TERM"] = "xterm-256color"
@@ -66,7 +67,7 @@ struct TerminalLaunch: Sendable, Hashable {
             executable: command.executable,
             execName: "tmux",
             arguments: command.attachOrCreate(
-                session: session, directory: directory, environment: sessionVariables
+                session: session, directory: directory, environment: sessionVariables, shellCommand: execution.terminalCommand
             ),
             environment: variables.map { "\($0.key)=\($0.value)" }.sorted(),
             directory: directory

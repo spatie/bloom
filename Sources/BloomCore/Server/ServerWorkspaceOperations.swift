@@ -41,10 +41,10 @@ enum ServerWorkspaceOperations {
             return .accepted
         case .runScripts:
             guard let repo = try await store.repo(id: workspace.repoID) else { throw ServerFailure("The workspace's project is unavailable.") }
-            return .runScripts(SettingsLoader.load(repo: repo.path).runScripts)
+            return .runScripts(SettingsLoader.load(workspace: workspace.path, repo: repo.path).runScripts)
         case .runScript(let id):
             guard let repo = try await store.repo(id: workspace.repoID),
-                  let script = SettingsLoader.load(repo: repo.path).runScripts.first(where: { $0.id == id }) else {
+                  let script = SettingsLoader.load(workspace: workspace.path, repo: repo.path).runScripts.first(where: { $0.id == id }) else {
                 throw ServerFailure("This run script is no longer configured in the project.")
             }
             let pane = ServerTerminalPane(id: UUID().uuidString, title: script.name)
@@ -109,13 +109,11 @@ enum ServerWorkspaceOperations {
         let exists = try await Shell.run(executable, command.arguments(["has-session", "-t", "=" + session]), cwd: workspace.path)
         if !exists.ok {
             var arguments = ["new-session", "-d", "-s", session, "-c", workspace.path]
-            if let repo = try await store.repo(id: workspace.repoID) {
-                let manager = WorkspaceManager(store: store)
-                let port = await manager.ensurePort(for: workspace)
-                for (key, value) in manager.environment(for: workspace, repo: repo, port: port).sorted(by: { $0.key < $1.key }) {
-                    arguments += ["-e", "\(key)=\(value)"]
-                }
+            let execution = try await WorkspaceExecution.resolve(store: store, workspace: workspace)
+            for (key, value) in execution.environment.sorted(by: { $0.key < $1.key }) {
+                arguments += ["-e", "\(key)=\(value)"]
             }
+            if let shell = execution.terminalCommand { arguments.append(shell) }
             let created = try await Shell.run(executable, command.arguments(arguments), cwd: workspace.path)
             if !created.ok {
                 let raced = try await Shell.run(executable, command.arguments(["has-session", "-t", "=" + session]), cwd: workspace.path)

@@ -26,6 +26,7 @@ public actor CodexClient {
     // MARK: Configuration
 
     public struct Configuration: Sendable {
+        public var commandPrefix: [String]
         public var executable: String
         /// The directory the agent works in. Passed per thread as well, because `turn/start` can
         /// override it, but the process is launched here so relative paths in tracing make sense.
@@ -50,6 +51,7 @@ public actor CodexClient {
 
         public init(
             executable: String = CodexClient.executable,
+            commandPrefix: [String] = [],
             cwd: String,
             codexHome: String? = nil,
             clientName: String = "Bloom",
@@ -58,6 +60,7 @@ public actor CodexClient {
             bridge: BridgeAttachment? = nil,
             contextWindow: Int = CodexContextWindow.modelDefault
         ) {
+            self.commandPrefix = commandPrefix
             self.executable = executable
             self.cwd = cwd
             self.codexHome = codexHome
@@ -86,16 +89,16 @@ public actor CodexClient {
         // the same trap, refusing to start on a user config holding anything this build of Codex
         // does not recognise.
         var arguments = Self.arguments
-        if let bridge = configuration.bridge {
+        if configuration.commandPrefix.isEmpty, let bridge = configuration.bridge {
             arguments += BridgeRegistration.codexArguments(bridge)
         }
         arguments += CodexContextWindow.overrides(for: configuration.contextWindow)
-        return AgentLaunch(
+        return WorkspaceExecution(commandPrefix: configuration.commandPrefix).wrapping(AgentLaunch(
             executable: configuration.executable,
             arguments: arguments,
             cwd: configuration.cwd,
             environment: environment
-        )
+        ))
     }
 
     // MARK: State

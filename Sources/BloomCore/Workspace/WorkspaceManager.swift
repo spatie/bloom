@@ -221,7 +221,7 @@ public struct WorkspaceManager: Sendable {
             repo: repo.path, path: worktreePath, branch: finalBranch, base: base, branchIsNew: true
         )
 
-        try copyFiles(settings.filesToCopy, from: repo.path, to: worktreePath)
+        try copyFiles(SettingsLoader.load(workspace: worktreePath, repo: repo.path).filesToCopy, from: repo.path, to: worktreePath)
 
         // Naming `setupState` reaches the initialiser that is internal to the module, which is
         // why this can say it and nothing in `Sources/Bloom` can. A workspace with no setup script
@@ -234,7 +234,7 @@ public struct WorkspaceManager: Sendable {
             branch: finalBranch,
             path: worktreePath,
             baseBranch: base,
-            setupState: setupPolicy.initialState(script: settings.setupScript),
+            setupState: setupPolicy.initialState(script: SettingsLoader.load(workspace: worktreePath, repo: repo.path).setupScript),
             sortOrder: try await store.nextWorkspaceSortOrder(repoID: repo.id),
             origin: origin
         )
@@ -265,7 +265,6 @@ public struct WorkspaceManager: Sendable {
         origin: WorkspaceOrigin,
         setupPolicy: WorkspaceSetupPolicy
     ) async throws -> Workspace {
-        let settings = SettingsLoader.load(repo: repo.path)
         let existingBranches = Set(try await Git.branches(of: repo.path))
         let branch = WorkspaceCheckoutPlan.localBranch(for: checkout, taken: existingBranches)
 
@@ -329,7 +328,7 @@ public struct WorkspaceManager: Sendable {
             }
         }
 
-        try copyFiles(settings.filesToCopy, from: repo.path, to: worktreePath)
+        try copyFiles(SettingsLoader.load(workspace: worktreePath, repo: repo.path).filesToCopy, from: repo.path, to: worktreePath)
 
         let workspace = Workspace(
             id: id,
@@ -338,7 +337,7 @@ public struct WorkspaceManager: Sendable {
             branch: branch,
             path: worktreePath,
             baseBranch: checkout.baseBranch(default: repo.defaultBranch),
-            setupState: setupPolicy.initialState(script: settings.setupScript),
+            setupState: setupPolicy.initialState(script: SettingsLoader.load(workspace: worktreePath, repo: repo.path).setupScript),
             sortOrder: try await store.nextWorkspaceSortOrder(repoID: repo.id),
             origin: origin,
             // Written now rather than waited for. A review workspace knows its pull request before
@@ -451,9 +450,9 @@ public struct WorkspaceManager: Sendable {
         onExit: (@Sendable (Int) -> Void)? = nil,
         onOutput: @escaping @Sendable (String) -> Void
     ) async -> Bool {
-        let settings = SettingsLoader.load(repo: repo.path)
+        let settings = SettingsLoader.load(workspace: workspace.path, repo: repo.path)
         let launch = ScriptLaunch.resolve(
-            text: settings.setupScript, file: settings.scriptFiles[.setup], repo: repo.path
+            text: settings.setupScript, file: settings.scriptFiles[.setup], repo: workspace.path
         )
 
         guard let launch else {
@@ -633,7 +632,7 @@ public struct WorkspaceManager: Sendable {
         // See the branch delete near the end of this method for what it guards.
         let worktreeWasOnDisk = FileManager.default.fileExists(atPath: workspace.path)
 
-        let settings = SettingsLoader.load(repo: repo.path)
+        let settings = SettingsLoader.load(workspace: workspace.path, repo: repo.path)
         let shouldDeleteBranch = deleteBranch ?? settings.deleteBranchOnArchive
 
         let report: WorkspaceSafetyReport?
@@ -663,7 +662,7 @@ public struct WorkspaceManager: Sendable {
         // running, a database still there. Deleting the worktree anyway leaves that mess with
         // nothing left to clean it up from.
         let archiveLaunch = ScriptLaunch.resolve(
-            text: settings.archiveScript, file: settings.scriptFiles[.archive], repo: repo.path
+            text: settings.archiveScript, file: settings.scriptFiles[.archive], repo: workspace.path
         )
         // A `.missing` archive script is not run and does not stop the archive, for the same
         // reason a missing setup script does not stop a workspace being created.

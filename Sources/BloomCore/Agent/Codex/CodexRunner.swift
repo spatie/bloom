@@ -359,12 +359,15 @@ public actor CodexRunner: SessionRunner {
         if let client { return client }
 
         let stored = try? await store.setting(AgentCatalog.executablePathSettingKey(.codex))
+        let execution = try await WorkspaceExecution.resolve(store: store, session: session)
         let client = makeClient(CodexClient.Configuration(
             executable: AgentCatalog.executable(for: .codex, override: stored),
+            commandPrefix: execution.commandPrefix,
             cwd: workspacePath,
             clientName: "Bloom",
             clientVersion: Self.clientVersion,
-            bridge: bridge,
+            environment: Shell.environment(extra: execution.environment),
+            bridge: execution.commandPrefix.isEmpty ? bridge : nil,
             contextWindow: contextWindow
         ))
         self.client = client
