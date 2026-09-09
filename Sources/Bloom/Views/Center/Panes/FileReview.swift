@@ -14,13 +14,13 @@ import BloomCore
 @MainActor
 enum FileReview {
     /// Opens the workspace's review on a file, or points the open one at it.
-    static func open(path: String, in model: WorkspaceModel) {
+    static func open(path: String, in model: WorkspaceModel, focusing: Bool = false) {
         // Unchanged files and attachments still open on their own.
         if !model.changedFiles.contains(where: { $0.path == path }),
            let tab = CenterTabStore.shared.review(for: model.workspace.id) {
             CenterTabStore.shared.setShowsAllFiles(false, for: tab)
         }
-        show(path: path, in: model, focusing: false)
+        show(path: path, in: model, focusing: focusing)
     }
 
     /// The one door, with the one thing the two callers disagree about.

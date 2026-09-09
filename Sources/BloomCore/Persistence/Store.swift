@@ -3096,6 +3096,27 @@ public actor Store {
 
     /// Archive and replacement are one commit. A failed insert, preference or draft write must
     /// leave the original conversation reachable, and a second caller must not replace it twice.
+    public func replaceWorkspaceConversation(id: SessionID, controls: ComposerControls) throws -> Session {
+        try db.transaction {
+            guard let current = try session(id: id), let workspaceID = current.workspaceID,
+                  current.archivedAt == nil else {
+                throw SQLiteError(message: "This conversation is no longer current.", sql: nil)
+            }
+            var next = Session(workspaceID: workspaceID, title: current.title, sortOrder: current.sortOrder)
+            next.model = controls.model
+            next.effort = controls.effort
+            next.agentKind = controls.agentKind
+            next.permissionMode = controls.permissionMode
+            try upsert(next)
+            for (key, value) in controls.settings(sessionID: next.id) {
+                try setSetting(key, value)
+            }
+            _ = try update(sessionID: id) { $0.archivedAt = Date() }
+            return next
+        }
+    }
+
+    /// Ask tabs also carry their directory and persisted selection into the replacement.
     public func replaceAskConversation(
         id: SessionID, controls: ComposerControls, draft: String = ""
     ) throws -> Session {

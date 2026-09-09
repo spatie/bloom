@@ -104,7 +104,11 @@ match. In Settings, General, choose where new projects are created and add other
 
 **Panes.** A workspace holds tabs, and a tab can be split. A pane is a chat, a terminal standing in
 the worktree, or a browser, so the dev server the setup script started can be read beside the
-conversation that is changing it.
+conversation that is changing it. Type `/close` to close the current chat and start a fresh one
+with the same model settings. The previous conversation is archived.
+
+Press Cmd+P to search files in the current workspace. Use the arrow keys and Return to open a
+file, or Escape to dismiss the search.
 
 **Review and ship.** The inspector lists the files the workspace changed and shows a
 syntax-highlighted diff against the merge base, with inline comments and an editor on the same
