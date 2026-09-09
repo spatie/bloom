@@ -291,8 +291,8 @@ if [[ -d "$BIN_DIR/Bloom_Bloom.bundle" ]]; then
   cp -R "$BIN_DIR/Bloom_Bloom.bundle" "$APP/Contents/Resources/"
 fi
 
-# PLCrashReporter's privacy manifest is a SwiftPM resource bundle, even though its code links statically.
-for resource in "$BIN_DIR"/*_CrashReporter.bundle(N); do
+# Statically linked dependencies still ship privacy manifests in SwiftPM resource bundles.
+for resource in "$BIN_DIR"/*_CrashReporter.bundle(N) "$BIN_DIR"/AppAuth_*.bundle(N); do
   cp -R "$resource" "$APP/Contents/Resources/"
 done
 
@@ -356,6 +356,10 @@ PY
     -sdk "$sdk" \
     -I "$BIN_DIR/Modules" \
     -Xcc "-fmodule-map-file=$BIN_DIR/CrashReporter.build/module.modulemap" \
+    -Xcc "-fmodule-map-file=$BIN_DIR/AppAuth.build/module.modulemap" \
+    -Xcc "-fmodule-map-file=$BIN_DIR/AppAuthCore.build/module.modulemap" \
+    -I "$(dirname "$(dirname "$BIN_DIR")")/checkouts/AppAuth-iOS/Sources/AppAuth" \
+    -I "$(dirname "$(dirname "$BIN_DIR")")/checkouts/AppAuth-iOS/Sources/AppAuthCore" \
     -F "${SPARKLE_SEARCH_PATH:-$BIN_DIR}" \
     -emit-const-values-path "$constvalues" \
     -Xfrontend -const-gather-protocols-file -Xfrontend "$protocolList" \
