@@ -14,9 +14,9 @@ import BloomCore
 @MainActor
 enum FileReview {
     /// Opens the workspace's review on a file, or points the open one at it.
-    static func open(path: String, in model: WorkspaceModel) {
+    static func open(path: String, in model: WorkspaceModel, focusing: Bool = false) {
         if model.changedFiles.contains(where: { $0.path == path }) { model.selectedFilePath = path }
-        show(path: path, in: model, focusing: false)
+        show(path: path, in: model, focusing: focusing)
         // A new shared review defaults to all changes, but unchanged files open on their own.
         if !model.changedFiles.contains(where: { $0.path == path }),
            let tab = CenterTabStore.shared.review(for: model.workspace.id) {
