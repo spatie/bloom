@@ -1,7 +1,7 @@
 import SwiftUI
 import BloomCore
 
-/// Revealed only during responsive preview, leaving the address bar room for the page's URL.
+/// Compact controls shared by the toolbar popover and the interactive preview fixture.
 struct BrowserViewportBar: View {
     @Binding var viewport: BrowserViewport
 
@@ -22,7 +22,6 @@ struct BrowserViewportBar: View {
         .padding(.horizontal, Metrics.spacingWide)
         .padding(.vertical, Metrics.spacingSmall)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.surfaceSunken)
     }
 
     private var presets: some View {
@@ -49,24 +48,32 @@ struct BrowserViewportBar: View {
             }
         } label: {
             Text(viewport.preset?.rawValue ?? "Custom")
-                .frame(width: 82, alignment: .leading)
         }
+        // Native menu buttons derive their intrinsic size from the title, ignoring a frame on
+        // the label. Constrain the control itself so Phone, Custom and Small phone align alike.
+        .frame(width: 110)
         .help("Choose a viewport size")
         .accessibilityLabel("Viewport preset")
     }
 
     private var dimensions: some View {
         HStack(spacing: 4) {
-            dimension("Width", value: viewport.width) { viewport.resize(width: $0, height: viewport.height) }
+            dimension("Width", value: viewport.width) {
+                viewport.resize(width: $0, height: viewport.height)
+            }
             Text("×").foregroundStyle(Palette.textSecondary)
-            dimension("Height", value: viewport.height) { viewport.resize(width: viewport.width, height: $0) }
+            dimension("Height", value: viewport.height) {
+                viewport.resize(width: viewport.width, height: $0)
+            }
         }
         .help("Viewport dimensions in CSS pixels")
     }
 
     private var actions: some View {
         HStack(spacing: Metrics.spacingSmall) {
-            Button("Rotate", systemImage: "rotate.right") { viewport.rotate() }
+            Button("Rotate", systemImage: "rotate.right") {
+                viewport.rotate()
+            }
                 .labelStyle(.iconOnly)
                 .help("Swap viewport width and height")
             Picker("Preview scale", selection: $viewport.fitsPane) {
@@ -107,7 +114,7 @@ private struct ViewportDimensionField: View {
     }
 
     private func commit() {
-        if let number = Int(text.trimmingCharacters(in: .whitespaces)) { change(number) }
+        if let number = Int(text.trimmingCharacters(in: .whitespaces)), number != value { change(number) }
         text = String(value)
     }
 }

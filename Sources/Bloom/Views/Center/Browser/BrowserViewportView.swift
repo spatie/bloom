@@ -66,6 +66,7 @@ struct BrowserViewportView: View {
             .frame(width: edge == .bottom ? 32 : 4, height: edge == .bottom ? 4 : 32)
             .frame(width: edge == .bottom ? 64 : gutter, height: edge == .bottom ? gutter : 64)
             .contentShape(Rectangle())
+            .pointerStyle(edge == .bottom ? .rowResize : .columnResize)
             .help(edge == .bottom ? "Drag to resize viewport height" : "Drag to resize viewport width")
             .accessibilityLabel(edge == .bottom ? "Viewport height" : "Viewport width")
             .accessibilityValue("\(edge == .bottom ? session.viewport.height : session.viewport.width) pixels")

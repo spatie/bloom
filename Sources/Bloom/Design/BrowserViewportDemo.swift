@@ -120,12 +120,8 @@ private struct BrowserViewportDemoView: View {
         VStack(spacing: 0) {
             BrowserToolbarView(
                 toolbar: BrowserToolbar(), address: $address, addressFocus: $addressFocused,
-                isRingVisible: addressFocused, isResponsive: session.viewport.isEnabled,
-                toggleResponsive: { session.viewport.isEnabled.toggle() }
+                isRingVisible: addressFocused, viewport: $session.viewport
             )
-            if session.viewport.isEnabled {
-                BrowserViewportBar(viewport: $session.viewport)
-            }
             Hairline()
             BrowserViewportView(session: session)
         }
