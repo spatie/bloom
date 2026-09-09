@@ -7,6 +7,7 @@ import SwiftUI
 /// Checks the real diff controls in an invisible window without opening the app or its database.
 @MainActor
 enum ReviewRunProbe {
+    static var preparedLayouts: [String: String] = [:]
     static var isRequested: Bool { CommandLine.arguments.contains("--review-run-probe") }
 
     static func runAndExit() -> Never {
@@ -133,7 +134,12 @@ enum ReviewRunProbe {
                   "review-all toggle did not return to one file")
             check(CenterTabStore.shared.review(for: model.workspace.id)?.path == "README.md",
                   "review-all toggle forgot the selected file")
-            let inspector = NSHostingView(rootView: ChangedFileList(model: model).background(Palette.surface))
+            model.inspectorTab = .changes
+            let inspector = NSHostingView(rootView: VStack(spacing: 0) {
+                InspectorToolbar(model: model)
+                Hairline()
+                ChangedFileList(model: model)
+            }.background(Palette.surface))
             let inspectorWindow = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 340, height: 560),
                 styleMask: [.borderless], backing: .buffered, defer: false
@@ -183,6 +189,7 @@ enum ReviewRunProbe {
             if !loadedLongReview(in: host) {
                 let tab = CenterTabStore.shared.review(for: model.workspace.id)
                 progress("Navigation target: \(tab?.path ?? "nil"), revision: \(tab?.reviewNavigationRevision ?? -1)")
+                progress("Prepared layouts: \(preparedLayouts)")
                 if let file = model.changedFiles.first(where: { $0.path == "Sources/LongReview.swift" }) {
                     let held = model.heldDiff(for: file, ignoringWhitespace: false)
                     progress("Long review held additions: \(held?.document.file.additions ?? -1)")
@@ -303,8 +310,16 @@ enum ReviewRunProbe {
     private static func settle(_ window: NSWindow) async {
         for _ in 0..<3 {
             window.contentView?.layoutSubtreeIfNeeded()
+            if CommandLine.arguments.contains("--review-legacy-scrollers"), let view = window.contentView {
+                useLegacyScrollers(in: view)
+            }
             try? await Task.sleep(for: .milliseconds(30))
         }
+    }
+
+    private static func useLegacyScrollers(in view: NSView) {
+        if let scroll = view as? NSScrollView { scroll.scrollerStyle = .legacy }
+        for child in view.subviews { useLegacyScrollers(in: child) }
     }
 
     private static func scrollView(in view: NSView) -> NSScrollView? {

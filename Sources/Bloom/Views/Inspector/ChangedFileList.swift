@@ -75,12 +75,8 @@ struct ChangedFileList: View {
             // Only over a diff there is something to narrow. A filter above "No changes yet" is a
             // control that cannot do anything, offered at the one moment it is useless.
             if !model.changedFiles.isEmpty {
-                HStack(spacing: 0) {
-                    InspectorFilterField(query: $query, onEscape: escape, onReturn: enterList)
-                    ReviewAllFilesToggle(model: model)
-                        .padding(.trailing, InspectorLayout.inset)
-                }
-                .background(Palette.surfaceSunken)
+                InspectorFilterField(query: $query, onEscape: escape, onReturn: enterList)
+                    .background(Palette.surfaceSunken)
                 Hairline()
             }
 

@@ -46,6 +46,7 @@ struct DiffView: View {
         var rows: [DiffRow]
         var width: CGFloat
         var heights: [String: [CGFloat]]
+        var codeHeight: CGFloat
     }
     @State private var expandedRuns: Set<Int> = []
     @State private var revealedGaps: [Int: Int] = [:]
@@ -307,9 +308,9 @@ struct DiffView: View {
         switch mode {
         case .diff:
             content
-                // Empty states have an intrinsic size; centre them in the whole pane.
-                // The actual diff fills this frame and owns its top-leading scroll anchor.
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // A standalone diff fills its pane. A file section must grow with its code,
+                // rather than accepting the short height proposed for its loading placeholder.
+                .frame(maxWidth: .infinity, maxHeight: embeddedWidth == nil ? .infinity : nil)
                 // Both of these hang on the diff rather than on the view around it, and that
                 // is not tidiness: a second `.alert` and a second `.sheet` on one view is one
                 // presentation modifier of each kind too many, and which of the pair wins is
@@ -673,6 +674,8 @@ struct DiffView: View {
                 }
                 .id(prepared.document.file)
                 .frame(width: embeddedWidth, alignment: .leading)
+                .frame(minHeight: prepared.codeHeight, alignment: .top)
+                .fixedSize(horizontal: false, vertical: true)
                 .clipped()
                 .disabled(prepared.revision != rowRevision)
                 .allowsHitTesting(prepared.revision == rowRevision)
@@ -844,7 +847,15 @@ struct DiffView: View {
             await Task.yield()
         }
         guard !Task.isCancelled else { return }
-        wrappedPresentation = WrappedPresentation(revision: revision, document: document, rows: currentRows, width: width, heights: heights)
+        wrappedPresentation = WrappedPresentation(
+            revision: revision, document: document, rows: currentRows, width: width, heights: heights,
+            codeHeight: heights.values.reduce(0) { $0 + $1.reduce(0, +) }
+        )
+        #if DEBUG
+        if CommandLine.arguments.contains("--review-run-probe") {
+            ReviewRunProbe.preparedLayouts[file.path] = "rows=\(currentRows.count), blocks=\(heights.count), height=\(heights.values.flatMap { $0 }.reduce(0, +)), width=\(width), viewport=\(embeddedViewportHeight ?? -1)"
+        }
+        #endif
     }
 
     private func wrappedHeights(for row: DiffRow, width: CGFloat) -> [CGFloat]? {

@@ -65,6 +65,10 @@ struct WrappedCodeText: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: TextView, context: Context) -> CGSize? {
+        CGSize(width: width, height: heights.reduce(0, +))
+    }
+
     func makeNSView(context: Context) -> TextView {
         let storage = NSTextStorage()
         let manager = NSLayoutManager()

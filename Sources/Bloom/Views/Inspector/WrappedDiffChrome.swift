@@ -14,6 +14,10 @@ struct WrappedDiffChrome: NSViewRepresentable {
     var editable: [Bool]
     @Environment(\.colorScheme) private var colorScheme
 
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: ChromeView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? nsView.bounds.width, height: heights.reduce(0, +))
+    }
+
     func makeNSView(context: Context) -> ChromeView {
         let view = ChromeView()
         view.toolTip = "Use Up and Down to choose a line, then Return to comment."
