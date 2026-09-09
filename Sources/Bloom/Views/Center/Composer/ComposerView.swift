@@ -491,7 +491,8 @@ struct ComposerView: View {
             defer { isClearingChat = false }
             if let model {
                 let tabs = WorkspaceTabsStore.shared
-                let owner = tabs.entries(in: model).first { tab in
+                let order = tabs.entries(in: model)
+                let owner = order.first { tab in
                     tabs.layout(of: tab).panes.contains { tabs.content(of: $0, in: tab) == .chat(previous.session.id) }
                 }
                 let pane = owner.flatMap { tab in
@@ -506,6 +507,9 @@ struct ComposerView: View {
                         tabs.replace(pane: pane, of: owner, with: .chat(next.id), in: model)
                     }
                     tabs.forget(.chat(previous.session.id), workspaceID: model.workspace.id)
+                    tabs.reorder(order.map { entry in
+                        entry == .chat(previous.session.id) ? .chat(next.id) : entry
+                    }, in: model)
                 }
                 tabs.reveal(.chat(next.id), in: model, focusing: true)
             } else {
