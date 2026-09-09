@@ -53,6 +53,16 @@ final class RepoSettingsModel {
         return result
     }
 
+    func updateRemoteProject(_ action: ServerProjectAction) async {
+        do {
+            guard case .accepted = try await remoteRead(action) else {
+                throw ServerFailure("The server did not confirm the project change.")
+            }
+            await remote?.refreshCatalogue()
+            saveError = nil
+        } catch { saveError = error.readableMessage }
+    }
+
     private func readSettings() async throws -> (RepoSettings, [ProjectInstructions.Subject: String]) {
         if remote != nil {
             guard case .projectSettings(let snapshot) = try await remoteRead(.settings) else {

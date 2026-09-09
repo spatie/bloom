@@ -71,7 +71,7 @@ private struct RepoSettingsWindowContent: View {
             // than pouring a new project's settings into the state of the last.
             RepoSettingsView(repo: repo)
                 .id(repo.id)
-        } else if let repo = app.remoteServer.catalogue?.repositories.first(where: { $0.id == repoID }) {
+        } else if let repo = app.remoteServer.sidebarRepositories.first(where: { $0.id == repoID }) {
             RepoSettingsView(repo: repo, remote: app.remoteServer)
                 .id(repo.id)
         } else {

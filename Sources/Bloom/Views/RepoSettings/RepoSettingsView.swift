@@ -416,8 +416,8 @@ struct RepoSettingsView: View {
             set: { color in
                 guard let hex = color.hexString, hex != repo.accent else { return }
                 Task {
-                    if let remote {
-                        await remote.updateProject(repo, action: .setAccent(hex))
+                    if remote != nil {
+                        await model.updateRemoteProject(.setAccent(hex))
                         return
                     }
                     guard let store = app.store else { return }
@@ -439,7 +439,7 @@ struct RepoSettingsView: View {
         }
         guard trimmed != repo.name else { return }
         Task {
-            if let remote { await remote.updateProject(repo, action: .rename(trimmed)) } else { await app.rename(repo, to: trimmed) }
+            if remote != nil { await model.updateRemoteProject(.rename(trimmed)) } else { await app.rename(repo, to: trimmed) }
         }
     }
 
