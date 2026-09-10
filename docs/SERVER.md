@@ -496,3 +496,9 @@ Run this as the account that runs Bloom Server. It changes no configuration and 
 check needs attention, 0 otherwise, or 64 for invalid arguments. Update the server, Mac client and
 HTTPS gateway together: all enforce the same protocol version. The gateway contract test checks
 its version against the Swift source to catch future drift.
+
+Remote pane splits advertise the `pane_split_anchored` UI capability. The MCP tool remains
+`pane_split`; Bloom Server supplies the authenticated caller's session ID separately from tool
+arguments. New clients resolve that chat before splitting and refuse if it is no longer open.
+Older clients without this capability refuse these requests rather than splitting another chat.
+The legacy `pane_split` UI action retains its focused-pane behaviour for older servers.

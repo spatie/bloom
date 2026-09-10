@@ -51,6 +51,10 @@ public struct PaneListTool: BridgeToolHandling {
     public let tool = BridgeTool(
         name: "pane_list",
         description: """
+            A pane is a visible region inside a tab. One tab can contain several panes shown \
+            together; selecting another tab switches the whole arrangement. pane_split adds a \
+            pane beside the chat making the request. pane_open creates a separate tab.
+
             List what the person has open in the workspace you are in: their chats, terminals, \
             browsers, the changed files and the notes. Each pane says what kind it is, what the \
             tab is called, and whether it is in the tab they are looking at right now.

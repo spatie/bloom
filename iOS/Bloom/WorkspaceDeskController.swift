@@ -470,7 +470,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
 }
 
 extension WorkspaceDeskController {
-    private static let uiActions = ["pane_open", "pane_split", "pane_close", "pane_rename", "pane_list", "workspace_tabs", "workspace_tab_select",
+    private static let uiActions = ["pane_open", "pane_split", "pane_split_anchored", "pane_close", "pane_rename", "pane_list", "workspace_tabs", "workspace_tab_select",
                                     "browser_read", "browser_reload", "browser_go", "browser_scroll", "browser_text", "browser_screenshot",
                                     "terminal_start", "terminal_read", "terminal_write", "terminal_send_key", "media_show"]
 
@@ -541,7 +541,11 @@ extension WorkspaceDeskController {
     }
 
     private func openPane(kind: PaneKind, address: String? = nil, title: String? = nil,
-                          focus: Bool = true, axis: SplitAxis? = nil) async throws -> WorkspaceToolPane {
+                          focus: Bool = true, axis: SplitAxis? = nil, targetSessionID: SessionID? = nil) async throws -> WorkspaceToolPane {
+        let targetPane = targetSessionID.flatMap { id in deck.allPanes.first { $0.sessionID == id } }
+        if let targetSessionID, targetPane == nil, standalonePrimary?.id != targetSessionID {
+            throw ConnectionFailure("The chat making this request is not open in a tab. Nothing was split.")
+        }
         guard let service = review.service else { throw ConnectionFailure("Reconnect to this workspace's server first.") }
         let content: UIViewController
         var session: RemoteSession?
@@ -569,7 +573,18 @@ extension WorkspaceDeskController {
         pane.sessionID = session?.id
         configure(pane)
         let previousFocus = focusesConversation
-        if axis != nil, !primaryInDeck, tool == nil || focusesConversation, let conversation, let primary = primarySession {
+        if let targetSessionID {
+            if let targetPane, deck.allPanes.contains(where: { $0 === targetPane && $0.sessionID == targetSessionID }) {
+                deck.selectPane(targetPane)
+                focusesConversation = false
+            } else if targetPane == nil, standalonePrimary?.id == targetSessionID {
+                focusesConversation = true
+            } else {
+                deck.add(pane, focus: false)
+                throw ConnectionFailure("The target chat changed before it could be split. The new content is available as a separate tab.")
+            }
+        }
+        if axis != nil, targetPane == nil, !primaryInDeck, tool == nil || focusesConversation, let conversation, let primary = primarySession {
             remove(conversation)
             let root = WorkspaceToolPane(kind: "chat", title: primary.title, content: conversation)
             root.sessionID = primary.id
@@ -761,10 +776,15 @@ extension WorkspaceDeskController {
             switch action.name {
             case "pane_list": return .init(value: panesJSON())
             case "workspace_tabs": return .init(value: tabsJSON())
-            case "pane_open", "pane_split":
+            case "pane_open", "pane_split", "pane_split_anchored":
                 guard let raw = args["kind"]?.stringValue, let kind = PaneKind(rawValue: raw) else { throw ConnectionFailure("Choose chat, browser or terminal.") }
-                let axis: SplitAxis? = action.name == "pane_split" ? (args["direction"]?.stringValue == "below" ? .vertical : .horizontal) : nil
-                let pane = try await openPane(kind: kind, address: args["url"]?.stringValue, title: args["title"]?.stringValue, focus: args["focus"]?.boolValue ?? true, axis: axis)
+                if action.name == "pane_split_anchored", args["target"]?.stringValue == "this_chat", args["sessionID"]?.stringValue == nil {
+                    throw ConnectionFailure("The server did not identify the chat to split beside. Nothing was split.")
+                }
+                let axis: SplitAxis? = action.name != "pane_open" ? (args["direction"]?.stringValue == "below" ? .vertical : .horizontal) : nil
+                let pane = try await openPane(kind: kind, address: args["url"]?.stringValue, title: args["title"]?.stringValue, focus: args["focus"]?.boolValue ?? true, axis: axis,
+                    targetSessionID: action.name == "pane_split_anchored" && args["target"]?.stringValue == "this_chat"
+                        ? args["sessionID"]?.stringValue.map(SessionID.init) : nil)
                 return .init(text: "Opened \(pane.title).")
             case "pane_close":
                 if let primary = standalonePrimary, tool == nil || focusesConversation, args["kind"]?.stringValue == nil || args["kind"]?.stringValue == "chat" {

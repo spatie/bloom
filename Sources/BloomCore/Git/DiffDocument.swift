@@ -33,8 +33,8 @@ public struct DiffDocument: Sendable {
     /// Context skipped between hunks is a known gap in this reasoning. Git only gives us the lines
     /// it printed, so a construct opened inside the skipped region cannot be seen, and the first
     /// lines of the next hunk may highlight as if it were never opened.
-    public static func prepare(file: FileDiff, path: String) -> DiffDocument {
-        let language = Language.detect(path: path)
+    public static func prepare(file: FileDiff, path: String, language override: Language? = nil) -> DiffDocument {
+        let language = override ?? Language.detect(path: path)
         // Plain text has no construct that can span a line, so the whole sequential pass would
         // only ever hand back a clean state. Skipping it makes an unrecognised file free.
         let needsCarry = language != .plainText

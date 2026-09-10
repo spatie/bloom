@@ -56,6 +56,10 @@ public struct WorkspaceTabsTool: BridgeToolHandling {
     public let tool = BridgeTool(
         name: "workspace_tabs",
         description: """
+            A tab is an entry in the top strip that owns an arrangement of one or more panes. \
+            Panes are the regions visible together inside that tab. Use pane_split for "add a \
+            pane" or "next to this chat"; use pane_open for a separate new tab.
+
             The tab strip of the workspace you are in, left to right: what each tab is, what the \
             person sees it called, which one is in front, and one true thing about what is in it.
 
@@ -70,7 +74,8 @@ public struct WorkspaceTabsTool: BridgeToolHandling {
 
             'tab' is a place in the strip counting from 1 and it moves as tabs are opened, closed \
             and dragged, so call this again before acting on a number. workspace_tab_select takes \
-            either that number or the title.
+            either that number or the title. Use chat_read with a chat title to read its messages,
+            or chat_list for IDs when titles are shared.
 
             It reads your own workspace and takes no arguments. It runs no command and fetches no \
             page: a terminal's directory is where its shell started, not where it is now, and \

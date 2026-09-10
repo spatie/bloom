@@ -18,6 +18,7 @@ let serverTests = [
     "ServerClientLifecycleTests.swift",
     "ServerMCPTests.swift",
     "ServerUIBrokerTests.swift",
+    "ServerPaneSplitTests.swift",
     "ServerTerminalRelayTests.swift",
     "RemoteCreationContractTests.swift",
     "ServerSetupTests.swift",

@@ -68,9 +68,9 @@ extension AppModel {
                 guard let self else { return .refused("Bloom is still starting up.") }
                 return await self.showMediaForBridge(order, in: workspaceID)
             },
-            PaneSplitTool { [weak self] order, axis, workspaceID in
+            PaneSplitTool { [weak self] order, axis, anchor, workspaceID in
                 guard let self else { return .refused("Bloom is still starting up.") }
-                return await self.splitPaneForBridge(order, axis: axis, in: workspaceID)
+                return await self.splitPaneForBridge(order, axis: axis, anchor: anchor, in: workspaceID)
             },
             PaneCloseTool { [weak self] kind, workspaceID in
                 guard let self else { return .refused("Bloom is still starting up.") }
@@ -386,28 +386,6 @@ extension AppModel {
             }
         }
         return .opened(order.confirmation)
-    }
-
-    /// `pane_split`, through the same door Cmd+D uses.
-    ///
-    /// The refusal comes from `PaneSplit`, which is what greys Split Right in the menu, so a pane
-    /// the menu will not divide is one this declines with the menu's own reason rather than with a
-    /// second opinion.
-    func splitPaneForBridge(
-        _ order: PaneOrder, axis: SplitAxis, in workspaceID: WorkspaceID
-    ) async -> PaneOutcome {
-        guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForPane) }
-        let tabs = model.paneStores.tabs
-        guard let tab = tabs.selectedTab(in: model) else {
-            return .refused(
-                "There is no tab open in that workspace to split. Use pane_open instead."
-            )
-        }
-        NewPane.open(order.kind, in: model, url: order.url ?? "", title: order.title) { content in
-            tabs.split(tab: tab, axis: axis, showing: content)
-        }
-        let where_ = axis == .horizontal ? "beside" : "below"
-        return .opened("Opened \(order.kind.title) \(where_) what was already on screen.")
     }
 
     /// Which pane of the tab in front a kind names, or the sentence saying why none does.

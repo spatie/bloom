@@ -46,9 +46,15 @@ enum ServerUIBridgeTools {
             PaneOpenTool { order, workspaceID in
                 await pane(broker, name: "pane_open", arguments: arguments(order), workspaceID: workspaceID)
             },
-            PaneSplitTool { order, axis, workspaceID in
+            PaneSplitTool { order, axis, anchor, workspaceID in
                 var args = arguments(order); args["direction"] = .string(axis == .horizontal ? "beside" : "below")
-                return await pane(broker, name: "pane_split", arguments: args, workspaceID: workspaceID)
+                switch anchor {
+                case .activePane: args["target"] = .string("active_pane")
+                case .chat(let sessionID):
+                    args["target"] = .string("this_chat")
+                    args["sessionID"] = .string(sessionID.rawValue)
+                }
+                return await pane(broker, name: "pane_split_anchored", arguments: args, workspaceID: workspaceID)
             },
             PaneCloseTool { kind, workspaceID in
                 await pane(broker, name: "pane_close", arguments: ["kind": kind.map { .string($0.rawValue) } ?? .null], workspaceID: workspaceID)

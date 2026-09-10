@@ -5,6 +5,16 @@ import BloomCore
 @MainActor
 final class PaneStores {
     static let local = PaneStores(defaults: .standard, domain: Bundle.main.bundleIdentifier, migrateLegacy: true, identity: "local")
+    let sourceNavigation = SourceNavigation()
+    private var sourceFiles: [String: SourceEditorState] = [:]
+
+    func sourceFile(_ path: String) -> SourceEditorState {
+        if let state = sourceFiles[path] { return state }
+        let state = SourceEditorState()
+        sourceFiles[path] = state
+        return state
+    }
+
     let identity: String
     let center: CenterTabStore
     let tabs: WorkspaceTabsStore

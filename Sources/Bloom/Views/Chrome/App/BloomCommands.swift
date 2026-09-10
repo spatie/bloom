@@ -23,6 +23,7 @@ struct BloomCommands: Commands {
     @FocusedValue(\.focusedWorkspaceRow) private var focusedRow: FocusedWorkspaceRow?
 
     /// The focused window's Save, when it has one. See `FocusedMenuValues`.
+    @FocusedValue(\.sourceFind) private var sourceFind
     @FocusedValue(\.saveAction) private var saveAction: SaveAction?
 
     @FocusedValue(\.composerTranscript) private var composerTranscript: TranscriptModel?
@@ -973,6 +974,10 @@ struct BloomCommands: Commands {
     /// Cmd+F. The pane in front gets first refusal, and the workspace search is what is left when
     /// nothing there can find. See `FindCommand`, which is the rule and holds the tests.
     private func find() {
+        if !FindInPlace.isAvailable, let sourceFind {
+            sourceFind.perform(.showFindInterface)
+            return
+        }
         switch FindCommand.find(
             canFindInPlace: FindInPlace.isAvailable, hasProjects: !model.repos.isEmpty
         ) {
@@ -986,6 +991,10 @@ struct BloomCommands: Commands {
     }
 
     private func step(_ action: NSTextFinder.Action) {
+        if !FindInPlace.isAvailable, let sourceFind {
+            sourceFind.perform(action)
+            return
+        }
         guard FindCommand.step(canFindInPlace: FindInPlace.isAvailable) == .findInPlace else {
             return
         }

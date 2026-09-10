@@ -10,7 +10,7 @@ import BloomClient
 /// and attaching a second device cannot take over the first device's active UI.
 public actor ServerUIBroker {
     public static let actionNames: Set<String> = [
-        "pane_open", "pane_split", "pane_close", "pane_rename", "pane_list", "workspace_tabs", "workspace_tab_select",
+        "pane_open", "pane_split", "pane_split_anchored", "pane_close", "pane_rename", "pane_list", "workspace_tabs", "workspace_tab_select",
         "browser_read", "browser_reload", "browser_go", "browser_screenshot", "browser_scroll", "browser_text",
         "terminal_start", "terminal_read", "terminal_write", "terminal_send_key", "media_show",
     ]

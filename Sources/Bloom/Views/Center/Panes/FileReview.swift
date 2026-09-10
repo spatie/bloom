@@ -15,6 +15,9 @@ import BloomCore
 enum FileReview {
     /// Opens the workspace's review on a file, or points the open one at it.
     static func open(path: String, in model: any WorkspacePaneModel, focusing: Bool = false) {
+        let location = CodeLocation.parse(path)
+        if location.path != path { open(location: location, in: model); return }
+        model.paneStores.sourceNavigation.visit(location, in: model)
         if model.changedFiles.contains(where: { $0.path == path }) { model.selectedFilePath = path }
         show(path: path, in: model, focusing: focusing)
         // A new shared review defaults to all changes, but unchanged files open on their own.
@@ -22,6 +25,21 @@ enum FileReview {
            let tab = model.paneStores.center.review(for: model.workspace.id) {
             model.paneStores.center.setShowsAllFiles(false, for: tab)
         }
+    }
+
+    static func open(location: CodeLocation, in model: any WorkspacePaneModel, recording: Bool = true) {
+        var location = location
+        let root = model.workspace.path + "/"
+        if location.path.hasPrefix(root) { location.path = String(location.path.dropFirst(root.count)) }
+        if recording { model.paneStores.sourceNavigation.visit(location, in: model) }
+        let absolute = (location.path as NSString).isAbsolutePath ? location.path
+            : (model.workspace.path as NSString).appendingPathComponent(location.path)
+        model.paneStores.sourceFile(absolute).go(to: location)
+        show(path: location.path, in: model, focusing: true)
+        if let tab = model.paneStores.center.review(for: model.workspace.id) {
+            model.paneStores.center.setShowsAllFiles(false, for: tab)
+        }
+        if model.changedFiles.contains(where: { $0.path == location.path }) { model.selectedFilePath = location.path }
     }
 
     /// The one door, with the one thing the two callers disagree about.
@@ -47,7 +65,14 @@ enum FileReview {
     /// never the one `showReview` repoints, so a reading you set aside survives the next filename
     /// you click. See `CenterTab.isPinnedToPath`.
     static func openInNewTab(path: String, in model: any WorkspacePaneModel) {
-        let tab = model.paneStores.center.openPinnedReview(path: path, workspaceID: model.workspace.id)
+        let location = CodeLocation.parse(path)
+        model.paneStores.sourceNavigation.visit(location, in: model)
+        if location.path != path {
+            let absolute = (location.path as NSString).isAbsolutePath ? location.path
+                : (model.workspace.path as NSString).appendingPathComponent(location.path)
+            model.paneStores.sourceFile(absolute).go(to: location)
+        }
+        let tab = model.paneStores.center.openPinnedReview(path: location.path, workspaceID: model.workspace.id)
         model.paneStores.tabs.reveal(.tool(tab.id), in: model)
     }
 
