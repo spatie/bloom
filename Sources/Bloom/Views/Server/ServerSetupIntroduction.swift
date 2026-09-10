@@ -8,7 +8,7 @@ struct ServerSetupIntroduction: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Metrics.gutter) {
-                BloomServerIllustration(accent: Brand.shallow)
+                BloomServerIllustration(accent: Palette.controlAccent)
                     .environment(\.colorScheme, .dark)
                     .background { BrandWater() }
                     .background(Brand.depth)
@@ -41,7 +41,7 @@ struct ServerSetupIntroduction: View {
 
     private func benefit(_ title: String, symbol: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-            Label(title, systemImage: symbol).font(Typo.captionEmphasis).foregroundStyle(Palette.accent)
+            Label(title, systemImage: symbol).font(Typo.captionEmphasis).foregroundStyle(Palette.controlAccent)
             Text(detail).font(Typo.caption).foregroundStyle(Palette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

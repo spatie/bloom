@@ -80,7 +80,7 @@ struct ServerSetupView: View {
                     .help("Copy the setup step, error and server output to share for troubleshooting.")
                 }
                 Spacer()
-                primaryButton
+                primaryButton.buttonStyle(.borderedProminent).tint(Palette.controlAccent)
             }
             .padding(Metrics.gutter)
         }
@@ -156,10 +156,10 @@ struct ServerSetupView: View {
         case .connecting:
             HStack { ProgressView().controlSize(.small); Text("Loading projects and verifying the connection…") }
         case .complete:
-            BloomServerIllustration(state: .complete, accent: Palette.accent)
+            BloomServerIllustration(state: .complete, accent: Palette.controlAccent)
                 .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner * 2))
             Label("Your projects and conversations live on this server.", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(Palette.accent)
+                .foregroundStyle(Palette.controlAccent)
             Text("Agents can keep working when you close Bloom.").foregroundStyle(.secondary)
         }
     }
@@ -201,7 +201,7 @@ struct ServerSetupView: View {
                 HStack {
                     Label(check.blockers.isEmpty ? "Ready for setup" : "Setup needs attention",
                           systemImage: check.blockers.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle")
-                        .foregroundStyle(check.blockers.isEmpty ? Palette.accent : Palette.warning)
+                        .foregroundStyle(check.blockers.isEmpty ? Palette.controlAccent : Palette.warning)
                     Spacer()
                     Text("\(check.platform), \(check.architecture)").font(Typo.caption).foregroundStyle(.secondary)
                 }
@@ -231,7 +231,7 @@ struct ServerSetupView: View {
             }
             if model.hasInstalledServer {
                 Label("Already installed. Continue to Accounts without reinstalling.", systemImage: "checkmark.circle.fill")
-                    .font(Typo.caption).foregroundStyle(Palette.accent)
+                    .font(Typo.caption).foregroundStyle(Palette.controlAccent)
             }
         }
     }
@@ -293,7 +293,7 @@ struct ServerSetupView: View {
                     Text(name)
                 }
                 .font(Typo.captionEmphasis)
-                .foregroundStyle(index <= setupStep ? Palette.accent : Palette.textSecondary)
+                .foregroundStyle(index <= setupStep ? Palette.controlAccent : Palette.textSecondary)
             }
         }
         .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: setupStep)

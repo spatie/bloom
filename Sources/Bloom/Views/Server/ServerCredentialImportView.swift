@@ -68,6 +68,7 @@ struct ServerCredentialImportView: View {
                 }
                 .keyboardShortcut(.cancelAction).disabled(model.isStopping)
                 Button("Import Selected Accounts") { model.startImport() }
+                    .buttonStyle(.borderedProminent).tint(Palette.controlAccent)
                     .keyboardShortcut(.defaultAction).disabled(!model.canImport)
             }
         }
@@ -94,7 +95,7 @@ struct ServerCredentialImportView: View {
             .disabled(model.isBusy || model.results[candidate]?.succeeded == true)
             if let result = model.results[candidate] {
                 Label(result.message, systemImage: result.succeeded ? (result.verified ? "checkmark.circle.fill" : "info.circle") : "exclamationmark.triangle")
-                    .font(Typo.caption).foregroundStyle(result.succeeded ? (result.verified ? Palette.accent : Palette.textSecondary) : Palette.warning)
+                    .font(Typo.caption).foregroundStyle(result.succeeded ? (result.verified ? Palette.controlAccent : Palette.textSecondary) : Palette.warning)
                     .textSelection(.enabled)
                 if let recovery = result.recovery {
                     Text(recovery).font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)

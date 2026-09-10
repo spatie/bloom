@@ -22,7 +22,7 @@ struct ServerSetupActivityView: View {
                     VStack(alignment: .leading, spacing: Metrics.spacing) {
                         Image(systemName: failure == nil ? "server.rack" : "exclamationmark.triangle")
                             .font(.system(size: 30, weight: .light))
-                            .foregroundStyle(failure == nil ? Palette.accent : Palette.warning)
+                            .foregroundStyle(failure == nil ? Palette.controlAccent : Palette.warning)
                             .symbolEffect(.variableColor.iterative, isActive: isRunning && !reduceMotion && scenePhase == .active)
                             .contentTransition(.symbolEffect(.replace))
                             .symbolEffectsRemoved(reduceMotion)
@@ -30,7 +30,7 @@ struct ServerSetupActivityView: View {
                         if activity.status(of: .transfer) != .pending {
                             Text("\(completedSteps) of \(totalSteps) steps complete").font(Typo.captionEmphasis)
                             ProgressView(value: Double(completedSteps), total: Double(max(1, totalSteps)))
-                                .tint(Palette.accent)
+                                .tint(Palette.controlAccent)
                                 .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: completedSteps)
                                 .accessibilityLabel("Completed installation steps")
                         }
@@ -78,7 +78,7 @@ struct ServerSetupActivityView: View {
     @ViewBuilder private func statusIcon(_ status: ServerSetupActivity.Status) -> some View {
         switch status {
         case .running: ProgressView().controlSize(.small)
-        case .complete: Image(systemName: "checkmark.circle.fill").foregroundStyle(Palette.accent)
+        case .complete: Image(systemName: "checkmark.circle.fill").foregroundStyle(Palette.controlAccent)
         case .failed: Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Palette.warning)
         case .skipped: Image(systemName: "minus.circle").foregroundStyle(Palette.textTertiary)
         case .pending: Image(systemName: "circle").foregroundStyle(Palette.textTertiary)
