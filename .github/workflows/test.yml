@@ -1,391 +1,57 @@
-name: Test
-
-# What a push has to survive. release.yml only reacts to a published release,
-# so until this existed nothing compiled the app or ran a test in reaction to a
-# commit, and a branch could look fine right up to the moment somebody built it.
-#
-# Three jobs, all three side by side, because they fail for different reasons
-# and one push should tell you everything that is wrong with it rather than one
-# thing at a time.
-#
-#   lint     the workflows, the shell scripts, the house rules and SwiftLint,
-#            all on Linux, because not one of them needs a Mac.
-#   build    swift build, which compiles the app target, Sources/Bloom included.
-#            Tools/test-core.sh mirrors only BloomCore into a throwaway package
-#            with no app target, so a view that stops compiling leaves the whole
-#            suite green. That has broken main four times in a single day: widen
-#            an enum, leave a switch non-exhaustive, tests pass, app does not
-#            build. This job is what catches it.
-#   test     ./Tools/test-core.sh, the BloomCore suite, over three thousand
-#            tests in about half a minute.
-#
-# build and test were one job with one after the other in it, and were 187 and
-# 204 seconds of a 404 second run. They share no output, so they now share no
-# runner either.
-#
-# A bundle is only built when somebody asks for one by hand, from the Actions
-# tab. It used to be built on every push, which proved the app can be assembled
-# on a runner. That is proven, and release.yml is what builds the copies people
-# actually install, so paying for a zip nobody downloads on every commit was
-# space and macOS minutes spent on a question already answered.
-#
-# The runner image and the toolchain check are copied from release.yml on
-# purpose. If the two ever disagree about which Xcode builds Bloom, the release
-# is the one that finds out, and it finds out at the worst moment.
+name: PR 178 test build
 
 on:
-  # Push on main only, pull request for everything else. Running on both for
-  # every branch meant a branch with a pull request open was built twice for
-  # one commit, and a macOS minute on a private repository bills at ten times
-  # the rate of a Linux one. The consequence to know about: a branch with no
-  # pull request open is not built until it lands on main.
-  push:
-    branches: [main]
-  pull_request:
-  # The manual build. Run this workflow from the Actions tab, on any branch, to
-  # get a Bloom.app out of it without cutting a release.
   workflow_dispatch:
 
 permissions:
-  # Nothing is written. The artifact, on the runs that make one, goes through
-  # the actions API rather than contents.
   contents: read
 
-concurrency:
-  # A second push to a branch makes the first one's answer stale, so the older
-  # run is dropped rather than left to occupy a macOS runner. The event is part
-  # of the group so that a push does not cancel a manual build of the same
-  # branch: that run was asked for by a person who wants the zip at the end.
-  group: bloom-test-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  # Everything that does not need a Mac, on a runner that bills at a tenth of
-  # the rate of one. It runs beside the build rather than in front of it, so a
-  # spelling mistake and a failing test are reported by the same run.
-  lint:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - uses: actions/checkout@v7
-
-      # Workflow files are only ever executed by GitHub, so a mistake in one is
-      # found by pushing it and waiting. actionlint reads them here instead: it
-      # knows the schema, the expression syntax and which contexts exist in
-      # which place. Pinned, because this is a binary from the internet.
-      - name: Lint the workflows
-        env:
-          ACTIONLINT_VERSION: 1.7.7
-        run: |
-          set -euo pipefail
-          url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
-          curl -sSfL "$url/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" | tar xz actionlint
-          # SC2153 is ignored, and only SC2153. actionlint hands every `run:`
-          # block to shellcheck, which cannot see the step's `env:` block, so
-          # every value passed in the safe way, through the environment rather
-          # than interpolated into the script, looks to it like a misspelling of
-          # a nearby local variable. That is the house pattern in release.yml
-          # and it is not going to change.
-          ./actionlint -no-color -ignore 'SC2153' .github/workflows/*.yml
-
-      # Every script in this repository is zsh, and shellcheck refuses zsh
-      # outright: it parses sh, bash, dash and ksh and nothing else. Forcing it
-      # to read them as bash was tried and is worse than nothing. It cannot
-      # parse a glob qualifier, so `for art in Resources/*.pdf(N)` is four
-      # errors, and it does not know that zsh never word splits an unquoted
-      # parameter, so its advice on Tools/release/keychain.sh would break a
-      # working script. What zsh itself can do is parse them, which catches the
-      # unbalanced quote and the missing fi, and that is what runs here.
-      - name: Check the shell scripts parse
-        run: |
-          set -euo pipefail
-          command -v zsh >/dev/null || sudo apt-get install -y -qq zsh
-          command -v shellcheck >/dev/null || sudo apt-get install -y -qq shellcheck
-          # Any tracked script, so a new one is covered the day it is added.
-          git ls-files '*.sh' | while read -r script; do
-            case "$(head -1 "$script")" in
-              *zsh*) zsh -n "$script" ;;
-              *) shellcheck "$script" ;;
-            esac
-            echo "ok $script"
-          done
-
-      # The rules that are ours rather than the language's. See the script.
-      - name: Check licence packaging
-        run: zsh Tools/release/tests/licences.sh
-
-      - name: Check the house rules
-        run: ./Tools/house-rules.sh
-
-      # And the rules that are the language's rather than ours, which is the other half.
-      # `.swiftlint.yml` is tuned rather than default: the head of that file has the counts every
-      # disabled rule produced and why each one is off.
-      #
-      # On Linux, and that is the point of it being in this job. SwiftLint is SwiftSyntax rather
-      # than SourceKit for every rule that does not need a compiler log, so it needs no Xcode and
-      # no Mac, and it took 0.9 seconds over 920 files on the machine this was written on. Putting
-      # it on the macOS build would have added it to a runner that bills at ten times the rate to
-      # answer a question that does not need one.
-      #
-      # `swiftlint-static` rather than `swiftlint`: the same binary linked against nothing, so the
-      # runner needs no Swift runtime installed to run it. Pinned, because this is a binary from
-      # the internet, and renamed onto the PATH so that CI and a developer run the same script
-      # rather than two commands that have to be kept in step by hand.
-      - name: Lint the Swift
-        env:
-          SWIFTLINT_VERSION: 0.65.1
-        run: |
-          set -euo pipefail
-          command -v zsh >/dev/null || sudo apt-get install -y -qq zsh
-          url="https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_VERSION}"
-          curl -sSfL -o swiftlint.zip "$url/swiftlint_linux_amd64.zip"
-          mkdir -p swiftlint-bin
-          unzip -q -j swiftlint.zip swiftlint-static -d swiftlint-bin
-          mv swiftlint-bin/swiftlint-static swiftlint-bin/swiftlint
-          chmod +x swiftlint-bin/swiftlint
-          PATH="$PWD/swiftlint-bin:$PATH" ./Tools/swiftlint.sh
-
-  # Compiling Sources/Bloom, which is the question "does the app still build".
-  #
-  # This was one macOS job with the tests after it, and the two steps were 187
-  # and 204 seconds of a 404 second run. Neither needs anything the other
-  # produces: the build reads Sources/Bloom, and Tools/test-core.sh builds its
-  # own mirror from BloomCore alone. Run in series they added up, run beside
-  # each other the run is as long as the longer of the two. The bill barely
-  # moves, because the work is split rather than repeated: the same minutes are
-  # spent, on two runners instead of one, and only the few seconds of checkout
-  # and toolchain check are paid twice.
-  build:
+  download:
     runs-on: macos-26
-    # A cold run is about three and a half minutes. Anything past thirty is
-    # hung, and a hung job that is left alone bills for the full six hour
-    # default.
-    timeout-minutes: 30
-
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
-
-      # Verbatim from release.yml. Swift 6 language mode, actool for the
-      # layered icon and the App Intents metadata processor all come from Xcode,
-      # and an older one would produce an app that builds with pieces missing.
-      # It costs a couple of seconds and turns "the image changed its default
-      # Xcode" from a wall of unrelated compiler errors into one sentence.
-      - name: Check the toolchain
-        run: |
-          set -euo pipefail
-          swift --version
-
-          # How many cores swift build is about to spread itself over. It sets
-          # no --jobs, so this number is the parallelism, and it is the first
-          # thing to look at when a build time moves for no reason anybody can
-          # see in the diff. macos-26 answered 3 in August 2026, which is worth
-          # knowing twice over: it is why compiling dominates this workflow, and
-          # it is a second reason to run this job beside the tests rather than
-          # before them, because two jobs is six cores and one job is three.
-          echo "cores: $(sysctl -n hw.ncpu)"
-
-          # `xcodebuild -version` writes two lines and is piped nowhere, deliberately.
-          #
-          # Run 32536983369 died here with `-[_NSStdIOFileHandle writeData:]: Broken pipe` and
-          # exit 134. The line was `xcodebuild -version | head -1`: head reads what it wants and
-          # exits, which closes the pipe under a program that is still writing its second line.
-          # xcodebuild writes through a Foundation FileHandle, which raises on EPIPE rather than
-          # taking the signal, so the process aborts. It is a race between head exiting and
-          # xcodebuild finishing, which is why it looked intermittent and was not: every run was
-          # rolling the same dice.
-          #
-          # So the whole output is taken into a variable and the first line is read from there.
-          # Nothing is piped, nothing can close early, and there is nothing left to retry.
-          version="$(xcodebuild -version)"
-          echo "$version"
-
-          major="$(printf '%s\n' "$version" | sed -n '1s/^Xcode \([0-9]*\).*/\1/p')"
-          if [ -z "$major" ]; then
-            echo "Could not read a major version out of: $version"
-            exit 1
-          fi
-          if [ "$major" -lt 26 ]; then
-            echo "Bloom needs Xcode 26 or newer, this runner has $major."
-            exit 1
-          fi
-
-      # There is no cache step here, and that is a measured decision rather
-      # than an omission.
-      #
-      # A cold `swift build` spends about forty three seconds before the
-      # compiler starts: compiling the manifest, fetching Sparkle, SwiftTerm and
-      # swift-argument-parser, working out which versions satisfy the ranges,
-      # three working copies, and downloading and unpacking Sparkle's
-      # XCFramework. All of it looks cacheable, and Package.resolved pins the
-      # three so a key on that file would hit on every run.
-      #
-      # It was tried, on runs 32820412787 and 32820771440. Caching
-      # .build/checkouts, .build/repositories, .build/artifacts and
-      # ~/Library/Caches/org.swift.swiftpm took those forty three seconds to
-      # thirty nine, on two runs whose compile phases came out within one per
-      # cent of each other, so the comparison is clean. Four seconds, for a
-      # hundred and fifty six megabyte cache entry moved twice a run. SwiftPM
-      # still spends six seconds recomputing which Sparkle version satisfies
-      # the range with the repository already on disk, and still spends twelve
-      # unpacking the XCFramework it fetched from its own cache.
-      #
-      # Nothing compiled is worth caching either, and for a different reason.
-      # A build directory tarred and restored to the same path stays fully
-      # incremental, so llbuild does not mind the inodes changing. But
-      # actions/checkout stamps every source file with today's mtime, which it
-      # does mind, so cached object files for our own code are rebuilt whatever
-      # is on disk. Making that work needs mtimes that follow the commit history
-      # rather than the checkout, which is a change with a failure mode worth
-      # watching and does not belong hidden in a cache step.
-
-      # Debug, because nothing downstream consumes these objects. The question
-      # this step answers is "does Sources/Bloom still compile", and a debug
-      # build answers it faster. The manual build below makes its own release
-      # build through Tools/build.sh.
-      #
-      # -warnings-as-errors lives here rather than in Package.swift so that a
-      # local build stays tolerant while a run of this workflow does not. The
-      # tree has been at zero warnings since a33e0c9 and this is what keeps it
-      # there. The flag reaches the dependencies as well as our own targets, so
-      # a warning in SwiftTerm would fail this build. That is acceptable
-      # because Package.resolved is committed: the versions are pinned, nothing
-      # moves on its own, and the only commit that can introduce a dependency
-      # warning is a deliberate bump, whose author is right here to see it. If
-      # that day comes and the warning is not ours to fix, move the flag into
-      # Package.swift behind an environment variable so it applies to the
-      # Bloom and BloomCore targets only.
-      - name: Build the app target
-        run: swift build -Xswiftc -warnings-as-errors
-
-      - name: Check welcome navigation and window sizing
-        run: ./Tools/welcome-layout-probe.sh
-
-      - name: Check diff scrolling and comment focus
-        run: ./Tools/review-run-probe.sh
-
-      - name: Preserve failed review probe evidence
-        if: ${{ failure() }}
-        uses: actions/upload-artifact@v7
         with:
-          name: review-probe-evidence
-          path: ${{ runner.temp }}/bloom-review-probe
-          if-no-files-found: ignore
-          retention-days: 3
-
-      # Everything below only happens on a manual run.
-      #
-      # Assembles Bloom.app: the icon, the App Intents metadata, the embedded
-      # Sparkle framework, and an ad-hoc signature. No secrets are involved, and
-      # none of the signing, notarisation or bucket steps in release.yml are
-      # touched. The result is an app nobody has vouched for, which is the point
-      # for now: it is here to be tried, not to be handed out.
-      - name: Assemble the app bundle
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        run: ./Tools/build.sh -r
-
-      - name: Zip the bundle
-        id: zip
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+          ref: 5fe9078728f05c37bc532c25ddc4bfaf3faff279
+          persist-credentials: false
+      - name: Build isolated Bloom Dev
+        shell: bash
         run: |
           set -euo pipefail
-          app="$(swift build -c release --show-bin-path)/Bloom.app"
-          [ -d "$app" ] || { echo "No bundle at $app"; exit 1; }
+          ./Tools/dev-build.sh HEAD --no-install | tee "$RUNNER_TEMP/bloom-dev.log"
+      - name: Package a portable download
+        shell: bash
+        run: |
+          set -euo pipefail
+          built="$(sed -n 's/^==> built //p' "$RUNNER_TEMP/bloom-dev.log" | tail -1)"
+          test -d "$built"
           mkdir -p dist
-          # ditto, never zip. Sparkle.framework inside the bundle is a versioned
-          # framework held together by symlinks, nine of them, and the bundle
-          # carries extended attributes and a signature. zip flattens the
-          # symlinks and drops the rest, and what comes out the far end does
-          # not launch.
-          /usr/bin/ditto -c -k --keepParent "$app" dist/Bloom.zip
-          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-          echo "Zipped $(du -h dist/Bloom.zip | cut -f1)"
-
-      # The zip is uploaded rather than the bundle, because this action zips
-      # what it is given with a zipper of its own that does not keep symlinks.
-      # A downloaded artifact is therefore a zip inside a zip, and the inner one
-      # is the bundle ditto made.
-      - name: Upload the app
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        uses: actions/upload-artifact@v7
+          ditto "$built" "dist/Bloom Dev.app"
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+          path = Path('dist/Bloom Dev.app/Contents/Info.plist')
+          with path.open('rb') as handle:
+              info = plistlib.load(handle)
+          assert info['CFBundleIdentifier'] == 'be.spatie.bloom.dev'
+          assert info['BloomMasterCommit'].startswith('5fe9078')
+          # Use Store's bundle-id fallback on the recipient's Mac, not the CI home directory.
+          info.pop('LSEnvironment', None)
+          info['BloomPRCommit'] = '5fe9078728f05c37bc532c25ddc4bfaf3faff279'
+          with path.open('wb') as handle:
+              plistlib.dump(info, handle)
+          PY
+          codesign --force --deep --sign - "dist/Bloom Dev.app"
+          codesign --verify --deep --strict "dist/Bloom Dev.app"
+          file "dist/Bloom Dev.app/Contents/MacOS/Bloom"
+          ditto -c -k --sequesterRsrc --keepParent "dist/Bloom Dev.app" dist/Bloom-PR-178-5fe90787.zip
+          shasum -a 256 dist/Bloom-PR-178-5fe90787.zip > dist/SHA256.txt
+      - uses: actions/upload-artifact@v7
         with:
-          name: Bloom-${{ steps.zip.outputs.sha }}
-          path: dist/Bloom.zip
+          name: Bloom-PR-178-5fe90787
+          path: |
+            dist/Bloom-PR-178-5fe90787.zip
+            dist/SHA256.txt
           retention-days: 14
           if-no-files-found: error
-
-      - name: Say how to open it
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        run: |
-          {
-            echo "### Bloom ${{ steps.zip.outputs.sha }}"
-            echo
-            echo "The artifact is a zip holding \`Bloom.zip\`, which holds \`Bloom.app\`."
-            echo "It is ad-hoc signed and not notarised, so Gatekeeper quarantines it"
-            echo "on download and refuses to open it. After unzipping both layers:"
-            echo
-            echo '```'
-            echo "xattr -d -r com.apple.quarantine /path/to/Bloom.app"
-            echo "open /path/to/Bloom.app"
-            echo '```'
-            echo
-            echo "It keeps the real bundle id, so it uses the real database and the"
-            echo "real preferences, and it will not offer to update itself: Tools/build.sh"
-            echo "marks a build with no version as local and the updater refuses those."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  # The BloomCore suite, on its own runner beside the build.
-  #
-  # It caches nothing, and there is nothing here to cache. Tools/test-core.sh
-  # writes a package with no dependencies at all, so there is no resolve to
-  # skip, and the rest of its time goes on compiling BloomCore and fifty one
-  # thousand lines of test source, which a fresh checkout's mtimes force to be
-  # recompiled whatever is on disk.
-  test:
-    runs-on: macos-26
-    # A cold run is about three and a half minutes.
-    timeout-minutes: 30
-
-    steps:
-      - uses: actions/checkout@v7
-
-      # Around thirty tests make a real commit with this machine's git, and
-      # RepositoryStarter refuses to commit without a name and an address. A
-      # fresh runner has neither, so one of them fails outright and the rest
-      # return early and assert nothing. This is what makes them run at all.
-      #
-      # Before the toolchain check, not after it. `RepositoryStarter` makes a first commit
-      # and a commit needs an author, so this is a prerequisite of the tests rather than a
-      # step that happens to come before them. Behind the version probe it was skipped when
-      # that probe crashed, and the run reported a test failure for a missing git identity
-      # caused by a SIGABRT in xcodebuild.
-      - name: Give the runner a git identity
-        run: |
-          set -euo pipefail
-          git config --global user.email "ci@bloom.local"
-          git config --global user.name "Bloom CI"
-
-      # The same check the build job makes, and made here too rather than
-      # depended on. Waiting for the build job to vouch for the toolchain would
-      # put the two back in series, which is the thing this split exists to
-      # undo, and an image that changed its Xcode should say so in one sentence
-      # here as well as there.
-      - name: Check the toolchain
-        run: |
-          set -euo pipefail
-          swift --version
-          echo "cores: $(sysctl -n hw.ncpu)"
-          version="$(xcodebuild -version)"
-          echo "$version"
-          major="$(printf '%s\n' "$version" | sed -n '1s/^Xcode \([0-9]*\).*/\1/p')"
-          if [ -z "$major" ]; then
-            echo "Could not read a major version out of: $version"
-            exit 1
-          fi
-          if [ "$major" -lt 26 ]; then
-            echo "Bloom needs Xcode 26 or newer, this runner has $major."
-            exit 1
-          fi
-
-      - name: Run the core tests
-        run: ./Tools/test-core.sh
