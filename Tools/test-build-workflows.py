@@ -117,6 +117,100 @@ class SnapshotTests(unittest.TestCase):
         snapshot.sync(self.stage, cache)
         self.assertEqual(source.read_text(), "changed")
 
+    def structure_fixture(self):
+        self.track("Package.swift", "// root manifest")
+        self.track("Packages/Local/Package.swift", "// local manifest")
+        self.track("Packages/Local/Package.resolved", "first resolution")
+        self.track("Packages/Local/Sources/Local/Existing.swift", "existing source")
+        self.track("Packages/Local/Sources/Local/Resources/first.txt", "resource")
+        snapshot.snapshot(self.repo, self.stage)
+        cache = self.base / "cache"
+        snapshot.sync(self.stage, cache)
+        return cache
+
+    @unittest.skipUnless(shutil.which("rsync"), "rsync is required by fast builds")
+    def test_dependency_membership_and_manifest_changes_replan_without_touching_sources(self):
+        cache = self.structure_fixture()
+        manifest = cache / "Package.swift"
+        existing = cache / "Packages/Local/Sources/Local/Existing.swift"
+        os.utime(existing, ns=(2_000_000_000, 2_000_000_000))
+        local = self.stage / "Packages/Local"
+        changes = [
+            lambda: (local / "Sources/Local/Added.swift").write_text("new source"),
+            lambda: (local / "Sources/Local/Added.swift").unlink(),
+            lambda: (local / "Sources/Local/Resources/second.txt").write_text("new resource"),
+            lambda: (local / "Sources/Local/Resources/first.txt").unlink(),
+            lambda: (local / "Package.swift").write_text("// changed local manifest"),
+            lambda: (local / "Package.resolved").write_text("changed resolution"),
+        ]
+        for index, change in enumerate(changes):
+            with self.subTest(change=index):
+                os.utime(manifest, ns=(1_000_000_000, 1_000_000_000))
+                change()
+                snapshot.sync(self.stage, cache)
+                self.assertGreater(manifest.stat().st_mtime_ns, 1_000_000_000)
+                self.assertEqual(existing.stat().st_mtime_ns, 2_000_000_000)
+
+    @unittest.skipUnless(shutil.which("rsync"), "rsync is required by fast builds")
+    def test_source_content_edits_and_warm_sync_keep_the_plan_timestamp(self):
+        cache = self.structure_fixture()
+        manifest = cache / "Package.swift"
+        os.utime(manifest, ns=(1_000_000_000, 1_000_000_000))
+        (self.stage / "Packages/Local/Sources/Local/Existing.swift").write_text("edited source")
+        snapshot.sync(self.stage, cache)
+        self.assertEqual(manifest.stat().st_mtime_ns, 1_000_000_000)
+        self.assertEqual((cache / "Packages/Local/Sources/Local/Existing.swift").read_text(), "edited source")
+        snapshot.sync(self.stage, cache)
+        self.assertEqual(manifest.stat().st_mtime_ns, 1_000_000_000)
+
+    @unittest.skipUnless(shutil.which("rsync"), "rsync is required by fast builds")
+    def test_older_cache_without_structure_marker_replans_once_and_retains_objects(self):
+        cache = self.structure_fixture()
+        marker = cache.with_name(".cache-package-structure")
+        marker.unlink()
+        manifest = cache / "Package.swift"
+        source = cache / "Packages/Local/Sources/Local/Existing.swift"
+        os.utime(manifest, ns=(1_000_000_000, 1_000_000_000))
+        os.utime(source, ns=(2_000_000_000, 2_000_000_000))
+        build = self.base / "objects"
+        build.mkdir()
+        (build / "existing.o").write_text("object")
+        (cache / ".build").symlink_to(build)
+        snapshot.sync(self.stage, cache)
+        self.assertGreater(manifest.stat().st_mtime_ns, 1_000_000_000)
+        self.assertEqual(source.stat().st_mtime_ns, 2_000_000_000)
+        self.assertEqual((build / "existing.o").read_text(), "object")
+        self.assertTrue(marker.is_file())
+        refreshed = manifest.stat().st_mtime_ns
+        snapshot.sync(self.stage, cache)
+        self.assertEqual(manifest.stat().st_mtime_ns, refreshed)
+
+    @unittest.skipUnless(shutil.which("swift") and shutil.which("rsync"), "Requires SwiftPM and rsync")
+    def test_swiftpm_finds_a_new_local_dependency_source_in_a_warm_build(self):
+        self.track("Package.swift", '''// swift-tools-version: 6.2
+import PackageDescription
+let package = Package(name: "SnapshotFixture", dependencies: [.package(path: "Packages/Local")],
+    targets: [.target(name: "App", dependencies: [.product(name: "Local", package: "Local")])])
+''')
+        self.track("Packages/Local/Package.swift", '''// swift-tools-version: 6.2
+import PackageDescription
+let package = Package(name: "Local", products: [.library(name: "Local", targets: ["Local"])], targets: [.target(name: "Local")])
+''')
+        self.track("Packages/Local/Sources/Local/Existing.swift", "public let oldValue = 1")
+        self.track("Sources/App/App.swift", "import Local\npublic func sample() -> Int { oldValue }")
+        snapshot.snapshot(self.repo, self.stage)
+        cache = self.base / "cache"
+        snapshot.sync(self.stage, cache)
+        def build():
+            result = subprocess.run(["swift", "build", "--package-path", str(cache), "--target", "App", "-j", "2"],
+                                    capture_output=True, text=True, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        build()
+        (self.stage / "Packages/Local/Sources/Local/New.swift").write_text("public let newValue = 2")
+        (self.stage / "Sources/App/App.swift").write_text("import Local\npublic func sample() -> Int { newValue }")
+        snapshot.sync(self.stage, cache)
+        build()
+
 
 class PublicationTests(unittest.TestCase):
     def setUp(self):
