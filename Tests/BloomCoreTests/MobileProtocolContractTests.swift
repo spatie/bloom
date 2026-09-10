@@ -4,10 +4,10 @@ import BloomClient
 @testable import BloomCore
 
 struct MobileProtocolContractTests {
-    @Test func protocol13DiagnosticsShareTheActualServerValue() throws {
+    @Test func diagnosticsShareTheActualServerValue() throws {
         let command = RemoteCommand.call("diagnostics")
         let request = try JSONDecoder().decode(ServerRequest.self, from: JSONEncoder().encode(command))
-        #expect(request.version == 13)
+        #expect(request.version == BloomWire.version)
         #expect(request.operation == .diagnostics)
         #expect(!request.operation.mutates)
         let report = ServerDiagnostics(checkedAt: Date(timeIntervalSince1970: 10), hostname: "server", operatingSystem: "Linux", account: "bloom", checks: [
@@ -71,6 +71,8 @@ struct MobileProtocolContractTests {
             (.call("diagnostics"), .diagnostics),
             (.send(sessionID: id, text: "Run tests"), .send(sessionID: id, text: "Run tests")),
             (.stop(sessionID: id), .stop(sessionID: id)),
+            (.cancelQueued(sessionID: id, deliveryID: DeliveryID("next")), .cancelQueued(sessionID: id, deliveryID: DeliveryID("next"))),
+            (.restore(workspaceID: WorkspaceID("workspace")), .workspace(workspaceID: WorkspaceID("workspace"), action: .restore)),
             (.call("transcript", ["sessionID": .string(id.rawValue), "afterSeq": .integer(12)]), .transcript(sessionID: id, afterSeq: 12)),
             (.call("previewAddress", ["_0": .string("http://localhost:3100")]), .previewAddress("http://localhost:3100")),
         ]
@@ -87,24 +89,44 @@ struct MobileProtocolContractTests {
         let workspace = Workspace(repoID: repo.id, name: "Work", branch: "work", path: "/server/work", baseBranch: "main")
         let session = Session(workspaceID: workspace.id, title: "Chat")
         let command = RemoteCommand.call("catalogue")
-        let reply = ServerReply(id: command.id, result: .catalogue(ServerCatalogue(repositories: [repo], workspaces: [workspace], sessions: [session])))
+        let reply = ServerReply(id: command.id, result: .catalogue(ServerCatalogue(repositories: [repo], workspaces: [workspace], sessions: [session], archivedWorkspaces: [workspace])))
         let result = try RemoteClient.decode(JSONEncoder().encode(reply), commandID: command.id)
         let catalogue = try RemoteCatalogue.decode(result)
         #expect(catalogue.repositories.first?.id == repo.id)
         #expect(catalogue.workspaces.first?.id == workspace.id)
         #expect(catalogue.sessions.first?.id == session.id)
+        #expect(catalogue.archivedWorkspaces.first?.id == workspace.id)
     }
 
     @Test func actualServerTranscriptDecodesOnMobile() throws {
         let session = Session(workspaceID: WorkspaceID("workspace"))
         let message = Message(sessionID: session.id, seq: 1, kind: .assistantText, payload: Data(#"{"text":"Hello"}"#.utf8))
-        let transcript = ServerTranscript(session: session, messages: [message], pendingQuestions: [], isBusy: false, streamingText: "", permissionDecisions: [:], queuedPrompts: [], queueError: nil)
+        let transcript = ServerTranscript(session: session, messages: [message], pendingQuestions: [], isBusy: false, streamingText: "", permissionDecisions: ["ask": "allowed"], queuedPrompts: [.init(id: DeliveryID("next"), text: "Next task")], queueError: nil)
         let command = RemoteCommand.call("transcript")
         let reply = ServerReply(id: command.id, result: .transcript(transcript))
         let result = try RemoteClient.decode(JSONEncoder().encode(reply), commandID: command.id)
         let decoded = try RemoteTranscript.decode(result)
         #expect(decoded.messages.first?.text == "Hello")
         #expect(decoded.session.id == session.id)
+        #expect(decoded.queuedPrompts.first?.id == DeliveryID("next"))
+        #expect(decoded.permissionDecisions == ["ask": "allowed"])
+    }
+
+    @Test func archivePreviewUsesTheSameSafetyReportAndRejectsWrongWorkspace() async throws {
+        let workspace = Workspace(repoID: RepoID("repo"), name: "Work", branch: "work", path: "/server/work", baseBranch: "main")
+        let preview = ServerArchivePreview(id: UUID(), workspace: workspace,
+            report: .init(hasUncommittedChanges: true, untrackedFiles: ["notes.txt"], modifiedIgnoredFiles: [".env"]),
+            hazards: .init(isAgentRunning: true, isDeletingBranch: true), createdAt: Date(timeIntervalSinceReferenceDate: 0))
+        let encoded = try JSONEncoder().encode(ServerResult.archivePreview(preview))
+        let service = RemoteWorkspaceService(client: ContractClient(result: try JSONDecoder().decode(BloomClient.JSONValue.self, from: encoded)))
+        let decoded = try await service.archivePreview(workspaceID: workspace.id)
+        #expect(decoded.id == preview.id)
+        #expect(decoded.report == preview.report)
+        #expect(decoded.hazards == preview.hazards)
+        await #expect(throws: ConnectionFailure.self) { try await service.archivePreview(workspaceID: WorkspaceID("different")) }
+        let command = RemoteCommand.archive(workspaceID: workspace.id, confirmation: decoded.id)
+        let request = try JSONDecoder().decode(ServerRequest.self, from: JSONEncoder().encode(command))
+        #expect(request.operation == .workspace(workspaceID: workspace.id, action: .archive(confirmation: preview.id)))
     }
 
     @Test func workspaceCreationUsesActualServerDefaults() async throws {

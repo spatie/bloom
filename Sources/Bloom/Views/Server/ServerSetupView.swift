@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct ServerSetupView: View {
     @Bindable var model: ServerSetupModel
     let showAdvanced: () -> Void
+    var windowID = ServerWindow.id
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openWindow) private var openWindow
     @State private var login: LoginTerminalSession?
@@ -51,7 +52,7 @@ struct ServerSetupView: View {
             HStack(spacing: Metrics.gutter) {
                 Button("Cancel") {
                     model.cancel()
-                    dismissWindow(id: ServerWindow.id)
+                    dismissWindow(id: windowID)
                 }
                 .keyboardShortcut(.cancelAction)
                 if canEditAddress {
@@ -98,7 +99,7 @@ struct ServerSetupView: View {
 
     private var subtitle: String {
         switch model.phase {
-        case .address: "Enter the SSH address of your Ubuntu server. Bloom will check the connection and guide you through setup."
+        case .address: "Start with an Ubuntu server from your hosting provider. Enter its SSH address below and Bloom will install the tools you need."
         case .trust: "This is the first connection to this server. Compare its fingerprint with one provided by your administrator or hosting provider."
         case .checking: "Checking the operating system, access and any existing Bloom installation."
         case .readyToInstall: "Bloom will install its server component and tools, create a dedicated account, and configure automatic startup."
@@ -288,7 +289,7 @@ struct ServerSetupView: View {
                 Button("Choose a Repository…") {
                     StartProjectOpening.shared.isRemote = true
                     openWindow(id: StartProjectWindow.id)
-                    dismissWindow(id: ServerWindow.id)
+                    dismissWindow(id: windowID)
                 }
                 .keyboardShortcut(.defaultAction)
             case .checking, .installing, .connecting:

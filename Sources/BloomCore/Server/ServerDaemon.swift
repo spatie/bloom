@@ -12,13 +12,15 @@ public final class ServerDaemon: Sendable {
     public let bridge: BridgeServer
     private let lock: ServerLock
     private let listener: UnixSocketListener
+    private let connections: ServerConnections
 
-    private init(runtime: ServerRuntime, socketPath: String, bridge: BridgeServer, lock: ServerLock, listener: UnixSocketListener) {
+    private init(runtime: ServerRuntime, socketPath: String, bridge: BridgeServer, lock: ServerLock, listener: UnixSocketListener, connections: ServerConnections) {
         self.runtime = runtime
         self.socketPath = socketPath
         self.bridge = bridge
         self.lock = lock
         self.listener = listener
+        self.connections = connections
     }
 
     public static func start(
@@ -37,10 +39,9 @@ public final class ServerDaemon: Sendable {
             let bridge = try await runtime.startBridge(socketPath: mcpSocketPath(directory: directory))
             try await runtime.restoreQueuedPrompts()
             let socketPath = try socketPath(directory: directory)
-            let listener = try UnixSocketListener(path: socketPath, groupID: gatewayGroupID) { connection in
-                Task { await serve(connection, runtime: runtime) }
-            }
-            return ServerDaemon(runtime: runtime, socketPath: socketPath, bridge: bridge, lock: lock, listener: listener)
+            let connections = ServerConnections { request in await runtime.respond(to: request) }
+            let listener = try UnixSocketListener(path: socketPath, groupID: gatewayGroupID) { connections.accept($0) }
+            return ServerDaemon(runtime: runtime, socketPath: socketPath, bridge: bridge, lock: lock, listener: listener, connections: connections)
         } catch {
             await runtime.shutdown()
             throw error
@@ -49,9 +50,11 @@ public final class ServerDaemon: Sendable {
 
     deinit {
         listener.stop()
-        let runtime = runtime, ownership = lock
+        connections.stop()
+        let runtime = runtime, ownership = lock, connections = connections
         Task {
             await runtime.shutdown()
+            await connections.drain()
             ownership.release()
         }
     }
@@ -81,24 +84,11 @@ public final class ServerDaemon: Sendable {
         return try BridgeSocketPath.derive(databasePath: databasePath(directory: directory), directory: "/tmp")
     }
 
-    private static func serve(_ connection: UnixSocketConnection, runtime: ServerRuntime) async {
-        defer { connection.close() }
-        for await line in connection.lines {
-            guard line.utf8.count <= 16_777_216,
-                  let request = try? JSONDecoder().decode(ServerRequest.self, from: Data(line.utf8)) else { return }
-            // A setup script can take minutes. Keep accepting reads and Stop commands while
-            // it runs, and let the runtime own mutations even after this connection closes.
-            Task {
-                let reply = await runtime.respond(to: request)
-                guard let data = try? JSONEncoder().encode(reply) else { return }
-                connection.writeLine(String(decoding: data, as: UTF8.self))
-            }
-        }
-    }
-
     public func shutdown() async {
         listener.stop()
+        connections.stop()
         await runtime.shutdown()
+        await connections.drain()
         lock.release()
     }
 }

@@ -8,6 +8,8 @@ public struct TranscriptBuffer: Sendable {
     public private(set) var isBusy = false
     public private(set) var pendingQuestions: [Data] = []
     public private(set) var queueError: String?
+    public private(set) var queuedPrompts: [RemoteQueuedPrompt] = []
+    public private(set) var permissionDecisions: [String: String] = [:]
 
     public init() {}
 
@@ -20,5 +22,7 @@ public struct TranscriptBuffer: Sendable {
         isBusy = transcript.isBusy
         pendingQuestions = transcript.pendingQuestions
         queueError = transcript.queueError
+        queuedPrompts = transcript.queuedPrompts
+        permissionDecisions = transcript.permissionDecisions
     }
 }

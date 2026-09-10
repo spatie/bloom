@@ -252,9 +252,6 @@ struct SidebarView: View {
                 remoteProjects(catalogue)
             } else if app.remoteServer.isConfigured {
                 SidebarServerHeader(server: app.remoteServer).selectionDisabled()
-            } else {
-                Button("Add Server…", systemImage: "server.rack") { openWindow(id: ServerWindow.id) }
-                    .buttonStyle(.plain).foregroundStyle(Palette.textSecondary).selectionDisabled()
             }
         }
         // The list draws its own row height, and that is left to it. Its selection is not.

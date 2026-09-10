@@ -6,6 +6,48 @@ import Testing
 struct DraftTests {
     private func location() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("drafts.json") }
 
+    @Test func connectionScopesKeepClonedSessionDraftsSeparateAcrossRelaunch() throws {
+        let suite = "bloom-drafts-test." + UUID().uuidString
+        let preferences = try #require(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let original = ConversationDraftStore.Scope(connectionID: "original-server")
+        let clone = ConversationDraftStore.Scope(connectionID: "cloned-server")
+        let session = SessionID("same-uuid")
+        let store = ConversationDraftStore(preferences: preferences, key: "drafts")
+        try store.save(text: "Original private draft", scope: original, sessionID: session)
+        try store.save(text: "Clone draft", scope: clone, sessionID: session)
+        let relaunched = ConversationDraftStore(preferences: preferences, key: "drafts")
+        #expect(try relaunched.draft(scope: original, sessionID: session).text == "Original private draft")
+        #expect(try relaunched.draft(scope: clone, sessionID: session).text == "Clone draft")
+        try relaunched.save(text: "Original draft with late attachment", scope: original, sessionID: session)
+        #expect(try relaunched.draft(scope: clone, sessionID: session).text == "Clone draft")
+    }
+
+    @Test func legacyMigrationOnlyPopulatesItsKnownOriginalScopeAndPreservesNewerDrafts() throws {
+        let file = location()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = ConversationDraftStore(file: file)
+        let original = ConversationDraftStore.Scope(connectionID: "original")
+        let other = ConversationDraftStore.Scope(connectionID: "other")
+        try store.save(text: "Newer text", scope: original, sessionID: .init("existing"))
+        try store.importLegacy(["existing": "Stale text", "legacy": "Recovered text"], scope: original)
+        #expect(try store.draft(scope: original, sessionID: .init("existing")).text == "Newer text")
+        #expect(try store.draft(scope: original, sessionID: .init("legacy")).text == "Recovered text")
+        #expect(try store.draft(scope: other, sessionID: .init("legacy")).text.isEmpty)
+    }
+
+    @Test func corruptPreferenceDraftsAreNotSilentlyReplaced() throws {
+        let suite = "bloom-drafts-test." + UUID().uuidString
+        let preferences = try #require(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        preferences.set("unreadable", forKey: "drafts")
+        let store = ConversationDraftStore(preferences: preferences, key: "drafts")
+        #expect(throws: ConnectionFailure.self) {
+            try store.save(text: "New text", scope: .init(connectionID: "server"), sessionID: .init("session"))
+        }
+        #expect(preferences.string(forKey: "drafts") == "unreadable")
+    }
+
     @Test func sshDraftsAreScopedToAccountAndRuntime() throws {
         let file = location()
         defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }

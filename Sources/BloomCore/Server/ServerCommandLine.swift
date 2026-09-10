@@ -83,12 +83,18 @@ public enum ServerCommandLine {
         let buffer = LineBuffer()
         for line in buffer.take(initial) { connection.writeLine(line) }
         input.readabilityHandler = { handle in
-            let data = handle.availableData
-            if data.isEmpty {
+            do {
+                guard let data = try ProcessPipeReader.available(from: handle) else { return }
+                if data.isEmpty {
+                    input.readabilityHandler = nil
+                    connection.close()
+                } else {
+                    for line in buffer.take(data) { connection.writeLine(line) }
+                }
+            } catch {
                 input.readabilityHandler = nil
+                complain("Could not read server connection input: " + error.localizedDescription)
                 connection.close()
-            } else {
-                for line in buffer.take(data) { connection.writeLine(line) }
             }
         }
         for await line in connection.lines {

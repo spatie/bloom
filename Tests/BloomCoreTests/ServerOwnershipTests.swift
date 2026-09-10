@@ -38,6 +38,27 @@ struct ServerOwnershipTests {
             } catch { return false }
         }
     }
+    @Test func shutdownClosesAnAlreadyAcceptedIdleClient() async throws {
+        let fixture = try await OwnershipFixture()
+        let daemon = try await fixture.start()
+        let connection = try UnixSocketConnection.connect(to: daemon.socketPath)
+        defer { connection.close() }
+        let request = ServerRequest(.hello)
+        connection.writeLine(String(decoding: try JSONEncoder().encode(request), as: UTF8.self))
+        var lines = connection.lines.makeAsyncIterator()
+        let line = try #require(await lines.next())
+        #expect(try JSONDecoder().decode(ServerReply.self, from: Data(line.utf8)).id == request.id)
+        await daemon.shutdown()
+        let ended = Mutex(false)
+        let reading = Task {
+            for await _ in connection.lines {}
+            ended.withLock { $0 = true }
+        }
+        await waitUntil("stopped daemon closes its idle socket", within: .seconds(2)) { ended.withLock { $0 } }
+        connection.close()
+        await reading.value
+    }
+
 }
 
 private struct OwnershipFixture: Sendable {

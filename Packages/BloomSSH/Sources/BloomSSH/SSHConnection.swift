@@ -11,7 +11,7 @@ public actor SSHConnection: RemoteRequesting {
     private let configuration: SSHConfiguration
     private let privateKey: Data
     private let fingerprint: String?
-    private var channels: [UUID: any Channel] = [:]
+    private var requests: [UUID: @Sendable () -> Void] = [:]
     private var closed = false
     private lazy var wire = RemoteWireSession { [weak self] body in
         guard let self else { throw CancellationError() }
@@ -28,8 +28,8 @@ public actor SSHConnection: RemoteRequesting {
 
     public func close() {
         closed = true
-        for channel in channels.values { channel.close(promise: nil) }
-        channels.removeAll()
+        for cancel in requests.values { cancel() }
+        requests.removeAll()
     }
 
     public func exchange(_ body: Data, timeout: TimeAmount = .seconds(660)) async throws -> Data {
@@ -38,47 +38,58 @@ public actor SSHConnection: RemoteRequesting {
         let loop = MultiThreadedEventLoopGroup.singleton.next()
         let response = loop.makePromise(of: Data.self)
         let gate = try await loop.submit { NIOLoopBound(ReplyCompletion(response), eventLoop: loop) }.get()
-        let configuration = configuration, privateKey = privateKey, fingerprint = fingerprint
-        let bootstrap = ClientBootstrap(group: loop).connectTimeout(.seconds(15)).channelInitializer { channel in
-            channel.eventLoop.makeCompletedFuture {
-                let key = NIOSSHPrivateKey(ed25519Key: try Curve25519.Signing.PrivateKey(rawRepresentation: privateKey))
-                let ssh = NIOSSHHandler(role: .client(.init(userAuthDelegate: KeyAuthentication(username: configuration.username, key: key), serverAuthDelegate: HostAuthentication(expected: fingerprint))), allocator: channel.allocator, inboundChildChannelInitializer: nil)
-                try channel.pipeline.syncOperations.addHandlers(ssh, ConnectionErrors(completion: gate.value))
-                let child = channel.eventLoop.makePromise(of: Channel.self)
-                ssh.createChannel(child) { childChannel, type in
-                    childChannel.eventLoop.makeCompletedFuture {
-                        guard type == .session else { throw ConnectionFailure("The server rejected the SSH session.") }
-                        try childChannel.pipeline.syncOperations.addHandler(ReplyHandler(command: configuration.command, body: body, completion: gate.value))
-                    }
-                }
-                child.futureResult.whenFailure { gate.value.finish(.failure($0)) }
-            }
-        }
-        let channel: any Channel
-        do { channel = try await bootstrap.connect(host: configuration.host, port: configuration.port).get() }
-        catch {
-            let failure = ConnectionFailure("Could not reach SSH at \(configuration.host):\(configuration.port). Check the address, port, network and server firewall.")
-            try await loop.submit { gate.value.finish(.failure(failure)) }.get()
-            throw failure
-        }
+        let cancel: @Sendable () -> Void = { loop.execute { gate.value.finish(.failure(CancellationError())) } }
+        guard !closed, !Task.isCancelled else { cancel(); throw CancellationError() }
         let id = UUID()
-        guard !closed, !Task.isCancelled else { channel.close(promise: nil); throw CancellationError() }
-        channels[id] = channel
+        requests[id] = cancel
         let deadline = loop.scheduleTask(in: timeout) {
             gate.value.finish(.failure(ConnectionFailure("SSH request timed out. Check the server and retry with the same command ID.")))
-            channel.close(promise: nil)
         }
-        defer { deadline.cancel(); channels[id] = nil; channel.close(promise: nil) }
+        defer { deadline.cancel(); requests[id] = nil; cancel() }
+        let configuration = configuration, privateKey = privateKey, fingerprint = fingerprint
         return try await withTaskCancellationHandler {
-            try await response.futureResult.get()
-        } onCancel: { channel.close(promise: nil) }
+            try Task.checkCancellation()
+            let bootstrap = ClientBootstrap(group: loop).connectTimeout(.seconds(15)).channelInitializer { channel in
+                channel.eventLoop.makeCompletedFuture {
+                    guard gate.value.attach(channel) else { throw CancellationError() }
+                    let key = NIOSSHPrivateKey(ed25519Key: try Curve25519.Signing.PrivateKey(rawRepresentation: privateKey))
+                    let ssh = NIOSSHHandler(role: .client(.init(userAuthDelegate: KeyAuthentication(username: configuration.username, key: key), serverAuthDelegate: HostAuthentication(expected: fingerprint))), allocator: channel.allocator, inboundChildChannelInitializer: nil)
+                    try channel.pipeline.syncOperations.addHandlers(ssh, ConnectionErrors(completion: gate.value))
+                    let child = channel.eventLoop.makePromise(of: Channel.self)
+                    ssh.createChannel(child) { childChannel, type in
+                        childChannel.eventLoop.makeCompletedFuture {
+                            guard type == .session else { throw ConnectionFailure("The server rejected the SSH session.") }
+                            try childChannel.pipeline.syncOperations.addHandler(ReplyHandler(command: configuration.command, body: body, completion: gate.value))
+                        }
+                    }
+                    child.futureResult.whenFailure { gate.value.finish(.failure($0)) }
+                }
+            }
+            // Await the lifecycle promise, not connect(): cancellation/deadline must also finish
+            // during DNS and TCP setup. A late initializer observes the finished gate and closes.
+            bootstrap.connect(host: configuration.host, port: configuration.port).whenFailure { _ in
+                gate.value.finish(.failure(ConnectionFailure("Could not reach SSH at \(configuration.host):\(configuration.port). Check the address, port, network and server firewall.")))
+            }
+            return try await response.futureResult.get()
+        } onCancel: { cancel() }
     }
 }
 
 private final class ReplyCompletion {
     private var promise: EventLoopPromise<Data>?
+    private var parent: (any Channel)?
     init(_ promise: EventLoopPromise<Data>) { self.promise = promise }
-    func finish(_ result: Result<Data, Error>) { let promise = promise; self.promise = nil; promise?.completeWith(result) }
+    func attach(_ channel: any Channel) -> Bool {
+        guard promise != nil else { channel.close(promise: nil); return false }
+        parent = channel
+        return true
+    }
+    func finish(_ result: Result<Data, Error>) {
+        let promise = promise; self.promise = nil
+        let parent = parent; self.parent = nil
+        promise?.completeWith(result)
+        parent?.close(promise: nil)
+    }
 }
 
 private final class ConnectionErrors: ChannelInboundHandler {
@@ -98,12 +109,27 @@ private final class ReplyHandler: ChannelInboundHandler {
     let body: Data
     let completion: ReplyCompletion
     private var bytes = Data()
+    private var submitted = false
     init(command: String, body: Data, completion: ReplyCompletion) { self.command = command; self.body = body; self.completion = completion }
     func channelActive(context: ChannelHandlerContext) {
-        context.triggerUserOutboundEvent(SSHChannelRequestEvent.ExecRequest(command: command, wantReply: true), promise: nil)
-        var buffer = context.channel.allocator.buffer(capacity: body.count + 1)
-        buffer.writeBytes(body); buffer.writeInteger(UInt8(10))
-        context.writeAndFlush(NIOAny(SSHChannelData(type: .channel, data: .byteBuffer(buffer))), promise: nil)
+        let sent = context.eventLoop.makePromise(of: Void.self)
+        let completion = NIOLoopBound(completion, eventLoop: context.eventLoop)
+        sent.futureResult.whenFailure { completion.value.finish(.failure($0)) }
+        context.triggerUserOutboundEvent(SSHChannelRequestEvent.ExecRequest(command: command, wantReply: true), promise: sent)
+    }
+    func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+        if event is ChannelFailureEvent {
+            completion.finish(.failure(ConnectionFailure("The SSH server refused Bloom's exec command. Check this key's command restrictions and the server executable.")))
+        } else if event is ChannelSuccessEvent, !submitted {
+            submitted = true
+            var buffer = context.channel.allocator.buffer(capacity: body.count + 1)
+            buffer.writeBytes(body); buffer.writeInteger(UInt8(10))
+            let sent = context.eventLoop.makePromise(of: Void.self)
+            let completion = NIOLoopBound(completion, eventLoop: context.eventLoop)
+            sent.futureResult.whenFailure { completion.value.finish(.failure($0)) }
+            context.writeAndFlush(NIOAny(SSHChannelData(type: .channel, data: .byteBuffer(buffer))), promise: sent)
+        }
+        context.fireUserInboundEventTriggered(event)
     }
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let message = unwrapInboundIn(data)

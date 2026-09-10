@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Validate production Swift wire vectors with JSON Schema draft 2020-12."""
 import argparse
+import copy
 import importlib.util
 import json
 import pathlib
@@ -33,6 +34,16 @@ def main():
             validator.validate(vector["value"])
         except Exception as error:
             raise SystemExit(f"{vector['name']}: {error}") from error
+    # Incomplete safety reports must never validate as a clean archive confirmation.
+    archive = next((vector["value"] for vector in vectors if vector["name"] == "reply-archivePreview"), None)
+    if archive is None:
+        raise SystemExit("Missing archive confirmation contract vector.")
+    for section, key in [("report", "hasUncommittedChanges"), ("report", "detachedCommits"),
+                         ("hazards", "isAgentRunning"), ("hazards", "isDeletingBranch")]:
+        malformed = copy.deepcopy(archive)
+        del malformed["result"]["archivePreview"]["_0"][section][key]
+        if validator.is_valid(malformed):
+            raise SystemExit(f"Schema accepted archive confirmation without {section}.{key}.")
     checked_in = ROOT / "Protocol" / f"vectors-v{generator.VERSION}.json"
     if json.loads(checked_in.read_text()) != vectors:
         raise SystemExit("Production vectors changed. Review and update the checked-in protocol vectors.")
@@ -44,7 +55,7 @@ def main():
     ]:
         if validator.is_valid(invalid):
             raise SystemExit("Schema accepted malformed framing.")
-    print(f"Validated {len(vectors)} production Swift vectors and 3 malformed-envelope regressions.")
+    print(f"Validated {len(vectors)} production Swift vectors and 7 malformed-envelope/safety regressions.")
 
 
 if __name__ == "__main__":

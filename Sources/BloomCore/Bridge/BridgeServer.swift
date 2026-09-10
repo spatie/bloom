@@ -359,11 +359,11 @@ public final class BridgeServer: Sendable {
         guard let data = line.data(using: .utf8),
               let hello = try? JSONDecoder().decode(BridgeHello.self, from: data)
         else {
-            refuse("This is Bloom's workspace bridge and that was not a hello frame.", on: connection)
+            await refuse("This is Bloom's workspace bridge and that was not a hello frame.", on: connection)
             return nil
         }
         if let problem = BridgeProtocol.problem(with: hello) {
-            refuse(problem, on: connection)
+            await refuse(problem, on: connection)
             note("bridge refused a shim speaking protocol \(hello.version)")
             return nil
         }
@@ -371,7 +371,7 @@ public final class BridgeServer: Sendable {
             // What a stale token means depends entirely on which kind it is, and only the claimed
             // role says which. `BridgeProtocol.unrecognisedToken(claiming:)` holds both answers
             // and the reasoning behind the split.
-            refuse(BridgeProtocol.unrecognisedToken(claiming: hello.role), on: connection)
+            await refuse(BridgeProtocol.unrecognisedToken(claiming: hello.role), on: connection)
             note("bridge refused an unknown token claiming role \(hello.role)")
             return nil
         }
@@ -380,12 +380,12 @@ public final class BridgeServer: Sendable {
             // user can make it; the database is the answer.
             note("bridge caller claimed role \(hello.role) and is \(identity.role.rawValue)")
         }
-        connection.writeLine(encode(BridgeWelcome.accepting()))
+        await connection.writeLineAsync(encode(BridgeWelcome.accepting()))
         return hello
     }
 
-    private func refuse(_ problem: String, on connection: UnixSocketConnection) {
-        connection.writeLine(encode(BridgeWelcome.refusing(problem)))
+    private func refuse(_ problem: String, on connection: UnixSocketConnection) async {
+        await connection.writeLineAsync(encode(BridgeWelcome.refusing(problem)))
     }
 
     private func encode(_ welcome: BridgeWelcome) -> String {

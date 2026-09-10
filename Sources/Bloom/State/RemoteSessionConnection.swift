@@ -84,7 +84,7 @@ final class RemoteSessionConnection {
     func markRead(_ seq: Int) async { _ = try? await request(.markRead(sessionID: sessionID, seq: seq)) }
     func saveDraft(_ text: String) {
         guard server?.endpoint == endpoint else { return }
-        server?.saveRemoteDraft(text, sessionID: sessionID)
+        server?.saveRemoteDraft(text, sessionID: sessionID, endpoint: endpoint)
     }
 
     func newChat() async -> Session? {
@@ -103,7 +103,7 @@ final class RemoteSessionConnection {
 
     func saveDraft(_ text: String, for session: Session) {
         guard server?.endpoint == endpoint else { return }
-        server?.saveRemoteDraft(text, sessionID: session.id)
+        server?.saveRemoteDraft(text, sessionID: session.id, endpoint: endpoint)
     }
 
     func files() async -> [String] {

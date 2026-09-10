@@ -60,7 +60,7 @@ actor ServerTerminalStreams {
                         for try await line in lines {
                             guard !Task.isCancelled else { break }
                             if let data = decoder.take(line), let frame = try? JSONEncoder().encode(ServerTerminalFrame(kind: "output", data: data)) {
-                                connection.writeLine(String(decoding: frame, as: UTF8.self))
+                                await connection.writeLineAsync(String(decoding: frame, as: UTF8.self))
                             }
                         }
                     } catch { /* Closing the socket reports a terminated terminal client. */ }

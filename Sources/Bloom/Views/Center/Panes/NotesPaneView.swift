@@ -36,7 +36,7 @@ struct NotesPaneView<Model: WorkspacePaneModel>: View {
             hasLoaded: hasLoaded,
             couldNotLoad: couldNotLoad,
             couldNotSave: couldNotSave,
-            hasChanges: WorkspaceNote.needsSave(stored: saved, typed: text),
+            hasChanges: WorkspaceNote.needsSave(stored: hasLoaded ? saved : nil, typed: text),
             onRetryLoad: { Task { await load() } },
             onRetrySave: saveNow
         )
@@ -100,7 +100,7 @@ struct NotesPaneView<Model: WorkspacePaneModel>: View {
     /// would be cancelled before it wrote anything.
     private func saveNow() {
         saveTask?.cancel()
-        guard hasLoaded, WorkspaceNote.needsSave(stored: saved, typed: text) else { return }
+        guard hasLoaded, WorkspaceNote.needsSave(stored: hasLoaded ? saved : nil, typed: text) else { return }
         let model = model
         let body = text
         // Detached, so `saved` is set from inside rather than out here. This view is usually gone
@@ -124,7 +124,7 @@ struct NotesPaneView<Model: WorkspacePaneModel>: View {
     /// autosave fired, `saveNow` returned early, and the text existed only in `@State` until the
     /// pane went away. Left where it was, the next keystroke tries again.
     private func write() async {
-        guard WorkspaceNote.needsSave(stored: saved, typed: text) else { return }
+        guard WorkspaceNote.needsSave(stored: hasLoaded ? saved : nil, typed: text) else { return }
         let body = text
         do {
             try await model.writeNote(body)

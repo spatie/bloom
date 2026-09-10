@@ -210,6 +210,7 @@ struct BloomApp: App {
         }
 
         ServerWindow(model: model)
+        ServerSetupWindow(model: model)
 
         Settings {
             SettingsView()

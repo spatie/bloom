@@ -72,16 +72,22 @@ enum IOSPreviewFixture {
         let second = try message(2, kind: "assistantText", text: "A short reply.")
         let settled = try message(3, kind: "assistantText", text: "The streamed reply.")
         let corrected = try message(2, kind: "assistantText", text: "A corrected reply.")
-        let states: [([[String: Any]], String)] = [
-            ([first, second], ""), ([first, second], "The streamed"),
-            ([first, second], "The streamed reply."), ([first, second, settled], ""),
-            ([first, corrected, settled], ""), ([first, corrected, settled], "Temporary tail"),
-            ([first, corrected, settled], ""),
+        let firstQueued = ["id": "queued-one", "text": "Run the focused tests next."]
+        let secondQueued = ["id": "queued-two", "text": "Then check the empty state."]
+        let states: [([[String: Any]], String, [[String: String]])] = [
+            ([first, second], "", []), ([first, second], "The streamed", []),
+            ([first, second], "The streamed reply.", []), ([first, second, settled], "", []),
+            ([first, corrected, settled], "", []), ([first, corrected, settled], "Temporary tail", []),
+            ([first, corrected, settled], "", []),
+            ([first, corrected, settled], "", [firstQueued]),
+            ([first, corrected, settled], "", [firstQueued, secondQueued]),
+            ([first, corrected, settled], "Another reply", [secondQueued]),
+            ([first, corrected, settled], "", []),
         ]
         let session = try JSONSerialization.jsonObject(with: Data(sessionJSON.utf8))
-        return try states.map { messages, stream in
+        return try states.map { messages, stream, queued in
             let data = try JSONSerialization.data(withJSONObject: ["session": session, "messages": messages,
-                "pendingQuestions": [], "isBusy": !stream.isEmpty, "streamingText": stream, "queueError": NSNull()])
+                "pendingQuestions": [], "queuedPrompts": queued, "isBusy": !stream.isEmpty, "streamingText": stream, "queueError": NSNull()])
             return try JSONDecoder().decode(RemoteTranscript.self, from: data)
         }
     }

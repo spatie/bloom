@@ -198,6 +198,9 @@ private final class SSHTerminalHandler: ChannelInboundHandler {
     }
     func channelReadComplete(context: ChannelHandlerContext) { state.advanceRead() }
     func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+        if event is ChannelFailureEvent {
+            state.finish(error: ConnectionFailure("The SSH server refused Bloom’s terminal command. Check this key’s command restrictions and the server executable."))
+        }
         if let status = event as? SSHChannelRequestEvent.ExitStatus { state.exitStatus = status.exitStatus }
         context.fireUserInboundEventTriggered(event)
     }

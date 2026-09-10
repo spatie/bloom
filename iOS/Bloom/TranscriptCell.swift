@@ -24,6 +24,7 @@ final class TranscriptCell: UITableViewCell {
     }
 
     func configure(kind: String, text: String, identity: String, isStreaming: Bool = false, inspection: RemoteToolInspection? = nil) {
+        accessoryView = nil
         contentConfiguration = UIHostingConfiguration {
             MobileTranscriptRow(kind: kind, text: text, isStreaming: isStreaming, inspection: inspection)
                 .id(identity)
@@ -31,6 +32,26 @@ final class TranscriptCell: UITableViewCell {
         }
         .margins(.all, 0)
     }
+
+    func configureQueued(_ prompt: RemoteQueuedPrompt, isCancelling: Bool, canCancel: Bool, cancel: @escaping () -> Void) {
+        contentConfiguration = UIHostingConfiguration {
+            BloomUserBubble(fill: Color(uiColor: BloomTheme.colour(PaletteInk.accentFill))) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(verbatim: prompt.text).font(.body).foregroundStyle(.white).textSelection(.enabled)
+                    Label(isCancelling ? "Removing from queue…" : "Queued", systemImage: "clock")
+                        .font(.caption).foregroundStyle(.white.opacity(0.85))
+                }
+            }.id("queued-" + prompt.id.rawValue)
+        }.margins(.all, 0)
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(systemName: "xmark.circle"), for: .normal)
+        button.frame.size = CGSize(width: 44, height: 44)
+        button.accessibilityLabel = "Remove queued message"
+        button.isEnabled = canCancel && !isCancelling
+        button.addAction(UIAction { _ in cancel() }, for: .touchUpInside)
+        accessoryView = button
+    }
+
 }
 
 private struct MobileTranscriptRow: View {

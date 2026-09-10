@@ -113,8 +113,10 @@ final class RemoteWorkspaceFileListing: WorkspacePaneModel {
     func panePosition(pane: String, session: SessionID) -> TranscriptPaneState? { panePositions[.init(pane: pane, session: session)] }
     func rememberPanePosition(_ state: TranscriptPaneState, pane: String, session: SessionID) { panePositions[.init(pane: pane, session: session)] = state }
     func readNote() async throws -> String {
-        if case .text(let text) = try await read(.workspace(workspaceID: workspace.id, action: .notes)) { return text }
-        return ""
+        guard case .text(let text) = try await read(.workspace(workspaceID: workspace.id, action: .notes)) else {
+            throw ServerFailure("The server did not return workspace notes. Try loading them again.")
+        }
+        return text
     }
     func writeNote(_ body: String) async throws { _ = try await read(.workspace(workspaceID: workspace.id, action: .saveNotes(body))) }
 

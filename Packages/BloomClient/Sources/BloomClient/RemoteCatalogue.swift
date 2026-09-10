@@ -6,6 +6,17 @@ public struct RemoteCatalogue: Decodable, Sendable {
     public let repositories: [RemoteProject]
     public let workspaces: [RemoteWorkspace]
     public let sessions: [RemoteSession]
+    public let archivedWorkspaces: [RemoteWorkspace]
+
+    private enum CodingKeys: CodingKey { case repositories, workspaces, sessions, archivedWorkspaces }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        repositories = try values.decode([RemoteProject].self, forKey: .repositories)
+        workspaces = try values.decode([RemoteWorkspace].self, forKey: .workspaces)
+        sessions = try values.decode([RemoteSession].self, forKey: .sessions)
+        archivedWorkspaces = try values.decodeIfPresent([RemoteWorkspace].self, forKey: .archivedWorkspaces) ?? []
+    }
 
     public static func decode(_ result: JSONValue) throws -> Self {
         guard let payload = result["catalogue"]?["_0"] else { throw ConnectionFailure("The server did not return its workspaces.") }
@@ -70,9 +81,34 @@ public struct RemoteTranscript: Decodable, Sendable {
     public let isBusy: Bool
     public let streamingText: String
     public let queueError: String?
+    public let queuedPrompts: [RemoteQueuedPrompt]
+    public let permissionDecisions: [String: String]
+
+    private enum CodingKeys: CodingKey {
+        case session, messages, pendingQuestions, isBusy, streamingText, queueError, queuedPrompts, permissionDecisions
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        session = try values.decode(RemoteSession.self, forKey: .session)
+        messages = try values.decode([RemoteMessage].self, forKey: .messages)
+        pendingQuestions = try values.decode([Data].self, forKey: .pendingQuestions)
+        isBusy = try values.decode(Bool.self, forKey: .isBusy)
+        streamingText = try values.decode(String.self, forKey: .streamingText)
+        queueError = try values.decodeIfPresent(String.self, forKey: .queueError)
+        queuedPrompts = try values.decodeIfPresent([RemoteQueuedPrompt].self, forKey: .queuedPrompts) ?? []
+        permissionDecisions = try values.decodeIfPresent([String: String].self, forKey: .permissionDecisions) ?? [:]
+    }
 
     public static func decode(_ result: JSONValue) throws -> Self {
         guard let payload = result["transcript"]?["_0"] else { throw ConnectionFailure("The server did not return this conversation.") }
         return try JSONDecoder().decode(Self.self, from: JSONEncoder().encode(payload))
     }
+}
+
+public struct RemoteQueuedPrompt: Codable, Sendable, Identifiable, Equatable {
+    public let id: DeliveryID
+    public let text: String
+
+    public init(id: DeliveryID, text: String) { self.id = id; self.text = text }
 }

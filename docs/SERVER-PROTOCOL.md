@@ -432,7 +432,7 @@ handled explicitly; an app port does not automatically forward every service por
 ## Domain records and schema coverage
 
 The schema strictly describes case names, envelope shapes, required operation fields and the
-portable file/review/message records. `DomainRecord` intentionally preserves complex application
+portable file/review/message records, queued prompts and archive safety reports. `DomainRecord` intentionally preserves complex application
 records without claiming complete generated client models. It accepts an object and is not a
 substitute for semantic validation. The server remains authoritative. The following sources define
 those records, including fields not yet projected by the mobile client:
@@ -443,9 +443,24 @@ those records, including fields not yet projected by the mobile client:
 | Creation context/inspection/results/attachments | [`ServerCreation.swift`](../Sources/BloomCore/Server/ServerCreation.swift) |
 | Composer controls and choices | [`ServerComposerState.swift`](../Sources/BloomCore/Server/ServerComposerState.swift), [`ComposerControls.swift`](../Packages/BloomClient/Sources/BloomClient/Composer/ComposerControls.swift) |
 | Project settings | [`ServerProjectSettings.swift`](../Sources/BloomCore/Server/ServerProjectSettings.swift) |
-| Archive confirmation and hazards | [`ServerSidebar.swift`](../Sources/BloomCore/Server/ServerSidebar.swift) |
+| Archive confirmation and safety | [`ServerSidebar.swift`](../Sources/BloomCore/Server/ServerSidebar.swift), [`WorkspaceSafetyReport.swift`](../Packages/BloomClient/Sources/BloomClient/WorkspaceSafetyReport.swift), [`ArchiveHazards.swift`](../Packages/BloomClient/Sources/BloomClient/ArchiveHazards.swift) |
 | File and revision snapshots | [`ServerProtocol.swift`](../Sources/BloomCore/Server/ServerProtocol.swift), [`ServerReviewCache.swift`](../Sources/BloomCore/Server/ServerReviewCache.swift) |
 | Read-only cross-platform record projections | [`RemoteCatalogue.swift`](../Packages/BloomClient/Sources/BloomClient/RemoteCatalogue.swift) |
+
+The shared client preserves archived workspaces, queued prompts and permission decisions from the
+server. Older responses that omit those additive fields decode to empty collections. Transcript
+snapshots replace queue and decision state even when no new messages arrive. Queued cancellation,
+archive preview, confirmed archive and restoration have typed shared service methods. Keep the
+same command ID when retrying an uncertain mutation; archive also returns the unchanged confirmation
+ID issued by the server. Shared `WorkspaceSafetyReport` and `ArchiveHazards` retain the desktop's
+loss descriptions and safety decisions. Incomplete risk reports fail decoding rather than implying
+that archiving is safe.
+
+Production vectors cover common conversation mutations, queue cancellation, archive confirmation,
+restoration, terminal setup, catalogue and composer replies. They do not yet cover every operation
+or result variant. The generator checks every enum case name and associated argument name, but
+`DomainRecord` payloads still need field-level schemas and additional vectors before generated
+clients can claim complete domain coverage.
 
 A minimal client needs only catalogue selection, transcript merging, composer choices and the
 review/file records above. Preserve opaque controls and expected-state objects when sending them

@@ -1109,20 +1109,7 @@
                     "queuedPrompts": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "text": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "text"
-                        ],
-                        "additionalProperties": false
+                        "$ref": "#/$defs/QueuedPrompt"
                       }
                     },
                     "queueError": {
@@ -1335,6 +1322,27 @@
         {
           "type": "object",
           "properties": {
+            "archivePreview": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/ArchivePreview"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "archivePreview"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
             "diagnostics": {
               "type": "object",
               "properties": {
@@ -1350,27 +1358,6 @@
           },
           "required": [
             "diagnostics"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "archivePreview": {
-              "type": "object",
-              "properties": {
-                "_0": {
-                  "$ref": "#/$defs/DomainRecord"
-                }
-              },
-              "required": [
-                "_0"
-              ],
-              "additionalProperties": false
-            }
-          },
-          "required": [
-            "archivePreview"
           ],
           "additionalProperties": false
         },
@@ -2791,6 +2778,119 @@
         "createdAt"
       ],
       "additionalProperties": true
+    },
+    "QueuedPrompt": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "ArchivePreview": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "workspace": {
+          "$ref": "#/$defs/Workspace"
+        },
+        "report": {
+          "$ref": "#/$defs/WorkspaceSafetyReport"
+        },
+        "hazards": {
+          "$ref": "#/$defs/ArchiveHazards"
+        },
+        "createdAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "workspace",
+        "report",
+        "hazards",
+        "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "ArchiveHazards": {
+      "type": "object",
+      "properties": {
+        "isAgentRunning": {
+          "type": "boolean"
+        },
+        "isPullRequestMerged": {
+          "type": "boolean"
+        },
+        "isDeletingBranch": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "isAgentRunning",
+        "isPullRequestMerged",
+        "isDeletingBranch"
+      ],
+      "additionalProperties": false
+    },
+    "WorkspaceSafetyReport": {
+      "type": "object",
+      "properties": {
+        "hasUncommittedChanges": {
+          "type": "boolean"
+        },
+        "untrackedFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unpushedCommits": {
+          "type": "integer"
+        },
+        "isBranchMerged": {
+          "type": "boolean"
+        },
+        "modifiedIgnoredFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "detachedCommits": {
+          "type": "integer"
+        },
+        "preservedFolderPath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "hasUncommittedChanges",
+        "untrackedFiles",
+        "unpushedCommits",
+        "isBranchMerged",
+        "modifiedIgnoredFiles",
+        "detachedCommits"
+      ],
+      "additionalProperties": false
     },
     "TextFile": {
       "type": "object",

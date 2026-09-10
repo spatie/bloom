@@ -25,11 +25,11 @@ final class ServerSetupModel {
     private let resources: URL?
     private let supportDirectory: URL?
     private let server: ServerWindowModel
-    private unowned let app: AppModel
     private var connection: ServerSetupConnection?
     private var candidate: ServerSetupHostKey?
     private var installed: ServerInstallEvent?
     private var clientKey: URL?
+    private var installedKnownHosts: URL?
     private var task: Task<Void, Never>?
     private var generation = UUID()
     private var retryStep = Phase.address
@@ -39,18 +39,18 @@ final class ServerSetupModel {
 
     var canInstallBrowser: Bool { connection != nil && installed?.serviceHome != nil && !isBusy }
     var githubIsAuthenticated: Bool { accountChecks.contains { $0.id == .github && $0.status == .ready } }
-    var canConnect: Bool { installed != nil && accountClient != nil && !isBusy }
+    var canConnect: Bool { installed != nil && accountClient != nil && !isBusy && !server.isConnecting && !server.isSigningIn && !server.isPerformingCommand }
     private var support: URL { supportDirectory ?? Store.defaultDirectory.appendingPathComponent("server-setup", isDirectory: true) }
     private var knownHosts: URL { support.appendingPathComponent("known_hosts") }
 
-    init(server: ServerWindowModel, app: AppModel, resources: URL? = nil, supportDirectory: URL? = nil) {
+    init(server: ServerWindowModel, resources: URL? = nil, supportDirectory: URL? = nil, resumeExisting: Bool = true) {
         self.resources = resources; self.supportDirectory = supportDirectory
         self.server = server
-        self.app = app
-        if server.isConfigured, !server.usesHTTPS, !server.knownHostsFile.isEmpty, !server.identityFile.isEmpty,
+        if resumeExisting, server.isConfigured, !server.usesHTTPS, !server.knownHostsFile.isEmpty, !server.identityFile.isEmpty,
            let user = server.host.split(separator: "@").first, server.host.contains("@") {
             host = server.host; label = server.customLabel; validatedHost = server.host
             clientKey = URL(fileURLWithPath: server.identityFile)
+            installedKnownHosts = URL(fileURLWithPath: server.knownHostsFile)
             installed = ServerInstallEvent(executable: server.executable, dataDirectory: server.remoteDirectory, serviceUser: String(user))
             phase = .accounts
         }
@@ -58,7 +58,7 @@ final class ServerSetupModel {
 
     func inspect() async {
         await perform(.checking) {
-            self.installed = nil; self.accountChecks = []; self.browserReadiness = nil; self.browserFailure = nil; self.browserRecovery = nil; self.browserAttempted = false; self.check = nil; self.candidate = nil; self.fingerprint = nil
+            self.installed = nil; self.installedKnownHosts = nil; self.accountChecks = []; self.browserReadiness = nil; self.browserFailure = nil; self.browserRecovery = nil; self.browserAttempted = false; self.check = nil; self.candidate = nil; self.fingerprint = nil
             try self.prepareTrustStore()
             let host = self.host.trimmingCharacters(in: .whitespacesAndNewlines)
             let connection = try ServerSetupConnection(host: host, identityFile: self.identityFile, knownHostsFile: self.knownHosts.path)
@@ -79,13 +79,12 @@ final class ServerSetupModel {
 
     func trustHost() async {
         guard let connection, let candidate, inputsUnchanged else { return }
-        await perform(.checking) { try await connection.trust(candidate) }
-        if failure == nil { await inspect() }
+        if await perform(.checking, operation: { try await connection.trust(candidate) }) { await inspect() }
     }
 
     func install() async {
         guard let connection, inputsUnchanged, check?.blockers.isEmpty == true else { return }
-        await perform(.installing) {
+        let completed = await perform(.installing) {
             let package = try self.serverPackage()
             let script = try self.installerScript()
             let key = try await self.prepareClientKey()
@@ -102,7 +101,7 @@ final class ServerSetupModel {
             try Task.checkCancellation()
             self.phase = .accounts
         }
-        if installed != nil, failure == nil, phase == .accounts { await refreshAccounts() }
+        if completed, installed != nil, phase == .accounts { await refreshAccounts() }
     }
 
     func refreshAccounts() async {
@@ -126,8 +125,8 @@ final class ServerSetupModel {
 
     func retryBrowserInstall() async {
         guard canInstallBrowser else { return }
-        await perform(.accounts) { try await self.configureBrowser() }
-        if failure == nil, phase == .accounts { await refreshAccounts() }
+        let completed = await perform(.accounts) { try await self.configureBrowser() }
+        if completed, phase == .accounts { await refreshAccounts() }
     }
 
     private func configureBrowser() async throws {
@@ -159,16 +158,14 @@ final class ServerSetupModel {
               case .ssh(let host, let executable, let directory, let identity, let knownHosts) = endpoint else { return }
         await perform(.connecting) {
             await self.accountClient?.disconnect(); self.accountClient = nil
-            self.server.host = host
-            self.server.executable = executable
-            self.server.remoteDirectory = directory
-            self.server.identityFile = identity ?? ""
-            self.server.knownHostsFile = knownHosts ?? ""
-            self.server.usesHTTPS = false
-            self.server.connectionMode = .remote
-            self.server.renameServer(self.label)
-            await self.server.connect()
-            guard self.server.isConnected else { throw ServerSetupFailure(code: .unreachable) }
+            try Task.checkCancellation()
+            guard let profile = ServerConnectionProfile(values: [
+                "host": host, "executable": executable, "directory": directory,
+                "identityFile": identity ?? "", "knownHostsFile": knownHosts ?? "",
+            ], label: self.label) else { throw ServerSetupFailure(code: .installation) }
+            let connected = await self.server.connect(to: profile)
+            try Task.checkCancellation()
+            guard connected else { throw ServerSetupFailure(code: .unreachable) }
             if self.accountChecks.contains(where: { $0.id == .agents && $0.detail.contains("codex") }) { self.server.agent = .codex }
             self.progress.append("Connected as \(installed.serviceUser ?? "bloom").")
             self.phase = .complete
@@ -212,11 +209,12 @@ final class ServerSetupModel {
               let executable = installed.executable, let directory = installed.dataDirectory else { return nil }
         let address = validatedHost.split(separator: "@").last.map(String.init) ?? validatedHost
         return .ssh(host: user + "@" + address, executable: executable, directory: directory,
-                    identityFile: clientKey.path, knownHostsFile: knownHosts.path)
+                    identityFile: clientKey.path, knownHostsFile: (installedKnownHosts ?? knownHosts).path)
     }
 
-    private func perform(_ step: Phase, operation: @escaping @MainActor () async throws -> Void) async {
-        guard !isBusy else { return }
+    @discardableResult
+    private func perform(_ step: Phase, operation: @escaping @MainActor () async throws -> Void) async -> Bool {
+        guard !isBusy else { return false }
         let id = UUID(); generation = id; retryStep = step; phase = step; failure = nil; isBusy = true
         let task = Task { @MainActor in
             do { try await operation() } catch {
@@ -227,6 +225,7 @@ final class ServerSetupModel {
         }
         self.task = task
         await task.value
+        return generation == id && failure == nil && !task.isCancelled
     }
 
     private func record(_ message: String) {

@@ -49,6 +49,16 @@ struct SidebarServerHeader: View {
         }
         Button("Rename Server…") { label = server.displayName; isRenaming = true }
         Button("Server Settings…") { openWindow(id: ServerWindow.id) }
+        if server.savedServers.profiles.count > 1 {
+            Menu("Switch Server") {
+                ForEach(server.savedServers.profiles) { profile in
+                    Button(profile.displayName) { Task { await server.selectServer(profile) } }
+                        .disabled(profile.id == server.connectionProfile?.id)
+                }
+            }
+            .disabled(server.isConnecting || server.isPerformingCommand)
+        }
+        Button("Add Server…") { openWindow(id: ServerSetupWindow.id) }
         Button("Archived Workspaces…") { server.showsArchivedWorkspaces = true }
     }
 }

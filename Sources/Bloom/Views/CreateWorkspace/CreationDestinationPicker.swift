@@ -17,8 +17,23 @@ struct CreationDestinationPicker: View {
                 }
             }
             .pickerStyle(.inline)
+            if app.remoteServer.savedServers.profiles.count > 1 {
+                Menu("Other Servers") {
+                    ForEach(app.remoteServer.savedServers.profiles) { profile in
+                        if profile.id != app.remoteServer.connectionProfile?.id {
+                            Button(profile.displayName) {
+                                Task { await app.remoteServer.selectServer(profile); isRemote = true }
+                            }
+                        }
+                    }
+                }
+                .disabled(app.remoteServer.isConnecting || app.remoteServer.isPerformingCommand)
+            }
             Divider()
-            Button(app.remoteServer.isConfigured ? "Server Settings…" : "Add Server…") { openWindow(id: ServerWindow.id) }
+            Button("Add Server…") { openWindow(id: ServerSetupWindow.id) }
+            if app.remoteServer.isConfigured {
+                Button("Server Settings…") { openWindow(id: ServerWindow.id) }
+            }
         } label: {
             Label(isRemote ? (serverLabel) : "This Mac",
                 systemImage: isRemote ? "server.rack" : "laptopcomputer")

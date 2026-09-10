@@ -6,7 +6,10 @@ public actor RemoteWireSession: RemoteRequesting {
     public typealias Exchange = @Sendable (Data) async throws -> Data
     private let exchange: Exchange
     private var established: Handshake?
-    private var pending: Task<Handshake, Error>?
+    private var pending: Task<Void, Never>?
+    private var pendingID: UUID?
+    private var waiters: [UUID: CheckedContinuation<Handshake, Error>] = [:]
+    var handshakeWaiterCount: Int { waiters.count }
     public var negotiatedVersion: Int? { established?.version }
 
     public init(exchange: @escaping Exchange) { self.exchange = exchange }
@@ -30,20 +33,43 @@ public actor RemoteWireSession: RemoteRequesting {
 
     private func negotiate(helloID: UUID) async throws -> Handshake {
         if let established { return established }
-        if let pending { return try await pending.value }
-        let exchange = exchange
-        let task = Task { try await Self.handshake(id: helloID, exchange: exchange) }
-        pending = task
-        do {
-            let result = try await task.value
-            established = result
-            pending = nil
-            return result
-        } catch {
-            pending = nil
-            throw error
+        let waiterID = UUID()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard !Task.isCancelled else { continuation.resume(throwing: CancellationError()); return }
+                waiters[waiterID] = continuation
+                guard pending == nil else { return }
+                let id = UUID()
+                pendingID = id
+                let exchange = exchange
+                pending = Task { [weak self] in
+                    let result: Result<Handshake, Error>
+                    do { result = .success(try await Self.handshake(id: helloID, exchange: exchange)) } catch { result = .failure(error) }
+                    await self?.finishHandshake(result, id: id)
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelHandshake(waiterID: waiterID) }
         }
     }
+
+    private func finishHandshake(_ result: Result<Handshake, Error>, id: UUID) {
+        guard pendingID == id else { return }
+        let waiting = waiters.values
+        waiters = [:]; pending = nil; pendingID = nil
+        if case .success(let connection) = result { established = connection }
+        for continuation in waiting { continuation.resume(with: result) }
+    }
+
+    private func cancelHandshake(waiterID: UUID) {
+        waiters.removeValue(forKey: waiterID)?.resume(throwing: CancellationError())
+        guard waiters.isEmpty else { return }
+        pendingID = nil
+        pending?.cancel()
+        pending = nil
+    }
+
+    deinit { pending?.cancel() }
 
     private struct Handshake: Sendable {
         let version: Int
@@ -53,10 +79,12 @@ public actor RemoteWireSession: RemoteRequesting {
     private static func handshake(id: UUID, exchange: Exchange) async throws -> Handshake {
         let hello = RemoteCommand(.object(["hello": .object([:])]), id: id)
         let initial = try await exchange(encode(hello, version: BloomWire.version))
+        try Task.checkCancellation()
         let reply = try RemoteWireReply.decode(initial, commandID: id)
         if reply.version != BloomWire.version, BloomWire.supportedVersions.contains(reply.version),
            reply.result == .object(["failure": .object(["_0": .string("Incompatible Bloom server protocol. Update the client and server.")])]) {
             let data = try await exchange(encode(hello, version: reply.version))
+            try Task.checkCancellation()
             let result = try RemoteClient.decode(data, commandID: id, expectedVersion: reply.version)
             return try validatedHello(result, version: reply.version)
         }

@@ -9,7 +9,11 @@ public actor ServerClient: RemoteRequesting {
     private let http: ServerHTTPTransport?
     private var pump: Task<Void, Never>?
     private var errorPump: Task<Void, Never>?
-    private var pending: [UUID: CheckedContinuation<Data, Error>] = [:]
+    private struct PendingReply {
+        let attempt: UUID
+        let continuation: CheckedContinuation<Data, Error>
+    }
+    private var pending: [UUID: PendingReply] = [:]
     private var wire: RemoteWireSession?
     private var isClosed = false
     private var stderr = ""
@@ -102,19 +106,25 @@ public actor ServerClient: RemoteRequesting {
         let id = try JSONDecoder().decode(ServerWireIdentity.self, from: body).id
         guard pending[id] == nil else { throw ServerFailure("This command is already awaiting a reply.") }
         let line = String(decoding: body, as: UTF8.self)
+        let attempt = UUID()
         let deadline = Task { [weak self] in
             do { try await Task.sleep(for: timeout) } catch { return }
-            await self?.fail(id, message: "The server did not reply. Reconnect and refresh before retrying.")
+            await self?.fail(id, attempt: attempt, message: "The server did not reply. Reconnect and refresh before retrying.")
         }
         defer { deadline.cancel() }
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
-                pending[id] = continuation
-                if let socket { socket.writeLine(line) } else { process?.writeLine(line) }
+                pending[id] = PendingReply(attempt: attempt, continuation: continuation)
+                if let socket {
+                    Task { [weak self] in
+                        guard await self?.maySend(id, attempt: attempt) == true else { return }
+                        await socket.writeLineAsync(line)
+                    }
+                } else { process?.writeLine(line) }
             }
         } onCancel: {
-            Task { await self.fail(id, message: "The request was cancelled. It may still be running on the server.") }
+            Task { await self.fail(id, attempt: attempt, message: "The request was cancelled. It may still be running on the server.") }
         }
     }
 
@@ -124,11 +134,16 @@ public actor ServerClient: RemoteRequesting {
             disconnect(message: "The server sent an invalid reply.")
             return
         }
-        pending.removeValue(forKey: reply.id)?.resume(returning: data)
+        pending.removeValue(forKey: reply.id)?.continuation.resume(returning: data)
     }
 
-    private func fail(_ id: UUID, message: String) {
-        pending.removeValue(forKey: id)?.resume(throwing: ServerFailure(message))
+    private func maySend(_ id: UUID, attempt: UUID) -> Bool {
+        !isClosed && pending[id]?.attempt == attempt
+    }
+
+    private func fail(_ id: UUID, attempt: UUID, message: String) {
+        guard pending[id]?.attempt == attempt else { return }
+        pending.removeValue(forKey: id)?.continuation.resume(throwing: ServerFailure(message))
     }
 
     private func recordError(_ line: String) { stderr = String((stderr + line + "\n").suffix(4_096)) }
@@ -151,7 +166,7 @@ public actor ServerClient: RemoteRequesting {
         errorPump = nil
         let waiting = pending.values
         pending.removeAll()
-        for continuation in waiting { continuation.resume(throwing: ServerFailure(message)) }
+        for reply in waiting { reply.continuation.resume(throwing: ServerFailure(message)) }
     }
 
     deinit {

@@ -18,6 +18,7 @@ enum ServerSetupProbe {
         let expectedFingerprint: String
         let install: Bool
         let githubSignIn: Bool?
+        let inspect: Bool?
     }
 
     static func runAndExit() -> Never {
@@ -39,7 +40,13 @@ enum ServerSetupProbe {
             let preferences = UserDefaults(suiteName: "be.spatie.bloom.wizard-probe.\(UUID())")!
             let app = AppModel()
             let server = ServerWindowModel(preferences: preferences)
-            let model = ServerSetupModel(server: server, app: app, resources: URL(fileURLWithPath: configuration.resources), supportDirectory: URL(fileURLWithPath: configuration.support))
+            if configuration.inspect == false {
+                server.host = "bloom@existing-server"; server.executable = "/opt/bloom/server"
+                server.remoteDirectory = "/var/lib/bloom"; server.identityFile = "/tmp/fixture-key"
+                server.knownHostsFile = "/tmp/fixture-known-hosts"
+                try await verifyAuthenticationIsolation(server)
+            }
+            let model = ServerSetupModel(server: server, resources: URL(fileURLWithPath: configuration.resources), supportDirectory: URL(fileURLWithPath: configuration.support), resumeExisting: false)
             model.host = configuration.host; model.identityFile = configuration.identityFile; model.label = "New Ubuntu server"
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 560), styleMask: [.titled], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
@@ -68,7 +75,7 @@ enum ServerSetupProbe {
             }
             try await Task.sleep(for: .milliseconds(300))
             try await capture("server-details")
-            await model.inspect()
+            if configuration.inspect != false { await model.inspect() }
             try await capture("server-check")
             if model.phase == .trust {
                 guard model.fingerprint == configuration.expectedFingerprint else { throw ServerFailure("The wizard host fingerprint does not match the independently verified key.") }
@@ -132,6 +139,13 @@ enum ServerSetupProbe {
                 }
                 if model.canConnect { await model.connect(); try await capture("connected") }
             }
+            if configuration.inspect == false {
+                guard model.phase == .address else { throw ServerFailure("Adding a server must start with a fresh address form.") }
+                window.contentView = NSHostingView(rootView: SidebarStatusBar(filter: .constant(.all)).environment(app).environment(\.colorScheme, .light).background(Palette.windowBackground))
+                window.setContentSize(NSSize(width: 280, height: 40))
+                try await Task.sleep(for: .milliseconds(200))
+                try await capture("sidebar-footer")
+            }
             let report: [String: Any] = ["phase": String(describing: model.phase), "error": model.failure?.message ?? "", "captures": count,
                                        "connected": server.isConnected, "progress": model.progress, "windowWasShown": window.isVisible]
             try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: output.appendingPathComponent("result.json"))
@@ -151,6 +165,23 @@ enum ServerSetupProbe {
             if let scroll = accountScroll(in: child) { return scroll }
         }
         return nil
+    }
+
+    private static func verifyAuthenticationIsolation(_ server: ServerWindowModel) async throws {
+        let original = server.connectionProfile
+        let endpoint = server.endpoint
+        guard let candidate = ServerConnectionProfile(values: ["usesHTTPS": "true", "httpsAddress": "https://example.invalid"]) else {
+            throw ServerFailure("The authentication test fixture is invalid.")
+        }
+        let cancelled = await server.connect(to: candidate, authenticate: { _ in throw CancellationError() })
+        guard !cancelled, server.connectionProfile == original, server.endpoint == endpoint else {
+            throw ServerFailure("Cancelled sign-in changed the active server.")
+        }
+        let stale = await server.connect(to: candidate, authenticate: { _ in await server.disconnect() })
+        guard !stale, server.connectionProfile == original, server.endpoint == endpoint else {
+            throw ServerFailure("A stale sign-in changed the active server.")
+        }
+        server.error = nil
     }
 }
 #endif

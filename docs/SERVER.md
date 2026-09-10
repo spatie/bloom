@@ -13,11 +13,19 @@ moved into this server. New server workspaces can run locally or on another mach
 
 ## Add Server assistant
 
-Choose Add Server, enter `root@server-ip` (or an administrative SSH account with passwordless
+Choose **+** in the bottom-left sidebar footer, then **Add Server…**. The same command is available
+in the File menu and the workspace destination menu, including when a server is already connected.
+It opens a fresh setup form. Enter `root@server-ip` (or an administrative SSH account with passwordless
 sudo), and select a key or use your SSH agent. Existing trusted host keys are copied into the
 app's private trust store. New hosts show their Ed25519 fingerprint for explicit verification;
 changed and revoked keys are refused. Automatic first-time key discovery supports direct IPv4
 and DNS connections; advanced SSH routes need their host verified with SSH first.
+
+Create the Ubuntu machine with your hosting provider first; Bloom installs and configures the
+software on that machine. Saved connection profiles retain earlier servers when you add another.
+Use **Server Settings > Saved servers**, or **Switch Server** in the server's sidebar menu, to
+change the active remote connection. This Mac's projects remain available alongside it. Profiles
+contain addresses and references to local key files, never the private key contents or access tokens.
 
 The assistant checks Ubuntu 24.04/26.04 x86_64, systemd, administrator access, free disk space and
 existing installation ownership. Set Up Server uploads the package bundled with Bloom, verifies
@@ -347,7 +355,8 @@ server starts, even without a connected Mac.
    queue rather than steering the running agent, and global owner-only UI actions are not exposed
    through a workspace lease. Shared creation, crew management, tool cards, native terminals and
    workspace-scoped pane/browser MCP actions are implemented.
-4. Add saved machine profiles, push events and remote transcript search.
+4. Display multiple remote catalogues concurrently, add push events and remote transcript search.
+   Saved machine profiles currently switch one active remote connection.
 5. Broaden attachment limits and preview navigation across multiple forwarded origins.
 6. Generate complete public wire records and language SDKs from the protocol contract. Native
    iPhone/iPad clients exist; a browser client and an operated relay remain separate future work.

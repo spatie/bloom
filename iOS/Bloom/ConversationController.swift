@@ -21,12 +21,15 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     #endif
     private var buffer = TranscriptBuffer()
     private var rows: [RemoteTranscriptRow] = []
+    private var queuedRows: [RemoteQueuedPrompt] = []
     var transcriptMessageCount: Int { buffer.messages.count }
     private var poll: Task<Void, Never>?
     private var isRefreshing = false
     private var needsRefresh = false
     private var isSending = false
     private var hasPendingSubmission = false
+    private var queueCancellationIDs: [DeliveryID: UUID] = [:]
+    private var cancellingQueued: Set<DeliveryID> = []
 
     private let uncertainSend = "The last send has not been confirmed. Reconnect to this server and check the conversation before retrying. Retry uses the same message ID."
 
@@ -122,7 +125,13 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
             send.heightAnchor.constraint(equalToConstant: 44),
         ])
         #if DEBUG
-        if let fixture { buffer.apply(fixture); updateStatus() }
+        if let fixture {
+            buffer.apply(fixture)
+            rows = RemoteTranscriptProjection.rows(messages: buffer.messages)
+            queuedRows = buffer.queuedPrompts
+            table.reloadData()
+            updateStatus()
+        }
         #endif
         updateComposer()
     }
@@ -257,6 +266,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
 
     private func applyTranscript(_ transcript: RemoteTranscript) {
         let previousRows = rows
+        let previousQueue = queuedRows
         let previousStreamingText = buffer.streamingText
         buffer.apply(transcript)
         rows = RemoteTranscriptProjection.rows(messages: buffer.messages)
@@ -264,8 +274,14 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         if previousRows != rows || previousStreamingText != buffer.streamingText {
             updateRows(previousRows: previousRows, previousStreamingText: previousStreamingText)
         }
-        if wasAtBottom, table.numberOfRows(inSection: 0) > 0 {
-            table.scrollToRow(at: IndexPath(row: table.numberOfRows(inSection: 0) - 1, section: 0), at: .bottom, animated: false)
+        if previousQueue != buffer.queuedPrompts {
+            queuedRows = buffer.queuedPrompts
+            queueCancellationIDs = queueCancellationIDs.filter { id, _ in buffer.queuedPrompts.contains { $0.id == id } }
+            UIView.performWithoutAnimation { table.reloadSections(IndexSet(integer: 1), with: .none) }
+        }
+        let lastSection = queuedRows.isEmpty ? 0 : 1
+        if wasAtBottom, table.numberOfRows(inSection: lastSection) > 0 {
+            table.scrollToRow(at: IndexPath(row: table.numberOfRows(inSection: lastSection) - 1, section: lastSection), at: .bottom, animated: false)
         }
         updateStatus()
         review.isHidden = buffer.pendingQuestions.isEmpty
@@ -299,6 +315,8 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
             table.layoutIfNeeded()
             let expected = RemoteTranscriptProjection.rows(messages: snapshot.messages).count + (snapshot.streamingText.isEmpty ? 0 : 1)
             guard table.numberOfRows(inSection: 0) == expected,
+                  table.numberOfRows(inSection: 1) == snapshot.queuedPrompts.count,
+                  buffer.queuedPrompts == snapshot.queuedPrompts,
                   buffer.messages == snapshot.messages,
                   buffer.streamingText == snapshot.streamingText,
                   table.cellForRow(at: firstPath) === firstCell else {
@@ -417,7 +435,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     private func updateStatus() {
         updateComposer()
         send.configuration?.showsActivityIndicator = isSending
-        if rows.isEmpty && buffer.streamingText.isEmpty {
+        if rows.isEmpty && buffer.streamingText.isEmpty && buffer.queuedPrompts.isEmpty {
             var empty = UIContentUnavailableConfiguration.empty()
             empty.image = UIImage(systemName: "bubble.left.and.text.bubble.right")
             empty.text = "Start a conversation"
@@ -445,12 +463,40 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         present(BloomTheme.navigation(controller), animated: true)
     }
 
+    private func cancelQueued(_ prompt: RemoteQueuedPrompt) {
+        guard !cancellingQueued.contains(prompt.id), model.address == origin, let service = model.service else { return }
+        let commandID = queueCancellationIDs[prompt.id] ?? UUID()
+        queueCancellationIDs[prompt.id] = commandID
+        cancellingQueued.insert(prompt.id)
+        table.reloadSections(IndexSet(integer: 1), with: .none)
+        Task { [weak self] in
+            guard let self else { return }
+            defer {
+                cancellingQueued.remove(prompt.id)
+                table.reloadSections(IndexSet(integer: 1), with: .none)
+            }
+            do {
+                try await service.cancelQueued(sessionID: session.id, deliveryID: prompt.id, commandID: commandID)
+                await refresh()
+            } catch {
+                guard model.address == origin, viewIfLoaded?.window != nil else { return }
+                show(error, retry: { [weak self] in self?.cancelQueued(prompt) })
+            }
+        }
+    }
+
+    func numberOfSections(in tableView: UITableView) -> Int { 2 }
+
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        rows.count + (buffer.streamingText.isEmpty ? 0 : 1)
+        section == 1 ? queuedRows.count : rows.count + (buffer.streamingText.isEmpty ? 0 : 1)
     }
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         guard let cell = tableView.dequeueReusableCell(withIdentifier: "message", for: indexPath) as? TranscriptCell else { return UITableViewCell() }
-        if indexPath.row < rows.count {
+        if indexPath.section == 1 {
+            let prompt = queuedRows[indexPath.row]
+            cell.configureQueued(prompt, isCancelling: cancellingQueued.contains(prompt.id),
+                                 canCancel: model.address == origin && model.service != nil) { [weak self] in self?.cancelQueued(prompt) }
+        } else if indexPath.row < rows.count {
             cell.configure(row: rows[indexPath.row])
         } else { cell.configure(kind: "assistant", text: buffer.streamingText, identity: "stream", isStreaming: true) }
         return cell

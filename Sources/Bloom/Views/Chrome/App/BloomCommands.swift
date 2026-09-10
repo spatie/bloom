@@ -76,7 +76,10 @@ struct BloomCommands: Commands {
         }
 
         CommandGroup(replacing: .newItem) {
-            Button(model.remoteServer.isConfigured ? "Server Settings…" : "Add Server…") { openWindow(id: ServerWindow.id) }
+            Button("Add Server…") { openWindow(id: ServerSetupWindow.id) }
+            if model.remoteServer.isConfigured {
+                Button("Server Settings…") { openWindow(id: ServerWindow.id) }
+            }
             Divider()
             MenuCommand(.newWorkspace) {
                 // `RootView` opens the window, and the sidebar and Home already ask for it this

@@ -84,6 +84,192 @@
     }
   },
   {
+    "name" : "request-diagnostics",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "diagnostics" : {
+
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-composer",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "composer" : {
+          "sessionID" : "session-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-setComposer",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "setComposer" : {
+          "controls" : {
+            "agentKind" : "codex",
+            "codexContextWindow" : 0,
+            "effort" : "medium",
+            "hasWorktree" : true,
+            "isFastMode" : false,
+            "model" : "example-model",
+            "outputStyle" : "default",
+            "permissionMode" : "auto"
+          },
+          "sessionID" : "session-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-send",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "send" : {
+          "sessionID" : "session-example",
+          "text" : "Run tests"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-stop",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "stop" : {
+          "sessionID" : "session-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-cancelQueued",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "cancelQueued" : {
+          "deliveryID" : "delivery-example",
+          "sessionID" : "session-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-markRead",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "markRead" : {
+          "seq" : 1,
+          "sessionID" : "session-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-renameSession",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "renameSession" : {
+          "sessionID" : "session-example",
+          "title" : "Review"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-closeSession",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "closeSession" : {
+          "sessionID" : "session-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-terminalStream",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "terminalStream" : {
+          "name" : "Terminal",
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-archivePreview",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "workspace" : {
+          "action" : {
+            "archivePreview" : {
+
+            }
+          },
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-archive",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "workspace" : {
+          "action" : {
+            "archive" : {
+              "confirmation" : "00000000-0000-4000-8000-000000000001"
+            }
+          },
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-restore",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "workspace" : {
+          "action" : {
+            "restore" : {
+
+            }
+          },
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
     "name" : "request-transcript",
     "value" : {
       "id" : "00000000-0000-4000-8000-000000000001",
@@ -335,6 +521,191 @@
     }
   },
   {
+    "name" : "reply-catalogue",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "catalogue" : {
+          "_0" : {
+            "archivedWorkspaces" : [
+              {
+                "additions" : 0,
+                "baseBranch" : "main",
+                "branch" : "archived",
+                "changedFiles" : 0,
+                "createdAt" : 0,
+                "deletions" : 0,
+                "id" : "archived-example",
+                "lastActivityAt" : 0,
+                "name" : "Archived work",
+                "origin" : {
+                  "user" : {
+
+                  }
+                },
+                "path" : "/server/archived",
+                "pinned" : false,
+                "port" : 0,
+                "repoID" : "repo-example",
+                "setupLog" : "",
+                "setupState" : "pending",
+                "sortOrder" : 0,
+                "state" : "active",
+                "unread" : false
+              }
+            ],
+            "repositories" : [
+              {
+                "accent" : "4C8DF6",
+                "collapsed" : false,
+                "createdAt" : 0,
+                "defaultBranch" : "main",
+                "hidden" : false,
+                "iconSource" : "undetected",
+                "id" : "repo-example",
+                "name" : "Project",
+                "path" : "/server/project",
+                "sortOrder" : 0
+              }
+            ],
+            "sessions" : [
+              {
+                "agentKind" : "claudeCode",
+                "contextTokens" : 0,
+                "costUSD" : 0,
+                "createdAt" : 0,
+                "effort" : "medium",
+                "id" : "session-example",
+                "inputTokens" : 0,
+                "lastReadSeq" : 0,
+                "model" : "example-model",
+                "outputTokens" : 0,
+                "permissionMode" : "bypassPermissions",
+                "sortOrder" : 0,
+                "state" : "idle",
+                "title" : "Chat",
+                "updatedAt" : 0,
+                "workspaceID" : "workspace-example"
+              }
+            ],
+            "workspaces" : [
+
+            ]
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-composer",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "composer" : {
+          "_0" : {
+            "availableAgents" : [
+              "codex"
+            ],
+            "commands" : [
+
+            ],
+            "controls" : {
+              "agentKind" : "codex",
+              "codexContextWindow" : 0,
+              "effort" : "medium",
+              "hasWorktree" : true,
+              "isFastMode" : false,
+              "model" : "example-model",
+              "outputStyle" : "default",
+              "permissionMode" : "auto"
+            },
+            "models" : [
+
+            ],
+            "styles" : [
+
+            ]
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-archivePreview",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "archivePreview" : {
+          "_0" : {
+            "createdAt" : 0,
+            "hazards" : {
+              "isAgentRunning" : true,
+              "isDeletingBranch" : true,
+              "isPullRequestMerged" : false
+            },
+            "id" : "00000000-0000-4000-8000-000000000001",
+            "report" : {
+              "detachedCommits" : 0,
+              "hasUncommittedChanges" : true,
+              "isBranchMerged" : false,
+              "modifiedIgnoredFiles" : [
+                ".env"
+              ],
+              "unpushedCommits" : 2,
+              "untrackedFiles" : [
+                "notes.txt"
+              ]
+            },
+            "workspace" : {
+              "additions" : 0,
+              "baseBranch" : "main",
+              "branch" : "archived",
+              "changedFiles" : 0,
+              "createdAt" : 0,
+              "deletions" : 0,
+              "id" : "archived-example",
+              "lastActivityAt" : 0,
+              "name" : "Archived work",
+              "origin" : {
+                "user" : {
+
+                }
+              },
+              "path" : "/server/archived",
+              "pinned" : false,
+              "port" : 0,
+              "repoID" : "repo-example",
+              "setupLog" : "",
+              "setupState" : "pending",
+              "sortOrder" : 0,
+              "state" : "active",
+              "unread" : false
+            }
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-terminal",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "terminal" : {
+          "_0" : {
+            "executable" : "/usr/local/bin/bloom-server",
+            "session" : "terminal-example",
+            "socket" : "/tmp/bloom-terminal-example.sock"
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
     "name" : "reply-hello",
     "value" : {
       "id" : "00000000-0000-4000-8000-000000000001",
@@ -487,10 +858,13 @@
               "e30="
             ],
             "permissionDecisions" : {
-
+              "ask-example" : "allowed"
             },
             "queuedPrompts" : [
-
+              {
+                "id" : "delivery-example",
+                "text" : "Next task"
+              }
             ],
             "session" : {
               "agentKind" : "claudeCode",

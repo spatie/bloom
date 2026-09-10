@@ -15,6 +15,7 @@ public actor ServerRuntime {
     private let reviewCache = ServerReviewCache()
     private let repositories = ServerRepositoryResolver()
     private let terminals = ServerTerminalService()
+    private let workspaceAdmissions: ServerWorkspaceAdmissions
     private let terminalStreams: ServerTerminalStreams
     private let modelCatalogue = CodexModelCatalog.live()
     private var sessions: [SessionID: ServerSession] = [:]
@@ -31,6 +32,13 @@ public actor ServerRuntime {
     private var promptQueue: ServerPromptQueue?
 
     public init(store: Store, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery = ServerAgentAvailability.installed, makeRunner: RunnerFactory? = nil) {
+        self.init(store: store, gatewayGroupID: gatewayGroupID, installedAgents: installedAgents, makeRunner: makeRunner,
+                  workspaceAdmissions: ServerWorkspaceAdmissions())
+    }
+
+    init(store: Store, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery,
+         makeRunner: RunnerFactory? = nil, workspaceAdmissions: ServerWorkspaceAdmissions) {
+        self.workspaceAdmissions = workspaceAdmissions
         self.store = store
         self.installedAgents = installedAgents
         terminalStreams = ServerTerminalStreams(groupID: gatewayGroupID)
@@ -143,7 +151,18 @@ public actor ServerRuntime {
     }
 
     private func execute(_ request: ServerRequest) async -> ServerReply {
-        do { return ServerReply(id: request.id, result: try await execute(request.operation)) } catch { return ServerReply(id: request.id, result: .failure(error.localizedDescription)) }
+        do {
+            let permit: ServerWorkspaceAdmissions.Permit?
+            switch request.operation.workspaceMutation {
+            case .workspace(let id): permit = try workspaceAdmissions.admit(id)
+            case .session(let id):
+                guard let workspaceID = try await storedSession(id).workspaceID else { throw ServerFailure("This session has no workspace.") }
+                permit = try workspaceAdmissions.admit(workspaceID)
+            case nil: permit = nil
+            }
+            defer { permit?.release() }
+            return ServerReply(id: request.id, result: try await execute(request.operation))
+        } catch { return ServerReply(id: request.id, result: .failure(error.localizedDescription)) }
     }
 
     private func execute(_ operation: ServerOperation) async throws -> ServerResult {
@@ -383,29 +402,18 @@ public actor ServerRuntime {
     private func archiveWorkspace(_ id: WorkspaceID, confirmation: UUID, bridgeSafe: Bool = false) async throws -> ServerResult {
         guard changingWorkspaces.insert(id).inserted else { throw ServerFailure("This workspace is already being changed.") }
         defer { changingWorkspaces.remove(id) }
+        let transition = try workspaceAdmissions.beginTransition(id)
+        var remainsClosed = false
+        defer { transition.finish(closed: remainsClosed) }
         guard let workspace = try await store.workspace(id: id) else { throw ServerFailure("This workspace no longer exists.") }
-        if workspace.state == .archived { return .accepted }
+        if workspace.state == .archived { remainsClosed = true; return .accepted }
         guard let accepted = archivePreviews[confirmation], accepted.workspace.id == id,
               Date().timeIntervalSince(accepted.createdAt) < 600 else {
             return .archivePreview(try await prepareArchive(workspace, keepingBranch: bridgeSafe))
         }
-        let sessionIDs = Set(try await store.sessions(workspaceID: id).map(\.id))
-        // Finish commands already accepted before checking what the confirmation covers.
-        let pending = commandOperations.compactMap { key, operation -> Task<ServerReply, Never>? in
-            if case .workspace(let target, let action) = operation, target == id, action.mutates {
-                if case .archive = action { return nil }
-                if case .restore = action { return nil }
-                return commands[key]
-            }
-            switch operation {
-            case .terminalStream(let target, _): return target == id ? commands[key] : nil
-            case .send(let target, _), .setComposer(let target, _), .configure(let target, _, _, _),
-                 .closeSession(let target), .stop(let target), .answer(let target, _, _):
-                return sessionIDs.contains(target) ? commands[key] : nil
-            default: return nil
-            }
-        }
-        for task in pending { _ = await task.value }
+        // Both RPC and MCP mutations hold tickets, including work paused before its first
+        // Store write. Capture sessions only once those accepted operations have settled.
+        try await transition.drain()
         let fresh = try await prepareArchive(workspace, keepingBranch: bridgeSafe)
         guard fresh.report == accepted.report, fresh.hazards == accepted.hazards else { return .archivePreview(fresh) }
         let chats = try await store.sessions(workspaceID: id)
@@ -423,6 +431,7 @@ public actor ServerRuntime {
         guard let repo = try await store.repo(id: workspace.repoID) else { throw ServerFailure("This project's repository is unavailable.") }
         try await WorkspaceManager(store: store).archive(workspace: workspace, repo: repo,
             deleteBranch: accepted.hazards.isDeletingBranch, force: !bridgeSafe)
+        remainsClosed = true
         await uiBroker.close(workspaceID: id)
         await terminalStreams.close(workspaceID: id)
         try await terminals.close(workspaceID: id, store: store, cwd: repo.path)
@@ -434,11 +443,17 @@ public actor ServerRuntime {
         guard !changingWorkspaces.contains(id) else { throw ServerFailure("This workspace is already being changed.") }
         changingWorkspaces.insert(id)
         defer { changingWorkspaces.remove(id) }
+        let transition = try workspaceAdmissions.beginTransition(id)
+        var remainsClosed = false
+        defer { transition.finish(closed: remainsClosed) }
+        try await transition.drain()
         guard let workspace = try await store.workspace(id: id), let repo = try await store.repo(id: workspace.repoID) else {
             throw ServerFailure("This workspace's project is unavailable.")
         }
         if workspace.state == .active { return .accepted }
+        remainsClosed = true
         _ = try await WorkspaceManager(store: store).restore(workspace: workspace, repo: repo)
+        remainsClosed = false
         return .accepted
     }
 
@@ -533,6 +548,7 @@ public actor ServerRuntime {
     public func shutdown() async {
         if let shutdownTask { await shutdownTask.value; return }
         isClosed = true
+        workspaceAdmissions.stop()
         let task = Task { await self.finishShutdown() }
         shutdownTask = task
         await task.value
@@ -555,6 +571,7 @@ public actor ServerRuntime {
         }
         for command in runningCommands { _ = await command.value }
         for task in archiving { await task.value }
+        await workspaceAdmissions.waitUntilIdle()
         sessions.removeAll()
     }
 }
@@ -609,6 +626,8 @@ extension ServerRuntime {
 extension ServerRuntime {
     private func startCrewForBridge(_ order: CrewOrder, sessionID: SessionID, workspaceID: WorkspaceID) async -> CrewStartOutcome {
         do {
+            let permit = try workspaceAdmissions.admit(workspaceID)
+            defer { permit.release() }
             guard !isClosed, !closingSessions.contains(sessionID) else { throw Crew.StartRefusal.parentUnavailable }
             _ = try await workspace(workspaceID)
             let available = await installedAgents(store)
@@ -622,6 +641,8 @@ extension ServerRuntime {
 
     private func sayForBridge(_ name: String?, text: String, sessionID: SessionID, workspaceID: WorkspaceID) async -> CrewSayOutcome {
         do {
+            let permit = try workspaceAdmissions.admit(workspaceID)
+            defer { permit.release() }
             let caller = try await storedSession(sessionID)
             guard caller.workspaceID == workspaceID else { throw ServerFailure("The calling chat belongs to another workspace.") }
             _ = try await workspace(workspaceID)
@@ -647,6 +668,8 @@ extension ServerRuntime {
 
     private func stopCrewForBridge(_ name: String, sessionID: SessionID, workspaceID: WorkspaceID) async -> CrewStopOutcome {
         do {
+            let permit = try workspaceAdmissions.admit(workspaceID)
+            defer { permit.release() }
             let caller = try await storedSession(sessionID)
             guard caller.workspaceID == workspaceID else { throw ServerFailure("The calling chat belongs to another workspace.") }
             let members = try await store.crew(of: sessionID)
@@ -662,6 +685,8 @@ extension ServerRuntime {
         do {
             let current = try await workspace(order.workspace.id)
             if let sessionID = order.afterTurnOf {
+                let permit = try workspaceAdmissions.admit(current.id)
+                defer { permit.release() }
                 let caller = try await storedSession(sessionID)
                 guard caller.workspaceID == current.id else { throw ServerFailure("The calling chat belongs to another workspace.") }
                 try await store.setSetting("server.archive.after-turn.\(sessionID)", current.id.rawValue)
@@ -681,6 +706,8 @@ extension ServerRuntime {
 
     private func mergeForBridge(_ target: Workspace, pullRequest: PullRequest, method: GitHub.MergeMethod) async -> WorkspaceMergeHandoff {
         do {
+            let permit = try workspaceAdmissions.admit(target.id)
+            defer { permit.release() }
             let workspace = try await workspace(target.id)
             guard let repo = try await store.repo(id: workspace.repoID) else { throw ServerFailure("This workspace's project is unavailable.") }
             let existing = try await store.sessions(workspaceID: workspace.id)

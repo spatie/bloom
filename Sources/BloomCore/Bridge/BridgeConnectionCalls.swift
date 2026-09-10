@@ -10,17 +10,17 @@ actor BridgeConnectionCalls {
     private var closed = false
     private var tail: Task<Void, Never>?
 
-    func receive(_ line: String, dispatch: BridgeDispatch, connection: UnixSocketConnection) {
+    func receive(_ line: String, dispatch: BridgeDispatch, connection: UnixSocketConnection) async {
         guard !closed, let request = MCPRequest.decode(line) else { return }
         if request.method == "notifications/cancelled", let id = request.param("requestId") {
             running[id]?.cancel()
             return
         }
         guard let id = request.replyID else { return }
-        if let reply = finished[id] { connection.writeLine(reply); return }
+        if let reply = finished[id] { await connection.writeLineAsync(reply); return }
         guard running[id] == nil else { return }
         guard running.count < 32 else {
-            connection.writeLine(MCPResponse.failure(id: id, code: MCPErrorCode.invalidParams, message: "Too many bridge requests are pending.").line())
+            await connection.writeLineAsync(MCPResponse.failure(id: id, code: MCPErrorCode.invalidParams, message: "Too many bridge requests are pending.").line())
             return
         }
         let previous = tail
@@ -40,14 +40,14 @@ actor BridgeConnectionCalls {
         tail = task
     }
 
-    private func complete(_ id: JSONValue, response: MCPResponse?, connection: UnixSocketConnection) {
-        running[id] = nil
+    private func complete(_ id: JSONValue, response: MCPResponse?, connection: UnixSocketConnection) async {
+        defer { running[id] = nil }
         guard !closed, let reply = response?.line() else { return }
         finished[id] = reply; order.append(id); finishedBytes += reply.utf8.count
         while order.count > 128 || finishedBytes > 8 * 1_024 * 1_024 {
             if let removed = finished.removeValue(forKey: order.removeFirst()) { finishedBytes -= removed.utf8.count }
         }
-        connection.writeLine(reply)
+        await connection.writeLineAsync(reply)
     }
 
     func close() async {

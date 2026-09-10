@@ -9,6 +9,7 @@ import BloomClient
 @Observable
 final class ServerWindowModel {
     enum ConnectionMode { case remote, local, existingLocal }
+    let savedServers: ServerConnectionShelf
     @ObservationIgnored private var paneStoresByConnection: [String: PaneStores] = [:]
     @ObservationIgnored private let unconnectedPaneID = UUID().uuidString
     var paneStores: PaneStores {
@@ -56,6 +57,7 @@ final class ServerWindowModel {
         let name = String(label.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
         serverLabels[labelKey] = name.isEmpty ? nil : name
         preferences.set(serverLabels, forKey: "server.labels")
+        rememberConnection()
     }
     var catalogue: ServerCatalogue? {
         didSet {
@@ -71,8 +73,8 @@ final class ServerWindowModel {
                 selectedWorkspaceID = workspaceID
                 activeSessions[workspaceID] = id
             }
-            if let oldValue { drafts[oldValue.rawValue] = draft }
-            draft = selectedSessionID.flatMap { drafts[$0.rawValue] } ?? ""
+            if let oldValue { persistRemoteDraft(draft, sessionID: oldValue) }
+            draft = selectedSessionID.map { remoteDraft(sessionID: $0) } ?? ""
             messages = []
             runScripts = []
             questions = []
@@ -91,13 +93,17 @@ final class ServerWindowModel {
     var streamingText = ""
     var draft = "" {
         didSet {
-            if let selectedSessionID { drafts[selectedSessionID.rawValue] = draft }
-            preferences.set(drafts, forKey: "server.drafts")
+            guard oldValue != draft, let selectedSessionID else { return }
+            persistRemoteDraft(draft, sessionID: selectedSessionID)
         }
     }
-    private var drafts: [String: String] = [:]
+    @ObservationIgnored private let draftStore: ConversationDraftStore
     var shouldReconnect = true
-    var isEditingConnection = false
+    private var connectionEditors: Set<UUID> = []
+    var isEditingConnection: Bool { !connectionEditors.isEmpty }
+    func setConnectionEditing(_ editing: Bool, id: UUID) {
+        if editing { connectionEditors.insert(id) } else { connectionEditors.remove(id) }
+    }
     var isUploading = false
     var runScripts: [RunScript] = []
     private var terminalPanes: [String: [ServerTerminalPane]] = [:]
@@ -139,7 +145,7 @@ final class ServerWindowModel {
         if let existing = conversationModels[session.id] { return existing }
         let connection = RemoteSessionConnection(server: self, endpoint: endpoint, session: session, workspace: workspace)
         let model = TranscriptModel(session: session, workspace: workspace, app: app, remote: connection)
-        model.draft = drafts[session.id.rawValue] ?? ""
+        model.draft = remoteDraft(sessionID: session.id, endpoint: endpoint)
         conversationModels[session.id] = model
         return model
     }
@@ -176,10 +182,25 @@ final class ServerWindowModel {
         selectedSessionID = activeSession(in: id)
     }
 
-    func saveRemoteDraft(_ text: String, sessionID: SessionID) {
-        drafts[sessionID.rawValue] = text
-        preferences.set(drafts, forKey: "server.drafts")
-        if selectedSessionID == sessionID { draft = text }
+    private func remoteDraft(sessionID: SessionID, endpoint: ServerEndpoint? = nil) -> String {
+        guard let endpoint = endpoint ?? self.endpoint else { return "" }
+        do { return try draftStore.draft(scope: .init(connectionID: PaneStateNamespace.connectionID(endpoint)), sessionID: sessionID).text } catch {
+            self.error = "Saved conversation drafts could not be read: " + error.localizedDescription
+            return ""
+        }
+    }
+
+    private func persistRemoteDraft(_ text: String, sessionID: SessionID, endpoint: ServerEndpoint? = nil) {
+        guard let endpoint = endpoint ?? self.endpoint else { return }
+        do { try draftStore.save(text: text, scope: .init(connectionID: PaneStateNamespace.connectionID(endpoint)), sessionID: sessionID) } catch {
+            self.error = "This conversation draft could not be saved: " + error.localizedDescription
+        }
+    }
+
+    func saveRemoteDraft(_ text: String, sessionID: SessionID, endpoint: ServerEndpoint? = nil) {
+        guard let origin = endpoint ?? self.endpoint else { return }
+        persistRemoteDraft(text, sessionID: sessionID, endpoint: origin)
+        if self.endpoint == origin, selectedSessionID == sessionID, draft != text { draft = text }
     }
 
     func read(_ operation: ServerOperation) async throws -> ServerResult {
@@ -215,13 +236,14 @@ final class ServerWindowModel {
 
     init(preferences: UserDefaults = .standard, bundle: Bundle = .main) {
         self.preferences = preferences
+        draftStore = ConversationDraftStore(preferences: preferences, key: "server.scopedDrafts")
+        savedServers = ServerConnectionShelf(preferences: preferences)
         serverLabels = preferences.dictionary(forKey: "server.labels") as? [String: String] ?? [:]
         let seed = bundle.object(forInfoDictionaryKey: "BloomRemoteConnection") as? [String: String] ?? [:]
         let saved = preferences.dictionary(forKey: "server.connection") as? [String: String] ?? [:]
         let values = seed.merging(saved) { _, saved in saved }
         usesHTTPS = values["usesHTTPS"] == "true"
         httpsAddress = values["httpsAddress"] ?? ""
-        drafts = preferences.dictionary(forKey: "server.drafts") as? [String: String] ?? [:]
         host = values["host"] ?? ""
         executable = values["executable"] ?? ""
         identityFile = values["identityFile"] ?? ""
@@ -234,6 +256,16 @@ final class ServerWindowModel {
         agentModel = values["model"] ?? (agent == .codex ? "" : AppDefaults.fallbackModel)
         effort = values["effort"] ?? AppDefaults.fallbackEffort
         permissionMode = (values["permissionMode"].flatMap(PermissionMode.init(rawValue:)) ?? .plan).nearest(on: agent)
+        // Legacy entries have no per-entry origin. Attribute them only to the original saved
+        // connection, never a newly selected profile or a bundle seed.
+        if let original = ServerConnectionProfile(values: saved),
+           let legacy = preferences.dictionary(forKey: "server.drafts") as? [String: String] {
+            do {
+                try draftStore.importLegacy(legacy, scope: .init(connectionID: original.id))
+                preferences.removeObject(forKey: "server.drafts")
+            } catch { self.error = "Existing conversation drafts could not be migrated: " + error.localizedDescription }
+        }
+        rememberConnection()
     }
 
     var destinationLabel: String { connectionMode == .remote ? "Remote server" : "This Mac" }
@@ -250,6 +282,7 @@ final class ServerWindowModel {
     }
 
     private func saveConnection() {
+        rememberConnection()
         preferences.set([
             "usesHTTPS": usesHTTPS ? "true" : "false", "httpsAddress": httpsAddress,
             "host": host, "executable": executable, "directory": remoteDirectory, "identityFile": identityFile, "knownHostsFile": knownHostsFile,
@@ -478,12 +511,12 @@ final class ServerWindowModel {
 
     func connect() async {
         guard !isConnecting else { return }
+        isConnecting = true
+        defer { isConnecting = false }
         shouldReconnect = true
         saveConnection()
         await disconnect()
         let generation = connectionGeneration
-        isConnecting = true
-        defer { isConnecting = false }
         var stage = usesHTTPS ? "Connecting over HTTPS" : "Connecting over SSH"
         needsBackgroundApproval = false
         error = nil
@@ -630,7 +663,7 @@ final class ServerWindowModel {
     }
 
     func upload(_ sources: [AttachmentSource]) async {
-        guard let workspaceID = selectedWorkspace?.id, let client, !isUploading else { return }
+        guard let workspaceID = selectedWorkspace?.id, let client, let attachmentEndpoint = endpoint, !isUploading else { return }
         let sessionID = selectedSessionID
         isUploading = true
         defer { isUploading = false }
@@ -651,7 +684,10 @@ final class ServerWindowModel {
                     action: .uploadFile(name: source.filename, data: data))))
                 if case .text(let path) = reply.result {
                     let addition = " `" + path + "` "
-                    if selectedSessionID == sessionID { draft += addition } else if let sessionID { drafts[sessionID.rawValue, default: ""] += addition }
+                    if let sessionID {
+                        let current = remoteDraft(sessionID: sessionID, endpoint: attachmentEndpoint)
+                        saveRemoteDraft(current + addition, sessionID: sessionID, endpoint: attachmentEndpoint)
+                    }
                 }
             }
         } catch { self.error = error.localizedDescription }
@@ -757,9 +793,8 @@ final class ServerWindowModel {
             if selectedSessionID == id {
                 if draft == text { draft = "" }
                 isBusy = true
-            } else if drafts[id.rawValue] == text {
-                drafts[id.rawValue] = ""
-                preferences.set(drafts, forKey: "server.drafts")
+            } else if remoteDraft(sessionID: id) == text {
+                saveRemoteDraft("", sessionID: id)
             }
         }
     }

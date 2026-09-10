@@ -106,14 +106,20 @@ public enum BridgeShim {
         let input = FileHandle.standardInput
         let buffer = LineBuffer()
         input.readabilityHandler = { handle in
-            let data = handle.availableData
-            if data.isEmpty {
+            do {
+                guard let data = try ProcessPipeReader.available(from: handle) else { return }
+                if data.isEmpty {
+                    input.readabilityHandler = nil
+                    shutdownAsked.ask()
+                    connection.close()
+                    return
+                }
+                for line in buffer.take(data) { connection.writeLine(line) }
+            } catch {
                 input.readabilityHandler = nil
-                shutdownAsked.ask()
+                complain("Could not read bridge input: " + error.localizedDescription)
                 connection.close()
-                return
             }
-            for line in buffer.take(data) { connection.writeLine(line) }
         }
     }
 

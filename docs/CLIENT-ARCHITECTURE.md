@@ -2,6 +2,9 @@
 
 Status and direction, 10 September 2026. Shared review state, composer choices, typed creation, transcript projection, tool presentation, native terminals and leased agent UI actions are implemented on this branch. The current wire contract is documented in [SERVER-PROTOCOL.md](SERVER-PROTOCOL.md), with schemas and an executable Python client under `Protocol/`. Generated application DTOs, a new public envelope and full feature parity remain future work.
 
+See [the reliability review](CLIENT-SERVER-RELIABILITY.md) for the current ownership boundaries,
+concrete transport and lifecycle fixes, shared archive/draft/note logic, and remaining duplication.
+
 Keep one repository and one set of feature rules. Share reusable presentation between Apple apps, with native navigation, editing, tables, menus, browser and window behaviour. A web client should consume the same server capabilities through a generated TypeScript client; it needs its own web presentation.
 
 Apple explicitly supports local packages for modular code in one repository. Our existing packages are a good foundation; there is no reason to introduce separate repositories for every app or feature. [Apple's local-package guidance](https://developer.apple.com/documentation/xcode/organizing-your-code-with-local-packages)
