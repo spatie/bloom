@@ -224,10 +224,12 @@ struct ServerSetupView: View {
             Divider()
             VStack(alignment: .leading, spacing: Metrics.spacing) {
                 Toggle("Add browser testing tools", isOn: $model.installsBrowserTools).disabled(model.hasInstalledServer)
-                Text("agent-browser, sandboxed Chrome, browser libraries and fonts. May add a Chrome-specific AppArmor rule. Docker projects need their own browser setup.")
+                Text("Lets agents test websites with sandboxed Chrome. Website previews work without it.")
                     .font(Typo.caption).foregroundStyle(.secondary)
-                Text("Optional. You can preview websites in Bloom without these tools.")
-                    .font(Typo.caption).foregroundStyle(.secondary)
+                DisclosureGroup("Browser tool details") {
+                    Text("Installs agent-browser, Chrome, browser libraries and fonts. May add a Chrome-specific AppArmor rule. Docker projects need their own browser setup.")
+                        .font(Typo.caption).foregroundStyle(.secondary)
+                }
             }
             if model.hasInstalledServer {
                 Label("Already installed. Continue to Accounts without reinstalling.", systemImage: "checkmark.circle.fill")
@@ -238,7 +240,7 @@ struct ServerSetupView: View {
 
     @ViewBuilder private var primaryButton: some View {
         if model.failure != nil && model.phase != .checking && model.phase != .address && model.phase != .trust {
-            Button(model.phase == .installing ? "Review and Retry" : "Try Again") { Task { await model.retry() } }
+            Button(model.phase == .installing ? "Check Again" : "Try Again") { Task { await model.retry() } }
                 .keyboardShortcut(.defaultAction).disabled(model.isBusy)
         } else {
             switch model.phase {

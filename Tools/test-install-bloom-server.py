@@ -376,6 +376,72 @@ class InstallerTests(unittest.TestCase):
         blocker = next(item for item in check["blockers"] if item["code"] == "untrusted_installation")
         self.assertEqual(blocker["recovery"], "Restore its root ownership.")
 
+    def activity_probe_fixture(self):
+        args = installer.parser().parse_args([
+            "--install-root", str(self.root / "install"), "--data-dir", str(self.root / "data"),
+            "--service-home", str(self.root / "home"), "--systemd-dir", str(self.root / "systemd"),
+            "--service-name", "bloom-custom",
+        ])
+        for name, value in [("marker", {"phase": "installed"}), ("check_ownership", None),
+                            ("existing_account", mock.Mock()), ("active_work", False),
+                            ("service_running", False), ("daemon_locked", False), ("command", None)]:
+            patch = mock.patch.object(installer, name, return_value=value)
+            patch.start()
+            self.addCleanup(patch.stop)
+        for patch in [mock.patch.object(installer.os, "geteuid", return_value=0),
+                      mock.patch.object(installer, "account_operation", side_effect=lambda account, operation: operation())]:
+            patch.start()
+            self.addCleanup(patch.stop)
+        return args
+
+    def test_probe_blocks_running_service_with_exact_stop_instructions(self):
+        args = self.activity_probe_fixture()
+        installer.service_running.return_value = True
+        check = installer.probe(args)
+        blocker = next(item for item in check["blockers"] if item["code"] == "server_running")
+        self.assertFalse(check["ok"])
+        self.assertIn("sudo systemctl stop bloom-custom.service", blocker["recovery"])
+        self.assertIn("systemctl is-active bloom-custom.service", blocker["recovery"])
+        self.assertIn("Check Again", blocker["recovery"])
+        installer.command.assert_not_called()
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_probe_detects_manually_started_daemon(self):
+        args = self.activity_probe_fixture()
+        installer.daemon_locked.return_value = True
+        check = installer.probe(args)
+        blocker = next(item for item in check["blockers"] if item["code"] == "server_running")
+        self.assertIn("terminal or process manager", blocker["recovery"])
+        installer.command.assert_not_called()
+
+    def test_probe_blocks_active_work_before_offering_to_stop_service(self):
+        args = self.activity_probe_fixture()
+        installer.active_work.return_value = True
+        check = installer.probe(args)
+        blocker = next(item for item in check["blockers"] if item["code"] == "server_busy")
+        self.assertIn("Finish that work", blocker["recovery"])
+        self.assertNotIn("systemctl stop", blocker["recovery"])
+        installer.service_running.assert_not_called()
+
+    def test_probe_allows_idle_stopped_installation(self):
+        args = self.activity_probe_fixture()
+        check = installer.probe(args)
+        self.assertFalse(any(item["code"] in ("server_busy", "server_running") for item in check["blockers"]))
+        installer.daemon_locked.assert_called_once_with(args)
+
+    def test_install_preserves_preflight_recovery_before_any_mutation(self):
+        args = self.installation_fixture()
+        installer.probe.return_value = {"ok": False, "blockers": [{
+            "code": "server_running", "message": "Server is running.",
+            "recovery": "Run sudo systemctl stop bloom-custom.service once work is idle.",
+        }]}
+        with self.assertRaises(installer.InstallError) as caught:
+            installer.install(args)
+        self.assertEqual(caught.exception.code, "server_running")
+        self.assertIn("bloom-custom.service", caught.exception.recovery)
+        installer.command.assert_not_called()
+        installer.install_dependencies.assert_not_called()
+
     def installation_fixture(self):
         package, checksum = self.package()
         key = self.root / "client.pub"

@@ -249,7 +249,7 @@ final class ServerSetupModel {
 
     func retry() async {
         switch retryStep {
-        case .installing: phase = .readyToInstall; failure = nil
+        case .installing: await inspect()
         case .accounts: await refreshAccounts()
         case .connecting: await refreshAccounts(); if canConnect { await connect() }
         default: await inspect()

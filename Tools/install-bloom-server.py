@@ -402,6 +402,19 @@ def daemon_locked(args):
             return True
 
 
+def check_existing_activity(args, account):
+    if account_operation(account, lambda: active_work(args.data_dir)):
+        fail("server_busy", "Agents, queued messages or workspace setup still need this server.",
+             "Finish that work in Bloom, then click Check Again. Stop the service only after all work is idle.")
+    if service_running(args) or account_operation(account, lambda: daemon_locked(args)):
+        service = args.service_name + ".service"
+        fail("server_running", "Bloom Server is running. Stop it before updating.",
+             "Wait until agents and workspace setup have finished. In an SSH terminal on the server, run "
+             "`sudo systemctl stop " + service + "`, then `systemctl is-active " + service + "` to confirm it is inactive. "
+             "If Bloom was started manually, stop it in the terminal or process manager that started it. "
+             "Click Check Again in Bloom. To use the current server without updating, choose Connect to Existing Server.")
+
+
 def probe(args):
     blockers, warnings = [], []
     release = {}
@@ -431,8 +444,8 @@ def probe(args):
         if privilege == "root":
             check_ownership(args, existing)
         account = existing_account(args, existing) if existing and privilege == "root" else None
-        if account is not None and account_operation(account, lambda: active_work(args.data_dir)):
-            warnings.append({"code": "server_busy", "message": "Existing work must finish before updating this server."})
+        if account is not None:
+            check_existing_activity(args, account)
     except InstallError as error:
         blockers.append({"code": error.code, "message": error.message, "recovery": error.recovery})
     target = args.install_root
@@ -736,15 +749,12 @@ def install(args):
     result = probe(args)
     emit("check", **result)
     if not result["ok"]:
-        fail("preflight_failed", "This server is not ready for installation.", "Resolve the reported checks and retry.")
+        blocker = result["blockers"][0]
+        fail(blocker["code"], blocker["message"], blocker.get("recovery", "Resolve the reported checks and retry."))
     existing = marker(args)
     account = existing_account(args, existing) if existing else None
     if account is not None:
-        if account_operation(account, lambda: active_work(args.data_dir)):
-            fail("server_busy", "Agents, queued messages or workspace setup still need this server.", "Finish or stop that work before updating.")
-        if service_running(args) or account_operation(account, lambda: daemon_locked(args)):
-            fail("server_running", "The existing server must be stopped before this update.",
-                 "Wait for work to finish, stop the Bloom service, and retry. Running sessions are never interrupted automatically.")
+        check_existing_activity(args, account)
     protected_system_path(pathlib.Path("/var/tmp"), allow_sticky=True)
     with tempfile.TemporaryDirectory(prefix="bloom-server-install-", dir="/var/tmp") as temporary:
         staging = pathlib.Path(temporary)

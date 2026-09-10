@@ -7,35 +7,12 @@ struct ServerSetupActivityView: View {
     let activity: ServerSetupActivity
     let failure: ServerSetupFailure?
     @State private var copiedOutput = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
-
-    private var completedSteps: Int { ServerSetupActivity.Stage.allCases.filter { activity.status(of: $0) == .complete }.count }
-    private var totalSteps: Int { ServerSetupActivity.Stage.allCases.filter { activity.status(of: $0) != .skipped }.count }
-    private var isRunning: Bool { ServerSetupActivity.Stage.allCases.contains { activity.status(of: $0) == .running } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
             if let failure { ServerSetupFailureView(failure: failure) }
             HStack(alignment: .top, spacing: Metrics.gutter * 2) {
                 VStack(alignment: .leading, spacing: Metrics.gutter) {
-                    VStack(alignment: .leading, spacing: Metrics.spacing) {
-                        Image(systemName: failure == nil ? "server.rack" : "exclamationmark.triangle")
-                            .font(.system(size: 30, weight: .light))
-                            .foregroundStyle(failure == nil ? Palette.controlAccent : Palette.warning)
-                            .symbolEffect(.variableColor.iterative, isActive: isRunning && !reduceMotion && scenePhase == .active)
-                            .contentTransition(.symbolEffect(.replace))
-                            .symbolEffectsRemoved(reduceMotion)
-                            .accessibilityHidden(true)
-                        if activity.status(of: .transfer) != .pending {
-                            Text("\(completedSteps) of \(totalSteps) steps complete").font(Typo.captionEmphasis)
-                            ProgressView(value: Double(completedSteps), total: Double(max(1, totalSteps)))
-                                .tint(Palette.controlAccent)
-                                .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: completedSteps)
-                                .accessibilityLabel("Completed installation steps")
-                        }
-                    }
-                    .padding(.bottom, Metrics.spacing)
                     ForEach(ServerSetupActivity.Stage.allCases) { stage in
                         HStack(alignment: .top, spacing: Metrics.spacing) {
                             statusIcon(activity.status(of: stage)).frame(width: 16)

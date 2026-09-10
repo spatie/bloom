@@ -8,25 +8,23 @@ struct ServerSetupIntroduction: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Metrics.gutter) {
-                BloomServerIllustration(accent: Palette.controlAccent)
+                BloomServerIllustration(accent: Brand.shallow)
                     .environment(\.colorScheme, .dark)
                     .background { BrandWater() }
                     .background(Brand.depth)
                     .clipShape(RoundedRectangle(cornerRadius: Metrics.corner * 2))
                 HStack(alignment: .top, spacing: Metrics.gutter * 1.5) {
                     benefit("Keep agents working", symbol: "play.circle",
-                            detail: "Close your laptop. Your sessions keep running on the server.")
+                            detail: "Agents keep running when you close your laptop.")
                     benefit("Pick up anywhere", symbol: "laptopcomputer.and.iphone",
-                            detail: "The same projects and chats on your Mac, iPhone or iPad.")
+                            detail: "Your projects on Mac, iPhone and iPad.")
                     benefit("Preview your work", symbol: "globe",
-                            detail: "Open your app beside the chat through a private connection.")
+                            detail: "Open your app beside the chat.")
                 }
                 Divider()
                 VStack(alignment: .leading, spacing: Metrics.spacing) {
                     Text("Bring an Ubuntu server").font(Typo.labelEmphasis)
-                    Text("Use your preferred hosting provider. You’ll need administrator access over SSH.")
-                        .font(Typo.caption).foregroundStyle(Palette.textSecondary)
-                    Text("Bloom installs its server, Git, GitHub CLI, tmux, Node.js and npm, with automatic startup. Browser testing tools are optional. You’ll review and confirm the installation first.")
+                    Text("Choose any provider. You’ll need administrator access over SSH.")
                         .font(Typo.caption).foregroundStyle(Palette.textSecondary)
                 }
                 .fixedSize(horizontal: false, vertical: true)

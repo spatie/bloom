@@ -75,7 +75,7 @@ public struct ServerSetupFailure: Error, LocalizedError, Sendable, Equatable {
         case .serverRunning:
             title = "Stop the server before updating"
             message = "Bloom Server is still running. The installer will not stop it automatically."
-            recovery = "Wait until sessions and workspace setup are idle, stop Bloom Server on the server, then retry."
+            recovery = "Wait until sessions and workspace setup are idle. In an SSH terminal on the server, run `sudo systemctl stop bloom-server.service` to stop Bloom Server, then `systemctl is-active bloom-server.service` to confirm it is inactive. If started manually, stop it in its terminal or process manager. Check the server again in Bloom."
         case .diskSpace:
             title = "More disk space is needed"
             message = "The server does not have enough free disk space for installation."

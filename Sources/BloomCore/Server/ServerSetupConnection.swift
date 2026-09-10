@@ -89,7 +89,9 @@ public struct ServerSetupConnection: Sendable {
     }
 
     public func inspect(script: String) async throws -> ServerInstallCheck {
-        let result = try await Shell.run("/usr/bin/ssh", arguments(command: "python3 - --check"), stdin: script, timeout: .seconds(35))
+        // Match installation privileges so preflight can inspect the private server account too.
+        let command = "if [ \"$(id -u)\" = 0 ]; then python3 - --check; elif sudo -n true; then sudo -n python3 - --check; else python3 - --check; fi"
+        let result = try await Shell.run("/usr/bin/ssh", arguments(command: command), stdin: script, timeout: .seconds(35))
         try Task.checkCancellation()
         if let line = result.stdout.split(separator: "\n").last,
            var check = try? JSONDecoder().decode(ServerInstallCheck.self, from: Data(line.utf8)) {
@@ -151,6 +153,12 @@ public struct ServerSetupConnection: Sendable {
 
     public func install(script: String, archive: URL, clientPublicKey: URL,
                         progress: @escaping @Sendable (ServerInstallEvent) async -> Void) async throws -> ServerInstallEvent {
+        // The server may have started work since the review screen was opened. Check again
+        // before creating remote files or uploading the package; the installer also rechecks.
+        let check = try await inspect(script: script)
+        if let blocker = check.blockers.first {
+            throw ServerSetupFailure.installation(code: blocker.code, message: blocker.message, recovery: blocker.recoverySuggestion)
+        }
         let staging = "/tmp/bloom-setup-\(UUID().uuidString.lowercased())"
         try Task.checkCancellation()
         await progress(ServerInstallEvent(event: "progress", step: "staging", message: "Preparing a private upload directory on the server."))
