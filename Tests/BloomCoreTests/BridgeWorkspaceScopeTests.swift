@@ -61,10 +61,12 @@ struct BridgeWorkspaceScopeTests {
     func theGateIsOnAllOfThem() {
         let handlers: [any BridgeToolHandling] = [
             PaneOpenTool { _, _ in .opened("") },
-            PaneSplitTool { _, _, _ in .opened("") },
+            PaneSplitTool { _, _, _, _ in .opened("") },
             PaneCloseTool { _, _ in .opened("") },
             PaneRenameTool { _, _, _ in .opened("") },
             PaneListTool { _ in nil },
+            ChatListTool(),
+            ChatReadTool(),
             WorkspaceTabsTool { _ in nil },
             WorkspaceTabSelectTool { _, _ in .refused("") },
             MediaShowTool { _, _ in .refused("") },

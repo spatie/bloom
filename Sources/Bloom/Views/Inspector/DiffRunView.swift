@@ -46,6 +46,7 @@ struct DiffRunView: View, Equatable {
     /// Total width of the run, including gutters. Fixed by the file's widest line so the whole
     /// diff scrolls horizontally as one sheet.
     var width: CGFloat
+    var wrappedHeights: [CGFloat]?
     /// Opens the review comment editor at a line. Nil, the default, draws no `+` at all.
     var onComment: ((ReviewSpot) -> Void)?
     /// A drag from one row's `+`, reporting where it began and which line it has reached. Where
@@ -89,32 +90,71 @@ struct DiffRunView: View, Equatable {
             && lhs.language == rhs.language
             && lhs.numbers == rhs.numbers
             && lhs.width == rhs.width
+            && lhs.wrappedHeights == rhs.wrappedHeights
     }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            VStack(spacing: 0) {
-                ForEach(rows) { row in
-                    chrome(row)
+            if let wrappedHeights {
+                WrappedDiffChrome(
+                    lines: lines, heights: wrappedHeights, numbers: numbers,
+                    onComment: { index in
+                        if let spot = spot(of: lines[index]) { onComment?(spot) }
+                    },
+                    onEdit: { index in
+                        if let line = editableLine(of: lines[index]) { onEdit?(line) }
+                    },
+                    commentable: lines.map { spot(of: $0) != nil },
+                    editable: lines.map { editableLine(of: $0) != nil }
+                )
+                .overlay(alignment: .topLeading) {
+                    if let hovered, lines.indices.contains(hovered) {
+                        commentButton(Row(id: hovered, entry: lines[hovered], isHovered: true))
+                            .frame(height: CodeMetrics.rowHeight)
+                            .offset(y: wrappedHeights.prefix(hovered).reduce(0, +))
+                    }
+                }
+            } else {
+                LazyVStack(spacing: 0) {
+                    ForEach(rows) { row in chrome(row) }
                 }
             }
-            HStack(spacing: 0) {
-                CodeRunText(lines: runLines, language: language)
-                    .padding(.leading, columnsWidth)
-                    // The sentence a reader hears is the row's, assembled by `DiffGutter.speech`
-                    // and already carrying this line's text. Left visible, VoiceOver read the
-                    // whole run a second time as one undifferentiated block.
-                    .accessibilityHidden(true)
-                Spacer(minLength: 0)
+            if let wrappedHeights {
+                WrappedCodeText(
+                    lines: runLines, language: language,
+                    width: wrappedCodeWidth, heights: wrappedHeights,
+                    onComment: { index in
+                        if let spot = spot(of: lines[index]) { onComment?(spot) }
+                    },
+                    onEdit: { index in
+                        if let line = editableLine(of: lines[index]) { onEdit?(line) }
+                    },
+                    commentable: lines.map { spot(of: $0) != nil },
+                    editable: lines.map { editableLine(of: $0) != nil }
+                )
+                .frame(width: wrappedCodeWidth, height: wrappedHeights.reduce(0, +))
+                .padding(.leading, columnsWidth)
+                .accessibilityHidden(true)
+            } else {
+                HStack(spacing: 0) {
+                    CodeRunText(lines: runLines, language: language)
+                        .padding(.leading, columnsWidth)
+                        // The sentence a reader hears is the row's, assembled by `DiffGutter.speech`
+                        // and already carrying this line's text. Left visible, VoiceOver read the
+                        // whole run a second time as one undifferentiated block.
+                        .accessibilityHidden(true)
+                    Spacer(minLength: 0)
+                }
             }
         }
-        .frame(width: width, height: CodeMetrics.rowHeight * CGFloat(lines.count), alignment: .leading)
+        .frame(width: width, height: wrappedHeights?.reduce(0, +) ?? CodeMetrics.rowHeight * CGFloat(lines.count), alignment: .topLeading)
         // For `DiffLineView`'s reason: most of a diff row draws nothing, and without a shape the
         // pointer finds the run only along the band of pixels the glyphs cover.
         .contentShape(Rectangle())
         // Over everything, including the code, and hit testable by nothing. See `DiffRowHover`.
         .overlay {
-            DiffRowHover(rowHeight: CodeMetrics.rowHeight, rowCount: lines.count) { hovered = $0 }
+            DiffRowHover(rowHeight: CodeMetrics.rowHeight, rowCount: lines.count,
+                         rowHeights: wrappedHeights) { hovered = $0 }
         }
     }
 
@@ -150,7 +190,8 @@ struct DiffRunView: View, Equatable {
             DiffMarker(line: entry.line)
             Spacer(minLength: 0)
         }
-        .frame(width: width, height: CodeMetrics.rowHeight, alignment: .leading)
+        .frame(height: CodeMetrics.rowHeight)
+        .frame(width: width, height: wrappedHeights?[row.id] ?? CodeMetrics.rowHeight, alignment: .topLeading)
         // Collapsed here, above the overlay and never below it, for the reason spelled out on
         // `DiffLineView` and on `DiffCommentButton`: `children: .ignore` swallows every descendant
         // of what it is applied to, and a `+` inside the collapsed element is one no keyboard and
@@ -158,7 +199,7 @@ struct DiffRunView: View, Equatable {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(DiffGutter.speech(for: entry.line))
         .accessibilityHidden(entry.line == nil)
-        .overlay(alignment: .leading) { commentButton(row) }
+        .overlay(alignment: .topLeading) { commentButton(row).frame(height: CodeMetrics.rowHeight) }
         // The same action the `+` carries, on the right click as well, and for the reason written
         // out on `DiffLineView`.
         //
@@ -222,6 +263,7 @@ struct DiffRunView: View, Equatable {
                 from: index,
                 translation: travel,
                 rowHeight: CodeMetrics.rowHeight,
+                rowHeights: wrappedHeights,
                 spots: dragSpots,
                 side: spot.side
             ) else { return }
@@ -244,6 +286,10 @@ struct DiffRunView: View, Equatable {
     /// Where the code starts: both gutters in the unified layout, one in either half of the split,
     /// plus the marker column. The one number the code layer needs, and it is arithmetic rather
     /// than a measurement for the same reason the sheet's width is.
+    private var wrappedCodeWidth: CGFloat {
+        floor(max(1, width - columnsWidth - CodeMetrics.gutterPadding))
+    }
+
     private var columnsWidth: CGFloat {
         DiffGutter.width(for: numbers) + CodeMetrics.markerWidth
     }

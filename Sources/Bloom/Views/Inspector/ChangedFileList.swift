@@ -76,6 +76,7 @@ struct ChangedFileList: View {
             // control that cannot do anything, offered at the one moment it is useless.
             if !model.changedFiles.isEmpty {
                 InspectorFilterField(query: $query, onEscape: escape, onReturn: enterList)
+                    .background(Palette.surfaceSunken)
                 Hairline()
             }
 
@@ -107,7 +108,7 @@ struct ChangedFileList: View {
                 // key. Only while this list holds the keyboard: a cursor that moved because the
                 // agent rewrote the file list must not drag the reader's scroll position with it.
                 .onChange(of: cursor) { _, path in
-                    guard hasKeyboard, let path else { return }
+                    guard hasKeyboard || followsReviewScroll, let path else { return }
                     proxy.scrollTo(path)
                 }
             }
@@ -132,7 +133,16 @@ struct ChangedFileList: View {
         // The keyboard follows a selection taken anywhere else: Command+Option+J, the review
         // pane's own walk, a file chip in the transcript.
         .onChange(of: model.selectedFilePath, initial: true) { _, path in
-            if let path, path != cursor { cursor = path }
+            if let path, path != cursor {
+                if followsReviewScroll {
+                    let parents = closedFolders.filter { path.hasPrefix($0 + "/") }
+                    if !parents.isEmpty {
+                        if filtered == nil { collapsed.subtract(parents) } else { filterCollapsed.subtract(parents) }
+                        rebuild()
+                    }
+                }
+                cursor = path
+            }
         }
         .onChange(of: cursor) { _, _ in refreshPreview() }
         .onChange(of: hasKeyboard) { _, focused in
@@ -169,6 +179,10 @@ struct ChangedFileList: View {
         } message: { problem in
             Text(problem.message)
         }
+    }
+
+    private var followsReviewScroll: Bool {
+        CenterTabStore.shared.review(for: model.workspace.id)?.showsAllFiles == true
     }
 
     private var list: some View {

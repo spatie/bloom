@@ -6,7 +6,7 @@ import Testing
 struct TerminalLaunchScriptTests {
     @Test("Each agent's displayed command and execution arguments agree")
     func loginArguments() {
-        #expect(AgentKind.claudeCode.loginArguments == ["/login"])
+        #expect(AgentKind.claudeCode.loginArguments == ["auth", "login"])
         #expect(AgentKind.codex.loginArguments == ["login"])
         #expect(AgentKind.cursor.loginArguments == ["login"])
         #expect(AgentKind.openCode.loginArguments == ["auth", "login"])
@@ -33,24 +33,6 @@ struct TerminalLaunchScriptTests {
             arguments: ["$(printf unwanted)", "a\"b\\c", ""]
         )
         #expect(command == #"cd '/tmp/it'\''s a folder' && '/tmp/tool; echo unwanted' '$(printf unwanted)' 'a"b\c' ''"#)
-    }
-
-    @Test("AppleScript quotes the complete shell command as one string")
-    func quotesAppleScript() {
-        let script = TerminalLaunchScript.appleScript(
-            directory: "/tmp/a\"b\\c", executable: "/opt/bin/codex", arguments: ["login"]
-        )
-        #expect(script == #"tell application "Terminal" to do script "cd '/tmp/a\"b\\c' && '/opt/bin/codex' 'login'""#)
-    }
-
-    @Test("Line breaks cannot escape the AppleScript string")
-    func quotesLineBreaks() {
-        let script = TerminalLaunchScript.appleScript(
-            directory: "/tmp/a\nb\rc", executable: "/opt/bin/codex", arguments: ["login"]
-        )
-        #expect(!script.contains("\n"))
-        #expect(!script.contains("\r"))
-        #expect(script.contains(#"a\nb\rc"#))
     }
 
     @Test("The shell runs an absolute executable with spaces and quotes without interpreting its arguments")

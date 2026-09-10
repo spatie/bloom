@@ -77,9 +77,8 @@ final class TranscriptModel {
     /// unread mark, a notification that names a place. Each of them now says nothing rather than
     /// saying it about a workspace that was invented to keep the type non-optional.
     let workspace: Workspace?
-    /// Where this chat's agent runs. The worktree, when there is one, and Ask Bloom's own empty
-    /// directory when there is not. See `AskConversation.directory`, which argues at length why
-    /// that directory is empty rather than the owner's home.
+    /// Where this chat's agent runs: its worktree, or the directory retained by its Ask tab.
+    /// New Ask conversations use the folder chosen in Settings, with Bloom's own folder as fallback.
     let cwd: String
     private unowned let app: AppModel
 
@@ -288,6 +287,13 @@ final class TranscriptModel {
     /// meant to carry on writing. A counter for `liveEndRequests`'s reason: two requests in a row
     /// are two requests, and the composer has nothing to clear afterwards.
     private(set) var composerFocusRequests = 0
+
+    func appendSourceContext(_ context: String) {
+        draft += (draft.isEmpty ? "" : "\n\n") + "Ask about this code:\n\n" + context + "\n\n"
+        focusComposer()
+    }
+
+    func focusComposer() { composerFocusRequests += 1 }
 
     private var runner: (any SessionRunner)?
 
@@ -599,12 +605,14 @@ final class TranscriptModel {
     /// screen from the frame the key went down, in the state `Delivery.goesImmediately` says it is
     /// in: as a sent bubble if nothing is holding the queue, as a pending one if something is. See
     /// `sending`.
-    func submit(_ text: String) async {
+    func submit(_ text: String, clearingDraft sourceDraft: String? = nil) async {
         guard !isWorkspaceArchiving else { return }
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, let store else { return }
 
-        let submittedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines) == body ? draft : nil
+        // Review payloads expand compact chips into comments. Clear the source draft, while
+        // retaining anything the reader typed after that payload began being prepared.
+        let submittedDraft = SubmittedDraft.matching(current: draft, message: body, source: sourceDraft)
         if submittedDraft != nil { draft = "" }
 
         // Built here rather than inside the enqueue, so the row that goes in the table and the
@@ -1268,13 +1276,19 @@ final class TranscriptModel {
             runner = nil
             runnerPreferences = nil
         }
+        // Registration mints a new token and revokes the previous one. Reusing a runner must
+        // keep its token too, or the next bridge call closes its still-connected transport.
+        if let runner {
+            if pumpTask == nil { startPump(on: runner) }
+            return runner
+        }
         // Two registrations, because there are two identities. A chat in a worktree gets a token
         // minted for that workspace and the role its origin says; Ask Bloom gets the owner's own,
         // which is the same door the owner's terminal comes in through and the reason every owner
         // tool works here without one of them being written twice.
         let bridge = workspace.map { app.bridge?.register(session: session, workspace: $0) }
             ?? app.bridge?.register(askSession: session)
-        let runner = self.runner ?? Self.makeRunner(
+        let runner = Self.makeRunner(
             session: session,
             workspacePath: cwd,
             store: store,
@@ -1436,6 +1450,14 @@ final class TranscriptModel {
             await reportToOrchestrator(
                 CrewMessage.failed(name: session.title, reason: failure.message)
             )
+            // An agent that died is an agent whose turn has ended, so a workspace it had asked to
+            // archive is due now. `notifyFinished` is not on this path and never was: it is about
+            // a result, and there is none. The recheck decides as it does everywhere else.
+            if let workspaceNow {
+                await app.archiveIfRequested(
+                    workspaceNow, endedIn: session.id, wasStopped: wasStoppedByHand
+                )
+            }
 
         case .result(let result):
             // A turn that recovered leaves its sentence on the row that closes it; one that failed
@@ -1827,6 +1849,25 @@ final class TranscriptModel {
 
         NotificationService.shared.turnFinished(
             workspace: workspaceNow, result: result, wasCancelled: session.state == .cancelled
+        )
+
+        // Last, and after the banner, because this is the one thing here that can take the
+        // workspace away: a notification about a turn that finished in a workspace is worth
+        // sending whether or not the worktree survives the next line.
+        //
+        // Before the drain rather than after it, which is the ordering that matters. `drain` runs
+        // once this returns and is guarded by `isWorkspaceArchiving`, so an archive that starts
+        // here cannot have a queued message sent into it; and a workspace that still has one
+        // queued is refused with the true reason rather than with "an agent is running" a
+        // fraction of a second later.
+        //
+        // `wasStoppedByHand` is read here rather than a few lines down for the reason the drain
+        // reads it: the owner stepped in, and a worktree removing itself out from under somebody
+        // who has just pressed Stop is the opposite of what Stop is for. It is still true at this
+        // line for a Steer, which is a stop made in order to say one particular thing, and that is
+        // right too. See `AppModel.archiveIfRequested`.
+        await app.archiveIfRequested(
+            workspaceNow, endedIn: session.id, wasStopped: wasStoppedByHand
         )
     }
 }

@@ -72,6 +72,10 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
     /// poll drops any selection git no longer reports, which would throw the reader out of a file
     /// they opened from the worktree tree a few seconds after they opened it.
     var path: String = ""
+    /// Shared reviews default to a continuous review; an explicit saved choice is retained.
+    var showsAllFiles: Bool
+    /// A repeated click on the same file still asks the continuous review to scroll back to it.
+    var reviewNavigationRevision: Int = 0
 
     /// The glyph that tells the kinds apart in the strip. Chats carry one too now, and the whole
     /// vocabulary is `PaneGlyph`.
@@ -114,6 +118,8 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
         // False for every tab written before this existed, which is what all of them are: the one
         // shared review. See `isPinnedToPath`.
         isPinnedToPath = try container.decodeIfPresent(Bool.self, forKey: .isPinnedToPath) ?? false
+        showsAllFiles = try container.decodeIfPresent(Bool.self, forKey: .showsAllFiles)
+            ?? (kind == .review && !isPinnedToPath)
     }
 
     init(
@@ -122,6 +128,7 @@ struct CenterTab: Identifiable, Hashable, Codable, Sendable {
         directory: String = "", isPinnedToPath: Bool = false
     ) {
         self.isPinnedToPath = isPinnedToPath
+        self.showsAllFiles = kind == .review && !isPinnedToPath
         self.id = id
         self.workspaceID = workspaceID
         self.kind = kind

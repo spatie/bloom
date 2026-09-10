@@ -110,11 +110,19 @@ struct SearchPanelWindowOverlay: View {
     /// dim now starts at the very top of the window and the card must not travel up with it: it
     /// is measured from the top of the CONTENT, which is what `SearchPanelLayout.topInset` means.
     private func card(inWindow windowWidth: CGFloat) -> some View {
-        SearchPanelView(
-            app: app,
-            panel: panel,
-            width: SearchPanelLayout.width(inWindow: windowWidth)
-        )
+        Group {
+            if let files = panel.files {
+                FileSearchView(app: app, panel: panel, model: files)
+                    .id(files.workspace.id)
+                    .frame(width: SearchPanelLayout.width(inWindow: windowWidth))
+            } else {
+                SearchPanelView(
+                    app: app,
+                    panel: panel,
+                    width: SearchPanelLayout.width(inWindow: windowWidth)
+                )
+            }
+        }
         .padding(.top, geometry.titleBarHeight + SearchPanelLayout.topInset)
         .transition(.opacity)
     }

@@ -33,6 +33,16 @@ enum DiffRow: Identifiable {
     /// its identity through a rebuild, or the text in it is thrown away by a poll.
     case lineEditor(DiffEditRegion)
 
+    var sourceLines: [DiffLine] {
+        switch self {
+        case let .line(line): [line]
+        case let .lineRun(lines): lines
+        case let .pair(row): [row.left, row.right].compactMap { $0 }
+        case let .pairRun(rows): rows.flatMap { [$0.left, $0.right].compactMap { $0 } }
+        default: []
+        }
+    }
+
     var id: String {
         switch self {
         case let .header(hunk, _): "header-\(hunk)"
@@ -56,6 +66,16 @@ enum DiffRow: Identifiable {
         case let .commentBand(placement): "band-\(placement.id)"
         case .commentEditor: "editor"
         case .lineEditor: "line-editor"
+        }
+    }
+
+    /// Code rows have an exact height; comment and edit bands size themselves from their text.
+    var codeLineCount: Int? {
+        switch self {
+        case let .lineRun(lines): lines.count
+        case let .pairRun(pairs): pairs.count
+        case .line, .pair: 1
+        default: nil
         }
     }
 

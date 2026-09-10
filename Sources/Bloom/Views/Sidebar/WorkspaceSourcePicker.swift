@@ -73,8 +73,32 @@ struct WorkspaceSourcePicker: View {
     }
 
     var body: some View {
+        HStack(spacing: Metrics.spacingSmall) {
+            sourceButton
+
+            if checkout == nil {
+                Button {
+                    present(.existingBranch)
+                } label: {
+                    ComposerControlLabel(
+                        systemImage: "arrow.triangle.branch",
+                        text: "Open existing branch…",
+                        tint: Palette.controlAccent
+                    )
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .help("Open a workspace on an existing branch or pull request")
+            }
+        }
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            panel
+        }
+    }
+
+    private var sourceButton: some View {
         Button {
-            isPresented = true
+            present(checkout == nil ? .newBranch : .existingBranch)
         } label: {
             ComposerControlLabel(
                 systemImage: glyph,
@@ -88,9 +112,14 @@ struct WorkspaceSourcePicker: View {
         .help("Open a pull request or a branch, or cut a new branch")
         .accessibilityLabel("Start from")
         .accessibilityValue(label)
-        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
-            panel
-        }
+    }
+
+    /// Both entry points use the same picker, but the explicit branch action skips the new tab.
+    private func present(_ openingTab: WorkspaceSourceTab) {
+        query = ""
+        tab = openingTab
+        selected = offering.search(query: "").rows(in: tab).first
+        isPresented = true
     }
 
     private var panel: some View {
@@ -126,14 +155,6 @@ struct WorkspaceSourcePicker: View {
         }
         .frame(width: Self.width)
         .background { tabShortcuts }
-        // A fresh query every time it opens. The panel is a way of finding one thing, not a filter
-        // somebody set and left, and reopening it onto yesterday's word would hide the list that
-        // has since loaded behind it.
-        .onAppear {
-            query = ""
-            tab = checkout == nil ? .newBranch : .existingBranch
-            selected = offering.search(query: "").rows(in: tab).first
-        }
     }
 
     /// `PanelTabs` rather than a segmented picker, and its own note carries the three measurements

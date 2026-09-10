@@ -68,9 +68,9 @@ extension AppModel {
                 guard let self else { return .refused("Bloom is still starting up.") }
                 return self.showMediaForBridge(order, in: workspaceID)
             },
-            PaneSplitTool { [weak self] order, axis, workspaceID in
+            PaneSplitTool { [weak self] order, axis, anchor, workspaceID in
                 guard let self else { return .refused("Bloom is still starting up.") }
-                return await self.splitPaneForBridge(order, axis: axis, in: workspaceID)
+                return await self.splitPaneForBridge(order, axis: axis, anchor: anchor, in: workspaceID)
             },
             PaneCloseTool { [weak self] kind, workspaceID in
                 guard let self else { return .refused("Bloom is still starting up.") }
@@ -101,9 +101,9 @@ extension AppModel {
             BrowserScrollTool(browser),
             BrowserScreenshotTool(browser),
             BrowserTextTool(browser),
-            WorkspaceArchiveTool { [weak self] workspace in
+            WorkspaceArchiveTool { [weak self] order in
                 guard let self else { return .refused("Bloom is still starting up.") }
-                return await self.archiveWorkspaceForBridge(workspace)
+                return await self.archiveWorkspaceForBridge(order)
             },
             WorkspaceMergeTool { [weak self] workspace, pullRequest, method in
                 guard let self else {
@@ -138,11 +138,23 @@ extension AppModel {
 
     /// Uses the UI lifecycle so tabs, agents, terminals and selection cannot outlive the worktree.
     /// A refusal goes back to the caller instead of asking the user to approve a destructive retry.
-    private func archiveWorkspaceForBridge(_ workspace: Workspace) async -> WorkspaceArchiveOutcome {
-        guard let current = workspaces.first(where: { $0.id == workspace.id }) else {
+    ///
+    /// The owner's own client is acted on at once, because it is standing outside every turn. A
+    /// workspace's own agent is booked, because it is standing inside the worktree: see
+    /// `bookArchiveForBridge` and `WorkspaceArchiveTool`.
+    ///
+    /// `workspaces` rather than the row the tool read, in both arms. The list is this window's
+    /// own, so a workspace that has been archived by hand since the call came in is not in it, and
+    /// booking against a row nobody can act on any more would be a request that could only ever be
+    /// refused at the owner.
+    private func archiveWorkspaceForBridge(_ order: WorkspaceArchiveOrder) async -> WorkspaceArchiveOutcome {
+        guard let current = workspaces.first(where: { $0.id == order.workspace.id }) else {
             return .refused("This workspace is no longer active. Refresh workspace_list.")
         }
-        return await archive(current, deleteBranch: false, allowsConfirmation: false)
+        guard let sessionID = order.afterTurnOf else {
+            return await archive(current, deleteBranch: false, allowsConfirmation: false)
+        }
+        return bookArchiveForBridge(of: current, after: sessionID)
     }
 
     /// Confirms that the path the model named is a real image or movie inside its own worktree.
@@ -418,28 +430,6 @@ extension AppModel {
             }
         }
         return .opened(order.confirmation)
-    }
-
-    /// `pane_split`, through the same door Cmd+D uses.
-    ///
-    /// The refusal comes from `PaneSplit`, which is what greys Split Right in the menu, so a pane
-    /// the menu will not divide is one this declines with the menu's own reason rather than with a
-    /// second opinion.
-    func splitPaneForBridge(
-        _ order: PaneOrder, axis: SplitAxis, in workspaceID: WorkspaceID
-    ) async -> PaneOutcome {
-        guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForPane) }
-        let tabs = WorkspaceTabsStore.shared
-        guard let tab = tabs.selectedTab(in: model) else {
-            return .refused(
-                "There is no tab open in that workspace to split. Use pane_open instead."
-            )
-        }
-        NewPane.open(order.kind, in: model, url: order.url ?? "", title: order.title) { content in
-            tabs.split(tab: tab, axis: axis, showing: content)
-        }
-        let where_ = axis == .horizontal ? "beside" : "below"
-        return .opened("Opened \(order.kind.title) \(where_) what was already on screen.")
     }
 
     /// Which pane of the tab in front a kind names, or the sentence saying why none does.

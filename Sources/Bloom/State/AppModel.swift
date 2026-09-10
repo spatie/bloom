@@ -270,6 +270,33 @@ final class AppModel {
 
     func isArchiving(_ id: WorkspaceID) -> Bool { archivingWorkspaceIDs.contains(id) }
 
+    /// Workspaces whose own agent has asked to be archived, and the chat whose turn has to end
+    /// before that can happen.
+    ///
+    /// The booking is here rather than on `WorkspaceModel` because the model is torn down by the
+    /// archive it is waiting for, and a request held on the thing it is about is a request that
+    /// dies half way through being carried out. It is a dictionary rather than a set because the
+    /// chat is the point: a workspace running a crew ends several turns and only one of them is
+    /// the turn that asked. See `AppModel.archiveIfRequested`.
+    ///
+    /// One booking per workspace. A second call from the same agent overwrites the first rather
+    /// than queueing behind it, because both name the same worktree and the later one is the one
+    /// with the fresher chat behind it.
+    private var archiveBookings: [WorkspaceID: SessionID] = [:]
+
+    /// Books a workspace to be archived once the asking chat's turn has ended.
+    func bookArchive(of id: WorkspaceID, after sessionID: SessionID) {
+        archiveBookings[id] = sessionID
+    }
+
+    /// Takes the booking back, if there is one and this is the chat it was waiting on. Answers
+    /// whether the caller now owns it, so a booking cannot be acted on twice.
+    func takeArchiveBooking(of id: WorkspaceID, endedIn sessionID: SessionID) -> Bool {
+        guard archiveBookings[id] == sessionID else { return false }
+        archiveBookings[id] = nil
+        return true
+    }
+
     /// Workspaces the owner has asked for whose worktree is still being cut.
     ///
     /// The mirror of `archivingWorkspaceIDs` above: that one takes a row away before the disk work
@@ -1209,6 +1236,10 @@ final class AppModel {
     func forgetWorkspace(_ id: WorkspaceID) {
         stopHidingFromSidebar(id)
         workspaceModels[id] = nil
+        // An archive that has happened cannot still be waiting to happen. Nothing books one twice
+        // today, but a booking outliving the worktree it names is a request that can only ever be
+        // refused, and it would be refused at the owner rather than at the agent that made it.
+        archiveBookings[id] = nil
         storedActivity.removeAll { $0.workspaceID == id }
         // The crew rows go for the same reason the activity rows above do: `ON DELETE CASCADE`
         // has taken this workspace's sessions with it, and rows read before that would keep
@@ -1528,10 +1559,9 @@ final class AppModel {
 
     /// What a drag on a project header ends in.
     ///
-    /// The projects are a flat list with one number ordering them, so there is none of the
-    /// translation a workspace drag needs: no filter hides a project and nothing sorts ahead of
-    /// anything. `to` is already an offset into this list, worked out by `SidebarReorder` from the
-    /// flattened rows the pane actually draws.
+    /// `to` indexes the visible projects from the pane that produced the drag. Hidden projects
+    /// still exist in `repos`, so applying that offset directly to it can leave the dragged
+    /// project where it started. `SidebarReorder` translates it while preserving hidden slots.
     ///
     /// The new order is put on screen before it is written, for the reason `reorderWorkspaces`
     /// gives: a drop is the end of a movement the table has already animated, and waiting for the
@@ -1543,9 +1573,9 @@ final class AppModel {
     /// or an icon that landed while the drag was happening. See e47a3b7. It is one transaction for
     /// the same reason `reorderWorkspaces` gives: one commit, one announcement, and no moment at
     /// which the observer can reload a half written order.
-    func reorderProjects(id: RepoID, to: Int) async {
+    func reorderProjects(id: RepoID, visible: [RepoID], to: Int) async {
         guard let store else { return }
-        let changes = SidebarReorder.move(projects: repos, id: id, to: to)
+        let changes = SidebarReorder.move(projects: repos, visible: visible, id: id, to: to)
         guard !changes.isEmpty else { return }
 
         let byID = Dictionary(changes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })

@@ -43,6 +43,8 @@ struct FileHeaderBar: View {
     /// Absent when the file cannot be edited: binary, gone, or too large to open.
     var isEditable: Bool
     var onRevert: () -> Void
+    var isCollapsed = false
+    var onToggleCollapsed: (() -> Void)?
 
     @AppStorage(DiffLayoutSetting.storageKey) private var isSideBySide = false
     @AppStorage(DiffWhitespaceSetting.storageKey) private var ignoresWhitespace = false
@@ -68,6 +70,18 @@ struct FileHeaderBar: View {
 
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {
+            if let onToggleCollapsed {
+                Button(action: onToggleCollapsed) {
+                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                        .font(Typo.micro)
+                        .foregroundStyle(Palette.textSecondary)
+                        .frame(width: 20, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("\(isCollapsed ? "Expand" : "Collapse") \(file.filename)")
+                .accessibilityLabel("\(isCollapsed ? "Expand" : "Collapse") \(file.filename)")
+            }
             FilePathLabel(path: file.path, width: width)
 
             // Whether Edit mode is holding changes that are not on disk yet. Asked by
@@ -90,17 +104,21 @@ struct FileHeaderBar: View {
             // boundary between two of `ViewThatFits`'s arrangements would swap them as the pointer
             // arrived. The controls have to be the one thing in this bar that never moves while
             // it is being pointed at.
-            FileBarHintLabel(text: hint ?? "")
-                .layoutPriority(-2)
+            if onToggleCollapsed != nil {
+                reviewControls
+            } else {
+                FileBarHintLabel(text: hint ?? "")
+                    .layoutPriority(-2)
 
-            ViewThatFits(in: .horizontal) {
-                controls
-                compact
-                collapsed
+                ViewThatFits(in: .horizontal) {
+                    controls
+                    compact
+                    collapsed
+                }
             }
         }
         .padding(.horizontal, InspectorLayout.inset)
-        .frame(height: InspectorLayout.barHeight)
+        .frame(height: onToggleCollapsed == nil ? InspectorLayout.barHeight : InspectorLayout.reviewHeaderHeight)
         .background(Palette.surfaceSunken)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .confirmationDialog(
@@ -137,8 +155,48 @@ struct FileHeaderBar: View {
                 whitespaceToggle(labelled: true)
             }
             copyButton(labelled: true)
-            overflowMenu(full: false)
             modePicker
+        }
+    }
+
+    /// All-files review owns the layout settings. Keep each file's identity and progress
+    /// visible, with less frequent and destructive actions in its menu.
+    private var reviewControls: some View {
+        HStack(spacing: InspectorLayout.gap) {
+            if !file.isBinary {
+                HStack(spacing: 4) {
+                    Text("+\(file.additions)").foregroundStyle(Palette.positive)
+                    Text("−\(file.deletions)").foregroundStyle(Palette.negative)
+                }
+                .font(Typo.caption)
+                .monospacedDigit()
+                .fixedSize()
+                .accessibilityLabel("\(file.additions) additions, \(file.deletions) deletions")
+            }
+            ViewThatFits(in: .horizontal) {
+                viewedToggle(labelled: true)
+                viewedToggle(labelled: false)
+            }
+            Menu {
+                if isEditable {
+                    Button(mode == .diff ? "Edit file" : "Show diff") {
+                        if isCollapsed { onToggleCollapsed?() }
+                        mode = mode == .diff ? .edit : .diff
+                    }
+                }
+                Button(FileBarControls.copy(mode: mode).title, action: copy)
+                Divider()
+                Button(FileBarControls.revert(filename: file.filename).title, role: .destructive) {
+                    isConfirmingRevert = true
+                }
+            } label: {
+                Label("File actions", systemImage: "ellipsis.circle")
+            }
+            .labelStyle(.iconOnly)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("File actions")
         }
     }
 
@@ -156,7 +214,6 @@ struct FileHeaderBar: View {
                 whitespaceToggle(labelled: false)
             }
             copyButton(labelled: false)
-            overflowMenu(full: false)
             modePicker
         }
     }
@@ -164,54 +221,32 @@ struct FileHeaderBar: View {
     /// The narrow arrangement: what this file is, and everything else behind an overflow menu.
     private var collapsed: some View {
         HStack(spacing: InspectorLayout.gap) {
-            overflowMenu(full: true)
+            overflowMenu
             modePicker
         }
     }
 
-    /// Where Share went, and where everything else goes once the bar is too narrow to draw it.
-    ///
-    /// **Share used to be a control in the row and is not any more.** It was a share glyph beside
-    /// the copy glyph: two ways of doing nearly the same thing, given the same weight, in a row
-    /// that was already reported as too full to read. Copy is the one people press, so Copy keeps
-    /// the button and Share keeps the route, one press further away. It is the same item the
-    /// collapsed arrangement has always carried, which is why this menu is now drawn at every
-    /// width instead of only at the narrow one: removing the button must not make sharing
-    /// unreachable on a wide window.
-    ///
-    /// - Parameter full: whether the row outside this menu is empty, in which case everything goes
-    ///   in it rather than only what was left over.
-    private func overflowMenu(full: Bool) -> some View {
+    /// File controls for a bar too narrow to show them inline.
+    private var overflowMenu: some View {
         Menu {
-            if full {
-                Toggle("Viewed", isOn: Binding(
-                    get: { model.isViewed(file) },
-                    set: { value in Task { await model.setViewed(value, file: file) } }
-                ))
-                Divider()
-                Picker(FileBarControls.layout.title, selection: $isSideBySide) {
-                    Text(FileBarControls.unified).tag(false)
-                    Text(FileBarControls.sideBySide).tag(true)
-                }
-                .pickerStyle(.inline)
-                if mode == .diff {
-                    Toggle(FileBarControls.whitespace(ignoring: ignoresWhitespace).title,
-                           isOn: $ignoresWhitespace)
-                }
-                Divider()
-                Button(FileBarControls.copy(mode: mode).title, action: copy)
+            Toggle("Viewed", isOn: Binding(
+                get: { model.isViewed(file) },
+                set: { value in Task { await model.setViewed(value, file: file) } }
+            ))
+            Divider()
+            Picker(FileBarControls.layout.title, selection: $isSideBySide) {
+                Text(FileBarControls.unified).tag(false)
+                Text(FileBarControls.sideBySide).tag(true)
             }
-
-            // A `Text` label rather than a title string, because the `.labelStyle(.iconOnly)`
-            // below reaches this menu's contents too and would leave the item a bare glyph.
-            ShareLink(item: sharedDiff, preview: SharePreview(file.filename)) {
-                Text(FileBarControls.share(filename: file.filename).title)
+            .pickerStyle(.inline)
+            if mode == .diff {
+                Toggle(FileBarControls.whitespace(ignoring: ignoresWhitespace).title,
+                       isOn: $ignoresWhitespace)
             }
-
-            if full {
-                Button(FileBarControls.revert(filename: file.filename).title, role: .destructive) {
-                    isConfirmingRevert = true
-                }
+            Divider()
+            Button(FileBarControls.copy(mode: mode).title, action: copy)
+            Button(FileBarControls.revert(filename: file.filename).title, role: .destructive) {
+                isConfirmingRevert = true
             }
         } label: {
             Label(FileBarControls.more.title, systemImage: "ellipsis.circle")
@@ -321,13 +356,6 @@ struct FileHeaderBar: View {
         .fileBarLabelStyle(labelled: labelled)
         .inspectorBarControl()
         .fileBarHint(control, into: $hint)
-    }
-
-    /// What both share routes hand over. The patch is only rendered into a message on export,
-    /// which is what keeps a four thousand line diff out of every redraw of this bar. See
-    /// `SharedDiff`.
-    private var sharedDiff: SharedDiff {
-        SharedDiff(file: file, diff: diff)
     }
 
     private var modePicker: some View {

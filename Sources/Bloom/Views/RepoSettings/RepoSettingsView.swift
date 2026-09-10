@@ -87,6 +87,7 @@ struct RepoSettingsView: View {
                 case .workspaces:
                     Form {
                         branchSection
+                        browserSection
                         RepoFilesToCopySection(model: model)
                     }
                     .settingsForm()
@@ -455,6 +456,41 @@ struct RepoSettingsView: View {
             Text("Branches")
         }
     }
+
+    // MARK: - Browser
+
+    /// One field, because the interesting half of this setting is what a setup script writes, and
+    /// that has nowhere to be edited here: it belongs to a workspace rather than to the project.
+    /// What is stated here is the project's standing answer, and the footer is what tells somebody
+    /// reading this row why one of their workspaces opens somewhere else.
+    private var browserSection: some View {
+        Section {
+            SettingsRow("Address") {
+                TextField("", text: $model.draft.browserURL, prompt: Text(Self.browserPrompt))
+                    // See the branch prefix field: without this the form claims the row's value
+                    // column and the field ends up at the far edge of the window.
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+            }
+        } header: {
+            Text("Browser")
+        } footer: {
+            VStack(alignment: .leading, spacing: Metrics.spacingTight) {
+                Text(Self.browserFootnote)
+                SettingsDestinationLabel(model: model, key: .browserURL)
+            }
+            .font(Typo.caption)
+            .foregroundStyle(Palette.textSecondary)
+        }
+    }
+
+    private static let browserPrompt = "http://localhost:$\(WorkspaceManager.environmentPrefix)_PORT"
+
+    private static let browserFootnote = "Where a browser pane opens when you ask a workspace for "
+        + "one. Script variables are expanded, so a path or a hostname can be stated once for "
+        + "every workspace. A setup script that writes an address to "
+        + "$\(WorkspaceManager.environmentPrefix)_URL_FILE beats this, for the workspaces where "
+        + "only the script knows where the site ended up."
 
     // MARK: - Settings files
 

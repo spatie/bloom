@@ -80,6 +80,11 @@ Use `./Tools/dev-build.sh --fast --no-launch` to install without restarting, or
 `./Tools/dev-build.sh --fast --no-install` to build without installing or launching. Fast mode cannot
 be combined with a revision. It keeps the normal assets and App Intents metadata.
 
+Working with an AI agent? [AGENTS.md](AGENTS.md) indexes the shared project skills for Claude and
+Codex, including `bloom-dev-build` and `bloom-release`. In Claude, invoke `/bloom-dev-build` or
+`/bloom-release`; in Codex, use `$bloom-dev-build` or `$bloom-release`. The skills are stored in
+`.claude/skills/` and linked from `.agents/skills/`, so a normal clone includes both entry points.
+
 `make` on its own lists every target. `make build` compiles without installing or launching.
 `make app` and `make run` retain the production bundle identity, so use the isolated dev build for
 day-to-day development.
@@ -96,16 +101,38 @@ The `.noindex` suffix keeps Spotlight out of them, which is what a dozen worktre
 need once each of them holds its own copy of `vendor` and `.build`. A workspace can also be started
 on an existing branch, or on a GitHub pull request, to review one rather than write one.
 
+To continue on an existing branch, open **New Workspace** (Cmd+N), choose the project, and click
+**Open existing branch…** beside the branch selector. Search for and select the branch, then
+create the workspace. Commits go onto that branch. Choose **Terminal** under **Start with** if
+you want to open it without starting an agent. The branch selector also offers this under its
+**Existing branch** tab.
+
+If the branch is already checked out in a Bloom workspace, selecting it opens that workspace.
+If another worktree holds it, Bloom shows its location so you can free the branch there first.
+
+The project field suggests folders as you type, searching beside your existing projects or inside
+a typed path. Use the arrow keys and Return to choose a suggestion, or Tab to complete the first
+match. In Settings, General, choose where new projects are created and add other folders to search.
+
 **Panes.** A workspace holds tabs, and a tab can be split. A pane is a chat, a terminal standing in
 the worktree, or a browser, so the dev server the setup script started can be read beside the
-conversation that is changing it.
+conversation that is changing it. Type `/close` to close the current chat and start a fresh one
+with the same model settings. The previous conversation is archived.
+
+Press Cmd+P to search files in the current workspace. Use the arrow keys and Return to open a
+file, or Escape to dismiss the search.
 
 **Review and ship.** The inspector lists the files the workspace changed and shows a
 syntax-highlighted diff against the merge base, with inline comments and an editor on the same
-file. When `gh` is installed it also carries the pull request: open it, watch its checks, merge it.
+file. Choose **Review all files** to scroll through every file's changes together, or switch back
+to **Selected file** to focus on one. When `gh` is installed it also carries the pull request: open
+it, watch its checks, merge it.
 
-**Ask Bloom.** A conversation that belongs to no workspace, for the questions that are about your
-projects rather than about one branch.
+**Ask Bloom.** Conversations that belong to no workspace, for questions about your projects.
+Start another conversation with the toolbar button or Cmd+T. The tab bar appears when a second
+conversation is open, and switching tabs keeps agents running. Closing a tab archives its chat.
+Choose the working directory for new conversations in Settings, General; existing chats retain
+their directory.
 
 **Quick prompts.** A library of prompts you reuse, available in any workspace.
 
@@ -121,8 +148,8 @@ the file the value came from.
 
 The keys are `scripts.setup`, `scripts.archive`, `scripts.run` (a string, or a table of named
 scripts with a `command`), `scripts.run_mode`, `file_include_globs` (`[".env*"]` by default),
-`git.branch_prefix`, `git.branch_prefix_type`, `git.delete_branch_on_archive`, `models.default` and
-`models.claude.default_thinking_level`. A key ending in `_file` (`scripts.setup_file`,
+`git.branch_prefix`, `git.branch_prefix_type`, `git.delete_branch_on_archive`, `browser.url`,
+`models.default` and `models.claude.default_thinking_level`. A key ending in `_file` (`scripts.setup_file`,
 `scripts.archive_file`) names an executable file in the repository instead of an inline command.
 
 Every script Bloom runs is handed these variables on top of your own shell environment:
@@ -137,6 +164,7 @@ Every script Bloom runs is handed these variables on top of your own shell envir
 | `BLOOM_ROOT_PATH` | The main checkout |
 | `BLOOM_DEFAULT_BRANCH` | The repository's default branch |
 | `BLOOM_PORT` | The first of ten ports allocated to this workspace |
+| `BLOOM_URL_FILE` | A file to write the address a browser pane should open on. Git cannot see it |
 
 #### A database per worktree
 
@@ -190,6 +218,32 @@ mysql -u root -e "DROP DATABASE IF EXISTS \`$database\`"
 `$BLOOM_PORT` is the same number in both, and it is the same number after a restart, so the archive
 script can also bring down whatever the setup script started on it (`docker compose down -v`, or
 killing what is listening). It gets ten minutes to do so.
+
+#### Where a browser pane opens
+
+A browser pane opens on `http://localhost:$BLOOM_PORT`, which is right for a project whose dev
+server binds the port Bloom allocated and wrong for every project that does not. Two ways to say
+otherwise, and the first of them wins:
+
+```bash
+# .bloom/setup.sh, for an address only the script knows: a Herd or Valet site named after a slug it
+# just computed, a tunnel that printed its hostname, a sign-in link carrying a fresh token.
+site="$(printf '%s' "$BLOOM_PROJECT_NAME-$BLOOM_WORKSPACE_ID" | tr '_' '-' | cut -c1-30)"
+herd link "$site"
+herd secure "$site"
+echo "https://$site.test" > "$BLOOM_URL_FILE"
+```
+
+```toml
+# .bloom/settings.toml, for an address the whole project shares. The script variables above are
+# expanded, so one line covers every workspace.
+[browser]
+url = "http://localhost:$BLOOM_PORT/admin"
+```
+
+`$BLOOM_URL_FILE` is inside the worktree and covered by an ignore rule of Bloom's own, so it never
+reaches a commit. Write it whenever you like: it is read each time a pane is opened, so an archive
+script that tears the site down can empty it and a run script can rewrite it.
 
 ### The bridge
 

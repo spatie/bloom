@@ -308,6 +308,24 @@ struct DiffDragRangeTests {
         #expect(DiffDragRange.row(from: 2, translation: -36, rowHeight: Self.rowHeight, count: 10) == 0)
     }
 
+    @Test("wrapped rows retain their source line for hover and drag")
+    func wrappedRows() {
+        let heights: [CGFloat] = [18, 72, 18]
+        #expect(DiffDragRange.row(at: 17, heights: heights) == 0)
+        #expect(DiffDragRange.row(at: 18, heights: heights) == 1)
+        #expect(DiffDragRange.row(at: 89, heights: heights) == 1)
+        #expect(DiffDragRange.row(at: 90, heights: heights) == 2)
+        #expect(DiffDragRange.row(at: 108, heights: heights) == nil)
+        #expect(DiffDragRange.row(at: -1, heights: heights) == nil)
+        let spots = (1...3).map { Optional(ReviewSpot(side: .new, line: $0)) }
+        #expect(DiffDragRange.spot(from: 0, translation: 70, rowHeight: 18,
+                                  rowHeights: heights, spots: spots, side: .new)?.line == 2)
+        #expect(DiffDragRange.spot(from: 0, translation: 82, rowHeight: 18,
+                                  rowHeights: heights, spots: spots, side: .new)?.line == 3)
+        #expect(DiffDragRange.spot(from: 2, translation: -25, rowHeight: 18,
+                                  rowHeights: heights, spots: spots, side: .new)?.line == 2)
+    }
+
     @Test("a drag is clamped to the block it began in")
     func clamps() {
         #expect(DiffDragRange.row(from: 1, translation: 900, rowHeight: Self.rowHeight, count: 4) == 3)

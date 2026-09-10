@@ -19,6 +19,7 @@ final class WorkspaceModel {
     private unowned let app: AppModel
 
     var sessions: [Session] = []
+    var sideConversations: [SessionID: SideConversationState] = [:]
 
     /// Whether the store has answered about this workspace's sessions at all, this launch.
     ///
@@ -87,7 +88,11 @@ final class WorkspaceModel {
         get { InspectorTab.resolve(chosenInspectorTab, available: availableInspectorTabs) }
         set { chosenInspectorTab = newValue }
     }
-    var changedFiles: [ChangedFile] = []
+    var changedFiles: [ChangedFile] = [] {
+        didSet { reviewFiles = ChangedFileTree.orderedFiles(from: changedFiles) }
+    }
+    /// Retain tree order across scroll updates; rebuild it only when the changed files change.
+    private(set) var reviewFiles: [ChangedFile] = []
     var selectedFilePath: String?
     var isLoadingChanges = false
     /// Whether git has answered about this worktree at all, this launch.
@@ -334,12 +339,12 @@ final class WorkspaceModel {
     }
 
     /// What this workspace's repository asks for: the setup script, the run scripts, the rest of
-    /// `.conductor/settings.toml`.
+    /// the repository settings files.
     ///
     /// Held here rather than read where it is needed because the Workspace menu reads it, and a
     /// `Commands` body is not a view: it cannot await a file, and it cannot carry a task. It is
-    /// re-read whenever the workspace is selected, so a run script added in the project settings
-    /// window is in the menu the next time the workspace is on screen.
+    /// re-read whenever the workspace is selected and after project settings are saved, so a new
+    /// run script appears in the menu without switching workspaces.
     private(set) var settings = RepoSettings()
 
     /// Off the main actor, because this parses up to six files and is called on every switch.
@@ -379,8 +384,8 @@ final class WorkspaceModel {
     // MARK: - Sessions
 
     var activeSession: Session? {
-        guard let activeSessionID else { return sessions.first }
-        return sessions.first { $0.id == activeSessionID } ?? sessions.first
+        guard let activeSessionID else { return sessions.first { $0.sideConversationParentID == nil } }
+        return sessions.first { $0.id == activeSessionID } ?? sessions.first { $0.sideConversationParentID == nil }
     }
 
     /// Reads the session list back from the store.
@@ -402,7 +407,7 @@ final class WorkspaceModel {
         if !hasReadSessions { hasReadSessions = true }
         SwitchTrace.mark("sessions.assigned", workspace: workspace.id)
         if activeSessionID == nil || !sessions.contains(where: { $0.id == activeSessionID }) {
-            activeSessionID = sessions.first?.id
+            activeSessionID = sessions.first { $0.sideConversationParentID == nil }?.id
         } else {
             // The setter above prepares the transcript for us. This is the other branch, where the
             // active session has not moved and the transcript may still be the one this launch has
@@ -489,6 +494,22 @@ final class WorkspaceModel {
     func isRunning(_ session: Session) -> Bool {
         AgentTurns.session(.running, state: session.state, live: liveTurn(for: session.id))
             || transcripts[session.id]?.subagents.isWorking == true
+    }
+
+    /// Persist the replacement before stopping the old agent so a failed write leaves it usable.
+    func replaceSession(_ session: Session, controls: ComposerControls) async -> Session? {
+        guard !app.isArchiving(workspace.id), let store else { return nil }
+        do {
+            let next = try await store.replaceWorkspaceConversation(id: session.id, controls: controls)
+            transcripts.removeValue(forKey: session.id)?.teardown()
+            app.bridge?.retire(sessionID: session.id)
+            await reloadSessions()
+            activeSessionID = next.id
+            return next
+        } catch {
+            app.alert = BloomAlert(title: "Could not start a fresh chat", message: error.readableMessage)
+            return nil
+        }
     }
 
     func closeSession(_ session: Session) async {
@@ -901,6 +922,7 @@ final class WorkspaceModel {
     /// agents are killed here rather than merely interrupted, and killed first, which is what lets
     /// every SIGTERM escalation run at the same time instead of one after another.
     func stopEverything() {
+        for state in sideConversations.values { state.task?.cancel() }
         for transcript in transcripts.values { transcript.terminateNow() }
         setupTask?.cancel()
         setupTask = nil
@@ -930,11 +952,13 @@ final class WorkspaceModel {
         stopEverything()
         for transcript in transcripts.values { transcript.teardown() }
         transcripts.removeAll()
+        sideConversations.removeAll()
     }
 
     /// The quit path: the same teardown, but it waits for the agents to actually be gone rather
     /// than only asking them to leave.
     func shutdown() async {
+        for state in sideConversations.values { state.task?.cancel() }
         setupTask?.cancel()
         setupTask = nil
         // Nilled like the three above: a cancelled refresh returns through its
@@ -1071,6 +1095,40 @@ final class WorkspaceModel {
         // next refresh, so the terminal about to be forked reads the number rather than 0.
         if self.workspace.port == 0 { self.workspace.port = allocated }
         return self.workspace.port
+    }
+
+    /// Where a browser pane opened on this workspace should go.
+    ///
+    /// The port is allocated first because it is both the last-resort answer and a variable the
+    /// stated one may be written in terms of, and because a workspace nobody has opened a terminal
+    /// in yet holds no block at all. The decision itself is `WorkspaceBrowserURL`, which is where
+    /// the two ways a project can state an address, and the order between them, are written down.
+    ///
+    /// The settings are read again rather than taken from `settings`: this runs at the moment a
+    /// pane is opened, which is often the first thing that happens to a workspace, and an address
+    /// silently missing because the file had not been read yet is the sort of intermittent that
+    /// gets blamed on the script.
+    func browserAddress() async -> String {
+        let port = await ensurePort()
+        guard let repo, let store = app.store else {
+            return WorkspaceBrowserURL.resolve(
+                written: nil, stated: nil, environment: [:], port: port
+            )
+        }
+
+        let environment = WorkspaceManager(store: store).environment(
+            for: workspace, repo: repo, port: port
+        )
+        let worktree = workspace.path
+        let repoPath = repo.path
+        return await Task.detached(priority: .userInitiated) {
+            WorkspaceBrowserURL.read(
+                worktree: worktree,
+                settings: SettingsLoader.load(repo: repoPath),
+                environment: environment,
+                port: port
+            )
+        }.value
     }
 
     /// One setup run: the state it resets, the output it streams, and what it leaves behind.
@@ -1411,6 +1469,9 @@ final class WorkspaceModel {
     /// `DiffView.body` reads this for every pass it makes over the diff and a keystroke must not
     /// be a reason to make one.
     var reviewDrafts: [String: ReviewDraft] = [:]
+
+    /// A browser review survives switching tabs, just like a half-written diff comment.
+    var browserReviews: [String: BrowserRegionCapture] = [:]
 
     /// Which comments are open for editing in place. Here for the same reason `reviewDrafts` is,
     /// and the reason is not hypothetical for an edit either: the band being edited sits in the

@@ -8,7 +8,8 @@ import BloomCore
 /// `AttachmentDraft`. This is what the composer knows *besides* the path, and every field is
 /// either something the path cannot say or something it would cost a trip to the disk to ask.
 ///
-/// Nothing here is required to draw a chip, open a file or send a turn. A draft restored after a
+/// An image review also carries the comment and source URL to include when sending its chip.
+/// Ordinary attachments need only their path to draw a chip, open a file or send a turn. A draft restored after a
 /// relaunch whose records were lost still names its files, still draws them and still sends them,
 /// on the strength of the paths alone.
 ///
@@ -29,6 +30,7 @@ struct PromptAttachment: Identifiable, Hashable, Codable, Sendable {
     /// so taking its chip off must not touch the user's work.
     var isCopy: Bool
     var byteCount: Int = 0
+    var imageComment: BrowserImageComment?
 
     var filename: String { (path as NSString).lastPathComponent }
     var directory: String { (path as NSString).deletingLastPathComponent }
