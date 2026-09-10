@@ -133,7 +133,9 @@ def valid_path(value):
 
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("--check", action="store_true")
+    mode = result.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--stop-server", action="store_true")
     result.add_argument("--package", type=pathlib.Path)
     result.add_argument("--sha256")
     result.add_argument("--install-root", type=valid_path, default=None)
@@ -359,7 +361,7 @@ def check_ownership(args, existing):
          "and remove the account only after confirming it is unused. Then choose Check Again. Otherwise, use a fresh server.")
 
 
-def active_work(data_directory):
+def active_work(data_directory, include_commands=False):
     database = data_directory / "server.sqlite"
     if not database.exists():
         return False
@@ -376,8 +378,19 @@ def active_work(data_directory):
                 return True
             if "deliveries" in tables and connection.execute("SELECT 1 FROM deliveries WHERE delivered_at IS NULL LIMIT 1").fetchone():
                 return True
+            if include_commands and "settings" in tables:
+                for (raw,) in connection.execute("SELECT value FROM settings WHERE key GLOB 'server.command.*'"):
+                    record = json.loads(raw)
+                    if not isinstance(record, dict) or not isinstance(record.get("request"), dict):
+                        raise ValueError("unknown command journal")
+                    if record.get("reply") is None:
+                        fail("command_outcome_unknown", "A recorded server command has no confirmed outcome.",
+                             "This may be an interrupted historical command. Bloom cannot safely confirm an idle stop. "
+                             "Ask an administrator to inspect the server and stop its managed service manually if safe. No service was stopped.")
+                    if not isinstance(record["reply"], dict):
+                        raise ValueError("unknown command reply")
             return False
-    except (sqlite3.Error, ValueError, OSError):
+    except (sqlite3.Error, ValueError, OSError, TypeError):
         fail("database_unavailable", "Bloom could not safely check whether the server is busy.",
              "Check the existing server and database before attempting an update.")
 
@@ -413,6 +426,87 @@ def check_existing_activity(args, account):
              "`sudo systemctl stop " + service + "`, then `systemctl is-active " + service + "` to confirm it is inactive. "
              "If Bloom was started manually, stop it in the terminal or process manager that started it. "
              "Click Check Again in Bloom. To use the current server without updating, choose Connect to Existing Server.")
+
+
+def managed_service_state(args):
+    unit = args.systemd_dir / (args.service_name + ".service")
+    protected_system_path(unit)
+    if unit.read_text().strip() != unit_contents(args).strip():
+        fail("unmanaged_server", "The service configuration no longer matches Bloom's managed installation.",
+             "Inspect the changed service in an SSH terminal. Bloom will not stop a different service.")
+    fields = ["LoadState", "ActiveState", "SubState", "MainPID", "User", "Group", "FragmentPath", "DropInPaths", "NeedDaemonReload", "ControlGroup"]
+    result = command(["systemctl", "show", args.service_name + ".service", "--property=" + ",".join(fields)], timeout=8, required=False)
+    if result is None or result.returncode:
+        fail("service_state_unknown", "The managed service state could not be checked.", "Check systemd in an SSH terminal before stopping anything.")
+    values = dict(line.split("=", 1) for line in result.stdout.decode("utf-8").splitlines() if "=" in line)
+    if (not set(fields).issubset(values) or values["LoadState"] != "loaded" or values["FragmentPath"] != str(unit)
+            or values["User"] != args.user or values["Group"] != args.user or values["DropInPaths"]
+            or values["NeedDaemonReload"] != "no"):
+        fail("unmanaged_server", "The running service does not match the verified Bloom service.",
+             "Inspect its unit, account and drop-in configuration in an SSH terminal. No service was stopped.")
+    return values
+
+
+def verify_managed_process(args, account, state, proc=pathlib.Path("/proc")):
+    try:
+        pid = int(state["MainPID"])
+        if pid <= 1 or not state["ControlGroup"]:
+            raise ValueError("missing main process")
+        root = proc / str(pid)
+        expected = str(args.install_root / "current/bin/bloom-server")
+        if os.readlink(root / "exe") != os.path.realpath(expected):
+            raise ValueError("different executable")
+        with (root / "cmdline").open("rb") as source:
+            argv = source.read(65537).split(b"\0")
+        if argv != [os.fsencode(expected), b"serve", b"--data-dir", os.fsencode(args.data_dir), b""]:
+            raise ValueError("different service arguments")
+        fields = dict(line.split(":", 1) for line in (root / "status").read_text().splitlines() if ":" in line)
+        if [int(value) for value in fields["Uid"].split()] != [account.pw_uid] * 4:
+            raise ValueError("different process account")
+        groups = [line.split(":", 2)[-1] for line in (root / "cgroup").read_text().splitlines()]
+        if state["ControlGroup"] not in groups:
+            raise ValueError("different process group")
+    except (OSError, ValueError, KeyError):
+        fail("unmanaged_server", "Bloom could not identify the running process as its managed server.",
+             "If the server was started manually, stop it in the terminal or process manager that started it. No process was signalled.")
+
+
+def stop_server(args):
+    if os.geteuid() != 0:
+        fail("administrator_required", "Stopping the managed service needs administrator access.", "Connect as root or use passwordless sudo.")
+    existing = marker(args)
+    if not existing or existing.get("phase") != "installed":
+        fail("unmanaged_server", "There is no completed managed Bloom installation to stop.", "Use the server's original terminal or process manager.")
+    check_ownership(args, existing)
+    account = existing_account(args, existing)
+    state = managed_service_state(args)
+    if account_operation(account, lambda: active_work(args.data_dir, include_commands=True)):
+        fail("server_busy", "Agents, queued prompts or workspace setup still need this server.",
+             "Finish or cancel that work in Bloom, then choose Check Again. No service was stopped.")
+    if state["ActiveState"] in ("inactive", "failed") and state["MainPID"] == "0":
+        if account_operation(account, lambda: daemon_locked(args)):
+            fail("unmanaged_server", "A manually started process still owns the server data.", "Stop it using its original terminal or process manager.")
+        return probe(args)
+    if state["ActiveState"] != "active" or state["SubState"] != "running":
+        fail("server_running", "The service is changing state. Wait before stopping it.", "Let startup or shutdown finish, then choose Check Again.")
+    verify_managed_process(args, account, state)
+    # This is a confirmed administrative stop, not an atomic idle-maintenance protocol.
+    # The installer lock excludes other installers, but new client work can arrive after this
+    # last database check. A future daemon admission barrier would be needed to remove that race.
+    if account_operation(account, lambda: active_work(args.data_dir, include_commands=True)):
+        fail("server_busy", "New work arrived before the server could be stopped.", "Finish that work in Bloom, then choose Check Again. No service was stopped.")
+    latest = managed_service_state(args)
+    if latest != state:
+        fail("server_running", "The managed service changed while its activity was checked.", "Choose Check Again. No service was stopped.")
+    verify_managed_process(args, account, latest)
+    emit("progress", step="stop-server", message="Stopping the managed Bloom Server service")
+    command(["systemctl", "stop", args.service_name + ".service"], timeout=40)
+    stopped = managed_service_state(args)
+    if stopped["ActiveState"] not in ("inactive", "failed") or stopped["MainPID"] != "0":
+        fail("stop_failed", "The service has not stopped.", "Check the service in an SSH terminal, then choose Check Again.")
+    if account_operation(account, lambda: daemon_locked(args)):
+        fail("stop_failed", "A process still owns the server data after the service stopped.", "Inspect manually started processes before continuing. Bloom will not stop unrelated processes.")
+    return probe(args)
 
 
 def probe(args):
@@ -852,7 +946,10 @@ def main():
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 fail("installation_busy", "Another installation is already running.", "Wait for it to finish, then retry.")
-            install(args)
+            if args.stop_server:
+                emit("check", **stop_server(args))
+            else:
+                install(args)
         return 0
     except InstallError as error:
         emit("error", code=error.code, message=error.message, recovery=error.recovery, **error.metadata)

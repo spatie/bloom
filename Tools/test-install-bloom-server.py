@@ -754,5 +754,152 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(database.execute("SELECT value FROM preserved").fetchone(), ("kept",))
 
 
+class StopServerTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="bloom-stop-tests-")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = pathlib.Path(self.temporary.name).resolve()
+        self.args = installer.parser().parse_args(["--stop-server", "--service-name", "bloom-fixture",
+            "--systemd-dir", str(self.root / "units"), "--install-root", str(self.root / "runtime"),
+            "--data-dir", str(self.root / "data"), "--service-home", str(self.root / "home")])
+        installer.configuration(self.args)
+        self.account = mock.Mock(pw_uid=1234, pw_gid=1234)
+        self.active = {"LoadState": "loaded", "ActiveState": "active", "SubState": "running", "MainPID": "123",
+            "User": "bloom", "Group": "bloom", "FragmentPath": str(self.args.systemd_dir / "bloom-fixture.service"),
+            "DropInPaths": "", "NeedDaemonReload": "no", "ControlGroup": "/system.slice/bloom-fixture.service"}
+        self.inactive = {**self.active, "ActiveState": "inactive", "SubState": "dead", "MainPID": "0", "ControlGroup": ""}
+        self.check = {"ok": False, "blockers": [{"code": "disk_full"}], "existing": True}
+        self.patches = {}
+        for name, value in [("marker", {"phase": "installed"}), ("check_ownership", None),
+                            ("existing_account", self.account), ("active_work", False), ("daemon_locked", False),
+                            ("verify_managed_process", None), ("probe", self.check), ("emit", None), ("command", mock.Mock(returncode=0))]:
+            patch = mock.patch.object(installer, name, return_value=value)
+            self.patches[name] = patch.start(); self.addCleanup(patch.stop)
+        for patch in [mock.patch.object(installer.os, "geteuid", return_value=0),
+                      mock.patch.object(installer, "account_operation", side_effect=lambda account, operation: operation())]:
+            patch.start(); self.addCleanup(patch.stop)
+
+    def assert_refused(self, code, states=None):
+        with mock.patch.object(installer, "managed_service_state", side_effect=states or [self.active]):
+            with self.assertRaises(installer.InstallError) as raised:
+                installer.stop_server(self.args)
+        self.assertEqual(raised.exception.code, code)
+        self.patches["command"].assert_not_called()
+
+    def test_only_verified_idle_unit_is_stopped_and_fresh_blockers_are_retained(self):
+        with mock.patch.object(installer, "managed_service_state", side_effect=[self.active, self.active, self.inactive]):
+            check = installer.stop_server(self.args)
+        self.assertEqual(check, self.check)
+        self.patches["command"].assert_called_once_with(["systemctl", "stop", "bloom-fixture.service"], timeout=40)
+        self.assertEqual(self.patches["active_work"].call_count, 2)
+        self.patches["probe"].assert_called_once_with(self.args)
+
+    def test_busy_work_and_newly_arriving_work_prevent_stop(self):
+        self.patches["active_work"].return_value = True
+        self.assert_refused("server_busy")
+        self.patches["active_work"].side_effect = [False, True]
+        self.assert_refused("server_busy")
+
+    def test_unmanaged_or_partial_installation_cannot_be_stopped(self):
+        for marker in [None, {"phase": "prepared"}]:
+            self.patches["marker"].return_value = marker
+            self.assert_refused("unmanaged_server")
+
+    def test_manual_process_is_not_stopped(self):
+        self.patches["daemon_locked"].return_value = True
+        self.assert_refused("unmanaged_server", [self.inactive])
+
+    def test_changed_or_unidentified_main_process_prevents_stop(self):
+        self.assert_refused("server_running", [self.active, {**self.active, "MainPID": "999"}])
+        self.patches["verify_managed_process"].side_effect = installer.InstallError("unmanaged_server", "Unknown process", "Inspect it")
+        self.assert_refused("unmanaged_server")
+
+    def test_unknown_and_unfinished_stop_never_report_success(self):
+        with mock.patch.object(installer, "managed_service_state", side_effect=[self.active, self.active, self.active]):
+            with self.assertRaises(installer.InstallError) as raised:
+                installer.stop_server(self.args)
+        self.assertEqual(raised.exception.code, "stop_failed")
+        self.patches["probe"].assert_not_called()
+
+    def test_lock_remaining_after_systemd_stop_is_not_success(self):
+        self.patches["daemon_locked"].return_value = True
+        with mock.patch.object(installer, "managed_service_state", side_effect=[self.active, self.active, self.inactive]):
+            with self.assertRaises(installer.InstallError) as raised:
+                installer.stop_server(self.args)
+        self.assertEqual(raised.exception.code, "stop_failed")
+        self.patches["probe"].assert_not_called()
+
+    def test_stop_failure_does_not_restart_or_reinstall(self):
+        self.patches["command"].side_effect = installer.InstallError("command_failed", "Stop failed", "Inspect systemd")
+        with mock.patch.object(installer, "managed_service_state", side_effect=[self.active, self.active]):
+            with self.assertRaises(installer.InstallError): installer.stop_server(self.args)
+        self.patches["command"].assert_called_once()
+        self.patches["probe"].assert_not_called()
+
+
+class StopOwnershipTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="bloom-stop-ownership-")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = pathlib.Path(self.temporary.name).resolve()
+        self.args = installer.parser().parse_args(["--stop-server", "--systemd-dir", str(self.root / "units"),
+            "--install-root", str(self.root / "runtime"), "--data-dir", str(self.root / "data"), "--service-home", str(self.root / "home")])
+        installer.configuration(self.args)
+        self.args.systemd_dir.mkdir()
+        self.unit = self.args.systemd_dir / "bloom-server.service"
+        self.unit.write_text(installer.unit_contents(self.args))
+        self.fields = {"LoadState": "loaded", "ActiveState": "active", "SubState": "running", "MainPID": "123",
+            "User": "bloom", "Group": "bloom", "FragmentPath": str(self.unit), "DropInPaths": "", "NeedDaemonReload": "no", "ControlGroup": "/system.slice/bloom-server.service"}
+
+    def state(self, fields):
+        result = mock.Mock(returncode=0, stdout="\n".join(key + "=" + value for key, value in fields.items()).encode())
+        with mock.patch.object(installer, "protected_system_path"), mock.patch.object(installer, "command", return_value=result):
+            return installer.managed_service_state(self.args)
+
+    def test_effective_unit_account_dropins_and_reload_must_match(self):
+        self.assertEqual(self.state(self.fields), self.fields)
+        for changes in [{"User": "root"}, {"FragmentPath": "/unrelated.service"}, {"DropInPaths": "/other.conf"}, {"NeedDaemonReload": "yes"}, {"LoadState": "not-found"}]:
+            with self.subTest(changes=changes), self.assertRaises(installer.InstallError):
+                self.state({**self.fields, **changes})
+        self.unit.write_text(installer.unit_contents(self.args) + "\nExecStop=/unrelated\n")
+        with self.assertRaises(installer.InstallError): self.state(self.fields)
+
+    def test_linux_proc_identity_requires_the_owned_executable_arguments_uid_and_cgroup(self):
+        proc = self.root / "proc"
+        process = proc / "123"; process.mkdir(parents=True)
+        expected = str(self.args.install_root / "current/bin/bloom-server")
+        (process / "exe").symlink_to(expected)
+        argv = [expected, "serve", "--data-dir", str(self.args.data_dir), ""]
+        (process / "cmdline").write_bytes("\0".join(argv).encode())
+        (process / "status").write_text("Uid:\t1234\t1234\t1234\t1234\n")
+        (process / "cgroup").write_text("0::/system.slice/bloom-server.service\n")
+        account = mock.Mock(pw_uid=1234)
+        installer.verify_managed_process(self.args, account, self.fields, proc=proc)
+        for name, bad in [("cmdline", b"another-server\0"), ("status", b"Uid:\t0\t0\t0\t0\n"), ("cgroup", b"0::/user.slice/manual.scope\n")]:
+            file = process / name; original = file.read_bytes(); file.write_bytes(bad)
+            with self.subTest(file=name), self.assertRaises(installer.InstallError):
+                installer.verify_managed_process(self.args, account, self.fields, proc=proc)
+            file.write_bytes(original)
+
+    def test_unfinished_or_corrupt_durable_command_journal_is_not_idle(self):
+        self.args.data_dir.mkdir()
+        with closing(sqlite3.connect(self.args.data_dir / "server.sqlite")) as connection, connection:
+            connection.executescript("CREATE TABLE sessions(state TEXT); CREATE TABLE workspaces(setup_state TEXT); CREATE TABLE settings(key TEXT,value TEXT);")
+            connection.execute("INSERT INTO settings VALUES (?, ?)", ("server.command.fixture", json.dumps({"request": {"id": "fixture"}})))
+        self.assertFalse(installer.active_work(self.args.data_dir))
+        with self.assertRaises(installer.InstallError) as raised:
+            installer.active_work(self.args.data_dir, include_commands=True)
+        self.assertEqual(raised.exception.code, "command_outcome_unknown")
+        self.assertIn("historical", raised.exception.recovery)
+        with closing(sqlite3.connect(self.args.data_dir / "server.sqlite")) as connection, connection:
+            connection.execute("UPDATE settings SET value=?", (json.dumps({"request": {}, "reply": {}}),))
+        self.assertFalse(installer.active_work(self.args.data_dir, include_commands=True))
+        with closing(sqlite3.connect(self.args.data_dir / "server.sqlite")) as connection, connection:
+            connection.execute("UPDATE settings SET value='invalid record'")
+        self.assertFalse(installer.active_work(self.args.data_dir))
+        with self.assertRaises(installer.InstallError) as raised: installer.active_work(self.args.data_dir, include_commands=True)
+        self.assertEqual(raised.exception.code, "database_unavailable")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -128,6 +128,18 @@ server; archived workspaces can be restored with their conversation history and 
 
 ### Guided installation layout
 
+Server checks keep the problem and available actions visible. Hover over a circled question mark
+for recovery details, or click it to open selectable text and Copy Details. Copy Report still
+includes every check and its full recovery instructions.
+
+For an existing managed installation, Stop Server asks for confirmation and uses the verified
+administrator SSH connection. It verifies the service ownership and checks for work before
+stopping that service, then refreshes installation checks. It refuses manually managed processes,
+unknown service state and observed active work. This is an explicit administrative stop, not an
+atomic maintenance mode: another client can start work after the final activity check. Connected
+clients disconnect; projects and conversations remain on disk. Installation starts the service
+again. Installation itself never stops a running server automatically.
+
 The wizard creates the `bloom` service account with `/home/bloom` as its home. Bloom-owned runtime
 and state use `~/bloom`:
 

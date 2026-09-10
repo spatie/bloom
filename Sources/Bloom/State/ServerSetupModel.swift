@@ -39,6 +39,7 @@ final class ServerSetupModel {
     private var clientKey: URL?
     private var installedKnownHosts: URL?
     private var task: Task<Void, Never>?
+    private var stoppingServerID: UUID?
     private var generation = UUID()
     private var retryStep = Phase.address
     private var validatedHost = ""
@@ -108,6 +109,28 @@ final class ServerSetupModel {
     }
 
     var canReviewInstallation: Bool { check?.blockers.isEmpty == true && inputsUnchanged && !isBusy }
+    var isStoppingServer: Bool { stoppingServerID != nil }
+
+    var canStopServer: Bool {
+        guard let check, check.existing, inputsUnchanged, !isBusy,
+              check.blockers.contains(where: { $0.code == "server_running" }) else { return false }
+        return check.blockers.allSatisfy { $0.code == "server_running" }
+    }
+
+    func stopServer() async {
+        guard canStopServer, let connection else { return }
+        let operationID = UUID()
+        stoppingServerID = operationID
+        defer { if stoppingServerID == operationID { stoppingServerID = nil } }
+        await perform(.checking) {
+            self.record("Checking for active work before stopping Bloom Server.")
+            let check = try await connection.stopServer(script: self.installerScript())
+            try Task.checkCancellation()
+            self.check = check
+            self.record("Bloom Server stopped. Installation checks refreshed.")
+            self.phase = .address
+        }
+    }
 
     func reviewInstallation() {
         guard phase == .address, canReviewInstallation else { return }
@@ -327,6 +350,7 @@ final class ServerSetupModel {
 
     func cancel() {
         generation = UUID(); task?.cancel(); task = nil; isBusy = false
+        stoppingServerID = nil
         if let client = accountClient { Task { await client.disconnect() } }
         accountClient = nil
     }

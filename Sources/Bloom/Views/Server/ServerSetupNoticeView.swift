@@ -6,27 +6,28 @@ struct ServerSetupNoticeView: View {
     let notice: ServerInstallNotice
     let serviceUser: String
     let showAdvanced: () -> Void
+    var stopServer: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.spacing) {
-            Label(notice.message, systemImage: "exclamationmark.triangle")
-                .foregroundStyle(Palette.warning)
-            Text(notice.recoverySuggestion)
-                .font(Typo.caption).foregroundStyle(.secondary)
-            if notice.code == "service_account_exists" || notice.code == "server_running" || notice.code == "server_busy" {
-                Button("Connect to Existing Server…", action: showAdvanced)
-                    .buttonStyle(.link)
+            HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingSmall) {
+                Text(notice.message).foregroundStyle(Palette.warning)
+                ServerSetupHelpButton(title: "How to resolve this", details: recoveryDetails)
             }
-            if notice.code == "service_account_exists" {
-                DisclosureGroup("Inspect the account") {
-                    Text("Run these read-only commands in an SSH terminal on the server. They show the account’s home directory and running processes. Share the results with your administrator before changing or removing the account.")
-                        .font(Typo.caption).foregroundStyle(.secondary)
-                    Text("getent passwd \(ServerSetupSSH.shellQuote(serviceUser))\nps -u \(ServerSetupSSH.shellQuote(serviceUser)) -o pid,comm")
-                        .font(Typo.codeSmall)
+            HStack(spacing: Metrics.gutter) {
+                if let stopServer { Button("Stop Server…", action: stopServer) }
+                if notice.code == "service_account_exists" || notice.code == "server_running" || notice.code == "server_busy" {
+                    Button("Connect to Existing Server…", action: showAdvanced)
+                        .buttonStyle(.link)
                 }
             }
         }
         .textSelection(.enabled)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var recoveryDetails: String {
+        guard notice.code == "service_account_exists" else { return notice.recoverySuggestion }
+        return notice.recoverySuggestion + "\n\nInspect the account with these read-only commands in an SSH terminal. Share the results with your administrator before changing or removing the account.\n\ngetent passwd \(ServerSetupSSH.shellQuote(serviceUser))\nps -u \(ServerSetupSSH.shellQuote(serviceUser)) -o pid,comm"
     }
 }

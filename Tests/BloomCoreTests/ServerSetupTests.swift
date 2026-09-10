@@ -3,6 +3,63 @@ import Testing
 @testable import BloomCore
 
 @Suite struct ServerSetupTests {
+    @Test func stoppedServerReturnsUnrelatedFreshBlockers() throws {
+        let check = try ServerSetupConnection.stoppedServerCheck(status: 0, output: stopCheck(code: "disk_full"))
+        #expect(check.existing)
+        #expect(check.blockers.map(\.code) == ["disk_full"])
+    }
+
+    @Test(arguments: ["server_running", "server_busy", "installation_busy"])
+    func stoppedServerRejectsConcurrentRestartOrWork(code: String) {
+        #expect(throws: ServerSetupFailure.self) {
+            try ServerSetupConnection.stoppedServerCheck(status: 0, output: stopCheck(code: code))
+        }
+    }
+
+    @Test func failedStopPreservesExactSafeDiagnostic() throws {
+        let output = #"{"event":"error","code":"command_failed","message":"systemd refused the stop","recovery":"Inspect the managed unit","command":"systemctl stop bloom-server.service","exitStatus":5,"details":"token=secret-fixture"}"#
+        do {
+            _ = try ServerSetupConnection.stoppedServerCheck(status: 1, output: output)
+            Issue.record("A failed stop was accepted")
+        } catch let failure as ServerSetupFailure {
+            #expect(failure.message == "systemd refused the stop")
+            #expect(failure.recovery == "Inspect the managed unit")
+            #expect(failure.command == "systemctl stop bloom-server.service")
+            #expect(failure.exitStatus == 5)
+            #expect(failure.details?.contains("secret-fixture") == false)
+        }
+    }
+
+    @Test func stoppedServerRequiresSuccessfulCompleteCheck() {
+        for output in ["", "{}", "not JSON", #"{"event":"complete"}"#] {
+            #expect(throws: ServerSetupFailure.self) {
+                try ServerSetupConnection.stoppedServerCheck(status: 0, output: output)
+            }
+        }
+        #expect(throws: ServerSetupFailure.self) {
+            try ServerSetupConnection.stoppedServerCheck(status: 1, output: stopCheck(code: "disk_full"))
+        }
+    }
+
+    @Test func stopCommandUsesExplicitNoninteractiveAdministratorMode() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("bloom-stop-wrapper-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fakeID = directory.appendingPathComponent("id")
+        try Data("#!/bin/sh\nprintf '0\\n'\n".utf8).write(to: fakeID)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fakeID.path)
+        let result = try await Shell.run("/bin/sh", ["-c", ServerSetupConnection.stopServerCommand],
+            env: ["PATH": directory.path + ":/usr/bin:/bin"],
+            stdin: "import sys\nprint(sys.argv[1])\n", timeout: .seconds(5))
+        #expect(result.ok)
+        #expect(result.trimmed == "--stop-server")
+        #expect(ServerSetupConnection.stopServerCommand.contains("sudo -n python3 - --stop-server"))
+    }
+
+    private func stopCheck(code: String) -> String {
+        #"{"event":"check","platform":"ubuntu","architecture":"x86_64","privilege":"root","existing":true,"blockers":[{"code":"\#(code)","message":"Fresh status"}],"warnings":[],"executable":"/home/bloom/bloom/server/current/bin/bloom-server","dataDirectory":"/home/bloom/bloom/data","serviceUser":"bloom"}"#
+    }
+
     @Test(arguments: ["", ", \"recovery\": null"])
     func legacyInstallerNoticesDecodeWithSafeRecoveryFallback(recoveryField: String) throws {
         let json = "{\"code\":\"installation_conflict\",\"message\":\"The installation needs attention.\"\(recoveryField)}"

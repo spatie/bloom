@@ -15,6 +15,7 @@ struct ServerSetupView: View {
     @State private var keySelectionFailure: String?
     @State private var showsOutput = false
     @State private var copiedReport = false
+    @State private var confirmsStopServer = false
     @FocusState private var addressIsFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -85,6 +86,12 @@ struct ServerSetupView: View {
             .padding(Metrics.gutter)
         }
         .frame(width: 800, height: 620)
+        .confirmationDialog("Stop Bloom Server on \(model.label.isEmpty ? model.host : model.label)?", isPresented: $confirmsStopServer) {
+            Button("Stop Server", role: .destructive) { Task { await model.stopServer() } }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Connected clients will disconnect, and server terminal commands may stop. Bloom checks for active agents and workspace setup first. Your projects and conversations stay on the server. Installing the update starts it again.")
+        }
         .sheet(isPresented: $showsOutput) {
             VStack(alignment: .leading, spacing: Metrics.gutter) {
                 Text("Setup Output").font(Typo.heading)
@@ -187,14 +194,19 @@ struct ServerSetupView: View {
                     .font(Typo.caption).foregroundStyle(.secondary)
                 if let keySelectionFailure { Text(keySelectionFailure).font(Typo.caption).foregroundStyle(Palette.warning) }
             }
-            Button("Connect to an existing Bloom server…", action: showAdvanced).buttonStyle(.link)
+            if !hasConnectionNotice {
+                Button("Connect to an existing Bloom server…", action: showAdvanced).buttonStyle(.link)
+            }
         }
         .disabled(model.isBusy)
     }
 
     @ViewBuilder private var serverChecks: some View {
         if model.isBusy {
-            HStack { ProgressView().controlSize(.small); Text("Checking SSH access, Ubuntu compatibility and installation…") }
+            HStack {
+                ProgressView().controlSize(.small)
+                Text(model.isStoppingServer ? "Stopping Bloom Server and checking the installation…" : "Checking SSH access, Ubuntu compatibility and installation…")
+            }
                 .font(Typo.caption).foregroundStyle(.secondary)
         } else if let check = model.check {
             VStack(alignment: .leading, spacing: Metrics.spacing) {
@@ -206,16 +218,25 @@ struct ServerSetupView: View {
                     Text("\(check.platform), \(check.architecture)").font(Typo.caption).foregroundStyle(.secondary)
                 }
                 ForEach(check.blockers, id: \.code) { notice in
-                    ServerSetupNoticeView(notice: notice, serviceUser: check.serviceUser, showAdvanced: showAdvanced)
+                    ServerSetupNoticeView(notice: notice, serviceUser: check.serviceUser, showAdvanced: showAdvanced,
+                        stopServer: notice.code == "server_running" && model.canStopServer ? { confirmsStopServer = true } : nil)
                 }
                 ForEach(check.warnings, id: \.code) { notice in
-                    Text(notice.message).font(Typo.caption).foregroundStyle(.secondary)
+                    HStack(spacing: Metrics.spacingSmall) {
+                        Text(notice.code == "limited_memory" ? "Less than 2 GB of memory" : notice.message)
+                            .font(Typo.caption).foregroundStyle(.secondary)
+                        ServerSetupHelpButton(title: notice.code == "limited_memory" ? "Memory requirements" : "Server warning", details: notice.message)
+                    }
                 }
-                if check.existing { Text("Existing Bloom installation found. Projects will be preserved.").font(Typo.caption).foregroundStyle(.secondary) }
+                if check.existing { Text("Existing projects will be preserved.").font(Typo.caption).foregroundStyle(.secondary) }
             }
             .padding(Metrics.gutter)
             .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
         }
+    }
+
+    private var hasConnectionNotice: Bool {
+        model.check?.blockers.contains { ["service_account_exists", "server_running", "server_busy"].contains($0.code) } == true
     }
 
     private var installationSummary: some View {

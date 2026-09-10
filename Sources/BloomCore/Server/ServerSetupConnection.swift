@@ -102,6 +102,47 @@ public struct ServerSetupConnection: Sendable {
         throw ServerSetupFailure.classify(status: result.status, stderr: result.stderr, command: "ssh")
     }
 
+    /// An explicit administrative action. The installer checks managed ownership and current
+    /// work before stopping its service; this does not claim an atomic daemon admission barrier.
+    public func stopServer(script: String) async throws -> ServerInstallCheck {
+        let command = Self.stopServerCommand
+        let result: ServerCredentialImportProcess.Result
+        do {
+            result = try await ServerCredentialImportProcess.run("/usr/bin/ssh", arguments(command: command),
+                environment: Shell.environment(), input: Data(script.utf8), limit: 262_144, timeout: 90, captureStderr: true)
+        } catch is CancellationError { throw CancellationError() } catch {
+            let timedOut = error.localizedDescription.lowercased().contains("timed out")
+            throw ServerSetupFailure.installation(code: timedOut ? "command_timeout" : "stop_failed",
+                message: timedOut ? "Stopping Bloom Server timed out." : "The server stop could not be confirmed.",
+                recovery: "The service may already have stopped. Choose Check Again before retrying.", command: "Stop Bloom Server")
+        }
+        try Task.checkCancellation()
+        return try Self.stoppedServerCheck(status: result.status, output: String(decoding: result.output, as: UTF8.self))
+    }
+
+    static let stopServerCommand = "if [ \"$(id -u)\" = 0 ]; then python3 - --stop-server; elif sudo -n true; then sudo -n python3 - --stop-server; else python3 - --stop-server; fi"
+
+    static func stoppedServerCheck(status: Int32, output: String) throws -> ServerInstallCheck {
+        let lines = output.split(separator: "\n")
+        if status == 0, let last = lines.last,
+           let value = JSONValue.parse(Data(last.utf8)), value["event"]?.stringValue == "check",
+           var check = try? JSONDecoder().decode(ServerInstallCheck.self, from: Data(last.utf8)) {
+            check.blockers = check.blockers.map(sanitisedNotice)
+            check.warnings = check.warnings.map(sanitisedNotice)
+            if let refusal = check.blockers.first(where: { ["server_running", "server_busy", "installation_busy"].contains($0.code) }) {
+                throw ServerSetupFailure.installation(code: refusal.code, message: refusal.message, recovery: refusal.recovery)
+            }
+            return check
+        }
+        for line in lines.reversed() {
+            if let event = try? JSONDecoder().decode(ServerInstallEvent.self, from: Data(line.utf8)), event.event == "error" {
+                throw ServerSetupFailure.installation(code: event.code ?? "stop_failed", message: event.message,
+                    recovery: event.recovery, details: event.details, command: event.command, exitStatus: event.exitStatus)
+            }
+        }
+        throw ServerSetupFailure.classify(status: status, stderr: output, command: "Stop Bloom Server", explainUnknown: true)
+    }
+
     private static func sanitisedNotice(_ notice: ServerInstallNotice) -> ServerInstallNotice {
         var value = notice
         value.message = ServerSetupDiagnostics.sanitise(value.message)
