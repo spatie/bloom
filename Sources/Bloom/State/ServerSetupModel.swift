@@ -6,7 +6,7 @@ import CryptoKit
 
 @MainActor @Observable
 final class ServerSetupModel {
-    enum Phase { case address, trust, checking, readyToInstall, installing, accounts, connecting, complete }
+    enum Phase { case introduction, address, trust, checking, readyToInstall, installing, accounts, connecting, complete }
     var host = ""
     var identityFile = ""
     var label = ""
@@ -15,7 +15,7 @@ final class ServerSetupModel {
     private(set) var browserFailure: String?
     private(set) var browserRecovery: String?
     private(set) var browserAttempted = false
-    private(set) var phase = Phase.address
+    private(set) var phase = Phase.introduction
     private(set) var isBusy = false
     private(set) var fingerprint: String?
     private(set) var failure: ServerSetupFailure?
@@ -54,6 +54,17 @@ final class ServerSetupModel {
             installed = ServerInstallEvent(executable: server.executable, dataDirectory: server.remoteDirectory, serviceUser: String(user))
             phase = .accounts
         }
+    }
+
+    func beginSetup() {
+        guard phase == .introduction else { return }
+        phase = .address
+    }
+
+    func showIntroduction() {
+        guard phase == .address, !isBusy else { return }
+        failure = nil
+        phase = .introduction
     }
 
     func inspect() async {

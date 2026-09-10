@@ -16,7 +16,12 @@ struct ServerSetupView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: Metrics.spacing) {
-                Text(title).font(Typo.heading)
+                if model.phase == .introduction {
+                    Label("Bloom Server", systemImage: "server.rack")
+                        .font(Typo.captionEmphasis)
+                        .foregroundStyle(Palette.accent)
+                } else { setupProgress }
+                Text(title).font(model.phase == .introduction ? Typo.displayHeading : Typo.heading)
                 Text(subtitle)
                     .font(Typo.label)
                     .foregroundStyle(Palette.textSecondary)
@@ -24,7 +29,9 @@ struct ServerSetupView: View {
             }
             .padding(Metrics.gutter * 2)
 
-            Form {
+            if model.phase == .introduction {
+                ServerSetupIntroduction(showAdvanced: showAdvanced)
+            } else { Form {
                 phaseContent
                 if let failure = model.failure {
                     Section {
@@ -47,6 +54,7 @@ struct ServerSetupView: View {
                 }
             }
             .formStyle(.grouped)
+            }
 
             Divider()
             HStack(spacing: Metrics.gutter) {
@@ -58,6 +66,9 @@ struct ServerSetupView: View {
                 if canEditAddress {
                     Button("Edit Address") { model.editAddress() }
                         .disabled(model.isBusy)
+                }
+                if model.phase == .address {
+                    Button("Back") { model.showIntroduction() }
                 }
                 Spacer()
                 if model.isBusy { ProgressView().controlSize(.small) }
@@ -86,6 +97,7 @@ struct ServerSetupView: View {
 
     private var title: String {
         switch model.phase {
+        case .introduction: "Keep your work running"
         case .address: "Add a Server"
         case .trust: "Verify Your Server"
         case .checking: "Checking Your Server"
@@ -99,7 +111,8 @@ struct ServerSetupView: View {
 
     private var subtitle: String {
         switch model.phase {
-        case .address: "Start with an Ubuntu server from your hosting provider. Enter its SSH address below and Bloom will install the tools you need."
+        case .introduction: "Run your projects on your own server, and pick up where you left off in Bloom."
+        case .address: "Enter your Ubuntu server’s SSH address. Bloom will check it before making any changes."
         case .trust: "This is the first connection to this server. Compare its fingerprint with one provided by your administrator or hosting provider."
         case .checking: "Checking the operating system, access and any existing Bloom installation."
         case .readyToInstall: "Bloom will install its server component and tools, create a dedicated account, and configure automatic startup."
@@ -112,6 +125,7 @@ struct ServerSetupView: View {
 
     @ViewBuilder private var phaseContent: some View {
         switch model.phase {
+        case .introduction: EmptyView()
         case .address: addressFields
         case .trust:
             Section("Server identity") {
@@ -257,7 +271,7 @@ struct ServerSetupView: View {
 
     private var canEditAddress: Bool {
         switch model.phase {
-        case .address, .complete: false
+        case .introduction, .address, .complete: false
         default: true
         }
     }
@@ -269,6 +283,9 @@ struct ServerSetupView: View {
                 .disabled(model.isBusy)
         } else {
             switch model.phase {
+            case .introduction:
+                Button("Get Started") { model.beginSetup() }
+                    .keyboardShortcut(.defaultAction)
             case .address:
                 Button("Check Server") { Task { await model.inspect() } }
                     .keyboardShortcut(.defaultAction)
@@ -302,6 +319,34 @@ struct ServerSetupView: View {
         login?.stop()
         login = nil
         Task { await model.refreshAccounts() }
+    }
+
+    private var setupStep: Int {
+        switch model.phase {
+        case .introduction, .address, .trust, .checking: 0
+        case .readyToInstall, .installing: 1
+        case .accounts, .connecting: 2
+        case .complete: 3
+        }
+    }
+
+    private var setupProgress: some View {
+        HStack(spacing: Metrics.gutter) {
+            ForEach(Array(["Server", "Setup", "Accounts"].enumerated()), id: \.offset) { index, name in
+                if index > 0 {
+                    Image(systemName: "chevron.right").font(Typo.micro).foregroundStyle(Palette.textTertiary)
+                }
+                HStack(spacing: Metrics.spacingSmall) {
+                    if index < setupStep { Image(systemName: "checkmark.circle.fill") }
+                    Text(name)
+                }
+                .font(Typo.captionEmphasis)
+                .foregroundStyle(index == setupStep ? Palette.accent : Palette.textSecondary)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(setupStep == 3 ? "Setup complete" : "Step \(setupStep + 1) of 3")
+        .padding(.bottom, Metrics.spacing)
     }
 }
 

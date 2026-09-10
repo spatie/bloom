@@ -25,7 +25,7 @@ private struct ServerConnectionContent: View {
     init(server: ServerWindowModel) {
         self.server = server
         _setup = State(initialValue: ServerSetupModel(server: server))
-        _showsSetup = State(initialValue: !server.isConfigured)
+        _showsSetup = State(initialValue: false)
     }
 
     var body: some View {

@@ -15,7 +15,8 @@ moved into this server. New server workspaces can run locally or on another mach
 
 Choose **+** in the bottom-left sidebar footer, then **Add Server…**. The same command is available
 in the File menu and the workspace destination menu, including when a server is already connected.
-It opens a fresh setup form. Enter `root@server-ip` (or an administrative SSH account with passwordless
+It introduces remote workspaces and explains the requirements before asking for connection details.
+Choose **Get Started**, then enter `root@server-ip` (or an administrative SSH account with passwordless
 sudo), and select a key or use your SSH agent. Existing trusted host keys are copied into the
 app's private trust store. New hosts show their Ed25519 fingerprint for explicit verification;
 changed and revoked keys are refused. Automatic first-time key discovery supports direct IPv4

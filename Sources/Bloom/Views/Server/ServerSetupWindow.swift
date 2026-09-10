@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Adding a server always starts with a fresh form, independently of the current connection.
+/// Adding a server starts with an introduction, independently of the current connection.
 struct ServerSetupWindow: Scene {
     static let id = "bloom-server-setup"
     let model: AppModel

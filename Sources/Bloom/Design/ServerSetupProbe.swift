@@ -74,6 +74,18 @@ enum ServerSetupProbe {
                 try data.write(to: output.appendingPathComponent(String(format: "%02d-%@.png", count, phase)))
             }
             try await Task.sleep(for: .milliseconds(300))
+            guard model.phase == .introduction else { throw ServerFailure("Adding a server must introduce the feature first.") }
+            try await capture("introduction")
+            model.beginSetup()
+            if configuration.inspect == false {
+                let address = model.host, label = model.label, key = model.identityFile
+                model.showIntroduction()
+                guard model.phase == .introduction, model.host == address, model.label == label, model.identityFile == key else {
+                    throw ServerFailure("Returning to the introduction lost the entered server details.")
+                }
+                model.beginSetup()
+            }
+            try await Task.sleep(for: .milliseconds(200))
             try await capture("server-details")
             if configuration.inspect != false { await model.inspect() }
             try await capture("server-check")
