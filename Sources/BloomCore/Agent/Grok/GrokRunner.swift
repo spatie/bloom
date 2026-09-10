@@ -25,6 +25,7 @@ public actor GrokRunner: SessionRunner {
     /// Invalidates in-flight pump events when the client is replaced. A late `.closed` from a
     /// dead process must not drop the replacement.
     private var connectionGeneration: UInt64 = 0
+    private var permissionConnectionID = UUID()
 
     private let grants: SessionGrants
     private var wireModel: String { ModelIdentifier.resolve(session.model).model }
@@ -82,6 +83,10 @@ public actor GrokRunner: SessionRunner {
         let replacement = handle.prepareReplacement()
         defer { handle.finishReplacement(replacement) }
         try handle.check(generation)
+        if handle.wasCancelled {
+            for event in translation.finishInterruptedTurn() { await emit(event) }
+            try handle.check(generation)
+        }
         let client = try await connected()
         try handle.check(generation)
         let grokSessionID = try await openSession(on: client)
@@ -113,11 +118,12 @@ public actor GrokRunner: SessionRunner {
 
     private func stopTurn(_ stopped: CodexTurnHandle.Stopped) async {
         if handle.generation == stopped.generation, handle.wasCancelled {
+            for event in translation.finishInterruptedTurn() { await emit(event) }
             await filePendingAsks()
         }
         if handle.generation == stopped.generation, handle.wasCancelled,
            session.apply(.cancelled).moves { await save(session) }
-        if let grokSessionID {
+        if handle.generation == stopped.generation, handle.wasCancelled, let grokSessionID {
             await client?.cancel(sessionID: grokSessionID)
         }
     }
@@ -152,6 +158,7 @@ public actor GrokRunner: SessionRunner {
         pumpTask = nil
         handle.end()
         approvals.removeAll()
+        for event in translation.finishInterruptedTurn() { await emit(event) }
         if let sessionToClose {
             await closing?.closeSession(sessionToClose)
         }
@@ -179,6 +186,7 @@ public actor GrokRunner: SessionRunner {
             alwaysApprove: session.permissionMode == .bypassPermissions
         ))
         self.client = client
+        permissionConnectionID = UUID()
         connection.attach(client)
         let events = client.events
         let generation = connectionGeneration
@@ -278,9 +286,15 @@ public actor GrokRunner: SessionRunner {
         if case .closed = event, handle.wasCancelled || trouble.hasStopped { return }
 
         if case .permission(let request) = event {
+            if handle.wasCancelled {
+                await client?.answer(request.id, with: GrokPermission.cancelledResult)
+                return
+            }
             await ask(request)
             return
         }
+
+        if case .update = event, handle.wasCancelled { return }
 
         let ending = if case .promptCompleted(let result) = event { result.requestID.turnID } else { nil as String? }
         if let ending, !handle.acceptsTerminal(turnID: ending) { return }
@@ -329,7 +343,7 @@ public actor GrokRunner: SessionRunner {
     // MARK: - Asking
 
     private func ask(_ request: GrokPermissionRequest) async {
-        let ask = GrokPermission.ask(for: request)
+        let ask = GrokPermission.ask(for: request, connectionID: permissionConnectionID)
         pending.add(ask)
         approvals[ask.requestID] = request
 

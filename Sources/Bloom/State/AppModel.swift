@@ -387,6 +387,7 @@ final class AppModel {
                 try Store(path: try Store.defaultPath())
             }.value
             self.store = store
+            ComposerModelCatalog.shared.configure(store: store)
             self.manager = WorkspaceManager(store: store)
             try await store.resetRunningSessions()
             // The questions those sessions were blocked on. A pending ask whose agent is gone is

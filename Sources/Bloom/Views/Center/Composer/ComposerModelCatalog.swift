@@ -35,8 +35,9 @@ final class ComposerModelCatalog {
     private(set) var lastFailure: String?
 
     private let catalog: CodexModelCatalog
-    private let grokCatalog: GrokModelCatalog
+    private var grokCatalog: GrokModelCatalog
     private var loadTask: Task<Void, Never>?
+    private var loadGeneration = UUID()
 
     init(
         catalog: CodexModelCatalog = CodexModelCatalog.live(),
@@ -44,6 +45,11 @@ final class ComposerModelCatalog {
     ) {
         self.catalog = catalog
         self.grokCatalog = grokCatalog
+    }
+
+    func configure(store: Store) {
+        grokCatalog = GrokModelCatalog.live(store: store)
+        refresh()
     }
 
     /// Fetches once, and again only after `refresh()`. Cheap to call on every menu appearance,
@@ -54,22 +60,29 @@ final class ComposerModelCatalog {
         let needsGrok = grokModels.isEmpty
         guard needsCodex || needsGrok else { return }
         isLoading = true
+        let generation = loadGeneration
         loadTask = Task { [catalog, grokCatalog] in
             var failure: String?
             if needsCodex {
                 do {
-                    self.codexModels = try await catalog.pickerModels()
+                    let models = try await catalog.pickerModels()
+                    guard generation == self.loadGeneration else { return }
+                    self.codexModels = models
                 } catch {
                     failure = error.readableMessage
                 }
             }
+            guard generation == self.loadGeneration else { return }
             if needsGrok {
                 do {
-                    self.grokModels = try await grokCatalog.pickerModels()
+                    let models = try await grokCatalog.pickerModels()
+                    guard generation == self.loadGeneration else { return }
+                    self.grokModels = models
                 } catch {
                     if failure == nil { failure = error.readableMessage }
                 }
             }
+            guard generation == self.loadGeneration else { return }
             // Not an alert. A model menu that cannot reach a CLI is a menu with fewer sections,
             // and the sections that are there still work.
             self.lastFailure = failure
@@ -80,12 +93,16 @@ final class ComposerModelCatalog {
 
     func refresh() {
         loadTask?.cancel()
-        loadTask = nil
+        loadGeneration = UUID()
+        let generation = loadGeneration
         codexModels = []
         grokModels = []
-        Task {
+        isLoading = true
+        loadTask = Task { [catalog, grokCatalog] in
             await catalog.invalidate()
             await grokCatalog.invalidate()
+            guard generation == self.loadGeneration else { return }
+            self.loadTask = nil
             load()
         }
     }

@@ -57,6 +57,39 @@ private func eventually(
 
 @Suite(.scratchDirectory)
 struct GrokRunnerTests {
+    @Test("a restarted server can reuse a permission RPC id without inheriting its old decision")
+    func permissionIDsSurviveReconnect() async throws {
+        let store = try makeTestStore("grok-permission-reconnect")
+        let session = try await makeGrokSession(store)
+        let box = scriptedGrokBox()
+        let runner = makeRunner(store: store, session: session, box: box)
+        defer { runner.terminateNow() }
+
+        try await runner.send("first")
+        box.process.emit(permissionRequestLine(id: 7))
+        await eventually("first permission") {
+            ((try? await store.pendingPermissionAsks(sessionID: session.id)) ?? []).count == 1
+        }
+        let first = try #require(try await store.pendingPermissionAsks(sessionID: session.id).first)
+        await runner.answer(requestID: first.id, decision: .allow(scope: .once))
+        box.process.endOutput()
+        await eventually("connection closed") {
+            (try? await store.session(id: session.id))?.state == .failed
+        }
+
+        try await runner.send("second")
+        box.process.emit(permissionRequestLine(id: 7))
+        await eventually("second permission") {
+            ((try? await store.pendingPermissionAsks(sessionID: session.id)) ?? []).count == 1
+        }
+        let second = try #require(try await store.pendingPermissionAsks(sessionID: session.id).first)
+        #expect(second.id != first.id)
+        await runner.answer(requestID: second.id, decision: .allow(scope: .once))
+        #expect(box.process.stdin.compactMap(JSONValue.parse).contains {
+            $0["id"]?.intValue == 7 && $0["result"]?["outcome"]?["optionId"]?.stringValue == "allow-once"
+        })
+    }
+
     @Test("a first send starts ACP, opens a session, and stores the id")
     func firstSendOpensASession() async throws {
         let store = try makeTestStore("grok-first-send")

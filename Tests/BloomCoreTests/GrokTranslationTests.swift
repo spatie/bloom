@@ -4,6 +4,29 @@ import Foundation
 
 @Suite("Grok translation")
 struct GrokTranslationTests {
+    @Test("prompt errors retain their explanation when stored and decoded")
+    func promptErrorSurvivesStorage() throws {
+        var translation = GrokTranslation()
+        let events = translation.translate(.promptCompleted(GrokPromptResult(
+            requestID: .number(1),
+            sessionID: "s",
+            stopReason: "refusal",
+            raw: .object(["message": .string("Insufficient credits")])
+        )))
+        guard case .result(let result) = events.last else {
+            Issue.record("expected an error result")
+            return
+        }
+        #expect(result.isError)
+        #expect(result.summary == "Insufficient credits")
+        let line = try #require(String(data: result.raw, encoding: .utf8))
+        guard case .result(let restored) = AgentEvent.decode(line: line) else {
+            Issue.record("expected a stored result")
+            return
+        }
+        #expect(restored.summary == result.summary)
+    }
+
     @Test("session ready becomes a stored init line naming Grok")
     func sessionReadyIsInit() {
         var translation = GrokTranslation(context: GrokTranslation.Context(
@@ -141,10 +164,11 @@ struct GrokTranslationTests {
             raw: Data()
         )
         let ask = GrokPermission.ask(for: request)
-        #expect(ask.requestID == "grok:sess-1:3")
+        #expect(ask.requestID.hasPrefix("grok:"))
         #expect(ask.toolName == "Bash")
         #expect(ask.input["command"]?.stringValue == "ls")
         #expect(ask.suppressesAlwaysAllow)
+        #expect(PermissionAsk.decode(payload: ask.raw)?.suppressesAlwaysAllow == true)
         #expect(GrokPermission.optionID(for: .allow(scope: .once), in: request) == "allow-once")
         #expect(GrokPermission.optionID(
             for: .deny(message: "no", endsTurn: false),

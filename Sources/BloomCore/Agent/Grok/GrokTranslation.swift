@@ -122,11 +122,20 @@ public struct GrokTranslation: Sendable {
             return events
 
         case .closed(let reason):
-            return [.error(AgentError(message: reason, raw: Self.errorLine(message: reason)))]
+            return finishInterruptedTurn()
+                + [.error(AgentError(message: reason, raw: Self.errorLine(message: reason)))]
 
         case .permission, .unknown:
             return []
         }
+    }
+
+    /// An interrupted turn might never send its completion. Keep its partial answer in its own
+    /// row before another prompt arrives, and discard tool state belonging to that turn.
+    public mutating func finishInterruptedTurn() -> [AgentEvent] {
+        let events = flushOpenBlocks()
+        tools.removeAll()
+        return events
     }
 
     private mutating func updateEvents(_ update: GrokSessionUpdate) -> [AgentEvent] {
@@ -278,12 +287,13 @@ public struct GrokTranslation: Sendable {
     }
 
     private func result(for prompt: GrokPromptResult) -> AgentResult {
+        let summary = prompt.isError ? prompt.raw["message"]?.stringValue ?? "" : ""
         let subtype = prompt.wasCancelled ? "error_during_execution"
             : prompt.isError ? prompt.stopReason
             : "success"
         return AgentResult(
             usage: usage,
-            summary: "",
+            summary: summary,
             isError: prompt.isError,
             subtype: subtype,
             durationMS: 0,
@@ -292,7 +302,7 @@ public struct GrokTranslation: Sendable {
             raw: Self.resultLine(
                 subtype: subtype,
                 isError: prompt.isError,
-                summary: "",
+                summary: summary,
                 durationMS: 0,
                 usage: usage,
                 model: context.model,

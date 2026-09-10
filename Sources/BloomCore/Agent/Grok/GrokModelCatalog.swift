@@ -126,10 +126,16 @@ public actor GrokModelCatalog {
     }
 
     public static func live(
-        cwd: String = AgentScratchDirectory.current()
+        cwd: String = AgentScratchDirectory.current(),
+        store: Store? = nil,
+        makeClient: @escaping @Sendable (GrokClient.Configuration) -> GrokClient = GrokRunner.spawn
     ) -> GrokModelCatalog {
         GrokModelCatalog(fetch: {
-            let client = GrokClient(configuration: GrokClient.Configuration(cwd: cwd))
+            let stored = try await store?.setting(AgentCatalog.executablePathSettingKey(.grok))
+            let client = makeClient(GrokClient.Configuration(
+                executable: AgentCatalog.executable(for: .grok, override: stored),
+                cwd: cwd
+            ))
             defer { Task { await client.stop() } }
             try await client.start()
             return await client.advertisedModels()
@@ -151,9 +157,11 @@ public actor GrokModelCatalog {
             inFlight = task
         }
 
+        // A failed fetch must be retryable. Keep the identity check so an old failure cannot
+        // clear a replacement fetch started after invalidation.
+        defer { if inFlight == task { inFlight = nil } }
         let models = try await task.value
         if inFlight == task {
-            inFlight = nil
             cached = Self.sorted(models)
             fetchedAt = now()
         }

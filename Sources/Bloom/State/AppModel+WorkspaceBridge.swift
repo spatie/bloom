@@ -344,7 +344,7 @@ extension AppModel {
         case .grok:
             if order.model == nil, agent == inheritedAgent { return controls }
 
-            let models = try await GrokModelCatalog.live().pickerModels()
+            let models = try await GrokModelCatalog.live(store: store).pickerModels()
             let chosen: GrokModel?
             if let requested = order.model {
                 chosen = models.first { $0.id == requested }

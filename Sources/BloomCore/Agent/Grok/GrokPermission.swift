@@ -8,19 +8,17 @@ import Foundation
 /// makes the persistent grant available; without one, `suppressesAlwaysAllow` is set and the
 /// prompt will not offer a rule Bloom could not honour on the wire.
 public enum GrokPermission {
-    public static func requestID(_ id: GrokRequestID, sessionID: String) -> String {
-        switch id {
-        case .number(let value): "grok:\(sessionID):\(value)"
-        case .text(let value): "grok:\(sessionID):\(value)"
-        }
+    public static func requestID(_ id: GrokRequestID, sessionID: String, connectionID: UUID) -> String {
+        // RPC ids can restart at one when the same session resumes in a new process.
+        "grok:\(connectionID.uuidString):\(sessionID):\(id.jsonLiteral)"
     }
 
-    public static func ask(for request: GrokPermissionRequest) -> PermissionAsk {
+    public static func ask(for request: GrokPermissionRequest, connectionID: UUID = UUID()) -> PermissionAsk {
         let name = GrokTranslation.toolName(for: request.toolCall)
         let input = GrokTranslation.input(for: request.toolCall)
         let allowsAlways = request.options.contains { $0.kind == "allow_always" }
         let ask = PermissionAsk(
-            requestID: requestID(request.id, sessionID: request.sessionID),
+            requestID: requestID(request.id, sessionID: request.sessionID, connectionID: connectionID),
             toolName: name,
             displayName: request.toolCall.title,
             toolUseID: request.toolCall.id,
@@ -53,6 +51,23 @@ public enum GrokPermission {
                 "display_name": ask.displayName.isEmpty ? nil : .string(ask.displayName),
                 "tool_use_id": .string(ask.toolUseID),
                 "input": ask.input,
+                "description": .string(ask.summary),
+                "decision_reason_type": .string(ask.reasonType),
+                "blocked_path": ask.blockedPath.map(JSONValue.string),
+                "suppress_always_allow_rule": .bool(ask.suppressesAlwaysAllow),
+                "permission_suggestions": .array(ask.suggestions.map { suggestion in
+                    .object([
+                        "type": .string(suggestion.type),
+                        "behavior": .string(suggestion.behavior),
+                        "destination": .string(suggestion.destination),
+                        "rules": .array(suggestion.rules.map { rule in
+                            .object(omittingNil: [
+                                "toolName": .string(rule.toolName),
+                                "ruleContent": rule.ruleContent.map(JSONValue.string),
+                            ])
+                        }),
+                    ])
+                }),
             ]),
         ])
         return Data(json.compactJSON.utf8)
@@ -93,7 +108,8 @@ public enum GrokPermission {
     ])
 
     private static func ruleContent(for call: GrokToolCall) -> String? {
-        if let command = call.rawInput["command"]?.stringValue, !command.isEmpty { return command }
+        let input = GrokTranslation.input(for: call)
+        if let command = input["command"]?.stringValue, !command.isEmpty { return command }
         if !call.path.isEmpty { return call.path }
         return nil
     }
