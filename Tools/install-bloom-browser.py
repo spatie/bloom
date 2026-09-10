@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Optional, pinned host browser tooling. Does not modify or restart Bloom Server.
 
-Install: --user bloom --service-home /var/lib/bloom-home
+Install: --user bloom --service-home /home/bloom
 Read-only readiness: --check (last sandbox smoke, not a live browser launch).
 A nonzero exit means only browser testing is unavailable. Core setup may continue.
 """
@@ -217,6 +217,10 @@ def private_directory(path):
         path.mkdir(mode=0o700)
 
 
+def browser_state(home):
+    return Path(home) / "bloom/data/browser"
+
+
 def chrome_arguments(arguments):
     unsafe = {"--no-sandbox", "--disable-setuid-sandbox", "--disable-namespace-sandbox", "--disable-seccomp-filter-sandbox",
               "--disable-gpu-sandbox", "--single-process", "--no-zygote", "--in-process-gpu"}
@@ -243,7 +247,9 @@ def runtime():
     workspace = os.environ.get("BLOOM_WORKSPACE_ID") or os.environ.get("BLOOM_WORKSPACE_PATH") or str(Path.cwd().resolve())
     key = hashlib.sha256(workspace.encode()).hexdigest()[:24]
     home = Path(config["serviceHome"])
-    state = home / ".bloom-browser"
+    state = browser_state(home)
+    private_directory(home / "bloom")
+    private_directory(home / "bloom/data")
     private_directory(state)
     private_directory(state / "workspaces")
     base = state / "workspaces" / key
@@ -329,7 +335,7 @@ def smoke(config, account):
         if not value.get("success"):
             fail("browser_smoke_failed", str(value.get("error", "Browser smoke failed"))[:2000], "Review sandbox and dependency diagnostics, then retry.")
         return value.get("data", {})
-    state = Path(config["serviceHome"]) / ".bloom-browser"
+    state = browser_state(config["serviceHome"])
     screenshot = state / "smoke.png"
     try:
         invoke("open", "chrome://sandbox")
@@ -375,7 +381,7 @@ def install(options):
     if release_info.get("ID", "").strip('"') != "ubuntu" or release_info.get("VERSION_ID", "").strip('"') not in ("24.04", "26.04"):
         fail("unsupported_distribution", "Browser dependencies are tested for Ubuntu 24.04 and 26.04.", "Install on a supported Ubuntu host.")
     account = pwd.getpwnam(options.user)
-    home = Path(options.service_home)
+    home = Path(options.service_home or account.pw_dir)
     if account.pw_uid == 0 or not home.is_absolute() or home.is_symlink() or not home.is_dir() or home.stat().st_uid != account.pw_uid:
         fail("invalid_service_user", "Browser testing needs a non-root service user with its own home directory.", "Complete Bloom Server setup first and pass its user and service home.")
     protected(ROOT)
@@ -447,7 +453,7 @@ def main():
         return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--user", default="bloom")
-    parser.add_argument("--service-home", default="/var/lib/bloom-home")
+    parser.add_argument("--service-home", help="Service account home from its passwd entry by default")
     parser.add_argument("--check", action="store_true", help="Read the last successful sandbox verification without starting a browser")
     options = parser.parse_args()
     if options.check:

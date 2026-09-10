@@ -6,14 +6,29 @@ struct ServerSetupAccountsView: View {
     @Bindable var model: ServerSetupModel
     @State private var login: LoginTerminalSession?
     @State private var loginProblem: String?
+    @State private var credentialImport: ServerCredentialImportModel?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                    Text("Already signed in on this Mac?").font(Typo.labelEmphasis)
+                    Text("Choose GitHub or Codex accounts to use on this server.")
+                        .font(Typo.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Use Accounts from This Mac…") {
+                    guard let connection = model.accountConnection else { return }
+                    credentialImport = ServerCredentialImportModel(connection: connection)
+                }
+                .disabled(model.isBusy || model.accountConnection == nil)
+            }
+            Divider()
             accountRow("GitHub", detail: githubDetail, account: .github)
             Divider()
-            accountRow("Codex", detail: "Connect your Codex account. The tool installs if needed.", account: .codex)
+            accountRow("Codex", detail: agentDetail(.codex, name: "Codex"), account: .codex)
             Divider()
-            accountRow("Claude", detail: "Connect your Claude account. The tool installs if needed.", account: .claude)
+            accountRow("Claude", detail: agentDetail(.claudeCode, name: "Claude"), account: .claude)
             Divider()
             browserRow
             HStack {
@@ -25,11 +40,26 @@ struct ServerSetupAccountsView: View {
         .sheet(isPresented: Binding(get: { login != nil }, set: { if !$0 { closeLogin() } })) {
             if let login { ServerSetupLoginView(session: login, close: closeLogin) }
         }
-        .onDisappear { login?.stop(); login = nil }
+        .sheet(isPresented: Binding(get: { credentialImport != nil }, set: { if !$0 { closeImport() } })) {
+            if let credentialImport { ServerCredentialImportView(model: credentialImport, close: closeImport) }
+        }
+        .onDisappear { login?.stop(); login = nil; credentialImport?.cancel(); credentialImport = nil }
     }
 
     private var githubDetail: String {
         model.githubIsAuthenticated ? "Signed in on this server. Private repositories are available." : "Connect GitHub to browse and clone your private repositories."
+    }
+
+    private func agentDetail(_ agent: AgentKind, name: String) -> String {
+        guard let status = model.agentAuthentication.first(where: { $0.agent == agent }) else {
+            return "Connect your \(name) account. The tool installs if needed."
+        }
+        switch status.state {
+        case .ready: return "A saved sign-in is available on this server."
+        case .signInRequired: return "Sign in before starting an agent chat on this server."
+        case .unavailable: return "The tool will be installed when you sign in."
+        case .unknown: return "Sign-in status could not be checked. You can sign in or refresh to try again."
+        }
     }
 
     private func accountRow(_ title: String, detail: String, account: ServerSetupAccount) -> some View {
@@ -74,6 +104,12 @@ struct ServerSetupAccountsView: View {
                 Button(model.browserAttempted ? "Retry Browser Setup" : "Install Browser Tools") { Task { await model.retryBrowserInstall() } }
             }
         }
+    }
+
+    private func closeImport() {
+        credentialImport?.cancel()
+        credentialImport = nil
+        Task { await model.refreshAccounts() }
     }
 
     private func closeLogin() {

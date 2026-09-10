@@ -850,7 +850,10 @@ final class TranscriptModel {
 
     /// Whether this delivery is at the front of an idle queue and can be attempted now.
     func canRetry(_ delivery: Delivery) -> Bool {
-        if remote != nil { return false }
+        if let remote {
+            return remote.supportsAuthenticationChecks && remoteQueueError.map(AgentAuthenticationStatus.isSignInFailure) == true
+                && pendingDeliveries.first?.id == delivery.id
+        }
         return Delivery.next(
             from: pendingDeliveries, hold: deliveryHold, on: session.agentKind
         )?.id == delivery.id
@@ -858,6 +861,11 @@ final class TranscriptModel {
 
     /// Attempts the front of the queue again without changing its order or duplicating its text.
     func retryPending() async {
+        if let remote {
+            guard let first = pendingDeliveries.first, canRetry(first) else { return }
+            _ = await remote.retryAuthenticationPaused(first)
+            return
+        }
         wasStoppedByHand = false
         await drain()
     }

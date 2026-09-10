@@ -49,35 +49,35 @@ public enum ServerCreationResult: Codable, Sendable {
 
 /// All filesystem and gh work stays on the execution host. Both UIs use these same core planners.
 public enum ProjectCreationOperations {
-    public static func context(store: Store) async -> ServerProjectContext {
+    public static func context(store: Store, defaultProjectLocation: String? = nil) async -> ServerProjectContext {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let preferences = await DirectoryPreferences.load(from: store)
         let paths = (try? await store.repos().map(\.path)) ?? []
-        return ServerProjectContext(home: home, location: preferences.projectLocation(projectPaths: paths, home: home),
+        return ServerProjectContext(home: home, location: preferences.projectLocation(projectPaths: paths, home: home, fallbackLocation: defaultProjectLocation),
             projectPaths: paths, branch: await NewProjectStarter.plannedBranch(),
             identityProblem: await RepositoryStarter.identityProblem(at: home))
     }
 
-    public static func perform(_ operation: ServerCreationOperation, store: Store, models: [CodexModel] = [], availableAgents: [AgentKind]? = nil) async throws -> ServerCreationResult {
+    public static func perform(_ operation: ServerCreationOperation, store: Store, models: [CodexModel] = [], availableAgents: [AgentKind]? = nil, defaultProjectLocation: String? = nil) async throws -> ServerCreationResult {
         switch operation {
         case .githubRepositories(let query, let page):
             return .repositories(try await GitHubRepositoryBrowser.repositories(query: query, page: page))
         case .importGitHub(let name):
-            let directory = URL(fileURLWithPath: await context(store: store).location)
+            let directory = URL(fileURLWithPath: await context(store: store, defaultProjectLocation: defaultProjectLocation).location)
             let path = try await GitHubRepositoryBrowser.clone(name, under: directory)
             return .project(try await WorkspaceManager(store: store).addRepository(at: path))
-        case .projectContext: return .projectContext(await context(store: store))
+        case .projectContext: return .projectContext(await context(store: store, defaultProjectLocation: defaultProjectLocation))
         case .inspectProject(let typed):
             guard typed.utf8.count <= 4_096 else { throw ServerFailure("Use a shorter project path.") }
-            let context = await context(store: store)
+            let context = await context(store: store, defaultProjectLocation: defaultProjectLocation)
             let facts = NewProjectStarter.inspect(typed: typed, defaultLocation: context.location)
             let contents: FolderContents? = if case .track = ProjectTargetVerdict.of(facts) { RepositoryStarter.scan(facts.path) } else { nil }
             let preferences = await DirectoryPreferences.load(from: store)
-            let locations = preferences.searchLocations(projectPaths: context.projectPaths, home: context.home)
+            let locations = preferences.searchLocations(projectPaths: context.projectPaths, home: context.home) + [context.location]
             return .inspection(ServerProjectInspection(facts: facts, contents: contents,
                 completions: ProjectCompletion.matches(typed, locations: locations, home: context.home)))
         case .startProject(let typed, let expected):
-            let context = await context(store: store)
+            let context = await context(store: store, defaultProjectLocation: defaultProjectLocation)
             let facts = NewProjectStarter.inspect(typed: typed, defaultLocation: context.location)
             guard facts == expected else { throw ServerFailure("The folder changed. Review it again before starting the project.") }
             let verdict = ProjectTargetVerdict.of(facts)

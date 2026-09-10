@@ -10,6 +10,7 @@ struct AgentErrorRowView: View {
     var exit: AgentExit
     var isExpanded: Bool
     var onToggle: () -> Void
+    var onSignIn: (() -> Void)?
 
     @State private var isHovered = false
     @State private var showsAll = false
@@ -20,6 +21,12 @@ struct AgentErrorRowView: View {
                 header
             }
 
+            if let onSignIn, AgentAuthenticationStatus.isSignInFailure(exit.summary + "\n" + exit.detail) {
+                Button("Sign In on Server…", action: onSignIn)
+                    .linkButton().font(Typo.caption)
+                    .padding(.leading, TranscriptLayout.detailIndent)
+                    .padding(.vertical, TranscriptLayout.tight)
+            }
             if isExpanded {
                 opened
             }

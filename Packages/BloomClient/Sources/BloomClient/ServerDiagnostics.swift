@@ -21,10 +21,11 @@ public struct ServerDiagnostics: Codable, Sendable, Equatable {
     public var account: String
     public var checks: [Check]
     public var browser: ServerBrowserReadiness?
+    public var authentication: [AgentAuthenticationStatus]?
 
-    public init(checkedAt: Date, hostname: String, operatingSystem: String, account: String, checks: [Check], browser: ServerBrowserReadiness? = nil) {
+    public init(checkedAt: Date, hostname: String, operatingSystem: String, account: String, checks: [Check], browser: ServerBrowserReadiness? = nil, authentication: [AgentAuthenticationStatus]? = nil) {
         self.checkedAt = checkedAt; self.hostname = hostname; self.operatingSystem = operatingSystem
-        self.account = account; self.checks = checks; self.browser = browser
+        self.account = account; self.checks = checks; self.browser = browser; self.authentication = authentication
     }
 
     public static func decode(_ result: JSONValue) throws -> Self {

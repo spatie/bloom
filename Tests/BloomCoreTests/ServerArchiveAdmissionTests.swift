@@ -15,7 +15,7 @@ struct ServerArchiveAdmissionTests {
         let parent = try await store.upsert(Session(workspaceID: workspace.id, title: "Parent"))
         let discovery = AdmissionGate(), sending = AdmissionGate()
         let admissions = ServerWorkspaceAdmissions()
-        let runtime = ServerRuntime(store: store, installedAgents: { _ in await discovery.hold(); return [.claudeCode] },
+        let runtime = ServerRuntime(store: store, authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, installedAgents: { _ in await discovery.hold(); return [.claudeCode] },
                                     makeRunner: { _, _, _ in AdmissionRunner(gate: sending) }, workspaceAdmissions: admissions)
         do {
             let bridge = try await runtime.startBridge(socketPath: BridgeSocketPath.derive(databasePath: store.path, directory: "/tmp"))

@@ -38,7 +38,7 @@ public enum ServerOperation: Codable, Sendable, Equatable {
     case file(workspaceID: WorkspaceID, path: String)
     case workspace(workspaceID: WorkspaceID, action: ServerWorkspaceAction)
     case configure(sessionID: SessionID, model: String, effort: String, permissionMode: PermissionMode)
-    case send(sessionID: SessionID, text: String)
+    case send(sessionID: SessionID, text: String, retryDeliveryID: DeliveryID? = nil)
     case cancelQueued(sessionID: SessionID, deliveryID: DeliveryID)
     case stop(sessionID: SessionID)
     case answer(sessionID: SessionID, requestID: String, answer: ServerAnswer)

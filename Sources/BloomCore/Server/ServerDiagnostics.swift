@@ -6,8 +6,10 @@ public typealias ServerDiagnostics = BloomClient.ServerDiagnostics
 public enum ServerDiagnosticsCollector {
     typealias Probe = @Sendable (String, [String]) async -> Bool?
 
-    public static func collect(directory: String) async -> ServerDiagnostics {
-        await collect(directory: directory, probe: probe)
+    public static func collect(directory: String, authentication: [AgentAuthenticationStatus]? = nil) async -> ServerDiagnostics {
+        var result = await collect(directory: directory, probe: probe)
+        result.authentication = authentication
+        return result
     }
 
     static func collect(directory: String, probe: @escaping Probe) async -> ServerDiagnostics {

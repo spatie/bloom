@@ -91,8 +91,8 @@ credentials, and subsequent builds preserve the installed preset unless explicit
 
 ```sh
 BLOOM_REMOTE_HOST=developer@server \
-BLOOM_REMOTE_EXECUTABLE=/opt/bloom-server/bin/bloom-server \
-BLOOM_REMOTE_DIRECTORY=/var/lib/bloom/data \
+BLOOM_REMOTE_EXECUTABLE=/home/bloom/bloom/server/current/bin/bloom-server \
+BLOOM_REMOTE_DIRECTORY=/home/bloom/bloom/data \
 BLOOM_REMOTE_REPOSITORY=/srv/repository \
 make remote
 ```
@@ -109,6 +109,27 @@ Names, colours, pins, unread marks and archive status live on the server. Collap
 and tab layouts stay on each client. Archive confirmations are computed and rechecked on the
 server; archived workspaces can be restored with their conversation history and notes.
 
+### Guided installation layout
+
+The wizard creates the `bloom` service account with `/home/bloom` as its home. Bloom-owned runtime
+and state use `~/bloom`:
+
+- `~/bloom/server/current/bin/bloom-server`: the installed server executable.
+- `~/bloom/data`: server database and runtime data.
+- `~/bloom/data/repositories`: imported GitHub repositories, unless a project directory was explicitly configured.
+- `~/bloom/workspaces.noindex`: workspace checkouts.
+- `~/bloom/data/browser`: mutable browser profiles and state.
+
+The wizard shows the full installation paths before confirmation. Runtime files are written as
+the service user; the installer verifies packages in a private administrator directory before
+handing them over. Installation ownership metadata remains protected at
+`/etc/systemd/system/bloom-installations/bloom-server.json` alongside the service integration.
+
+System packages and systemd journals stay in their OS locations. The reviewed sandboxed browser
+bundle stays root-owned at `/opt/bloom-browser`, because its protected launchers and AppArmor
+profile depend on trusted executable paths. Agent CLIs use `~/.local/bin`; GitHub, Codex and Claude
+use their supported credential locations under the service account's home.
+
 ### Standalone executable
 
 From the repository:
@@ -123,7 +144,26 @@ mkdir -m 700 "$HOME/.bloom-server"
 
 The server runs in the foreground. Install and authenticate the agent CLIs, git and gh on the
 server machine under the same user account. The server uses those credentials and the existing
-Bloom agent backends. It does not transfer credentials from the client.
+Bloom agent backends.
+
+The Mac setup wizard and **Server Settings > Accounts** offer **Use Accounts from This Mac**.
+Opening the chooser lists GitHub account metadata and checks for a file-based Codex sign-in.
+Nothing is selected by default. Importing is a separate action that names the destination server.
+GitHub's own CLI reads the selected account token; Codex imports only its supported file-based
+cache. Claude uses its supported sign-in flow instead of exporting private Keychain entries.
+
+Credentials travel directly over SSH with the saved host-key pin, as the installed service user,
+never as the setup administrator. They are excluded from command arguments, application logs,
+clipboard and Bloom's database. Existing server sign-ins are preserved rather than overwritten.
+The result distinguishes successful import from verification that could not finish.
+
+This is intended for servers you trust. Server administrators and code running as the same Bloom
+user can use the imported credentials with their original permissions. SSH encryption and private
+file permissions do not isolate credentials from that user. Signing out on the server removes its
+stored copy; revoking the token with the provider invalidates it and may also sign out the Mac.
+A separate provider sign-in remains available, including when the local tool uses a credential
+store that cannot be imported. iPhone and iPad clients use accounts already configured on the
+server and do not need a copy of those credentials.
 
 Use a dedicated data directory owned by the server user with mode 700. The database is named
 `server.sqlite`. Do not point the desktop app at that database. An exclusive process lock is
@@ -405,7 +445,7 @@ Use a dedicated server database and service account for this fixture.
 
 ```sh
 BLOOM_REMOTE_TEST_HOST=developer@test-server \
-BLOOM_REMOTE_TEST_EXECUTABLE=/opt/bloom-server/bin/bloom-server \
+BLOOM_REMOTE_TEST_EXECUTABLE=/home/bloom/bloom/server/current/bin/bloom-server \
 BLOOM_REMOTE_TEST_DIRECTORY=/var/lib/bloom-test/data \
 BLOOM_REMOTE_TEST_REPOSITORY=/var/lib/bloom-test/repository \
 Tools/test-core.sh RemoteServer
@@ -488,8 +528,8 @@ disks are not inspected.
 An administrator can run the same checks without starting a daemon:
 
 ```sh
-bloom-server doctor --data-dir /var/lib/bloom/data
-bloom-server doctor --data-dir /var/lib/bloom/data --json
+bloom-server doctor --data-dir /home/bloom/bloom/data
+bloom-server doctor --data-dir /home/bloom/bloom/data --json
 ```
 
 Run this as the account that runs Bloom Server. It changes no configuration and exits 1 when a

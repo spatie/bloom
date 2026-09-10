@@ -12,6 +12,8 @@ import platform
 import pwd
 import re
 import shutil
+import signal
+import selectors
 import socket
 import sqlite3
 import stat
@@ -134,8 +136,8 @@ def parser():
     result.add_argument("--check", action="store_true")
     result.add_argument("--package", type=pathlib.Path)
     result.add_argument("--sha256")
-    result.add_argument("--install-root", type=valid_path, default=pathlib.Path("/opt/bloom-server"))
-    result.add_argument("--data-dir", type=valid_path, default=pathlib.Path("/var/lib/bloom"))
+    result.add_argument("--install-root", type=valid_path, default=None)
+    result.add_argument("--data-dir", type=valid_path, default=None)
     result.add_argument("--service-home", type=valid_path, default=None)
     result.add_argument("--service-name", default="bloom-server")
     result.add_argument("--systemd-dir", type=valid_path, default=pathlib.Path("/etc/systemd/system"))
@@ -149,14 +151,16 @@ def configuration(args):
         if not re.fullmatch(r"[a-z][a-z0-9-]{0,30}", name):
             fail("invalid_configuration", "The service and user names must be simple Linux identifiers.",
                  "Use the default installation settings.")
-    args.service_home = args.service_home or pathlib.Path("/var/lib") / (args.user + "-home")
+    args.service_home = args.service_home or pathlib.Path("/home") / args.user
+    args.install_root = args.install_root or args.service_home / "bloom/server"
+    args.data_dir = args.data_dir or args.service_home / "bloom/data"
     for path in (args.install_root, args.data_dir, args.service_home, args.systemd_dir):
         valid_path(str(path))
-    paths = (args.install_root, args.data_dir, args.service_home)
+    paths = (args.install_root, args.data_dir)
     if any(a == b or a in b.parents or b in a.parents for i, a in enumerate(paths) for b in paths[i + 1:]):
-        fail("invalid_configuration", "The installation, data and home directories must be separate.",
+        fail("invalid_configuration", "The server executable and data directories must be separate.",
              "Use the default installation settings.")
-    return {"format": 1, "installRoot": str(args.install_root), "dataDirectory": str(args.data_dir),
+    return {"format": 2, "installRoot": str(args.install_root), "dataDirectory": str(args.data_dir),
             "serviceHome": str(args.service_home), "serviceUser": args.user, "serviceName": args.service_name,
             "systemdDirectory": str(args.systemd_dir)}
 
@@ -166,12 +170,32 @@ def metadata(args):
             "dataDirectory": str(args.data_dir), "serviceUser": args.user, "serviceHome": str(args.service_home)}
 
 
+def protected_system_path(path, allow_sticky=False):
+    for item in (path, *path.parents):
+        if item.is_symlink():
+            fail("untrusted_directory", "A system integration path is a symbolic link.", "Use protected system directories without symlinks.")
+        if item.exists():
+            info = item.stat()
+            if info.st_uid != 0 or (info.st_mode & 0o022 and not (allow_sticky and info.st_mode & stat.S_ISVTX)):
+                fail("untrusted_directory", "A system integration path is writable by another account.", "Restore root ownership and protected permissions.")
+
+
+def marker_path(args):
+    return args.systemd_dir / "bloom-installations" / (args.service_name + ".json")
+
+
+def save_marker(args, value):
+    path = marker_path(args)
+    protected_system_path(path)
+    path.parent.mkdir(mode=0o755, exist_ok=True)
+    atomic_text(path, json.dumps(value) + "\n")
+
+
 def marker(args):
-    path = args.install_root / ".bloom-installation.json"
+    path = marker_path(args)
+    protected_system_path(path)
     if not path.exists():
         return None
-    if path.is_symlink() or path.stat().st_uid != 0 or path.stat().st_mode & 0o022:
-        fail("untrusted_installation", "The installation marker is not protected.", "Ask the server administrator to check its ownership.")
     try:
         value = json.loads(path.read_text())
     except (ValueError, OSError):
@@ -183,43 +207,147 @@ def marker(args):
     return value
 
 
+def account_operation(account, operation, timeout=120):
+    """User-controlled paths are never opened or changed with installer privileges."""
+    if account.pw_uid == 0:
+        fail("invalid_service_user", "Bloom file operations require a non-root service account.", "Use the dedicated Bloom service account.")
+    if os.getuid() == account.pw_uid:
+        previous_mask = os.umask(0o077)
+        try:
+            return operation()
+        finally:
+            os.umask(previous_mask)
+    reader, writer = os.pipe()
+    try:
+        pid = os.fork()
+    except BaseException:
+        os.close(reader)
+        os.close(writer)
+        raise
+    if pid == 0:
+        os.close(reader)
+        try:
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.pthread_sigmask(signal.SIG_SETMASK, [])
+            os.setgroups([])
+            os.setgid(account.pw_gid)
+            os.setuid(account.pw_uid)
+            os.umask(0o077)
+            if os.geteuid() == 0:
+                raise RuntimeError("The service account must not be root")
+            os.environ["HOME"] = account.pw_dir
+            os.environ["PATH"] = SYSTEM_PATH
+            value = {"result": operation()}
+        except InstallError as error:
+            value = {"error": {"code": error.code, "message": error.message, "recovery": error.recovery, "metadata": error.metadata}}
+        except BaseException as error:
+            value = {"error": {"code": "account_files_failed", "message": "The server account could not prepare its files.",
+                               "recovery": "Check the service account's directory permissions and free space, then retry.",
+                               "metadata": {"details": install_exception_details(error)}}}
+        try:
+            with os.fdopen(writer, "w") as output:
+                json.dump(value, output)
+        finally:
+            os._exit(0)
+    os.close(writer)
+    reaped = False
+    deadline = time.monotonic() + timeout
+    try:
+        raw = bytearray()
+        with selectors.DefaultSelector() as selector:
+            selector.register(reader, selectors.EVENT_READ)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not selector.select(remaining):
+                    fail("account_files_timeout", "The server account file operation timed out.",
+                         "Check filesystem availability and free space, then retry.")
+                chunk = os.read(reader, 65536)
+                if not chunk:
+                    break
+                raw.extend(chunk)
+                if len(raw) > 1_048_576:
+                    raise ValueError("The service file operation returned too much data")
+        while True:
+            ended, status = os.waitpid(pid, os.WNOHANG)
+            if ended:
+                reaped = True
+                break
+            if time.monotonic() >= deadline:
+                fail("account_files_timeout", "The server account process did not finish.", "Check filesystem availability and retry.")
+            time.sleep(0.01)
+        if status != 0:
+            raise ValueError("The service file operation did not finish")
+        value = json.loads(raw)
+        if "error" in value:
+            error = value["error"]
+            fail(error["code"], error["message"], error["recovery"], **error.get("metadata", {}))
+        return value["result"]
+    except (OSError, ValueError, KeyError) as error:
+        fail("account_files_failed", "The server account file operation failed.",
+             "Inspect its directory permissions and retry.", details=install_exception_details(error))
+    finally:
+        os.close(reader)
+        if not reaped:
+            stop_account_child(pid)
+
+
+def stop_account_child(pid):
+    # Cancellation must not wait indefinitely for user-owned storage or inherited handlers.
+    for pending_signal, grace in ((signal.SIGTERM, 0.25), (signal.SIGKILL, 1.0)):
+        try:
+            os.kill(pid, pending_signal)
+        except ProcessLookupError:
+            return
+        deadline = time.monotonic() + grace
+        while time.monotonic() < deadline:
+            try:
+                ended, _ = os.waitpid(pid, os.WNOHANG)
+                if ended:
+                    return
+            except ChildProcessError:
+                return
+            time.sleep(0.01)
+
+
+def existing_account(args, existing):
+    try:
+        return pwd.getpwnam(args.user)
+    except KeyError:
+        if existing.get("phase") == "prepared":
+            return None
+        fail("installation_conflict", "The server account is missing.", "Restore the original server account settings.")
+
+
 def check_ownership(args, existing):
     unit = args.systemd_dir / (args.service_name + ".service")
+    protected_system_path(unit)
+    protected_system_path(args.service_home.parent)
     if existing:
-        protected = [args.install_root] + ([unit] if unit.exists() else [])
         if not unit.exists() and existing.get("phase") != "prepared":
             fail("installation_conflict", "The server service file is missing.", "Restore the original service file before retrying.")
-        for path in protected:
-            if path.is_symlink() or not path.exists() or path.stat().st_uid != 0 or path.stat().st_mode & 0o022:
-                fail("untrusted_installation", "The existing server installation is not protected.",
-                     "Ask the server administrator to restore root ownership and permissions.")
-        try:
-            account = pwd.getpwnam(args.user)
-        except KeyError:
-            if existing.get("phase") == "prepared":
-                return
-            fail("installation_conflict", "The server account is missing.", "Restore the original server account before retrying.")
+        account = existing_account(args, existing)
+        if account is None:
+            return
         if account.pw_dir != str(args.service_home) or account.pw_uid == 0:
             fail("installation_conflict", "The server account does not match this installation.", "Restore the original server account settings.")
-        for path in (args.data_dir, args.service_home):
-            if not path.exists() and existing.get("phase") == "prepared":
-                continue
-            if not path.is_dir() or path.stat().st_uid != account.pw_uid or path.stat().st_mode & 0o077:
-                fail("untrusted_installation", "The server's private directories have unexpected permissions.",
-                     "Restore service account ownership and mode 700 before retrying.")
+        def inspect_private_directories():
+            for path in (args.install_root, args.data_dir, args.service_home):
+                if not path.exists() and existing.get("phase") == "prepared":
+                    continue
+                if path.is_symlink() or not path.is_dir() or path.stat().st_uid != account.pw_uid or path.stat().st_mode & 0o077:
+                    fail("untrusted_installation", "The server's private directories have unexpected permissions.",
+                         "Restore service account ownership and mode 700 before retrying.")
+        account_operation(account, inspect_private_directories)
         return
     for path in (args.install_root, args.data_dir, args.service_home):
         for parent in path.parents:
-            if parent.exists() and (parent.stat().st_uid != 0 or (parent.stat().st_mode & 0o022 and not parent.stat().st_mode & stat.S_ISVTX)):
-                fail("untrusted_directory", "An installation parent directory is writable by another account.", "Use directories under /opt and /var/lib.")
-        if path.exists() and path.stat().st_uid != 0:
-            fail("untrusted_directory", "An installation directory belongs to another account.", "Choose empty root-owned installation directories.")
+            protected_system_path(parent)
+        if path.exists() and (path.stat().st_uid != 0 or not path.is_dir() or any(path.iterdir())):
+            fail("installation_conflict", "An installation directory already contains unrelated files.",
+                 "Choose a fresh account and empty directories. Existing files will not be replaced.")
     if unit.exists() or unit.is_symlink():
         fail("installation_conflict", "A system service already uses this name.", "Choose a different service name.")
-    for path in (args.install_root, args.data_dir, args.service_home):
-        if path.exists() and (not path.is_dir() or any(path.iterdir())):
-            fail("installation_conflict", "An installation directory already contains unrelated files.",
-                 "Choose empty directories. Existing files will not be replaced.")
     try:
         pwd.getpwnam(args.user)
     except KeyError:
@@ -302,7 +430,8 @@ def probe(args):
         # The root check is repeated during installation; unprivileged probes cannot inspect private homes.
         if privilege == "root":
             check_ownership(args, existing)
-        if existing and privilege == "root" and active_work(args.data_dir):
+        account = existing_account(args, existing) if existing and privilege == "root" else None
+        if account is not None and account_operation(account, lambda: active_work(args.data_dir)):
             warnings.append({"code": "server_busy", "message": "Existing work must finish before updating this server."})
     except InstallError as error:
         blockers.append({"code": error.code, "message": error.message, "recovery": error.recovery})
@@ -556,6 +685,48 @@ def backup_database(database, staging, account):
     return backup
 
 
+def prepare_account_files(args, key, bundle, checksum, account):
+    for path in (args.install_root, args.data_dir):
+        valid_path(str(path))
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path.chmod(0o700)
+    install_key(args, key, account)
+    releases = args.install_root / "releases"
+    valid_path(str(releases))
+    releases.mkdir(mode=0o700, exist_ok=True)
+    release = releases / checksum
+    valid_path(str(release))
+    # The service account owns runtime files. Always repair from the verified archive,
+    # even if a directory already has the expected release name.
+    temporary = pathlib.Path(tempfile.mkdtemp(prefix=".release-", dir=releases))
+    try:
+        shutil.copytree(bundle, temporary / "bundle")
+        if release.exists():
+            os.replace(release, temporary / "previous")
+        try:
+            os.replace(temporary / "bundle", release)
+        except OSError:
+            if (temporary / "previous").exists():
+                os.replace(temporary / "previous", release)
+            raise
+    finally:
+        shutil.rmtree(temporary)
+    current = args.install_root / "current"
+    if current.exists() and not current.is_symlink():
+        fail("installation_conflict", "The server's current release path is not managed by Bloom.", "Restore the managed installation before retrying.")
+    return os.readlink(current) if current.is_symlink() else None
+
+
+def set_current_release(args, target):
+    current = args.install_root / "current"
+    if target is None:
+        current.unlink(missing_ok=True)
+        return
+    temporary = args.install_root / (".current-new-" + os.urandom(8).hex())
+    temporary.symlink_to(target)
+    os.replace(temporary, current)
+
+
 def install(args):
     if os.geteuid() != 0:
         fail("administrator_required", "Installation needs administrator access.", "Run the installer through sudo -n or connect as root.")
@@ -567,68 +738,53 @@ def install(args):
     if not result["ok"]:
         fail("preflight_failed", "This server is not ready for installation.", "Resolve the reported checks and retry.")
     existing = marker(args)
-    if existing and existing.get("sha256") == args.sha256.lower() and service_running(args):
-        account = pwd.getpwnam(args.user)
-        wait_ready(args, account.pw_uid)
-        install_key(args, key, account)
-        emit("complete", unchanged=True, **metadata(args))
-        return
-    if existing and active_work(args.data_dir):
-        fail("server_busy", "Agents, queued messages or workspace setup still need this server.", "Finish or stop that work before updating.")
-    if existing and (service_running(args) or daemon_locked(args)):
-        fail("server_running", "The existing server must be stopped before this update.",
-             "Wait for work to finish, stop the Bloom service, and retry. Running sessions are never interrupted automatically.")
-    args.install_root.mkdir(parents=True, exist_ok=True, mode=0o755)
-    args.install_root.chmod(0o755)
-    with tempfile.TemporaryDirectory(prefix=".prepare-", dir=args.install_root) as temporary:
+    account = existing_account(args, existing) if existing else None
+    if account is not None:
+        if account_operation(account, lambda: active_work(args.data_dir)):
+            fail("server_busy", "Agents, queued messages or workspace setup still need this server.", "Finish or stop that work before updating.")
+        if service_running(args) or account_operation(account, lambda: daemon_locked(args)):
+            fail("server_running", "The existing server must be stopped before this update.",
+                 "Wait for work to finish, stop the Bloom service, and retry. Running sessions are never interrupted automatically.")
+    protected_system_path(pathlib.Path("/var/tmp"), allow_sticky=True)
+    with tempfile.TemporaryDirectory(prefix="bloom-server-install-", dir="/var/tmp") as temporary:
         staging = pathlib.Path(temporary)
-        emit("progress", step="verify", message="Verifying the server package")
+        emit("progress", step="verify", message="Verifying the uploaded package")
         bundle = extract_package(args.package, staging, args.sha256)
-        # --help checks the loader and bundled libraries without opening a database.
-        command([str(bundle / "bin/bloom-server"), "--help"])
+        emit("progress", step="dependencies", message="Checking Git, tmux, GitHub CLI and Node.js")
         install_dependencies(args)
-        emit("progress", step="account", message="Preparing a private server account")
-        details = {**configuration(args), "sha256": args.sha256.lower(), "phase": "prepared"}
         if not existing:
-            atomic_text(args.install_root / ".bloom-installation.json", json.dumps(details) + "\n")
+            save_marker(args, {**configuration(args), "sha256": args.sha256.lower(), "phase": "prepared"})
+        emit("progress", step="account", message="Preparing the dedicated server account")
         try:
             pwd.getpwnam(args.user)
         except KeyError:
             command(["useradd", "--system", "--user-group", "--create-home", "--home-dir", str(args.service_home),
                      "--shell", "/bin/bash", args.user])
         account = pwd.getpwnam(args.user)
+        protected_system_path(args.service_home.parent)
+        args.service_home.mkdir(exist_ok=True, mode=0o700)
+        home_fd = os.open(args.service_home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fchmod(home_fd, 0o700)
+            os.fchown(home_fd, account.pw_uid, account.pw_gid)
+        finally:
+            os.close(home_fd)
         verify_node_tools(account)
-        for path in (args.service_home, args.data_dir):
-            path.mkdir(parents=True, exist_ok=True, mode=0o700)
-            path.chmod(0o700)
-            os.chown(path, account.pw_uid, account.pw_gid)
-        install_key(args, key, account)
-        releases = args.install_root / "releases"
-        releases.mkdir(mode=0o755, exist_ok=True)
-        releases.chmod(0o755)
-        release = releases / args.sha256.lower()
-        if not release.exists():
-            os.replace(bundle, release)
-        current = args.install_root / "current"
-        previous = os.readlink(current) if current.is_symlink() else None
-        if current.exists() and not current.is_symlink():
-            fail("installation_conflict", "The server's current release path is not managed by Bloom.", "Restore the managed installation before retrying.")
+        staging.chmod(0o711)
+        previous = account_operation(account, lambda: prepare_account_files(args, key, bundle, args.sha256.lower(), account))
         unit = args.systemd_dir / (args.service_name + ".service")
         previous_unit = unit.read_text() if unit.exists() else None
         database = args.data_dir / "server.sqlite"
         backup = None
-        if database.exists():
-            # SQLite and restoration run as the service account. A replaced database symlink must
-            # never let an agent trick a root installer into reading or overwriting a root file.
+        if account_operation(account, lambda: database.exists()):
             backup = backup_database(database, staging, account)
         details = {**configuration(args), "sha256": args.sha256.lower(), "phase": "prepared"}
-        # Record ownership before starting. A failed first install can safely be retried.
-        atomic_text(args.install_root / ".bloom-installation.json", json.dumps(details) + "\n")
+        save_marker(args, details)
         emit("progress", step="service", message="Starting Bloom Server")
-        next_link = args.install_root / (".current-new-" + os.urandom(8).hex())
-        next_link.symlink_to(release)
-        os.replace(next_link, current)
+        release = args.install_root / "releases" / args.sha256.lower()
+        account_operation(account, lambda: set_current_release(args, str(release)))
         try:
+            protected_system_path(unit)
             atomic_text(unit, unit_contents(args))
             command(["systemctl", "daemon-reload"])
             command(["systemctl", "enable", args.service_name + ".service"])
@@ -638,9 +794,7 @@ def install(args):
             stopped = command(["systemctl", "stop", args.service_name + ".service"], required=False)
             if stopped is None or stopped.returncode != 0:
                 fail("rollback_blocked", "The failed service could not be stopped safely.", "Stop the service before restoring its previous release or database.")
-            current.unlink(missing_ok=True)
-            if previous:
-                current.symlink_to(previous)
+            account_operation(account, lambda: set_current_release(args, previous))
             if previous_unit is not None:
                 atomic_text(unit, previous_unit)
             else:
@@ -648,12 +802,28 @@ def install(args):
             if backup is not None:
                 command([sys.executable, "-c", DATABASE_RESTORE, str(backup), str(database)], account=account)
             if existing:
-                atomic_text(args.install_root / ".bloom-installation.json", json.dumps(existing) + "\n")
+                save_marker(args, existing)
             command(["systemctl", "daemon-reload"], required=False)
             raise
     details["phase"] = "installed"
-    atomic_text(args.install_root / ".bloom-installation.json", json.dumps(details) + "\n")
+    save_marker(args, details)
     emit("complete", unchanged=False, **metadata(args))
+
+
+def open_installation_lock(service_name, directory=pathlib.Path("/run/bloom-installers")):
+    protected_system_path(directory)
+    directory.mkdir(mode=0o755, exist_ok=True)
+    path = directory / (service_name + ".lock")
+    protected_system_path(path)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        info = os.fstat(fd)
+        if info.st_uid != 0 or not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+            fail("untrusted_lock", "The installer lock is not a protected root-owned file.", "Restore the private installer lock permissions before retrying.")
+        return os.fdopen(fd, "w")
+    except BaseException:
+        os.close(fd)
+        raise
 
 
 def main():
@@ -667,9 +837,7 @@ def main():
         if os.geteuid() != 0:
             fail("administrator_required", "Installation needs administrator access.", "Run the installer through sudo -n or connect as root.")
         # Serialise concurrent installers without touching the service account's writable home.
-        lock_path = pathlib.Path("/run/lock") / ("bloom-install-" + args.service_name + ".lock")
-        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(fd, "w") as lock:
+        with open_installation_lock(args.service_name) as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:

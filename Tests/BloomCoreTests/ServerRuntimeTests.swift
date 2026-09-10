@@ -105,7 +105,7 @@ struct ServerRuntimeTests {
         defer { repository.cleanUp() }
         let fixture = try await ServerFixture()
         let captured = Mutex<ServerTestRunner?>(nil)
-        let runtime = ServerRuntime(store: fixture.store, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { session, _, store in
+        let runtime = ServerRuntime(store: fixture.store, authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { session, _, store in
             let runner = ServerTestRunner(sessionID: session.id, store: store)
             captured.withLock { $0 = runner }
             return runner
@@ -257,7 +257,7 @@ struct ServerRuntimeTests {
     @Test func concurrentReconnectsCannotReuseDescriptorsStillBeingWatched() async throws {
         let fixture = try await ServerFixture()
         let runner = fixture.runner
-        let daemon = try await ServerDaemon.start(directory: fixture.directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { _, _, _ in runner })
+        let daemon = try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: fixture.directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { _, _, _ in runner })
         do {
             try await withThrowingTaskGroup(of: Void.self) { group in
                 for _ in 0..<8 {
@@ -286,7 +286,7 @@ struct ServerRuntimeTests {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script)
         try await fixture.store.setSetting(AgentCatalog.executablePathSettingKey(.claudeCode), script)
         let child = Mutex<StreamingProcess?>(nil)
-        let daemon = try await ServerDaemon.start(directory: fixture.directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { session, path, store in
+        let daemon = try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: fixture.directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { session, path, store in
             AgentRunner(workspacePath: path, session: session, store: store, makeProcess: { launch in
                 #expect(launch.executable == script)
                 // Always run the fixture, even if executable selection regresses. This test must
@@ -381,7 +381,7 @@ struct ServerRuntimeTests {
     @Test func disconnectLeavesAgentAliveAndAnotherClientCanContinue() async throws {
         let fixture = try await ServerFixture()
         let runner = fixture.runner
-        let daemon = try await ServerDaemon.start(directory: fixture.directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { _, _, _ in runner })
+        let daemon = try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: fixture.directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { _, _, _ in runner })
         let first = try await ServerClient.connect(to: .local(directory: fixture.directory))
         _ = try await first.request(ServerRequest(.send(sessionID: fixture.session.id, text: "Keep working")))
         await first.disconnect()
@@ -465,13 +465,13 @@ struct ServerRuntimeTests {
         let fixture = try await ServerFixture()
         let directory = fixture.directory
         let runner = fixture.runner
-        let first = try await ServerDaemon.start(directory: directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { _, _, _ in runner })
+        let first = try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { _, _, _ in runner })
         let attributes = try FileManager.default.attributesOfItem(atPath: first.socketPath)
         #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
         _ = await first.runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "Working")))
         await waitUntil("first server owns an active turn") { (try? await fixture.store.session(id: fixture.session.id)?.state) == .running }
         do {
-            _ = try await ServerDaemon.start(directory: directory)
+            _ = try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: directory)
             Issue.record("A second server acquired the same data directory")
         } catch { #expect(error.localizedDescription.contains("already owns")) }
         let state = try await fixture.store.session(id: fixture.session.id)?.state
@@ -585,7 +585,7 @@ struct ServerRuntimeTests {
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory)
         do {
-            _ = try await ServerDaemon.start(directory: directory)
+            _ = try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: directory)
             Issue.record("Server accepted a public data directory")
         } catch { #expect(error.localizedDescription.contains("700")) }
         #expect(!FileManager.default.fileExists(atPath: ServerDaemon.databasePath(directory: directory)))
@@ -631,7 +631,7 @@ private struct ServerFixture {
 
     func runtime(availableAgents: [AgentKind] = [.claudeCode, .codex]) -> ServerRuntime {
         let runner = runner
-        return ServerRuntime(store: store, installedAgents: { _ in availableAgents }, makeRunner: { _, _, _ in runner })
+        return ServerRuntime(store: store, authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, installedAgents: { _ in availableAgents }, makeRunner: { _, _, _ in runner })
     }
 }
 

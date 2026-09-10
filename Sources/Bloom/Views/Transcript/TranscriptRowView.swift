@@ -62,6 +62,7 @@ struct TranscriptRowView: View, Equatable {
     /// is: it is constant for a whole transcript.
     var projectName: String?
     var onToggle: () -> Void = {}
+    var onSignIn: (() -> Void)?
     /// Answering a permission question. Never a user turn: it writes a control response that
     /// unblocks a turn already in flight.
     var onAnswer: (String, PermissionDecision) -> Void = { _, _ in }
@@ -194,7 +195,7 @@ struct TranscriptRowView: View, Equatable {
             AgentErrorRowView(
                 exit: AgentExit.read(json),
                 isExpanded: isExpanded,
-                onToggle: onToggle
+                onToggle: onToggle, onSignIn: onSignIn
             )
 
         case .notice:

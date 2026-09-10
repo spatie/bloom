@@ -14,7 +14,7 @@ struct ServerSidebarTests {
         let project = try await manager.addRepository(at: repo.path)
         let workspace = try await manager.createWorkspace(repo: project, prompt: "Sidebar verification")
         let session = try await store.upsert(Session(workspaceID: workspace.id, title: "Chat"))
-        return (repo, store, workspace, session, ServerRuntime(store: store, installedAgents: { _ in [.claudeCode, .codex] }))
+        return (repo, store, workspace, session, ServerRuntime(store: store, authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, installedAgents: { _ in [.claudeCode, .codex] }))
     }
 
     @Test func archiveClosesOnlyItsOwnTerminals() async throws {

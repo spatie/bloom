@@ -23,7 +23,7 @@ actor ServerPromptQueue {
         endings[id] = ending
         if ending.isFailure {
             errors[id] = ending.summary
-            try? await store.setSetting(pauseKey(id), "true")
+            try? await store.setSetting(Self.pauseKey(id), "true")
         }
         start(id)
     }
@@ -31,8 +31,10 @@ actor ServerPromptQueue {
     func restore() async throws {
         for workspace in try await store.workspaces() {
             for session in try await store.sessions(workspaceID: workspace.id) {
-                if try await store.setting(pauseKey(session.id)) == "true" {
-                    errors[session.id] = "Queue paused. Send a message to resume."
+                if try await store.setting(Self.pauseKey(session.id)) == "true" {
+                    if let raw = try await store.setting(Self.authenticationPauseKey(session.id)), let agent = AgentKind(rawValue: raw) {
+                        errors[session.id] = AgentAuthenticationRequired(agent: agent).localizedDescription
+                    } else { errors[session.id] = "Queue paused. Send a message to resume." }
                 } else if try await !store.pendingDeliveries(sessionID: session.id).isEmpty { start(session.id) }
             }
         }
@@ -42,12 +44,22 @@ actor ServerPromptQueue {
         try await enqueue(Delivery(targetSessionID: sessionID, body: text), resumesPausedQueue: true)
     }
 
+    func retryAuthenticationPaused(sessionID: SessionID, deliveryID: DeliveryID, text: String) async throws {
+        guard !closed else { throw ServerFailure("The server is shutting down.") }
+        guard try await store.resumeAuthenticationPausedDelivery(sessionID: sessionID, deliveryID: deliveryID, matching: text) else {
+            throw ServerFailure("That queued prompt is no longer waiting for sign-in. Refresh the conversation before retrying.")
+        }
+        errors.removeValue(forKey: sessionID)
+        start(sessionID)
+    }
+
     func enqueue(_ delivery: Delivery, resumesPausedQueue: Bool = false) async throws {
         guard !closed else { throw ServerFailure("The server is shutting down.") }
         let sessionID = delivery.targetSessionID
         _ = try await store.enqueueDelivery(delivery)
         if resumesPausedQueue {
-            try await store.setSetting(pauseKey(sessionID), "false")
+            try await store.setSetting(Self.authenticationPauseKey(sessionID), nil)
+            try await store.setSetting(Self.pauseKey(sessionID), "false")
             errors.removeValue(forKey: sessionID)
         }
         start(sessionID)
@@ -69,12 +81,19 @@ actor ServerPromptQueue {
             throw ServerFailure("This message has already been sent. Stop the current turn instead.")
         }
         try await store.cancelDelivery(id: deliveryID)
-        errors.removeValue(forKey: sessionID)
+        if let raw = try await store.setting(Self.authenticationPauseKey(sessionID)), let agent = AgentKind(rawValue: raw),
+           try await !store.pendingDeliveries(sessionID: sessionID).isEmpty {
+            errors[sessionID] = AgentAuthenticationRequired(agent: agent).localizedDescription
+        } else {
+            errors.removeValue(forKey: sessionID)
+            try await store.setSetting(Self.authenticationPauseKey(sessionID), nil)
+        }
         try await restartIfPending(sessionID)
     }
 
     func pause(_ id: SessionID) async throws {
-        try await store.setSetting(pauseKey(id), "true")
+        try await store.setSetting(Self.authenticationPauseKey(id), nil)
+        try await store.setSetting(Self.pauseKey(id), "true")
         let task = tasks[id]
         task?.cancel()
         await task?.value
@@ -90,7 +109,8 @@ actor ServerPromptQueue {
     }
 
     private func key(_ delivery: Delivery) -> String { "server.delivery." + delivery.id.rawValue }
-    private func pauseKey(_ id: SessionID) -> String { "server.queue.paused." + id.rawValue }
+    static func authenticationPauseKey(_ id: SessionID) -> String { "server.queue.authentication.\(id.rawValue)" }
+    static func pauseKey(_ id: SessionID) -> String { "server.queue.paused." + id.rawValue }
 
     private func start(_ id: SessionID) {
         guard tasks[id] == nil, !closed else { return }
@@ -105,7 +125,7 @@ actor ServerPromptQueue {
 
     private func restartIfPending(_ id: SessionID) async throws {
         guard !closed, !Task.isCancelled, errors[id] == nil, tasks[id] == nil,
-              try await store.setting(pauseKey(id)) != "true",
+              try await store.setting(Self.pauseKey(id)) != "true",
               try await !store.pendingDeliveries(sessionID: id).isEmpty else { return }
         start(id)
     }
@@ -119,7 +139,7 @@ actor ServerPromptQueue {
         defer { tasks.removeValue(forKey: id) }
         do {
             while !Task.isCancelled, !closed, errors[id] == nil,
-                  try await store.setting(pauseKey(id)) != "true",
+                  try await store.setting(Self.pauseKey(id)) != "true",
                   let delivery = try await store.pendingDeliveries(sessionID: id).first {
                 if let receipt = try await store.setting(key(delivery)) {
                     if receipt == "delivered" { try await store.markDelivered(id: delivery.id); continue }
@@ -134,7 +154,7 @@ actor ServerPromptQueue {
                 }
                 // An error or Stop can arrive while loading/observing the live session. Its
                 // pause must win even when that session has just become idle.
-                guard errors[id] == nil, try await store.setting(pauseKey(id)) != "true" else { return }
+                guard errors[id] == nil, try await store.setting(Self.pauseKey(id)) != "true" else { return }
                 try Task.checkCancellation()
                 try await store.setSetting(key(delivery), "started")
                 // This followup supersedes a completed turn. A failure pauses above instead.
@@ -153,8 +173,11 @@ actor ServerPromptQueue {
         } catch {
             if !Task.isCancelled {
                 errors[id] = error.localizedDescription
+                if let required = error as? AgentAuthenticationRequired {
+                    try? await store.setSetting(Self.authenticationPauseKey(id), required.agent.rawValue)
+                }
                 if endings[id] == nil { endings[id] = .failed(error.localizedDescription) }
-                try? await store.setSetting(pauseKey(id), "true")
+                try? await store.setSetting(Self.pauseKey(id), "true")
             }
         }
     }
@@ -163,4 +186,19 @@ actor ServerPromptQueue {
 public struct ServerQueuedPrompt: Codable, Sendable, Identifiable {
     public var id: DeliveryID
     public var text: String
+}
+
+extension Store {
+    /// No suspension between matching the unsent head and clearing its authentication pause.
+    /// Cancellation cannot resurrect a removed delivery, and a receipt always vetoes a retry.
+    func resumeAuthenticationPausedDelivery(sessionID: SessionID, deliveryID: DeliveryID, matching text: String) throws -> Bool {
+        guard try setting(ServerPromptQueue.authenticationPauseKey(sessionID)) != nil,
+              try setting(ServerPromptQueue.pauseKey(sessionID)) == "true",
+              let first = try pendingDeliveries(sessionID: sessionID).first,
+              first.id == deliveryID, first.body == text,
+              try setting("server.delivery." + first.id.rawValue) == nil else { return false }
+        try setSetting(ServerPromptQueue.pauseKey(sessionID), "false")
+        try setSetting(ServerPromptQueue.authenticationPauseKey(sessionID), nil)
+        return true
+    }
 }

@@ -192,6 +192,7 @@ struct TranscriptListView: View {
     @State private var follower = TranscriptLiveEndFollower()
 
     @Environment(AppModel.self) private var app
+    @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Whether this window is the one in front, which is the whole of what the follower needs it
     /// for: a display link in a backgrounded app is a battery cost with nobody watching it.
@@ -622,6 +623,9 @@ struct TranscriptListView: View {
                                 isNested: row.parentToolUseID != nil,
                                 projectName: projectName,
                                 onToggle: { toggle(row.seq) },
+                                onSignIn: transcript.remote.map { remote in
+                                    { if remote.isCurrentServer { openWindow(id: ServerAccountsWindow.id) } }
+                                },
                                 onAnswer: { requestID, decision in
                                     Task { await transcript.answer(requestID: requestID, decision: decision) }
                                 }

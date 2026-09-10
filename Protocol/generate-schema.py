@@ -83,7 +83,7 @@ operations = {
     "patch": obj({"workspaceID": S, "path": S, "scope": SCOPE}), "file": obj({"workspaceID": S, "path": S}),
     "workspace": obj({"workspaceID": S, "action": ref("WorkspaceAction")}),
     "configure": obj({"sessionID": S, "model": S, "effort": S, "permissionMode": S}),
-    "send": obj({"sessionID": S, "text": S}), "cancelQueued": obj({"sessionID": S, "deliveryID": S}),
+    "send": obj({"sessionID": S, "text": S, "retryDeliveryID": optional(S)}, ["sessionID", "text"]), "cancelQueued": obj({"sessionID": S, "deliveryID": S}),
     "answer": obj({"sessionID": S, "requestID": S, "answer": ref("Answer")}),
 }
 changed = obj({"path": S, "oldPath": optional(S), "change": {"enum": ["A", "M", "D", "R", "C", "?"]},
@@ -108,7 +108,8 @@ results = {
     "creation": payload(ref("CreationResult")), "terminal": payload(obj({"executable": S, "socket": S, "session": S})),
     "terminalPane": payload(obj({"id": S, "title": S})), "runScripts": payload(array(R)),
     "archivePreview": payload(ref("ArchivePreview")),
-    **{name: payload(R) for name in ["diagnostics", "projectSettings", "filesToCopy"]},
+    "diagnostics": payload(ref("ServerDiagnostics")),
+    **{name: payload(R) for name in ["projectSettings", "filesToCopy"]},
 }
 creation_results = {name: payload(R) for name in ["project", "projectContext", "inspection", "workspaceContext", "checkouts", "reference"]}
 creation_results["repositories"] = payload(array(R))
@@ -182,7 +183,12 @@ def build():
                 "ComposerControls": obj({"model": S, "effort": S, "agentKind": S, "permissionMode": S, "isFastMode": B,
                                          "outputStyle": S, "codexContextWindow": I, "hasWorktree": B}, extra=True),
                 "ComposerState": obj({"controls": ref("ComposerControls"), "models": array(R), "commands": array(R), "styles": array(R),
-                                      "availableAgents": optional(array(S))}, ["controls", "models", "commands", "styles"], True),
+                                      "availableAgents": optional(array(S)), "authentication": optional(array(ref("AgentAuthentication")))}, ["controls", "models", "commands", "styles"], True),
+                "AgentAuthentication": obj({"agent": S, "state": {"enum": ["ready", "signInRequired", "unavailable", "unknown"]}}),
+                "ServerDiagnostics": obj({"checkedAt": {"type": "number"}, "hostname": S, "operatingSystem": S,
+                                          "account": S, "checks": array(R), "browser": optional(R),
+                                          "authentication": optional(array(ref("AgentAuthentication")))},
+                                         ["checkedAt", "hostname", "operatingSystem", "account", "checks"], True),
                 "UIBridgeOperation": cases(ui_operations), "UIBridgeResult": cases(ui_results),
                 "UILease": obj({"id": U, "token": S, "workspaceID": S, "expiresAtMilliseconds": I}),
                 "UIAction": obj({"name": S, "arguments": {"type": "object"}}),

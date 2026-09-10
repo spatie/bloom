@@ -53,6 +53,10 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--service-home", result.stdout)
 
+    def test_browser_state_is_inside_bloom_while_the_trusted_bundle_stays_protected(self):
+        self.assertEqual(browser.browser_state("/home/bloom"), Path("/home/bloom/bloom/data/browser"))
+        self.assertEqual(browser.ROOT, Path("/opt/bloom-browser"))
+
     def test_direct_file_install_also_embeds_helper_into_its_launchers(self):
         launcher = browser.launcher_source()
         self.assertTrue(launcher.startswith("#!/usr/bin/env python3\n"))

@@ -42,7 +42,7 @@ enum ServerSetupProbe {
             let server = ServerWindowModel(preferences: preferences)
             if configuration.inspect == false {
                 server.host = "bloom@existing-server"; server.executable = "/opt/bloom/server"
-                server.remoteDirectory = "/var/lib/bloom"; server.identityFile = "/tmp/fixture-key"
+                server.remoteDirectory = "/home/bloom/bloom/data"; server.identityFile = "/tmp/fixture-key"
                 server.knownHostsFile = "/tmp/fixture-known-hosts"
                 try await verifyAuthenticationIsolation(server)
             }
@@ -166,8 +166,8 @@ enum ServerSetupProbe {
                             ? "[{\"code\":\"service_account_exists\",\"message\":\"The Unix account 'bloom' already exists, but there is no matching managed Bloom installation. Setup will not take over its files or permissions.\"}]" : "[]"
                         return try JSONDecoder().decode(ServerInstallCheck.self, from: Data("""
                         {"platform":"Ubuntu 24.04", "architecture":"x86_64", "privilege":"root", "existing":false,
-                        "blockers":\(blockers), "warnings":[], "executable":"/opt/bloom-server/current/bin/bloom-server",
-                        "dataDirectory":"/var/lib/bloom", "serviceUser":"bloom"}
+                        "blockers":\(blockers), "warnings":[], "executable":"/home/bloom/bloom/server/current/bin/bloom-server",
+                        "dataDirectory":"/home/bloom/bloom/data", "serviceUser":"bloom"}
                         """.utf8))
                     })
                 checked.beginSetup(); checked.host = "root@preview.example"; checked.label = "Development"
@@ -213,8 +213,8 @@ enum ServerSetupProbe {
                     inspectConnection: { _, _ in
                         try JSONDecoder().decode(ServerInstallCheck.self, from: Data("""
                         {"platform":"Ubuntu 26.04", "architecture":"x86_64", "privilege":"root", "existing":false,
-                        "blockers":[], "warnings":[], "executable":"/opt/bloom-server/current/bin/bloom-server",
-                        "dataDirectory":"/var/lib/bloom", "serviceUser":"bloom"}
+                        "blockers":[], "warnings":[], "executable":"/home/bloom/bloom/server/current/bin/bloom-server",
+                        "dataDirectory":"/home/bloom/bloom/data", "serviceUser":"bloom"}
                         """.utf8))
                     }, installConnection: { _, _, _, _, progress in
                         for (step, message) in [("upload-package", "Server package uploaded (64 MB)."), ("verify", "SHA-256 checksum verified."), ("dependencies", "Preparing development tools") ] {
@@ -251,6 +251,7 @@ enum ServerSetupProbe {
                 }
                 try await capture("stopped-with-output-fixture")
                 live.cancel()
+                try await ServerCredentialImportProbe.verify(window: window) { phase in try await capture(phase) }
                 window.contentView = NSHostingView(rootView: SidebarStatusBar(filter: .constant(.all)).environment(app).environment(\.colorScheme, .light).background(Palette.windowBackground))
                 window.setContentSize(NSSize(width: 280, height: 40))
                 try await Task.sleep(for: .milliseconds(200))

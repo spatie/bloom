@@ -11,7 +11,7 @@ struct ServerProjectSettingsTests {
         try directory.write(".env.preview", "EXAMPLE=1\n")
         let store = try makeTestStore("remote-project-settings")
         let repo = try await store.upsert(Repo(name: "Remote project", path: directory.path))
-        let runtime = ServerRuntime(store: store)
+        let runtime = ServerRuntime(store: store, authentication: { agent, _, _ in .init(agent: agent, state: .unknown) })
         let request = ServerRequest(.project(repoID: repo.id, action: .settings))
         #expect(!request.operation.mutates)
         let response = await runtime.respond(to: request)
@@ -48,7 +48,7 @@ struct ServerProjectSettingsTests {
         try directory.write(".bloom/settings.toml", "[git]\nbranch_prefix = \"first/\"\n")
         let store = try makeTestStore("remote-project-conflict")
         let repo = try await store.upsert(Repo(name: "Remote project", path: directory.path))
-        let runtime = ServerRuntime(store: store)
+        let runtime = ServerRuntime(store: store, authentication: { agent, _, _ in .init(agent: agent, state: .unknown) })
         let baseline = SettingsLoader.load(repo: directory.path)
         try directory.write(".bloom/settings.toml", "[git]\nbranch_prefix = \"external/\"\n")
         let response = await runtime.respond(to: ServerRequest(.project(repoID: repo.id,

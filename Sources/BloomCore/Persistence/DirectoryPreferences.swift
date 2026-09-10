@@ -27,9 +27,9 @@ public struct DirectoryPreferences: Equatable, Sendable {
         try await store.setSetting(Self.additionalKey, String(decoding: data, as: UTF8.self))
     }
 
-    public func projectLocation(projectPaths: [String], home: String) -> String {
+    public func projectLocation(projectPaths: [String], home: String, fallbackLocation: String? = nil) -> String {
         projects.isEmpty
-            ? NewProjectPlan.suggestedLocation(projectPaths: projectPaths, home: home)
+            ? (fallbackLocation ?? NewProjectPlan.suggestedLocation(projectPaths: projectPaths, home: home))
             : NewProjectPlan.expand(projects, home: home)
     }
 

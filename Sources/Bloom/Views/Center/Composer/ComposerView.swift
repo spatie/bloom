@@ -36,6 +36,7 @@ struct ComposerView: View {
     var onSelectDestination: ((SessionID) -> Void)?
 
     @Environment(AppModel.self) private var app
+    @Environment(\.openWindow) private var openWindow
 
     /// The space a short pane keeps for the conversation when the draft grows.
     private static let minTranscriptHeight: CGFloat = 120
@@ -75,6 +76,15 @@ struct ComposerView: View {
                 )
             }
 
+            if let remote = transcript.remote, let message = remote.signInMessage {
+                HStack {
+                    Text(message).font(Typo.caption).foregroundStyle(Palette.textSecondary)
+                    Spacer()
+                    Button("Sign In on Server…") {
+                        if remote.isCurrentServer { openWindow(id: ServerAccountsWindow.id) }
+                    }
+                }.padding(.vertical, Metrics.spacing)
+            }
             composer
         }
         // The chrome is whatever is left once the editor's share is taken off, so this settles on
@@ -144,6 +154,10 @@ struct ComposerView: View {
         }
         .id(transcript.remote?.sessionID.rawValue ?? "local")
         .task(id: transcript.session.id) { await prepare() }
+        .task(id: app.remoteServer.agentAuthenticationRevision) {
+            guard app.remoteServer.agentAuthenticationRevision > 0 else { return }
+            await transcript.remote?.refreshAuthentication()
+        }
         .onChange(of: transcript.draft) { _, _ in scheduleDraftSave() }
         // Something put words in the box for the owner to carry on writing, which today is Edit on
         // a queued message. The caret goes to the start rather than the end, because the words that
@@ -537,7 +551,7 @@ struct ComposerView: View {
                 guard let session = await remote.newChat() else { return }
                 remote.saveDraft(prompt.text, for: session)
                 app.selectRemoteSession(session.id)
-                if sending { _ = await remote.submit(prompt.text, to: session.id); remote.saveDraft("", for: session) }
+                if sending, await remote.submit(prompt.text, to: session.id) { remote.saveDraft("", for: session) }
             }
             return
         }

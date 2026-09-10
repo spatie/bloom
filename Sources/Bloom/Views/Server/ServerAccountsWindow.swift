@@ -33,7 +33,7 @@ private struct ServerAccountsContent: View {
             Text("Server accounts").font(Typo.heading)
             Text(server.displayName).font(Typo.label).foregroundStyle(.secondary)
             if setup.hasInstalledServer {
-                Text("These sign-ins belong to \(setup.host). Your Mac’s accounts are separate.")
+                Text("These accounts are used by workspaces running as \(setup.host).")
                     .font(Typo.caption).foregroundStyle(.secondary)
                 ScrollView {
                     VStack(alignment: .leading, spacing: Metrics.gutter) {

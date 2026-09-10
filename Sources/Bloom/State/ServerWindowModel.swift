@@ -114,6 +114,10 @@ final class ServerWindowModel {
     var isPerformingCommand = false
     var error: String?
     var connectionGeneration = 0
+    private(set) var agentAuthenticationRevision = 0
+
+    /// Account sign-in/import changes CLI state without changing the connected server.
+    func invalidateAgentAuthentication() { agentAuthenticationRevision &+= 1 }
     var showsArchivedWorkspaces = false
     var sidebarCollapsed: Set<RepoID> = []
     var sidebarCollapseLoaded = false

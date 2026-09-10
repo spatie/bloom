@@ -18,6 +18,10 @@ final class RemoteSessionConnection {
     private(set) var isApplying = false
     private(set) var isUploading = false
     private var prepared = false
+    private(set) var supportsAuthenticationChecks = false
+    private(set) var authentication: AgentAuthenticationStatus?
+    var isCurrentServer: Bool { server?.endpoint == endpoint }
+    var signInMessage: String? { isCurrentServer && authentication?.requiresSignIn == true ? authentication?.message : nil }
     let attachmentCache: String
 
     init(server: ServerWindowModel, endpoint: ServerEndpoint, session: Session, workspace: Workspace) {
@@ -38,7 +42,19 @@ final class RemoteSessionConnection {
 
     private func perform(_ operation: ServerOperation) async -> ServerResult? {
         guard let server, server.endpoint == endpoint else { return nil }
-        return await server.perform(operation)
+        let result = await server.perform(operation)
+        if result == nil, let error = server.error, AgentAuthenticationStatus.isSignInFailure(error) {
+            authentication = .init(agent: controls.agentKind, state: .signInRequired)
+        }
+        return result
+    }
+
+    func refreshAuthentication() async {
+        do {
+            guard case .composer(let state) = try await request(.composer(sessionID: sessionID)), isCurrentServer else { return }
+            supportsAuthenticationChecks = state.authentication != nil
+            authentication = state.authentication?.first { $0.agent == controls.agentKind }
+        } catch { if !Task.isCancelled { server?.error = error.localizedDescription } }
     }
 
     func prepare() async {
@@ -48,6 +64,8 @@ final class RemoteSessionConnection {
         do {
             guard case .composer(let state) = try await request(.composer(sessionID: sessionID)) else { return }
             controls = state.controls
+            supportsAuthenticationChecks = state.authentication != nil
+            authentication = state.authentication?.first { $0.agent == controls.agentKind }
             models.receive(state.models, availableAgents: state.availableAgents)
             // Source-file previews require a fetched local copy. Never hand a server path to a
             // component that reads the Mac filesystem.
@@ -63,6 +81,7 @@ final class RemoteSessionConnection {
         defer { isApplying = false }
         switch await perform(.setComposer(sessionID: sessionID, controls: value)) {
         case .accepted:
+            if controls.agentKind != value.agentKind { authentication = nil }
             controls = value
             return nil
         case .created(let session, _, _):
@@ -74,6 +93,15 @@ final class RemoteSessionConnection {
 
     func submit(_ text: String) async -> Bool { await perform(.send(sessionID: sessionID, text: text)) != nil }
     func submit(_ text: String, to id: SessionID) async -> Bool { await perform(.send(sessionID: id, text: text)) != nil }
+    func retryAuthenticationPaused(_ delivery: Delivery) async -> Bool {
+        guard let server, isCurrentServer else { return false }
+        let generation = server.connectionGeneration
+        do {
+            guard case .composer(let state) = try await request(.composer(sessionID: sessionID)),
+                  state.authentication != nil, generation == server.connectionGeneration else { return false }
+            return await perform(.send(sessionID: sessionID, text: delivery.body, retryDeliveryID: delivery.id)) != nil
+        } catch { if !Task.isCancelled { server.error = error.localizedDescription }; return false }
+    }
     func stop() async { _ = await perform(.stop(sessionID: sessionID)) }
     func answer(requestID: String, decision: PermissionDecision) async {
         _ = await perform(.answer(sessionID: sessionID, requestID: requestID, answer: ServerAnswer(decision)))

@@ -4,6 +4,12 @@ import BloomClient
 @testable import BloomSSH
 
 struct SSHTests {
+    @Test func defaultPathsMatchTheDedicatedServerHome() throws {
+        let configuration = try SSHConfiguration(host: "example.com", username: "bloom")
+        #expect(configuration.executable == "/home/bloom/bloom/server/current/bin/bloom-server")
+        #expect(configuration.dataDirectory == "/home/bloom/bloom/data")
+        #expect(configuration.command == "'/home/bloom/bloom/server/current/bin/bloom-server' connect --data-dir '/home/bloom/bloom/data'")
+    }
     @Test func validatesAddressAndQuotesRemotePaths() throws {
         let configuration = try SSHConfiguration(host: "  EXAMPLE.com  ", username: "bloom", executable: "/opt/Bloom's Server", dataDirectory: "/var/lib/bloom")
         #expect(configuration.host == "example.com")

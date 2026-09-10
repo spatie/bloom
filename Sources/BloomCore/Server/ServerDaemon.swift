@@ -24,6 +24,7 @@ public final class ServerDaemon: Sendable {
     }
 
     public static func start(
+        authentication: @escaping ServerAgentAuthentication.Check = ServerAgentAuthentication.inspect,
         directory: String,
         gatewayGroupID: UInt32? = nil,
         installedAgents: @escaping ServerRuntime.AgentDiscovery = ServerAgentAvailability.installed,
@@ -34,7 +35,7 @@ public final class ServerDaemon: Sendable {
         let store = try Store(path: database)
         try await store.resetRunningSessions()
         _ = try await store.abandonPendingPermissionAsks()
-        let runtime = ServerRuntime(store: store, gatewayGroupID: gatewayGroupID, installedAgents: installedAgents, makeRunner: makeRunner)
+        let runtime = ServerRuntime(store: store, authentication: authentication, gatewayGroupID: gatewayGroupID, installedAgents: installedAgents, makeRunner: makeRunner)
         do {
             let bridge = try await runtime.startBridge(socketPath: mcpSocketPath(directory: directory))
             try await runtime.restoreQueuedPrompts()

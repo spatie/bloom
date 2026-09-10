@@ -75,7 +75,7 @@ private struct OwnershipFixture: Sendable {
         session = try await store.upsert(Session(workspaceID: workspace.id))
     }
     func start() async throws -> ServerDaemon {
-        try await ServerDaemon.start(directory: directory, installedAgents: { _ in [.claudeCode] }, makeRunner: { [runner] _, _, _ in runner })
+        try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: directory, installedAgents: { _ in [.claudeCode] }, makeRunner: { [runner] _, _, _ in runner })
     }
 }
 

@@ -17,7 +17,7 @@ extension ServerOperation {
             default: return .workspace(id)
             }
         case .terminalStream(let id, _): return .workspace(id)
-        case .send(let id, _), .setComposer(let id, _), .configure(let id, _, _, _),
+        case .send(let id, _, _), .setComposer(let id, _), .configure(let id, _, _, _),
              .closeSession(let id), .stop(let id), .answer(let id, _, _), .cancelQueued(let id, _),
              .renameSession(let id, _), .markRead(let id, _): return .session(id)
         case .uiBridge, .creation, .reviewSnapshot, .reviewPatch, .diagnostics, .hello, .previewAddress,

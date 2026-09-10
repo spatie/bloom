@@ -98,11 +98,13 @@ final class CreationComposerSource {
     let commands = SlashCommandCatalog()
     let styles = ComposerOutputStyleCatalog()
     var files: [String] = []
+    var authentication: [AgentAuthenticationStatus] = []
 
     func receive(_ context: ServerWorkspaceContext) {
         models.receive(context.composer.models, availableAgents: context.composer.availableAgents)
         commands.receive(context.composer.commands.map { var value = $0; value.path = nil; return value })
         styles.receive(context.composer.styles)
         files = context.files
+        authentication = context.composer.authentication ?? []
     }
 }

@@ -4,13 +4,15 @@ import Crypto
 import NIOSSH
 
 public struct SSHConfiguration: Codable, Sendable, Equatable {
+    public static let defaultExecutable = "/home/bloom/bloom/server/current/bin/bloom-server"
+    public static let defaultDataDirectory = "/home/bloom/bloom/data"
     public let host: String
     public let port: Int
     public let username: String
     public let executable: String
     public let dataDirectory: String
 
-    public init(host: String, port: Int = 22, username: String, executable: String = "/opt/bloom-server/current/bin/bloom-server", dataDirectory: String = "/var/lib/bloom") throws {
+    public init(host: String, port: Int = 22, username: String, executable: String = Self.defaultExecutable, dataDirectory: String = Self.defaultDataDirectory) throws {
         let host = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !host.isEmpty, !host.contains(where: { $0.isWhitespace }), !host.contains("/"),
               (1...65535).contains(port), !username.isEmpty,

@@ -6,6 +6,7 @@ import BloomClient
 public actor ServerRuntime {
     public typealias AgentDiscovery = @Sendable (Store) async -> [AgentKind]
     private let installedAgents: AgentDiscovery
+    private let authentication: ServerAgentAuthentication.Check
     public typealias RunnerFactory = @Sendable (Session, String, Store) -> any SessionRunner
     private let store: Store
     private let makeRunner: RunnerFactory?
@@ -31,25 +32,36 @@ public actor ServerRuntime {
     private var shutdownTask: Task<Void, Never>?
     private var promptQueue: ServerPromptQueue?
 
-    public init(store: Store, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery = ServerAgentAvailability.installed, makeRunner: RunnerFactory? = nil) {
-        self.init(store: store, gatewayGroupID: gatewayGroupID, installedAgents: installedAgents, makeRunner: makeRunner,
+    public init(store: Store, authentication: @escaping ServerAgentAuthentication.Check = ServerAgentAuthentication.inspect, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery = ServerAgentAvailability.installed, makeRunner: RunnerFactory? = nil) {
+        self.init(store: store, authentication: authentication, gatewayGroupID: gatewayGroupID, installedAgents: installedAgents, makeRunner: makeRunner,
                   workspaceAdmissions: ServerWorkspaceAdmissions())
     }
 
-    init(store: Store, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery,
+    init(store: Store, authentication: @escaping ServerAgentAuthentication.Check = ServerAgentAuthentication.inspect, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery,
          makeRunner: RunnerFactory? = nil, workspaceAdmissions: ServerWorkspaceAdmissions) {
         self.workspaceAdmissions = workspaceAdmissions
         self.store = store
         self.installedAgents = installedAgents
+        self.authentication = authentication
         terminalStreams = ServerTerminalStreams(groupID: gatewayGroupID)
         self.makeRunner = makeRunner
+    }
+
+    private func authenticationStatuses(_ agents: [AgentKind], workspace: Workspace? = nil) async -> [AgentAuthenticationStatus] {
+        await ServerAgentAuthentication.checkAll(agents, store: store, workspace: workspace, check: authentication)
+    }
+
+    private func requireAuthentication(_ agent: AgentKind, workspace: Workspace? = nil) async throws {
+        let status = await authentication(agent, store, workspace)
+        try Task.checkCancellation()
+        if status.requiresSignIn { throw AgentAuthenticationRequired(agent: agent) }
     }
 
     private func queue() -> ServerPromptQueue {
         if let promptQueue { return promptQueue }
         let queue = ServerPromptQueue(store: store, load: { [weak self] id in
             guard let self else { throw ServerFailure("The server is shutting down.") }
-            return try await self.liveSession(id)
+            return try await self.authenticatedSession(id)
         }, settled: { [weak self] id, ending in
             await self?.bridgeTurnEnded(sessionID: id, ending: ending)
         })
@@ -172,13 +184,23 @@ public actor ServerRuntime {
         case .creation(let action):
             var models: [CodexModel] = []
             if case .workspaceContext = action { models = (try? await modelCatalogue.pickerModels()) ?? [] }
-            return .creation(try await ProjectCreationOperations.perform(action, store: store, models: models, availableAgents: await installedAgents(store)))
+            let repositoryDirectory = URL(fileURLWithPath: store.path).deletingLastPathComponent().appendingPathComponent("repositories").path
+            var result = try await ProjectCreationOperations.perform(action, store: store, models: models,
+                availableAgents: await installedAgents(store), defaultProjectLocation: repositoryDirectory)
+            if case .workspaceContext(let id) = action, case .workspaceContext(var context) = result,
+               let repo = try await store.repo(id: id) {
+                let wrapped = !(SettingsLoader.load(workspace: repo.path, repo: repo.path).executionCommand ?? []).isEmpty
+                if !wrapped { context.composer.authentication = await authenticationStatuses(context.composer.availableAgents ?? []) }
+                result = .workspaceContext(context)
+            }
+            return .creation(result)
         case .reviewSnapshot(let id, let scope, let revision, let wait):
             return .reviewSnapshot(try await reviewCache.snapshot(workspace: workspace(id, readingDuringSetup: true), scope: scope, knownRevision: revision, wait: wait))
         case .reviewPatch(let id, let path, let scope, let revision):
             return .reviewPatch(try await reviewCache.patch(workspace: workspace(id, readingDuringSetup: true), path: path, scope: scope, knownRevision: revision))
         case .diagnostics:
-            return .diagnostics(await ServerDiagnosticsCollector.collect(directory: (store.path as NSString).deletingLastPathComponent))
+            return .diagnostics(await ServerDiagnosticsCollector.collect(directory: (store.path as NSString).deletingLastPathComponent,
+                authentication: await authenticationStatuses(await installedAgents(store))))
         case .hello:
             return .hello(name: ProcessInfo.processInfo.hostName)
         case .previewAddress(let address):
@@ -197,7 +219,8 @@ public actor ServerRuntime {
             let home = FileManager.default.homeDirectoryForCurrentUser.path
             return .composer(ServerComposerState(controls: controls, models: models,
                 commands: SlashCommandIndex.discover(home: home, project: path),
-                styles: OutputStyleIndex.discover(home: home, project: path), availableAgents: await installedAgents(store)))
+                styles: OutputStyleIndex.discover(home: home, project: path), availableAgents: await installedAgents(store),
+                authentication: await authenticationStatuses([controls.agentKind], workspace: try await workspace(workspaceID, readingDuringSetup: true))))
         case .markRead(let id, let seq):
             _ = try await storedSession(id)
             try await store.updateLastReadSeq(sessionID: id, seq: seq)
@@ -289,7 +312,7 @@ public actor ServerRuntime {
             controls.permissionMode = permissionMode
             try await configure(id, controls: controls)
             return .accepted
-        case .send(let id, let text):
+        case .send(let id, let text, let retryDeliveryID):
             guard stopping[id] == nil else { throw ServerFailure("This session is being stopped.") }
             let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !body.isEmpty, body.utf8.count <= 1_048_576 else { throw ServerFailure("The prompt is empty or too large.") }
@@ -297,8 +320,11 @@ public actor ServerRuntime {
             try ServerAgentAvailability.require(session.agentKind, in: await installedAgents(store))
             guard session.archivedAt == nil else { throw ServerFailure("This conversation is closed.") }
             guard let workspaceID = session.workspaceID else { throw ServerFailure("This session has no workspace.") }
-            _ = try await workspace(workspaceID)
-            try await queue().enqueue(body, sessionID: id)
+            let selected = try await workspace(workspaceID)
+            try await requireAuthentication(session.agentKind, workspace: selected)
+            if let retryDeliveryID {
+                try await queue().retryAuthenticationPaused(sessionID: id, deliveryID: retryDeliveryID, text: body)
+            } else { try await queue().enqueue(body, sessionID: id) }
             return .accepted
         case .cancelQueued(let id, let deliveryID):
             try await queue().cancel(deliveryID, sessionID: id)
@@ -319,7 +345,7 @@ public actor ServerRuntime {
             // A Stop received during runner creation must also stop that pending start. Wait
             // for already accepted sends to settle while refusing new ones for this session.
             let sends = commandOperations.compactMap { commandID, operation -> Task<ServerReply, Never>? in
-                if case .send(let target, _) = operation, target == id { return commands[commandID] }
+                if case .send(let target, _, _) = operation, target == id { return commands[commandID] }
                 return nil
             }
             for send in sends { _ = await send.value }
@@ -369,7 +395,7 @@ public actor ServerRuntime {
         stopping[id] = 1
         defer { stopping.removeValue(forKey: id) }
         for (commandID, operation) in commandOperations {
-            if case .send(let target, _) = operation, target == id { _ = await commands[commandID]?.value }
+            if case .send(let target, _, _) = operation, target == id { _ = await commands[commandID]?.value }
         }
         let queued = try await queue().snapshot(id)
         guard queued.0.isEmpty else { throw ServerFailure("Wait for queued messages before changing settings.") }
@@ -465,7 +491,13 @@ public actor ServerRuntime {
               !mode.runsAnAgent || !(request.prompt ?? request.name).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ServerFailure("Choose a project, a model and a task for the workspace.")
         }
-        if mode.runsAnAgent { try ServerAgentAvailability.require(controls.agentKind, in: await installedAgents(store)) }
+        if mode.runsAnAgent {
+            try ServerAgentAvailability.require(controls.agentKind, in: await installedAgents(store))
+            let wrapped = !(SettingsLoader.load(workspace: request.repositoryPath, repo: request.repositoryPath).executionCommand ?? []).isEmpty
+            let currentBranch = try? await Git.currentBranch(of: request.repositoryPath)
+            let branchMatches = request.baseBranch == nil || request.baseBranch == currentBranch
+            if !wrapped, request.checkout == nil, branchMatches { try await requireAuthentication(controls.agentKind) }
+        }
         let attachments = request.attachments ?? []
         guard attachments.reduce(0, { $0 + $1.data.count }) <= 10_000_000 else { throw ServerFailure("Use up to 10 MB of attachments in the first message.") }
         guard Set(attachments.map(\.sourcePath)).count == attachments.count else { throw ServerFailure("Attach each file once.") }
@@ -486,16 +518,32 @@ public actor ServerRuntime {
             let uploaded = try ServerFileOperations.upload(workspace: started.workspace, name: attachment.name, data: attachment.data)
             prompt = prompt.replacingOccurrences(of: attachment.sourcePath, with: uploaded)
         }
+        var keptDraft = started.setupSucceeded == false ? prompt : nil
         if let session = started.session {
             try await ServerComposer.save(controls, session: session, store: store)
-            if !prompt.isEmpty, started.setupSucceeded != false { try await queue().enqueue(prompt, sessionID: session.id) }
+            if !prompt.isEmpty, started.setupSucceeded != false {
+                let status = await authentication(controls.agentKind, store, started.workspace)
+                if status.requiresSignIn, request.mode != nil {
+                    keptDraft = prompt
+                    try await store.saveDraft(sessionID: session.id, body: prompt)
+                } else { try await queue().enqueue(prompt, sessionID: session.id) }
+            }
         }
         if request.mode != nil {
             return .creation(.workspaceStarted(workspace: started.workspace, session: started.session,
-                setupSucceeded: started.setupSucceeded, draft: started.setupSucceeded == false ? prompt : nil))
+                setupSucceeded: started.setupSucceeded, draft: keptDraft))
         }
         guard let session = started.session else { throw ServerFailure("The workspace has no session.") }
         return .created(session: session, workspace: started.workspace, setupSucceeded: started.setupSucceeded)
+    }
+
+    private func authenticatedSession(_ id: SessionID) async throws -> ServerSession {
+        if await sessions[id]?.isBusy != true {
+            let session = try await storedSession(id)
+            guard let workspaceID = session.workspaceID else { throw ServerFailure("This session has no workspace.") }
+            try await requireAuthentication(session.agentKind, workspace: workspace(workspaceID))
+        }
+        return try await liveSession(id)
     }
 
     private func liveSession(_ id: SessionID) async throws -> ServerSession {

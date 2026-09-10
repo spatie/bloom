@@ -13,9 +13,10 @@ struct ServerSetupInstallPlan: View {
             item("Your projects", detail: "Projects and conversations stay on your server. Existing Bloom workspaces are preserved.")
             VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
                 Text("Installation locations").font(Typo.labelEmphasis)
-                LabeledContent("Server files", value: installationRoot ?? "/opt/bloom-server")
-                LabeledContent("Server data", value: dataDirectory ?? "/var/lib/bloom")
-                LabeledContent("Account home", value: serviceHome ?? "/var/lib/bloom-home")
+                LabeledContent("Server files", value: installationRoot ?? "/home/bloom/bloom/server")
+                LabeledContent("Server data", value: dataDirectory ?? "/home/bloom/bloom/data")
+                LabeledContent("Account home", value: serviceHome ?? "/home/bloom")
+                Text("OS packages and the startup service use system locations. Sandboxed browser tools use /opt/bloom-browser. Tool sign-ins use the account’s standard configuration folders.")
             }
             .font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
             Text("Codex and Claude install during sign-in. PHP, Docker and databases are configured separately for each project.")

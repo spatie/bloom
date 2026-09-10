@@ -11,6 +11,9 @@ import os
 import pathlib
 import pwd
 import sqlite3
+import signal
+import stat
+import time
 import struct
 import subprocess
 import sys
@@ -221,7 +224,7 @@ class InstallerTests(unittest.TestCase):
         self.assert_error("invalid_configuration", lambda: installer.configuration(args))
 
     def test_configuration_rejects_overlapping_directories(self):
-        args = installer.parser().parse_args(["--data-dir", "/opt/bloom-server/data"])
+        args = installer.parser().parse_args(["--install-root", str(self.root / "install"), "--data-dir", str(self.root / "install/data")])
         with mock.patch.object(installer, "valid_path"):
             self.assert_error("invalid_configuration", lambda: installer.configuration(args))
 
@@ -320,6 +323,7 @@ class InstallerTests(unittest.TestCase):
             if path in parents:
                 fields = list(info)
                 fields[4] = 0
+                fields[0] &= ~0o022
                 return os.stat_result(fields)
             return info
 
@@ -384,7 +388,7 @@ class InstallerTests(unittest.TestCase):
         args.systemd_dir.mkdir()
         account = mock.Mock(pw_uid=os.getuid(), pw_gid=os.getgid())
         for name, value in [("probe", {"ok": True}), ("marker", None), ("command", mock.Mock(returncode=0)),
-                            ("wait_ready", None), ("emit", None), ("install_dependencies", None), ("verify_node_tools", None)]:
+                            ("wait_ready", None), ("emit", None), ("install_dependencies", None), ("verify_node_tools", None), ("protected_system_path", None), ("account_operation", None)]:
             patch = mock.patch.object(installer, name, return_value=value)
             patch.start()
             self.addCleanup(patch.stop)
@@ -399,6 +403,7 @@ class InstallerTests(unittest.TestCase):
                 return subprocess.run(arguments, check=True, capture_output=True)
             return mock.Mock(returncode=0)
         installer.command.side_effect = fake_command
+        installer.account_operation.side_effect = lambda account, operation: operation()
         return args
 
     def test_fresh_install_starts_private_service(self):
@@ -406,7 +411,7 @@ class InstallerTests(unittest.TestCase):
         installer.install(args)
         self.assertTrue((args.install_root / "current/bin/bloom-server").is_file())
         self.assertEqual(args.data_dir.stat().st_mode & 0o777, 0o700)
-        saved = json.loads((args.install_root / ".bloom-installation.json").read_text())
+        saved = json.loads(installer.marker_path(args).read_text())
         self.assertEqual(saved["phase"], "installed")
         installer.command.assert_any_call(["systemctl", "start", "bloom-server.service"])
         installer.install_dependencies.assert_called_once_with(args)
@@ -419,14 +424,32 @@ class InstallerTests(unittest.TestCase):
             self.assert_error("server_running", lambda: installer.install(args))
         installer.command.assert_not_called()
 
-    def test_unchanged_running_install_adds_key_without_restart(self):
+    def test_matching_marker_does_not_claim_a_user_owned_running_runtime_is_verified(self):
         args = self.installation_fixture()
         args.service_home.mkdir()
         installer.marker.return_value = {"sha256": args.sha256}
         with mock.patch.object(installer, "service_running", return_value=True):
-            installer.install(args)
+            self.assert_error("server_running", lambda: installer.install(args))
         installer.command.assert_not_called()
-        self.assertIn(self.key(), (args.service_home / ".ssh/authorized_keys").read_text())
+        self.assertFalse((args.service_home / ".ssh/authorized_keys").exists())
+
+    def test_prepared_installation_with_a_missing_account_resumes_user_creation(self):
+        args = self.installation_fixture()
+        installer.marker.return_value = {**installer.configuration(args), "phase": "prepared", "sha256": args.sha256}
+        account = mock.Mock(pw_uid=os.getuid(), pw_gid=os.getgid())
+        installer.pwd.getpwnam.side_effect = [KeyError(args.user), KeyError(args.user), account]
+        installer.install(args)
+        installer.command.assert_any_call(["useradd", "--system", "--user-group", "--create-home", "--home-dir", str(args.service_home),
+                                          "--shell", "/bin/bash", args.user])
+        self.assertTrue((args.install_root / "current/bin/bloom-server").is_file())
+        self.assertEqual(json.loads(installer.marker_path(args).read_text())["phase"], "installed")
+
+    def test_installer_rejects_a_precreated_user_owned_lock_inode(self):
+        directory = self.root / "locks"
+        info = mock.Mock(st_uid=12345, st_mode=stat.S_IFREG | 0o600)
+        with mock.patch.object(installer, "protected_system_path"), mock.patch.object(installer.os, "fstat", return_value=info):
+            self.assert_error("untrusted_lock", lambda: installer.open_installation_lock("bloom", directory))
+        self.assertEqual((directory / "bloom.lock").stat().st_size, 0)
 
     def test_failed_upgrade_restores_database_and_release(self):
         args = self.installation_fixture()
@@ -456,7 +479,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(unit.read_text(), "original unit")
         with closing(sqlite3.connect(database)) as connection, connection:
             self.assertEqual(connection.execute("SELECT value FROM original").fetchone(), ("preserved",))
-        self.assertEqual(json.loads((args.install_root / ".bloom-installation.json").read_text()), saved)
+        self.assertEqual(json.loads(installer.marker_path(args).read_text()), saved)
 
     def test_startup_timeout_collects_redacted_journal_before_rollback(self):
         wait_ready = installer.wait_ready
@@ -468,6 +491,7 @@ class InstallerTests(unittest.TestCase):
                 return journal
             return original_command(arguments, **keywords)
         installer.command.side_effect = fake_command
+        installer.account_operation.side_effect = lambda account, operation: operation()
         installer.wait_ready.side_effect = wait_ready
         with mock.patch.object(installer.time, "monotonic", side_effect=[0, 21]):
             with self.assertRaises(installer.InstallError) as caught:
@@ -519,6 +543,129 @@ class InstallerTests(unittest.TestCase):
         installer.atomic_text(target, "replace")
         self.assertEqual(target.read_text(), "replace")
         self.assertEqual(other.read_text(), "keep")
+
+    def test_defaults_keep_the_conventional_home_and_runtime_in_bloom(self):
+        args = installer.parser().parse_args([])
+        with mock.patch.object(installer, "valid_path"):
+            installer.configuration(args)
+        self.assertEqual(args.service_home, pathlib.Path("/home/bloom"))
+        self.assertEqual(args.install_root, args.service_home / "bloom/server")
+        self.assertEqual(args.data_dir, args.service_home / "bloom/data")
+        self.assertEqual(installer.marker_path(args), pathlib.Path("/etc/systemd/system/bloom-installations/bloom-server.json"))
+        unit = installer.unit_contents(args)
+        self.assertIn("Environment=HOME=/home/bloom\n", unit)
+        self.assertIn("/home/bloom/.local/bin", unit)
+        self.assertIn("User=bloom\n", unit)
+        self.assertNotIn("StandardOutput=append:", unit)
+
+    def test_a_home_marker_cannot_claim_a_managed_system_installation(self):
+        args = installer.parser().parse_args(["--service-home", str(self.root / "home"),
+                                              "--systemd-dir", str(self.root / "systemd")])
+        installer.configuration(args)
+        args.install_root.mkdir(parents=True)
+        (args.install_root / ".bloom-installation.json").write_text(json.dumps(installer.configuration(args)))
+        with mock.patch.object(installer, "protected_system_path"):
+            self.assertIsNone(installer.marker(args))
+        self.assertFalse(installer.marker_path(args).is_relative_to(args.service_home))
+
+    def test_system_metadata_rejects_a_symlink_even_when_the_target_is_a_file(self):
+        args = installer.parser().parse_args(["--systemd-dir", str(self.root)])
+        marker = installer.marker_path(args)
+        marker.parent.mkdir()
+        target = self.root / "unrelated"
+        target.write_text("preserve")
+        marker.symlink_to(target)
+        self.assert_error("untrusted_directory", lambda: installer.save_marker(args, {}))
+        self.assertEqual(target.read_text(), "preserve")
+
+    @unittest.skipUnless(sys.platform == "linux" and os.geteuid() == 0, "Requires a real privilege drop")
+    def test_service_file_operations_drop_identity_and_cannot_write_root_files(self):
+        account = pwd.getpwnam("nobody")
+        identity = installer.account_operation(account, lambda: [os.getuid(), os.geteuid(), os.getgroups()])
+        self.assertEqual(identity, [account.pw_uid, account.pw_uid, []])
+        self.root.chmod(0o711)
+        protected = self.root / "root-private"
+        protected.mkdir(mode=0o700)
+        secret = protected / "unchanged"
+        secret.write_text("preserve")
+        home = self.root / "home"
+        home.mkdir(mode=0o700)
+        os.chown(home, account.pw_uid, account.pw_gid)
+        redirected = home / "redirected"
+        redirected.symlink_to(secret)
+        self.assert_error("account_files_failed", lambda: installer.account_operation(account, lambda: redirected.write_text("changed")))
+        self.assertEqual(secret.read_text(), "preserve")
+        created = home / "owned-file"
+        installer.account_operation(account, lambda: created.write_text("owned"))
+        self.assertEqual(created.stat().st_uid, account.pw_uid)
+        self.assertEqual(created.stat().st_mode & 0o777, 0o600)
+
+    @unittest.skipUnless(sys.platform == "linux" and os.geteuid() == 0, "Requires a real privilege drop")
+    def test_runtime_copy_and_release_activation_use_only_the_service_uid(self):
+        account = pwd.getpwnam("nobody")
+        self.root.chmod(0o711)
+        home = self.root / "home"
+        home.mkdir(mode=0o700)
+        os.chown(home, account.pw_uid, account.pw_gid)
+        args = installer.parser().parse_args(["--service-home", str(home)])
+        installer.configuration(args)
+        bundle = self.extract()
+        previous = installer.account_operation(account, lambda: installer.prepare_account_files(args, self.key(), bundle, "fixture", account))
+        self.assertIsNone(previous)
+        release = args.install_root / "releases/fixture"
+        installer.account_operation(account, lambda: installer.set_current_release(args, str(release)))
+        for path in [args.install_root, args.data_dir, release / "bin/bloom-server", home / ".ssh/authorized_keys"]:
+            self.assertEqual(path.stat().st_uid, account.pw_uid)
+        self.assertEqual((args.install_root / "current").resolve(), release)
+        self.assertEqual(args.install_root.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((home / "bloom").stat().st_mode & 0o777, 0o700)
+        self.assertFalse((args.install_root / ".bloom-installation.json").exists())
+        installed = release / "bin/bloom-server"
+        installer.account_operation(account, lambda: installed.write_text("tampered"))
+        installer.account_operation(account, lambda: installer.prepare_account_files(args, self.key(), bundle, "fixture", account))
+        self.assertEqual(installed.read_bytes(), (bundle / "bin/bloom-server").read_bytes())
+        self.assertEqual(installed.stat().st_uid, account.pw_uid)
+
+    @unittest.skipUnless(sys.platform == "linux" and os.geteuid() == 0, "Requires a real privilege drop")
+    def test_stuck_or_invalid_service_children_are_bounded_and_reaped(self):
+        account = pwd.getpwnam("nobody")
+        real_fork = os.fork
+        children = []
+        def capture_fork():
+            pid = real_fork()
+            if pid:
+                children.append(pid)
+            return pid
+        def stuck():
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            time.sleep(5)
+        with mock.patch.object(installer.os, "fork", side_effect=capture_fork):
+            started = time.monotonic()
+            self.assert_error("account_files_timeout", lambda: installer.account_operation(account, stuck, timeout=0.05))
+            self.assertLess(time.monotonic() - started, 2)
+            self.assert_error("account_files_failed", lambda: installer.account_operation(account, lambda: os._exit(23)))
+            self.assert_error("account_files_failed", lambda: installer.account_operation(account, lambda: "x" * 1_100_000))
+        for child in children:
+            with self.assertRaises(ChildProcessError):
+                os.waitpid(child, os.WNOHANG)
+
+    @unittest.skipUnless(sys.platform == "linux" and os.geteuid() == 0, "Requires a real privilege drop")
+    def test_parent_cancellation_reaps_the_service_child(self):
+        account = pwd.getpwnam("nobody")
+        real_fork = os.fork
+        children = []
+        def capture_fork():
+            pid = real_fork()
+            if pid:
+                children.append(pid)
+            return pid
+        with mock.patch.object(installer.os, "fork", side_effect=capture_fork), \
+             mock.patch.object(installer.selectors.DefaultSelector, "select", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                installer.account_operation(account, lambda: time.sleep(5))
+        for child in children:
+            with self.assertRaises(ChildProcessError):
+                os.waitpid(child, os.WNOHANG)
 
     @unittest.skipUnless(sys.platform == "linux" and os.geteuid() == 0, "Requires a Linux root installer dropping to its service account")
     def test_upgrade_backup_runs_as_service_user_with_a_writable_private_parent(self):

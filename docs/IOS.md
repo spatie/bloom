@@ -102,7 +102,7 @@ BLOOM_TEST_ID=ios-client BLOOM_TEST_SWIFT_ARGS='-j 2' \
 
 Choose Server, select SSH and enter the server IP address or hostname and SSH account.
 The default account is `bloom`. Advanced defaults match Bloom's installer:
-`/opt/bloom-server/current/bin/bloom-server` with data directory `/var/lib/bloom`.
+`/home/bloom/bloom/server/current/bin/bloom-server` with data directory `/home/bloom/bloom/data`.
 Existing installations can override both paths and the SSH port.
 
 Tap Copy Public Key and add it to the account's `~/.ssh/authorized_keys` using your existing

@@ -27,6 +27,7 @@ final class ServerSetupModel {
     private(set) var isInstallingBrowser = false
     private(set) var check: ServerInstallCheck?
     private(set) var accountChecks: [ServerDiagnostics.Check] = []
+    private(set) var agentAuthentication: [AgentAuthenticationStatus] = []
     private let resources: URL?
     private let supportDirectory: URL?
     private let server: ServerWindowModel
@@ -82,7 +83,7 @@ final class ServerSetupModel {
 
     func inspect() async {
         await perform(.checking) {
-            self.installed = nil; self.installedKnownHosts = nil; self.accountChecks = []; self.browserReadiness = nil; self.browserFailure = nil; self.browserRecovery = nil; self.browserAttempted = false; self.browserDiagnostic = nil; self.check = nil; self.candidate = nil; self.fingerprint = nil
+            self.installed = nil; self.installedKnownHosts = nil; self.accountChecks = []; self.agentAuthentication = []; self.browserReadiness = nil; self.browserFailure = nil; self.browserRecovery = nil; self.browserAttempted = false; self.browserDiagnostic = nil; self.check = nil; self.candidate = nil; self.fingerprint = nil
             try self.prepareTrustStore()
             let host = self.host.trimmingCharacters(in: .whitespacesAndNewlines)
             let connection = try ServerSetupConnection(host: host, identityFile: self.identityFile, knownHostsFile: self.knownHosts.path)
@@ -151,6 +152,8 @@ final class ServerSetupModel {
                 try Task.checkCancellation()
                 self.accountClient = client
                 self.accountChecks = report.checks
+                self.agentAuthentication = report.authentication ?? []
+                self.server.invalidateAgentAuthentication()
                 self.browserReadiness = report.browser
                 if report.browser?.status == .ready { self.browserFailure = nil; self.browserRecovery = nil; self.browserDiagnostic = nil }
                 self.phase = .accounts
@@ -223,9 +226,15 @@ final class ServerSetupModel {
         }
     }
 
-    func accountTerminal(_ account: ServerSetupAccount) -> TerminalLaunch? {
+    /// Credentials use the installed service account, never the administrator used for setup.
+    var accountConnection: ServerSetupConnection? {
         guard let endpoint = installedEndpoint, case .ssh(let host, _, _, let identity, let knownHosts) = endpoint,
-              let knownHosts, let connection = try? ServerSetupConnection(host: host, identityFile: identity, knownHostsFile: knownHosts) else { return nil }
+              let knownHosts else { return nil }
+        return try? ServerSetupConnection(host: host, identityFile: identity, knownHostsFile: knownHosts)
+    }
+
+    func accountTerminal(_ account: ServerSetupAccount) -> TerminalLaunch? {
+        guard let connection = accountConnection else { return nil }
         let command: String
         switch account {
         case .github: command = "GH_BROWSER=echo gh auth login --hostname github.com --git-protocol https --web && gh auth setup-git"

@@ -13,7 +13,7 @@ struct ServerMCPTests {
         let repo = try await store.upsert(Repo(name: "fixture", path: directory, defaultBranch: "main"))
         let workspace = try await store.upsert(Workspace(repoID: repo.id, name: "Fixture", branch: "fixture", path: directory, baseBranch: "main"))
         let session = try await store.upsert(Session(workspaceID: workspace.id, title: "Chat"))
-        let daemon = try await ServerDaemon.start(directory: directory, installedAgents: { _ in [] })
+        let daemon = try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: directory, installedAgents: { _ in [] })
         do {
             let attachment = daemon.bridge.attach(session: session, workspace: workspace, shimPath: "/fixture/bloom-bridge")
             let connection = try UnixSocketConnection.connect(to: daemon.bridge.socketPath)
@@ -109,7 +109,7 @@ struct ServerMCPTests {
     @Test(arguments: [12, 13, 14])
     func compatibleRequestsKeepTheirReplyVersion(version: Int) async throws {
         let store = try makeTestStore("mcp-version")
-        let runtime = ServerRuntime(store: store, installedAgents: { _ in [] })
+        let runtime = ServerRuntime(store: store, authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, installedAgents: { _ in [] })
         var request = ServerRequest(.catalogue)
         request.version = version
         let reply = await runtime.respond(to: request)

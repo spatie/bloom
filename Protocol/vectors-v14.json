@@ -143,6 +143,20 @@
     }
   },
   {
+    "name" : "request-retryAuthentication",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "send" : {
+          "retryDeliveryID" : "delivery-example",
+          "sessionID" : "session-example",
+          "text" : "Run tests"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
     "name" : "request-stop",
     "value" : {
       "id" : "00000000-0000-4000-8000-000000000001",
@@ -606,6 +620,44 @@
           "_0" : {
             "availableAgents" : [
               "codex"
+            ],
+            "commands" : [
+
+            ],
+            "controls" : {
+              "agentKind" : "codex",
+              "codexContextWindow" : 0,
+              "effort" : "medium",
+              "hasWorktree" : true,
+              "isFastMode" : false,
+              "model" : "example-model",
+              "outputStyle" : "default",
+              "permissionMode" : "auto"
+            },
+            "models" : [
+
+            ],
+            "styles" : [
+
+            ]
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-composerAuthentication",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "composer" : {
+          "_0" : {
+            "authentication" : [
+              {
+                "agent" : "codex",
+                "state" : "signInRequired"
+              }
             ],
             "commands" : [
 

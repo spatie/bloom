@@ -505,3 +505,18 @@ reviewing and updating the published samples. The vector test includes unnamed/n
 still matches the source inventory. Add vectors and update the schema when changing this contract;
 changing a wire case without doing so should fail the check. These checks do not replace a live
 SSH/HTTPS deployment test or justify silently accepting another protocol version.
+
+Agent authentication metadata is optional on composer records and diagnostics, as an
+`authentication` array of `{ "agent": "codex", "state": "signInRequired" }` records. States are
+`ready` (a saved CLI login, not an online validation), `signInRequired`, `unavailable`, and
+`unknown`. Absent metadata means the older server cannot perform this preflight. Unknown does
+not block custom providers. Container checks run in the configured workspace execution wrapper
+after setup; an unconfigured checkout cannot reliably inherit the main checkout's login state.
+
+A failed authentication preflight leaves a queued delivery unsent and durably pauses its queue.
+There is no automatic authentication retry. After sign-in, send the existing head's text with
+the optional `retryDeliveryID` field on `send`. Only clients that have received authentication
+metadata may use this field, because older servers ignore it. The server atomically requires
+the same pending head ID and text, an authentication pause, and no delivery receipt. It resumes
+that existing delivery without inserting another. A removed, changed or already delivered
+message is refused. Ordinary `send` calls without this field retain distinct identical prompts.

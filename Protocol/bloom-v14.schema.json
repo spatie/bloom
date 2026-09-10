@@ -636,6 +636,16 @@
                 },
                 "text": {
                   "type": "string"
+                },
+                "retryDeliveryID": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
@@ -1347,7 +1357,7 @@
               "type": "object",
               "properties": {
                 "_0": {
-                  "$ref": "#/$defs/DomainRecord"
+                  "$ref": "#/$defs/ServerDiagnostics"
                 }
               },
               "required": [
@@ -3122,6 +3132,19 @@
               "type": "null"
             }
           ]
+        },
+        "authentication": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentAuthentication"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -3129,6 +3152,81 @@
         "models",
         "commands",
         "styles"
+      ],
+      "additionalProperties": true
+    },
+    "AgentAuthentication": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "ready",
+            "signInRequired",
+            "unavailable",
+            "unknown"
+          ]
+        }
+      },
+      "required": [
+        "agent",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "ServerDiagnostics": {
+      "type": "object",
+      "properties": {
+        "checkedAt": {
+          "type": "number"
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "operatingSystem": {
+          "type": "string"
+        },
+        "account": {
+          "type": "string"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DomainRecord"
+          }
+        },
+        "browser": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DomainRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authentication": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentAuthentication"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "checkedAt",
+        "hostname",
+        "operatingSystem",
+        "account",
+        "checks"
       ],
       "additionalProperties": true
     },

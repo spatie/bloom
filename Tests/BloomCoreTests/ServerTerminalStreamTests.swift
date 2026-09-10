@@ -68,7 +68,7 @@ struct ServerTerminalStreamTests {
         let workspace = try await store.upsert(Workspace(repoID: storedRepo.id, name: "Terminal", branch: "main", path: repo.path, baseBranch: "main"))
         let configuration = URL(fileURLWithPath: store.path).deletingLastPathComponent().appendingPathComponent("tmux.conf")
         try (TmuxSessions.configuration(defaultShell: "/bin/sh") + "\nset -g default-command /bin/sh\n").write(to: configuration, atomically: true, encoding: .utf8)
-        let runtime = ServerRuntime(store: store)
+        let runtime = ServerRuntime(store: store, authentication: { agent, _, _ in .init(agent: agent, state: .unknown) })
         do {
             let first = await runtime.respond(to: ServerRequest(.terminalStream(workspaceID: workspace.id, name: "https")))
             guard case .text(let path) = first.result else { Issue.record("Terminal stream failed: \(first.result)"); await runtime.shutdown(); return }

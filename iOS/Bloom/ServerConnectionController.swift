@@ -41,8 +41,8 @@ final class ServerConnectionController: UITableViewController {
         host.text = saved?.host; host.placeholder = "IP address or hostname"
         username.text = saved?.username ?? "bloom"
         port.text = String(saved?.port ?? 22); port.keyboardType = .numberPad
-        executable.text = saved?.executable ?? "/opt/bloom-server/current/bin/bloom-server"
-        directory.text = saved?.dataDirectory ?? "/var/lib/bloom"
+        executable.text = saved?.executable ?? SSHConfiguration.defaultExecutable
+        directory.text = saved?.dataDirectory ?? SSHConfiguration.defaultDataDirectory
         https.text = model.address.hasPrefix("https:") ? model.address : nil
         https.placeholder = "https://bloom.example.com"; https.keyboardType = .URL
         transport.selectedSegmentIndex = model.address.hasPrefix("https:") ? 1 : 0
