@@ -72,7 +72,7 @@ final class ProjectsController: UITableViewController {
     }
 
     private func update() {
-        let currentAddress = model.service == nil ? nil : model.address
+        let currentAddress = model.catalogue == nil ? nil : model.address
         if displayedAddress != currentAddress {
             displayedAddress = currentAddress
             let empty = UIViewController()
@@ -101,7 +101,7 @@ final class ProjectsController: UITableViewController {
             }
             contentUnavailableConfiguration = content
         } else { contentUnavailableConfiguration = nil }
-        navigationItem.rightBarButtonItem?.isEnabled = model.service != nil
+        navigationItem.rightBarButtonItem?.isEnabled = model.canSend
     }
 
     override func numberOfSections(in tableView: UITableView) -> Int { projects.count }
@@ -148,10 +148,10 @@ final class ProjectsController: UITableViewController {
     }
 
     private func updateHeader() {
-        guard model.service != nil else { tableView.tableHeaderView = nil; return }
+        guard model.catalogue != nil || model.canRetryConnection || model.recovery.phase == .connecting || model.recovery.phase == .reconnecting else { tableView.tableHeaderView = nil; return }
         let host = URL(string: model.address)?.host ?? model.address
         let label = BloomTheme.label(host, style: .subheadline)
-        let detail = BloomTheme.label("Connected · \(model.catalogue?.workspaces.count ?? 0) workspaces", style: .footnote, secondary: true)
+        let detail = BloomTheme.label("\(model.catalogue?.workspaces.count ?? 0) workspaces", style: .footnote, secondary: true)
         let icon = UIImageView(image: UIImage(systemName: "server.rack", withConfiguration: UIImage.SymbolConfiguration(textStyle: .title2)))
         icon.tintColor = BloomTheme.accent
         icon.setContentHuggingPriority(.required, for: .horizontal)
@@ -159,10 +159,14 @@ final class ProjectsController: UITableViewController {
         let stack = UIStackView(arrangedSubviews: [icon, text]); stack.spacing = 14; stack.alignment = .center
         stack.isLayoutMarginsRelativeArrangement = true
         stack.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 16, leading: 24, bottom: 12, trailing: 24)
-        stack.frame = CGRect(x: 0, y: 0, width: tableView.bounds.width, height: 76)
-        let fitting = stack.systemLayoutSizeFitting(CGSize(width: tableView.bounds.width, height: 0), withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel)
-        stack.frame.size.height = max(76, fitting.height)
-        tableView.tableHeaderView = stack
+        let connectionStatus = MobileConnectionStatusView()
+        connectionStatus.update(model.recovery, canRetry: model.canRetryConnection)
+        connectionStatus.onRetry = { [weak self] in self?.model.retryConnection() }
+        let header = UIStackView(arrangedSubviews: [stack, connectionStatus]); header.axis = .vertical
+        header.frame = CGRect(x: 0, y: 0, width: tableView.bounds.width, height: 76)
+        let fitting = header.systemLayoutSizeFitting(CGSize(width: tableView.bounds.width, height: 0), withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel)
+        header.frame.size.height = max(76, fitting.height)
+        tableView.tableHeaderView = header
     }
 
     func selectWorkspace(_ id: WorkspaceID, reveal: Bool) {

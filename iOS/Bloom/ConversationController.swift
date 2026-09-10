@@ -24,6 +24,9 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     private var queuedRows: [RemoteQueuedPrompt] = []
     var transcriptMessageCount: Int { buffer.messages.count }
     private var poll: Task<Void, Never>?
+    private var connectionObserver: UUID?
+    private var pollingGeneration: Int?
+    private var transcriptProblem: String?
     private var isRefreshing = false
     private var needsRefresh = false
     private var isSending = false
@@ -31,7 +34,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     private var queueCancellationIDs: [DeliveryID: UUID] = [:]
     private var cancellingQueued: Set<DeliveryID> = []
 
-    private let uncertainSend = "The last send has not been confirmed. Reconnect to this server and check the conversation before retrying. Retry uses the same message ID."
+    private let uncertainSend = "Message delivery is unconfirmed. Check the conversation, then choose Retry Message. Bloom reuses its original ID to avoid sending it twice."
 
     init(model: MobileConnection, session: RemoteSession) {
         self.model = model; self.session = session
@@ -121,7 +124,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
             stack.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
             stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             stack.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -8),
-            composerHeight!, send.widthAnchor.constraint(equalToConstant: 44),
+            composerHeight!, send.widthAnchor.constraint(greaterThanOrEqualToConstant: 44),
             send.heightAnchor.constraint(equalToConstant: 44),
         ])
         #if DEBUG
@@ -153,10 +156,12 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         let hintHeight = placeholder.isHidden ? 0 : placeholder.sizeThatFits(CGSize(width: max(100, composer.bounds.width - 30), height: .greatestFiniteMagnitude)).height + 28
         composerHeight?.constant = min(maximum, max(62, height, hintHeight))
         composer.isScrollEnabled = height > maximum
-        send.isEnabled = model.service != nil && model.address == origin && !isSending && (hasPendingSubmission || !composer.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        send.isEnabled = model.canSend && model.address == origin && !isSending && (hasPendingSubmission || !composer.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         send.configuration?.image = UIImage(systemName: hasPendingSubmission ? "arrow.clockwise" : "arrow.up")
+        send.configuration?.title = hasPendingSubmission ? "Retry Message" : nil
         send.accessibilityLabel = hasPendingSubmission ? "Retry message" : "Send message"
-        options.isEnabled = model.service != nil && model.address == origin && !isSending && !hasPendingSubmission
+        options.isHidden = hasPendingSubmission
+        options.isEnabled = model.canSend && model.address == origin && !isSending && !hasPendingSubmission
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -166,16 +171,37 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         #endif
         restoreDraft()
         loadOptions()
+        connectionObserver = model.observe { [weak self] in self?.connectionChanged() }
+        connectionChanged()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        poll?.cancel(); poll = nil; pollingGeneration = nil
+        if let connectionObserver { model.removeObserver(connectionObserver) }
+        connectionObserver = nil
+    }
+
+    private func connectionChanged() {
+        updateStatus()
+        if !queuedRows.isEmpty { table.reloadSections(IndexSet(integer: 1), with: .none) }
+        guard model.canSend, model.address == origin else {
+            poll?.cancel(); poll = nil; pollingGeneration = nil
+            return
+        }
+        guard pollingGeneration != model.generation else { return }
+        pollingGeneration = model.generation
+        transcriptProblem = nil
+        loadOptions()
         poll?.cancel()
         poll = Task { [weak self] in
             while !Task.isCancelled {
-                guard let self else { return }
-                if self.model.isActive { await self.refresh() }
+                guard let self, self.model.canSend else { return }
+                await self.refresh()
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
             }
         }
     }
-    override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); poll?.cancel(); poll = nil }
 
     private func configureOptionsButton() {
         var configuration = UIButton.Configuration.plain()
@@ -251,16 +277,18 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     }
 
     private func refreshTranscript() async {
-        guard model.address == origin, let service = model.service else {
-            status.text = hasPendingSubmission ? uncertainSend : "Disconnected. Reconnect to this server to see progress."
-            return
-        }
+        guard model.canSend, model.address == origin, let service = model.service else { updateStatus(); return }
+        let generation = model.generation
         do {
             let transcript = try await service.transcript(sessionID: session.id, after: buffer.sequence)
-            guard !Task.isCancelled, model.address == origin, model.service != nil else { return }
+            guard !Task.isCancelled, model.address == origin, model.generation == generation, model.canSend else { return }
+            transcriptProblem = nil
             applyTranscript(transcript)
         } catch {
-            if !Task.isCancelled { status.text = hasPendingSubmission ? uncertainSend : error.localizedDescription }
+            if !Task.isCancelled {
+                transcriptProblem = model.canSend ? error.localizedDescription : nil
+                updateStatus()
+            }
         }
     }
 
@@ -285,7 +313,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         }
         updateStatus()
         review.isHidden = buffer.pendingQuestions.isEmpty
-        navigationItem.rightBarButtonItem?.isEnabled = buffer.isBusy || !buffer.pendingQuestions.isEmpty
+        navigationItem.rightBarButtonItem?.isEnabled = model.canSend && (buffer.isBusy || !buffer.pendingQuestions.isEmpty)
     }
 
     #if DEBUG
@@ -384,7 +412,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     }
 
     private func submit() {
-        guard !isSending, model.address == origin, let service = model.service else { return }
+        guard !isSending, model.canSend, model.address == origin, let service = model.service else { return }
         do {
             let existing = try MobileConnection.drafts.draft(origin: origin, sessionID: session.id)
             if existing.submission == nil {
@@ -396,15 +424,17 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         isSending = true
         send.isEnabled = false; composer.isEditable = false
         Task {
-            defer { self.isSending = false; self.send.isEnabled = true; self.updateStatus() }
+            defer { self.isSending = false; self.updateStatus() }
             do {
                 try await MobileConnection.drafts.submit(using: service.client, origin: self.origin, sessionID: self.session.id)
                 self.restoreDraft()
                 self.composer.undoManager?.removeAllActions()
                 await self.refresh()
             } catch {
-                self.updateComposer()
-                self.show(ConnectionFailure(self.uncertainSend + "\n\n" + error.localizedDescription))
+                // The persisted pending command remains the only retry path. Never submit it
+                // automatically when connectivity returns, and do not interrupt reading with alerts.
+                self.restoreDraft()
+                self.transcriptProblem = self.model.canSend ? error.localizedDescription : nil
             }
         }
     }
@@ -443,8 +473,15 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
             table.backgroundView = UIContentUnavailableView(configuration: empty)
         } else { table.backgroundView = nil }
 
+        navigationItem.rightBarButtonItem?.isEnabled = model.canSend && (buffer.isBusy || !buffer.pendingQuestions.isEmpty)
+        review.isEnabled = model.canSend && model.address == origin
         if isSending { status.text = "Sending to the server" } else if hasPendingSubmission {
-            status.text = uncertainSend
+            status.text = model.canSend ? uncertainSend : "Message delivery is unconfirmed. It is saved on this device. Reconnect before choosing Retry Message."
+        } else if model.address != origin {
+            status.text = "Reconnect to this conversation's server. Your draft is saved on this device."
+        } else if !model.canSend {
+            status.text = model.recovery.title + ". You can keep writing; your draft stays on this device."
+        } else if let transcriptProblem { status.text = transcriptProblem
         } else if !buffer.pendingQuestions.isEmpty { status.text = "The agent is waiting for your answer." } else {
             status.text = buffer.queueError ?? (buffer.isBusy ? "Working on the server" : "Ready when you are")
         }
@@ -495,7 +532,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         if indexPath.section == 1 {
             let prompt = queuedRows[indexPath.row]
             cell.configureQueued(prompt, isCancelling: cancellingQueued.contains(prompt.id),
-                                 canCancel: model.address == origin && model.service != nil) { [weak self] in self?.cancelQueued(prompt) }
+                                 canCancel: model.address == origin && model.canSend) { [weak self] in self?.cancelQueued(prompt) }
         } else if indexPath.row < rows.count {
             cell.configure(row: rows[indexPath.row])
         } else { cell.configure(kind: "assistant", text: buffer.streamingText, identity: "stream", isStreaming: true) }

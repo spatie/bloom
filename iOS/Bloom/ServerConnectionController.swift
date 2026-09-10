@@ -27,7 +27,7 @@ final class ServerConnectionController: UITableViewController {
             self?.task?.cancel(); self?.dismiss(animated: true)
         })
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Connect", primaryAction: UIAction { [weak self] _ in self?.connect() })
-        if model.service != nil {
+        if model.service != nil || model.catalogue != nil || model.canRetryConnection {
             toolbarItems = [UIBarButtonItem(title: model.address.hasPrefix("https:") ? "Sign Out" : "Disconnect", primaryAction: UIAction { [weak self] _ in
                 guard let self else { return }
                 do {

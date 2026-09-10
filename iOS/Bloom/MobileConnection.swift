@@ -18,90 +18,207 @@ final class MobileConnection {
     private var sshConfiguration: SSHConfiguration?
     private var previewLeases: [UUID: MobilePreviewLease] = [:]
     private var terminals: [UUID: (WorkspaceID, String, any RemoteTerminalConnection)] = [:]
-    private var generation = 0
+    private(set) var generation = 0
+    private(set) var recovery = RemoteConnectionRecovery()
     private var refreshTask: Task<Void, Never>?
+    private var attemptTask: Task<Void, Error>?
+    private var observers: [UUID: @MainActor () -> Void] = [:]
+    private enum Destination {
+        case https(URL)
+        case ssh(SSHConfiguration)
+        var address: String {
+            switch self {
+            case .https(let url): url.absoluteString
+            case .ssh(let configuration): configuration.identity
+            }
+        }
+    }
+    private var destination: Destination?
+    var canRetryConnection: Bool { isActive && destination != nil && recovery.canRetry }
+    var canSend: Bool { isActive && service != nil && recovery.phase == .connected }
 
-    init() {}
+    func observe(_ changed: @escaping @MainActor () -> Void) -> UUID {
+        let id = UUID(); observers[id] = changed; return id
+    }
+    func removeObserver(_ id: UUID) { observers[id] = nil }
+    private func notify() { changed?(); for observer in Array(observers.values) { observer() } }
+
+    init() {
+        guard UserDefaults.standard.object(forKey: "server.reconnectOnLaunch") as? Bool != false else { return }
+        if let data = UserDefaults.standard.data(forKey: "server.ssh"),
+           let configuration = try? JSONDecoder().decode(SSHConfiguration.self, from: data), configuration.identity == address {
+            destination = .ssh(configuration)
+        } else if let origin = try? HTTPSConnection.origin(address) { destination = .https(origin) }
+    }
 
     #if DEBUG
     init(previewCatalogue: RemoteCatalogue, client: any RemoteRequesting = PreviewRequestClient()) {
         catalogue = previewCatalogue
         address = "ssh://bloom@preview.bloom.invalid/var/lib/bloom"
         service = RemoteWorkspaceService(client: client)
+        recovery.connected()
     }
     #endif
 
     func connect(address: String) async throws {
-        let origin = try HTTPSConnection.origin(address)
-        disconnect()
-        let generation = self.generation
-        _ = try await authentication.token(for: origin.absoluteString)
-        guard generation == self.generation else { throw CancellationError() }
-        let authentication = authentication
-        let connection = try HTTPSConnection(baseURL: origin) {
-            try await authentication.token(for: origin.absoluteString)
-        }
-        let client = RemoteClient(connection: connection)
-        do {
-            let hello = try await client.request(.call("hello"))
-            guard hello["hello"]?["name"]?.stringValue != nil else { throw ConnectionFailure("This is not a Bloom Server.") }
-            let catalogue = try await RemoteCatalogue.decode(client.request(.call("catalogue")))
-            guard generation == self.generation else { throw CancellationError() }
-            self.connection = connection
-            service = RemoteWorkspaceService(client: client)
-            self.catalogue = catalogue
-            self.address = origin.absoluteString
-            UserDefaults.standard.set(self.address, forKey: "server.address")
-            changed?()
-        } catch { connection.close(); throw error }
+        try await select(.https(try HTTPSConnection.origin(address)))
     }
 
-    func connect(ssh configuration: SSHConfiguration) async throws {
-        disconnect()
-        let generation = generation
-        let connection = SSHConnection(configuration: configuration, privateKey: try SSHCredentials.identity(), fingerprint: try SSHCredentials.fingerprint(for: configuration.hostIdentity))
+    func connect(ssh configuration: SSHConfiguration) async throws { try await select(.ssh(configuration)) }
+
+    private func select(_ target: Destination) async throws {
+        refreshTask?.cancel(); refreshTask = nil
+        attemptTask?.cancel()
+        if address != target.address { catalogue = nil; recovery = RemoteConnectionRecovery() }
+        destination = target
+        UserDefaults.standard.set(true, forKey: "server.reconnectOnLaunch")
+        address = target.address
+        let attemptGeneration = generation + 1
         do {
-            let hello = try await connection.request(.call("hello"))
-            guard hello["hello"]?["name"]?.stringValue != nil else { throw ConnectionFailure("This is not a Bloom Server.") }
-            let catalogue = try await RemoteCatalogue.decode(connection.request(.call("catalogue")))
-            guard generation == self.generation else { throw CancellationError() }
-            sshConnection = connection
+            try await attemptConnection()
+            startMonitoring()
+        } catch {
+            guard generation == attemptGeneration, destination?.address == target.address else { throw error }
+            if error is CancellationError {
+                retireTransports()
+                if isActive { recovery.disconnect() } else { recovery.suspend() }
+                notify()
+            } else if isActive {
+                connectionFailed(error)
+                startMonitoring()
+            }
+            throw error
+        }
+    }
+
+    private func attemptConnection() async throws {
+        guard isActive, let destination else { throw CancellationError() }
+        retireTransports()
+        let generation = generation
+        recovery.beginAttempt(); notify()
+        let task = Task { @MainActor [self] in
+            try await establish(destination, generation: generation)
+        }
+        attemptTask = task
+        defer { if generation == self.generation { attemptTask = nil } }
+        try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+    }
+
+    private func establish(_ destination: Destination, generation: Int) async throws {
+        let raw: any RemoteRequesting
+        switch destination {
+        case .https(let origin):
+            let authentication = authentication
+            let transport = try HTTPSConnection(baseURL: origin) {
+                try await authentication.token(for: origin.absoluteString)
+            }
+            connection = transport
+            raw = RemoteClient(connection: transport)
+        case .ssh(let configuration):
+            let transport = SSHConnection(configuration: configuration, privateKey: try SSHCredentials.identity(),
+                                          fingerprint: try SSHCredentials.fingerprint(for: configuration.hostIdentity))
+            sshConnection = transport
             sshConfiguration = configuration
-            service = RemoteWorkspaceService(client: connection)
-            self.catalogue = catalogue
-            address = configuration.identity
-            UserDefaults.standard.set(address, forKey: "server.address")
+            raw = transport
+        }
+        let hello = try await MobileRequestClient.request(.call("hello"), using: raw)
+        guard hello["hello"]?["name"]?.stringValue != nil else { throw ConnectionFailure("This is not a Bloom Server.") }
+        let catalogue = try await RemoteCatalogue.decode(MobileRequestClient.request(.call("catalogue"), using: raw))
+        guard generation == self.generation, isActive, !Task.isCancelled else { throw CancellationError() }
+        let client = MobileRequestClient(base: raw) { [weak self] error in
+            await self?.requestFailed(error, generation: generation)
+        }
+        service = RemoteWorkspaceService(client: client)
+        self.catalogue = catalogue
+        address = destination.address
+        UserDefaults.standard.set(address, forKey: "server.address")
+        if case .ssh(let configuration) = destination {
             UserDefaults.standard.set(try JSONEncoder().encode(configuration), forKey: "server.ssh")
-            changed?()
-        } catch { await connection.close(); throw error }
+        }
+        recovery.connected(); notify()
     }
 
     func refresh() async throws {
-        guard let service else { return }
+        guard isActive, let service else { return }
         let generation = generation
         let catalogue = try await service.catalogue()
         guard generation == self.generation else { return }
         self.catalogue = catalogue
-        changed?()
+        notify()
     }
 
-    func disconnect() {
-        generation += 1
+    private func requestFailed(_ error: Error, generation: Int) {
+        guard generation == self.generation, isActive else { return }
+        // Server operation refusals are not broken transports, unless credentials expired.
+        if error is ConnectionRefusal, !RemoteConnectionRecovery.requiresUserAction(error.localizedDescription) { return }
+        connectionFailed(error)
+        startMonitoring()
+    }
+
+    private func connectionFailed(_ error: Error) {
+        retireTransports()
+        let automatic = !(error is SSHHostTrustRequired) && !RemoteConnectionRecovery.requiresUserAction(error.localizedDescription)
+        recovery.failed(message: error.localizedDescription, automaticallyRetry: automatic)
+        notify()
+    }
+
+    /// Retry only the connection and read snapshots. Pending prompts require an explicit retry.
+    func retryConnection() {
+        guard isActive, destination != nil, recovery.phase != .connecting, recovery.phase != .reconnecting else { return }
+        refreshTask?.cancel(); refreshTask = nil
+        startMonitoring(immediately: true)
+    }
+
+    private func startMonitoring(immediately: Bool = false) {
         refreshTask?.cancel()
-        connection?.close()
-        connection = nil
+        guard isActive, destination != nil else { return }
+        refreshTask = Task { [weak self] in
+            var immediately = immediately
+            while !Task.isCancelled {
+                guard let self, self.isActive, self.destination != nil else { return }
+                if self.service == nil {
+                    guard immediately || self.recovery.automaticallyRetries else { return }
+                    if !immediately {
+                        do { try await Task.sleep(for: .seconds(self.recovery.retryDelaySeconds)) } catch { return }
+                    }
+                    immediately = false
+                    guard !Task.isCancelled, self.isActive else { return }
+                    do { try await self.attemptConnection() } catch {
+                        guard !Task.isCancelled, self.isActive, !(error is CancellationError) else { return }
+                        self.connectionFailed(error)
+                    }
+                } else {
+                    do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                    guard !Task.isCancelled, self.isActive else { return }
+                    do { try await self.refresh() } catch { /* The request observer updates recovery once. */ }
+                }
+            }
+        }
+    }
+
+    /// Explicit disconnect forgets only this window's snapshot. Drafts and credentials survive.
+    func disconnect() {
+        UserDefaults.standard.set(false, forKey: "server.reconnectOnLaunch")
+        refreshTask?.cancel(); refreshTask = nil
+        attemptTask?.cancel(); attemptTask = nil
+        destination = nil
+        retireTransports()
+        catalogue = nil
+        recovery.disconnect(); notify()
+    }
+
+    private func retireTransports() {
+        generation += 1
+        connection?.close(); connection = nil
         if let sshConnection { Task { await sshConnection.close() } }
         sshConnection = nil
         sshConfiguration = nil
         let leases = Array(previewLeases.values)
-        previewLeases.removeAll()
-        leases.forEach { $0.close() }
+        previewLeases.removeAll(); leases.forEach { $0.close() }
         let terminals = self.terminals.values.map { $0.2 }
         self.terminals.removeAll()
         Task { for terminal in terminals { await terminal.close() } }
         service = nil
-        catalogue = nil
-        changed?()
     }
 
     func openTerminal(workspaceID: WorkspaceID, name: String) async throws -> any RemoteTerminalConnection {
@@ -194,12 +311,22 @@ final class MobileConnection {
         ["localhost", "127.0.0.1", "::1", "[::1]"].contains(url.host?.lowercased() ?? "")
     }
 
-    func suspend() { isActive = false; refreshTask?.cancel() }
+    func suspend() {
+        isActive = false
+        refreshTask?.cancel(); refreshTask = nil
+        attemptTask?.cancel(); attemptTask = nil
+        retireTransports()
+        recovery.suspend(); notify()
+    }
+
     func resume() {
         isActive = true
-        refreshTask?.cancel()
-        refreshTask = Task { try? await refresh() }
+        // Preview fixtures have no transport and intentionally do not access a network.
+        guard destination != nil, attemptTask == nil else { notify(); return }
+        if service == nil { startMonitoring(immediately: true) } else { startMonitoring() }
+        notify()
     }
+
 }
 
 /// A browser owns one preview lease. Closing a tab or disconnecting revokes its local HTTP origin.

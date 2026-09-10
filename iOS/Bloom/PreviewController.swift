@@ -24,6 +24,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     private let errorDetail = BloomTheme.label("", style: .subheadline, secondary: true)
     private var isLoading = false
     private var retryURL: URL?
+    private var reconnectAddress: String?
     #if DEBUG
     private var previewHTML: String?
     #endif
@@ -48,6 +49,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     init(preview: MobilePreviewLease) {
         url = preview.url
         previewLease = preview
+        reconnectAddress = preview.sourceURL.absoluteString
         let configuration = WKWebViewConfiguration()
         // An ephemeral local port must never inherit another workspace's browser cookies.
         if preview.isTunnel { configuration.websiteDataStore = .nonPersistent() }
@@ -57,7 +59,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             self?.preparing?.cancel()
             self?.browser.stopLoading()
             self?.browser.loadHTMLString("", baseURL: nil)
-            self?.showFailure("This preview connection has closed. Reconnect to the server and reopen the preview.")
+            self?.showFailure("This preview connection has closed. Reconnect to the server, then reload the preview.")
         }
     }
 
@@ -67,7 +69,10 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         Task { @MainActor in lease?.close() }
     }
 
-    var currentAddress: String { previewLease?.reportedURL(browser.url ?? url).absoluteString ?? (browser.url ?? url).absoluteString }
+    var currentAddress: String {
+        if previewLease?.isClosed == true { return reconnectAddress ?? previewLease?.sourceURL.absoluteString ?? url.absoluteString }
+        return previewLease?.reportedURL(browser.url ?? url).absoluteString ?? (browser.url ?? url).absoluteString
+    }
     var pageIsLoading: Bool { isLoading }
     var pageCanGoBack: Bool { browser.canGoBack }
     var pageCanGoForward: Bool { browser.canGoForward }
@@ -266,7 +271,9 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     private func prepareBrowser() {
         if previewLease?.isClosed == true {
-            showFailure("This preview connection has closed. Reconnect to the server and reopen the preview.")
+            if let reconnectAddress, let onNavigate { onNavigate(reconnectAddress) } else {
+                showFailure("This preview connection has closed. Reconnect to the server, then reopen the preview.")
+            }
             return
         }
         guard let previewLease, previewLease.isTunnel, let port = previewLease.url.port else {
@@ -317,7 +324,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     private func reload() {
         if previewLease?.isClosed == true {
-            showFailure("This preview connection has closed. Reconnect to the server and reopen the preview.")
+            showFailure("This preview connection has closed. Reconnect to the server, then reload the preview.")
             return
         }
         if isLoading {
@@ -386,6 +393,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if let previewLease, !previewLease.isClosed { reconnectAddress = currentAddress }
         hasLoadedPage = true
         lastPageFailure = nil
         retryURL = nil

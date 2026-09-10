@@ -29,17 +29,17 @@ public final class ServerAuthentication {
     public func token(for address: String) async throws -> String {
         let origin = try HTTPSConnection.origin(address).absoluteString
         guard let state = try state(for: origin), state.isAuthorized else { throw ConnectionFailure("Sign in to this server first.") }
-        return try await withCheckedThrowingContinuation { continuation in
+        return try await CancellableCallback<String>.run { finish in
             state.performAction(freshTokens: { [weak self] token, _, error in
                 MainActor.assumeIsolated {
                     guard let token, error == nil else {
-                        continuation.resume(throwing: ConnectionFailure("Your server sign-in expired. Sign in again."))
+                        finish(.failure(ConnectionFailure("Your server sign-in expired. Sign in again.")))
                         return
                     }
                     do {
                         try self?.save(state, origin: origin)
-                        continuation.resume(returning: token)
-                    } catch { continuation.resume(throwing: error) }
+                        finish(.success(token))
+                    } catch { finish(.failure(error)) }
                 }
             }, additionalRefreshParameters: state.lastAuthorizationResponse.request.additionalParameters?["resource"].map { ["resource": $0] })
         }

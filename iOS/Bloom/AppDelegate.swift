@@ -25,6 +25,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         #endif
     }
 
+    func sceneDidDisconnect(_ scene: UIScene) { model.suspend() }
     func sceneDidEnterBackground(_ scene: UIScene) { model.suspend() }
     func sceneDidBecomeActive(_ scene: UIScene) { model.resume() }
 }

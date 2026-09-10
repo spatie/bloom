@@ -49,12 +49,16 @@ public final class ConversationDraftStore {
     public func prepare(origin: String, sessionID: SessionID) throws -> RemoteCommand {
         try prepare(scope: Scope(origin: origin), sessionID: sessionID)
     }
-    public func prepare(scope: Scope, sessionID: SessionID) throws -> RemoteCommand {
+    public func prepare(scope: Scope, sessionID: SessionID, text: String? = nil) throws -> RemoteCommand {
         var command: RemoteCommand?
         try update(scope: scope, sessionID: sessionID) { draft in
+            if let text, let pending = draft.submission, pending.operation["send"]?["text"]?.stringValue != text {
+                throw ConnectionFailure("The previous message is awaiting confirmation. Retry that message before sending a different one; your edited draft is saved.")
+            }
             if draft.submission == nil {
-                guard !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ConnectionFailure("Enter a message first.") }
-                draft.submission = .send(sessionID: sessionID, text: draft.text)
+                let submitted = text ?? draft.text
+                guard !submitted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ConnectionFailure("Enter a message first.") }
+                draft.submission = .send(sessionID: sessionID, text: submitted)
             }
             command = draft.submission
         }

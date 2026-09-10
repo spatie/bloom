@@ -8,6 +8,9 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     var preferredSessionID: SessionID?
     let review: MobileWorkspaceReview
     private let panes = UIStackView()
+    private let connectionStatus = MobileConnectionStatusView()
+    private var connectionObserver: UUID?
+    private var connectedGeneration: Int?
     private let compactTabs = UITabBar()
     private var compactTabsHeight: NSLayoutConstraint?
     private var usesCompactTabs = false
@@ -56,7 +59,11 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         panes.spacing = 0
         panes.alignment = .fill
         panes.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(panes)
+        connectionStatus.onRetry = { [weak self] in self?.connection.retryConnection() }
+        connectionStatus.update(connection.recovery, canRetry: connection.canRetryConnection)
+        let content = UIStackView(arrangedSubviews: [connectionStatus, panes]); content.axis = .vertical
+        content.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(content)
         compactTabs.translatesAutoresizingMaskIntoConstraints = false
         compactTabs.delegate = self
         compactTabs.tintColor = BloomTheme.accent
@@ -74,10 +81,10 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
             compactTabs.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             compactTabs.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             compactTabs.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            panes.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
-            panes.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-            panes.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            panes.bottomAnchor.constraint(equalTo: compactTabs.topAnchor),
+            content.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+            content.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            content.bottomAnchor.constraint(equalTo: compactTabs.topAnchor),
         ])
         for host in [conversationHost, conversationRule, toolHost, filesRule, filesHost] { panes.addArrangedSubview(host) }
         for rule in [conversationRule, filesRule] {
@@ -124,12 +131,14 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        connectionObserver = connection.observe { [weak self] in self?.connectionChanged() }
+        connectionChanged()
         attachUI()
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                if self.connection.isActive { self.attachUI(); await self.review.refresh() } else { self.uiSession?.stop() }
+                if self.connection.canSend { self.attachUI(); await self.review.refresh() } else { self.uiSession?.stop() }
                 do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }
         }
@@ -137,12 +146,23 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        if let connectionObserver { connection.removeObserver(connectionObserver) }
+        connectionObserver = nil
         refreshTask?.cancel()
         refreshTask = nil
         previewTask?.cancel()
         uiSession?.stop()
         deck.suspendTerminals()
         review.cancel()
+    }
+
+    private func connectionChanged() {
+        connectionStatus.update(connection.recovery, canRetry: connection.canRetryConnection)
+        if connection.canSend, connectedGeneration != connection.generation {
+            connectedGeneration = connection.generation
+            uiSession?.stop(); uiSession = nil
+            attachUI()
+        } else if !connection.canSend { uiSession?.stop(); deck.suspendTerminals() }
     }
 
     private func updateToolbar() {

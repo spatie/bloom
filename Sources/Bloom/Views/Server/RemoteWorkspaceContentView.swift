@@ -41,10 +41,57 @@ struct RemoteWorkspaceContentView: View {
             session.start(using: service)
         }
         .onDisappear { uiBridge?.stop(); uiBridge = nil }
+        .safeAreaInset(edge: .top, spacing: 0) { connectionNotice }
         .safeAreaInset(edge: .bottom) {
-            if let error = uiBridge?.error {
+            if model.connectionRecovery.phase == .connected, let error = uiBridge?.error {
                 Text(error).font(.caption).foregroundStyle(.secondary).padding(8).frame(maxWidth: .infinity)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var connectionNotice: some View {
+        let recovery = model.connectionRecovery
+        if model.isConfigured, recovery.phase != .connected || model.selectedPendingSend != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                if recovery.phase != .connected {
+                    HStack(alignment: .top, spacing: 10) {
+                        if recovery.phase == .connecting || recovery.phase == .reconnecting {
+                            ProgressView().controlSize(.small)
+                        } else { Image(systemName: "wifi.exclamationmark").foregroundStyle(.orange) }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(recovery.title).font(Typo.captionEmphasis)
+                            Text(recovery.detail).font(Typo.caption).foregroundStyle(.secondary)
+                            if !recovery.automaticallyRetries, recovery.phase == .offline, let failure = recovery.lastError {
+                                Text(ServerSetupDiagnostics.sanitise(failure)).font(Typo.caption).textSelection(.enabled)
+                            }
+                        }
+                        Spacer(minLength: 8)
+                        if recovery.canRetry {
+                            Button("Retry Now") { Task { await model.connect() } }
+                                .disabled(model.isConnecting || model.isRemovingServer || model.isDisconnecting)
+                        }
+                    }
+                }
+                if model.selectedPendingSend != nil {
+                    HStack(alignment: .top, spacing: 10) {
+                        let sending = model.sendingSessionID == model.selectedSessionID
+                        Image(systemName: sending ? "paperplane" : "exclamationmark.bubble").foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(sending ? "Sending message" : "Message awaiting confirmation").font(Typo.captionEmphasis)
+                            Text(sending ? "Waiting for the server to confirm receipt."
+                                 : "It may already be on the server. Retry checks the same message without creating a duplicate.")
+                                .font(Typo.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        Button("Retry Message") { Task { await model.retryPendingSend() } }
+                            .disabled(sending || !model.isConnected || model.isConnecting || model.isPerformingCommand)
+                    }
+                }
+            }
+            .padding(12)
+            .background(.quaternary.opacity(0.35))
+            .accessibilityElement(children: .contain)
         }
     }
 

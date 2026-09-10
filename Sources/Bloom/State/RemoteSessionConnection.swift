@@ -33,7 +33,7 @@ final class RemoteSessionConnection {
         attachmentCache = FileManager.default.temporaryDirectory.appendingPathComponent("bloom-remote-previews/\(UUID().uuidString)").path
     }
 
-    var canSend: Bool { server?.isConnected == true && server?.endpoint == endpoint && !isApplying && !isUploading }
+    var canSend: Bool { server?.isConnected == true && server?.isConnecting == false && server?.isPerformingCommand == false && server?.pendingSend(sessionID: sessionID) == nil && server?.endpoint == endpoint && !isApplying && !isUploading }
 
     private func request(_ operation: ServerOperation) async throws -> ServerResult {
         guard let server, server.endpoint == endpoint else { throw ServerFailure("Reconnect to this workspace's server.") }
@@ -146,23 +146,29 @@ final class RemoteSessionConnection {
         isUploading = true
         defer { isUploading = false }
         var paths: [String] = []
-        for source in sources {
-            let data: Data
-            switch source {
-            case .file(let url), .promisedFile(let url, _):
-                let access = url.startAccessingSecurityScopedResource()
-                defer { if access { url.stopAccessingSecurityScopedResource() } }
-                guard try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max <= ServerFileOperations.transferLimit else {
-                    throw ServerFailure("Choose a file up to 8 MB.")
+        do {
+            for source in sources {
+                let data: Data
+                switch source {
+                case .file(let url), .promisedFile(let url, _):
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    guard try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max <= ServerFileOperations.transferLimit else {
+                        throw ServerFailure("Choose a file up to 8 MB.")
+                    }
+                    data = try Data(contentsOf: url)
+                case .image(let bytes, _, _): data = bytes
+                case .text(let text, _): data = Data(text.utf8)
                 }
-                data = try Data(contentsOf: url)
-            case .image(let bytes, _, _): data = bytes
-            case .text(let text, _): data = Data(text.utf8)
+                guard case .text(let path) = try await request(.workspace(workspaceID: workspace.id,
+                    action: .uploadFile(name: source.filename, data: data))) else { throw ServerFailure("The server did not confirm this attachment.") }
+                try cache(data, at: path)
+                paths.append(path)
             }
-            guard case .text(let path) = try await request(.workspace(workspaceID: workspace.id,
-                action: .uploadFile(name: source.filename, data: data))) else { continue }
-            try cache(data, at: path)
-            paths.append(path)
+        } catch {
+            server?.preserveUploadedAttachments(paths, sessionID: sessionID, endpoint: endpoint)
+            let suffix = paths.isEmpty ? "" : " Uploaded files have been kept in your draft."
+            throw ServerFailure(error.localizedDescription + suffix + " Reattach any remaining files after reconnecting.")
         }
         return paths
     }

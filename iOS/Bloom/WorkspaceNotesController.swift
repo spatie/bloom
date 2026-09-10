@@ -90,7 +90,7 @@ final class WorkspaceNotesController: UIViewController, UITextViewDelegate {
                 guard !Task.isCancelled else { return }
                 // Keep any device draft visible but read-only. A failed read is not an empty note.
                 status.text = "Couldn’t load notes"
-                if viewIfLoaded?.window != nil { show(error) }
+                if model.canSend, viewIfLoaded?.window != nil { show(error) }
             }
             loading = nil
             retry.isEnabled = true
@@ -122,7 +122,7 @@ final class WorkspaceNotesController: UIViewController, UITextViewDelegate {
                 saved = text
                 saving = nil
                 if editor.text == text { UserDefaults.standard.removeObject(forKey: key); status.text = "Saved" } else { saveNow() }
-            } catch { saving = nil; status.text = "Draft saved on this device"; if viewIfLoaded?.window != nil { show(error) } }
+            } catch { saving = nil; status.text = "Draft saved on this device"; if model.canSend, viewIfLoaded?.window != nil { show(error) } }
         }
     }
 }
