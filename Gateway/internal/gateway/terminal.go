@@ -33,6 +33,12 @@ func requestID() string {
 }
 
 func (server *Server) terminal(writer http.ResponseWriter, request *http.Request, config Config) {
+	// Allocating the runtime stream can start a terminal. Ordinary HTTP requests must not
+	// cause that side effect before the WebSocket upgrader rejects them.
+	if !websocket.IsWebSocketUpgrade(request) {
+		http.Error(writer, "WebSocket upgrade required", http.StatusBadRequest)
+		return
+	}
 	query := request.URL.Query()
 	if request.Method != "GET" || len(query) != 2 || len(query["workspace_id"]) != 1 || len(query["name"]) != 1 || len(query.Get("workspace_id")) > 128 || len(query.Get("name")) > 64 || query.Get("workspace_id") == "" || query.Get("name") == "" {
 		http.Error(writer, "Invalid terminal request", 400)

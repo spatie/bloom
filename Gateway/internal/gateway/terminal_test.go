@@ -68,3 +68,19 @@ func TestTerminalEOFUsesNormalWebSocketCloseButMalformedOutputDoesNot(t *testing
 		})
 	}
 }
+
+func TestTerminalRequiresWebSocketUpgradeBeforeContactingRuntime(t *testing.T) {
+	f := newFixture(t)
+	count := runtimeFixture(t, f, func(connection net.Conn, request rpcRequest) {
+		_ = json.NewEncoder(connection).Encode(map[string]any{"version": protocolVersion, "id": request.ID,
+			"result": map[string]any{"failure": map[string]string{"_0": "fixture should not be called"}}})
+	})
+	response := f.request("GET", f.config.APIHost, "/v1/terminal?workspace_id=workspace-a&name=shell",
+		f.token(t, "control", nil), "", "")
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("ordinary HTTP request returned %d", response.Code)
+	}
+	if count.Load() != 0 {
+		t.Fatal("ordinary HTTP request allocated a runtime terminal stream")
+	}
+}
