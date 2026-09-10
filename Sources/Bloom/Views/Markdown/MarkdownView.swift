@@ -434,6 +434,7 @@ enum InlineNSAttributes {
 
         let output = NSMutableAttributedString()
         render(inline, font: font, code: code, color: color, traits: [], into: output)
+        TranscriptLink.addSourceIcons(to: output)
         output.addAttribute(
             .paragraphStyle, value: paragraph, range: NSRange(location: 0, length: output.length)
         )

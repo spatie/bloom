@@ -56,6 +56,8 @@ struct TranscriptLinkActions: Sendable, Equatable {
     var hoverFile: @MainActor @Sendable (FileChipHover?) -> Void = { _ in }
     var previewFile: @MainActor @Sendable (String) -> URL? = { _ in nil }
 
+    var previewSource: @MainActor @Sendable (URL) -> URL? = { _ in nil }
+
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.identity == rhs.identity }
 }
 
@@ -305,8 +307,9 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
     }
 
     func quickLookURL(at point: NSPoint) -> URL? {
-        guard let path = fileChip(at: point)?.subject.path else { return nil }
-        return actions.previewFile(path)
+        if let path = fileChip(at: point)?.subject.path { return actions.previewFile(path) }
+        guard let url = link(at: point) else { return nil }
+        return actions.previewSource(url)
     }
 
     var bubbleAlignmentWidth: CGFloat?
@@ -463,6 +466,7 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
         guard let layout = layoutManager, let container = textContainer,
               let storage = textStorage, storage.length > 0 else { return nil }
 
+        let point = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
         let index = layout.characterIndex(
             for: point, in: container, fractionOfDistanceBetweenInsertionPoints: nil
         )
@@ -491,6 +495,7 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
         guard let layout = layoutManager, let container = textContainer,
               let storage = textStorage, storage.length > 0 else { return nil }
 
+        let point = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
         let index = layout.characterIndex(
             for: point, in: container, fractionOfDistanceBetweenInsertionPoints: nil
         )
@@ -526,7 +531,7 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
             return super.writeSelection(to: pasteboard, type: type)
         }
         let text = selectedRanges
-            .map { ComposerChipText.draft(of: storage, in: $0.rangeValue) }
+            .map { TranscriptLink.selectedText(in: storage, range: $0.rangeValue) }
             .joined(separator: "\n")
         pasteboard.setString(text, forType: .string)
         return true
@@ -548,6 +553,12 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
         let menu = NSMenu()
         for offered in actions.items(url) {
             menu.addItem(item(offered.title, url: url, target: offered.target))
+        }
+        if let file = actions.previewSource(url), QuickLookTarget.url(for: file.path) != nil {
+            let preview = NSMenuItem(title: "Quick Look", action: #selector(previewSource(_:)), keyEquivalent: "")
+            preview.target = self
+            preview.represent(file)
+            menu.addItem(preview)
         }
         menu.addItem(.separator())
         let copy = NSMenuItem(title: "Copy Link", action: #selector(copyLink(_:)), keyEquivalent: "")
@@ -572,6 +583,11 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
     @objc private func openLink(_ sender: NSMenuItem) {
         guard let choice = sender.represented(LinkChoice.self) else { return }
         actions.open(choice.url, choice.target)
+    }
+
+    @objc private func previewSource(_ sender: NSMenuItem) {
+        guard let url = sender.represented(URL.self) else { return }
+        HoverQuickLookController.shared.show(url, in: window)
     }
 
     @objc private func copyLink(_ sender: NSMenuItem) {
