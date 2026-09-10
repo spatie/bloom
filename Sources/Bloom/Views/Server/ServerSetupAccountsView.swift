@@ -10,20 +10,42 @@ struct ServerSetupAccountsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                    Text("Already signed in on this Mac?").font(Typo.labelEmphasis)
-                    Text("Choose GitHub or Codex accounts to use on this server.")
-                        .font(Typo.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Use Accounts from This Mac…") {
-                    guard let connection = model.accountConnection else { return }
-                    credentialImport = ServerCredentialImportModel(connection: connection)
-                }
-                .disabled(model.isBusy || model.accountConnection == nil)
+            if !model.hasChosenAccountMethod {
+                accountChoice
+            } else {
+                signIns
             }
-            Divider()
+        }
+        .sheet(isPresented: Binding(get: { login != nil }, set: { if !$0 { closeLogin() } })) {
+            if let login { ServerSetupLoginView(session: login, close: closeLogin) }
+        }
+        .sheet(isPresented: Binding(get: { credentialImport != nil }, set: { if !$0 { closeImport() } })) {
+            if let credentialImport { ServerCredentialImportView(model: credentialImport, close: closeImport) }
+        }
+        .onDisappear { login?.stop(); login = nil; credentialImport?.cancel(); credentialImport = nil }
+    }
+
+    private var accountChoice: some View {
+        VStack(alignment: .leading, spacing: Metrics.gutter * 1.5) {
+            Image(systemName: "person.crop.circle.badge.checkmark")
+                .font(.system(size: 40)).foregroundStyle(Palette.controlAccent).accessibilityHidden(true)
+            Text("Bring your accounts with you").font(Typo.heading)
+            Text("Copy your GitHub and Codex sign-ins from this Mac. You choose which accounts to share, and this Mac stays signed in.")
+                .font(Typo.label).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Button("Copy Accounts from This Mac…") {
+                guard let connection = model.accountConnection else { return }
+                credentialImport = ServerCredentialImportModel(connection: connection)
+            }
+            .buttonStyle(.borderedProminent).tint(Palette.controlAccent)
+            .disabled(model.isBusy || model.accountConnection == nil)
+            Text("Prefer to sign in separately? Choose Continue. You can also connect Claude on the next screen.")
+                .font(Typo.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var signIns: some View {
+        VStack(alignment: .leading, spacing: Metrics.gutter) {
             accountRow("GitHub", detail: githubDetail, account: .github)
             Divider()
             accountRow("Codex", detail: agentDetail(.codex, name: "Codex"), account: .codex)
@@ -34,16 +56,16 @@ struct ServerSetupAccountsView: View {
             HStack {
                 Button("Refresh Status") { Task { await model.refreshAccounts() } }.disabled(model.isBusy)
                 if model.isBusy { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Copy Accounts from This Mac…") {
+                    guard let connection = model.accountConnection else { return }
+                    credentialImport = ServerCredentialImportModel(connection: connection)
+                }
+                .buttonStyle(.link).font(Typo.caption)
+                .disabled(model.isBusy || model.accountConnection == nil)
             }
             if let loginProblem { Text(loginProblem).font(Typo.caption).foregroundStyle(Palette.warning).textSelection(.enabled) }
         }
-        .sheet(isPresented: Binding(get: { login != nil }, set: { if !$0 { closeLogin() } })) {
-            if let login { ServerSetupLoginView(session: login, close: closeLogin) }
-        }
-        .sheet(isPresented: Binding(get: { credentialImport != nil }, set: { if !$0 { closeImport() } })) {
-            if let credentialImport { ServerCredentialImportView(model: credentialImport, close: closeImport) }
-        }
-        .onDisappear { login?.stop(); login = nil; credentialImport?.cancel(); credentialImport = nil }
     }
 
     private var githubDetail: String {
@@ -109,6 +131,7 @@ struct ServerSetupAccountsView: View {
     private func closeImport() {
         credentialImport?.cancel()
         credentialImport = nil
+        model.hasChosenAccountMethod = true
         Task { await model.refreshAccounts() }
     }
 

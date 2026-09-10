@@ -11,16 +11,18 @@ extension ServerWindowModel {
     }
 
     func rememberConnection() {
+        guard !isRemovingServer else { return }
         if let profile = connectionProfile { savedServers.remember(profile) }
     }
 
     func selectServer(_ profile: ServerConnectionProfile) async {
-        guard !isConnecting, !isSigningIn, !isPerformingCommand else { return }
+        guard !isConnecting, !isSigningIn, !isPerformingCommand, !isRemovingServer else { return }
         useConnectionProfile(profile)
         await connect()
     }
 
     func useConnectionProfile(_ profile: ServerConnectionProfile) {
+        guard !isRemovingServer else { return }
         rememberConnection()
         let changed = connectionProfile?.id != profile.id
         usesHTTPS = profile.usesHTTPS

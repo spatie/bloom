@@ -15,8 +15,8 @@ struct ServerCredentialImportView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
-            Text("Use accounts from this Mac").font(Typo.heading)
-            Text("Choose which accounts to copy to your server. Your Mac stays signed in.")
+            Text(showsResults ? "Import results" : "Use accounts from this Mac").font(Typo.heading)
+            Text(showsResults ? "Choose Done to return to server accounts." : "Choose which accounts to copy to your server. Your Mac stays signed in.")
                 .font(Typo.label).foregroundStyle(.secondary)
             Label(model.connection.host, systemImage: "server.rack")
                 .font(Typo.labelEmphasis).textSelection(.enabled)
@@ -63,18 +63,25 @@ struct ServerCredentialImportView: View {
                     }
                 }
                 Spacer()
-                Button(model.isImporting ? "Stop" : model.hasResults ? "Done" : "Cancel") {
-                    if model.isImporting { model.stop() } else { close() }
+                if showsResults {
+                    Button("Done", action: close)
+                        .buttonStyle(.borderedProminent).tint(Palette.controlAccent)
+                        .keyboardShortcut(.defaultAction)
+                } else {
+                    Button(model.isImporting ? "Stop" : model.hasResults ? "Done" : "Cancel") {
+                        if model.isImporting { model.stop() } else { close() }
+                    }
+                    .keyboardShortcut(.cancelAction).disabled(model.isStopping)
+                    Button("Import Selected Accounts") { model.startImport() }
+                        .buttonStyle(.borderedProminent).tint(Palette.controlAccent)
+                        .keyboardShortcut(.defaultAction).disabled(!model.canImport)
                 }
-                .keyboardShortcut(.cancelAction).disabled(model.isStopping)
-                Button("Import Selected Accounts") { model.startImport() }
-                    .buttonStyle(.borderedProminent).tint(Palette.controlAccent)
-                    .keyboardShortcut(.defaultAction).disabled(!model.canImport)
             }
         }
         .padding(Metrics.gutter * 2)
         .frame(width: 660, height: 570)
         .interactiveDismissDisabled(model.isBusy)
+        .onExitCommand { if !model.isBusy { close() } }
         .task { await model.discover() }
         .task(id: copied) {
             guard copied else { return }
@@ -84,22 +91,33 @@ struct ServerCredentialImportView: View {
         .onDisappear { model.cancel() }
     }
 
+    private var showsResults: Bool { model.hasResults && !model.isBusy }
+
     private func account(_ candidate: ServerCredentialImport.Candidate) -> some View {
         VStack(alignment: .leading, spacing: Metrics.spacing) {
-            Toggle(isOn: Binding(get: { model.selected.contains(candidate) }, set: { model.select(candidate, enabled: $0) })) {
+            if showsResults || model.results[candidate]?.succeeded == true {
+                Text(candidate.provider == .github ? "GitHub · \(candidate.displayName)" : candidate.displayName)
+                    .font(Typo.labelEmphasis)
+            } else {
+                Toggle(isOn: Binding(get: { model.selected.contains(candidate) }, set: { model.select(candidate, enabled: $0) })) {
                 VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
                     Text(candidate.provider == .github ? "GitHub · \(candidate.displayName)" : candidate.displayName).font(Typo.labelEmphasis)
                     Text(candidate.detail).font(Typo.caption).foregroundStyle(.secondary)
                 }
+                }
+                .disabled(model.isBusy)
             }
-            .disabled(model.isBusy || model.results[candidate]?.succeeded == true)
             if let result = model.results[candidate] {
                 Label(result.message, systemImage: result.succeeded ? (result.verified ? "checkmark.circle.fill" : "info.circle") : "exclamationmark.triangle")
                     .font(Typo.caption).foregroundStyle(result.succeeded ? (result.verified ? Palette.controlAccent : Palette.textSecondary) : Palette.warning)
                     .textSelection(.enabled)
                 if let recovery = result.recovery {
-                    Text(recovery).font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    DisclosureGroup(result.succeeded ? "Removing this account" : "Recovery details") {
+                        Text(recovery).font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
                 }
+            } else if showsResults {
+                Text("Not imported").font(Typo.caption).foregroundStyle(.secondary)
             }
         }
     }

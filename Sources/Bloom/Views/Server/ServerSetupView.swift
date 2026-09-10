@@ -17,48 +17,52 @@ struct ServerSetupView: View {
     @State private var copiedReport = false
     @State private var confirmsStopServer = false
     @FocusState private var addressIsFocused: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: Metrics.spacing) {
-                setupProgress
-                HStack(alignment: .firstTextBaseline) {
-                    Text(title).font(model.phase == .introduction ? Typo.displayHeading : Typo.heading)
-                    Spacer()
-                    if model.phase != .introduction && model.phase != .address && model.phase != .checking {
-                        Text(model.label.isEmpty ? model.host : "\(model.label) · \(model.host)")
-                            .font(Typo.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                }
-                if !subtitle.isEmpty {
-                    Text(subtitle).font(Typo.label).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .padding(Metrics.gutter * 2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Group {
-                if model.phase == .introduction {
-                    ServerSetupIntroduction(showAdvanced: showAdvanced)
-                } else if model.phase == .installing || model.isInstallingBrowser {
-                    ServerSetupActivityView(activity: model.activity, failure: model.failure ?? model.browserDiagnostic)
-                } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: Metrics.gutter * 1.5) {
-                            if let failure = model.failure { ServerSetupFailureView(failure: failure) }
-                            phaseContent
+            HStack(spacing: 0) {
+                ServerSetupSteps(current: setupStep)
+                Divider()
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: Metrics.spacing) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(title).font(model.phase == .introduction ? Typo.displayHeading : Typo.heading)
+                            Spacer()
+                            if model.phase != .introduction && model.phase != .address && model.phase != .checking {
+                                Text(model.label.isEmpty ? model.host : "\(model.label) · \(model.host)")
+                                    .font(Typo.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        if !subtitle.isEmpty {
+                            Text(subtitle).font(Typo.label).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
-                    .scrollBounceBehavior(.basedOnSize)
-                    .scrollClipDisabled()
+                    .padding(Metrics.gutter * 2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Group {
+                        if model.phase == .introduction {
+                            ServerSetupIntroduction(showAdvanced: showAdvanced)
+                        } else if model.phase == .installing || model.isInstallingBrowser {
+                            ServerSetupActivityView(activity: model.activity, failure: model.failure ?? model.browserDiagnostic, compact: true)
+                        } else {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: Metrics.gutter * 1.5) {
+                                    if let failure = model.failure { ServerSetupFailureView(failure: failure) }
+                                    phaseContent
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .scrollBounceBehavior(.basedOnSize)
+                            .scrollClipDisabled()
+                        }
+                    }
+                    .padding(.horizontal, Metrics.gutter * 2)
+                    .padding(.bottom, Metrics.gutter * 2)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             }
-            .padding(.horizontal, Metrics.gutter * 2)
-            .padding(.bottom, Metrics.gutter * 2)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             Divider()
             HStack(spacing: Metrics.gutter) {
@@ -66,9 +70,6 @@ struct ServerSetupView: View {
                     if model.isBusy { Task { await model.stopSetup() } } else { model.cancel(); dismissWindow(id: windowID) }
                 }
                 .keyboardShortcut(.cancelAction).disabled(model.isStopping)
-                if model.phase != .introduction {
-                    Button("Back") { Task { await model.goBack() } }.disabled(!model.canGoBack)
-                }
                 if !model.activity.lines.isEmpty && model.phase != .installing && !model.isInstallingBrowser {
                     Button("View Output…") { showsOutput = true }.buttonStyle(.link)
                 }
@@ -78,14 +79,20 @@ struct ServerSetupView: View {
                         NSPasteboard.general.setString(model.diagnosticReport, forType: .string)
                         copiedReport = true
                     }
+                    .buttonStyle(.link).font(Typo.caption)
                     .help("Copy the setup step, error and server output to share for troubleshooting.")
                 }
                 Spacer()
+                if model.phase != .introduction && model.phase != .complete {
+                    Button("Back") {
+                        if model.phase == .accounts && model.hasChosenAccountMethod { model.hasChosenAccountMethod = false } else { Task { await model.goBack() } }
+                    }.disabled(!model.canGoBack)
+                }
                 primaryButton.buttonStyle(.borderedProminent).tint(Palette.controlAccent)
             }
             .padding(Metrics.gutter)
         }
-        .frame(width: 800, height: 620)
+        .frame(width: 840, height: 640)
         .confirmationDialog("Stop Bloom Server on \(model.label.isEmpty ? model.host : model.label)?", isPresented: $confirmsStopServer) {
             Button("Stop Server", role: .destructive) { Task { await model.stopServer() } }
             Button("Cancel", role: .cancel) { }
@@ -126,9 +133,9 @@ struct ServerSetupView: View {
         case .introduction: "Keep your work running"
         case .address, .checking: "Connect your server"
         case .trust: "Verify the server identity"
-        case .readyToInstall: model.hasInstalledServer ? "Server installed" : "Review installation"
+        case .readyToInstall: model.hasInstalledServer ? "Server installed" : "Install Bloom Server"
         case .installing: model.failure == nil ? "Installing Bloom Server" : "Setup stopped"
-        case .accounts: model.isInstallingBrowser ? "Installing browser tools" : "Connect your accounts"
+        case .accounts: model.isInstallingBrowser ? "Installing browser tools" : model.hasChosenAccountMethod ? "Sign in on your server" : "Set up your accounts"
         case .connecting: "Connecting to Bloom Server"
         case .complete: "Your server is ready"
         }
@@ -139,8 +146,8 @@ struct ServerSetupView: View {
         case .introduction: "Run projects on your server and pick up where you left off on any device."
         case .address, .checking: "Enter an Ubuntu server with administrator SSH access. This step only checks the server."
         case .trust: "Compare this fingerprint with your provider’s before trusting the connection."
-        case .readyToInstall: model.hasInstalledServer ? "Your installation and sign-ins are preserved. Continue to finish connecting." : "Review the changes, then confirm to install."
-        case .accounts: model.isInstallingBrowser ? "" : "Sign in for private repositories and agent chats. You can also do this later."
+        case .readyToInstall: model.hasInstalledServer ? "Your installation and sign-ins are preserved. Continue to finish connecting." : "Check what will be installed, then choose Install."
+        case .accounts: model.isInstallingBrowser || !model.hasChosenAccountMethod ? "" : "Check your accounts below. You can connect more tools later."
         case .installing, .connecting: ""
         case .complete: "Choose a repository to start your first remote workspace."
         }
@@ -168,6 +175,11 @@ struct ServerSetupView: View {
             Label("Your projects and conversations live on this server.", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(Palette.controlAccent)
             Text("Agents can keep working when you close Bloom.").foregroundStyle(.secondary)
+            Button("Start a Project…") {
+                StartProjectOpening.shared.isRemote = true
+                openWindow(id: StartProjectWindow.id)
+                dismissWindow(id: windowID)
+            }.buttonStyle(.link)
         }
     }
 
@@ -209,29 +221,8 @@ struct ServerSetupView: View {
             }
                 .font(Typo.caption).foregroundStyle(.secondary)
         } else if let check = model.check {
-            VStack(alignment: .leading, spacing: Metrics.spacing) {
-                HStack {
-                    Label(check.blockers.isEmpty ? "Ready for setup" : "Setup needs attention",
-                          systemImage: check.blockers.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle")
-                        .foregroundStyle(check.blockers.isEmpty ? Palette.controlAccent : Palette.warning)
-                    Spacer()
-                    Text("\(check.platform), \(check.architecture)").font(Typo.caption).foregroundStyle(.secondary)
-                }
-                ForEach(check.blockers, id: \.code) { notice in
-                    ServerSetupNoticeView(notice: notice, serviceUser: check.serviceUser, showAdvanced: showAdvanced,
-                        stopServer: notice.code == "server_running" && model.canStopServer ? { confirmsStopServer = true } : nil)
-                }
-                ForEach(check.warnings, id: \.code) { notice in
-                    HStack(spacing: Metrics.spacingSmall) {
-                        Text(notice.code == "limited_memory" ? "Less than 2 GB of memory" : notice.message)
-                            .font(Typo.caption).foregroundStyle(.secondary)
-                        ServerSetupHelpButton(title: notice.code == "limited_memory" ? "Memory requirements" : "Server warning", details: notice.message)
-                    }
-                }
-                if check.existing { Text("Existing projects will be preserved.").font(Typo.caption).foregroundStyle(.secondary) }
-            }
-            .padding(Metrics.gutter)
-            .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
+            ServerSetupCheckSummary(check: check, showAdvanced: showAdvanced,
+                stopServer: model.canStopServer ? { confirmsStopServer = true } : nil)
         }
     }
 
@@ -265,12 +256,12 @@ struct ServerSetupView: View {
                 .keyboardShortcut(.defaultAction).disabled(model.isBusy)
         } else {
             switch model.phase {
-            case .introduction: Button("Get Started") { model.beginSetup() }.keyboardShortcut(.defaultAction)
+            case .introduction: Button("Continue") { model.beginSetup() }.keyboardShortcut(.defaultAction)
             case .address, .checking:
                 if model.canContinueToAccounts {
-                    Button("Continue to Accounts") { Task { await model.continueToAccounts() } }.keyboardShortcut(.defaultAction)
+                    Button("Continue") { Task { await model.continueToAccounts() } }.keyboardShortcut(.defaultAction)
                 } else {
-                    Button(model.canReviewInstallation ? "Review Installation…" : model.check != nil || model.failure != nil ? "Check Again" : "Check Server") {
+                    Button(model.canReviewInstallation ? "Continue" : model.check != nil || model.failure != nil ? "Check Again" : "Check Server") {
                         if model.canReviewInstallation { model.reviewInstallation() } else { Task { await model.inspect() } }
                     }
                     .keyboardShortcut(.defaultAction).disabled(model.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isBusy)
@@ -280,48 +271,34 @@ struct ServerSetupView: View {
                     .disabled(model.fingerprint == nil || model.isBusy)
             case .readyToInstall:
                 if model.canContinueToAccounts {
-                    Button("Continue to Accounts") { Task { await model.continueToAccounts() } }.keyboardShortcut(.defaultAction)
+                    Button("Continue") { Task { await model.continueToAccounts() } }.keyboardShortcut(.defaultAction)
                 } else {
-                    Button("Confirm and Install") { Task { await model.install() } }.keyboardShortcut(.defaultAction)
+                    Button("Install") { Task { await model.install() } }.keyboardShortcut(.defaultAction)
                         .disabled(model.check == nil || model.check?.blockers.isEmpty == false || model.isBusy)
                 }
             case .accounts:
-                Button("Connect") { Task { await model.connect() } }.keyboardShortcut(.defaultAction).disabled(!model.canConnect || model.isBusy)
+                Button("Continue") {
+                    if model.hasChosenAccountMethod { Task { await model.connect() } } else { model.hasChosenAccountMethod = true }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(model.isBusy || (model.hasChosenAccountMethod && !model.canConnect))
             case .complete:
-                Button("Choose a Repository…") {
-                    StartProjectOpening.shared.isRemote = true; openWindow(id: StartProjectWindow.id); dismissWindow(id: windowID)
-                }.keyboardShortcut(.defaultAction)
+                Button("Done") { dismissWindow(id: windowID) }.keyboardShortcut(.defaultAction)
             case .installing, .connecting: EmptyView()
             }
         }
     }
 
-    private var setupStep: Int {
+    private var setupStep: ServerSetupSteps.Step {
         switch model.phase {
-        case .introduction, .address, .trust, .checking: 0
-        case .readyToInstall, .installing: 1
-        case .accounts, .connecting: 2
-        case .complete: 3
+        case .introduction: .introduction
+        case .address, .trust, .checking: .server
+        case .readyToInstall, .installing: .installation
+        case .accounts, .connecting: .accounts
+        case .complete: .finish
         }
     }
-    private var setupProgress: some View {
-        HStack(spacing: Metrics.gutter) {
-            ForEach(Array(["Server", "Install", "Accounts"].enumerated()), id: \.offset) { index, name in
-                if index > 0 { Image(systemName: "chevron.right").font(Typo.micro).foregroundStyle(Palette.textTertiary) }
-                HStack(spacing: Metrics.spacingSmall) {
-                    Image(systemName: index < setupStep ? "checkmark.circle.fill" : index == 0 ? "server.rack" : index == 1 ? "arrow.down.circle" : "person.crop.circle")
-                        .contentTransition(.symbolEffect(.replace))
-                        .symbolEffectsRemoved(reduceMotion)
-                        .accessibilityHidden(true)
-                    Text(name)
-                }
-                .font(Typo.captionEmphasis)
-                .foregroundStyle(index <= setupStep ? Palette.controlAccent : Palette.textSecondary)
-            }
-        }
-        .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: setupStep)
-        .accessibilityLabel(setupStep == 3 ? "Setup complete" : "Step \(setupStep + 1) of 3")
-    }
+
 }
 
 struct ServerSetupLoginView: View {

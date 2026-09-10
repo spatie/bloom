@@ -39,6 +39,73 @@ struct ServerConnectionProfileTests {
         #expect(ServerConnectionProfile(values: ["host": "incomplete"]) == nil)
     }
 
+    @MainActor @Test func removalPreservesOtherServersDraftsAndLocalPreferences() throws {
+        let suite = "be.spatie.bloom.test.removal.\(UUID())"
+        let preferences = try #require(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let first = try #require(ServerConnectionProfile(values: ssh, label: "First"))
+        var other = ssh; other["host"] = "bloom@two"
+        let second = try #require(ServerConnectionProfile(values: other, label: "Second"))
+        let shelf = ServerConnectionShelf(preferences: preferences)
+        shelf.remember(first)
+        shelf.remember(second)
+        var current = ssh; current["localRepository"] = "/local/repository"; current["repository"] = "/remote/repository"
+        preferences.set(current, forKey: "server.connection")
+        preferences.set(["ssh:bloom@one:/var/lib/bloom": "First", "ssh:bloom@two:/var/lib/bloom": "Second"], forKey: "server.labels")
+        let draft = Data("preserved conversation draft".utf8)
+        preferences.set(draft, forKey: "server.scopedDrafts")
+        let removed = shelf.remove(first)
+        #expect(removed)
+        let restored = ServerConnectionShelf(preferences: preferences)
+        #expect(restored.profiles == [second])
+        #expect(restored.connectionValues(seed: ssh)["host"] == nil)
+        #expect(restored.connectionValues(seed: ssh)["identityFile"] == nil)
+        #expect(restored.connectionValues(seed: ssh)["localRepository"] == "/local/repository")
+        #expect(preferences.data(forKey: "server.scopedDrafts") == draft)
+        #expect(preferences.dictionary(forKey: "server.labels") as? [String: String] == ["ssh:bloom@two:/var/lib/bloom": "Second"])
+    }
+
+    @MainActor @Test func removedPresetStaysRemovedAcrossRebuildsAndCanBeExplicitlyAddedAgain() throws {
+        let suite = "be.spatie.bloom.test.preset-removal.\(UUID())"
+        let preferences = try #require(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let first = try #require(ServerConnectionProfile(values: ssh))
+        let shelf = ServerConnectionShelf(preferences: preferences)
+        shelf.remember(first)
+        let removed = shelf.remove(first)
+        #expect(removed)
+        var newBuild = ssh; newBuild["executable"] = "/updated/server"; newBuild["identityFile"] = "/rotated/key"
+        let reopened = ServerConnectionShelf(preferences: preferences)
+        #expect(reopened.connectionValues(seed: newBuild).isEmpty)
+        #expect(reopened.profiles.isEmpty)
+        // Interrupted preference writes cannot restore a removed item through the saved list.
+        preferences.set(try JSONEncoder().encode([first]), forKey: "server.savedConnections")
+        #expect(ServerConnectionShelf(preferences: preferences).profiles.isEmpty)
+        // A stale saved current entry must not override the removal tombstone either.
+        preferences.set(ssh, forKey: "server.connection")
+        #expect(reopened.connectionValues(seed: newBuild).isEmpty)
+        reopened.remember(first)
+        #expect(ServerConnectionShelf(preferences: preferences).connectionValues(seed: ssh)["host"] == "bloom@one")
+        #expect(ServerConnectionShelf(preferences: preferences).profiles == [first])
+    }
+
+    @MainActor @Test func removingAnotherProfileDoesNotClearCurrentServer() throws {
+        let suite = "be.spatie.bloom.test.other-removal.\(UUID())"
+        let preferences = try #require(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let first = try #require(ServerConnectionProfile(values: ssh))
+        var other = ssh; other["host"] = "bloom@two"
+        let second = try #require(ServerConnectionProfile(values: other))
+        let shelf = ServerConnectionShelf(preferences: preferences)
+        shelf.remember(first)
+        shelf.remember(second)
+        preferences.set(other, forKey: "server.connection")
+        let removed = shelf.remove(first)
+        #expect(removed)
+        #expect(shelf.connectionValues(seed: ssh) == other)
+        #expect(shelf.profiles == [second])
+    }
+
     @MainActor @Test func corruptHistoryDoesNotLoseOutgoingConnection() throws {
         let suite = "be.spatie.bloom.test.connections.\(UUID())"
         let preferences = try #require(UserDefaults(suiteName: suite))

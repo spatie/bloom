@@ -8,47 +8,64 @@ struct ServerSetupActivityView: View {
     let failure: ServerSetupFailure?
     @State private var copiedOutput = false
 
+    var compact = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
             if let failure { ServerSetupFailureView(failure: failure) }
-            HStack(alignment: .top, spacing: Metrics.gutter * 2) {
-                VStack(alignment: .leading, spacing: Metrics.gutter) {
-                    ForEach(ServerSetupActivity.Stage.allCases) { stage in
-                        HStack(alignment: .top, spacing: Metrics.spacing) {
-                            statusIcon(activity.status(of: stage)).frame(width: 16)
-                            Text(stage.title)
-                                .font(activity.status(of: stage) == .running ? Typo.captionEmphasis : Typo.caption)
-                                .foregroundStyle(activity.status(of: stage) == .pending || activity.status(of: stage) == .skipped ? Palette.textTertiary : Palette.textPrimary)
-                        }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityValue(String(describing: activity.status(of: stage)))
-                    }
-                    Spacer(minLength: 0)
+            if compact {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 2), alignment: .leading, spacing: Metrics.spacing) {
+                    ForEach(ServerSetupActivity.Stage.allCases) { stage in stageRow(stage) }
                 }
-                .frame(width: 185, alignment: .leading)
-                VStack(alignment: .leading, spacing: Metrics.spacing) {
-                    HStack {
-                        Text("Server output").font(Typo.captionEmphasis)
-                        Spacer()
-                        Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(activity.output, forType: .string); copiedOutput = true } label: {
-                            Text(copiedOutput ? "Copied" : "Copy Output").font(Typo.caption)
-                        }
-                        .buttonStyle(.bordered).controlSize(.small).help("Copy server output").accessibilityLabel("Copy server output")
+                output
+            } else {
+                HStack(alignment: .top, spacing: Metrics.gutter * 2) {
+                    VStack(alignment: .leading, spacing: Metrics.gutter) {
+                        ForEach(ServerSetupActivity.Stage.allCases) { stage in stageRow(stage) }
+                        Spacer(minLength: 0)
                     }
-                    ServerSetupOutputView(lines: activity.lines)
-                    if failure == nil {
-                        Text(activity.currentMessage)
-                            .font(Typo.caption).foregroundStyle(.secondary)
-                            .lineLimit(2).textSelection(.enabled)
-                    }
+                    .frame(width: 185, alignment: .leading)
+                    output
                 }
+                .frame(maxHeight: .infinity)
             }
-            .frame(maxHeight: .infinity)
         }
         .task(id: copiedOutput) {
             guard copiedOutput else { return }
             do { try await Task.sleep(for: .seconds(2)) } catch { return }
             copiedOutput = false
+        }
+    }
+
+    private func stageRow(_ stage: ServerSetupActivity.Stage) -> some View {
+        HStack(alignment: .top, spacing: Metrics.spacing) {
+            statusIcon(activity.status(of: stage)).frame(width: 16)
+            Text(stage.title)
+                .font(activity.status(of: stage) == .running ? Typo.captionEmphasis : Typo.caption)
+                .foregroundStyle(activity.status(of: stage) == .pending || activity.status(of: stage) == .skipped ? Palette.textTertiary : Palette.textPrimary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(String(describing: activity.status(of: stage)))
+    }
+
+    private var output: some View {
+        VStack(alignment: .leading, spacing: Metrics.spacing) {
+            HStack {
+                Text("Server output").font(Typo.captionEmphasis)
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(activity.output, forType: .string)
+                    copiedOutput = true
+                } label: { Text(copiedOutput ? "Copied" : "Copy Output").font(Typo.caption) }
+                .buttonStyle(.bordered).controlSize(.small).help("Copy server output").accessibilityLabel("Copy server output")
+            }
+            ServerSetupOutputView(lines: activity.lines)
+            if failure == nil {
+                Text(activity.currentMessage)
+                    .font(Typo.caption).foregroundStyle(.secondary)
+                    .lineLimit(2).textSelection(.enabled)
+            }
         }
     }
 

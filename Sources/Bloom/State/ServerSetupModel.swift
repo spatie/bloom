@@ -12,6 +12,7 @@ final class ServerSetupModel {
     var identityFile = "" { didSet { if identityFile != oldValue { connectionInputsChanged() } } }
     var label = ""
     var installsBrowserTools = true
+    var hasChosenAccountMethod = false
     private(set) var browserReadiness: ServerBrowserReadiness?
     private(set) var browserFailure: String?
     private(set) var browserRecovery: String?
@@ -68,6 +69,7 @@ final class ServerSetupModel {
             installedKnownHosts = URL(fileURLWithPath: server.knownHostsFile)
             installed = ServerInstallEvent(executable: server.executable, dataDirectory: server.remoteDirectory, serviceUser: String(user))
             phase = .accounts
+            hasChosenAccountMethod = true
         }
     }
 
@@ -84,6 +86,7 @@ final class ServerSetupModel {
 
     func inspect() async {
         await perform(.checking) {
+            self.hasChosenAccountMethod = false
             self.installed = nil; self.installedKnownHosts = nil; self.accountChecks = []; self.agentAuthentication = []; self.browserReadiness = nil; self.browserFailure = nil; self.browserRecovery = nil; self.browserAttempted = false; self.browserDiagnostic = nil; self.check = nil; self.candidate = nil; self.fingerprint = nil
             try self.prepareTrustStore()
             let host = self.host.trimmingCharacters(in: .whitespacesAndNewlines)

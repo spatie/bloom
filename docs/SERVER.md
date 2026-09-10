@@ -128,6 +128,16 @@ server; archived workspaces can be restored with their conversation history and 
 
 ### Guided installation layout
 
+The Mac assistant shows five steps throughout: Introduction, Server, Installation, Accounts and
+Finish. Continue moves between pages; Install is the explicit action that changes the server.
+The Accounts step first offers credential copying, then a separate page for individual sign-ins.
+Import results finish with Done, including partial results, before account status is refreshed.
+
+Remove Server in the sidebar asks for confirmation and forgets only this Mac's saved connection.
+It leaves server processes, projects and credentials alone, and retains local drafts and key
+files. Removed bundled presets stay removed on relaunch. Other saved connections remain available
+under the sidebar footer's Saved Servers menu.
+
 Server checks keep the problem and available actions visible. Hover over a circled question mark
 for recovery details, or click it to open selectable text and Copy Details. Copy Report still
 includes every check and its full recovery instructions.

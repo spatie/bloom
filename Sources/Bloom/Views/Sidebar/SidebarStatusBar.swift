@@ -28,6 +28,15 @@ struct SidebarStatusBar: View {
             HStack(spacing: Metrics.spacingSmall) {
                 Menu {
                     Button("Add Server…", systemImage: "server.rack") { openWindow(id: ServerSetupWindow.id) }
+                    if !app.remoteServer.savedServers.profiles.isEmpty {
+                        Divider()
+                        Menu("Saved Servers") {
+                            ForEach(app.remoteServer.savedServers.profiles) { profile in
+                                Button(profile.displayName) { Task { await app.remoteServer.selectServer(profile) } }
+                            }
+                        }
+                        .disabled(app.remoteServer.isConnecting || app.remoteServer.isPerformingCommand || app.remoteServer.isRemovingServer)
+                    }
                 } label: {
                     Label("Add", systemImage: "plus")
                 }

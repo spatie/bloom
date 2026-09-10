@@ -59,9 +59,11 @@ final class ServerWindowModel {
         preferences.set(serverLabels, forKey: "server.labels")
         rememberConnection()
     }
+    @ObservationIgnored var onCatalogueChanged: (() -> Void)?
     var catalogue: ServerCatalogue? {
         didSet {
             for workspace in catalogue?.workspaces ?? [] { workspaceModels[workspace.id]?.workspace = workspace }
+            onCatalogueChanged?()
         }
     }
     var selectedWorkspaceID: WorkspaceID?
@@ -110,6 +112,7 @@ final class ServerWindowModel {
     private var forwards: [Int: ServerPortForward] = [:]
     private var previewAddresses: [BrowserPreviewAddress] = []
     var isBusy = false
+    var isRemovingServer = false
     var isConnecting = false
     var isPerformingCommand = false
     var error: String?
@@ -208,7 +211,7 @@ final class ServerWindowModel {
     }
 
     func read(_ operation: ServerOperation) async throws -> ServerResult {
-        guard let client else { throw ServerFailure("Connect to the server first.") }
+        guard let client, !isRemovingServer else { throw ServerFailure("Connect to the server first.") }
         let generation = connectionGeneration
         let reply = try await client.request(ServerRequest(operation))
         guard generation == connectionGeneration else { throw ServerFailure("The server connection changed. Try again.") }
@@ -245,7 +248,7 @@ final class ServerWindowModel {
         serverLabels = preferences.dictionary(forKey: "server.labels") as? [String: String] ?? [:]
         let seed = bundle.object(forInfoDictionaryKey: "BloomRemoteConnection") as? [String: String] ?? [:]
         let saved = preferences.dictionary(forKey: "server.connection") as? [String: String] ?? [:]
-        let values = seed.merging(saved) { _, saved in saved }
+        let values = savedServers.connectionValues(seed: seed)
         usesHTTPS = values["usesHTTPS"] == "true"
         httpsAddress = values["httpsAddress"] ?? ""
         host = values["host"] ?? ""
@@ -286,6 +289,7 @@ final class ServerWindowModel {
     }
 
     private func saveConnection() {
+        guard !isRemovingServer else { return }
         rememberConnection()
         preferences.set([
             "usesHTTPS": usesHTTPS ? "true" : "false", "httpsAddress": httpsAddress,
@@ -458,7 +462,7 @@ final class ServerWindowModel {
     }
 
     func reloadFile(_ buffer: ServerFileBuffer) async {
-        guard let client, lastEndpoint == buffer.endpoint, !buffer.isSaving else { return }
+        guard let client, lastEndpoint == buffer.endpoint, !buffer.isSaving, !isRemovingServer else { return }
         buffer.isSaving = true
         defer { buffer.isSaving = false }
         let original = buffer.text
@@ -469,7 +473,7 @@ final class ServerWindowModel {
     }
 
     func saveFile(_ buffer: ServerFileBuffer) async {
-        guard let client, lastEndpoint == buffer.endpoint, !buffer.isSaving else { return }
+        guard let client, lastEndpoint == buffer.endpoint, !buffer.isSaving, !isRemovingServer else { return }
         buffer.isSaving = true
         defer { buffer.isSaving = false }
         let text = buffer.text
@@ -486,7 +490,7 @@ final class ServerWindowModel {
     }
 
     func terminal(named name: String = "main") async throws -> BloomTerminalView {
-        guard let workspace = selectedWorkspace, let client, let endpoint = lastEndpoint else {
+        guard let workspace = selectedWorkspace, let client, let endpoint = lastEndpoint, !isRemovingServer else {
             throw ServerFailure("Connect to this workspace's server first.")
         }
         let key = String(reflecting: endpoint) + workspace.id.rawValue + "/" + name
@@ -498,7 +502,9 @@ final class ServerWindowModel {
             terminals[key] = view
             return view
         }
+        let generation = connectionGeneration
         let reply = try await client.request(ServerRequest(.workspace(workspaceID: workspace.id, action: .terminal(name: name))))
+        guard generation == connectionGeneration, !isRemovingServer, !Task.isCancelled else { throw CancellationError() }
         guard case .terminal(let terminal) = reply.result else { throw ServerFailure("The server did not return a terminal.") }
         let launch = try endpoint.terminalLaunch(terminal)
         var environment = launch.environment
@@ -514,7 +520,7 @@ final class ServerWindowModel {
     }
 
     func connect() async {
-        guard !isConnecting else { return }
+        guard !isConnecting, !isRemovingServer else { return }
         isConnecting = true
         defer { isConnecting = false }
         shouldReconnect = true
@@ -605,6 +611,58 @@ final class ServerWindowModel {
         await withTaskGroup(of: Void.self) { group in
             for tunnel in tunnels { group.addTask { await tunnel.close() } }
         }
+    }
+
+    var canRemoveServer: Bool {
+        connectionMode == .remote && connectionProfile != nil && !isRemovingServer && !isConnecting
+            && !isSigningIn && !isPerformingCommand && !isUploading && !isEditingConnection
+            && !fileBuffers.values.contains(where: \.isSaving) && !editingSessions.values.contains(where: { !$0.saving.isEmpty })
+    }
+
+    /// Removal forgets this client's connection only. In-memory editor drafts are retained by
+    /// endpoint, just like persisted conversation drafts, in case the user adds the server again.
+    @discardableResult
+    func removeServer(_ profile: ServerConnectionProfile, clearSelection: () -> Void) async -> Bool {
+        guard canRemoveServer, connectionProfile?.id == profile.id else { return false }
+        isRemovingServer = true
+        isPerformingCommand = true
+        shouldReconnect = false
+        connectionGeneration += 1
+        defer { isRemovingServer = false; isPerformingCommand = false }
+        clearSelection()
+        await shutdown()
+        guard savedServers.remove(profile) else { error = savedServers.failure; return false }
+        // Preserve the origin until the final conversation draft has been saved.
+        selectedSessionID = nil
+        selectedWorkspaceID = nil
+        catalogue = nil
+        messages = []; questions = []; queuedPrompts = []; runScripts = []
+        queueError = nil; streamingText = ""
+        review.reset()
+        conversationModels.removeAll()
+        workspaceModels.removeAll()
+        messageIdentity.reset()
+        activeSessions = [:]
+        terminalPanes = [:]
+        previewAddresses = []
+        archiveConfirmations = [:]
+        archivingWorkspaceIDs = []
+        sidebarCollapsed = []
+        sidebarCollapseLoaded = false
+        uncertainRequest = nil
+        transcriptSessionID = nil
+        permissionDecisions = [:]
+        serverName = ""
+        host = ""; executable = ""; remoteDirectory = ""; identityFile = ""; knownHostsFile = ""
+        usesHTTPS = false; httpsAddress = ""; remoteRepositoryPath = ""
+        serverLabels = preferences.dictionary(forKey: "server.labels") as? [String: String] ?? [:]
+        lastEndpoint = nil
+        isBusy = false
+        showsArchivedWorkspaces = false
+        showsNewWorkspace = false
+        needsBackgroundApproval = false
+        error = nil
+        return true
     }
 
     func stopLocalServer() async {

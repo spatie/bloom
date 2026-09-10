@@ -8,9 +8,11 @@ struct ServerSetupInstallPlan: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
-            item("Software", detail: "Installs Bloom Server and development tools. Reuses compatible tools already installed.")
+            item("Software", detail: "Bloom Server, Git, GitHub CLI, tmux, Node.js, npm and trusted CA certificates. Compatible tools already installed are reused.")
             item("Account and startup", detail: "Creates a private bloom account, adds this Mac’s public SSH key and starts Bloom automatically.")
             item("Your projects", detail: "Existing projects, conversations and sign-ins are preserved.")
+            LabeledContent("Install location", value: installationRoot ?? "/home/bloom/bloom/server")
+                .font(Typo.caption).textSelection(.enabled)
             DisclosureGroup("Installation details") {
                 VStack(alignment: .leading, spacing: Metrics.spacing) {
                     Text("Includes Git, GitHub CLI, tmux, Node.js, npm and trusted CA certificates. Startup uses systemd.")

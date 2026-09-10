@@ -1,12 +1,16 @@
 import SwiftUI
+import BloomCore
 
 /// Servers are flat group headings, at the same depth as This Mac.
 struct SidebarServerHeader: View {
     @Bindable var server: ServerWindowModel
+    @Environment(AppModel.self) private var app
     @Environment(\.openWindow) private var openWindow
     @State private var hovered = false
     @State private var isRenaming = false
     @State private var label = ""
+    @State private var showsRemoval = false
+    @State private var removalProfile: ServerConnectionProfile?
 
     var body: some View {
         HStack(spacing: Metrics.spacing) {
@@ -34,6 +38,15 @@ struct SidebarServerHeader: View {
             Button("Cancel", role: .cancel) {}
             Button("Save") { server.renameServer(label) }
         } message: { Text("This label is used in Bloom. Leave it empty to use the hostname.") }
+        .alert("Remove Server?", isPresented: $showsRemoval, presenting: removalProfile) { profile in
+            Button("Cancel", role: .cancel) {}
+            Button("Remove Server", role: .destructive) {
+                Task { await server.removeServer(profile) { app.clearRemoteSelection() } }
+            }
+            .disabled(!server.canRemoveServer || server.connectionProfile?.id != profile.id)
+        } message: { profile in
+            Text("\(profile.displayName) will be removed from Bloom on this Mac. Projects and processes on the server will keep running. Local drafts and SSH keys will be kept.")
+        }
     }
 
     @ViewBuilder private var actions: some View {
@@ -60,5 +73,11 @@ struct SidebarServerHeader: View {
         }
         Button("Add Server…") { openWindow(id: ServerSetupWindow.id) }
         Button("Archived Workspaces…") { server.showsArchivedWorkspaces = true }
+        Divider()
+        Button("Remove Server…", role: .destructive) {
+            removalProfile = server.connectionProfile
+            showsRemoval = removalProfile != nil
+        }
+        .disabled(!server.canRemoveServer)
     }
 }
