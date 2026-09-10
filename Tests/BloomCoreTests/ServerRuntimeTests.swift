@@ -5,6 +5,50 @@ import Testing
 
 @Suite("ServerRuntime", .tags(.persistence, .subprocess), .scratchDirectory)
 struct ServerRuntimeTests {
+    @Test func cancellingQueuedMessageBlocksReplacementDrainUntilDeletionFinishes() async throws {
+        let fixture = try await ServerFixture()
+        let first = ServerQueueGate(), second = ServerQueueGate(), settlement = ServerQueueGate()
+        let cancelledLoad = Mutex(false)
+        let calls = Mutex(0)
+        let live = ServerSession(runner: fixture.runner)
+        let queue = ServerPromptQueue(store: fixture.store, load: { _ in
+            let call = calls.withLock { $0 += 1; return $0 }
+            if call == 1 {
+                await withTaskCancellationHandler { await first.wait() } onCancel: { cancelledLoad.withLock { $0 = true } }
+            } else if call == 2 { await second.wait() }
+            return live
+        }, settled: { _, _ in await settlement.wait() })
+        let target = Delivery(targetSessionID: fixture.session.id, body: "Cancelled prompt")
+        _ = try await fixture.store.enqueueDelivery(target)
+        let another = Delivery(targetSessionID: fixture.session.id, body: "Also cancelled")
+        _ = try await fixture.store.enqueueDelivery(another)
+        await queue.turnEnded(fixture.session.id, ending: .completed("Previous turn"))
+        await waitUntil("first drain is suspended before sending") { await first.entered }
+        let cancelling = Task { try await queue.cancel(target.id, sessionID: fixture.session.id) }
+        await waitUntil("cancellation reaches the original drain") { cancelledLoad.withLock { $0 } }
+        await first.release()
+        await waitUntil("old drain is finishing its turn report") { await settlement.entered }
+        // A second client can cancel a different row without releasing the first cancellation's
+        // admission hold or receiving a permanently journalled temporary-busy refusal.
+        do { try await queue.cancel(another.id, sessionID: fixture.session.id) } catch {
+            Issue.record("Concurrent cancellation failed: \(error)")
+        }
+        try await queue.enqueue(Delivery(targetSessionID: fixture.session.id, body: "Remaining prompt"))
+        let replacements = await queue.activeDrainCount
+        #expect(replacements == 0)
+        // On the regressed implementation, pin the replacement after it captured the deleted
+        // delivery. On the fixed path it cannot start until cancellation releases admission.
+        if replacements > 0 { await waitUntil("replacement captured its delivery") { await second.entered } }
+        await settlement.release()
+        try await cancelling.value
+        await waitUntil("remaining delivery starts after cancellation") { await second.entered }
+        await second.release()
+        await waitUntil("one queued delivery reaches the runner") { await fixture.runner.sends.count == 1 }
+        #expect(await fixture.runner.sends == ["Remaining prompt"])
+        await queue.shutdown()
+        await live.shutdown()
+    }
+
     @Test func setupPublishesOutputWhileQuietAndReplaysTheSameCommandWithoutRerunning() async throws {
         let fixture = try await ServerFixture()
         let workspaceID = try #require(fixture.session.workspaceID)
@@ -676,4 +720,16 @@ private actor ServerTestRunner: SessionRunner {
         _ = try? await store.update(sessionID: sessionID) { $0.apply(.turnFinished(isError: false)) }
         sink.yield(.result(AgentResult()))
     }
+}
+
+private actor ServerQueueGate {
+    private(set) var entered = false
+    private var released = false
+    private var continuation: CheckedContinuation<Void, Never>?
+    func wait() async {
+        entered = true
+        guard !released else { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+    func release() { released = true; continuation?.resume(); continuation = nil }
 }

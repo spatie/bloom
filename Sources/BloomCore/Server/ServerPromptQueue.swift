@@ -9,6 +9,8 @@ actor ServerPromptQueue {
     private let load: LoadSession
     private var tasks: [SessionID: Task<Void, Never>] = [:]
     private var errors: [SessionID: String] = [:]
+    private var cancellations: [SessionID: Int] = [:]
+    var activeDrainCount: Int { tasks.count }
     private var closed = false
     private var endings: [SessionID: CrewTurnEnd] = [:]
     private let settled: @Sendable (SessionID, CrewTurnEnd) async -> Void
@@ -74,13 +76,24 @@ actor ServerPromptQueue {
     }
 
     func cancel(_ deliveryID: DeliveryID, sessionID: SessionID) async throws {
+        guard !closed else { throw ServerFailure("The server is shutting down.") }
+        cancellations[sessionID, default: 0] += 1
+        // Enqueue remains durable while cancellation waits, but cannot start a replacement
+        // drain holding the message that is about to be deleted.
+        defer {
+            let remaining = (cancellations[sessionID] ?? 1) - 1
+            cancellations[sessionID] = remaining == 0 ? nil : remaining
+            start(sessionID)
+        }
         let task = tasks[sessionID]
         task?.cancel()
         await task?.value
         guard try await store.pendingDeliveries(sessionID: sessionID).contains(where: { $0.id == deliveryID }) else {
             throw ServerFailure("This message has already been sent. Stop the current turn instead.")
         }
-        try await store.cancelDelivery(id: deliveryID)
+        guard try await store.cancelDelivery(id: deliveryID) else {
+            throw ServerFailure("This message has already been sent. Stop the current turn instead.")
+        }
         if let raw = try await store.setting(Self.authenticationPauseKey(sessionID)), let agent = AgentKind(rawValue: raw),
            try await !store.pendingDeliveries(sessionID: sessionID).isEmpty {
             errors[sessionID] = AgentAuthenticationRequired(agent: agent).localizedDescription
@@ -88,7 +101,6 @@ actor ServerPromptQueue {
             errors.removeValue(forKey: sessionID)
             try await store.setSetting(Self.authenticationPauseKey(sessionID), nil)
         }
-        try await restartIfPending(sessionID)
     }
 
     func pause(_ id: SessionID) async throws {
@@ -113,7 +125,7 @@ actor ServerPromptQueue {
     static func pauseKey(_ id: SessionID) -> String { "server.queue.paused." + id.rawValue }
 
     private func start(_ id: SessionID) {
-        guard tasks[id] == nil, !closed else { return }
+        guard tasks[id] == nil, !closed, cancellations[id] == nil else { return }
         tasks[id] = Task {
             await self.drain(id)
             await self.settleTurn(id)
