@@ -21,6 +21,7 @@ enum ComposerHandoff {
     /// promise is that the file is now in the prompt.
     struct Outcome: Sendable {
         var failure: String?
+        var paths: [String] = []
     }
 
     /// Attaches to the workspace's active session, writes `body` at the end of that draft, and
@@ -41,10 +42,22 @@ enum ComposerHandoff {
     static func attach(
         _ sources: [AttachmentSource],
         to model: WorkspaceModel,
+        sessionID: SessionID? = nil,
+        revealConversation: Bool = true,
+        imageComment: BrowserImageComment? = nil,
         body: @escaping @Sendable ([String]) -> String = { $0.map(AttachmentDraft.token(for:)).joined(separator: " ") }
     ) async -> Outcome {
-        guard let session = model.activeSession else {
-            return Outcome(failure: "This workspace has no conversation to attach to yet.")
+        // A review can stay open while another chat becomes active. An explicit destination
+        // must never fall back to that new chat if the original conversation has been closed.
+        let destination: Session? = if let sessionID {
+            model.sessions.first { $0.id == sessionID }
+        } else {
+            model.activeSession
+        }
+        guard let session = destination else {
+            return Outcome(failure: sessionID == nil
+                ? "This workspace has no conversation to attach to yet."
+                : "The conversation for this feedback has been closed.")
         }
         model.prepareTranscript(for: session.id)
         guard let transcript = model.existingTranscript(for: session.id) else {
@@ -60,10 +73,11 @@ enum ComposerHandoff {
             return Outcome(failure: added.failures.first ?? "Nothing could be attached.")
         }
 
+        if let imageComment { store.annotate(paths: added.paths, with: imageComment, sessionID: key) }
         append(body(added.paths), to: transcript)
-        WorkspaceTabsStore.shared.reveal(.chat(session.id), in: model)
+        if revealConversation { WorkspaceTabsStore.shared.reveal(.chat(session.id), in: model) }
 
-        return Outcome(failure: added.failures.first)
+        return Outcome(failure: added.failures.first, paths: added.paths)
     }
 
     /// A sentence with nothing attached to it, put in the same place by the same rules.

@@ -399,6 +399,54 @@ struct SidebarReorderTests {
         #expect(SidebarReorder.move(projects: repos, id: RepoID("b"), to: 2).isEmpty)
     }
 
+    @Test("Project drops count visible projects and preserve hidden places", arguments: [false, true])
+    func projectMoveWithHiddenProjects(movingDown: Bool) {
+        var repos = [
+            repo("hidden-first", order: 0), repo("a", order: 1),
+            repo("hidden-middle", order: 2), repo("b", order: 3),
+            repo("hidden-last", order: 4),
+        ]
+        for index in [0, 2, 4] { repos[index].hidden = true }
+        let visible = ProjectVisibility.listed(repos, showingHidden: false).map(\.id)
+        let changes = SidebarReorder.move(
+            projects: repos, visible: visible,
+            id: RepoID(movingDown ? "a" : "b"), to: movingDown ? 2 : 0
+        )
+        #expect(changes == [
+            SidebarReorder.ProjectChange(id: RepoID("b"), sortOrder: 1),
+            SidebarReorder.ProjectChange(id: RepoID("a"), sortOrder: 3),
+        ])
+    }
+
+    @Test("A drop beside the same visible project does not move it past hidden projects")
+    func projectMoveBesideItselfWithHiddenProjects() {
+        let repos = [repo("hidden", order: 0), repo("a", order: 1), repo("b", order: 2)]
+        for destination in [0, 1] {
+            let changes = SidebarReorder.move(
+                projects: repos, visible: [RepoID("a"), RepoID("b")],
+                id: RepoID("a"), to: destination
+            )
+            #expect(changes.isEmpty)
+        }
+    }
+
+    @Test("Showing hidden projects includes them in the drag order")
+    func projectMoveWhileShowingHiddenProjects() {
+        var hidden = repo("hidden", order: 0)
+        hidden.hidden = true
+        let repos = [hidden, repo("a", order: 1), repo("b", order: 2)]
+        let changes = SidebarReorder.move(
+            projects: repos,
+            visible: ProjectVisibility.listed(repos, showingHidden: true).map(\.id),
+            id: hidden.id, to: 3
+        )
+        #expect(changes == [
+            SidebarReorder.ProjectChange(id: RepoID("a"), sortOrder: 0),
+            SidebarReorder.ProjectChange(id: RepoID("b"), sortOrder: 1),
+            SidebarReorder.ProjectChange(id: hidden.id, sortOrder: 2),
+        ])
+    }
+
     /// Every project added before the sidebar could be reordered carries the column's default, so
     /// the first drag in a project list is a drag over a list of zeroes. What comes out of it has
     /// to be an order, not a tie.

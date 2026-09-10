@@ -19,6 +19,7 @@ final class WorkspaceModel {
     private unowned let app: AppModel
 
     var sessions: [Session] = []
+    var sideConversations: [SessionID: SideConversationState] = [:]
 
     /// Whether the store has answered about this workspace's sessions at all, this launch.
     ///
@@ -338,12 +339,12 @@ final class WorkspaceModel {
     }
 
     /// What this workspace's repository asks for: the setup script, the run scripts, the rest of
-    /// `.conductor/settings.toml`.
+    /// the repository settings files.
     ///
     /// Held here rather than read where it is needed because the Workspace menu reads it, and a
     /// `Commands` body is not a view: it cannot await a file, and it cannot carry a task. It is
-    /// re-read whenever the workspace is selected, so a run script added in the project settings
-    /// window is in the menu the next time the workspace is on screen.
+    /// re-read whenever the workspace is selected and after project settings are saved, so a new
+    /// run script appears in the menu without switching workspaces.
     private(set) var settings = RepoSettings()
 
     /// Off the main actor, because this parses up to six files and is called on every switch.
@@ -383,8 +384,8 @@ final class WorkspaceModel {
     // MARK: - Sessions
 
     var activeSession: Session? {
-        guard let activeSessionID else { return sessions.first }
-        return sessions.first { $0.id == activeSessionID } ?? sessions.first
+        guard let activeSessionID else { return sessions.first { $0.sideConversationParentID == nil } }
+        return sessions.first { $0.id == activeSessionID } ?? sessions.first { $0.sideConversationParentID == nil }
     }
 
     /// Reads the session list back from the store.
@@ -406,7 +407,7 @@ final class WorkspaceModel {
         if !hasReadSessions { hasReadSessions = true }
         SwitchTrace.mark("sessions.assigned", workspace: workspace.id)
         if activeSessionID == nil || !sessions.contains(where: { $0.id == activeSessionID }) {
-            activeSessionID = sessions.first?.id
+            activeSessionID = sessions.first { $0.sideConversationParentID == nil }?.id
         } else {
             // The setter above prepares the transcript for us. This is the other branch, where the
             // active session has not moved and the transcript may still be the one this launch has
@@ -921,6 +922,7 @@ final class WorkspaceModel {
     /// agents are killed here rather than merely interrupted, and killed first, which is what lets
     /// every SIGTERM escalation run at the same time instead of one after another.
     func stopEverything() {
+        for state in sideConversations.values { state.task?.cancel() }
         for transcript in transcripts.values { transcript.terminateNow() }
         setupTask?.cancel()
         setupTask = nil
@@ -950,11 +952,13 @@ final class WorkspaceModel {
         stopEverything()
         for transcript in transcripts.values { transcript.teardown() }
         transcripts.removeAll()
+        sideConversations.removeAll()
     }
 
     /// The quit path: the same teardown, but it waits for the agents to actually be gone rather
     /// than only asking them to leave.
     func shutdown() async {
+        for state in sideConversations.values { state.task?.cancel() }
         setupTask?.cancel()
         setupTask = nil
         // Nilled like the three above: a cancelled refresh returns through its
@@ -1465,6 +1469,9 @@ final class WorkspaceModel {
     /// `DiffView.body` reads this for every pass it makes over the diff and a keystroke must not
     /// be a reason to make one.
     var reviewDrafts: [String: ReviewDraft] = [:]
+
+    /// A browser review survives switching tabs, just like a half-written diff comment.
+    var browserReviews: [String: BrowserRegionCapture] = [:]
 
     /// Which comments are open for editing in place. Here for the same reason `reviewDrafts` is,
     /// and the reason is not hypothetical for an edit either: the band being edited sits in the
