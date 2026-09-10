@@ -121,7 +121,7 @@ places: the listing, the dispatch and the gate.
 | `workspace_merge` | Ask a workspace's own agent to merge its pull request | | | ✓ |
 | `reveal` | Point Bloom's window at one workspace, or at Home narrowed by project, scope and search. Navigation and nothing else: it creates nothing and archives nothing | | | ✓ |
 | `pane_open` | Open a chat, a terminal or a browser in a new tab of the caller's own workspace | ✓ | | |
-| `pane_split` | Put one beside what is on screen rather than behind it | ✓ | | |
+| `pane_split` | Add a pane inside the calling chat's tab, defaulting to a new chat on its right | ✓ | | |
 | `pane_close` | Take one back off the screen | ✓ | | |
 | `pane_rename` | Give a tab a name the reader can find it by | ✓ | | |
 | `pane_list` | What the workspace has open: each pane's kind, its name, whether it is in the tab in front, and for a browser its number and its address | ✓ | | |
@@ -162,6 +162,26 @@ A refusal is a result with `isError` set and never a JSON-RPC error frame. A JSO
 transport failure the CLI may retry or surface as a broken server; an errored result is text the
 model reads and can act on. "You are not allowed to do that" is something to tell the model, not
 something to tell the transport.
+
+### Tabs, panes and the chat making the request
+
+A **tab** is an entry in the top strip. It owns an arrangement of one or more **panes**, the
+regions visible together inside that tab. Selecting another tab switches the whole arrangement.
+`pane_open` creates a separate tab; `pane_split` adds a region to an existing tab. Both tools,
+`pane_list` and `workspace_tabs` explain this distinction in their model-facing descriptions.
+
+For "add a pane", "split pane in this chat", or "split vertically next to this chat", the model
+should call `pane_split` with no arguments. It defaults to a **new chat on the right**, separated
+by a vertical divider. This is `direction: "beside"` on the wire and `SplitAxis.horizontal`
+internally. `direction: "below"` stacks the panes with a horizontal divider. The optional `kind`
+can instead request a terminal or browser; `title` names the new content, not the containing tab.
+
+The default `target: "this_chat"` comes from the authenticated session, not the tab or pane that
+happens to have focus when the agent calls. The resolver finds that conversation inside its tab,
+including when another chat roots the tab or a terminal has focus beside it. A missing chat is
+refused before anything is created. `target: "active_pane"` follows the selected tab's focused
+pane only when explicitly requested. Chat creation is awaited and the destination revalidated
+before placement, so a changed target cannot produce a false success or split unrelated content.
 
 ### Reading another chat
 

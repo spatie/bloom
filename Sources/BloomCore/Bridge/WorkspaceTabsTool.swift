@@ -50,6 +50,10 @@ public struct WorkspaceTabsTool: BridgeToolHandling {
     public let tool = BridgeTool(
         name: "workspace_tabs",
         description: """
+            A tab is an entry in the top strip that owns an arrangement of one or more panes. \
+            Panes are the regions visible together inside that tab. Use pane_split for "add a \
+            pane" or "next to this chat"; use pane_open for a separate new tab.
+
             The tab strip of the workspace you are in, left to right: what each tab is, what the \
             person sees it called, which one is in front, and one true thing about what is in it.
 
