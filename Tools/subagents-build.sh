@@ -55,6 +55,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source "$PWD/Tools/guard.sh"
+source "$PWD/Tools/isolated-build.sh"
 
 REF=HEAD
 LAUNCH=1
@@ -80,9 +81,11 @@ bloom_refuse_real_app "$DEST"
 
 echo "==> $RESOLVED  $SUBJECT"
 
+bloom_build_lock "$HOME/Library/Caches/BloomBuild/subagents/release.lock"
 git worktree remove --force "$WORK" 2>/dev/null || true
 rm -rf "$WORK"
 git worktree add --detach "$WORK" "$RESOLVED" >/dev/null
+BLOOM_BUILD_WORKTREE="$WORK"
 
 # ---------------------------------------------------------------- the identity
 
@@ -268,9 +271,6 @@ if [[ ! -d "$BUILT" ]]; then
   exit 1
 fi
 
-mkdir -p "$HOME/Applications"
-rm -rf "$DEST"
-cp -R "$BUILT" "$DEST"
 
 # What this is, so a stale install can be identified without guessing. The same
 # key Tools/master.sh writes, plus one that says which of the two this is.
@@ -279,8 +279,8 @@ cp -R "$BUILT" "$DEST"
 # keys anybody reads when they are already confused about which build they are
 # looking at. If the stamp cannot be written the bundle is unidentifiable, and
 # that is worth stopping for.
-/usr/bin/defaults write "$DEST/Contents/Info.plist" BloomMasterCommit -string "$RESOLVED"
-/usr/bin/defaults write "$DEST/Contents/Info.plist" BloomSubagentsBuild -bool true
+/usr/bin/defaults write "$BUILT/Contents/Info.plist" BloomMasterCommit -string "$RESOLVED"
+/usr/bin/defaults write "$BUILT/Contents/Info.plist" BloomSubagentsBuild -bool true
 
 # Re-signed, because the two writes above invalidated the signature Tools/build.sh
 # applied. Same identity resolution as that script, so a machine with a real one
@@ -292,12 +292,9 @@ cp -R "$BUILT" "$DEST"
 # it, and macOS kills a bundle whose signature no longer matches its contents. A
 # swallowed failure would surface three steps down as "launched, but no process
 # is running from ...", which is true and says nothing about the cause.
-if ! signing="$(codesign --force --deep --sign "${BLOOM_CODESIGN_IDENTITY:-${BATON_CODESIGN_IDENTITY:--}}" "$DEST" 2>&1)"; then
-  print -ru2 -- "$signing"
-  print -ru2 -- "==> re-signing $DEST failed, so it would not launch. The bundle is"
-  print -ru2 -- "    on disk and broken; fix the signing identity and run this again."
-  exit 1
-fi
+bloom_sign_built_app "$BUILT"
+bloom_build_lock "$HOME/Library/Caches/BloomBuild/subagents/install.lock"
+bloom_publish_built_app "$BUILT" "$DEST" "$BLOOM_SUB_BUNDLE_ID" "$BLOOM_SUB_DB" "$LAUNCH"
 
 # LaunchServices caches Info.plist per bundle, LSEnvironment included, so a
 # rebuild that changed it is not seen until the bundle is registered again.
@@ -315,14 +312,7 @@ echo "==> installed $DEST"
 echo "==> database $BLOOM_SUB_DB"
 
 if [ "$LAUNCH" -eq 1 ]; then
-  # By pid, and only pids of the dev bundle. The real copy is a different
-  # executable path, so it is never a candidate. No pattern kill anywhere near
-  # this: `pkill -f Bloom` would take the owner's app with it.
-  for pid in $(bloom_app_pids "$DEST"); do
-    kill "$pid" 2>/dev/null || true
-  done
-  sleep 1
-  open "$DEST"
+  open -g "$DEST"
   sleep 3
 
   # Nothing above proves the subagents copy is on its own database. `ps -E` prints the

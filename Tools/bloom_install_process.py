@@ -1,5 +1,6 @@
 """Bounded subprocess output shared by the standalone, embedded Bloom installers."""
 import collections
+from contextlib import contextmanager
 import os
 import pathlib
 import re
@@ -20,6 +21,28 @@ class InstallProcessFailure(Exception):
 
 class InstallProcessCancelled(Exception):
     pass
+
+
+@contextmanager
+def install_cancellation_scope():
+    """Translate process signals into unwinding, leaving cleanup time to reap owned children."""
+    previous = {}
+    interrupted = False
+
+    def cancel(_signum, _frame):
+        nonlocal interrupted
+        if not interrupted:
+            interrupted = True
+            raise InstallProcessCancelled()
+
+    try:
+        if threading.current_thread() is threading.main_thread():
+            for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+                previous[signum] = signal.signal(signum, cancel)
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 
 class InstallOutputRedactor:
@@ -84,6 +107,14 @@ def install_command_label(arguments):
 def stream_install_command(arguments, *, timeout, output=None, live=True, capture_limit=1048576,
                            detail_limit=8192, event_limit=500, **options):
     """Drain both pipes without threads; cancellation and timeout terminate our whole process group."""
+    try:
+        with install_cancellation_scope():
+            return _stream_install_command(arguments, timeout, output, live, capture_limit, detail_limit, event_limit, options)
+    except InstallProcessCancelled:
+        raise InstallProcessFailure("cancelled", install_command_label(arguments), None, "") from None
+
+
+def _stream_install_command(arguments, timeout, output, live, capture_limit, detail_limit, event_limit, options):
     label = install_command_label(arguments)
     try:
         process = subprocess.Popen(arguments, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -99,7 +130,6 @@ def stream_install_command(arguments, *, timeout, output=None, live=True, captur
     last_output_at = 0.0
     pending_output = None
     reduction_announced = False
-    previous_handlers = {}
     deadline = time.monotonic() + timeout
 
     def terminate():
@@ -117,9 +147,6 @@ def stream_install_command(arguments, *, timeout, output=None, live=True, captur
         except ProcessLookupError:
             pass
         process.wait()
-
-    def cancelled(_signum, _frame):
-        raise InstallProcessCancelled()
 
     def publish(line, force=False):
         nonlocal emitted, last_output_at, pending_output, reduction_announced
@@ -169,9 +196,6 @@ def stream_install_command(arguments, *, timeout, output=None, live=True, captur
             record(state, bytes(state["pending"]))
 
     try:
-        if threading.current_thread() is threading.main_thread():
-            for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-                previous_handlers[signum] = signal.signal(signum, cancelled)
         for pipe in (process.stdout, process.stderr):
             os.set_blocking(pipe.fileno(), False)
             selector.register(pipe, selectors.EVENT_READ)
@@ -218,8 +242,6 @@ def stream_install_command(arguments, *, timeout, output=None, live=True, captur
         selector.close()
         process.stdout.close()
         process.stderr.close()
-        for signum, handler in previous_handlers.items():
-            signal.signal(signum, handler)
 
 
 def standalone_installer_source(path, source=None):

@@ -1,9 +1,9 @@
 #!/bin/bash
 # Resolve before copying notices, so the app ships the licences of its actual dependencies.
 set -euo pipefail
-cd "$(dirname "$0")/.."
-project_dir="${BLOOM_IOS_PROJECT_DIR:-/tmp/bloom-ios-project}"
-build_dir="${BLOOM_IOS_BUILD_DIR:-/tmp/bloom-ios-build}"
+source "$(dirname "${BASH_SOURCE[0]}")/ios-build-environment.sh"
+
+bloom_ios_prepare() {
 python3 Tools/ios-project.py "$project_dir"
 xcodebuild -resolvePackageDependencies -project "$project_dir/Bloom.xcodeproj" -scheme Bloom -derivedDataPath "$build_dir"
 python3 Tools/check-ios-build-plugins.py "$build_dir/SourcePackages/checkouts"
@@ -20,3 +20,10 @@ for dependency in ['SwiftTerm', 'AppAuth-iOS', 'swift-nio-ssh', 'swift-nio', 'sw
     notices = [file for file in source.glob('NOTICE*') if file.is_file()]
     (output / f'{dependency}.txt').write_text('\n\n'.join(file.read_text() for file in sorted(licences + notices)))
 PY
+}
+
+# Build and archive source this function and own their locks through xcodebuild's completion.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    bloom_ios_begin
+    bloom_ios_prepare
+fi

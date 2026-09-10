@@ -42,8 +42,9 @@ changes merely to try them locally. Fast mode cannot be combined with a revision
    no release certificate or notarisation credentials are needed. Running App Intents through
    Shortcuts requires a real signing identity.
 3. Run the selected command. Only restart the dev app when authorised. `make dev-fast` and
-   `make dev` both quit and relaunch the dev copy. `--no-launch` still replaces the installed bundle;
-   an already running copy does not switch to the new code until restarted.
+   `make dev` both quit and relaunch the verified dev copy after its replacement is ready.
+   `--no-launch` refuses installation while the destination app is running. Use `--no-install`
+   to verify a build while keeping that copy open.
 4. Verify the bundle at the path printed by the script. With `--no-install`, use that build path;
    otherwise use `~/Applications/Bloom Dev.app`. Check its `Contents/Info.plist` and signature:
    - `CFBundleIdentifier` is `be.spatie.bloom.dev`.
@@ -66,9 +67,9 @@ dev data; copying production data with `make dev-db` is optional and replaces de
 use it when requested.
 
 Do not bypass `Tools/guard.sh`. If installation is refused because Bloom Dev hosts this session,
-use `--no-install` for verification or install from an external terminal. Run only one installation
-at a time because both modes share the destination. Fast mode also locks its cache per checkout;
-release mode shares `/tmp/bloom-dev-src` and `/tmp/bloom-dev-build` across checkouts.
+use `--no-install` for verification or install from an external terminal. Both modes lock publication because they share the destination. Fast mode also locks its cache
+per checkout. Release mode locks the shared `/tmp/bloom-dev-src` and `/tmp/bloom-dev-build`
+across checkouts. A failed candidate leaves the installed app untouched.
 
 On failure, read the log path printed by the script. Fast mode uses
 `/tmp/bloom-dev-fast-<checkout-hash>/build.log`; release mode uses `/tmp/bloom-dev-build.log`.

@@ -25,7 +25,7 @@ import time
 
 
 if "stream_install_command" not in globals():
-    from bloom_install_process import InstallProcessFailure, install_exception_details, redact_install_text, stream_install_command
+    from bloom_install_process import InstallProcessCancelled, InstallProcessFailure, install_cancellation_scope, install_exception_details, redact_install_text, stream_install_command
 
 CURRENT_STEP = None
 SYSTEM_PATH = "/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -211,6 +211,14 @@ def marker(args):
 
 def account_operation(account, operation, timeout=120):
     """User-controlled paths are never opened or changed with installer privileges."""
+    try:
+        with install_cancellation_scope():
+            return _account_operation(account, operation, timeout)
+    except InstallProcessCancelled:
+        fail("cancelled", "Server file preparation was cancelled.", "Choose Check Again to inspect the server before retrying setup.")
+
+
+def _account_operation(account, operation, timeout):
     if account.pw_uid == 0:
         fail("invalid_service_user", "Bloom file operations require a non-root service account.", "Use the dedicated Bloom service account.")
     if os.getuid() == account.pw_uid:
@@ -231,6 +239,7 @@ def account_operation(account, operation, timeout=120):
         try:
             signal.signal(signal.SIGTERM, signal.SIG_DFL)
             signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.signal(signal.SIGHUP, signal.SIG_DFL)
             signal.pthread_sigmask(signal.SIG_SETMASK, [])
             os.setgroups([])
             os.setgid(account.pw_gid)

@@ -52,6 +52,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source "$PWD/Tools/guard.sh"
+source "$PWD/Tools/isolated-build.sh"
 
 REF=HEAD
 REF_GIVEN=0
@@ -93,20 +94,18 @@ echo "==> $RESOLVED  $SUBJECT"
 
 if (( FAST )); then
   FAST_ROOT="/tmp/bloom-dev-fast-$(printf '%s' "$PWD" | shasum | cut -c1-12)"
-  mkdir -p "$FAST_ROOT"
-  if ! mkdir "$FAST_ROOT/lock" 2>/dev/null; then
-    echo "Another fast build is running. If it stopped unexpectedly, remove $FAST_ROOT/lock." >&2
-    exit 1
-  fi
+  bloom_build_lock "$FAST_ROOT/lock"
   WORK="$(mktemp -d "$FAST_ROOT/stage.XXXXXX")"
-  trap 'rm -rf "$WORK"; rmdir "$FAST_ROOT/lock"' EXIT
+  BLOOM_BUILD_STAGE="$WORK"
   python3 Tools/build-snapshot.py snapshot "$PWD" "$WORK"
   RESOLVED="$RESOLVED-working"
   echo "==> debug build of current files (including uncommitted edits)"
 else
+  bloom_build_lock "$HOME/Library/Caches/BloomBuild/dev/release.lock"
   git worktree remove --force "$WORK" 2>/dev/null || true
   rm -rf "$WORK"
   git worktree add --detach "$WORK" "$RESOLVED" >/dev/null
+  BLOOM_BUILD_WORKTREE="$WORK"
 fi
 
 # ---------------------------------------------------------------- the identity
@@ -253,7 +252,7 @@ if (( FAST )); then
   python3 Tools/build-snapshot.py sync "$WORK" "$FAST_ROOT/src"
   rm -rf "$WORK"
   WORK="$FAST_ROOT/src"
-  trap 'rmdir "$FAST_ROOT/lock"' EXIT
+  BLOOM_BUILD_STAGE=""
   ln -sfn "$FAST_ROOT/build" "$WORK/.build"
 else
   mkdir -p /tmp/bloom-dev-build
@@ -328,12 +327,7 @@ fi
 # it, and macOS kills a bundle whose signature no longer matches its contents. A
 # swallowed failure would surface three steps down as "launched, but no process
 # is running from ...", which is true and says nothing about the cause.
-if ! signing="$(codesign --force --deep --sign "${BLOOM_CODESIGN_IDENTITY:-${BATON_CODESIGN_IDENTITY:--}}" "$BUILT" 2>&1)"; then
-  print -ru2 -- "$signing"
-  print -ru2 -- "==> re-signing $BUILT failed, so it would not launch."
-  print -ru2 -- "    Nothing was installed; fix the signing identity and run this again."
-  exit 1
-fi
+bloom_sign_built_app "$BUILT"
 
 if (( ! INSTALL )); then
   echo "==> built $BUILT"
@@ -344,9 +338,8 @@ if (( ! INSTALL )); then
   exit 0
 fi
 
-mkdir -p "$HOME/Applications"
-rm -rf "$DEST"
-cp -R "$BUILT" "$DEST"
+bloom_build_lock "$HOME/Library/Caches/BloomBuild/dev/install.lock"
+bloom_publish_built_app "$BUILT" "$DEST" "$BLOOM_DEV_BUNDLE_ID" "$BLOOM_DEV_DB" "$LAUNCH"
 
 # LaunchServices caches Info.plist per bundle, LSEnvironment included, so a
 # rebuild that changed it is not seen until the bundle is registered again.
@@ -366,14 +359,7 @@ echo "==> installed $DEST"
 echo "==> database $BLOOM_DEV_DB"
 
 if [ "$LAUNCH" -eq 1 ]; then
-  # By pid, and only pids of the dev bundle. The real copy is a different
-  # executable path, so it is never a candidate. No pattern kill anywhere near
-  # this: `pkill -f Bloom` would take the owner's app with it.
-  for pid in $(bloom_app_pids "$DEST"); do
-    kill "$pid" 2>/dev/null || true
-  done
-  sleep 1
-  open "$DEST"
+  open -g "$DEST"
   sleep 3
 
   # Nothing above proves the dev copy is on its own database. `ps -E` prints the

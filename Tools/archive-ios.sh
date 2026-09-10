@@ -1,11 +1,9 @@
 #!/bin/bash
 # Produce an archive without launching, installing or uploading. Signing is explicit.
 set -euo pipefail
-cd "$(dirname "$0")/.."
-project_dir="${BLOOM_IOS_PROJECT_DIR:-/tmp/bloom-ios-project}"
-build_dir="${BLOOM_IOS_BUILD_DIR:-/tmp/bloom-ios-build}"
-archive_path="${BLOOM_IOS_ARCHIVE_PATH:-/tmp/Bloom-iOS.xcarchive}"
-Tools/prepare-ios.sh
+source "$(dirname "$0")/prepare-ios.sh"
+bloom_ios_begin archive
+bloom_ios_prepare
 signing=(CODE_SIGNING_ALLOWED=NO)
 if [[ -n "${BLOOM_IOS_TEAM_ID:-}" ]]; then
     signing=("DEVELOPMENT_TEAM=$BLOOM_IOS_TEAM_ID" CODE_SIGN_STYLE=Automatic)

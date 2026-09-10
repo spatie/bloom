@@ -80,13 +80,16 @@ variants, attachments, terminal interaction and further workspace/session manage
 ## Build
 
 Run `Tools/build-ios.sh`. It generates an ignored Xcode application container under
-`/tmp/bloom-ios-project` and builds iPhone/iPad Simulator slices in `/tmp/bloom-ios-build`.
+`~/Library/Caches/BloomBuild/ios/<checkout-hash>/project` and builds iPhone/iPad Simulator
+slices in the sibling `build` directory. These persistent paths retain incremental build output.
 It signs the Simulator build ad hoc so Xcode supplies the simulated Keychain entitlement.
 It does not launch Simulator, install an app, or take focus. The generated application container
 supplies iOS bundle metadata, scenes, signing and URL registration; package manifests remain
 the source of truth for shared code. This leaves the existing Mac SwiftPM build unchanged.
 
-Set `BLOOM_IOS_PROJECT_DIR` and `BLOOM_IOS_BUILD_DIR` to isolate simultaneous builds.
+Each checkout has its own defaults. `BLOOM_IOS_PROJECT_DIR` and `BLOOM_IOS_BUILD_DIR`
+override those paths. Locks cover project generation and compilation together, including explicit
+shared overrides; concurrent builds refuse to overwrite one another.
 For a device build, generate the project, select a development team in Xcode and build for the
 device. There is no provisioning profile or distribution setup checked in.
 
@@ -235,7 +238,8 @@ These flags and the driver are absent from Release builds.
 ## App Store preparation
 
 `Tools/archive-ios.sh` creates a Release archive for generic iOS devices at
-`/tmp/Bloom-iOS.xcarchive`. It is unsigned by default for build verification. Set
+`~/Library/Caches/BloomBuild/ios/<checkout-hash>/Bloom-iOS.xcarchive`. It is unsigned by
+default for build verification. Set
 `BLOOM_IOS_TEAM_ID` to archive using a development team already configured in Xcode;
 `BLOOM_IOS_ARCHIVE_PATH` controls the destination. It never installs, opens or uploads the app.
 A signed archive still needs distribution export, App Store Connect setup and review before

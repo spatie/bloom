@@ -54,7 +54,7 @@ re-exports moved value types through aliases so the Mac app and server retain th
 small platform-specific presentation and callback code. `iOS/Bloom` is the UIKit client shell.
 
 The iOS application needs a signed bundle and scene metadata. `Tools/build-ios.sh` generates its
-ignored Xcode container in `/tmp` and builds without launching Simulator. This is separate from
+ignored Xcode container in a persistent per-checkout cache and builds without launching Simulator. This is separate from
 the Mac SwiftPM build and is not a second description of the Mac targets. Read `docs/IOS.md` for
 the current functionality, HTTPS requirements and verification limits.
 
@@ -345,7 +345,8 @@ existing dev data, and restart only the dev copy. Fast mode cannot be combined w
 
 For agent verification without installation or launch, use
 `./Tools/dev-build.sh --fast --no-install`. To install without restarting, use
-`./Tools/dev-build.sh --fast --no-launch`. Restarting the dev app still needs authorisation.
+`./Tools/dev-build.sh --fast --no-launch`; this refuses if the destination app is running.
+Restarting the dev app still needs authorisation.
 See `.claude/skills/bloom-dev-build/SKILL.md` for the full workflow.
 
 **Bloom Dev has its own identity:** bundle id `be.spatie.bloom.dev`, and with it its own
