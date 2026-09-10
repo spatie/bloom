@@ -38,8 +38,8 @@ struct ComposerView: View {
     /// The space a short pane keeps for the conversation when the draft grows.
     private static let minTranscriptHeight: CGFloat = 120
 
-    /// What the wrapped text occupies, already clamped by `ComposerTextEditor` to its line window.
     @State private var contentHeight = ComposerTextEditor.lineHeight
+    @State private var draggedHeight: CGFloat?
     /// Everything in the composer that is not the editor: the footer, the box and the
     /// padding. Measured rather than assumed, because the footer's height comes from its controls.
     ///
@@ -72,6 +72,18 @@ struct ComposerView: View {
                     onSelect: onSelectDestination
                 )
             }
+
+            PaneDivider(
+                axis: .vertical,
+                length: Binding(
+                    get: { Double(editorHeight) },
+                    set: { draggedHeight = $0 == Double(automaticEditorHeight) ? nil : CGFloat($0) }
+                ),
+                bounds: Double(ComposerTextEditor.lineHeight)...Double(maxEditorHeight),
+                reset: Double(automaticEditorHeight),
+                label: "Message height"
+            )
+            .help("Drag to resize. Double-click to fit the text.")
 
             composer
         }
@@ -151,17 +163,21 @@ struct ComposerView: View {
 
     // MARK: - Height
 
-    /// The text editor measures up to ten lines, then scrolls internally. A short pane may
-    /// cap it earlier so the conversation always keeps some room above the writing surface.
     private var editorHeight: CGFloat {
-        let minimum = ComposerTextEditor.lineHeight
-        let maximum = PaneMeasure.editorCap(
+        min(max(draggedHeight ?? automaticEditorHeight, ComposerTextEditor.lineHeight), maxEditorHeight)
+    }
+
+    private var automaticEditorHeight: CGFloat {
+        min(max(contentHeight, ComposerTextEditor.lineHeight), maxEditorHeight)
+    }
+
+    private var maxEditorHeight: CGFloat {
+        PaneMeasure.editorCap(
             room: room.height,
             chrome: chromeHeight + ComposerLayout.bottomInset + ComposerLayout.textClearance,
             floor: Self.minTranscriptHeight,
-            atLeast: minimum
+            atLeast: ComposerTextEditor.lineHeight
         )
-        return min(max(contentHeight, minimum), maximum)
     }
 
     // MARK: - Derived state
