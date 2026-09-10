@@ -84,7 +84,24 @@ connection settings. The assistant configures SSH; HTTPS gateway deployment rema
 `make remote` builds a pinned release copy at `~/Applications/Bloom Remote.app`. It has its own
 bundle identifier, preferences, database fallback and local background service. It launches the regular
 Bloom interface, with local and remote workspaces together in its normal sidebar. Installation
-does not restart any running app.
+does not restart any running app by default. For everyday development, `make remote-fast` snapshots
+current edits into a persistent debug cache, builds and verifies the full app, then gracefully
+restarts only Bloom Remote with `open -g`. Use `Tools/remote-build.sh --fast --no-install` to verify
+without touching the installed app, or `--fast --no-launch` to install while Remote is closed.
+Fast mode uses four compiler jobs and a cache per checkout under
+`~/Library/Caches/BloomBuild/remote/`. It retains normal assets and App Intents metadata. Release
+mode still builds the selected committed revision; fast mode cannot take a revision.
+
+Both modes preserve the installed connection preset and client-key path. Set
+`BLOOM_LINUX_SERVER_ARCHIVE` to a tested server archive, or the build reuses the installed Remote
+app's embedded payload. Missing packages and protocol mismatches stop the build. Its printed
+archive SHA identifies the payload; protocol compatibility alone does not mean its server code
+matches current edits. Server changes require a newly tested Linux archive.
+
+Fast mode never replaces its own hosting app. `--no-install` is safe from a Remote-hosted session.
+Candidate copying/signing finishes before installation, and an atomic directory exchange retains
+the previous app if publication fails. `BLOOM_REMOTE_BUILD_ONLY=1` remains supported and exports
+`/tmp/Bloom-Remote-ready.app` without installation or launch.
 
 The first build can embed a connection preset. These values are connection addresses, not agent
 credentials, and subsequent builds preserve the installed preset unless explicitly overridden:

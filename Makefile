@@ -15,7 +15,7 @@
 # tried to second-guess it would be wrong the first time a file moved.
 
 .DEFAULT_GOAL := help
-.PHONY: help build test app run lint swiftlint master dev dev-db subagents remote release dmg
+.PHONY: help build test app run lint swiftlint master dev dev-fast dev-db subagents remote remote-fast release dmg
 
 help: ## Show this list
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -47,6 +47,9 @@ master: ## Build HEAD and install it to ~/Applications/Bloom.app
 dev: ## Build HEAD as Bloom Dev, a second app that cannot reach the real data
 	./Tools/dev-build.sh
 
+dev-fast: ## Build current edits as Bloom Dev with an incremental debug build
+	./Tools/dev-build.sh --fast
+
 dev-db: ## Copy the real database into Bloom Dev's own container
 	./Tools/dev-db.sh
 
@@ -55,6 +58,9 @@ subagents: ## Build HEAD as Bloom Subagents, a third app for trying the subagent
 
 remote: ## Install a separate Bloom Remote app for local and remote server workspaces
 	./Tools/remote-build.sh
+
+remote-fast: ## Build current edits incrementally, install and restart Bloom Remote
+	./Tools/remote-build.sh --fast --launch
 
 release: ## Build, sign, notarise and staple a zip and a disk image you can send
 	./Tools/release.sh

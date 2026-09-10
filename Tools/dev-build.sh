@@ -5,6 +5,8 @@
 #   ./Tools/dev-build.sh              build HEAD, install, relaunch the dev copy
 #   ./Tools/dev-build.sh <ref>        build that commit or branch instead
 #   ./Tools/dev-build.sh --no-launch  install without restarting the dev copy
+#   ./Tools/dev-build.sh --fast       debug build of current files, including uncommitted edits
+#   ./Tools/dev-build.sh --fast --no-install  build only
 #
 # `make dev` is the first of those.
 #
@@ -52,14 +54,26 @@ cd "$(dirname "$0")/.."
 source "$PWD/Tools/guard.sh"
 
 REF=HEAD
+REF_GIVEN=0
 LAUNCH=1
+INSTALL=1
+FAST=0
+CONFIG=release
+BUILD_ARGS=(-r)
 for arg in "$@"; do
   case "$arg" in
     --no-launch) LAUNCH=0 ;;
+    --no-install) INSTALL=0; LAUNCH=0 ;;
+    --fast) FAST=1; CONFIG=debug; BUILD_ARGS=(--jobs 4) ;;
     -*) echo "unknown option: $arg" >&2; exit 1 ;;
-    *) REF="$arg" ;;
+    *) REF="$arg"; REF_GIVEN=1 ;;
   esac
 done
+
+if (( FAST && REF_GIVEN )); then
+  echo "--fast builds current files and cannot be combined with a revision" >&2
+  exit 1
+fi
 
 RESOLVED="$(git rev-parse --short "$REF")"
 SUBJECT="$(git log -1 --format=%s "$REF")"
@@ -70,16 +84,35 @@ DEST="$BLOOM_DEV_APP"
 # hazard: an agent running inside the DEV copy would have this replace and kill
 # its own host. The second line is belt and braces against a typo or a stale
 # environment ever pointing DEST at the copy the owner is using.
-bloom_refuse_if_own_host "$DEST" "$BLOOM_DEV_DB"
+if (( INSTALL )); then
+  bloom_refuse_if_own_host "$DEST" "$BLOOM_DEV_DB"
+fi
 bloom_refuse_real_app "$DEST"
 
 echo "==> $RESOLVED  $SUBJECT"
 
-git worktree remove --force "$WORK" 2>/dev/null || true
-rm -rf "$WORK"
-git worktree add --detach "$WORK" "$RESOLVED" >/dev/null
+if (( FAST )); then
+  FAST_ROOT="/tmp/bloom-dev-fast-$(printf '%s' "$PWD" | shasum | cut -c1-12)"
+  mkdir -p "$FAST_ROOT"
+  if ! mkdir "$FAST_ROOT/lock" 2>/dev/null; then
+    echo "Another fast build is running. If it stopped unexpectedly, remove $FAST_ROOT/lock." >&2
+    exit 1
+  fi
+  WORK="$(mktemp -d "$FAST_ROOT/stage.XXXXXX")"
+  trap 'rm -rf "$WORK"; rmdir "$FAST_ROOT/lock"' EXIT
+  python3 Tools/build-snapshot.py snapshot "$PWD" "$WORK"
+  RESOLVED="$RESOLVED-working"
+  echo "==> debug build of current files (including uncommitted edits)"
+else
+  git worktree remove --force "$WORK" 2>/dev/null || true
+  rm -rf "$WORK"
+  git worktree add --detach "$WORK" "$RESOLVED" >/dev/null
+fi
 
 # ---------------------------------------------------------------- the identity
+
+python3 Tools/build-snapshot.py check-inputs "$WORK" Resources/Info.plist Resources/Bloom.icon/icon.json \
+  Sources/Bloom/Views/Chrome/Window/WindowTitle.swift Sources/Bloom/BloomApp.swift Sources/Bloom/Views/RootView.swift
 
 PLIST="$WORK/Resources/Info.plist"
 # The redirect hides the value PlistBuddy echoes back and nothing else: it
@@ -214,8 +247,18 @@ patch_source "$WORK/Sources/Bloom/Views/RootView.swift" \
 # it saw last time and rebuilds what changed. And the scratch is still this
 # script's alone, so a concurrent agent build cannot swap objects underneath it,
 # which is the reason Tools/master.sh takes a scratch path of its own.
-mkdir -p /tmp/bloom-dev-build
-ln -sfn /tmp/bloom-dev-build "$WORK/.build"
+if (( FAST )); then
+  # Apply identity edits before syncing so unchanged Swift files keep their timestamps.
+  mkdir -p "$FAST_ROOT/src" "$FAST_ROOT/build"
+  python3 Tools/build-snapshot.py sync "$WORK" "$FAST_ROOT/src"
+  rm -rf "$WORK"
+  WORK="$FAST_ROOT/src"
+  trap 'rmdir "$FAST_ROOT/lock"' EXIT
+  ln -sfn "$FAST_ROOT/build" "$WORK/.build"
+else
+  mkdir -p /tmp/bloom-dev-build
+  ln -sfn /tmp/bloom-dev-build "$WORK/.build"
+fi
 
 # The bundle the last run left in that scratch, removed before this one starts.
 #
@@ -227,7 +270,7 @@ ln -sfn /tmp/bloom-dev-build "$WORK/.build"
 # from twenty minutes ago apart from a fresh one: same path, same name, same
 # shape. So the old one goes first, and the only bundle that can be installed is
 # one this run produced.
-rm -rf "$WORK/.build/release/Bloom.app"
+rm -rf "$WORK/.build/$CONFIG/Bloom.app"
 
 # The build, kept quiet when it works and printed in full when it does not.
 #
@@ -244,7 +287,8 @@ rm -rf "$WORK/.build/release/Bloom.app"
 # the top and then keeps compiling, so the line that explains the failure is not
 # reliably in the last forty.
 BUILD_LOG=/tmp/bloom-dev-build.log
-if ! ( cd "$WORK" && ./Tools/build.sh -r ) >"$BUILD_LOG" 2>&1; then
+(( FAST )) && BUILD_LOG="$FAST_ROOT/build.log"
+if ! ( cd "$WORK" && ./Tools/build.sh "${BUILD_ARGS[@]}" ) >"$BUILD_LOG" 2>&1; then
   cat "$BUILD_LOG" >&2
   print -ru2 -- ""
   print -ru2 -- "==> the dev build failed. The whole log is above, and in $BUILD_LOG."
@@ -252,8 +296,9 @@ if ! ( cd "$WORK" && ./Tools/build.sh -r ) >"$BUILD_LOG" 2>&1; then
   exit 1
 fi
 
-BUILT="$WORK/.build/release/Bloom.app"
-[ -d "$BUILT" ] || BUILT="$(cd "$WORK" && swift build -c release --show-bin-path)/Bloom.app"
+BUILT="$WORK/.build/$CONFIG/Bloom.app"
+[ -d "$BUILT" ] || BUILT="$(cd "$WORK" && swift build -c "$CONFIG" --show-bin-path)/Bloom.app"
+BUILT="${BUILT:A}"
 
 # Belt and braces on the removal above. A build that reports success without
 # leaving a bundle behind must not reach the copy below, because the only thing
@@ -263,10 +308,6 @@ if [[ ! -d "$BUILT" ]]; then
   exit 1
 fi
 
-mkdir -p "$HOME/Applications"
-rm -rf "$DEST"
-cp -R "$BUILT" "$DEST"
-
 # What this is, so a stale install can be identified without guessing. The same
 # key Tools/master.sh writes, plus one that says which of the two this is.
 #
@@ -274,8 +315,8 @@ cp -R "$BUILT" "$DEST"
 # keys anybody reads when they are already confused about which build they are
 # looking at. If the stamp cannot be written the bundle is unidentifiable, and
 # that is worth stopping for.
-/usr/bin/defaults write "$DEST/Contents/Info.plist" BloomMasterCommit -string "$RESOLVED"
-/usr/bin/defaults write "$DEST/Contents/Info.plist" BloomDevBuild -bool true
+/usr/bin/defaults write "$BUILT/Contents/Info.plist" BloomMasterCommit -string "$RESOLVED"
+/usr/bin/defaults write "$BUILT/Contents/Info.plist" BloomDevBuild -bool true
 
 # Re-signed, because the two writes above invalidated the signature Tools/build.sh
 # applied. Same identity resolution as that script, so a machine with a real one
@@ -287,12 +328,25 @@ cp -R "$BUILT" "$DEST"
 # it, and macOS kills a bundle whose signature no longer matches its contents. A
 # swallowed failure would surface three steps down as "launched, but no process
 # is running from ...", which is true and says nothing about the cause.
-if ! signing="$(codesign --force --deep --sign "${BLOOM_CODESIGN_IDENTITY:-${BATON_CODESIGN_IDENTITY:--}}" "$DEST" 2>&1)"; then
+if ! signing="$(codesign --force --deep --sign "${BLOOM_CODESIGN_IDENTITY:-${BATON_CODESIGN_IDENTITY:--}}" "$BUILT" 2>&1)"; then
   print -ru2 -- "$signing"
-  print -ru2 -- "==> re-signing $DEST failed, so it would not launch. The bundle is"
-  print -ru2 -- "    on disk and broken; fix the signing identity and run this again."
+  print -ru2 -- "==> re-signing $BUILT failed, so it would not launch."
+  print -ru2 -- "    Nothing was installed; fix the signing identity and run this again."
   exit 1
 fi
+
+if (( ! INSTALL )); then
+  echo "==> built $BUILT"
+  echo "==> nothing installed or launched"
+  if (( ! FAST )); then
+    git worktree remove --force "$WORK" 2>/dev/null || true
+  fi
+  exit 0
+fi
+
+mkdir -p "$HOME/Applications"
+rm -rf "$DEST"
+cp -R "$BUILT" "$DEST"
 
 # LaunchServices caches Info.plist per bundle, LSEnvironment included, so a
 # rebuild that changed it is not seen until the bundle is registered again.
@@ -304,7 +358,9 @@ fi
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
   -f "$DEST" >/dev/null 2>&1 || true
 
-git worktree remove --force "$WORK" 2>/dev/null || true
+if (( ! FAST )); then
+  git worktree remove --force "$WORK" 2>/dev/null || true
+fi
 
 echo "==> installed $DEST"
 echo "==> database $BLOOM_DEV_DB"
