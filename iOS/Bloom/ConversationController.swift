@@ -488,15 +488,19 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     }
 
     private func reviewRequest() {
-        guard model.address == origin, let service = model.service,
+        guard model.address == origin, model.canSend,
               let data = buffer.pendingQuestions.first else { return }
         guard let request = RemoteApproval(data: data) else {
             show(ConnectionFailure("This request is not supported on iPhone or iPad yet. Answer it in Bloom on Mac, or stop the turn."))
             return
         }
-        let controller = ApprovalController(request: request, sessionID: session.id, service: service) { [weak self] in
-            await self?.refresh()
-        }
+        let model = model
+        let controller = ApprovalController(request: request, sessionID: session.id, origin: origin, service: {
+            guard model.canSend, let service = model.service else {
+                throw ConnectionFailure("Reconnect before retrying this decision. Your answers are kept here.")
+            }
+            return (model.address, service)
+        }) { [weak self] in await self?.refresh() }
         present(BloomTheme.navigation(controller), animated: true)
     }
 

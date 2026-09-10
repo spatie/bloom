@@ -12,6 +12,13 @@ public struct EditableFile: Sendable, Hashable {
     public let text: String
     public let modifiedAt: Date
     public let size: Int
+    /// Set only for a server snapshot. It is never a licence to write this path on the client.
+    public let remoteRevision: String?
+
+    init(path: String, text: String, modifiedAt: Date, size: Int, remoteRevision: String? = nil) {
+        self.path = path; self.text = text; self.modifiedAt = modifiedAt
+        self.size = size; self.remoteRevision = remoteRevision
+    }
 
     public var filename: String { (path as NSString).lastPathComponent }
 }
@@ -120,6 +127,16 @@ public enum FileEditor {
         throw FileEditorError.changedOnDisk(path: path, at: (try? stamp(path).modifiedAt) ?? Date())
     }
 
+    /// Build a server baseline without touching the client's filesystem or inventing a stat.
+    public static func remoteSnapshot(path: String, text: String, revision: String) throws(FileEditorError) -> EditableFile {
+        guard path.hasPrefix("/") else { throw .notAbsolute(path) }
+        guard !revision.isEmpty else { throw .unreadable(path: path, reason: "The server omitted this file's revision.") }
+        let bytes = Data(text.utf8)
+        guard bytes.count <= sizeLimit else { throw .tooLarge(path: path, bytes: bytes.count) }
+        guard !bytes.prefix(sniffLength).contains(0) else { throw .notText(path) }
+        return EditableFile(path: path, text: text, modifiedAt: .distantPast, size: bytes.count, remoteRevision: revision)
+    }
+
     /// Whether a path is worth offering an editor for at all, answered without reading the whole
     /// file. Cheap enough to call while building a toolbar.
     public static func isEditable(_ path: String) -> Bool {
@@ -140,6 +157,9 @@ public enum FileEditor {
     public static func write(
         _ text: String, over baseline: EditableFile
     ) throws(FileEditorError) -> EditableFile {
+        guard baseline.remoteRevision == nil else {
+            throw .unwritable(path: baseline.path, reason: "Save this file through its server connection.")
+        }
         let current = try read(baseline.path)
         guard current.text == baseline.text else {
             throw FileEditorError.changedOnDisk(path: baseline.path, at: current.modifiedAt)

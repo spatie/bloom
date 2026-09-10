@@ -14,6 +14,43 @@ struct FileEditorTests {
         return path
     }
 
+    @Test("remote baselines retain the server revision without reading or creating a local file")
+    func remoteSnapshotStaysInMemory() throws {
+        let path = TestScratch.path("server-only.php")
+        for _ in 0..<100 {
+            let snapshot = try FileEditor.remoteSnapshot(path: path, text: "remote source\n", revision: "server-revision")
+            #expect(snapshot.remoteRevision == "server-revision")
+            #expect(snapshot.text == "remote source\n")
+            #expect(snapshot.path == path)
+        }
+        #expect(!FileManager.default.fileExists(atPath: path))
+    }
+
+    @Test("a remote baseline cannot accidentally write the client's identically named file")
+    func remoteSnapshotCannotWriteLocalPath() throws {
+        let path = try makeFile("shared-name.txt", "local content")
+        let snapshot = try FileEditor.remoteSnapshot(path: path, text: "server content", revision: "opaque-revision")
+        do {
+            _ = try FileEditor.write("changed remotely", over: snapshot)
+            Issue.record("A remote baseline must never enter the local writer")
+        } catch {
+            guard case .unwritable = error else { Issue.record("Expected refusal before local filesystem I/O"); return }
+        }
+        #expect(try String(contentsOfFile: path, encoding: .utf8) == "local content")
+        #expect(try FileEditor.read(path).remoteRevision == nil)
+    }
+
+    @Test("remote snapshots keep the existing text and size safeguards")
+    func remoteSnapshotValidation() {
+        let path = TestScratch.path("remote.txt")
+        #expect(throws: FileEditorError.self) { try FileEditor.remoteSnapshot(path: path, text: "text", revision: "") }
+        #expect(throws: FileEditorError.notText(path)) { try FileEditor.remoteSnapshot(path: path, text: "binary\0text", revision: "revision") }
+        #expect(throws: FileEditorError.notAbsolute("relative")) { try FileEditor.remoteSnapshot(path: "relative", text: "text", revision: "revision") }
+        #expect(throws: FileEditorError.self) {
+            try FileEditor.remoteSnapshot(path: path, text: String(repeating: "x", count: FileEditor.sizeLimit + 1), revision: "revision")
+        }
+    }
+
     // MARK: - Reading
 
     @Test("a read hands back the bytes and a stamp that describes them")

@@ -5,11 +5,12 @@ import BloomClient
 final class ApprovalController: UIViewController {
     private let request: RemoteApproval
     private let sessionID: SessionID
-    private let service: RemoteWorkspaceService
+    private let origin: String
+    private let currentService: @MainActor () throws -> (origin: String, service: RemoteWorkspaceService)
     private let completed: () async -> Void
     private let stack = UIStackView()
     private var draft = AgentQuestionDraft()
-    private var command: RemoteCommand?
+    private var submission: RemoteApprovalSubmission?
     private var buttons: [UIButton] = []
     private var fields: [UITextField] = []
     private var optionButtons: [String: [UIButton]] = [:]
@@ -18,8 +19,11 @@ final class ApprovalController: UIViewController {
     private var retryButton: UIButton?
     private var sending = false
 
-    init(request: RemoteApproval, sessionID: SessionID, service: RemoteWorkspaceService, completed: @escaping () async -> Void) {
-        self.request = request; self.sessionID = sessionID; self.service = service; self.completed = completed
+    init(request: RemoteApproval, sessionID: SessionID, origin: String,
+         service: @escaping @MainActor () throws -> (origin: String, service: RemoteWorkspaceService),
+         completed: @escaping () async -> Void) {
+        self.request = request; self.sessionID = sessionID; self.origin = origin
+        self.currentService = service; self.completed = completed
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("Use init(request:sessionID:service:completed:)") }
@@ -146,16 +150,16 @@ final class ApprovalController: UIViewController {
     }
     private func execute(_ proposed: RemoteCommand) throws {
         guard !sending else { return }
-        let command = self.command ?? proposed
-        self.command = command
+        let submission = try self.submission ?? RemoteApprovalSubmission(command: proposed, origin: origin)
+        self.submission = submission
         sending = true
         buttons.forEach { $0.isEnabled = false }; fields.forEach { $0.isEnabled = false }
         isModalInPresentation = true
         navigationItem.leftBarButtonItem?.isEnabled = false
         Task {
             do {
-                let result = try await service.client.request(command)
-                guard result["accepted"]?.objectValue != nil else { throw ConnectionFailure("The server did not acknowledge this decision. Retry sends the same decision.") }
+                let current = try currentService()
+                try await submission.submit(using: current.service.client, origin: current.origin)
                 await completed()
                 dismiss(animated: true)
             } catch {
@@ -167,7 +171,7 @@ final class ApprovalController: UIViewController {
                 if retryButton == nil {
                     retryButton = button("Retry decision") { [weak self] in
                         guard let self else { return }
-                        do { try self.execute(command) } catch { self.show(error) }
+                        do { try self.execute(submission.command) } catch { self.show(error) }
                     }
                 }
                 retryButton?.isEnabled = true

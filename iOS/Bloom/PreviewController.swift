@@ -14,6 +14,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     private let url: URL
     private let browser: WKWebView
+    private var navigationObservations: [NSKeyValueObservation] = []
     private var previewLease: MobilePreviewLease?
     private var preparing: Task<Void, Never>?
     private let toolbar = UIToolbar()
@@ -134,6 +135,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
 
     func closePreview() {
+        navigationObservations.removeAll()
         preparing?.cancel()
         browser.stopLoading()
         previewLease?.close()
@@ -213,6 +215,25 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     private func configureBrowser() {
         browser.navigationDelegate = self
         browser.uiDelegate = self
+        // Inertia and other single-page apps change URL/history without navigation callbacks.
+        // Observations are retained only by this controller and capture it weakly.
+        navigationObservations = [
+            browser.observe(\.url, options: [.initial, .new]) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.refreshNavigation() }
+            },
+            browser.observe(\.title, options: [.new]) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.refreshNavigation() }
+            },
+            browser.observe(\.canGoBack, options: [.new]) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.refreshNavigation() }
+            },
+            browser.observe(\.canGoForward, options: [.new]) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.refreshNavigation() }
+            },
+            browser.observe(\.isLoading, options: [.new]) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.refreshNavigation() }
+            },
+        ]
         browser.allowsBackForwardNavigationGestures = true
         browser.isOpaque = false
         browser.backgroundColor = BloomTheme.background
@@ -346,6 +367,15 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         guard previewLease?.isClosed != true, target.user == nil, target.password == nil else { return false }
         return (target.scheme?.lowercased() == "https" && target.host?.isEmpty == false)
             || previewLease?.allowsHTTP(target) == true
+    }
+
+    private func refreshNavigation() {
+        isLoading = browser.isLoading
+        if isLoading { activity.startAnimating() } else { activity.stopAnimating() }
+        if let lease = previewLease, !lease.isClosed, let actual = browser.url, allows(actual) {
+            reconnectAddress = lease.reportedURL(actual).absoluteString
+        }
+        updateToolbar()
     }
 
     private func updateToolbar() {

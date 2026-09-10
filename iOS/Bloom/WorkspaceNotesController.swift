@@ -1,21 +1,20 @@
 import UIKit
 import BloomClient
 
-/// Notes use native editing and the existing server note operation. An unsaved device draft
-/// survives a network failure or closing its pane, and writes remain serial.
+/// UIKit owns editing and focus; the shared session owns persisted drafts and write ordering.
 final class WorkspaceNotesController: UIViewController, UITextViewDelegate {
+    private static let drafts = WorkspaceNoteDraftStore(file: URL.applicationSupportDirectory.appendingPathComponent("Notes/drafts.json"))
     private let model: MobileConnection
     private let workspaceID: WorkspaceID
     private let origin: String
     private let editor = UITextView()
     private let status = UILabel()
-    private var saved: String?
+    private var session: WorkspaceNoteSession?
+    private var observer: UUID?
     private var loading: Task<Void, Never>?
-    private var saving: Task<Void, Never>?
-    private var debounce: Task<Void, Never>?
     private lazy var save = UIBarButtonItem(systemItem: .save, primaryAction: UIAction { [weak self] _ in self?.saveNow() })
     private lazy var retry = UIBarButtonItem(systemItem: .refresh, primaryAction: UIAction { [weak self] _ in self?.loadNotes() })
-    private var key: String { "workspace.note.draft." + origin + "." + workspaceID.rawValue }
+    private var legacyKey: String { "workspace.note.draft." + origin + "." + workspaceID.rawValue }
     var characters: Int { editor.text.count }
 
     init(model: MobileConnection, workspaceID: WorkspaceID) {
@@ -23,7 +22,7 @@ final class WorkspaceNotesController: UIViewController, UITextViewDelegate {
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("Use init(model:workspaceID:)") }
-    deinit { loading?.cancel(); debounce?.cancel() }
+    deinit { loading?.cancel() }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -49,80 +48,68 @@ final class WorkspaceNotesController: UIViewController, UITextViewDelegate {
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor), stack.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
             toolbar.heightAnchor.constraint(equalToConstant: 48)
         ])
-        loadNotes()
+        do {
+            let session = try Self.drafts.session(scope: try RemoteOrigin.canonical(origin), workspaceID: workspaceID)
+            self.session = session
+            if let legacy = UserDefaults.standard.string(forKey: legacyKey) {
+                session.importLegacyDraft(legacy)
+                if session.draftError == nil { UserDefaults.standard.removeObject(forKey: legacyKey) }
+            }
+            update()
+        } catch { status.text = "Saved notes could not be opened" }
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        if saved == nil && loading == nil { loadNotes() }
+        observer = session?.observe { [weak self] in self?.update() }
+        loadNotes()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         loading?.cancel(); loading = nil
-        debounce?.cancel()
+        if let observer { session?.removeObserver(observer) }; observer = nil
         saveNow()
     }
 
     private func loadNotes() {
-        guard saving == nil else { return }
+        guard let session else { return }
         loading?.cancel()
-        debounce?.cancel()
-        saved = nil
-        editor.isEditable = false
-        save.isEnabled = false
-        retry.isEnabled = false
-        editor.text = UserDefaults.standard.string(forKey: key) ?? ""
-        status.text = "Loading notes…"
-        loading = Task { [weak self] in
-            guard let self else { return }
-            do {
+        let model = model, origin = origin, workspaceID = workspaceID
+        loading = Task {
+            await session.load {
                 guard model.address == origin, let service = model.service else { throw ConnectionFailure("Reconnect to load workspace notes.") }
                 let text = try await service.notes(workspaceID: workspaceID)
-                guard !Task.isCancelled else { return }
-                guard model.address == origin, model.service != nil else { throw ConnectionFailure("Reconnect to load workspace notes.") }
-                saved = text
-                editor.text = UserDefaults.standard.string(forKey: key) ?? text
-                editor.isEditable = true
-                save.isEnabled = true
-                status.text = WorkspaceNote.needsSave(stored: saved, typed: editor.text) ? "Draft saved on this device" : "Saved"
-            } catch {
-                guard !Task.isCancelled else { return }
-                // Keep any device draft visible but read-only. A failed read is not an empty note.
-                status.text = "Couldn’t load notes"
-                if model.canSend, viewIfLoaded?.window != nil { show(error) }
+                guard model.address == origin else { throw CancellationError() }
+                return text
             }
-            loading = nil
-            retry.isEnabled = true
         }
     }
 
-    func textViewDidChange(_ textView: UITextView) {
-        guard saved != nil else { return }
-        UserDefaults.standard.set(editor.text, forKey: key)
-        status.text = "Draft saved on this device"
-        debounce?.cancel()
-        debounce = Task { [weak self] in
-            do { try await Task.sleep(for: WorkspaceNote.autosaveDelay) } catch { return }
-            self?.saveNow()
+    private var write: WorkspaceNoteSession.Write {
+        let model = model, origin = origin, workspaceID = workspaceID
+        return { text in
+            guard model.address == origin, let service = model.service else { throw ConnectionFailure("Reconnect to save notes. Your draft is saved on this device.") }
+            try await service.saveNotes(text, workspaceID: workspaceID)
         }
     }
 
-    private func saveNow() {
-        guard saving == nil, WorkspaceNote.needsSave(stored: saved, typed: editor.text) else { return }
-        guard model.address == origin, let service = model.service else { status.text = "Reconnect to save notes"; return }
-        let text = editor.text ?? ""
-        guard text.utf8.count <= 1_048_576 else { status.text = "Notes exceed 1 MB"; return }
-        status.text = "Saving…"
-        saving = Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await service.saveNotes(text, workspaceID: workspaceID)
-                guard model.address == origin else { saving = nil; return }
-                saved = text
-                saving = nil
-                if editor.text == text { UserDefaults.standard.removeObject(forKey: key); status.text = "Saved" } else { saveNow() }
-            } catch { saving = nil; status.text = "Draft saved on this device"; if model.canSend, viewIfLoaded?.window != nil { show(error) } }
-        }
+    func textViewDidChange(_ textView: UITextView) { session?.edit(editor.text, using: write) }
+    private func saveNow() { session?.save(using: write) }
+
+    private func update() {
+        guard let session else { return }
+        if editor.text != session.text { editor.text = session.text }
+        editor.isEditable = session.canEdit
+        save.isEnabled = session.canEdit && session.hasChanges && !session.isSaving
+        retry.isEnabled = !session.isLoading && !session.isSaving
+        if let error = session.draftError { status.text = error
+        } else if session.isSaving { status.text = "Saving…"
+        } else if session.saveError != nil { status.text = "Draft saved on this device. Retry saving."
+        } else if session.hasChanges { status.text = "Draft saved on this device"
+        } else if session.loadError != nil { status.text = "Couldn’t load notes. Retry when connected."
+        } else if session.isLoading { status.text = "Loading notes…"
+        } else { status.text = "Saved" }
+        status.sizeToFit()
     }
 }
