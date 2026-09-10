@@ -1,34 +1,11 @@
 import Foundation
 
-/// Splitting the tab the reader is on, as Cmd+D and Shift+Cmd+D do it.
-///
-/// Injected for the same reason `PaneOpening` is, and it is a second closure rather than a flag on
-/// that one because the two verbs land in different places: `NewPane.open` makes a tab and
-/// `WorkspaceTabsStore.split` divides one.
+/// The destination comes from the authenticated chat, not whichever pane has keyboard focus
+/// after the agent has finished thinking. The app resolves that destination in its pane trees.
 public typealias PaneSplitting =
-    @Sendable (PaneOrder, SplitAxis, WorkspaceID) async -> PaneOutcome
+    @Sendable (PaneOrder, SplitAxis, PaneSplitAnchor, WorkspaceID) async -> PaneOutcome
 
-/// `pane_split`: put a pane beside what is already on screen rather than behind it.
-///
-/// ## Why it is its own tool and not an argument to `pane_open`
-///
-/// They read as one feature and behave as two. Opening always works: a workspace can always hold
-/// another tab. Splitting can be refused, and by rules that have nothing to do with the kind being
-/// asked for: there has to be a tab to split, and `PaneSplit` will not duplicate a pane a
-/// workspace has exactly one of. A single tool would have one set of arguments and two quite
-/// different refusal vocabularies, and a model reading "could not open" would not know which of
-/// the two it had run into.
-///
-/// The split rule itself is not restated here. `PaneSplit.duplicating` is what the menu items read
-/// to decide whether Split Right is greyed, and this asks the same question through the same door,
-/// so a pane the menu will not split is a pane this refuses with the menu's own reason.
-///
-/// ## The axis is named for what the reader sees
-///
-/// `SplitAxis.horizontal` is side by side and `.vertical` is stacked, which is the convention the
-/// rest of the app uses and the opposite of what half of the people reading it will expect. So the
-/// description says "beside" and "below" rather than the two words, and the wire still carries the
-/// enum, so nothing here invents a third vocabulary for the same two directions.
+/// Adds a pane to an existing tab. New tabs belong to `pane_open`.
 public struct PaneSplitTool: BridgeToolHandling {
     private let split: PaneSplitting
 
@@ -42,17 +19,24 @@ public struct PaneSplitTool: BridgeToolHandling {
     public let tool = BridgeTool(
         name: "pane_split",
         description: """
-            Split the tab the reader is on and show a pane in the new half: a chat, a terminal, \
-            or a browser. Use it when the two things are worth reading together, a terminal beside \
-            the diff it is about, and `pane_open` when they are not.
+            Add a pane alongside this conversation, inside the same tab. A tab is an entry in \
+            the top tab strip; a pane is one visible region inside a tab. Splitting adds a region \
+            so both contents are visible together. pane_open creates a separate tab instead.
 
-            'kind' is one of \(PaneOrder.kindList). 'url' is for a browser and is optional. \
-            'title' is what the tab is called and is optional. 'direction' is 'beside' to put \
-            the new pane on the right, or 'below' to stack it under; it defaults to 'beside'.
+            For "add a pane", "split pane in this chat", or "split vertically next to this chat", \
+            call pane_split with no arguments: it opens a NEW chat to the RIGHT of the chat \
+            making this request, separated by a vertical divider. It does not duplicate this \
+            conversation. Do not select another tab first or use pane_open for these requests.
 
-            It splits the tab in your own workspace and takes no workspace argument. It can be \
-            refused: there has to be a tab open, and some panes a workspace has only one of \
-            cannot be duplicated. It is not destructive.
+            'kind' defaults to 'chat'; use 'terminal' or 'browser' when requested. 'direction' \
+            defaults to 'beside' (right, side by side, vertical divider); 'below' stacks panes \
+            with a horizontal divider. 'url' is optional and browser-only. 'title' names the new \
+            content, not the containing tab.
+
+            'target' defaults to 'this_chat', resolved from your connection even if another tab \
+            or pane has focus. Only use 'active_pane' when the person explicitly asks to split \
+            the currently selected pane instead of this chat. A missing target is refused; it \
+            never silently falls back to another chat. Everything stays in your own workspace.
             """,
         inputSchema: .object([
             "type": .string("object"),
@@ -60,7 +44,7 @@ public struct PaneSplitTool: BridgeToolHandling {
                 "kind": .object([
                     "type": .string("string"),
                     "enum": .array(PaneKind.allCases.map { .string($0.rawValue) }),
-                    "description": .string("What to show in the new half."),
+                    "description": .string("What to show in the new pane. Defaults to a new chat."),
                 ]),
                 "url": .object([
                     "type": .string("string"),
@@ -69,18 +53,24 @@ public struct PaneSplitTool: BridgeToolHandling {
                 "title": .object([
                     "type": .string("string"),
                     "description": .string(
-                        "What to call the tab. Leave it out for the strip's own numbering."
+                        "Name of the new content. Does not rename the containing tab."
                     ),
+                ]),
+                "target": .object([
+                    "type": .string("string"),
+                    "enum": .array([.string("this_chat"), .string("active_pane")]),
+                    "description": .string("Defaults to this_chat, the conversation making this request. active_pane explicitly follows UI focus."),
                 ]),
                 "direction": .object([
                     "type": .string("string"),
                     "enum": .array([.string("beside"), .string("below")]),
                     "description": .string(
-                        "'beside' puts it on the right, 'below' stacks it. Defaults to 'beside'."
+                        "'beside': right with a vertical divider (default). 'below': underneath with a horizontal divider."
                     ),
                 ]),
             ]),
-            "required": .array([.string("kind")]),
+            "required": .array([]),
+            "additionalProperties": .bool(false),
         ])
     )
 
@@ -91,7 +81,10 @@ public struct PaneSplitTool: BridgeToolHandling {
         case .none, .some(""), .some("beside"): return .success(.horizontal)
         case .some("below"): return .success(.vertical)
         case .some(let other):
-            return .failure(PaneRefusal("Bloom splits 'beside' or 'below', not '\(other)'."))
+            return .failure(PaneRefusal(
+                "Bloom splits 'beside' or 'below', not '\(other)'. Use 'beside' for side-by-side "
+                    + "panes with a vertical divider, or 'below' for stacked panes with a horizontal divider."
+            ))
         }
     }
 
@@ -105,11 +98,23 @@ public struct PaneSplitTool: BridgeToolHandling {
                 BridgeWorkspaceScope.refusal(tool: "pane_split", doing: "splits a tab in")
             )
         }
-        // The pane a split lands in is beside what the reader is already looking at, so it is
-        // always in front of them: there is nothing for `focus` to choose between and the
-        // argument is deliberately absent rather than accepted and ignored.
+        let anchor: PaneSplitAnchor
+        switch request.param("target") {
+        case nil, .string("this_chat"):
+            guard let sessionID = identity.sessionID else {
+                return .failure("This connection has no chat to split beside.")
+            }
+            anchor = .chat(sessionID)
+        case .string("active_pane"): anchor = .activePane
+        default: return .failure("'target' must be 'this_chat' or 'active_pane'.")
+        }
+        for name in ["kind", "direction"] {
+            if let value = request.param(name), value.stringValue == nil {
+                return .failure("'\(name)' must be a string. Leave it out for the default.")
+            }
+        }
         switch PaneOrder.parse(
-            kind: request.stringParam("kind"),
+            kind: request.stringParam("kind") ?? "chat",
             url: request.stringParam("url"),
             focus: JSONValue?.none,
             title: request.stringParam("title"),
@@ -122,7 +127,7 @@ public struct PaneSplitTool: BridgeToolHandling {
             case .failure(let refusal):
                 return .failure(refusal.sentence)
             case .success(let axis):
-                switch await split(order, axis, workspaceID) {
+                switch await split(order, axis, anchor, workspaceID) {
                 case .opened(let sentence): return BridgeToolResult(text: sentence)
                 case .refused(let refusal): return .failure(refusal)
                 }

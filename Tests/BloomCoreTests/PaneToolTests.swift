@@ -232,7 +232,7 @@ struct PaneToolTests {
     @Test("opening and splitting both accept a title")
     func bothOpenersTakeATitle() {
         for tool in [PaneOpenTool { _, _ in .opened("") }.tool,
-                     PaneSplitTool { _, _, _ in .opened("") }.tool] {
+                     PaneSplitTool { _, _, _, _ in .opened("") }.tool] {
             guard case .object(let schema) = tool.inputSchema,
                   case .object(let properties)? = schema["properties"]
             else { Issue.record("no schema for \(tool.name)"); return }
@@ -276,7 +276,7 @@ struct PaneToolTests {
     @Test("only a parent can open, split, close or rename panes")
     func onlyAParentCanTouchPanes() {
         let open = PaneOpenTool { _, _ in .opened("") }
-        let split = PaneSplitTool { _, _, _ in .opened("") }
+        let split = PaneSplitTool { _, _, _, _ in .opened("") }
         let close = PaneCloseTool { _, _ in .opened("") }
         let rename = PaneRenameTool { _, _, _ in .opened("") }
         for roles in [open.roles, split.roles, close.roles, rename.roles] {
