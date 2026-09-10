@@ -70,17 +70,20 @@ struct ServerSetupView: View {
                     if model.isBusy { Task { await model.stopSetup() } } else { model.cancel(); dismissWindow(id: windowID) }
                 }
                 .keyboardShortcut(.cancelAction).disabled(model.isStopping)
-                if !model.activity.lines.isEmpty && model.phase != .installing && !model.isInstallingBrowser {
-                    Button("View Output…") { showsOutput = true }.buttonStyle(.link)
-                }
                 if !model.activity.lines.isEmpty || model.failure != nil || model.check != nil {
-                    Button(copiedReport ? "Copied" : "Copy Report") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(model.diagnosticReport, forType: .string)
-                        copiedReport = true
+                    Menu(copiedReport ? "Report Copied" : "Details") {
+                        if !model.activity.lines.isEmpty {
+                            Button("View Output…") { showsOutput = true }
+                        }
+                        Button("Copy Report") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(model.diagnosticReport, forType: .string)
+                            copiedReport = true
+                        }
                     }
-                    .buttonStyle(.link).font(Typo.caption)
-                    .help("Copy the setup step, error and server output to share for troubleshooting.")
+                    .menuStyle(.borderlessButton).fixedSize()
+                    .help("View setup output or copy a diagnostic report.")
+                    .accessibilityLabel("Setup details")
                 }
                 Spacer()
                 if model.phase != .introduction && model.phase != .complete {
