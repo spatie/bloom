@@ -19,7 +19,8 @@ extension CodeTextView {
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if modifiers == .command, isEditable {
+        // Key-equivalent lookup can visit sibling views. Only the editor holding the caret acts.
+        if window?.firstResponder === self, modifiers == .command, isEditable {
             switch event.charactersIgnoringModifiers {
             case "/": editLines(.comment); return true
             case "]": editLines(.indent); return true
