@@ -98,11 +98,19 @@ public actor SourceLanguageServer {
         try Task.checkCancellation()
         try start(executable: executable, arguments: command.1, root: root)
         let rootURI = URL(fileURLWithPath: root).absoluteString
+        // The TypeScript syntax server can stop at an import alias while its semantic server
+        // starts. Definition-only clients need the semantic answer on the first click.
+        let options: JSONValue = language == .typescript || language == .javascript
+            ? .object(["tsserver": .object(["useSyntaxServer": .string("never")])]) : .object([:])
         let response = try await request("initialize", .object([
             "processId": .integer(Int(ProcessInfo.processInfo.processIdentifier)),
             "rootUri": .string(rootURI),
+            "initializationOptions": options,
             "workspaceFolders": .array([.object(["uri": .string(rootURI), "name": .string((root as NSString).lastPathComponent)])]),
-            "capabilities": .object(["general": .object(["positionEncodings": .array([.string("utf-16")])])]),
+            "capabilities": .object([
+                "general": .object(["positionEncodings": .array([.string("utf-16")])]),
+                "textDocument": .object(["definition": .object(["linkSupport": .bool(true)])]),
+            ]),
         ]))
         if let encoding = response["capabilities"]?["positionEncoding"]?.stringValue, encoding != "utf-16" {
             throw SourceLanguageServerError.failed("The language server selected an unsupported position encoding: \(encoding).")
