@@ -288,6 +288,11 @@ final class TranscriptModel {
     /// are two requests, and the composer has nothing to clear afterwards.
     private(set) var composerFocusRequests = 0
 
+    func appendSourceContext(_ context: String) {
+        draft += (draft.isEmpty ? "" : "\n\n") + "Ask about this code:\n\n" + context + "\n\n"
+        focusComposer()
+    }
+
     func focusComposer() { composerFocusRequests += 1 }
 
     private var runner: (any SessionRunner)?

@@ -33,6 +33,16 @@ enum DiffRow: Identifiable {
     /// its identity through a rebuild, or the text in it is thrown away by a poll.
     case lineEditor(DiffEditRegion)
 
+    var sourceLines: [DiffLine] {
+        switch self {
+        case let .line(line): [line]
+        case let .lineRun(lines): lines
+        case let .pair(row): [row.left, row.right].compactMap { $0 }
+        case let .pairRun(rows): rows.flatMap { [$0.left, $0.right].compactMap { $0 } }
+        default: []
+        }
+    }
+
     var id: String {
         switch self {
         case let .header(hunk, _): "header-\(hunk)"

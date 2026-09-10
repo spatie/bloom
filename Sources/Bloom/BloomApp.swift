@@ -7,6 +7,7 @@ struct BloomApp: App {
 
     init() {
         #if DEBUG
+        if SourceEditorProbe.isRequested { SourceEditorProbe.runAndExit() }
         if AppChromeProbe.isRequested { AppChromeProbe.runAndExit() }
         if ComposerInputProbe.isRequested { ComposerInputProbe.runAndExit() }
         if InspectorVisibilityProbe.isRequested { InspectorVisibilityProbe.runAndExit() }

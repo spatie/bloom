@@ -179,6 +179,10 @@ enum TranscriptLink {
             guard let url = URL(string: found.url), LinkPolicy.opens(url) else { continue }
             run.addAttribute(.link, value: url, range: NSRange(found.range, in: text))
         }
+        for (range, url) in SourceReference.links(in: text)
+            where run.attribute(.link, at: range.location, effectiveRange: nil) == nil {
+            run.addAttribute(.link, value: url, range: range)
+        }
         return run
     }
 
@@ -198,6 +202,10 @@ enum TranscriptLink {
         TranscriptLinkActions(
             identity: .workspace(model?.workspace.id, pane: pane),
             open: { url, target in
+                if let location = SourceReference.location(url), let model {
+                    FileReview.open(location: location, in: model)
+                    return
+                }
                 switch target {
                 case .externalBrowser:
                     guard LinkPolicy.opens(url) else { return }
