@@ -140,8 +140,14 @@ public struct ServerSetupFailure: Error, LocalizedError, Sendable, Equatable {
         }
     }
 
-    public static func classify(status: Int32, stderr: String, command: String? = nil) -> Self {
-        Self(base: classified(status: status, stderr: stderr), details: stderr, command: command, exitStatus: Int(status))
+    public static func classify(status: Int32, stderr: String, command: String? = nil, explainUnknown: Bool = false) -> Self {
+        let base = classified(status: status, stderr: stderr)
+        // Bootstrap errors can happen before an installer emits its first JSON event. Keep the
+        // final diagnostic visible in the error row, with the complete sanitized tail alongside.
+        let safe = ServerSetupDiagnostics.sanitise(stderr)
+        let lastLine = safe.split(separator: "\n").last.map(String.init)
+        let summary = explainUnknown && base.code == .unknown ? lastLine : nil
+        return Self(base: base, message: summary, details: safe, command: command, exitStatus: Int(status))
     }
 
     private static func classified(status: Int32, stderr: String) -> Self {

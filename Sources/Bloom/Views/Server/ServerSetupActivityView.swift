@@ -6,7 +6,6 @@ import BloomCore
 struct ServerSetupActivityView: View {
     let activity: ServerSetupActivity
     let failure: ServerSetupFailure?
-    @State private var followsOutput = true
     @State private var copiedOutput = false
 
     var body: some View {
@@ -31,13 +30,12 @@ struct ServerSetupActivityView: View {
                     HStack {
                         Text("Server output").font(Typo.captionEmphasis)
                         Spacer()
-                        Toggle("Follow", isOn: $followsOutput).toggleStyle(.checkbox).font(Typo.caption)
                         Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(activity.output, forType: .string); copiedOutput = true } label: {
                             Text(copiedOutput ? "Copied" : "Copy Output").font(Typo.caption)
                         }
                         .buttonStyle(.bordered).controlSize(.small).help("Copy server output").accessibilityLabel("Copy server output")
                     }
-                    ServerSetupOutputView(lines: activity.lines, followsOutput: followsOutput)
+                    ServerSetupOutputView(lines: activity.lines)
                     if failure == nil {
                         Text(activity.currentMessage)
                             .font(Typo.caption).foregroundStyle(.secondary)

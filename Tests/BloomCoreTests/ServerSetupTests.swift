@@ -202,4 +202,17 @@ import Testing
         #expect(ServerSetupFailure.classify(status: 255, stderr: "").code == .unreachable)
         #expect(ServerSetupFailure.classify(status: 1, stderr: "").code == .unknown)
     }
+    @Test func installationLocationsComeFromPreflight() throws {
+        let data = Data(#"{"platform":"Ubuntu 26.04","architecture":"x86_64","privilege":"root","existing":false,"blockers":[],"warnings":[],"executable":"/opt/custom/current/bin/bloom-server","dataDirectory":"/var/lib/custom-data","serviceUser":"custom","installationRoot":"/opt/custom","serviceHome":"/var/lib/custom-home"}"#.utf8)
+        let check = try JSONDecoder().decode(ServerInstallCheck.self, from: data)
+        #expect(check.installationRoot == "/opt/custom")
+        #expect(check.serviceHome == "/var/lib/custom-home")
+        var legacy = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        legacy.removeValue(forKey: "installationRoot")
+        legacy.removeValue(forKey: "serviceHome")
+        let legacyCheck = try JSONDecoder().decode(ServerInstallCheck.self, from: JSONSerialization.data(withJSONObject: legacy))
+        #expect(legacyCheck.installationRoot == nil)
+        #expect(legacyCheck.serviceHome == nil)
+    }
+
 }

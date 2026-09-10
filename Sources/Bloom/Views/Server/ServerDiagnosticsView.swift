@@ -4,6 +4,7 @@ import BloomCore
 /// Checks stay in server settings. Creating a workspace does not require a checklist.
 struct ServerDiagnosticsView: View {
     let model: ServerWindowModel
+    @Environment(\.openWindow) private var openWindow
     @State private var report: ServerDiagnostics?
     @State private var error: String?
     @State private var isLoading = false
@@ -27,6 +28,9 @@ struct ServerDiagnosticsView: View {
                             Label(check.title, systemImage: symbol(check.status))
                                 .foregroundStyle(check.status == .attention ? Color.orange : Color.secondary)
                             Text(check.detail).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            if check.id == .github && check.status != .ready {
+                                Button("Sign In on Server…") { openWindow(id: ServerAccountsWindow.id) }
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 3)

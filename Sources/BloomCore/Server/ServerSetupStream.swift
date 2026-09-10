@@ -47,7 +47,7 @@ enum ServerSetupStream {
             if status == 0, let completed = result.completed { return completed }
             if status == 0, !requiresCompletion { return ServerInstallEvent(event: "complete", step: step) }
             let details = result.tail.isEmpty ? streamError?.localizedDescription ?? "The installer exited without a completion event." : result.tail
-            throw ServerSetupFailure.classify(status: status, stderr: details, command: commandLabel)
+            throw ServerSetupFailure.classify(status: status, stderr: details, command: commandLabel, explainUnknown: true)
         } onCancel: { lifetime.stop(timedOut: false) }
     }
 }

@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -36,6 +37,27 @@ class BrowserTests(unittest.TestCase):
             info.external_attr = mode << 16
             archive.writestr(info, contents)
         return path
+
+    def test_wizard_stdin_source_creates_standalone_launchers_without_file_global(self):
+        script = Path(__file__).with_name("install-bloom-browser.py")
+        source = browser.standalone_installer_source(script)
+        namespace = {"__name__": "browser_wizard_fixture", "__bloom_browser_source": source}
+        exec(compile(source, "<bloom-browser>", "exec"), namespace)
+        self.assertNotIn("__file__", namespace)
+        launcher = namespace["launcher_source"]()
+        self.assertEqual(launcher, source)
+        self.assertIn("class InstallProcessFailure(", launcher)
+        copied = self.root / "standalone-browser-installer.py"
+        copied.write_text(launcher)
+        result = subprocess.run([sys.executable, "-I", str(copied), "--help"], capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--service-home", result.stdout)
+
+    def test_direct_file_install_also_embeds_helper_into_its_launchers(self):
+        launcher = browser.launcher_source()
+        self.assertTrue(launcher.startswith("#!/usr/bin/env python3\n"))
+        self.assertIn("class InstallProcessFailure(", launcher)
+        self.assertTrue(launcher.endswith(Path(__file__).with_name("install-bloom-browser.py").read_text()))
 
     def test_browser_command_failure_redacts_output_and_preserves_exit_status(self):
         with self.assertRaises(browser.BrowserError) as caught:

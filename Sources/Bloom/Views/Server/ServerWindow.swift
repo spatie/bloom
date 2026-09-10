@@ -61,6 +61,18 @@ private struct ServerConnectionView: View {
 
     var body: some View {
         Form {
+            Section("Accounts") {
+                HStack {
+                    VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                        Text("GitHub, Codex and Claude").font(Typo.labelEmphasis)
+                        Text("Manage sign-ins on \(model.displayName).")
+                            .font(Typo.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Sign In on Server…") { openWindow(id: ServerAccountsWindow.id) }
+                        .disabled(!model.isConfigured)
+                }
+            }
             if !model.savedServers.profiles.isEmpty {
                 LabeledContent("Saved servers") {
                     Menu(model.displayName) {
@@ -117,7 +129,7 @@ private struct ServerConnectionView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 660, height: (usesHTTPS ? 300 : 390) + (model.isConnected ? 160 : 0))
+        .frame(width: 660, height: (usesHTTPS ? 380 : 470) + (model.isConnected ? 160 : 0))
         .disabled(model.isConnecting || model.isSigningIn)
         .onAppear(perform: loadConnection)
         .onChange(of: model.connectionProfile?.id) { loadConnection() }

@@ -23,10 +23,20 @@ import Testing
 
     @Test func missingRequiredToolsAndBrokenOptionalToolsNeedAttention() {
         let missing = ServerDiagnosticsCollector.tool(.git, "Git", nil, required: true, missing: "Install Git", failed: "Cannot run")
-        let broken = ServerDiagnosticsCollector.tool(.docker, "Docker", false, required: false, missing: "Optional", failed: "Check daemon")
+        let broken = ServerDiagnosticsCollector.tool(.github, "GitHub", false, required: false, missing: "Optional", failed: "Check authentication")
         #expect(missing.status == .attention)
         #expect(broken.status == .attention)
-        #expect(broken.detail == "Check daemon")
+        #expect(broken.detail == "Check authentication")
+    }
+
+    @Test(arguments: [false, nil] as [Bool?])
+    func optionalDockerDoesNotMakeAnOtherwiseHealthyServerFail(available: Bool?) {
+        let check = ServerDiagnosticsCollector.dockerCapability(available)
+        #expect(check.status == .unavailable)
+        #expect(check.detail.contains("Docker is optional"))
+        let report = ServerDiagnostics(checkedAt: Date(), hostname: "fixture", operatingSystem: "Ubuntu", account: "bloom", checks: [check])
+        #expect(!report.needsAttention)
+        #expect(ServerDiagnosticsCollector.dockerCapability(true).status == .ready)
     }
 
     @Test func lowResourcesProduceSpecificAdviceWithoutRecommendingPrivilegesForAgents() {

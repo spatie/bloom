@@ -19,7 +19,7 @@ public enum ServerDiagnosticsCollector {
             tool(.git, "Git", git, required: true, missing: "Install Git to create workspaces.", failed: "Git could not run under the server account."),
             tool(.tmux, "Terminals", tmux, required: true, missing: "Install tmux for persistent terminals.", failed: "tmux could not run under the server account."),
             tool(.github, "GitHub", github, required: false, missing: "Install gh to browse and clone private GitHub repositories.", failed: "GitHub authentication failed or could not be checked. Run gh auth login as the server account."),
-            tool(.docker, "Docker", docker, required: false, missing: "Docker is optional. Install it for projects with container setup scripts.", failed: "The Docker daemon could not be reached. Check the server account's Docker context and service."),
+            dockerCapability(docker),
         ]
         let agents = ["claude", "codex", "opencode", "pi"].filter { Shell.which($0) != nil }
         checks.append(.init(id: .agents, title: "Agents", status: agents.isEmpty ? .attention : .ready,
@@ -49,6 +49,17 @@ public enum ServerDiagnosticsCollector {
     static func tool(_ id: ServerDiagnostics.Check.Kind, _ title: String, _ result: Bool?, required: Bool, missing: String, failed: String) -> ServerDiagnostics.Check {
         .init(id: id, title: title, status: result == true ? .ready : (result == nil && !required ? .unavailable : .attention),
               detail: result == true ? (id == .github ? "Signed in to GitHub as the server account." : "Available to the server account.") : (result == nil ? missing : failed))
+    }
+
+    /// A globally installed CLI does not mean this account has configured a Docker daemon.
+    /// Container requirements belong to project setup, not the baseline server connection.
+    static func dockerCapability(_ available: Bool?) -> ServerDiagnostics.Check {
+        if available == true {
+            return .init(id: .docker, title: "Docker", status: .ready, detail: "Available to the server account.")
+        }
+        let reason = available == nil ? "Docker is not installed." : "No Docker daemon is available to this server account."
+        return .init(id: .docker, title: "Docker", status: .unavailable,
+                     detail: reason + " Docker is optional. Configure it when a project's setup requires containers; local processes can run without it.")
     }
 
     static func disk(freeBytes: UInt64?) -> ServerDiagnostics.Check {

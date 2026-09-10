@@ -43,6 +43,12 @@ browsing an empty server, but private GitHub repositories and agent turns requir
 sign-ins. Reopen Guided Setup to return to the account step for a managed server. The final step
 opens Bloom's existing repository picker.
 
+Existing-server sign-ins are under **Server Settings > Accounts**, the first settings section.
+The GitHub repository picker links to the same account screen when authentication is needed.
+GitHub, Codex and Claude use one shared sign-in view in setup and settings. Installation locations
+are shown directly in the review step. Optional browser or Docker availability does not block
+connecting to the core server.
+
 The optional browser step installs a pinned agent-browser and Chrome for the service account,
 then verifies the browser sandbox and a screenshot. A browser setup failure leaves the core
 server usable and offers a retry. This host browser is separate from browser tooling inside a

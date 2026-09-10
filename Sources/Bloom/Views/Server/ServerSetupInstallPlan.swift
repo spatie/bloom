@@ -2,20 +2,25 @@ import SwiftUI
 
 /// The review is the one place for the complete installation decision.
 struct ServerSetupInstallPlan: View {
-    let compact: Bool
+    var installationRoot: String?
+    var serviceHome: String?
+    var dataDirectory: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
             item("Software", detail: "Bloom Server, Git, GitHub CLI, tmux, Node.js, npm and trusted CA certificates. Compatible installed tools are reused.")
             item("Private account and startup", detail: "Creates a dedicated bloom account, adds this Mac’s SSH public key and starts Bloom automatically with systemd.")
             item("Your projects", detail: "Projects and conversations stay on your server. Existing Bloom workspaces are preserved.")
-            if !compact {
-                DisclosureGroup("Installation locations and project tools") {
-                    Text("Server: /opt/bloom-server. Data: /var/lib/bloom. Setup uses administrator access to install missing packages and dependencies.")
-                    Text("Codex and Claude install during their sign-in steps. PHP, Docker and databases are configured per project, separately from this setup.")
-                }
-                .font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                Text("Installation locations").font(Typo.labelEmphasis)
+                LabeledContent("Server files", value: installationRoot ?? "/opt/bloom-server")
+                LabeledContent("Server data", value: dataDirectory ?? "/var/lib/bloom")
+                LabeledContent("Account home", value: serviceHome ?? "/var/lib/bloom-home")
             }
+            .font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            Text("Codex and Claude install during sign-in. PHP, Docker and databases are configured separately for each project.")
+                .font(Typo.caption).foregroundStyle(.secondary)
+
         }
     }
 

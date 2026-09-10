@@ -10,7 +10,6 @@ struct ServerSetupView: View {
     var windowID = ServerWindow.id
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openWindow) private var openWindow
-    @State private var login: LoginTerminalSession?
     @State private var showsKeyPicker = false
     @State private var keySelectionFailure: String?
     @State private var showsOutput = false
@@ -51,6 +50,7 @@ struct ServerSetupView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .scrollBounceBehavior(.basedOnSize)
+                    .scrollClipDisabled()
                 }
             }
             .padding(.horizontal, Metrics.gutter * 2)
@@ -83,9 +83,6 @@ struct ServerSetupView: View {
             .padding(Metrics.gutter)
         }
         .frame(width: 800, height: 620)
-        .sheet(isPresented: Binding(get: { login != nil }, set: { if !$0 { closeLogin() } })) {
-            if let login { ServerSetupLoginView(session: login, close: closeLogin) }
-        }
         .sheet(isPresented: $showsOutput) {
             VStack(alignment: .leading, spacing: Metrics.gutter) {
                 Text("Setup Output").font(Typo.heading)
@@ -107,7 +104,7 @@ struct ServerSetupView: View {
             copiedReport = false
         }
         .onChange(of: model.phase) { _, _ in focusEmptyAddress() }
-        .onDisappear { login?.stop(); model.cancel() }
+        .onDisappear { model.cancel() }
     }
 
     private func focusEmptyAddress() {
@@ -153,7 +150,7 @@ struct ServerSetupView: View {
             Text("Use Back to correct the address. Only trust a fingerprint you have verified.")
                 .font(Typo.caption).foregroundStyle(.secondary)
         case .readyToInstall: installationSummary
-        case .accounts: accountFields
+        case .accounts: ServerSetupAccountsView(model: model)
         case .connecting:
             HStack { ProgressView().controlSize(.small); Text("Loading projects and verifying the connection…") }
         case .complete:
@@ -219,7 +216,7 @@ struct ServerSetupView: View {
 
     private var installationSummary: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter * 1.5) {
-            ServerSetupInstallPlan(compact: false)
+            ServerSetupInstallPlan(installationRoot: model.check?.installationRoot, serviceHome: model.check?.serviceHome, dataDirectory: model.check?.dataDirectory)
             Divider()
             VStack(alignment: .leading, spacing: Metrics.spacing) {
                 Toggle("Add browser testing tools", isOn: $model.installsBrowserTools).disabled(model.hasInstalledServer)
@@ -231,56 +228,6 @@ struct ServerSetupView: View {
             if model.hasInstalledServer {
                 Label("Already installed. Continue to Accounts without reinstalling.", systemImage: "checkmark.circle.fill")
                     .font(Typo.caption).foregroundStyle(Palette.accent)
-            }
-        }
-    }
-
-    private var accountFields: some View {
-        VStack(alignment: .leading, spacing: Metrics.gutter) {
-            accountRow("GitHub", detail: model.githubIsAuthenticated ? "Signed in. Private repositories are available." : "Access your private repositories.", account: .github)
-            Divider()
-            accountRow("Codex", detail: "Install if needed and sign in to Codex.", account: .codex)
-            Divider()
-            accountRow("Claude", detail: "Install if needed and sign in to Claude.", account: .claude)
-            Divider()
-            browserStatus
-            HStack {
-                Button("Check Accounts") { Task { await model.refreshAccounts() } }.disabled(model.isBusy)
-                if model.isBusy { ProgressView().controlSize(.small) }
-            }
-            ForEach(model.accountChecks.filter { $0.id != .github && $0.status != .ready }) { check in
-                Text(check.detail).font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
-            }
-        }
-    }
-
-    private func accountRow(_ title: String, detail: String, account: ServerSetupAccount) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                Text(title).font(Typo.labelEmphasis)
-                Text(detail).font(Typo.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button(account == .github && model.githubIsAuthenticated ? "Change Account…" : "Sign In…") {
-                guard let launch = model.accountTerminal(account) else { return }
-                login = LoginTerminalSession(launch: launch, label: "\(title) on \(model.host)") { _ in }
-            }
-            .disabled(model.isBusy)
-        }
-    }
-
-    private var browserStatus: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                Text("Browser testing").font(Typo.labelEmphasis)
-                Text(model.browserFailure ?? model.browserReadiness?.detail ?? "Optional. Browser tools are not installed.")
-                    .font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                if let command = model.browserDiagnostic?.command { Text(command).font(Typo.codeSmall).foregroundStyle(.secondary).textSelection(.enabled) }
-                if let recovery = model.browserRecovery { Text(recovery).font(Typo.caption).foregroundStyle(.secondary) }
-            }
-            Spacer()
-            if model.browserReadiness?.status != .ready, model.canInstallBrowser {
-                Button(model.browserAttempted ? "Retry…" : "Install…") { Task { await model.retryBrowserInstall() } }
             }
         }
     }
@@ -317,13 +264,11 @@ struct ServerSetupView: View {
                 Button("Choose a Repository…") {
                     StartProjectOpening.shared.isRemote = true; openWindow(id: StartProjectWindow.id); dismissWindow(id: windowID)
                 }.keyboardShortcut(.defaultAction)
-            case .installing, .connecting:
-                Text(model.isBusy ? "Running on your server" : "Setup stopped").font(Typo.caption).foregroundStyle(.secondary)
+            case .installing, .connecting: EmptyView()
             }
         }
     }
 
-    private func closeLogin() { login?.stop(); login = nil; Task { await model.refreshAccounts() } }
     private var setupStep: Int {
         switch model.phase {
         case .introduction, .address, .trust, .checking: 0

@@ -355,6 +355,15 @@ def smoke(config, account):
             pass
 
 
+def launcher_source():
+    # The wizard compiles stdin with __bloom_browser_source and deliberately has no file.
+    # Avoid even evaluating __file__ on that path; copied launchers already include the helper.
+    source = globals().get("__bloom_browser_source")
+    if source is not None:
+        return source
+    return standalone_installer_source(__file__)
+
+
 def install(options):
     if platform.system() != "Linux" or platform.machine() not in PINS:
         fail("unsupported_platform", "Browser provisioning requires Ubuntu Linux x64 or arm64.", "Use a supported Ubuntu server.")
@@ -414,9 +423,7 @@ def install(options):
     for name in ("agent-browser", "bloom-chrome"):
         path = binary_dir / name
         protected(path)
-        source = globals().get("__bloom_browser_source")
-        source = standalone_installer_source(__file__, source)
-        path.write_text(source)
+        path.write_text(launcher_source())
         path.chmod(0o755)
     empty = ROOT / "empty-config.json"
     protected(empty)

@@ -16,6 +16,8 @@ public struct ServerInstallNotice: Codable, Sendable, Equatable {
 }
 
 public struct ServerInstallCheck: Codable, Sendable {
+    public var installationRoot: String?
+    public var serviceHome: String?
     public var platform: String
     public var architecture: String
     public var privilege: String
@@ -192,8 +194,10 @@ public struct ServerSetupConnection: Sendable {
 
     public func installBrowser(script: String, user: String, serviceHome: String,
                                progress: @escaping @Sendable (ServerInstallEvent) async -> Void) async throws -> ServerInstallEvent {
-        try await stream(Self.browserInstallerCommand(user: user, serviceHome: serviceHome), script: script,
-                         acceptsFailureEvent: true, progress: progress)
+        try Task.checkCancellation()
+        await progress(ServerInstallEvent(event: "progress", step: "browser_dependencies", message: "Starting optional browser setup."))
+        return try await stream(Self.browserInstallerCommand(user: user, serviceHome: serviceHome), script: script,
+                                acceptsFailureEvent: true, commandLabel: "python3 (browser installer)", step: "browser_dependencies", progress: progress)
     }
 
     private func upload(_ file: URL, to remotePath: String, step: String,
@@ -207,8 +211,10 @@ public struct ServerSetupConnection: Sendable {
                                            commandLabel: "scp", step: step, progress: progress)
     }
 
-    private func stream(_ command: String, script: String, acceptsFailureEvent: Bool = false, progress: @escaping @Sendable (ServerInstallEvent) async -> Void) async throws -> ServerInstallEvent {
+    private func stream(_ command: String, script: String, acceptsFailureEvent: Bool = false,
+                        commandLabel: String = "ssh", step: String? = nil, progress: @escaping @Sendable (ServerInstallEvent) async -> Void) async throws -> ServerInstallEvent {
         let process = StreamingProcess(executable: "/usr/bin/ssh", arguments: try arguments(command: command), mergeStderr: false)
-        return try await ServerSetupStream.run(process, input: script, acceptsFailureEvent: acceptsFailureEvent, progress: progress)
+        return try await ServerSetupStream.run(process, input: script, acceptsFailureEvent: acceptsFailureEvent,
+                                             commandLabel: commandLabel, step: step, progress: progress)
     }
 }

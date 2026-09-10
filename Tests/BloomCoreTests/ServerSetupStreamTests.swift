@@ -56,6 +56,21 @@ struct ServerSetupStreamTests {
         }
     }
 
+    @Test func browserBootstrapTracebackIsVisibleWithoutAJSONErrorEvent() async throws {
+        let source = "printf '%s\\n' 'Traceback (most recent call last):' 'NameError: __file__ is not defined' >&2; exit 1"
+        let process = StreamingProcess(executable: "/bin/sh", arguments: ["-c", source], mergeStderr: false)
+        do {
+            _ = try await ServerSetupStream.run(process, input: "", acceptsFailureEvent: true,
+                                                commandLabel: "python3 (browser installer)", step: "browser_dependencies", progress: { _ in })
+            Issue.record("Bootstrap failure was accepted")
+        } catch let failure as ServerSetupFailure {
+            #expect(failure.code == .unknown)
+            #expect(failure.message == "NameError: __file__ is not defined")
+            #expect(failure.command == "python3 (browser installer)" && failure.exitStatus == 1)
+            #expect(failure.details?.contains("Traceback") == true)
+        }
+    }
+
     @Test func timeoutIsDistinctAndTerminatesAProcessThatIgnoresSIGTERM() async throws {
         let process = StreamingProcess(executable: "/bin/sh", arguments: ["-c", "trap '' TERM; while :; do sleep 1; done"], mergeStderr: false)
         do {

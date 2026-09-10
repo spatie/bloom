@@ -162,7 +162,7 @@ def configuration(args):
 
 
 def metadata(args):
-    return {"executable": str(args.install_root / "current/bin/bloom-server"),
+    return {"installationRoot": str(args.install_root), "executable": str(args.install_root / "current/bin/bloom-server"),
             "dataDirectory": str(args.data_dir), "serviceUser": args.user, "serviceHome": str(args.service_home)}
 
 

@@ -5,7 +5,6 @@ import SwiftUI
 /// A single native text surface keeps streamed installation output selectable and searchable.
 struct ServerSetupOutputView: NSViewRepresentable {
     let lines: [ServerSetupActivity.Line]
-    let followsOutput: Bool
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -46,24 +45,23 @@ struct ServerSetupOutputView: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let text = scroll.documentView as? NSTextView else { return }
-        context.coordinator.update(lines, followsOutput: followsOutput, text: text, scroll: scroll)
+        context.coordinator.update(lines, text: text, scroll: scroll)
     }
 
     @MainActor final class Coordinator {
         private var previous: [ServerSetupActivity.Line] = []
-        private var wasFollowing = false
 
-        func update(_ lines: [ServerSetupActivity.Line], followsOutput: Bool, text: NSTextView, scroll: NSScrollView) {
+        func update(_ lines: [ServerSetupActivity.Line], text: NSTextView, scroll: NSScrollView) {
             let samePrefix = previous.count <= lines.count && zip(previous, lines).allSatisfy {
                 $0.id == $1.id && $0.text == $1.text
             }
             let changed = !samePrefix || previous.count != lines.count
-            defer { wasFollowing = followsOutput }
-            guard changed else {
-                if followsOutput && !wasFollowing { text.scrollToEndOfDocument(nil) }
-                return
-            }
+            guard changed else { return }
             let selection = text.selectedRanges.map(\.rangeValue)
+            // Follow while the reader is at the bottom. Scrolling up or selecting text pauses it
+            // naturally, without a separate setting or a jump away from the selected output.
+            let followsOutput = !selection.contains { $0.length > 0 }
+                && (previous.isEmpty || scroll.contentView.bounds.maxY >= text.bounds.maxY - 20)
             let visible = visibleAnchor(text: text, scroll: scroll)
             let removedLength: Int
             if samePrefix {
