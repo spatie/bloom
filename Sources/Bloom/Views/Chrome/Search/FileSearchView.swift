@@ -14,7 +14,7 @@ struct FileSearchView: View {
                     .foregroundStyle(Palette.textTertiary)
                 MenuSearchField(
                     text: Binding(get: { model.query }, set: { model.type($0) }),
-                    placeholder: "Search files…",
+                    placeholder: "Search files, or filename:line…",
                     onKey: key(_:),
                     selectAllToken: panel.selectAllToken
                 )
@@ -76,9 +76,15 @@ struct FileSearchView: View {
             panel.close(app: app)
             return
         }
+        let location = CodeLocation.parse(model.query)
         panel.close(app: app)
         app.selection = .workspace(workspace.id)
-        FileReview.open(path: match.path, in: app.model(for: workspace), focusing: true)
+        if location.path != model.query {
+            FileReview.open(location: CodeLocation(path: match.path, line: location.line, column: location.column),
+                            in: app.model(for: workspace))
+        } else {
+            FileReview.open(path: match.path, in: app.model(for: workspace), focusing: true)
+        }
     }
 
     private func key(_ key: ComposerKey) -> Bool {

@@ -32,6 +32,10 @@ struct SourceEditor: NSViewRepresentable {
     /// Drawn in place of the text while the buffer is empty. A script nobody has written yet is
     /// otherwise an unexplained empty box.
     var placeholder = ""
+    var editorState: SourceEditorState?
+    var onOpenReference: ((String) -> Void)?
+    var onDefinition: ((Int) -> Void)?
+    var onAsk: (() -> Void)?
 
     /// Past this the colour pass costs more than it is worth on every keystroke, and a file this
     /// long is not one anybody is hand editing in a review pane. It still opens, in plain
@@ -75,8 +79,8 @@ struct SourceEditor: NSViewRepresentable {
         textView.backgroundColor = resolvedGround
         textView.drawsBackground = true
         textView.placeholder = placeholder
-        textView.usesFindBar = isEditable
-        textView.isIncrementalSearchingEnabled = isEditable
+        textView.usesFindBar = true
+        textView.isIncrementalSearchingEnabled = true
         // Every one of these turns a helpful editing feature into a source code corruption:
         // smart quotes in a string literal, an en dash in an operator, a "corrected" identifier.
         textView.isAutomaticQuoteSubstitutionEnabled = false
@@ -109,6 +113,15 @@ struct SourceEditor: NSViewRepresentable {
 
         context.coordinator.attach(textView: textView, ruler: ruler)
         context.coordinator.replace(text: text, language: language, appearance: colorScheme)
+        configure(textView, scrollView: scrollView)
+        if let editorState {
+            let length = textView.string.utf16.count
+            let start = min(editorState.selection.location, length)
+            textView.setSelectedRange(NSRange(location: start, length: min(editorState.selection.length, length - start)))
+            scrollView.contentView.scroll(to: editorState.scrollOrigin)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+        context.coordinator.restorePosition()
         return scrollView
     }
 
@@ -129,6 +142,8 @@ struct SourceEditor: NSViewRepresentable {
             ruler.needsDisplay = true
         }
 
+        configure(textView, scrollView: scrollView)
+
         // Only when the buffer genuinely differs, because assigning `string` throws away the
         // selection and the undo stack, and SwiftUI re-runs this on every unrelated update.
         // Language and appearance both change what the colour pass produces, so either one moving
@@ -138,6 +153,24 @@ struct SourceEditor: NSViewRepresentable {
             || context.coordinator.appearance != colorScheme {
             context.coordinator.replace(text: text, language: language, appearance: colorScheme)
         }
+        context.coordinator.restorePosition()
+    }
+
+    private func configure(_ view: CodeTextView, scrollView: NSScrollView) {
+        view.editorState = editorState
+        editorState?.textView = view
+        view.codeLanguage = language
+        view.onOpenReference = onOpenReference
+        view.onDefinition = onDefinition
+        view.onAsk = onAsk
+        let wraps = editorState?.wraps ?? false
+        view.isHorizontallyResizable = !wraps
+        view.autoresizingMask = wraps ? [.width] : []
+        view.textContainer?.widthTracksTextView = wraps
+        let width = wraps ? scrollView.contentSize.width : CGFloat.greatestFiniteMagnitude
+        view.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        if wraps { view.setFrameSize(NSSize(width: scrollView.contentSize.width, height: view.frame.height)) }
+        scrollView.hasHorizontalScroller = !wraps
     }
 
     static func dismantleNSView(_ scrollView: NSScrollView, coordinator: Coordinator) {
@@ -169,7 +202,9 @@ struct SourceEditor: NSViewRepresentable {
         /// opening a file in Edit mode took the only way back from an archive with it.
         private let editorUndo = UndoManager()
 
-        func undoManager(for view: NSTextView) -> UndoManager? { editorUndo }
+        func undoManager(for view: NSTextView) -> UndoManager? {
+            editorUndo
+        }
 
         init(text: Binding<String>) {
             self.text = text
@@ -181,6 +216,12 @@ struct SourceEditor: NSViewRepresentable {
         }
 
         func detach() {
+            if let view = textView as? CodeTextView, let state = view.editorState {
+                state.selection = view.selectedRange()
+                state.scrollOrigin = view.enclosingScrollView?.contentView.bounds.origin ?? .zero
+                if state.textView === view { state.textView = nil }
+            }
+            (textView as? CodeTextView)?.bracketTask?.cancel()
             highlightTask?.cancel()
         }
 
@@ -194,8 +235,17 @@ struct SourceEditor: NSViewRepresentable {
             language = newLanguage
             appearance = scheme
             if textView.string != value {
+                let selection = textView.selectedRange()
+                let origin = textView.enclosingScrollView?.contentView.bounds.origin
                 textView.string = value
+                let start = min(selection.location, value.utf16.count)
+                textView.setSelectedRange(NSRange(location: start, length: min(selection.length, value.utf16.count - start)))
+                if let origin, let scroll = textView.enclosingScrollView {
+                    scroll.contentView.scroll(to: origin)
+                    scroll.reflectScrolledClipView(scroll.contentView)
+                }
                 // Only this editor's stack, which is what `editorUndo` exists to make true.
+                // Each native view owns its undo registrations. A recreated view starts a fresh stack.
                 editorUndo.removeAllActions()
             }
             ruler?.refresh()
@@ -207,6 +257,31 @@ struct SourceEditor: NSViewRepresentable {
             text.wrappedValue = textView.string
             ruler?.refresh()
             highlight(immediately: false)
+        }
+
+        func restorePosition() {
+            guard let view = textView as? CodeTextView, let state = view.editorState,
+                  let request = state.request, state.appliedRevision != state.revision else { return }
+            state.appliedRevision = state.revision
+            let offset = CodeLocation.offset(in: view.string, line: request.line, column: request.column)
+            view.setSelectedRange(NSRange(location: offset, length: 0))
+            view.scrollRangeToVisible(NSRange(location: offset, length: 0))
+            view.showFindIndicator(for: (view.string as NSString).lineRange(for: NSRange(location: offset, length: 0)))
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let view = textView as? CodeTextView else { return }
+            view.needsDisplay = true
+            view.updateBracketMatch()
+            let selection = view.selectedRange()
+            let position = CodeLocation.position(in: view.string, offset: selection.location)
+            // TextKit can call the delegate during a SwiftUI update. Publish after that pass.
+            Task { @MainActor [weak view] in
+                guard let view, view.selectedRange() == selection, let state = view.editorState else { return }
+                state.selection = selection
+                state.line = position.line
+                state.column = position.column
+            }
         }
 
         /// Re-colour the buffer.
@@ -263,7 +338,7 @@ struct SourceEditor: NSViewRepresentable {
 
         private static let base: [NSAttributedString.Key: Any] = [
             .font: CodeMetrics.font,
-            .foregroundColor: NSColor.labelColor,
+            .foregroundColor: NSColor(Palette.textPrimary),
         ]
     }
 
@@ -304,6 +379,14 @@ struct SourceEditor: NSViewRepresentable {
 /// The prompt was drawn from the inset alone and sat five points to the left of the text it was
 /// standing in for, which is small enough to read as a rendering quirk and is not one.
 final class CodeTextView: NSTextView {
+    weak var editorState: SourceEditorState?
+    var codeLanguage: Language = .plainText
+    var onOpenReference: ((String) -> Void)?
+    var onDefinition: ((Int) -> Void)?
+    var onAsk: (() -> Void)?
+    var bracketRange: NSRange?
+    var bracketTask: Task<Void, Never>?
+
     var placeholder = "" {
         didSet { if placeholder != oldValue { needsDisplay = true } }
     }
