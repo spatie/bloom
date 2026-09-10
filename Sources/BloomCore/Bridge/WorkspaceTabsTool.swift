@@ -64,7 +64,8 @@ public struct WorkspaceTabsTool: BridgeToolHandling {
 
             'tab' is a place in the strip counting from 1 and it moves as tabs are opened, closed \
             and dragged, so call this again before acting on a number. workspace_tab_select takes \
-            either that number or the title.
+            either that number or the title. Use chat_read with a chat title to read its messages,
+            or chat_list for IDs when titles are shared.
 
             It reads your own workspace and takes no arguments. It runs no command and fetches no \
             page: a terminal's directory is where its shell started, not where it is now, and \
