@@ -15,25 +15,11 @@ public struct RemoteWorkspaceService: Sendable {
     }
 
     public func workspaceCommand(project: RemoteProject, name: String, prompt: String) async throws -> RemoteCommand {
-        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw ConnectionFailure("Enter a workspace name and a prompt.")
-        }
-        let result = try await client.request(.call("creation", ["_0": .object([
-            "workspaceContext": .object(["_0": .string(project.id.rawValue)])
-        ])]))
-        guard let context = result["creation"]?["_0"]?["workspaceContext"]?["_0"],
-              let composer = context["composer"], let controls = composer["controls"],
-              let agent = controls["agentKind"]?.stringValue,
-              composer["availableAgents"]?.stringArray.contains(agent) == true,
-              let model = controls["model"], let effort = controls["effort"], let mode = controls["permissionMode"] else {
-            throw ConnectionFailure("No available agent was advertised. Configure an agent on Bloom Server first.")
-        }
-        return .call("create", ["_0": .object([
-            "repositoryPath": .string(project.path), "name": .string(name), "prompt": .string(prompt),
-            "agent": .string(agent), "model": model, "effort": effort, "permissionMode": mode,
-            "controls": controls, "runSetupScript": .bool(true)
-        ])])
+        let context = try await workspaceContext(projectID: project.id)
+        let request = try RemoteCreationRequest.planned(project: project, name: name, prompt: prompt, mode: .chat,
+            context: context, controls: context.composer.controls, baseBranch: project.defaultBranch,
+            checkout: nil, runSetupScript: true)
+        return try creationCommand(request)
     }
 
     public func transcript(sessionID: SessionID, after sequence: Int) async throws -> RemoteTranscript {

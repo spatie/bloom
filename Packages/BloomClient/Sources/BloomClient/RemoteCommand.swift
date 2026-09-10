@@ -1,7 +1,8 @@
 import Foundation
 
 public enum BloomWire {
-    public static let version = 13
+    public static let version = 14
+    public static let supportedVersions: Set<Int> = [12, 13, version]
 }
 
 /// The command ID survives a transport failure. Retrying this value cannot create another turn.
@@ -46,7 +47,7 @@ public final class RemoteClient: RemoteRequesting, Sendable {
 
     public static func decode(_ data: Data, commandID: UUID, expectedVersion: Int = BloomWire.version) throws -> JSONValue {
         let reply = try RemoteWireReply.decode(data, commandID: commandID)
-        guard [12, BloomWire.version].contains(expectedVersion), reply.version == expectedVersion else {
+        guard BloomWire.supportedVersions.contains(expectedVersion), reply.version == expectedVersion else {
             throw ConnectionRefusal("This server uses Bloom protocol \(reply.version), but this app needs \(expectedVersion). Update Bloom Server and the app to matching versions, then reconnect.")
         }
         if let failure = reply.result["failure"]?["_0"]?.stringValue { throw ConnectionRefusal(failure) }

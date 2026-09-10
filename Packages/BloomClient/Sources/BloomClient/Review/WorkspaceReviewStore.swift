@@ -7,7 +7,10 @@ import Observation
 @Observable
 public final class WorkspaceReviewStore {
     public let workspaceID: WorkspaceID
-    public private(set) var changes: [ChangedFile] = []
+    public private(set) var changes: [ChangedFile] = [] {
+        didSet { orderedChanges = ChangedFileTree.orderedFiles(from: changes) }
+    }
+    public private(set) var orderedChanges: [ChangedFile] = []
     public private(set) var paths: [String] = []
     public private(set) var errors: [String: String] = [:]
     public private(set) var isLoading = false

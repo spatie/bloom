@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-VERSION = 13
+VERSION = 14
 MAX_BYTES = 16_777_216
 INCOMPATIBLE = {"failure": {"_0": "Incompatible Bloom server protocol. Update the client and server."}}
 READS = {"hello", "catalogue", "transcript", "reviewSnapshot", "reviewPatch", "file"}
@@ -154,8 +154,8 @@ class Client:
     def connect(self):
         hello = {"version": VERSION, "id": str(uuid.uuid4()), "operation": {"hello": {}}}
         reply = self._exchange(hello)
-        if reply["version"] == 12 and reply["result"] == INCOMPATIBLE:
-            hello["version"] = 12
+        if reply["version"] in (12, 13) and reply["result"] == INCOMPATIBLE:
+            hello["version"] = reply["version"]
             reply = self._exchange(hello)
         if reply["version"] != hello["version"] or not isinstance(reply["result"].get("hello", {}).get("name"), str):
             raise BloomError("Endpoint did not identify a supported Bloom server.")

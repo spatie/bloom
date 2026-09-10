@@ -8,7 +8,7 @@ struct ServerWindow: Scene {
 
     var body: some Scene {
         Window("Server Connection", id: Self.id) {
-            ServerConnectionView(model: model.remoteServer)
+            ServerConnectionContent(server: model.remoteServer, app: model)
                 .environment(model)
                 .windowRole(.utility)
         }
@@ -16,8 +16,35 @@ struct ServerWindow: Scene {
     }
 }
 
+private struct ServerConnectionContent: View {
+    let server: ServerWindowModel
+    @State private var setup: ServerSetupModel
+    @State private var showsSetup: Bool
+
+    init(server: ServerWindowModel, app: AppModel) {
+        self.server = server
+        _setup = State(initialValue: ServerSetupModel(server: server, app: app))
+        _showsSetup = State(initialValue: !server.isConfigured)
+    }
+
+    var body: some View {
+        Group {
+            if showsSetup {
+                ServerSetupView(model: setup) { showsSetup = false }
+            } else {
+                ServerConnectionView(model: server) {
+                    showsSetup = true
+                }
+            }
+        }
+        .onAppear { server.isEditingConnection = true }
+        .onDisappear { server.isEditingConnection = false }
+    }
+}
+
 private struct ServerConnectionView: View {
     @Bindable var model: ServerWindowModel
+    let showSetup: () -> Void
     @Environment(AppModel.self) private var app
     @Environment(\.dismissWindow) private var dismissWindow
     @State private var host = ""
@@ -50,6 +77,7 @@ private struct ServerConnectionView: View {
             if model.isConnected { ServerDiagnosticsView(model: model) }
             if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
+                Button("Guided Setup…", action: showSetup)
                 if model.isConnecting || model.isSigningIn { ProgressView().controlSize(.small) }
                 if usesHTTPS {
                     Button("Sign Out") { Task { await model.signOutHTTPS() } }
@@ -75,7 +103,6 @@ private struct ServerConnectionView: View {
         .formStyle(.grouped)
         .frame(width: 660, height: (usesHTTPS ? 300 : 390) + (model.isConnected ? 160 : 0))
         .disabled(model.isConnecting || model.isSigningIn)
-        .onAppear { model.isEditingConnection = true; host = model.host; executable = model.executable; directory = model.remoteDirectory; identityFile = model.identityFile; usesHTTPS = model.usesHTTPS; httpsAddress = model.httpsAddress }
-        .onDisappear { model.isEditingConnection = false }
+        .onAppear { host = model.host; executable = model.executable; directory = model.remoteDirectory; identityFile = model.identityFile; usesHTTPS = model.usesHTTPS; httpsAddress = model.httpsAddress }
     }
 }

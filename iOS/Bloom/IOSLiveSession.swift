@@ -38,9 +38,18 @@ enum IOSLiveSession {
                 // It is not learned or accepted from the connection being tested.
                 try SSHCredentials.trust(configuration.fingerprint, host: configuration.ssh.hostIdentity)
                 try await model.connect(ssh: configuration.ssh)
-                guard let workspace = model.catalogue?.workspaces.first(where: { $0.id.rawValue == configuration.workspaceID }),
-                      let session = model.catalogue?.sessions.first(where: { $0.id.rawValue == configuration.sessionID && $0.workspaceID == workspace.id }) else {
-                    throw ConnectionFailure("The requested real workspace or conversation is not on this server.")
+                guard let workspace = model.catalogue?.workspaces.first(where: { $0.id.rawValue == configuration.workspaceID }) else {
+                    throw ConnectionFailure("The requested real workspace is not on this server.")
+                }
+                let agentTest = arguments.contains("--bloom-live-agent")
+                let session: RemoteSession
+                if agentTest {
+                    session = try await createAgentSession(workspace: workspace, model: model)
+                } else {
+                    guard let existing = model.catalogue?.sessions.first(where: { $0.id.rawValue == configuration.sessionID && $0.workspaceID == workspace.id }) else {
+                        throw ConnectionFailure("The requested real conversation is not on this server.")
+                    }
+                    session = existing
                 }
                 let split = BloomSplitController(model: model)
                 window.overrideUserInterfaceStyle = .light
@@ -53,16 +62,37 @@ enum IOSLiveSession {
                 split.view.frame = window.bounds
                 window.layoutIfNeeded()
                 try status("Opening the real Laravel preview over SSH", workspace: workspace.id.rawValue, session: session.id.rawValue)
-                if phone {
+                if phone && !agentTest {
                     for _ in 0..<30 where desk.liveMessageCount == 0 {
                         try await Task.sleep(for: .seconds(1))
                     }
                 }
-                try await desk.openLivePreview(address: configuration.previewAddress)
-                for _ in 0..<90 {
+                if arguments.contains("--bloom-live-terminal") {
+                    let terminal = try await desk.verifyLiveTerminal()
+                    try JSONSerialization.data(withJSONObject: terminal, options: [.prettyPrinted, .sortedKeys]).write(
+                        to: URL.documentsDirectory.appendingPathComponent("bloom-live-terminal.json"), options: .atomic)
+                }
+                if agentTest {
+                    for _ in 0..<30 where !desk.liveUIAttached {
+                        if let failure = desk.liveUIFailure { throw ConnectionFailure(failure) }
+                        try await Task.sleep(for: .seconds(1))
+                    }
+                    guard desk.liveUIAttached, let service = model.service else { throw ConnectionFailure("The iPad workspace did not attach its UI tools to the server.") }
+                    let prompt = "Use only Bloom UI MCP tools for this verification. Call pane_open to open \(configuration.previewAddress) in a browser, then call browser_text on that browser and tell me the actual visible page heading. Stop after reporting it. Do not run shell commands, change files, or create other workspaces."
+                    _ = try await service.client.request(.send(sessionID: session.id, text: prompt))
+                    try status("Agent asked to open and read the real Laravel page", workspace: workspace.id.rawValue, session: session.id.rawValue)
+                } else {
+                    try await desk.openLivePreview(address: configuration.previewAddress)
+                }
+                for _ in 0..<180 {
                     try Task.checkCancellation()
                     if let failure = desk.livePreviewFailure { throw ConnectionFailure(failure) }
+                    if agentTest, let failure = desk.liveUIFailure { throw ConnectionFailure(failure) }
                     if desk.livePreviewReady && desk.liveMessageCount > 0 && desk.liveFilesReady {
+                        if agentTest, !(try await agentFinished(sessionID: session.id, model: model)) {
+                            try await Task.sleep(for: .seconds(1))
+                            continue
+                        }
                         try await Task.sleep(for: .seconds(2))
                         let folderCount = try desk.verifyLiveTree()
                         try "Verified \(folderCount) real change folders: disclosure, filtering and restoration.\n".write(
@@ -116,6 +146,35 @@ enum IOSLiveSession {
             } catch { record(error, window: window) }
         }
         return true
+    }
+
+    private static func agentFinished(sessionID: SessionID, model: MobileConnection) async throws -> Bool {
+        guard let service = model.service else { throw ConnectionFailure("The server disconnected during agent verification.") }
+        let transcript = try await service.transcript(sessionID: sessionID, after: 0)
+        if let error = transcript.queueError { throw ConnectionFailure(error) }
+        let tools = transcript.messages.filter { $0.kind == "toolUse" }.map { String(decoding: $0.payload, as: UTF8.self) }
+        return !transcript.isBusy && tools.contains { $0.contains("pane_open") }
+            && tools.contains { $0.contains("browser_text") }
+            && transcript.messages.contains { $0.kind == "assistantText" && !$0.text.isEmpty }
+    }
+
+    private static func createAgentSession(workspace: RemoteWorkspace, model: MobileConnection) async throws -> RemoteSession {
+        guard let service = model.service else { throw ConnectionFailure("The server disconnected before agent verification.") }
+        let context = try await service.workspaceContext(projectID: workspace.repoID)
+        guard context.composer.availableAgents?.contains(.codex) == true,
+              let chosen = context.composer.models.first(where: { $0.isDefault && !$0.hidden }) ?? context.composer.models.first(where: { !$0.hidden }) else {
+            throw ConnectionFailure("A signed-in Codex agent is required for this opt-in verification.")
+        }
+        let result = try await service.client.request(.call("workspace", ["workspaceID": .string(workspace.id.rawValue),
+            "action": .object(["newSession": .object(["agent": .string(AgentKind.codex.rawValue), "model": .string(chosen.id),
+                "effort": .string(chosen.resolvedEffort(preferring: "medium")), "permissionMode": .string(PermissionMode.autoReview.rawValue)])])]))
+        guard let value = result["created"]?["session"] else { throw ConnectionFailure("The server did not create the agent verification conversation.") }
+        let session = try JSONDecoder().decode(RemoteSession.self, from: JSONEncoder().encode(value))
+        _ = try await service.client.request(.call("renameSession", ["sessionID": .string(session.id.rawValue), "title": .string("iPad MCP verification")]))
+        let record = ["workspaceID": workspace.id.rawValue, "sessionID": session.id.rawValue]
+        try JSONSerialization.data(withJSONObject: record).write(to: URL.documentsDirectory.appendingPathComponent("bloom-live-agent.json"), options: .atomic)
+        try await model.refresh()
+        return model.catalogue?.sessions.first { $0.id == session.id } ?? session
     }
 
     private static func status(_ phase: String, workspace: String = "", session: String = "", messages: Int = 0, page: String = "") throws {

@@ -15,6 +15,47 @@ struct ServerReviewTests {
         #expect(file.text == "created on server\n")
     }
 
+    @Test func diffUsesThePinnedSnapshotAfterTheWorkspaceDirectoryIsSwapped() async throws {
+        let fixture = try await ReviewFixture()
+        try fixture.repo.write("nested/value.txt", "inside snapshot\n")
+        let outside = TestScratch.unique("outside-patch")
+        try FileManager.default.createDirectory(atPath: outside, withIntermediateDirectories: true)
+        try Data("outside private contents\n".utf8).write(to: URL(fileURLWithPath: outside + "/value.txt"))
+        let snapshot = try ServerDiffWorktree(workspace: fixture.workspace, paths: ["nested/value.txt"])
+        defer { snapshot.remove() }
+        try FileManager.default.moveItem(atPath: fixture.repo.path + "/nested", toPath: fixture.repo.path + "/original")
+        try FileManager.default.createSymbolicLink(atPath: fixture.repo.path + "/nested", withDestinationPath: outside)
+        let arguments = ["--literal-pathspecs", "diff", "--no-index", "--no-ext-diff", "--no-textconv", "--no-color", "--", "/dev/null", "nested/value.txt"]
+        let diff = try await Git.run(snapshot.arguments(arguments, workspace: fixture.workspace), in: snapshot.path)
+        #expect(diff.status == 1)
+        #expect(diff.stdout.contains("+inside snapshot"))
+        #expect(!diff.stdout.contains("outside private contents"))
+        #expect(diff.stdout.contains("b/nested/value.txt"))
+    }
+
+    @Test func snapshotRetainsDiffAttributesWithoutChangingTheRealIndex() async throws {
+        let fixture = try await ReviewFixture()
+        try fixture.repo.write(".gitattributes", "*.txt -diff\n")
+        try await fixture.repo.commit("Mark text fixtures as binary")
+        let indexPath = URL(fileURLWithPath: fixture.repo.path + "/.git/index")
+        let originalIndex = try Data(contentsOf: indexPath)
+        try fixture.repo.write("binary.txt", "contents that attributes hide from a text diff\n")
+        let patch = try await ServerReview.patch(workspace: fixture.workspace, path: "binary.txt", scope: .uncommitted)
+        #expect(patch.contains("Binary files"))
+        #expect(!patch.contains("+contents that"))
+        #expect(try Data(contentsOf: indexPath) == originalIndex)
+    }
+
+    @Test func aDeletedParentDirectoryStillProducesADeletionPatch() async throws {
+        let fixture = try await ReviewFixture()
+        try fixture.repo.write("nested/value.txt", "previous contents\n")
+        try await fixture.repo.commit("Add nested file")
+        try FileManager.default.removeItem(atPath: fixture.repo.path + "/nested")
+        let patch = try await ServerReview.patch(workspace: fixture.workspace, path: "nested/value.txt", scope: .uncommitted)
+        #expect(patch.contains("-previous contents"))
+        #expect(patch.contains("+++ /dev/null"))
+    }
+
     @Test func pathspecMagicIsTreatedAsALiteralFilename() async throws {
         let fixture = try await ReviewFixture()
         let path = ":(glob)*.txt"

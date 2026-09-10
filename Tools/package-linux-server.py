@@ -56,7 +56,12 @@ def package(binary, output):
     if "Swift version 6.3.3 " not in swift_version:
         raise RuntimeError("Use Swift 6.3.3; update the runtime notices before changing toolchains")
     root = pathlib.Path(__file__).resolve().parent.parent
-    libraries = linked_libraries(binary)
+    executables = [binary, binary.with_name("bloom-bridge")]
+    if not all(path.is_file() for path in executables):
+        raise RuntimeError("Build both bloom-server and bloom-bridge before packaging")
+    libraries = {}
+    for executable in executables:
+        libraries.update(linked_libraries(executable))
     target = json.loads(run("swift", "-print-target-info"))
     runtime_paths = [pathlib.Path(path).resolve() for path in target["paths"]["runtimeLibraryPaths"]]
     bundle_name = "bloom-server-linux-" + platform.machine()
@@ -79,7 +84,8 @@ def package(binary, output):
                 if notice.is_file() and notice.name.upper().startswith(("LICENSE", "NOTICE")):
                     copy_notice(notice, notices / dependency / notice.relative_to(checkout))
 
-        manifest = {"architecture": platform.machine(), "glibc": run("getconf", "GNU_LIBC_VERSION"),
+        protocol = int(re.search(r"version = (\d+)", (root / "Packages/BloomClient/Sources/BloomClient/RemoteCommand.swift").read_text())[1])
+        manifest = {"protocolVersion": protocol, "architecture": platform.machine(), "glibc": run("getconf", "GNU_LIBC_VERSION"),
                     "swift": swift_version, "libraries": {}}
         for name, source in sorted(libraries.items()):
             destination = bundle / "lib" / name
@@ -93,9 +99,10 @@ def package(binary, output):
                 owner = run("dpkg-query", "-S", str(source)).splitlines()[0].split(": ", 1)[0].split(":")[0]
                 copy_notice(pathlib.Path("/usr/share/doc") / owner / "copyright", notices / (owner + ".txt"))
 
-        executable = bundle / "bin/bloom-server"
-        shutil.copy2(binary, executable)
-        run("patchelf", "--set-rpath", "$ORIGIN/../lib", str(executable))
+        for source in executables:
+            executable = bundle / "bin" / source.name
+            shutil.copy2(source, executable)
+            run("patchelf", "--set-rpath", "$ORIGIN/../lib", str(executable))
         (bundle / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         (bundle / "README.txt").write_text(
             "Bloom server preview\n\n"
@@ -107,10 +114,11 @@ def package(binary, output):
             "See https://github.com/spatie/bloom/blob/freekmurze/client-server-runtime/docs/SERVER.md\n"
         )
         # Fail before producing an archive if relocation left an unresolved dependency.
-        relocated = linked_libraries(executable)
-        if any(not path.is_relative_to(bundle) for path in relocated.values()):
-            raise RuntimeError("A bundled dependency still resolves outside the package")
-        run(str(executable), "--help")
+        for source in executables:
+            relocated = linked_libraries(bundle / "bin" / source.name)
+            if any(not path.is_relative_to(bundle) for path in relocated.values()):
+                raise RuntimeError("A bundled dependency still resolves outside the package")
+        run(str(bundle / "bin/bloom-server"), "--help")
         with tarfile.open(output, "w:gz") as archive:
             archive.add(bundle, arcname=bundle.name)
     print(f"Packaged {output} ({output.stat().st_size // 1_048_576} MiB)")

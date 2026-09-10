@@ -3,21 +3,21 @@ import Testing
 @testable import BloomClient
 
 struct RemoteWireSessionTests {
-    @Test(arguments: [12, 13])
+    @Test(arguments: [12, 13, 14])
     func negotiatesKnownVersionsBeforeSendingOnce(version: Int) async throws {
         let host = WireHost(version: version)
         let client = RemoteWireSession { try await host.exchange($0) }
         let command = RemoteCommand.send(sessionID: SessionID(rawValue: UUID().uuidString), text: "Hello")
         _ = try await client.request(command)
         let frames = await host.frames
-        #expect(frames.filter { $0.operation["hello"] != nil }.map(\.version) == (version == 12 ? [13, 12] : [13]))
+        #expect(frames.filter { $0.operation["hello"] != nil }.map(\.version) == (version == BloomWire.version ? [BloomWire.version] : [BloomWire.version, version]))
         let sends = frames.filter { $0.operation["send"] != nil }
         #expect(sends.count == 1)
         #expect(sends.first?.id == command.id)
         #expect(sends.first?.version == version)
     }
 
-    @Test(arguments: [11, 14])
+    @Test(arguments: [11, 15])
     func refusesUnknownVersionsWithoutSendingMutation(version: Int) async {
         let host = WireHost(version: version)
         let client = RemoteWireSession { try await host.exchange($0) }
@@ -44,6 +44,14 @@ struct RemoteWireSessionTests {
         let client = RemoteWireSession { try await host.exchange($0) }
         _ = try await client.request(.call("hello"))
         await #expect(throws: ConnectionRefusal.self) { try await client.request(.call("diagnostics")) }
+        #expect(await host.frames.allSatisfy { $0.operation["hello"] != nil })
+    }
+
+    @Test(arguments: [12, 13])
+    func uiRequestsAreNotSentToOlderServers(version: Int) async throws {
+        let host = WireHost(version: version)
+        let client = RemoteWireSession { try await host.exchange($0) }
+        await #expect(throws: ConnectionRefusal.self) { try await client.request(.call("uiBridge")) }
         #expect(await host.frames.allSatisfy { $0.operation["hello"] != nil })
     }
 

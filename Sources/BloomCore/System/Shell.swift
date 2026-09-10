@@ -183,7 +183,7 @@ public enum Shell {
         let exit = ProcessExitGate()
         process.terminationHandler = { _ in exit.signal() }
 
-        try process.run()
+        try ProcessLaunch.run(process)
         Shell.countSpawn()
 
         outReader.start()

@@ -4,6 +4,27 @@ import Testing
 
 @Suite("ServerWorkspace", .scratchDirectory, .tags(.subprocess, .persistence))
 struct ServerWorkspaceTests {
+    @Test func browserAddressUsesServerSettingsAndSetupWrittenURL() async throws {
+        let repo = try await TempRepo()
+        try repo.write(".bloom/settings.toml", "[browser]\nurl = \"http://localhost:$BLOOM_PORT/admin\"\n")
+        let store = try makeTestStore("browser-address")
+        let storedRepo = try await store.upsert(Repo(name: "Test", path: repo.path))
+        var workspace = Workspace(repoID: storedRepo.id, name: "Test", branch: "main", path: repo.path, baseBranch: "main")
+        workspace.port = 3190
+        workspace = try await store.upsert(workspace)
+        let runtime = ServerRuntime(store: store)
+        let request = ServerRequest(.workspace(workspaceID: workspace.id, action: .browserAddress))
+        #expect(!request.operation.mutates)
+        let first = await runtime.respond(to: request)
+        guard case .text(let configured) = first.result else { Issue.record("Missing browser address"); return }
+        #expect(configured == "http://localhost:3190/admin")
+        try repo.write(WorkspaceBrowserURL.file, "https://private.example.com/login\n")
+        let written = await runtime.respond(to: request)
+        guard case .text(let address) = written.result else { Issue.record("Missing setup address"); return }
+        #expect(address == "https://private.example.com/login")
+        await runtime.shutdown()
+    }
+
     @Test func remoteNotesRemainWithTheirWorkspace() async throws {
         let repo = try await TempRepo()
         let store = try makeTestStore("notes")

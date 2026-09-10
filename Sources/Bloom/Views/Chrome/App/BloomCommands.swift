@@ -25,9 +25,7 @@ struct BloomCommands: Commands {
     /// The focused window's Save, when it has one. See `FocusedMenuValues`.
     @FocusedValue(\.saveAction) private var saveAction: SaveAction?
 
-    /// Landing the branch, published by the pull request band because that is where the
-    /// confirmation lives. Nil whenever that band is not on screen, which greys the item.
-    @FocusedValue(\.mergeAction) private var mergeAction
+    @FocusedValue(\.composerTranscript) private var composerTranscript: TranscriptModel?
     @FocusedValue(\.isTypingProse) private var isTypingProse: Bool?
 
     /// Opens the project settings window, which is a scene rather than a sheet.
@@ -78,7 +76,7 @@ struct BloomCommands: Commands {
         }
 
         CommandGroup(replacing: .newItem) {
-            Button("Connect to Server…") { openWindow(id: ServerWindow.id) }
+            Button(model.remoteServer.isConfigured ? "Server Settings…" : "Add Server…") { openWindow(id: ServerWindow.id) }
             Divider()
             MenuCommand(.newWorkspace) {
                 // `RootView` opens the window, and the sidebar and Home already ask for it this
@@ -126,6 +124,11 @@ struct BloomCommands: Commands {
             MenuCommand(.newAskConversation) {
                 NotificationCenter.default.post(name: .bloomNewAskConversation, object: nil)
             }
+
+            MenuCommand(.searchFiles) {
+                SearchPanelModel.shared.openFiles(app: model)
+            }
+            .disabled(model.selectedWorkspace == nil)
 
             MenuCommand(.newSession) {
                 if model.selection == .ask { Task { await model.ask.newConversation() } } else { openPane(.chat) }
@@ -481,15 +484,6 @@ struct BloomCommands: Commands {
 
             Divider()
 
-            // The title is the band's when the band is on screen, and the table's fallback when
-            // it is not, which is what lets a greyed row still say what the item is. It goes
-            // through the band's own `propose`, so the sign in gate and the confirmation are the
-            // ones the button raises rather than a second copy of them. See `MergeAction`.
-            Button(mergeAction?.title ?? MenuBarCatalogue[.merge].title) {
-                mergeAction?.perform()
-            }
-            .disabled(mergeAction?.isEnabled != true)
-
             // **Greyed while somebody is typing, and that is not tidiness.** Command-Backspace
             // deletes to the start of the line in every text box on macOS, and AppKit checks a
             // menu's key equivalents before the responder chain sees the key, so the text view
@@ -555,9 +549,9 @@ struct BloomCommands: Commands {
             // stops the agent that row is about. It is `existingModel`, which only reads: a
             // workspace this launch has never opened has no transcript to stop anyway.
             MenuCommand(.stopAgent) {
-                subjectModel?.activeTranscript?.stop()
+                (composerTranscript ?? subjectModel?.activeTranscript)?.stop()
             }
-            .disabled(subjectModel?.activeTranscript?.isRunning != true)
+            .disabled((composerTranscript ?? subjectModel?.activeTranscript)?.isRunning != true)
         }
 
         CommandGroup(replacing: .help) {
@@ -671,13 +665,13 @@ struct BloomCommands: Commands {
     /// somebody does on purpose, and a tab that silently restarted the one already running would
     /// throw away the log they were reading.
     private func run(_ script: RunScript, in workspace: WorkspaceModel) {
-        let tab = CenterTabStore.shared.add(
+        let tab = workspace.paneStores.center.add(
             kind: .terminal, workspaceID: workspace.workspace.id, title: script.name
         )
         // Queued rather than sent: the shell is forked by `ToolPaneView`, once it has settled the
         // port this script is about to bind. See `TerminalSessionStore.run(_:inPaneID:)`.
         TerminalSessionStore.shared.run(script.command, inPaneID: tab.id)
-        WorkspaceTabsStore.shared.select(.tool(tab.id), in: workspace)
+        workspace.paneStores.tabs.select(.tool(tab.id), in: workspace)
     }
 
     // MARK: - Splitting the centre column
@@ -739,7 +733,7 @@ struct BloomCommands: Commands {
     /// moves the key on its own, the way `zoom` greys itself above.
     private var sameAgainKind: PaneKind? {
         guard let workspace = model.selectedPaneModel else { return nil }
-        let tabs = WorkspaceTabsStore.shared
+        let tabs = workspace.paneStores.tabs
         guard let tab = tabs.selectedTab(in: workspace) else { return nil }
         return PaneDuplicate.sameAgainKind(
             tabs.content(of: tabs.focusedPane(of: tab), in: tab), in: workspace
@@ -750,7 +744,7 @@ struct BloomCommands: Commands {
     /// end up splitting differently.
     private func splitCentre(_ axis: SplitAxis, opening kind: PaneKind) {
         guard let workspace = model.selectedPaneModel else { return }
-        let tabs = WorkspaceTabsStore.shared
+        let tabs = workspace.paneStores.tabs
         guard let tab = tabs.selectedTab(in: workspace) else { return }
         let pane = tabs.focusedPane(of: tab)
 
@@ -766,11 +760,11 @@ struct BloomCommands: Commands {
     /// A shell tree is the only thing in the centre column that has panes of its own to zoom or to
     /// step focus around, which is why these two items are the terminal's rather than the column's.
     private var terminalOwnerID: String? {
-        guard let workspace = model.selectedPaneModel else { return nil }
-        let tabs = WorkspaceTabsStore.shared
+        guard let workspace = model.selectedPaneModel, workspace.remoteServer == nil else { return nil }
+        let tabs = workspace.paneStores.tabs
         guard let tab = tabs.selectedTab(in: workspace),
               case .tool(let id) = tabs.content(of: tabs.focusedPane(of: tab), in: tab),
-              CenterTabStore.shared.tabs(for: workspace.workspace.id)
+              workspace.paneStores.center.tabs(for: workspace.workspace.id)
                   .first(where: { $0.id == id })?.kind == .terminal else { return nil }
         return id
     }
@@ -807,7 +801,7 @@ struct BloomCommands: Commands {
     private var canCycleCentreTabs: Bool {
         if model.selection == .ask { return model.ask.sessions.count > 1 }
         guard let workspace = model.selectedPaneModel else { return false }
-        return WorkspaceTabsStore.shared.entries(in: workspace).count > 1
+        return workspace.paneStores.tabs.entries(in: workspace).count > 1
     }
 
     private func cycleCentreTab(by offset: Int) {
@@ -818,7 +812,7 @@ struct BloomCommands: Commands {
             return
         }
         guard let workspace = model.selectedPaneModel else { return }
-        WorkspaceTabsStore.shared.selectNextTab(offset: offset, in: workspace)
+        workspace.paneStores.tabs.selectNextTab(offset: offset, in: workspace)
     }
 
     /// Cmd+1 to Cmd+9, and the only place in the app a tab can be reached by name from the
@@ -848,7 +842,7 @@ struct BloomCommands: Commands {
                 }
             }
         } else if let workspace = model.selectedPaneModel {
-            let entries = WorkspaceTabsStore.shared.entries(in: workspace)
+            let entries = workspace.paneStores.tabs.entries(in: workspace)
             MenuCommandGroup(.goToTab) {
                 ForEach(TabCycle.numbered(entries), id: \.tab) { entry in
                     tabItem(entry.tab, ordinal: entry.ordinal, in: workspace)
@@ -860,8 +854,8 @@ struct BloomCommands: Commands {
 
     @ViewBuilder
     private func tabItem(_ tab: PaneContent, ordinal: Int?, in workspace: any WorkspacePaneModel) -> some View {
-        let button = Button(CenterTabStore.shared.title(of: tab, in: workspace)) {
-            WorkspaceTabsStore.shared.select(tab, in: workspace)
+        let button = Button(workspace.paneStores.center.title(of: tab, in: workspace)) {
+            workspace.paneStores.tabs.select(tab, in: workspace)
         }
         if let ordinal {
             button.keyboardShortcut(KeyEquivalent(Character("\(ordinal)")), modifiers: .command)
@@ -876,7 +870,7 @@ struct BloomCommands: Commands {
     /// `TabClosure`, which is the rule and which the tests hold.
     private var closableTab: PaneContent? {
         guard let workspace = model.selectedPaneModel else { return nil }
-        let tabs = WorkspaceTabsStore.shared
+        let tabs = workspace.paneStores.tabs
         guard let tab = tabs.selectedTab(in: workspace) else { return nil }
         return TabClosure.target(
             selectedTab: tab,
@@ -890,9 +884,9 @@ struct BloomCommands: Commands {
     /// also what the tab's own menu asks.
     private var renamableTab: PaneContent? {
         guard let workspace = model.selectedPaneModel else { return nil }
-        let tabs = WorkspaceTabsStore.shared
+        let tabs = workspace.paneStores.tabs
         guard let selected = tabs.selectedTab(in: workspace) else { return nil }
-        let kind = CenterTabStore.shared.tabs(for: workspace.workspace.id)
+        let kind = workspace.paneStores.center.tabs(for: workspace.workspace.id)
             .first { $0.id == selected.id }?.kind
         return TabRenaming.canRename(selected, tabKind: kind) ? selected : nil
     }
@@ -920,9 +914,9 @@ struct BloomCommands: Commands {
             guard let session = workspace.sessions.first(where: { $0.id == id }) else { return }
             CloseSessionAlert.shared.close(session, in: workspace)
         case .tool(let id):
-            guard let tab = CenterTabStore.shared.tabs(for: workspace.workspace.id)
+            guard let tab = workspace.paneStores.center.tabs(for: workspace.workspace.id)
                 .first(where: { $0.id == id }) else { return }
-            Task { await CenterTabStore.shared.close(tab) }
+            Task { await workspace.paneStores.center.close(tab) }
         }
     }
 
@@ -934,7 +928,7 @@ struct BloomCommands: Commands {
         guard let workspace = model.selectedPaneModel, !workspace.changedFiles.isEmpty else {
             return false
         }
-        return CenterTabStore.shared.review(for: workspace.workspace.id) != nil
+        return workspace.paneStores.center.review(for: workspace.workspace.id) != nil
     }
 
     private func stepChangedFile(_ delta: Int) {
@@ -944,7 +938,7 @@ struct BloomCommands: Commands {
 
     private func closeCentrePane() {
         guard let workspace = model.selectedPaneModel else { return }
-        let tabs = WorkspaceTabsStore.shared
+        let tabs = workspace.paneStores.tabs
         guard let tab = tabs.selectedTab(in: workspace) else { return }
         tabs.close(
             pane: tabs.focusedPane(of: tab), in: tab, of: workspace.workspace.id
@@ -955,19 +949,18 @@ struct BloomCommands: Commands {
     private func openPane(_ kind: PaneKind) {
         guard let workspace = model.selectedPaneModel else { return }
         NewPane.open(kind, in: workspace) {
-            WorkspaceTabsStore.shared.select($0, in: workspace)
+            workspace.paneStores.tabs.select($0, in: workspace)
         }
     }
 
     /// A browser on the workspace's own dev server, which is what the `+` opens and what a split
-    /// does not: this is the route that has a port to hand. See `SessionTabsView.newBrowser`.
+    /// does not: this is the route that knows where that is. See `SessionTabsView.newBrowser`.
     private func openBrowserPane() {
         guard let workspace = model.selectedPaneModel else { return }
         Task {
-            await workspace.ensurePort()
-            let address = workspace.port > 0 ? "http://localhost:\(workspace.port)" : ""
+            let address = await workspace.browserAddress()
             NewPane.open(.browser, in: workspace, url: address) {
-                WorkspaceTabsStore.shared.select($0, in: workspace)
+                workspace.paneStores.tabs.select($0, in: workspace)
             }
         }
     }

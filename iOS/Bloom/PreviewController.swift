@@ -1,8 +1,9 @@
 import UIKit
 import WebKit
+import BloomClient
 
 /// Preview login belongs to its own browser origin. Agent-control bearer tokens never enter WebKit.
-final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
+final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDelegate, UITextFieldDelegate {
     var onClose: (() -> Void)? {
         didSet { if isViewLoaded { updateToolbar() } }
     }
@@ -16,7 +17,8 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     private var previewLease: MobilePreviewLease?
     private var preparing: Task<Void, Never>?
     private let toolbar = UIToolbar()
-    private let address = UILabel()
+    private let address = UITextField()
+    var onNavigate: ((String) -> Void)?
     private let activity = UIActivityIndicatorView(style: .medium)
     private let errorView = UIView()
     private let errorDetail = BloomTheme.label("", style: .subheadline, secondary: true)
@@ -34,6 +36,8 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
                                                   primaryAction: UIAction { [weak self] _ in self?.reload() })
     private lazy var closeItem = UIBarButtonItem(systemItem: .close,
                                                  primaryAction: UIAction { [weak self] _ in self?.onClose?() })
+
+    convenience init() { self.init(url: URL(string: "about:blank")!) }
 
     init(url: URL) {
         self.url = url
@@ -61,6 +65,67 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         preparing?.cancel()
         let lease = previewLease
         Task { @MainActor in lease?.close() }
+    }
+
+    var currentAddress: String { previewLease?.reportedURL(browser.url ?? url).absoluteString ?? (browser.url ?? url).absoluteString }
+    var pageIsLoading: Bool { isLoading }
+    var pageCanGoBack: Bool { browser.canGoBack }
+    var pageCanGoForward: Bool { browser.canGoForward }
+
+    func reloadPage() { reload() }
+
+    func pageText() async throws -> String {
+        try requirePage()
+        let result = try await evaluate(.visibleText)
+        guard let text = result.stringValue else { throw ConnectionFailure("The browser did not return readable page text.") }
+        let trimmed = BrowserPageText.trim(text)
+        return trimmed.text + (trimmed.cut ? "\n[Page text truncated at \(BrowserPageText.limit) characters.]" : "")
+    }
+
+    func scrollPage(_ movement: BrowserScroll) async throws -> String {
+        try requirePage()
+        let result = try await evaluate(.scroll(movement))
+        guard let values = result.arrayValue, values.count == 3 else { throw ConnectionFailure("The page did not report its scroll position.") }
+        let numbers = values.map { value -> Int in
+            if case .integer(let number) = value { return number }
+            if case .number(let number) = value, number.isFinite, abs(number) < 100_000_000 { return Int(number) }
+            return 0
+        }
+        return movement.report(offset: numbers[0], height: numbers[1], viewport: numbers[2])
+    }
+
+    func pageSnapshot() async throws -> Data {
+        try requirePage()
+        guard browser.bounds.width > 1, browser.bounds.height > 1 else { throw ConnectionFailure("Select this browser tab before taking its first screenshot.") }
+        let configuration = WKSnapshotConfiguration()
+        configuration.snapshotWidth = NSNumber(value: min(1280, browser.bounds.width))
+        return try await CancellableCallback<Data>.run { completion in
+            browser.takeSnapshot(with: configuration) { snapshot, error in
+                if let error { completion(.failure(error)); return }
+                guard let snapshot, let data = snapshot.pngData(), data.count <= 8_388_608 else {
+                    completion(.failure(ConnectionFailure("The browser screenshot is too large or unavailable. Resize the pane and try again.")))
+                    return
+                }
+                completion(.success(data))
+            }
+        }
+    }
+
+    private func requirePage() throws {
+        if let lastPageFailure { throw ConnectionFailure(lastPageFailure) }
+        guard previewLease?.isClosed != true, hasLoadedPage else { throw ConnectionFailure("Wait for this browser page to finish loading, then try again.") }
+    }
+
+    private func evaluate(_ script: BrowserPageScript) async throws -> JSONValue {
+        try await CancellableCallback<JSONValue>.run { completion in
+            browser.evaluateJavaScript(script.source) { value, error in
+                if let error { completion(.failure(error)); return }
+                do {
+                    let data = try JSONSerialization.data(withJSONObject: value ?? NSNull(), options: .fragmentsAllowed)
+                    completion(.success(try JSONDecoder().decode(JSONValue.self, from: data)))
+                } catch { completion(.failure(error)) }
+            }
+        }
     }
 
     func closePreview() {
@@ -94,6 +159,17 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         address.frame.size = CGSize(width: max(80, toolbar.bounds.width - (onClose == nil ? 176 : 220)), height: 36)
     }
 
+    func textFieldDidBeginEditing(_ textField: UITextField) {
+        textField.text = currentAddress == "about:blank" ? "" : currentAddress
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        let text = textField.text ?? ""
+        textField.resignFirstResponder()
+        onNavigate?(text)
+        return true
+    }
+
     private func configureToolbar() {
         let appearance = UIToolbarAppearance()
         appearance.configureWithOpaqueBackground()
@@ -114,7 +190,13 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         address.adjustsFontForContentSizeCategory = true
         address.textColor = .secondaryLabel
         address.textAlignment = .center
-        address.lineBreakMode = .byTruncatingMiddle
+        address.delegate = self
+        address.keyboardType = .URL
+        address.returnKeyType = .go
+        address.autocapitalizationType = .none
+        address.autocorrectionType = .no
+        address.placeholder = "Enter a preview address"
+        address.borderStyle = .roundedRect
         address.accessibilityLabel = "Preview address"
         address.accessibilityIdentifier = "preview-address"
         backItem.accessibilityLabel = "Go back"
@@ -216,6 +298,10 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
 
     private func loadInitialPage() {
+        if url.absoluteString == "about:blank" {
+            updateToolbar()
+            return
+        }
         #if DEBUG
         if let previewHTML {
             browser.loadHTMLString(previewHTML, baseURL: url)
@@ -260,11 +346,12 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         forwardItem.isEnabled = browser.canGoForward
         reloadItem.image = UIImage(systemName: isLoading ? "xmark" : "arrow.clockwise")
         reloadItem.accessibilityLabel = isLoading ? "Stop loading" : "Reload preview"
-        let current = browser.url.flatMap { allows($0) ? $0 : nil } ?? url
-        address.text = current.host.map { host in
+        let actual = browser.url.flatMap { allows($0) ? $0 : nil } ?? url
+        let current = previewLease?.reportedURL(actual) ?? actual
+        if !address.isFirstResponder { address.text = current.host.map { host in
             let port = current.port.map { ":\($0)" } ?? ""
             return host + port + (current.path == "/" ? "" : current.path)
-        }
+        } }
         address.accessibilityValue = current.absoluteString
         address.accessibilityHint = browser.title
         var items = [backItem, forwardItem, UIBarButtonItem(systemItem: .flexibleSpace),

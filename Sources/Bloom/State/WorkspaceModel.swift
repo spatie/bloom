@@ -19,6 +19,7 @@ final class WorkspaceModel {
     private unowned let app: AppModel
 
     var sessions: [Session] = []
+    var sideConversations: [SessionID: SideConversationState] = [:]
 
     /// Whether the store has answered about this workspace's sessions at all, this launch.
     ///
@@ -87,7 +88,11 @@ final class WorkspaceModel {
         get { InspectorTab.resolve(chosenInspectorTab, available: availableInspectorTabs) }
         set { chosenInspectorTab = newValue }
     }
-    var changedFiles: [ChangedFile] = []
+    var changedFiles: [ChangedFile] = [] {
+        didSet { reviewFiles = ChangedFileTree.orderedFiles(from: changedFiles) }
+    }
+    /// Retain tree order across scroll updates; rebuild it only when the changed files change.
+    private(set) var reviewFiles: [ChangedFile] = []
     var selectedFilePath: String?
     var isLoadingChanges = false
     /// Whether git has answered about this worktree at all, this launch.
@@ -334,12 +339,12 @@ final class WorkspaceModel {
     }
 
     /// What this workspace's repository asks for: the setup script, the run scripts, the rest of
-    /// `.conductor/settings.toml`.
+    /// the repository settings files.
     ///
     /// Held here rather than read where it is needed because the Workspace menu reads it, and a
     /// `Commands` body is not a view: it cannot await a file, and it cannot carry a task. It is
-    /// re-read whenever the workspace is selected, so a run script added in the project settings
-    /// window is in the menu the next time the workspace is on screen.
+    /// re-read whenever the workspace is selected and after project settings are saved, so a new
+    /// run script appears in the menu without switching workspaces.
     private(set) var settings = RepoSettings()
 
     /// Off the main actor, because this parses up to six files and is called on every switch.
@@ -380,8 +385,8 @@ final class WorkspaceModel {
     // MARK: - Sessions
 
     var activeSession: Session? {
-        guard let activeSessionID else { return sessions.first }
-        return sessions.first { $0.id == activeSessionID } ?? sessions.first
+        guard let activeSessionID else { return sessions.first { $0.sideConversationParentID == nil } }
+        return sessions.first { $0.id == activeSessionID } ?? sessions.first { $0.sideConversationParentID == nil }
     }
 
     /// Reads the session list back from the store.
@@ -403,7 +408,7 @@ final class WorkspaceModel {
         if !hasReadSessions { hasReadSessions = true }
         SwitchTrace.mark("sessions.assigned", workspace: workspace.id)
         if activeSessionID == nil || !sessions.contains(where: { $0.id == activeSessionID }) {
-            activeSessionID = sessions.first?.id
+            activeSessionID = sessions.first { $0.sideConversationParentID == nil }?.id
         } else {
             // The setter above prepares the transcript for us. This is the other branch, where the
             // active session has not moved and the transcript may still be the one this launch has
@@ -492,6 +497,22 @@ final class WorkspaceModel {
             || transcripts[session.id]?.subagents.isWorking == true
     }
 
+    /// Persist the replacement before stopping the old agent so a failed write leaves it usable.
+    func replaceSession(_ session: Session, controls: ComposerControls) async -> Session? {
+        guard !app.isArchiving(workspace.id), let store else { return nil }
+        do {
+            let next = try await store.replaceWorkspaceConversation(id: session.id, controls: controls)
+            transcripts.removeValue(forKey: session.id)?.teardown()
+            app.bridge?.retire(sessionID: session.id)
+            await reloadSessions()
+            activeSessionID = next.id
+            return next
+        } catch {
+            app.alert = BloomAlert(title: "Could not start a fresh chat", message: error.readableMessage)
+            return nil
+        }
+    }
+
     func closeSession(_ session: Session) async {
         guard let store else { return }
         transcripts[session.id]?.teardown()
@@ -564,66 +585,14 @@ final class WorkspaceModel {
     /// opened gets, and it would turn "cascade-read" into "Chat 3": this name is the address the
     /// other two crew tools take, so it has to be the one the orchestrator chose.
     ///
-    /// **The nesting rule is checked here as well as in the tool, and only the nesting rule.**
-    /// This method is a second door into the same act, and a door that trusted its caller to have
-    /// checked would be one refactor away from a ring of agents in one worktree. The ceiling and
-    /// the name's uniqueness stay `AgentStartTool`'s alone, weighed there against the same rows a
-    /// moment earlier: which sessions count as running is `CrewCensus`, which the app target
-    /// cannot see, and a second opinion about that would be worse than one. The name goes back
-    /// through `Crew.normalisedName` because that is the same pure function the tool used, so the
-    /// two cannot come out with different strings.
+    /// The shared Store transaction owns parent validation, name/slot reservation, controls and
+    /// the initial brief. Mac and server cannot disagree or create a half-started crew member.
     func startCrewMember(
         _ order: CrewOrder, reportingTo parentID: SessionID
     ) async -> CrewStartOutcome {
         guard let store else { return .refused(Self.crewWithoutStore) }
-        guard let parent = try? await store.session(id: parentID) else {
-            return .refused("The chat that asked for this subagent is not in Bloom any more.")
-        }
-        guard parent.parentSessionID == nil else {
-            return .refused(Crew.sentence(for: .notAnOrchestrator))
-        }
-        guard let name = Crew.normalisedName(order.name) else {
-            return .refused(Crew.sentence(for: .noName))
-        }
-
-        // Whatever the orchestrator is itself on, unless the order named otherwise, which is the
-        // same inheritance `startWorkspaceForBridge` spells out: an agent splitting up its own
-        // work wants help from the thing it already trusts. The backend and the permission mode
-        // come across for a second reason as well, that a crew member is meant to be able to do
-        // what the chat above it can do without a person being asked twice for the same grant.
-        let member = Session(
-            workspaceID: workspace.id,
-            parentSessionID: parentID,
-            title: name,
-            model: order.model ?? parent.model,
-            effort: order.effort ?? parent.effort,
-            agentKind: parent.agentKind,
-            permissionMode: parent.permissionMode,
-            sortOrder: sessions.count
-        )
-        // `upsert` is right here and nowhere else on this path: the row is being created, out of a
-        // value built three lines up, which is the one shape the head of `Store.upsert(_ session:)`
-        // allows it in.
-        guard let stored = try? await store.upsert(member) else {
-            return .refused("Bloom could not open a chat for that subagent.")
-        }
-
-        // The brief joins the queue rather than being sent, exactly as a workspace's opening
-        // prompt does, so there is one ordered route into every conversation in the app. See
-        // `enqueueOpening` and the head of `Delivery`.
-        //
-        // As a crew message rather than a plain body, so the first row of this agent's chat says
-        // who set the task rather than reading as though the owner typed it. `CrewMessage.brief`
-        // is the one that is deliberately not wrapped: it is the instruction this agent exists to
-        // follow, and fencing it off would leave it with no task at all.
-        _ = try? await store.enqueueDelivery(
-            Delivery(
-                targetSessionID: stored.id,
-                sourceWorkspaceID: workspace.id,
-                kind: .message,
-                crew: CrewMessage.brief(from: parent.title, task: order.task)
-            )
-        )
+        let stored: Session
+        do { stored = try await store.startCrewMember(order, parentID: parentID, workspaceID: workspace.id) } catch { return .refused(error.localizedDescription) }
 
         // `activeSessionID` is deliberately left alone, which is the rule `select: false` holds
         // for a workspace the bridge starts: an agent appearing while somebody is typing in
@@ -638,7 +607,7 @@ final class WorkspaceModel {
         await transcript.drain()
 
         return .started(
-            "Started subagent \"\(name)\" in this workspace. Talk to it with agent_say, and Bloom "
+            "Started subagent \"\(stored.title)\" in this workspace. Talk to it with agent_say, and Bloom "
                 + "will tell you here when it stops, with the last thing it said."
         )
     }
@@ -902,6 +871,7 @@ final class WorkspaceModel {
     /// agents are killed here rather than merely interrupted, and killed first, which is what lets
     /// every SIGTERM escalation run at the same time instead of one after another.
     func stopEverything() {
+        for state in sideConversations.values { state.task?.cancel() }
         for transcript in transcripts.values { transcript.terminateNow() }
         setupTask?.cancel()
         setupTask = nil
@@ -931,11 +901,13 @@ final class WorkspaceModel {
         stopEverything()
         for transcript in transcripts.values { transcript.teardown() }
         transcripts.removeAll()
+        sideConversations.removeAll()
     }
 
     /// The quit path: the same teardown, but it waits for the agents to actually be gone rather
     /// than only asking them to leave.
     func shutdown() async {
+        for state in sideConversations.values { state.task?.cancel() }
         setupTask?.cancel()
         setupTask = nil
         // Nilled like the three above: a cancelled refresh returns through its
@@ -1073,6 +1045,40 @@ final class WorkspaceModel {
         // next refresh, so the terminal about to be forked reads the number rather than 0.
         if self.workspace.port == 0 { self.workspace.port = allocated }
         return self.workspace.port
+    }
+
+    /// Where a browser pane opened on this workspace should go.
+    ///
+    /// The port is allocated first because it is both the last-resort answer and a variable the
+    /// stated one may be written in terms of, and because a workspace nobody has opened a terminal
+    /// in yet holds no block at all. The decision itself is `WorkspaceBrowserURL`, which is where
+    /// the two ways a project can state an address, and the order between them, are written down.
+    ///
+    /// The settings are read again rather than taken from `settings`: this runs at the moment a
+    /// pane is opened, which is often the first thing that happens to a workspace, and an address
+    /// silently missing because the file had not been read yet is the sort of intermittent that
+    /// gets blamed on the script.
+    func browserAddress() async -> String {
+        let port = await ensurePort()
+        guard let repo, let store = app.store else {
+            return WorkspaceBrowserURL.resolve(
+                written: nil, stated: nil, environment: [:], port: port
+            )
+        }
+
+        let environment = WorkspaceManager(store: store).environment(
+            for: workspace, repo: repo, port: port
+        )
+        let worktree = workspace.path
+        let repoPath = repo.path
+        return await Task.detached(priority: .userInitiated) {
+            WorkspaceBrowserURL.read(
+                worktree: worktree,
+                settings: SettingsLoader.load(workspace: worktree, repo: repoPath),
+                environment: environment,
+                port: port
+            )
+        }.value
     }
 
     /// One setup run: the state it resets, the output it streams, and what it leaves behind.
@@ -1413,6 +1419,9 @@ final class WorkspaceModel {
     /// `DiffView.body` reads this for every pass it makes over the diff and a keystroke must not
     /// be a reason to make one.
     var reviewDrafts: [String: ReviewDraft] = [:]
+
+    /// A browser review survives switching tabs, just like a half-written diff comment.
+    var browserReviews: [String: BrowserRegionCapture] = [:]
 
     /// Which comments are open for editing in place. Here for the same reason `reviewDrafts` is,
     /// and the reason is not hypothetical for an edit either: the band being edited sits in the

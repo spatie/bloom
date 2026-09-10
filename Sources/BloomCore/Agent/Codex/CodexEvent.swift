@@ -119,7 +119,8 @@ public enum CodexItem: Sendable, Hashable {
                 arguments: json["arguments"] ?? .null,
                 status: CodexRunStatus(json["status"]?.stringValue),
                 errorMessage: json["error"]?["message"]?.stringValue,
-                durationMS: json["durationMs"]?.intValue
+                durationMS: json["durationMs"]?.intValue,
+                result: json["result"] == .null ? nil : json["result"]
             ))
 
         case "webSearch":
@@ -382,6 +383,7 @@ public struct CodexMcpToolCall: Sendable, Hashable {
     public let status: CodexRunStatus
     public let errorMessage: String?
     public let durationMS: Int?
+    public let result: JSONValue?
 
     public init(
         id: String,
@@ -390,7 +392,8 @@ public struct CodexMcpToolCall: Sendable, Hashable {
         arguments: JSONValue = .null,
         status: CodexRunStatus = .unknown,
         errorMessage: String? = nil,
-        durationMS: Int? = nil
+        durationMS: Int? = nil,
+        result: JSONValue? = nil
     ) {
         self.id = id
         self.server = server
@@ -399,6 +402,7 @@ public struct CodexMcpToolCall: Sendable, Hashable {
         self.status = status
         self.errorMessage = errorMessage
         self.durationMS = durationMS
+        self.result = result
     }
 }
 

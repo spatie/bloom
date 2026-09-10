@@ -3,6 +3,12 @@ import Testing
 @testable import BloomCore
 
 @Suite struct ServerDiagnosticsTests {
+    @Test func githubReadyMeansAuthenticationWasChecked() {
+        let check = ServerDiagnosticsCollector.tool(.github, "GitHub", true, required: false, missing: "Missing", failed: "Failed")
+        #expect(check.status == .ready)
+        #expect(check.detail == "Signed in to GitHub as the server account.")
+    }
+
     @Test func optionalToolsAreNotRequiredForPlainProjects() async {
         let report = await ServerDiagnosticsCollector.collect(directory: NSTemporaryDirectory()) { name, _ in
             switch name {

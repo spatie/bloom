@@ -540,6 +540,46 @@ struct ServerRuntimeTests {
         await runtime.shutdown()
     }
 
+    @Test func ownerClosingCrewReportsOnceWithoutResumingPausedParent() async throws {
+        let fixture = try await ServerFixture()
+        let member = try await fixture.store.upsert(Session(workspaceID: fixture.session.workspaceID, parentSessionID: fixture.session.id, title: "reviewer"))
+        let runtime = fixture.runtime()
+        #expect(await runtime.respond(to: ServerRequest(.stop(sessionID: fixture.session.id))).isAccepted)
+        #expect(await runtime.respond(to: ServerRequest(.closeSession(sessionID: member.id))).isAccepted)
+        #expect(await runtime.respond(to: ServerRequest(.closeSession(sessionID: member.id))).isAccepted)
+        let reports = try await fixture.store.pendingDeliveries(sessionID: fixture.session.id)
+        #expect(reports.count == 1)
+        #expect(reports.first?.kind == .report)
+        #expect(reports.first?.crewMessage == CrewMessage.stoppedByOwner(name: "reviewer"))
+        #expect(await fixture.runner.sends.isEmpty)
+        #expect(try await fixture.store.session(id: member.id)?.archivedAt != nil)
+        await runtime.shutdown()
+    }
+
+    @Test func closingCrewCannotReviveAnArchivedParentConversation() async throws {
+        let fixture = try await ServerFixture()
+        let member = try await fixture.store.upsert(Session(workspaceID: fixture.session.workspaceID, parentSessionID: fixture.session.id, title: "reviewer"))
+        _ = try await fixture.store.update(sessionID: fixture.session.id) { $0.archivedAt = Date() }
+        let runtime = fixture.runtime()
+        #expect(await runtime.respond(to: ServerRequest(.closeSession(sessionID: member.id))).isAccepted)
+        #expect(try await fixture.store.pendingDeliveries(sessionID: fixture.session.id).isEmpty)
+        #expect(await fixture.runner.sends.isEmpty)
+        await runtime.shutdown()
+    }
+
+    @Test func restartCancelsAnArchiveBookedForTheInterruptedTurn() async throws {
+        let fixture = try await ServerFixture()
+        let key = "server.archive.after-turn." + fixture.session.id.rawValue
+        try await fixture.store.setSetting(key, fixture.session.workspaceID?.rawValue)
+        let runtime = fixture.runtime()
+        try await runtime.restoreQueuedPrompts()
+        #expect(try await fixture.store.setting(key) == nil)
+        let messages = try await fixture.store.messages(sessionID: fixture.session.id)
+        #expect(messages.contains { String(decoding: $0.payload, as: UTF8.self).contains("archive request was cancelled") })
+        #expect(try await fixture.store.workspace(id: fixture.session.workspaceID!)?.state == .active)
+        await runtime.shutdown()
+    }
+
     @Test func dataDirectoryMustBePrivate() async throws {
         let directory = TestScratch.path("public-server")
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)

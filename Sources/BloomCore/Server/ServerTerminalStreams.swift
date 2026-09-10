@@ -1,15 +1,7 @@
 import Foundation
+import BloomClient
 
-public struct ServerTerminalFrame: Codable, Sendable {
-    public var kind: String
-    public var data: Data?
-    public var columns: Int?
-    public var rows: Int?
-
-    public init(kind: String, data: Data? = nil, columns: Int? = nil, rows: Int? = nil) {
-        self.kind = kind; self.data = data; self.columns = columns; self.rows = rows
-    }
-}
+public typealias ServerTerminalFrame = BloomClient.RemoteTerminalFrame
 
 /// Control mode provides terminal bytes without giving the gateway permission to spawn an agent
 /// or read its credentials. Disconnect terminates only the tmux client; its shell stays running.

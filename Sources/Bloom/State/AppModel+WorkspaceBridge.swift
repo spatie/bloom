@@ -66,7 +66,7 @@ extension AppModel {
             TerminalSendKeyTool(terminal),
             MediaShowTool { [weak self] order, workspaceID in
                 guard let self else { return .refused("Bloom is still starting up.") }
-                return self.showMediaForBridge(order, in: workspaceID)
+                return await self.showMediaForBridge(order, in: workspaceID)
             },
             PaneSplitTool { [weak self] order, axis, workspaceID in
                 guard let self else { return .refused("Bloom is still starting up.") }
@@ -162,9 +162,21 @@ extension AppModel {
     /// tool call and a later visit to this row.
     func showMediaForBridge(
         _ order: MediaShowOrder, in workspaceID: WorkspaceID
-    ) -> MediaShowOutcome {
+    ) async -> MediaShowOutcome {
         guard let model = paneTarget(workspaceID) else {
             return .refused(Self.noWorkspaceForPane)
+        }
+        if let server = model.remoteServer {
+            do {
+                let media = try await server.downloadMedia(order.path, workspaceID: workspaceID)
+                defer { try? FileManager.default.removeItem(at: media.url.deletingLastPathComponent()) }
+                guard !Task.isCancelled, server.selectedWorkspace?.id == workspaceID else {
+                    return .refused("This workspace is no longer selected.")
+                }
+                return .shown("Showing '\(order.path)' inline in the chat.")
+            } catch {
+                return .refused(error.localizedDescription)
+            }
         }
         guard let media = WorkspaceMedia.resolve(path: order.path, in: model.workspace.path) else {
             return .refused(
@@ -284,68 +296,8 @@ extension AppModel {
 
     /// Keeps the backend and model one valid choice. Changing only the backend used to carry the
     /// caller's model across with it, which is how a Codex workspace was started with `opus`.
-    private func workspaceControls(
-        for order: AgentWorkspaceOrder,
-        inheriting inherited: ComposerControls
-    ) async throws -> ComposerControls {
-        var controls = inherited
-        let inheritedAgent = controls.agentKind
-        // A caller that names a model and no agent has named an agent, because a model id says
-        // which CLI runs it. This used to be free: everything inherited Claude Code, so
-        // `workspace_start(model: "opus")` could only mean Claude Code. It stopped being free the
-        // moment the Models screen could make Codex the default, which would have turned that
-        // same call into "opus is not a Codex model". No list is fetched to answer it: the four
-        // families `ClaudeModelRank` knows are what the old reading covered, and anything else
-        // stays on the backend that was inherited. See `DefaultBackend`.
-        let agent = order.agent
-            ?? order.model.map {
-                DefaultBackend.kind(ofModel: $0, running: inheritedAgent, codexModels: [])
-            }
-            ?? inheritedAgent
-        controls.agentKind = agent
-
-        switch agent {
-        case .claudeCode:
-            let models = Set(ComposerOption.models.map(\.id))
-            if let model = order.model {
-                guard models.contains(model) else {
-                    throw BridgeWorkspaceModelFailure.invalid(
-                        model: model,
-                        agent: agent,
-                        available: models.sorted()
-                    )
-                }
-                controls.model = model
-            } else if agent != inheritedAgent {
-                controls.model = AppDefaults.fallbackModel
-            }
-        case .codex:
-            if order.model == nil, agent == inheritedAgent { return controls }
-
-            let models = try await CodexModelCatalog.live().pickerModels()
-            let chosen: CodexModel?
-            if let requested = order.model {
-                chosen = models.first { $0.id == requested }
-                guard chosen != nil else {
-                    throw BridgeWorkspaceModelFailure.invalid(
-                        model: requested,
-                        agent: agent,
-                        available: models.map(\.id)
-                    )
-                }
-            } else {
-                chosen = models.first { $0.isDefault } ?? models.first
-            }
-            guard let chosen else {
-                throw BridgeWorkspaceModelFailure.noneAvailable(agent)
-            }
-            controls.model = chosen.id
-            controls.effort = chosen.resolvedEffort(preferring: controls.effort)
-        case .cursor, .openCode:
-            throw BridgeWorkspaceModelFailure.noneAvailable(agent)
-        }
-
-        return controls
+    private func workspaceControls(for order: AgentWorkspaceOrder, inheriting controls: ComposerControls) async throws -> ComposerControls {
+        try await BridgeWorkspaceControls.resolve(for: order, inheriting: controls)
     }
 
     // MARK: - Crew
@@ -369,7 +321,7 @@ extension AppModel {
     private func startCrewForBridge(
         _ order: CrewOrder, from sessionID: SessionID, in workspaceID: WorkspaceID
     ) async -> CrewStartOutcome {
-        guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForCrew) }
+        guard let model = paneTarget(workspaceID)?.localWorkspaceModel else { return .refused(Self.noWorkspaceForCrew) }
         return await model.startCrewMember(order, reportingTo: sessionID)
     }
 
@@ -378,7 +330,7 @@ extension AppModel {
     private func sayToCrewForBridge(
         _ name: String?, saying text: String, from sessionID: SessionID, in workspaceID: WorkspaceID
     ) async -> CrewSayOutcome {
-        guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForCrew) }
+        guard let model = paneTarget(workspaceID)?.localWorkspaceModel else { return .refused(Self.noWorkspaceForCrew) }
         return await model.sayToCrew(text, to: name, from: sessionID)
     }
 
@@ -388,7 +340,7 @@ extension AppModel {
     private func stopCrewForBridge(
         _ name: String, from sessionID: SessionID, in workspaceID: WorkspaceID
     ) async -> CrewStopOutcome {
-        guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForCrew) }
+        guard let model = paneTarget(workspaceID)?.localWorkspaceModel else { return .refused(Self.noWorkspaceForCrew) }
         return await model.stopCrewMember(named: name, startedBy: sessionID)
     }
 
@@ -403,7 +355,11 @@ extension AppModel {
     /// Internal rather than private because `AppModel+BrowserBridge` asks the same question of
     /// the same workspace, and a second resolver there would be a second sentence for the same
     /// absence.
-    func paneTarget(_ workspaceID: WorkspaceID) -> WorkspaceModel? {
+    func paneTarget(_ workspaceID: WorkspaceID) -> (any WorkspacePaneModel)? {
+        if let server = RemoteUIActionRouter.serverScope {
+            guard remoteServer === server, selection == .remoteWorkspace(workspaceID) else { return nil }
+            return server.existingWorkspaceModel(workspaceID)
+        }
         guard let workspace = workspaces.first(where: { $0.id == workspaceID }) else { return nil }
         return model(for: workspace)
     }
@@ -418,7 +374,7 @@ extension AppModel {
     /// pane an agent asked for identical to one the reader made.
     func openPaneForBridge(_ order: PaneOrder, in workspaceID: WorkspaceID) async -> PaneOutcome {
         guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForPane) }
-        let tabs = WorkspaceTabsStore.shared
+        let tabs = model.paneStores.tabs
         NewPane.open(order.kind, in: model, url: order.url ?? "", title: order.title) { content in
             // Placed either way, and selected only when asked. A pane opened in the background is
             // still in the strip, which is the whole point of being able to ask for one: the
@@ -441,7 +397,7 @@ extension AppModel {
         _ order: PaneOrder, axis: SplitAxis, in workspaceID: WorkspaceID
     ) async -> PaneOutcome {
         guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForPane) }
-        let tabs = WorkspaceTabsStore.shared
+        let tabs = model.paneStores.tabs
         guard let tab = tabs.selectedTab(in: model) else {
             return .refused(
                 "There is no tab open in that workspace to split. Use pane_open instead."
@@ -461,12 +417,12 @@ extension AppModel {
     /// what "the browser" means. `verb` is the only thing that differs, and it is in the refusal
     /// because a model told "nothing was closed" after asking for a rename learns the wrong thing.
     private func paneForBridge(
-        _ kind: PaneKind?, in tab: PaneContent, of workspaceID: WorkspaceID, verb: String
+        _ kind: PaneKind?, in tab: PaneContent, of model: any WorkspacePaneModel, verb: String
     ) -> Result<String, PaneRefusal> {
-        let tabs = WorkspaceTabsStore.shared
+        let tabs = model.paneStores.tabs
         guard let kind else { return .success(tabs.focusedPane(of: tab)) }
         let found = tabs.layout(of: tab).panes.first {
-            paneKind(of: tabs.content(of: $0, in: tab), in: workspaceID) == kind
+            paneKind(of: tabs.content(of: $0, in: tab), in: model) == kind
         }
         guard let found else {
             return .failure(
@@ -486,14 +442,14 @@ extension AppModel {
     /// leave the column empty.
     func closePaneForBridge(_ kind: PaneKind?, in workspaceID: WorkspaceID) async -> PaneOutcome {
         guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForPane) }
-        let tabs = WorkspaceTabsStore.shared
+        let tabs = model.paneStores.tabs
         guard let tab = tabs.selectedTab(in: model) else {
             return .refused("There is nothing open in that workspace to close.")
         }
 
         let layout = tabs.layout(of: tab)
         let pane: String
-        switch paneForBridge(kind, in: tab, of: model.workspace.id, verb: "closed") {
+        switch paneForBridge(kind, in: tab, of: model, verb: "closed") {
         case .failure(let refusal): return .refused(refusal.sentence)
         case .success(let found): pane = found
         }
@@ -526,37 +482,33 @@ extension AppModel {
         _ title: String, kind: PaneKind?, in workspaceID: WorkspaceID
     ) async -> PaneOutcome {
         guard let model = paneTarget(workspaceID) else { return .refused(Self.noWorkspaceForPane) }
-        let tabs = WorkspaceTabsStore.shared
+        let tabs = model.paneStores.tabs
         guard let tab = tabs.selectedTab(in: model) else {
             return .refused("There is nothing open in that workspace to rename.")
         }
 
         let pane: String
-        switch paneForBridge(kind, in: tab, of: model.workspace.id, verb: "renamed") {
+        switch paneForBridge(kind, in: tab, of: model, verb: "renamed") {
         case .failure(let refusal): return .refused(refusal.sentence)
         case .success(let found): pane = found
         }
 
         switch tabs.content(of: pane, in: tab) {
         case .tool(let id):
-            let centre = CenterTabStore.shared
+            let centre = model.paneStores.center
             guard let target = centre.tabs(for: workspaceID).first(where: { $0.id == id }) else {
                 return .refused("That pane is not in the strip any more, so it was not renamed.")
             }
             centre.rename(target, to: title)
 
         case .chat(let sessionID):
-            guard let store,
-                  let session = model.sessions.first(where: { $0.id == sessionID })
-            else {
+            guard let session = model.sessions.first(where: { $0.id == sessionID }) else {
                 return .refused("That chat is not open any more, so it was not renamed.")
             }
-            let updated = session.with { $0.title = title }
-            if let index = model.sessions.firstIndex(where: { $0.id == session.id }) {
-                model.sessions[index] = updated
+            await model.renameSession(session, title: title)
+            guard model.sessions.contains(where: { $0.id == session.id && $0.title == title }) else {
+                return .refused(model.remoteServer?.error ?? "The chat could not be renamed. Refresh and try again.")
             }
-            try? await store.updateSessionPreferences(id: session.id, title: title)
-            await model.reloadSessions()
         }
 
         return .opened("Renamed that pane to '\(title)'.")
@@ -567,32 +519,17 @@ extension AppModel {
     /// Nil for a review and for the notes, which is what keeps `pane_close` off them: they are the
     /// two a workspace has exactly one of and they hold the reader's own work rather than the
     /// agent's, so a tool that cannot name them cannot close them.
-    private func paneKind(of content: PaneContent, in workspaceID: WorkspaceID) -> PaneKind? {
+    private func paneKind(of content: PaneContent, in model: any WorkspacePaneModel) -> PaneKind? {
         switch content {
         case .chat: return .chat
         case .tool(let id):
-            let tabs = CenterTabStore.shared.tabs(for: workspaceID)
+            let tabs = model.paneStores.center.tabs(for: model.workspace.id)
             guard let tab = tabs.first(where: { $0.id == id }) else { return nil }
             switch tab.kind {
             case .terminal: return .terminal
             case .browser: return .browser
             case .review, .notes: return nil
             }
-        }
-    }
-}
-
-private enum BridgeWorkspaceModelFailure: LocalizedError {
-    case invalid(model: String, agent: AgentKind, available: [String])
-    case noneAvailable(AgentKind)
-
-    var errorDescription: String? {
-        switch self {
-        case let .invalid(model, agent, available):
-            let choices = available.isEmpty ? "none were reported" : available.joined(separator: ", ")
-            return "The model '\(model)' is not available for \(agent.label). Available models: \(choices)."
-        case .noneAvailable(let agent):
-            return "Bloom could not find an available model for \(agent.label)."
         }
     }
 }

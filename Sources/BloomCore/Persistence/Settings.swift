@@ -30,6 +30,7 @@ public enum SettingsKey: String, Codable, Sendable, Hashable, CaseIterable {
     case deleteBranchOnArchive = "git.delete_branch_on_archive"
     case mergeInstructions = "instructions.merge"
     case conflictInstructions = "instructions.fix_conflicts"
+    case browserURL = "browser.url"
 
     /// The key path as components, for the document editor.
     public var path: [String] { rawValue.components(separatedBy: ".") }
@@ -67,6 +68,7 @@ public struct ScriptFile: Codable, Sendable, Hashable {
 /// applies. Conductor's own files are read as-is so an existing repo needs no new config.
 public struct RepoSettings: Codable, Sendable, Hashable {
     public var executionCommand: [String]?
+    public var executionBridge: Bool?
     public var executionName: String?
     public var setupScript: String?
     public var archiveScript: String?
@@ -84,6 +86,12 @@ public struct RepoSettings: Codable, Sendable, Hashable {
     /// `.bloom/merge-instructions.md` beat these.
     public var mergeInstructions: String?
     public var conflictInstructions: String?
+    /// What a browser pane opens on, before expansion, or nil for the port Bloom allocated.
+    ///
+    /// Stated with the variables a script is handed, so one line covers every workspace:
+    /// `http://localhost:$BLOOM_PORT/admin`. A workspace whose setup script wrote an address of
+    /// its own beats this. See `WorkspaceBrowserURL`, which holds both and the order between them.
+    public var browserURL: String?
     /// Set by a file inside the repository. Ranks ABOVE the app-level defaults, because pinning
     /// a model in a project's own settings is a deliberate statement about that project.
     public var defaultModel: String?
@@ -222,6 +230,7 @@ public enum SettingsLoader {
         if let command = toml["execution.command"]?.stringArray {
             settings.executionCommand = command.isEmpty ? nil : command
         }
+        if let bridge = toml["execution.bridge"]?.boolValue { settings.executionBridge = bridge }
         if let name = toml["execution.name"]?.stringValue {
             settings.executionName = name.isEmpty ? nil : name
         }
@@ -330,6 +339,10 @@ public enum SettingsLoader {
         if let text = toml["instructions.fix_conflicts"]?.stringValue {
             settings.conflictInstructions = text.isEmpty ? nil : text
             note(.conflictInstructions)
+        }
+        if let url = toml["browser.url"]?.stringValue {
+            settings.browserURL = url.isEmpty ? nil : url
+            note(.browserURL)
         }
         if let model = toml["models.default"]?.stringValue {
             settings.defaultModel = model

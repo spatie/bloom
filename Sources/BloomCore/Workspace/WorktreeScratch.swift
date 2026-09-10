@@ -36,6 +36,7 @@ import Foundation
 public enum WorktreeScratch {
     /// Copies of files somebody dropped, pasted or picked into a prompt.
     public static let attachments = ".bloom/attachments"
+    public static let ignoreContents = "*\n"
 
     /// Files Bloom generates for its own use, that no project asked for and no reviewer wants to
     /// read: the default pull request instructions, and whatever comes after them.
@@ -62,12 +63,16 @@ public enum WorktreeScratch {
         let ignore = (full as NSString).appendingPathComponent(".gitignore")
         let manager = FileManager.default
         guard !manager.fileExists(atPath: ignore) else { return }
+        // A worktree that is not there gets no scratch folder. Creating the intermediate
+        // directories would otherwise rebuild the skeleton of a worktree somebody has already
+        // removed, which is a folder git knows nothing about standing where a workspace was.
+        guard manager.fileExists(atPath: worktree) else { return }
         // `.bloom` itself is created as a side effect and deliberately left bare. Its own
         // `.gitignore` is a file the team commits, and writing one here would put a file in the
         // user's pull request that they did not ask for, which is the bug this type exists to
         // stop. `SettingsWriter.prepareFolder` still lays it down the first time somebody writes
         // a setting, whether or not `.bloom` already exists by then.
         try? manager.createDirectory(atPath: full, withIntermediateDirectories: true)
-        try? "*\n".write(toFile: ignore, atomically: true, encoding: .utf8)
+        try? ignoreContents.write(toFile: ignore, atomically: true, encoding: .utf8)
     }
 }

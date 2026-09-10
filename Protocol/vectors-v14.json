@@ -1,0 +1,520 @@
+[
+  {
+    "name" : "request-uiAttach",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "uiBridge" : {
+          "_0" : {
+            "attach" : {
+              "actions" : [
+                "pane_open"
+              ],
+              "clientID" : "00000000-0000-4000-8000-000000000001",
+              "workspaceID" : "workspace-example"
+            }
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-uiClaim",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "uiBridge" : {
+          "_0" : {
+            "claim" : {
+              "leaseID" : "00000000-0000-4000-8000-000000000001",
+              "requestID" : "00000000-0000-4000-8000-000000000001",
+              "token" : "example-ui-lease"
+            }
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-uiRespond",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "uiBridge" : {
+          "_0" : {
+            "respond" : {
+              "leaseID" : "00000000-0000-4000-8000-000000000001",
+              "requestID" : "00000000-0000-4000-8000-000000000001",
+              "result" : {
+                "isError" : false,
+                "text" : "Opened Browser"
+              },
+              "token" : "example-ui-lease"
+            }
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-hello",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "hello" : {
+
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-catalogue",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "catalogue" : {
+
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-transcript",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "transcript" : {
+          "afterSeq" : 0,
+          "sessionID" : "session-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-snapshot",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "reviewSnapshot" : {
+          "scope" : "branch",
+          "wait" : true,
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-patch",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "reviewPatch" : {
+          "knownRevision" : "revision-1",
+          "path" : "README.md",
+          "scope" : "uncommitted",
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-file",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "file" : {
+          "path" : "README.md",
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-files",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "workspace" : {
+          "action" : {
+            "files" : {
+
+            }
+          },
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-browserAddress",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "workspace" : {
+          "action" : {
+            "browserAddress" : {
+
+            }
+          },
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-upload",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "workspace" : {
+          "action" : {
+            "uploadFile" : {
+              "data" : "AAH/",
+              "name" : "note.txt"
+            }
+          },
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-clearColour",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "workspace" : {
+          "action" : {
+            "setColour" : {
+
+            }
+          },
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-settings",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "project" : {
+          "action" : {
+            "settings" : {
+
+            }
+          },
+          "repoID" : "repo-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-context",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "creation" : {
+          "_0" : {
+            "workspaceContext" : {
+              "_0" : "repo-example"
+            }
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-answer",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "answer" : {
+          "answer" : {
+            "question" : {
+              "input" : {
+                "choice" : "yes"
+              }
+            }
+          },
+          "requestID" : "ask-example",
+          "sessionID" : "session-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-uiAttached",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "uiBridge" : {
+          "_0" : {
+            "attached" : {
+              "_0" : {
+                "expiresAtMilliseconds" : 1800000030000,
+                "id" : "00000000-0000-4000-8000-000000000001",
+                "token" : "example-ui-lease",
+                "workspaceID" : "workspace-example"
+              }
+            }
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-uiClaimed",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "uiBridge" : {
+          "_0" : {
+            "claimed" : {
+              "_0" : true
+            }
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-uiRequests",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "uiBridge" : {
+          "_0" : {
+            "requests" : {
+              "_0" : {
+                "lease" : {
+                  "expiresAtMilliseconds" : 1800000030000,
+                  "id" : "00000000-0000-4000-8000-000000000001",
+                  "token" : "example-ui-lease",
+                  "workspaceID" : "workspace-example"
+                },
+                "requests" : [
+                  {
+                    "action" : {
+                      "arguments" : {
+                        "kind" : "browser",
+                        "url" : "http://localhost:3000"
+                      },
+                      "name" : "pane_open"
+                    },
+                    "expiresAtMilliseconds" : 1800000020000,
+                    "id" : "00000000-0000-4000-8000-000000000001",
+                    "workspaceID" : "workspace-example"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-hello",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "hello" : {
+          "name" : "example-server"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-accepted",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "accepted" : {
+
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-failure",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "failure" : {
+          "_0" : "Example refusal"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-snapshot",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "reviewSnapshot" : {
+          "_0" : {
+            "files" : [
+              {
+                "additions" : 2,
+                "change" : "M",
+                "deletions" : 1,
+                "hasIncompleteStats" : false,
+                "isBinary" : false,
+                "path" : "README.md"
+              }
+            ],
+            "revision" : "revision-1"
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-unchangedSnapshot",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "reviewSnapshot" : {
+          "_0" : {
+            "revision" : "revision-1"
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-unchangedPatch",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "reviewPatch" : {
+          "_0" : {
+            "revision" : "revision-1"
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-file",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "file" : {
+          "_0" : {
+            "path" : "README.md",
+            "revision" : "90f8ec5669cd34183b9b0fdf8b94f5efb4c3672876330f4aa76088c2b4ad17be",
+            "text" : "# Hello\n"
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-browserAddress",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "text" : {
+          "_0" : "http://localhost:8000/admin"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-download",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "download" : {
+          "_0" : {
+            "data" : "AAH/",
+            "path" : "note.txt"
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-transcript",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "transcript" : {
+          "_0" : {
+            "isBusy" : false,
+            "messages" : [
+              {
+                "createdAt" : 0,
+                "id" : 7,
+                "kind" : "assistantText",
+                "payload" : "eyJ0ZXh0IjoiSGVsbG9cbndvcmxkIn0=",
+                "seq" : 1,
+                "sessionID" : "session-example"
+              }
+            ],
+            "pendingQuestions" : [
+              "e30="
+            ],
+            "permissionDecisions" : {
+
+            },
+            "queuedPrompts" : [
+
+            ],
+            "session" : {
+              "agentKind" : "claudeCode",
+              "contextTokens" : 0,
+              "costUSD" : 0,
+              "createdAt" : 0,
+              "effort" : "medium",
+              "id" : "session-example",
+              "inputTokens" : 0,
+              "lastReadSeq" : 0,
+              "model" : "example-model",
+              "outputTokens" : 0,
+              "permissionMode" : "bypassPermissions",
+              "sortOrder" : 0,
+              "state" : "idle",
+              "title" : "Chat",
+              "updatedAt" : 0,
+              "workspaceID" : "workspace-example"
+            },
+            "streamingText" : ""
+          }
+        }
+      },
+      "version" : 14
+    }
+  }
+]

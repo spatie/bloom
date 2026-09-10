@@ -53,14 +53,14 @@ enum NewPane {
         // The shell itself is not started here. `ToolPaneView` settles the environment and the
         // port first, because both are baked into the process the moment it is forked.
         case .terminal:
-            let tab = CenterTabStore.shared.add(
+            let tab = model.paneStores.center.add(
                 kind: .terminal, workspaceID: model.workspace.id, title: title,
                 directory: directory
             )
             place(.tool(tab.id))
 
         case .browser:
-            let tab = CenterTabStore.shared.add(
+            let tab = model.paneStores.center.add(
                 kind: .browser, workspaceID: model.workspace.id, url: url, title: title
             )
             place(.tool(tab.id))

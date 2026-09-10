@@ -20,6 +20,10 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     private let filesRule = UIView()
     private var conversation: UIViewController?
     private var tool: UIViewController?
+    private let deck = WorkspaceToolDeckController()
+    private var uiSession: RemoteUIClientSession?
+    private var notes: WorkspaceNotesController?
+    private var primaryInDeck = false
     private lazy var files = WorkspaceFilesController(review: review)
     private lazy var reviewController = WorkspaceReviewController(review: review)
     private var conversationWidth: NSLayoutConstraint?
@@ -89,6 +93,19 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         files.onSelect = { [weak self] path, changed in self?.openFile(path, changed: changed) }
         files.onReviewAll = { [weak self] in self?.openReview(all: true) }
         reviewController.onClose = { [weak self] in self?.closeTool() }
+        deck.onEmpty = { [weak self] in self?.removeDeck() }
+        deck.onSelection = { [weak self] in self?.focusesConversation = false; self?.updateToolbar(); self?.layoutPanes() }
+        deck.onNewPane = { [weak self] kind, split in self?.requestNewPane(kind: kind, split: split) }
+        deck.onRename = { [weak self] pane in self?.requestRename(pane) }
+        deck.onClosePane = { [weak self] pane in self?.requestClosePane(pane) }
+        deck.onEndTerminal = { [weak self] pane in
+            guard let self, let terminal = pane.content as? WorkspaceTerminalController else { return }
+            Task {
+                do { try await connection.closeTerminal(workspaceID: workspace.id, name: terminal.terminalName); deck.close(pane) } catch { show(error) }
+            }
+        }
+        NotificationCenter.default.addObserver(self, selector: #selector(sceneChanged(_:)), name: UIScene.didActivateNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(sceneChanged(_:)), name: UIScene.willDeactivateNotification, object: nil)
         install(files, in: filesHost)
         review.changed = { [weak self] in
             guard let self else { return }
@@ -107,11 +124,12 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        attachUI()
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                if self.connection.isActive { await self.review.refresh() }
+                if self.connection.isActive { self.attachUI(); await self.review.refresh() } else { self.uiSession?.stop() }
                 do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }
         }
@@ -122,12 +140,15 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         refreshTask?.cancel()
         refreshTask = nil
         previewTask?.cancel()
+        uiSession?.stop()
+        deck.suspendTerminals()
         review.cancel()
     }
 
     private func updateToolbar() {
         let chat = UIBarButtonItem(image: UIImage(systemName: "bubble.left.and.bubble.right"), primaryAction: UIAction { [weak self] _ in
             guard let self else { return }
+            if self.primaryInDeck { self.focusConversation(); return }
             if self.tool != nil {
                 if self.view.safeAreaLayoutGuide.layoutFrame.width < 760 { self.focusesConversation = true } else {
                     self.showsConversation.toggle()
@@ -143,6 +164,23 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         let inspector = UIBarButtonItem(image: UIImage(systemName: "sidebar.right"), primaryAction: UIAction { [weak self] _ in self?.toggleFiles() })
         inspector.accessibilityLabel = "Show workspace files"
         let menu = UIMenu(children: [
+            UIMenu(title: "New tab", children: PaneKind.allCases.map { kind in
+                UIAction(title: kind.title, image: UIImage(systemName: kind.symbol)) { [weak self] _ in self?.requestNewPane(kind: kind) }
+            }),
+            UIMenu(title: "Open tabs", children: (tabsJSON()["tabs"]?.arrayValue ?? []).compactMap { tab -> UIAction? in
+                guard let number = tab["tab"]?.intValue, let title = tab["title"]?.stringValue else { return nil }
+                return UIAction(title: title, state: tab["active"]?.boolValue == true ? .on : .off) { [weak self] _ in
+                    Task { _ = await self?.handleUI(.init(name: "workspace_tab_select", arguments: .object(["tab": .integer(number)]))) }
+                }
+            }),
+            UIMenu(title: "Split beside", children: PaneKind.allCases.map { kind in
+                UIAction(title: kind.title, image: UIImage(systemName: kind.symbol)) { [weak self] _ in self?.requestNewPane(kind: kind, split: .horizontal) }
+            }),
+            UIMenu(title: "Split below", children: PaneKind.allCases.map { kind in
+                UIAction(title: kind.title, image: UIImage(systemName: kind.symbol)) { [weak self] _ in self?.requestNewPane(kind: kind, split: .vertical) }
+            }),
+            UIAction(title: "Agent UI tools", image: UIImage(systemName: "rectangle.connected.to.line.below")) { [weak self] _ in self?.showAgentUIStatus() },
+            UIAction(title: "Workspace notes", image: UIImage(systemName: PaneGlyph.notes)) { [weak self] _ in self?.openNotes() },
             UIAction(title: "Workspace details", image: UIImage(systemName: "info.circle")) { [weak self] _ in
                 guard let self else { return }
                 self.navigationController?.pushViewController(WorkspaceController(model: self.connection, workspace: self.workspace), animated: true)
@@ -188,6 +226,16 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     }
 
     private func replaceConversation(with session: RemoteSession) {
+        if primaryInDeck, let pane = deck.allPanes.first(where: { $0.content === conversation }) {
+            let content = ConversationController(model: connection, session: session)
+            let wrapped = WorkspacePaneController(title: session.title, image: PaneGlyph.chat, content: content)
+            deck.replace(pane, content: wrapped)
+            pane.sessionID = session.id
+            deck.rename(pane, title: session.title)
+            conversation = wrapped; preferredSessionID = session.id
+            configure(pane)
+            return
+        }
         if let conversation { remove(conversation) }
         let content = ConversationController(model: connection, session: session)
         content.onOpenSession = { [weak self] session in self?.replaceConversation(with: session) }
@@ -206,6 +254,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         reviewController.selectedPath = path
         reviewController.showsAllFiles = all
         setTool(reviewController)
+        deck.selectedPane?.path = path
     }
 
     func openFile(_ path: String, changed: Bool) {
@@ -214,6 +263,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         if changed { openReview(all: false, path: path) } else {
             let source = WorkspaceSourceController(review: review, path: path)
             setTool(WorkspacePaneController(title: (path as NSString).lastPathComponent, image: "doc.text", content: source, onClose: { [weak self] in self?.closeTool() }))
+            deck.selectedPane?.path = path
         }
     }
 
@@ -251,16 +301,11 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     private func openPreview(address: String) async throws {
         let preview = try await connection.preparePreview(address: address)
         guard !Task.isCancelled else { preview.close(); throw CancellationError() }
-        browser?.closePreview()
         showBrowser(PreviewController(preview: preview))
     }
 
     #if DEBUG
-    func focusLiveConversation() {
-        compactTabs.selectedItem = compactTabs.items?.first
-        focusesConversation = true
-        layoutPanes()
-    }
+    func focusLiveConversation() { focusConversation() }
     func showLiveFiles() { toggleFiles() }
     var liveReviewReady: Bool { reviewController.liveReviewReady }
     var liveReviewFailure: String? { review.error ?? review.errors.values.first }
@@ -288,26 +333,42 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
 
     private func showBrowser(_ browser: PreviewController) {
         self.browser = browser
-        browser.onClose = { [weak self] in self?.closeTool() }
         setTool(browser)
     }
 
     private func setTool(_ controller: UIViewController) {
         focusesConversation = false
-        compactTabs.selectedItem = compactTabs.items?[controller is PreviewController ? 1 : controller is WorkspaceReviewController ? 2 : 3]
-        if tool !== controller {
-            if let tool { remove(tool) }
-            tool = controller
-            install(controller, in: toolHost)
+        if let pane = deck.allPanes.first(where: { $0.content === controller }) { deck.selectPane(pane) } else {
+            let kind = controller is PreviewController ? "browser" : controller is WorkspaceTerminalController ? "terminal" : controller is WorkspaceNotesController ? "notes" : "review"
+            let base = kind == "browser" ? PaneNaming.browser : kind == "terminal" ? PaneNaming.terminal : kind == "notes" ? "Notes" : "Review"
+            let title = PaneNaming.nextTitle(base: base, taken: deck.allPanes.filter { $0.kind == kind }.map(\.title))
+            let pane = WorkspaceToolPane(kind: kind, title: title, content: controller)
+            configure(pane)
+            deck.add(pane)
         }
+        showDeck()
+    }
+
+    private func showDeck() {
+        if tool !== deck {
+            if let tool { remove(tool) }
+            tool = deck
+            install(deck, in: toolHost)
+        }
+        let kind = deck.selectedPane?.kind
+        compactTabs.selectedItem = compactTabs.items?[kind == "browser" ? 1 : kind == "review" ? 2 : 3]
         layoutPanes()
     }
 
     private func closeTool() {
-        if tool === browser { browser?.closePreview(); browser = nil }
+        if let pane = deck.selectedPane { requestClosePane(pane) } else { removeDeck() }
+    }
+
+    private func removeDeck() {
         compactTabs.selectedItem = compactTabs.items?.first
         if let tool { remove(tool) }
         tool = nil
+        browser = deck.allPanes.compactMap { $0.content as? PreviewController }.last
         showsConversation = true
         layoutPanes()
     }
@@ -339,14 +400,14 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     private func restoreFiles() {
         files.navigationController?.setViewControllers([], animated: false)
         install(files, in: filesHost)
-        let index = tool == nil || focusesConversation ? 0 : tool is PreviewController ? 1 : tool is WorkspaceReviewController ? 2 : 3
+        let index = tool == nil || focusesConversation ? 0 : deck.selectedPane?.kind == "browser" ? 1 : deck.selectedPane?.kind == "review" ? 2 : 3
         compactTabs.selectedItem = compactTabs.items?[index]
         layoutPanes()
     }
 
     func tabBar(_ tabBar: UITabBar, didSelect item: UITabBarItem) {
         switch item.tag {
-        case 0: focusesConversation = true; layoutPanes()
+        case 0: focusConversation()
         case 1: openPreview()
         case 2: openReview(all: true)
         default: toggleFiles()
@@ -362,12 +423,12 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         compactTabsHeight?.constant = compact ? 49 + view.safeAreaInsets.bottom : 0
         let hasTool = tool != nil
         let inlineFiles = showsFiles && width >= (hasTool ? 960 : 720) && files.parent === self
-        let splitConversation = hasTool && showsConversation && width >= 760
+        let splitConversation = hasTool && showsConversation && width >= 760 && !primaryInDeck
         let compactConversation = width < 760 && focusesConversation
-        conversationHost.isHidden = hasTool && !splitConversation && !compactConversation
+        conversationHost.isHidden = primaryInDeck || (hasTool && !splitConversation && !compactConversation)
         conversationRule.isHidden = !splitConversation
-        toolHost.isHidden = !hasTool || compactConversation
-        reviewController.isReviewVisible = tool === reviewController && !toolHost.isHidden
+        toolHost.isHidden = !hasTool || (compactConversation && !primaryInDeck)
+        reviewController.isReviewVisible = deck.selectedTab?.panes.contains { $0.content === reviewController } == true && !toolHost.isHidden
         filesHost.isHidden = !inlineFiles
         filesRule.isHidden = !inlineFiles
         filesWidth?.constant = width > 1100 ? 240 : 220
@@ -405,5 +466,445 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
             openFile("app/Actions/ReplyToTicket.php", changed: false)
         }
     }
+    #endif
+}
+
+extension WorkspaceDeskController {
+    private static let uiActions = ["pane_open", "pane_split", "pane_close", "pane_rename", "pane_list", "workspace_tabs", "workspace_tab_select",
+                                    "browser_read", "browser_reload", "browser_go", "browser_scroll", "browser_text", "browser_screenshot",
+                                    "terminal_start", "terminal_read", "terminal_write", "terminal_send_key", "media_show"]
+
+    func openInitialMode(_ mode: WorkspaceStartMode) async {
+        loadViewIfNeeded()
+        do {
+            switch mode {
+            case .chat: break
+            case .terminal: _ = try await openPane(kind: .terminal)
+            case .browser: _ = try await openPane(kind: .browser, address: workspace.port > 0 ? "http://localhost:\(workspace.port)" : nil)
+            }
+        } catch { show(error) }
+    }
+
+    private func attachUI() {
+        guard viewIfLoaded?.window?.windowScene?.activationState == .foregroundActive,
+              connection.isActive, let service = review.service else { uiSession?.stop(); return }
+        if uiSession == nil {
+            uiSession = RemoteUIClientSession(workspaceID: workspace.id, actions: Self.uiActions) { [weak self] action in
+                guard let self else { return .refusal("This workspace window has closed.") }
+                return await handleUI(action)
+            }
+        }
+        if uiSession?.error == nil { uiSession?.start(using: service) }
+    }
+
+    private func showAgentUIStatus() {
+        let attached = uiSession?.isAttached == true
+        let detail = attached
+            ? "Agents in this workspace can use this device’s tabs, browsers and terminals while Bloom is active."
+            : uiSession?.error ?? "Connect this workspace to let its agents use this device’s tabs, browsers and terminals."
+        let alert = UIAlertController(title: "Agent UI tools", message: detail, preferredStyle: .alert)
+        if !attached {
+            alert.addAction(UIAlertAction(title: "Reconnect", style: .default) { [weak self] _ in
+                guard let self, connection.isActive, let service = review.service else { return }
+                if let uiSession { uiSession.start(using: service) } else { attachUI() }
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Close", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    @objc private func sceneChanged(_ notification: Notification) {
+        guard let scene = notification.object as? UIScene, scene === viewIfLoaded?.window?.windowScene else { return }
+        if notification.name == UIScene.didActivateNotification { attachUI() } else { uiSession?.stop(); deck.suspendTerminals() }
+    }
+
+    private func focusConversation() {
+        if primaryInDeck, let pane = deck.allPanes.first(where: { $0.content === conversation }) {
+            deck.selectPane(pane)
+            showDeck()
+        } else {
+            compactTabs.selectedItem = compactTabs.items?.first
+            focusesConversation = true
+            layoutPanes()
+        }
+    }
+
+    private func chatContent(_ controller: UIViewController?) -> ConversationController? {
+        if let chat = controller as? ConversationController { return chat }
+        return (controller as? WorkspacePaneController)?.embeddedContent as? ConversationController
+    }
+
+    private func requestNewPane(kind: PaneKind, split: SplitAxis? = nil) {
+        Task { [weak self] in
+            do { _ = try await self?.openPane(kind: kind, axis: split) } catch { self?.show(error) }
+        }
+    }
+
+    private func openPane(kind: PaneKind, address: String? = nil, title: String? = nil,
+                          focus: Bool = true, axis: SplitAxis? = nil) async throws -> WorkspaceToolPane {
+        guard let service = review.service else { throw ConnectionFailure("Reconnect to this workspace's server first.") }
+        let content: UIViewController
+        var session: RemoteSession?
+        switch kind {
+        case .browser:
+            if let address, !address.isEmpty { content = PreviewController(preview: try await connection.preparePreview(address: address)) } else { content = PreviewController() }
+        case .terminal:
+            let name = "terminal-" + UUID().uuidString
+            let model = connection, workspaceID = workspace.id
+            content = WorkspaceTerminalController(name: name) { try await model.openTerminal(workspaceID: workspaceID, name: name) }
+        case .chat:
+            let context = try await service.workspaceContext(projectID: workspace.repoID)
+            let controls = context.composer.controls
+            let result = try await service.client.request(.call("workspace", ["workspaceID": .string(workspace.id.rawValue),
+                "action": .object(["newSession": .object(["agent": .string(controls.agentKind.rawValue), "model": .string(controls.model),
+                    "effort": .string(controls.effort), "permissionMode": .string(controls.permissionMode.rawValue)])])]))
+            guard let value = result["created"]?["session"] else { throw ConnectionFailure("The server did not return the new conversation.") }
+            let created = try JSONDecoder().decode(RemoteSession.self, from: JSONEncoder().encode(value))
+            session = created
+            content = ConversationController(model: connection, session: created)
+            try await connection.refresh()
+        }
+        let name = title ?? session?.title ?? PaneNaming.nextTitle(base: kind.title, taken: deck.allPanes.filter { $0.kind == kind.rawValue }.map(\.title))
+        let pane = WorkspaceToolPane(kind: kind.rawValue, title: name, content: content)
+        pane.sessionID = session?.id
+        configure(pane)
+        let previousFocus = focusesConversation
+        if axis != nil, !primaryInDeck, tool == nil || focusesConversation, let conversation, let primary = primarySession {
+            remove(conversation)
+            let root = WorkspaceToolPane(kind: "chat", title: primary.title, content: conversation)
+            root.sessionID = primary.id
+            primaryInDeck = true
+            configure(root)
+            deck.add(root)
+        }
+        deck.add(pane, focus: focus, split: axis)
+        if focus { showDeck() } else { focusesConversation = previousFocus; layoutPanes() }
+        if let terminal = content as? WorkspaceTerminalController { try await terminal.connect() }
+        if let browser = content as? PreviewController { browser.loadViewIfNeeded(); self.browser = browser }
+        if session != nil, title != nil { try await renamePane(pane, title: name) }
+        return pane
+    }
+
+    private func configure(_ pane: WorkspaceToolPane) {
+        if let browser = pane.content as? PreviewController {
+            browser.onClose = { [weak self, weak pane] in if let pane { self?.requestClosePane(pane) } }
+            browser.onNavigate = { [weak self, weak pane] address in
+                Task {
+                    guard let self, let pane else { return }
+                    do { try await self.navigate(pane, address: address) } catch { self.show(error) }
+                }
+            }
+        }
+        if let terminal = pane.content as? WorkspaceTerminalController {
+            terminal.onClose = { [weak self, weak pane] in if let pane { self?.requestClosePane(pane) } }
+            terminal.onOpenURL = { [weak self] url in
+                Task { do { _ = try await self?.openPane(kind: .browser, address: url.absoluteString) } catch { self?.show(error) } }
+            }
+        }
+        if let chat = (pane.content as? ConversationController) ?? ((pane.content as? WorkspacePaneController)?.embeddedContent as? ConversationController) {
+            chat.onOpenSession = { [weak self, weak pane] session in
+                guard let self, let pane else { return }
+                if pane.content === conversation { replaceConversation(with: session); return }
+                let chat = ConversationController(model: connection, session: session)
+                deck.replace(pane, content: chat)
+                pane.sessionID = session.id
+                deck.rename(pane, title: session.title)
+                configure(pane)
+            }
+        }
+    }
+
+    private func navigate(_ pane: WorkspaceToolPane, address: String) async throws {
+        let lease = try await connection.preparePreview(address: address)
+        guard !Task.isCancelled, deck.allPanes.contains(where: { $0 === pane }) else { lease.close(); throw CancellationError() }
+        let preview = PreviewController(preview: lease)
+        deck.replace(pane, content: preview)
+        configure(pane)
+        preview.loadViewIfNeeded()
+        browser = preview
+    }
+
+    private func requestRename(_ pane: WorkspaceToolPane) {
+        let alert = UIAlertController(title: "Rename pane", message: nil, preferredStyle: .alert)
+        alert.addTextField { $0.text = pane.title }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Rename", style: .default) { [weak self] _ in
+            guard let self else { return }
+            Task { do { try await self.renamePane(pane, title: alert.textFields?.first?.text ?? "") } catch { self.show(error) } }
+        })
+        present(alert, animated: true)
+    }
+
+    private func renamePane(_ pane: WorkspaceToolPane, title: String) async throws {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, title.utf8.count <= 1_024 else { throw ConnectionFailure("Enter a pane name between 1 and 1,024 bytes.") }
+        if let id = pane.sessionID {
+            guard let service = review.service else { throw ConnectionFailure("Reconnect before renaming this conversation.") }
+            _ = try await service.client.request(.call("renameSession", ["sessionID": .string(id.rawValue), "title": .string(title)]))
+        }
+        deck.rename(pane, title: title)
+        (pane.content as? WorkspacePaneController)?.rename(title)
+    }
+
+    private func requestClosePane(_ pane: WorkspaceToolPane) {
+        Task { [weak self] in do { try await self?.closePane(pane) } catch { self?.show(error) } }
+    }
+
+    private func closePane(_ pane: WorkspaceToolPane) async throws {
+        if let id = pane.sessionID {
+            guard let service = review.service else { throw ConnectionFailure("Reconnect before closing this conversation.") }
+            _ = try await service.client.request(.call("closeSession", ["sessionID": .string(id.rawValue)]))
+            try await connection.refresh()
+        }
+        let wasPrimary = pane.content === conversation
+        deck.close(pane)
+        if wasPrimary { conversation = nil; preferredSessionID = nil; primaryInDeck = false; openConversation(); layoutPanes() }
+    }
+
+    private var standalonePrimary: RemoteSession? { primaryInDeck ? nil : primarySession }
+
+    private func openNotes() {
+        if let notes { setTool(notes); return }
+        let notes = WorkspaceNotesController(model: connection, workspaceID: workspace.id)
+        self.notes = notes
+        setTool(notes)
+    }
+
+    private var primarySession: RemoteSession? {
+        let sessions = connection.catalogue?.sessions.filter { $0.workspaceID == workspace.id } ?? []
+        return sessions.first { $0.id == preferredSessionID } ?? sessions.first
+    }
+
+    private func selectedPane(kind: String?) throws -> WorkspaceToolPane {
+        guard let tab = deck.selectedTab, tool != nil, !focusesConversation || primaryInDeck else { throw ConnectionFailure("Select the pane you want to change first.") }
+        if let pane = deck.selectedPane, kind == nil || pane.kind == kind { return pane }
+        let matches = tab.panes.filter { $0.kind == kind }
+        guard matches.count == 1, let pane = matches.first else { throw ConnectionFailure("Select a tab with exactly one matching pane first.") }
+        return pane
+    }
+
+    private func numberedPane(kind: String, number: Int?) throws -> WorkspaceToolPane {
+        let panes = deck.allPanes.filter { $0.kind == kind }
+        if let number, number > 0, number <= panes.count { return panes[number - 1] }
+        if number == nil, panes.count == 1 { return panes[0] }
+        throw ConnectionFailure("Call pane_list and choose a current \(kind) number.")
+    }
+
+    private func relativePath(_ path: String) throws -> String {
+        let relative: String
+        if path.hasPrefix("/"), let root = workspace.path, path.hasPrefix(root + "/") { relative = String(path.dropFirst(root.count + 1)) } else { relative = path }
+        guard !relative.isEmpty, !relative.hasPrefix("/"), !relative.contains("\0"), !relative.split(separator: "/").contains("..") else {
+            throw ConnectionFailure("Choose a file inside this workspace.")
+        }
+        return relative
+    }
+
+    private func browserReport(_ pane: WorkspaceToolPane) -> BrowserPaneReport {
+        let page = pane.content as? PreviewController
+        let number = (deck.allPanes.filter { $0.kind == "browser" }.firstIndex { $0 === pane } ?? 0) + 1
+        return BrowserPaneReport(number: number, name: pane.title, address: page?.currentAddress ?? "", pageTitle: page?.loadedPageTitle ?? "",
+            isLoading: page?.pageIsLoading ?? false, canGoBack: page?.pageCanGoBack ?? false, canGoForward: page?.pageCanGoForward ?? false,
+            isLive: page?.isViewLoaded == true, failure: page?.lastPageFailure.map { BrowserLoadFailure(title: "Preview couldn’t load", message: $0) })
+    }
+
+    private func panesJSON() -> JSONValue {
+        var entries: [PaneCensusEntry] = []
+        if let session = standalonePrimary { entries.append(.init(kind: .chat, name: session.title, isShowing: !conversationHost.isHidden)) }
+        var terminal = 0
+        for pane in deck.allPanes {
+            let showing = tool != nil && !toolHost.isHidden && deck.showingPaneIDs.contains(pane.id)
+            var entry = PaneCensusEntry(kind: PaneCensusKind(rawValue: pane.kind) ?? .review, name: pane.title, isShowing: showing)
+            if pane.kind == "browser" { entry.browser = browserReport(pane) }
+            if let view = pane.content as? WorkspaceTerminalController {
+                terminal += 1
+                entry.terminal = TerminalPaneReport(number: terminal, name: pane.title, isLive: view.isConnected)
+            }
+            entries.append(entry)
+        }
+        return PaneCensus(entries: entries).json
+    }
+
+    private func tabDetail(_ pane: WorkspaceToolPane) -> WorkspaceTabDetail {
+        switch pane.kind {
+        case "browser": return .browser(browserReport(pane))
+        case "terminal": return .terminal(.init(directory: workspace.path ?? "", isLive: (pane.content as? WorkspaceTerminalController)?.isConnected == true))
+        case "chat":
+            let session = connection.catalogue?.sessions.first { $0.id == pane.sessionID }
+            return .chat(.init(agent: AgentKind(rawValue: session?.agentKind ?? "") ?? .claudeCode, state: SessionState(rawValue: session?.state ?? "") ?? .idle, messages: chatContent(pane.content)?.transcriptMessageCount ?? 0))
+        case "notes": return .notes(.init(characters: notes?.characters ?? 0))
+        default: return .review(.init(file: pane.path ?? ""))
+        }
+    }
+
+    private func tabsJSON() -> JSONValue {
+        var reports: [WorkspaceTabReport] = []
+        if let session = standalonePrimary {
+            reports.append(.init(number: 1, title: session.title, isActive: focusesConversation || tool == nil,
+                detail: .chat(.init(agent: AgentKind(rawValue: session.agentKind) ?? .claudeCode, state: SessionState(rawValue: session.state) ?? .idle, messages: chatContent(conversation)?.transcriptMessageCount ?? 0))))
+        }
+        for tab in deck.tabs {
+            guard let first = tab.panes.first else { continue }
+            let panes = tab.panes.count > 1 ? tab.panes.map { pane in
+                WorkspaceTabPane(kind: PaneCensusKind(rawValue: pane.kind) ?? .review, title: pane.title, browser: pane.kind == "browser" ? browserReport(pane).number : nil)
+            } : []
+            reports.append(.init(number: reports.count + 1, title: tab.title, isActive: tab.id == deck.selectedID && (!focusesConversation || primaryInDeck) && tool != nil,
+                                 detail: tabDetail(first), panes: panes))
+        }
+        return WorkspaceTabCensus(tabs: reports).json
+    }
+
+    private func handleUI(_ action: RemoteUIAction) async -> RemoteUIResult {
+        guard connection.isActive, viewIfLoaded?.window?.windowScene?.activationState == .foregroundActive,
+              review.service != nil else { return .refusal("This workspace UI is not active on this device.") }
+        let args = action.arguments
+        do {
+            switch action.name {
+            case "pane_list": return .init(value: panesJSON())
+            case "workspace_tabs": return .init(value: tabsJSON())
+            case "pane_open", "pane_split":
+                guard let raw = args["kind"]?.stringValue, let kind = PaneKind(rawValue: raw) else { throw ConnectionFailure("Choose chat, browser or terminal.") }
+                let axis: SplitAxis? = action.name == "pane_split" ? (args["direction"]?.stringValue == "below" ? .vertical : .horizontal) : nil
+                let pane = try await openPane(kind: kind, address: args["url"]?.stringValue, title: args["title"]?.stringValue, focus: args["focus"]?.boolValue ?? true, axis: axis)
+                return .init(text: "Opened \(pane.title).")
+            case "pane_close":
+                if let primary = standalonePrimary, tool == nil || focusesConversation, args["kind"]?.stringValue == nil || args["kind"]?.stringValue == "chat" {
+                    guard let service = review.service else { throw ConnectionFailure("Reconnect before closing this conversation.") }
+                    _ = try await service.client.request(.call("closeSession", ["sessionID": .string(primary.id.rawValue)]))
+                    try await connection.refresh()
+                    if let conversation { remove(conversation) }
+                    conversation = nil; preferredSessionID = nil; openConversation()
+                    return .init(text: "Closed \(primary.title).")
+                }
+                let pane = try selectedPane(kind: args["kind"]?.stringValue)
+                guard ["chat", "browser", "terminal"].contains(pane.kind) else { throw ConnectionFailure("This tool closes chat, browser and terminal panes only.") }
+                try await closePane(pane)
+                return .init(text: "Closed \(pane.title).")
+            case "pane_rename":
+                if let primary = standalonePrimary, tool == nil || focusesConversation, args["kind"]?.stringValue == nil || args["kind"]?.stringValue == "chat" {
+                    guard let service = review.service else { throw ConnectionFailure("Reconnect before renaming this conversation.") }
+                    let title = args["title"]?.stringValue ?? ""
+                    _ = try await service.client.request(.call("renameSession", ["sessionID": .string(primary.id.rawValue), "title": .string(title)]))
+                    (conversation as? WorkspacePaneController)?.rename(title)
+                    try await connection.refresh()
+                    return .init(text: "Renamed the conversation to \(title).")
+                }
+                let pane = try selectedPane(kind: args["kind"]?.stringValue)
+                try await renamePane(pane, title: args["title"]?.stringValue ?? "")
+                return .init(text: "Renamed the pane to \(pane.title).")
+            case "workspace_tab_select":
+                let reports = tabsJSON()["tabs"]?.arrayValue ?? []
+                let target: Int
+                if let number = args["tab"]?.intValue { target = number } else {
+                    let matches = reports.filter { $0["title"]?.stringValue == args["title"]?.stringValue }
+                    guard matches.count == 1, let number = matches.first?["tab"]?.intValue else { throw ConnectionFailure("That title does not identify exactly one tab. Call workspace_tabs.") }
+                    target = number
+                }
+                if standalonePrimary != nil && target == 1 { focusesConversation = true; layoutPanes() } else {
+                    let index = target - (standalonePrimary == nil ? 1 : 2)
+                    guard deck.tabs.indices.contains(index) else { throw ConnectionFailure("That tab number is no longer present. Call workspace_tabs.") }
+                    deck.select(deck.tabs[index].id); showDeck()
+                }
+                return .init(text: "Selected tab \(target).")
+            case "browser_read", "browser_reload", "browser_go", "browser_scroll", "browser_text", "browser_screenshot":
+                let pane = try numberedPane(kind: "browser", number: args["browser"]?.intValue)
+                guard let page = pane.content as? PreviewController else { throw ConnectionFailure("The browser is unavailable.") }
+                switch action.name {
+                case "browser_read": return .init(value: browserReport(pane).json)
+                case "browser_reload": page.reloadPage(); return .init(text: "Reloading \(pane.title).")
+                case "browser_go": try await navigate(pane, address: args["url"]?.stringValue ?? ""); return .init(text: "Navigating \(pane.title).")
+                case "browser_text": return .init(text: BridgeUntrustedText.wrap(try await page.pageText(), from: page.currentAddress))
+                case "browser_screenshot": return .init(text: "Screenshot of \(pane.title).", png: try await page.pageSnapshot())
+                default:
+                    let movement = try BrowserScroll.parse(direction: args["direction"]?.stringValue, pages: args["pages"]).get()
+                    return .init(text: try await page.scrollPage(movement))
+                }
+            case "terminal_start":
+                let pane = try await openPane(kind: .terminal, title: args["title"]?.stringValue, focus: args["focus"]?.boolValue ?? true)
+                guard let terminal = pane.content as? WorkspaceTerminalController else { throw ConnectionFailure("The terminal is unavailable.") }
+                try await terminal.send(Data(((args["command"]?.stringValue ?? "") + "\r").utf8))
+                return .init(text: "Started the command in \(pane.title).")
+            case "terminal_read", "terminal_write", "terminal_send_key":
+                let pane = try numberedPane(kind: "terminal", number: args["terminal"]?.intValue)
+                guard let terminal = pane.content as? WorkspaceTerminalController else { throw ConnectionFailure("The terminal is unavailable.") }
+                try await terminal.connect()
+                if action.name == "terminal_read" {
+                    let number = (deck.allPanes.filter { $0.kind == "terminal" }.firstIndex { $0 === pane } ?? 0) + 1
+                    return .init(value: .object(["text": .string(terminal.readText(maxLines: args["lines"]?.intValue ?? 500)), "terminal": .integer(number), "name": .string(pane.title), "live": .bool(terminal.isConnected)]))
+                }
+                if action.name == "terminal_write" {
+                    try await terminal.send(Data(((args["text"]?.stringValue ?? "") + ((args["submit"]?.boolValue ?? true) ? "\r" : "")).utf8))
+                } else {
+                    guard let key = TerminalKey(rawValue: args["key"]?.stringValue ?? "") else { throw ConnectionFailure("Choose a supported terminal key.") }
+                    try await terminal.sendKey(key)
+                }
+                return .init(text: "Sent input to \(pane.title).")
+            case "media_show":
+                let path = try relativePath(args["path"]?.stringValue ?? "")
+                let content = WorkspaceMediaController(model: connection, workspaceID: workspace.id, path: path)
+                let pane = WorkspaceToolPane(kind: "review", title: args["caption"]?.stringValue ?? (path as NSString).lastPathComponent, content: content)
+                pane.path = path
+                deck.add(pane); showDeck()
+                try await content.prepare()
+                return .init(text: "Opened \(path) in the workspace.")
+            default: return .refusal("This device does not implement that workspace UI action.")
+            }
+        } catch let refusal as PaneRefusal { return .refusal(refusal.sentence) } catch { return .refusal(error.localizedDescription) }
+    }
+
+    #if DEBUG
+    var liveUIAttached: Bool { uiSession?.isAttached == true }
+    var liveUIFailure: String? { uiSession?.error }
+    func livePaneCensus() -> JSONValue { panesJSON() }
+    func performLiveUIAction(_ action: RemoteUIAction) async -> RemoteUIResult { await handleUI(action) }
+
+    /// Opt-in real SSH/HTTPS terminal check. The temporary shell belongs only to this test.
+    func verifyLiveTerminal() async throws -> [String: String] {
+        let pane = try await openPane(kind: .terminal, title: "Terminal verification")
+        guard let terminal = pane.content as? WorkspaceTerminalController else { throw ConnectionFailure("The native terminal did not open.") }
+        do {
+            let marker = "bloom_native_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
+            try await terminal.send(Data("BLOOM_NATIVE_CHECK=\(marker); printf '\\n%s\\n' \"$BLOOM_NATIVE_CHECK\"\r".utf8))
+            try await waitForTerminal(terminal, line: marker)
+            try await terminal.resize(columns: 101, rows: 31)
+            try await Task.sleep(for: .milliseconds(150))
+            try await terminal.send(Data("stty size\r".utf8))
+            try await waitForTerminal(terminal, line: "31 101")
+            try await terminal.send(Data("sleep 30\r".utf8))
+            try await Task.sleep(for: .milliseconds(250))
+            try await terminal.sendKey(.controlC)
+            try await terminal.send(Data("printf '\\n%s_interrupted\\n' \"$BLOOM_NATIVE_CHECK\"\r".utf8))
+            try await waitForTerminal(terminal, line: marker + "_interrupted")
+            terminal.disconnect()
+            try await terminal.connect()
+            try await terminal.send(Data("printf '\\n%s_reconnected\\n' \"$BLOOM_NATIVE_CHECK\"\r".utf8))
+            try await waitForTerminal(terminal, line: marker + "_reconnected")
+            let result = ["terminalName": terminal.terminalName, "transport": "native", "checks": "output, input, resize, control-c, detach, reconnect, shell state preserved", "output": terminal.readText(maxLines: 40)]
+            if let window = view.window {
+                window.layoutIfNeeded()
+                let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+                try image.pngData()?.write(to: URL.documentsDirectory.appendingPathComponent("bloom-live-terminal.png"))
+            }
+            try await connection.closeTerminal(workspaceID: workspace.id, name: terminal.terminalName)
+            deck.close(pane)
+            return result
+        } catch {
+            let details = ["error": error.localizedDescription, "output": terminal.readText(maxLines: 80)]
+            try? JSONSerialization.data(withJSONObject: details, options: [.prettyPrinted, .sortedKeys]).write(
+                to: URL.documentsDirectory.appendingPathComponent("bloom-live-terminal-failure.json"), options: .atomic)
+            try? await connection.closeTerminal(workspaceID: workspace.id, name: terminal.terminalName)
+            deck.close(pane)
+            throw error
+        }
+    }
+
+    private func waitForTerminal(_ terminal: WorkspaceTerminalController, line: String) async throws {
+        for _ in 0..<100 {
+            try Task.checkCancellation()
+            if terminal.readText(maxLines: 200).split(separator: "\n").contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == line }) { return }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        throw ConnectionFailure("The native terminal did not receive its expected output: \(line)")
+    }
+
     #endif
 }

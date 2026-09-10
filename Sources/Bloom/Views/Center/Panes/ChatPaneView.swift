@@ -38,6 +38,7 @@ struct ChatPaneView: View {
     /// what a re-run costs to nothing at all. The transcript is rebuilt by neither now. See
     /// `ComposerRoom`.
     @State private var room = ComposerRoom()
+    @State private var sideOrigin: SideConversation.Snapshot?
 
     /// The conversation's text size, applied here because this pane is exactly what the setting is
     /// scoped to: what was said and what you are about to say. The sidebar, the inspector and the
@@ -83,6 +84,43 @@ struct ChatPaneView: View {
             ) {
                 ComposerView(transcript: transcript, model: model, room: room)
             }
+        }
+        .overlay(alignment: .topLeading) {
+            if let model, let origin = sideOrigin, transcript.session.sideConversationParentID == nil {
+                Button {
+                    model.paneStores.tabs.reveal(.chat(origin.parentID), in: model)
+                } label: {
+                    Label("From \(origin.title)", systemImage: "arrow.turn.up.left")
+                        .font(.caption)
+                        .padding(8)
+                        .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .disabled(!model.sessions.contains { $0.id == origin.parentID })
+                .padding(8)
+            }
+        }
+        .overlay {
+            if let model, let state = model.sideConversations[transcript.session.id], state.isVisible {
+                GeometryReader { geometry in
+                    let bottom = geometry.size.height - room.clearance >= 360 ? room.clearance + 8 : 8
+                    SideConversationView(parent: transcript, state: state, model: model)
+                        .frame(
+                            width: max(0, min(560, geometry.size.width - 24)),
+                            height: max(0, min(520, geometry.size.height - bottom - 12))
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        .padding(.trailing, 12)
+                        .padding(.bottom, bottom)
+                }
+            }
+        }
+        .task(id: transcript.session.id) {
+            sideOrigin = nil
+            guard let model else { return }
+            let origin = try? await model.store?.sideConversationSnapshot(sessionID: transcript.session.id)
+            guard !Task.isCancelled else { return }
+            sideOrigin = origin
         }
         .onGeometryChange(for: CGFloat.self) { PaneMeasure.room($0.size.height) } action: {
             room.height = $0

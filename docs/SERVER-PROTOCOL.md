@@ -1,10 +1,10 @@
 # Bloom server protocol
 
-This is the public client contract for Bloom Server protocol 13. A client can be written in any
+This is the public client contract for Bloom Server protocol 14. A client can be written in any
 language. It sends JSON requests to the owning server; it never opens the server's SQLite database.
 The same operations serve macOS, iPhone, iPad and other clients.
 
-The checked-in [JSON Schema](../Protocol/bloom-v13.schema.json) describes the envelopes, every
+The checked-in [JSON Schema](../Protocol/bloom-v14.schema.json) describes the envelopes, every
 operation and nested action, and the review/transcript framing. The
 [Python example](../Protocol/examples/bloom_client.py) uses the standard library and supports
 SSH and HTTPS. It makes only read-only requests. No server deployment or Swift runtime is needed
@@ -49,7 +49,7 @@ Authorization: Bearer <access-token>
 ```
 
 The body is exactly the same JSON envelope, without needing a trailing LF. Success and application
-failures both use HTTP 200 with a Bloom reply. The current gateway accepts protocol 13 only.
+failures both use HTTP 200 with a Bloom reply. The current gateway accepts protocols 12, 13 and 14. Older gateways that reject a newer hello before it reaches the runtime need a gateway update.
 It rejects HTTP redirects in native clients so bearer credentials cannot move to another origin.
 A custom client must also refuse redirects and verify TLS normally.
 
@@ -70,11 +70,11 @@ within one runtime. Deploy separate runtimes/accounts when that isolation is req
 This is a tagged JSON protocol, not JSON-RPC 2.0. There is no `jsonrpc`, `method` or `params` field.
 
 ```json
-{"version":13,"id":"00000000-0000-4000-8000-000000000001","operation":{"hello":{}}}
+{"version":14,"id":"00000000-0000-4000-8000-000000000001","operation":{"hello":{}}}
 ```
 
 ```json
-{"version":13,"id":"00000000-0000-4000-8000-000000000001","result":{"hello":{"name":"example-server"}}}
+{"version":14,"id":"00000000-0000-4000-8000-000000000001","result":{"hello":{"name":"example-server"}}}
 ```
 
 Each request contains `version`, a UUID `id`, and exactly one operation tag. Each reply contains
@@ -120,23 +120,23 @@ Other encoding rules:
 
 ## Version negotiation
 
-Current clients support versions 13 and 12. Version 13 adds `diagnostics`; the existing workspace
+Current clients support versions 14, 13 and 12. Version 14 adds the leased `uiBridge`; version 13 adds `diagnostics`; the existing workspace
 operations retain their version-12 encoding. This is an explicit compatibility exception, not a
 promise that any older or newer version is compatible.
 
-1. Send a read-only version-13 `hello` with a fresh UUID.
-2. Validate the reply ID. If the reply is version 13, require a successful `hello` with a `name`.
-3. Only if the reply is version 12 and its result is exactly
+1. Send a read-only version-14 `hello` with a fresh UUID.
+2. Validate the reply ID. If the reply is version 14, require a successful `hello` with a `name`.
+3. Only if the reply is version 12 or 13 and its result is exactly
    `{"failure":{"_0":"Incompatible Bloom server protocol. Update the client and server."}}`,
-   resend that same hello ID with version 12.
-4. Require a version-12 successful hello. Pin that version for this connection. Do not call
-   `diagnostics` on version 12.
+   resend that same hello ID with the version named by the reply.
+4. Require a successful hello at that exact version. Pin it for this connection. Do not call
+   `diagnostics` on version 12, or `uiBridge` below version 14.
 5. Refuse all other version mismatches and reconnect after a server upgrade.
 
 Never probe compatibility with a mutation. Never resend a mutation with a different wire version.
 [`RemoteWireSession`](../Packages/BloomClient/Sources/BloomClient/RemoteWireSession.swift) is the
 shared reference implementation. HTTPS gateways may reject a mismatched version with HTTP 400
-before a Bloom reply; the current gateway does not implement a version-12 endpoint.
+before a Bloom reply; the current gateway does not implement a version-12/13 endpoint.
 
 ## State, polling and review
 
@@ -229,8 +229,9 @@ for every operation. Names and field names are case-sensitive.
 
 | Operation | Fields inside case object | Successful result | Kind |
 | --- | --- | --- | --- |
+| `uiBridge` | `_0: UIBridgeOperation` | `uiBridge._0` | R |
 | `hello` | none | `hello: {name}` | R |
-| `diagnostics` | none, protocol 13 only | `diagnostics._0` | R |
+| `diagnostics` | none, protocol 13 or later | `diagnostics._0` | R |
 | `catalogue` | none | `catalogue._0` | R |
 | `creation` | `_0: CreationAction` | `creation._0` | mixed |
 | `previewAddress` | `_0: address` | `text._0` | R |
@@ -306,6 +307,7 @@ Wrap these inside `workspace.action` alongside the workspace ID.
 | `files` | none | `files._0` relative-path array | R |
 | `pullRequest` | none | `text._0` URL or empty string | R |
 | `runScripts` | none | `runScripts._0` array | R |
+| `browserAddress` | none | `text._0` resolved server-side preview URL | R |
 | `runScript` | configured script `id` | `terminalPane._0` | M |
 | `download` | relative `path` | `download._0: {path,data}` | R |
 | `writeFile` | `path`, `text`, last `revision` | `file._0` | M |
@@ -332,6 +334,37 @@ not background refresh operations.
 JSON value matching that agent's pending question. Use the agent request ID, not the transport
 request UUID. Permission modes and supported controls differ by agent. Read `composer` or the
 creation context and submit compatible server-advertised values through `setComposer`.
+
+## Agent requests to a client UI
+
+`uiBridge` lets a running server agent call the existing Bloom MCP tools against one connected
+client. Server-owned operations still run on the server. Pane, tab and browser actions are
+validated by the same workspace/role-scoped tool handlers and delivered to the selected UI.
+
+An attachment is explicit and belongs to one workspace and client:
+
+- `attach {workspaceID, clientID, actions}` advertises implemented action names and returns
+  `attached._0` containing a server-minted lease `{id, token, workspaceID, expiresAtMilliseconds}`.
+  Keep the original request UUID when retrying an uncertain attach. Another client cannot replace
+  an existing lease; detach it or allow it to expire first.
+- `poll {leaseID, token, wait}` returns `requests._0` containing a renewed lease and request list.
+  Each request has `{id, workspaceID, action: {name, arguments}, expiresAtMilliseconds}`.
+- `claim {leaseID, token, requestID}` returns `claimed._0` as a Boolean. Claim immediately before
+  executing each fetched action, and check the claim while an asynchronous action is running.
+  False means the request was cancelled or expired; do not execute it. Repeating a claim is
+  idempotent. A fetched batch alone is not permission to execute a later-cancelled action.
+- `respond {leaseID, token, requestID, result}` acknowledges one claimed request. A result has `text`,
+  `isError`, optional JSON `value` and optional Base64 `png`. Retry a lost result acknowledgement
+  with the same result; never perform the UI action twice.
+- `detach {leaseID, token}` gives up UI ownership. Stop polling when the workspace closes or the
+  app becomes inactive. Unavailable clients, unsupported actions and expired requests fail
+  explicitly rather than opening a window on another device.
+
+Lease and UI-request deadlines use **Unix milliseconds**, explicitly named in these fields.
+Existing domain-record dates still use the 2001 epoch described above. Lease tokens belong in
+connection memory, not logs or screenshots. UI replies must match the current workspace and lease.
+Browser tools retain their existing narrow scripts and approval rules; UI routing does not grant
+arbitrary JavaScript execution or broader access to another workspace.
 
 ## Delivery, retries and errors
 
@@ -450,7 +483,7 @@ python3 Protocol/verify.py /tmp/bloom-wire-vectors.json
 python3 -m unittest discover -s Protocol/examples -p 'test_*.py'
 ```
 
-The checked-in [vectors](../Protocol/vectors-v13.json) contain only synthetic identifiers and data.
+The checked-in [vectors](../Protocol/vectors-v14.json) contain only synthetic identifiers and data.
 The verifier also compares freshly encoded values with these examples so encoding drift requires
 reviewing and updating the published samples. The vector test includes unnamed/nested enums, optional omission, opaque IDs, Base64 bytes and the
 2001 date epoch. The verifier checks every vector against the schema and checks that the schema

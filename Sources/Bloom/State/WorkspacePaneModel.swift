@@ -5,6 +5,7 @@ import BloomCore
 /// The existing tab and pane system talks to this interface. Execution stays with its host.
 @MainActor
 protocol WorkspacePaneModel: WorkspaceFileReview, Observable {
+    var browserReviews: [String: BrowserRegionCapture] { get set }
     var sessions: [Session] { get set }
     var activeSessionID: SessionID? { get set }
     var activeSession: Session? { get }
@@ -41,7 +42,17 @@ extension WorkspacePaneModel {
 
     var browserAddressResolver: (@MainActor (String) async throws -> String)? {
         guard let server = remoteServer else { return nil }
-        return { try await server.forwardedAddress($0) }
+        let identity = paneStores.identity
+        return { [weak server] address in
+            guard let server, server.paneStores.identity == identity else {
+                throw ServerFailure("Reconnect to this browser’s server before opening its preview.")
+            }
+            let resolved = try await server.forwardedAddress(address)
+            guard server.paneStores.identity == identity else {
+                throw ServerFailure("The server connection changed while opening this preview.")
+            }
+            return resolved
+        }
     }
 
     @discardableResult func createSession(title: String? = nil, controls: ComposerControls? = nil, draft: String = "") async -> Session? {

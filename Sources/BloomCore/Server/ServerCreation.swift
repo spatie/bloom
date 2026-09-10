@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 public enum ServerCreationOperation: Codable, Sendable, Equatable {
     case githubRepositories(query: String, page: Int)
@@ -32,23 +33,8 @@ public struct ServerProjectInspection: Codable, Sendable {
     public var completions: [String]
 }
 
-public struct ServerWorkspaceContext: Codable, Sendable {
-    public var branches: [String]
-    public var branchPrefix: String?
-    public var hasSetupScript: Bool
-    public var composer: ServerComposerState
-    public var files: [String]
-}
-
-public struct ServerInitialAttachment: Codable, Sendable, Equatable {
-    public var sourcePath: String
-    public var name: String
-    public var data: Data
-
-    public init(sourcePath: String, name: String, data: Data) {
-        self.sourcePath = sourcePath; self.name = name; self.data = data
-    }
-}
+public typealias ServerWorkspaceContext = BloomClient.RemoteWorkspaceContext
+public typealias ServerInitialAttachment = BloomClient.ServerInitialAttachment
 
 public enum ServerCreationResult: Codable, Sendable {
     case workspaceStarted(workspace: Workspace, session: Session?, setupSucceeded: Bool?, draft: String?)

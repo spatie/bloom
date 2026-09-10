@@ -1,6 +1,6 @@
 # Shared clients and a public Bloom protocol
 
-Status and direction, 10 September 2026. Shared review state, composer choices, transcript/review content and native iPad panes are implemented on this branch. The current wire contract is documented in [SERVER-PROTOCOL.md](SERVER-PROTOCOL.md), with schemas and an executable Python client under `Protocol/`. Generated application DTOs, a new public envelope and full feature parity remain future work.
+Status and direction, 10 September 2026. Shared review state, composer choices, typed creation, transcript projection, tool presentation, native terminals and leased agent UI actions are implemented on this branch. The current wire contract is documented in [SERVER-PROTOCOL.md](SERVER-PROTOCOL.md), with schemas and an executable Python client under `Protocol/`. Generated application DTOs, a new public envelope and full feature parity remain future work.
 
 Keep one repository and one set of feature rules. Share reusable presentation between Apple apps, with native navigation, editing, tables, menus, browser and window behaviour. A web client should consume the same server capabilities through a generated TypeScript client; it needs its own web presentation.
 
@@ -36,17 +36,41 @@ Review state is now shared. `WorkspaceReviewStore` owns revision invalidation, c
 
 Composer values and decisions now live in BloomClient: controls, backend/model identity, model catalogues, supported reasoning levels, permission vocabulary, output styles and context choices. Mac's native picker and the iOS native option form consume those same decisions. `RemoteComposerStore` loads acknowledged server settings and preserves the command ID when an uncertain save is retried. Changing agent backends opens the session created by the server instead of continuing to send into the old conversation. Codex fast mode is hidden because the runner does not implement it.
 
-Creation remains the next extraction. iOS still walks raw JSON in `RemoteWorkspaceService.workspaceCommand` and exposes fewer branch, attachment and start-mode choices than Mac. Its create form now accurately requires a prompt. Move typed creation choices and validation behind the shared service before expanding both native forms.
+Creation now uses typed shared contexts for GitHub repositories, project inspection, branches/checkouts,
+agent controls and start modes. The server delegates to the same project/workspace creation rules
+as the Mac. The iPhone/iPad forms consume those contexts and persist uncertain creation commands
+with their original identities. Chat, terminal and browser starts use the existing native workspace
+shell instead of separate remote-only navigation.
 
-Then consolidate conversation state. Shared markdown cannot make queue controls, approvals or tool results appear automatically. `RemoteTranscript` currently omits some of the server's queue/permission projections, and `RemoteMessage.text` flattens rich payloads. A shared conversation store should expose typed turns, tools, queued messages, approval requests and connection states. Each shell renders the capabilities it supports and explains unavailable ones.
+Transcript visibility, tool-result pairing and tool presentation now live in BloomClient. Both
+Apple apps retain full raw buffers and sequence cursors while projecting a readable conversation
+with stable message identities. Agent decoding and normalisation remain canonical in BloomCore,
+used by local execution and the server. A client does not need to reverse-engineer a second agent
+output parser. Native selection, scrolling, text editing and sheets remain platform responsibilities.
 
-Command recovery belongs in the shared layer too. iOS persists uncertain message sends, but creation intentions are still held in memory; Mac also has in-memory uncertain-request state. Keep a durable command identity and explicit pending, acknowledged, rejected or unknown outcome. A crash between a server side effect and its receipt remains uncertain. Neither UUIDs nor retries promise exactly-once execution.
+The shared RemoteUIClientSession owns attach/poll/claim/respond/detach, deadlines and at-most-once
+UI action handling. Native routers advertise implemented actions and use the same pane naming,
+layout and narrow browser scripts. A cancelled batch item must be claimed again immediately before
+execution. WebKit callback adapters share cancellation handling rather than leaving native requests
+hung after a deadline. macOS pane stores are scoped per server connection, preserving local defaults
+and preventing copied workspace IDs from sharing tabs or live browser sessions.
 
-For external clients, publish a real contract rather than requiring people to read Swift enums. The current protocol is already ordinary JSON over SSH and HTTPS, so other languages can use it. Its weaknesses are the implicit Swift-associated-value shapes such as `_0`, opaque/base64 payloads, string-only failures, and limited wire-version negotiation (the Apple client now knows v12 and v13). That is not a stable public SDK boundary yet.
+SwiftTerm provides native terminal interaction on both Apple platforms. BloomClient defines the
+terminal connection interface; BloomSSH and the HTTPS adapter carry identical stream frames.
+The server owns the shell and tmux session, so closing a client does not close the process. Linux
+process launch policy is shared by Git, Shell and agent streaming, including signal-mask handling.
+
+Command recovery belongs in the shared layer. Message sends and creation use durable command
+identities, and the server records mutation receipts. A crash between an external side effect and
+its receipt remains uncertain. Neither UUIDs nor retries promise exactly-once execution. Further
+conversation-state consolidation should preserve native lifecycle behaviour and cover queue controls,
+approvals, attachments and error recovery with shared tests before replacing either adapter.
+
+For external clients, publish a real contract rather than requiring people to read Swift enums. The current protocol is already ordinary JSON over SSH and HTTPS, so other languages can use it. Its weaknesses are the implicit Swift-associated-value shapes such as `_0`, opaque/base64 payloads, string-only failures, and limited wire-version negotiation (the Apple clients now know v12, v13 and v14). That is not a stable public SDK boundary yet.
 
 Use a canonical, versioned JSON Schema description for commands, replies and events. Give every operation an explicit name and named fields, document nullability, timestamp formats, safe numeric ranges and path semantics, and define structured errors. The same operations and handlers must serve SSH and HTTPS. There is no need for a second REST implementation with separate behaviour.
 
-Document the HTTPS binding with OpenAPI 3.1 and references to those schemas. OpenAPI describes HTTP, not SSH framing. Apple provides a generator for Swift HTTP clients/server interfaces, and currently lists 3.0/3.1 support with preliminary 3.2 support. Start with a small generated Swift and TypeScript client covering catalogue, changes and one mutation before choosing the final generator configuration. A single generic RPC route may still need a thin typed service wrapper; generation does not produce business rules or native UI. [OpenAPI](https://spec.openapis.org/oas/v3.1.2.html), [Swift OpenAPI Generator](https://github.com/apple/swift-openapi-generator)
+Document the HTTPS binding with OpenAPI 3.1 and references to those schemas. OpenAPI describes HTTP, not SSH framing. Apple provides Swift OpenAPI Generator for typed HTTP clients and server interfaces. Start with a small generated Swift and TypeScript client covering catalogue, changes and one mutation before choosing the final generator configuration. A single generic RPC route may still need a thin typed service wrapper; generation does not produce business rules or native UI. [OpenAPI](https://spec.openapis.org/oas/v3.1.2.html), [Swift OpenAPI Generator](https://github.com/apple/swift-openapi-generator)
 
 Do not label the existing wire format JSON-RPC 2.0: it does not implement that envelope. If we choose that standard during a public-wire migration, OpenRPC is the corresponding method-description standard. That is an explicit migration decision, not a prerequisite for documenting today's protocol. [JSON-RPC 2.0](https://www.jsonrpc.org/specification), [OpenRPC](https://spec.open-rpc.org/)
 
@@ -61,6 +85,6 @@ The contract must cover behaviour as well as shapes:
 
 A browser cannot use the native SSH transport directly. It should connect through authenticated HTTPS. Prefer a same-origin web deployment initially and deliberately define browser sessions, CSRF/origin checks and reconnect behaviour. Keep agent-control credentials separate from workspace preview origins, as the existing gateway already requires.
 
-Roll this out incrementally. Continue from the shared review and composer stores into creation state, keeping both Apple clients building in each change. Maintain the current v13 wire examples and their behaviour in contract tests. Then add generated wire types and the explicit public envelope behind a compatibility adapter to the existing runtime. Keep legacy clients working during a documented transition; do not replace v13 silently.
+Roll this out incrementally. Keep both Apple clients building while extracting remaining conversation state. Maintain the current v14 wire examples and the v12/v13 compatibility cases in contract tests. Then add generated wire types and the explicit public envelope behind a compatibility adapter to the existing runtime. Keep legacy clients working during a documented transition; do not replace v13 silently.
 
 For each feature, review the server contract, shared state and presentation independently. Add a parity row for Mac local, Mac remote, iPhone and iPad, with deliberate unsupported cases. Shared tests prove feature behaviour; native smoke tests prove each shell exposes it. Adding a reusable component can reach both Apple apps automatically. A new Mac window, terminal integration or platform permission still needs an intentional mobile counterpart.

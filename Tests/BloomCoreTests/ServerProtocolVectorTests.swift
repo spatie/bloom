@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import BloomClient
 @testable import BloomCore
 
 /// These vectors come from the production Codable types, not a second hand-written wire codec.
@@ -12,13 +13,19 @@ struct ServerProtocolVectorTests {
         let session = Session(id: sessionID, workspaceID: workspace, model: "example-model", effort: "medium", createdAt: epoch, updatedAt: epoch)
         let message = Message(id: 7, sessionID: sessionID, seq: 1, kind: .assistantText,
                               payload: Data("{\"text\":\"Hello\\nworld\"}".utf8), createdAt: epoch)
+        let lease = RemoteUILease(id: id, token: "example-ui-lease", workspaceID: workspace, expiresAtMilliseconds: 1_800_000_030_000)
+        let uiRequest = RemoteUIRequest(id: id, workspaceID: workspace, action: RemoteUIAction(name: "pane_open", arguments: .object(["kind": .string("browser"), "url": .string("http://localhost:3000")])), expiresAtMilliseconds: 1_800_000_020_000)
         let operations: [(String, ServerOperation)] = [
+            ("uiAttach", .uiBridge(.attach(workspaceID: workspace, clientID: id, actions: ["pane_open"]))),
+            ("uiClaim", .uiBridge(.claim(leaseID: id, token: lease.token, requestID: id))),
+            ("uiRespond", .uiBridge(.respond(leaseID: id, token: lease.token, requestID: id, result: .init(text: "Opened Browser")))),
             ("hello", .hello), ("catalogue", .catalogue),
             ("transcript", .transcript(sessionID: sessionID, afterSeq: 0)),
             ("snapshot", .reviewSnapshot(workspaceID: workspace, scope: .branch, knownRevision: nil, wait: true)),
             ("patch", .reviewPatch(workspaceID: workspace, path: "README.md", scope: .uncommitted, knownRevision: "revision-1")),
             ("file", .file(workspaceID: workspace, path: "README.md")),
             ("files", .workspace(workspaceID: workspace, action: .files)),
+            ("browserAddress", .workspace(workspaceID: workspace, action: .browserAddress)),
             ("upload", .workspace(workspaceID: workspace, action: .uploadFile(name: "note.txt", data: Data([0, 1, 255])))),
             ("clearColour", .workspace(workspaceID: workspace, action: .setColour(nil))),
             ("settings", .project(repoID: RepoID("repo-example"), action: .settings)),
@@ -26,11 +33,15 @@ struct ServerProtocolVectorTests {
             ("answer", .answer(sessionID: sessionID, requestID: "ask-example", answer: .question(input: .object(["choice": .string("yes")]))))
         ]
         let results: [(String, ServerResult)] = [
+            ("uiAttached", .uiBridge(.attached(lease))),
+            ("uiClaimed", .uiBridge(.claimed(true))),
+            ("uiRequests", .uiBridge(.requests(.init(lease: lease, requests: [uiRequest])))),
             ("hello", .hello(name: "example-server")), ("accepted", .accepted), ("failure", .failure("Example refusal")),
             ("snapshot", .reviewSnapshot(.init(revision: "revision-1", files: [.init(path: "README.md", change: .modified, additions: 2, deletions: 1)]))),
             ("unchangedSnapshot", .reviewSnapshot(.init(revision: "revision-1", files: nil))),
             ("unchangedPatch", .reviewPatch(.init(revision: "revision-1", patch: nil))),
             ("file", .file(.init(path: "README.md", text: "# Hello\n"))),
+            ("browserAddress", .text("http://localhost:8000/admin")),
             ("download", .download(.init(path: "note.txt", data: Data([0, 1, 255])))),
             ("transcript", .transcript(.init(session: session, messages: [message], pendingQuestions: [Data("{}".utf8)], isBusy: false,
                                            streamingText: "", permissionDecisions: [:], queuedPrompts: [], queueError: nil)))

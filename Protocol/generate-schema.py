@@ -43,7 +43,7 @@ R = ref("DomainRecord")
 SCOPE = {"enum": ["branch", "uncommitted"]}
 workspace_actions = {
     "rename": payload(S), "setPinned": payload(B), "setUnread": payload(B), "setColour": obj({"_0": optional(S)}, []),
-    **{name: obj() for name in ["runSetup", "archivePreview", "restore", "files", "pullRequest", "runScripts", "push", "notes"]},
+    **{name: obj() for name in ["runSetup", "archivePreview", "restore", "files", "pullRequest", "runScripts", "browserAddress", "push", "notes"]},
     "archive": obj({"confirmation": U}), "runScript": obj({"id": S}), "download": obj({"path": S}),
     "writeFile": obj({"path": S, "text": S, "revision": S}), "uploadFile": obj({"name": S, "data": D}),
     "commit": obj({"message": S}), "createPullRequest": obj({"title": S, "body": S, "draft": B}),
@@ -61,11 +61,20 @@ creation_actions = {
 }
 answers = {name: obj() for name in ["allowOnce", "allowSession", "allowProject", "deny"]}
 answers.update({"denyWithReason": obj({"message": S, "endsTurn": B}), "approvePlan": obj({"mode": S}), "question": obj({"input": {}})})
+ui_operations = {
+    "attach": obj({"workspaceID": S, "clientID": U, "actions": array(S)}),
+    "poll": obj({"leaseID": U, "token": S, "wait": B}),
+    "claim": obj({"leaseID": U, "token": S, "requestID": U}),
+    "respond": obj({"leaseID": U, "token": S, "requestID": U, "result": ref("UIActionResult")}),
+    "detach": obj({"leaseID": U, "token": S}),
+}
+ui_results = {"attached": payload(ref("UILease")), "requests": payload(ref("UIBatch")), "accepted": obj(), "claimed": payload(B)}
 operations = {
     **{name: obj() for name in ["hello", "diagnostics", "catalogue"]},
     "reviewSnapshot": obj({"workspaceID": S, "scope": SCOPE, "knownRevision": optional(S), "wait": B}, ["workspaceID", "scope", "wait"]),
     "reviewPatch": obj({"workspaceID": S, "path": S, "scope": SCOPE, "knownRevision": optional(S)}, ["workspaceID", "path", "scope"]),
     "creation": payload(ref("CreationAction")), "previewAddress": payload(S),
+    "uiBridge": payload(ref("UIBridgeOperation")),
     "terminalStream": obj({"workspaceID": S, "name": S}), "project": obj({"repoID": S, "action": ref("ProjectAction")}),
     **{name: obj({"sessionID": S}) for name in ["composer", "closeSession", "stop"]},
     "setComposer": obj({"sessionID": S, "controls": ref("ComposerControls")}), "markRead": obj({"sessionID": S, "seq": I}),
@@ -84,6 +93,7 @@ message = obj({"id": I, "sessionID": S, "seq": I, "kind": S, "payload": D, "crea
                "durationMS": optional(I), "refID": optional(S)}, ["id", "sessionID", "seq", "kind", "payload", "createdAt"], True)
 results = {
     "hello": obj({"name": S}), "accepted": obj(), "failure": payload(S),
+    "uiBridge": payload(ref("UIBridgeResult")),
     **{name: payload(S) for name in ["patch", "text"]}, "changes": payload(array(ref("ChangedFile"))),
     "files": payload(array(S)), "file": payload(ref("TextFile")), "download": payload(obj({"path": S, "data": D})),
     "reviewSnapshot": payload(obj({"revision": S, "files": optional(array(ref("ChangedFile")))}, ["revision"])),
@@ -121,7 +131,8 @@ def build():
         example_version = int(re.search(r"^VERSION = (\d+)$", example.read_text(), re.M).group(1))
         if example_version != VERSION:
             raise SystemExit("Update the standalone Python example to BloomWire.version")
-    inventories = [("Sources/BloomCore/Server/ServerProtocol.swift", "ServerOperation", operations),
+    inventories = [("Packages/BloomClient/Sources/BloomClient/Bridge/RemoteUIBridge.swift", "RemoteUIBridgeOperation", ui_operations),
+                   ("Packages/BloomClient/Sources/BloomClient/Bridge/RemoteUIBridge.swift", "RemoteUIBridgeResult", ui_results), ("Sources/BloomCore/Server/ServerProtocol.swift", "ServerOperation", operations),
                    ("Sources/BloomCore/Server/ServerProtocol.swift", "ServerResult", results),
                    ("Sources/BloomCore/Server/ServerProtocol.swift", "ServerAnswer", answers),
                    ("Sources/BloomCore/Server/ServerWorkspaceAction.swift", "ServerWorkspaceAction", workspace_actions),
@@ -162,6 +173,12 @@ def build():
                                          "outputStyle": S, "codexContextWindow": I, "hasWorktree": B}, extra=True),
                 "ComposerState": obj({"controls": ref("ComposerControls"), "models": array(R), "commands": array(R), "styles": array(R),
                                       "availableAgents": optional(array(S))}, ["controls", "models", "commands", "styles"], True),
+                "UIBridgeOperation": cases(ui_operations), "UIBridgeResult": cases(ui_results),
+                "UILease": obj({"id": U, "token": S, "workspaceID": S, "expiresAtMilliseconds": I}),
+                "UIAction": obj({"name": S, "arguments": {"type": "object"}}),
+                "UIRequest": obj({"id": U, "workspaceID": S, "action": ref("UIAction"), "expiresAtMilliseconds": I}),
+                "UIBatch": obj({"lease": ref("UILease"), "requests": array(ref("UIRequest"))}),
+                "UIActionResult": obj({"text": S, "isError": B, "value": {}, "png": optional(D)}, ["text", "isError"]),
                 "DomainRecord": {"type": "object", "description": "Application record or tagged application enum, preserved without reinterpretation. See source map in docs/SERVER-PROTOCOL.md.", "additionalProperties": True},
             }}
 

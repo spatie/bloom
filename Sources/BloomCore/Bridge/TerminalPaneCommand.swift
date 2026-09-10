@@ -1,3 +1,4 @@
+import BloomClient
 import Foundation
 
 /// Reading and driving one terminal tab in the caller's own workspace.
@@ -21,29 +22,7 @@ public enum TerminalBridgeCommand: Sendable, Equatable {
     }
 }
 
-public enum TerminalKey: String, Sendable, Equatable, CaseIterable {
-    case enter
-    case controlC = "control-c"
-    case tab
-    case escape
-    case up
-    case down
-    case left
-    case right
-
-    public var bytes: [UInt8] {
-        switch self {
-        case .enter: [13]
-        case .controlC: [3]
-        case .tab: [9]
-        case .escape: [27]
-        case .up: Array("\u{1b}[A".utf8)
-        case .down: Array("\u{1b}[B".utf8)
-        case .right: Array("\u{1b}[C".utf8)
-        case .left: Array("\u{1b}[D".utf8)
-        }
-    }
-}
+public typealias TerminalKey = BloomClient.TerminalKey
 
 public enum TerminalPaneAnswer: Sendable, Equatable {
     case told(String)
@@ -69,17 +48,7 @@ public struct TerminalStartOrder: Sendable, Equatable {
     }
 }
 
-public struct TerminalPaneReport: Sendable, Equatable {
-    public var number: Int
-    public var name: String
-    public var isLive: Bool
-
-    public init(number: Int, name: String, isLive: Bool) {
-        self.number = number
-        self.name = name
-        self.isLive = isLive
-    }
-}
+public typealias TerminalPaneReport = BloomClient.TerminalPaneReport
 
 public enum TerminalPaneToolName {
     public static let start = "terminal_start"

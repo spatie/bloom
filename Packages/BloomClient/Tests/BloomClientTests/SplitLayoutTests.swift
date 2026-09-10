@@ -1,7 +1,9 @@
 import Testing
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 import Foundation
-@testable import BloomCore
+@testable import BloomClient
 
 @Suite("SplitLayout")
 struct SplitLayoutTests {

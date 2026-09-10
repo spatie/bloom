@@ -10,8 +10,23 @@ actor ServerPromptQueue {
     private var tasks: [SessionID: Task<Void, Never>] = [:]
     private var errors: [SessionID: String] = [:]
     private var closed = false
+    private var endings: [SessionID: CrewTurnEnd] = [:]
+    private let settled: @Sendable (SessionID, CrewTurnEnd) async -> Void
 
-    init(store: Store, load: @escaping LoadSession) { self.store = store; self.load = load }
+    init(store: Store, load: @escaping LoadSession,
+         settled: @escaping @Sendable (SessionID, CrewTurnEnd) async -> Void = { _, _ in }) {
+        self.store = store; self.load = load; self.settled = settled
+    }
+
+    func turnEnded(_ id: SessionID, ending: CrewTurnEnd) async {
+        guard !closed else { return }
+        endings[id] = ending
+        if ending.isFailure {
+            errors[id] = ending.summary
+            try? await store.setSetting(pauseKey(id), "true")
+        }
+        start(id)
+    }
 
     func restore() async throws {
         for workspace in try await store.workspaces() {
@@ -24,12 +39,22 @@ actor ServerPromptQueue {
     }
 
     func enqueue(_ text: String, sessionID: SessionID) async throws {
+        try await enqueue(Delivery(targetSessionID: sessionID, body: text), resumesPausedQueue: true)
+    }
+
+    func enqueue(_ delivery: Delivery, resumesPausedQueue: Bool = false) async throws {
         guard !closed else { throw ServerFailure("The server is shutting down.") }
-        _ = try await store.enqueueDelivery(Delivery(targetSessionID: sessionID, body: text))
-        try await store.setSetting(pauseKey(sessionID), "false")
-        errors.removeValue(forKey: sessionID)
+        let sessionID = delivery.targetSessionID
+        _ = try await store.enqueueDelivery(delivery)
+        if resumesPausedQueue {
+            try await store.setSetting(pauseKey(sessionID), "false")
+            errors.removeValue(forKey: sessionID)
+        }
         start(sessionID)
     }
+
+    /// A shared Store transaction already inserted this conversation and its initial brief.
+    func resumeStoredDeliveries(_ id: SessionID) async throws { try await restartIfPending(id) }
 
     func snapshot(_ id: SessionID) async throws -> ([ServerQueuedPrompt], String?) {
         let pending = try await store.pendingDeliveries(sessionID: id)
@@ -71,6 +96,7 @@ actor ServerPromptQueue {
         guard tasks[id] == nil, !closed else { return }
         tasks[id] = Task {
             await self.drain(id)
+            await self.settleTurn(id)
             // An enqueue can arrive while the final empty read is returning from Store.
             // Recheck after releasing the task slot so that delivery cannot be stranded.
             try? await self.restartIfPending(id)
@@ -84,10 +110,17 @@ actor ServerPromptQueue {
         start(id)
     }
 
+    private func settleTurn(_ id: SessionID) async {
+        guard !closed, let ending = endings.removeValue(forKey: id) else { return }
+        await settled(id, ending)
+    }
+
     private func drain(_ id: SessionID) async {
         defer { tasks.removeValue(forKey: id) }
         do {
-            while !Task.isCancelled, !closed, let delivery = try await store.pendingDeliveries(sessionID: id).first {
+            while !Task.isCancelled, !closed, errors[id] == nil,
+                  try await store.setting(pauseKey(id)) != "true",
+                  let delivery = try await store.pendingDeliveries(sessionID: id).first {
                 if let receipt = try await store.setting(key(delivery)) {
                     if receipt == "delivered" { try await store.markDelivered(id: delivery.id); continue }
                     errors[id] = "A previous delivery has an uncertain outcome. Check the conversation, then remove that queued message before continuing."
@@ -99,11 +132,16 @@ actor ServerPromptQueue {
                     try await Task.sleep(for: .milliseconds(200))
                     continue
                 }
+                // An error or Stop can arrive while loading/observing the live session. Its
+                // pause must win even when that session has just become idle.
+                guard errors[id] == nil, try await store.setting(pauseKey(id)) != "true" else { return }
                 try Task.checkCancellation()
                 try await store.setSetting(key(delivery), "started")
+                // This followup supersedes a completed turn. A failure pauses above instead.
+                endings.removeValue(forKey: id)
                 do {
                     // Cancelling the drain pauses the queue, not a runner halfway through launch.
-                    let send = Task { try await live.send(delivery.sent) }
+                    let send = Task { try await live.send(delivery.sent, recording: delivery.crewPayload) }
                     try await send.value
                     try await store.setSetting(key(delivery), "delivered")
                     try await store.markDelivered(id: delivery.id)
@@ -113,7 +151,11 @@ actor ServerPromptQueue {
                 }
             }
         } catch {
-            if !Task.isCancelled { errors[id] = error.localizedDescription }
+            if !Task.isCancelled {
+                errors[id] = error.localizedDescription
+                if endings[id] == nil { endings[id] = .failed(error.localizedDescription) }
+                try? await store.setSetting(pauseKey(id), "true")
+            }
         }
     }
 }

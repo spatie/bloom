@@ -9,6 +9,7 @@ import BloomClient
 @Observable
 final class ServerReviewModel {
     var files: [ChangedFile] { store?.changes ?? [] }
+    var reviewFiles: [ChangedFile] { store?.orderedChanges ?? [] }
     var allFiles: [String] { store?.paths ?? [] }
     var hasReadFiles: Bool { store?.hasLoaded ?? false }
     var contentGeneration: Int { store?.contentGeneration ?? 0 }

@@ -136,9 +136,9 @@ struct TranscriptRowView: View, Equatable {
 
         case .toolUse:
             if let use = toolUse {
-                if home.remoteWorkspaceID == nil, let media = successfulMediaRequest(use) {
+                if let media = successfulMediaRequest(use) {
                     MediaShowRowView(request: media, home: home)
-                } else if home.remoteWorkspaceID == nil, let image = successfulCodexImageRequest(use) {
+                } else if let image = successfulCodexImageRequest(use) {
                     MediaShowRowView(
                         request: MediaShowRequest(path: image.path),
                         home: home,

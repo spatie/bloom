@@ -198,9 +198,9 @@ final class RepoSettingsModel {
         Array(Set(edits.map { destination(for: $0.key) })).sorted()
     }
 
-    func save() async {
+    func save() async -> Bool {
         let pending = edits
-        guard isLoaded, !isSaving, !pending.isEmpty else { return }
+        guard isLoaded, !isSaving, !pending.isEmpty else { return false }
         isSaving = true
         defer { isSaving = false }
         let path = repo.path
@@ -216,7 +216,7 @@ final class RepoSettingsModel {
                 apply(snapshot.settings)
                 scheduleResolve(immediately: true)
                 saveError = nil
-                return
+                return true
             }
             savedPaths = try await Task.detached {
                 try SettingsWriter.write(pending, repo: path, settings: settings)
@@ -226,9 +226,10 @@ final class RepoSettingsModel {
             let message = error.readableMessage
             if remote != nil { await refresh() }
             saveError = message
-            return
+            return false
         }
 
         await load()
+        return true
     }
 }

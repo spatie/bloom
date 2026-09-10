@@ -56,7 +56,7 @@ struct ToolPaneView<Model: WorkspacePaneModel>: View {
                             repo: model.repo,
                             port: model.port,
                             directory: tab.directory,
-                            onCloseTab: { Task { await CenterTabStore.shared.close(tab) } },
+                            onCloseTab: { Task { await model.paneStores.center.close(tab) } },
                             splitColumn: splitColumn
                         )
                         .id(tab.id)
@@ -76,7 +76,7 @@ struct ToolPaneView<Model: WorkspacePaneModel>: View {
             .task(id: tab.id) { await prepareTerminal() }
 
         case .browser:
-            BrowserTabView(model: model, tab: tab, paneMenu: paneMenu)
+            BrowserTabView(model: model, tab: tab, paneMenu: paneMenu, siblings: siblings)
                 .id(tab.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 

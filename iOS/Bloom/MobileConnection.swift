@@ -17,6 +17,7 @@ final class MobileConnection {
     private var sshConnection: SSHConnection?
     private var sshConfiguration: SSHConfiguration?
     private var previewLeases: [UUID: MobilePreviewLease] = [:]
+    private var terminals: [UUID: (WorkspaceID, String, any RemoteTerminalConnection)] = [:]
     private var generation = 0
     private var refreshTask: Task<Void, Never>?
 
@@ -95,9 +96,42 @@ final class MobileConnection {
         let leases = Array(previewLeases.values)
         previewLeases.removeAll()
         leases.forEach { $0.close() }
+        let terminals = self.terminals.values.map { $0.2 }
+        self.terminals.removeAll()
+        Task { for terminal in terminals { await terminal.close() } }
         service = nil
         catalogue = nil
         changed?()
+    }
+
+    func openTerminal(workspaceID: WorkspaceID, name: String) async throws -> any RemoteTerminalConnection {
+        guard let service else { throw ConnectionFailure("Reconnect to this server to open a terminal.") }
+        guard !name.isEmpty, name.utf8.count <= 64,
+              name.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 95 }) else {
+            throw ConnectionFailure("Use a valid terminal name.")
+        }
+        let generation = generation
+        let remote: any RemoteTerminalConnection
+        if let configuration = sshConfiguration {
+            let result = try await service.client.request(.call("terminalStream", ["workspaceID": .string(workspaceID.rawValue), "name": .string(name)]))
+            guard let path = result["text"]?["_0"]?.stringValue else { throw ConnectionFailure("The server did not open a terminal stream.") }
+            guard let fingerprint = try SSHCredentials.fingerprint(for: configuration.hostIdentity) else { throw ConnectionFailure("Verify this server's SSH fingerprint before opening a terminal.") }
+            remote = try await SSHTerminalConnection.open(configuration: configuration, privateKey: SSHCredentials.identity(), fingerprint: fingerprint, socketPath: path)
+        } else if let connection {
+            remote = try await HTTPSTerminalConnection.open(connection: connection, workspaceID: workspaceID.rawValue, name: name)
+        } else { throw ConnectionFailure("This connection does not support interactive terminals.") }
+        guard generation == self.generation, !Task.isCancelled else { await remote.close(); throw CancellationError() }
+        let id = UUID()
+        let managed = MobileTerminalLease(id: id, connection: remote) { [weak self] id in self?.terminals[id] = nil }
+        terminals[id] = (workspaceID, name, managed)
+        return managed
+    }
+
+    func closeTerminal(workspaceID: WorkspaceID, name: String) async throws {
+        guard let service else { throw ConnectionFailure("Reconnect to this server to end a terminal.") }
+        for (_, entry) in terminals where entry.0 == workspaceID && entry.1 == name { await entry.2.close() }
+        _ = try await service.client.request(.call("workspace", ["workspaceID": .string(workspaceID.rawValue),
+            "action": .object(["closeTerminal": .object(["name": .string(name)])])]))
     }
 
     /// Loopback addresses name the server's interface, never another device on its network.
@@ -135,7 +169,7 @@ final class MobileConnection {
                 await tunnel.close()
                 throw ConnectionFailure("Could not create the local preview address.")
             }
-            let lease = MobilePreviewLease(url: url, tunnel: tunnel)
+            let lease = MobilePreviewLease(url: url, sourceURL: input, tunnel: tunnel)
             retain(lease)
             return lease
         }
@@ -173,13 +207,15 @@ final class MobileConnection {
 final class MobilePreviewLease {
     let id = UUID()
     let url: URL
+    let sourceURL: URL
     private(set) var isClosed = false
     var onRevoked: (() -> Void)?
     fileprivate var didClose: ((UUID) -> Void)?
     private let tunnel: SSHPreviewTunnel?
 
-    fileprivate init(url: URL, tunnel: SSHPreviewTunnel? = nil) {
+    fileprivate init(url: URL, sourceURL: URL? = nil, tunnel: SSHPreviewTunnel? = nil) {
         self.url = url
+        self.sourceURL = sourceURL ?? url
         self.tunnel = tunnel
     }
 
@@ -188,6 +224,13 @@ final class MobilePreviewLease {
     func allowsHTTP(_ target: URL) -> Bool {
         !isClosed && isTunnel && target.scheme?.lowercased() == "http" && target.host == "127.0.0.1"
             && target.port == url.port && target.user == nil && target.password == nil
+    }
+
+    func reportedURL(_ actual: URL) -> URL {
+        guard allowsHTTP(actual), var components = URLComponents(url: actual, resolvingAgainstBaseURL: false) else { return actual }
+        components.host = sourceURL.host
+        components.port = sourceURL.port
+        return components.url ?? sourceURL
     }
 
     func close() {

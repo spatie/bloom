@@ -335,19 +335,7 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
 
 /// What a chat is doing. `CaseIterable` so `Store.resetRunningSessions` can build its `WHERE`
 /// clause out of `SessionLifecycle`'s table instead of restating it in SQL.
-public enum SessionState: String, Sendable, Codable, CaseIterable, Hashable {
-    case idle
-    case running
-    /// The agent asked to do something and is holding its turn open until somebody answers.
-    ///
-    /// Distinct from `running` because it is the opposite of running: the process is alive, the
-    /// clock is going, and no work is happening. The CLI puts no timer on the question, so this
-    /// state ends when a person ends it. A session in it is the one thing in Bloom that gets
-    /// worse the longer it is left alone.
-    case waiting
-    case failed
-    case cancelled
-}
+public typealias SessionState = BloomClient.SessionState
 
 /// The rows in the composer's permission picker.
 ///
@@ -377,6 +365,9 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     ///
     /// Nil for every chat the owner made, which is nearly all of them.
     public var parentSessionID: SessionID?
+    /// A temporary conversation opened by the owner, separate from agent-created crew.
+    /// Cleared when kept as a regular chat; its context retains the link to the origin.
+    public var sideConversationParentID: SessionID?
     public var title: String
     public var agentSessionID: String?
     public var model: String
@@ -431,6 +422,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         id: SessionID = .new(),
         workspaceID: WorkspaceID?,
         parentSessionID: SessionID? = nil,
+        sideConversationParentID: SessionID? = nil,
         title: String = PaneNaming.chat,
         agentSessionID: String? = nil,
         model: String = AppDefaults.fallbackModel,
@@ -451,6 +443,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         self.id = id
         self.workspaceID = workspaceID
         self.parentSessionID = parentSessionID
+        self.sideConversationParentID = sideConversationParentID
         self.title = title
         self.agentSessionID = agentSessionID
         self.model = model
@@ -477,6 +470,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         id: SessionID = .new(),
         workspaceID: WorkspaceID?,
         parentSessionID: SessionID? = nil,
+        sideConversationParentID: SessionID? = nil,
         title: String = PaneNaming.chat,
         agentSessionID: String? = nil,
         model: String = AppDefaults.fallbackModel,
@@ -496,6 +490,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
             id: id,
             workspaceID: workspaceID,
             parentSessionID: parentSessionID,
+            sideConversationParentID: sideConversationParentID,
             title: title,
             agentSessionID: agentSessionID,
             model: model,

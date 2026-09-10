@@ -12,9 +12,20 @@ final class TranscriptCell: UITableViewCell {
     }
     required init?(coder: NSCoder) { fatalError("Use init(style:reuseIdentifier:)") }
 
-    func configure(kind: String, text: String, identity: String, isStreaming: Bool = false) {
+    func configure(message: RemoteMessage) {
+        configure(row: RemoteTranscriptRow(message: message))
+    }
+
+    func configure(row: RemoteTranscriptRow) {
+        let inspection = RemoteToolInspection(row: row)
+        // Unrecognised tool payloads retain both raw sides for inspection instead of losing the result.
+        let text = inspection == nil ? ([row.message.text] + (row.toolResult.map { ["Result:\n" + $0.text] } ?? [])).joined(separator: "\n\n") : ""
+        configure(kind: row.message.kind, text: text, identity: String(row.id), inspection: inspection)
+    }
+
+    func configure(kind: String, text: String, identity: String, isStreaming: Bool = false, inspection: RemoteToolInspection? = nil) {
         contentConfiguration = UIHostingConfiguration {
-            MobileTranscriptRow(kind: kind, text: text, isStreaming: isStreaming)
+            MobileTranscriptRow(kind: kind, text: text, isStreaming: isStreaming, inspection: inspection)
                 .id(identity)
                 .tint(Color(uiColor: BloomTheme.accent))
         }
@@ -26,9 +37,12 @@ private struct MobileTranscriptRow: View {
     let kind: String
     let text: String
     let isStreaming: Bool
+    let inspection: RemoteToolInspection?
 
     var body: some View {
-        if kind == "user" {
+        if let inspection {
+            BloomToolCard(inspection: inspection)
+        } else if kind == "user" {
             BloomUserBubble(fill: Color(uiColor: BloomTheme.colour(PaletteInk.accentFill))) {
                 Text(verbatim: text)
                     .font(.body)

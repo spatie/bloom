@@ -121,7 +121,10 @@ private final class PreviewForwardState {
                 channel.close(promise: nil)
                 let ready = bound.value.ready; bound.value.ready = nil
                 ready?.succeed(())
-            case .failure(let error): bound.value.fail(error)
+            case .failure(let error):
+                if let failure = error as? NIOSSHError, failure.type == .channelSetupRejected {
+                    bound.value.fail(ConnectionFailure("Couldn’t open the preview on server port \(bound.value.remotePort). Start the app on that port and check that this SSH key permits preview forwarding."))
+                } else { bound.value.fail(error) }
             }
         }
     }

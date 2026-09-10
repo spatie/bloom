@@ -154,22 +154,7 @@ final class TerminalSessionStore {
     /// explicitly, rather than turning inspection into an action.
     func output(paneID: String, lines limit: Int) -> (text: String, live: Bool)? {
         guard let view = terminals[paneID] else { return nil }
-        let terminal = view.getTerminal()
-        var lines: [String] = []
-
-        var row = terminal.buffer.totalLinesTrimmed
-        while let line = terminal.getScrollInvariantLine(row: row) {
-            let text = line.translateToString(trimRight: true, skipNullCellsFollowingWide: true)
-            if line.isWrapped, !lines.isEmpty {
-                lines[lines.count - 1] += text
-            } else {
-                lines.append(text)
-            }
-            row += 1
-        }
-
-        while lines.last?.isEmpty == true { lines.removeLast() }
-        return (lines.suffix(limit).joined(separator: "\n"), view.process?.running == true)
+        return (view.renderedOutput(lines: limit), view.hasLiveConnection)
     }
 
     /// Bytes sent to the shell exactly as terminal input, without taking keyboard focus.

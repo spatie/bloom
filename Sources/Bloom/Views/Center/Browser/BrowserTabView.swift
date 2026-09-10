@@ -14,6 +14,7 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
     /// down rather than reached for, for the reason `ToolPaneView.splitColumn` is: only the pane
     /// above knows which pane it is.
     var paneMenu: (@MainActor () -> NSMenu)?
+    var siblings: [PaneContent] = []
 
     /// What the field shows, which is not where the page is. Typing has to be allowed to disagree
     /// with the page until Return is pressed, so this is local state and the session is only told
@@ -30,13 +31,17 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
     /// then the file is written into the worktree off the main actor. A second press in the middle
     /// of that would attach the same page twice, so the button goes quiet rather than counting.
     @State private var isCapturing = false
+    @State private var isSelectingRegion = false
+    @State private var regionCapture: BrowserRegionCapture?
+    @State private var viewportFrame: CGRect = .zero
+    @State private var room = ComposerRoom()
 
     @Environment(AppModel.self) private var app
 
     /// See `ControlActiveState.showsFocusRing`: a ring belongs in the key window only.
     @Environment(\.controlActiveState) private var activeState
 
-    private var tabs: CenterTabStore { .shared }
+    private var tabs: CenterTabStore { model.paneStores.center }
     /// The worktree is handed over with the tab, because a page opened from a file row is a
     /// `file://` address and the session cannot fetch that page's stylesheet without it. See
     /// `LocalPage.fileURL`.
@@ -66,7 +71,11 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
                 )
             }
             ZStack {
-                BrowserWebView(session: session, paneMenu: pageMenu, host: host)
+                BrowserViewportView(
+                    session: session, paneMenu: pageMenu, host: host,
+                    isSelectingRegion: isSelectingRegion, regionCapture: regionCapture,
+                    onViewportFrame: { viewportFrame = $0 }
+                )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 // A tab nobody has given an address is a white rectangle under a toolbar, which
@@ -96,8 +105,30 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .coordinateSpace(name: "browser-feedback-pane")
+            .overlay(alignment: .topLeading) {
+                if let regionCapture {
+                    BrowserRegionCaptureView(
+                        capture: regionCapture, model: model, viewportFrame: viewportFrame,
+                        add: addRegion
+                    )
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if isSelectingRegion {
+                    regionControls
+                }
+            }
+            if ReviewComposer.isDrawn(destination: regionCapture?.sessionID ?? model.reviewDestination?.id, panes: siblings) {
+                ReviewPaneComposer(model: model, room: room, destinationID: regionCapture?.sessionID)
+            }
         }
+        .onGeometryChange(for: CGFloat.self) { PaneMeasure.room($0.size.height) } action: { room.height = $0 }
         .background(Palette.surface)
+        .task(id: isSelectingRegion) {
+            guard isSelectingRegion, regionCapture == nil else { return }
+            await prepareRegion()
+        }
         // Per tab, so switching between two browser tabs puts each field back where its own page
         // is rather than leaving the address of the one that was showing a moment ago.
         //
@@ -110,6 +141,10 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
         // keyboard off the composer next to it.
         .task(id: tab.id) {
             address = model.remoteServer == nil ? session.displayAddress : tab.url
+            if let held = model.browserReviews[tab.id] {
+                regionCapture = held
+                isSelectingRegion = true
+            }
             if address.isEmpty { isAddressFocused = true }
             // A pane redrawn onto a session that has been loading all along, which is what
             // switching workspace and coming back is. Nothing changed while this view was gone,
@@ -130,6 +165,9 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
                 for: tab, setup: model.workspace.setupState, port: port,
                 address: address, hasNavigated: session.hasRequestedNavigation
             ) {
+                let configured = await model.browserAddress()
+                guard !Task.isCancelled, address.isEmpty, !session.hasRequestedNavigation else { return }
+                let url = configured.isEmpty ? url : configured
                 address = url
                 isAddressFocused = false
                 session.load(url)
@@ -148,7 +186,8 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
 
     private func openPreview(_ session: BrowserSession) {
         Task {
-            guard let address = WorkspacePreview.address(port: await model.ensurePort()) else { return }
+            let address = await model.browserAddress()
+            guard !address.isEmpty else { return }
             tabs.cancelOpeningPreview(for: tab)
             tabs.setURL(address, for: tab)
             self.address = address
@@ -179,7 +218,7 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
                 canGoForward: session.canGoForward,
                 isLoading: session.isLoading,
                 loadProgress: session.loadProgress,
-                isCapturing: isCapturing
+                isCapturing: isCapturing || isSelectingRegion
             ),
             address: $address,
             addressFocus: $isAddressFocused,
@@ -194,6 +233,10 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
                 if session.isLoading { session.webView.stopLoading() } else { session.reload() }
             },
             capture: capture,
+            captureRegion: isSelectingRegion ? cancelRegion : beginRegion,
+            isReviewing: isSelectingRegion,
+            isSavingReview: regionCapture?.isAdding == true,
+            viewport: Binding(get: { session.viewport }, set: { session.viewport = $0 }),
             submit: {
                 session.load(address)
                 isAddressFocused = false
@@ -221,6 +264,103 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
 
     // MARK: - Screenshot
 
+    @ViewBuilder private var regionControls: some View {
+        if regionCapture?.isEditing != true && regionCapture?.focusedComment == nil {
+            HStack(spacing: Metrics.spacingWide) {
+                if let regionCapture {
+                    Menu {
+                        Button("Select All") {
+                            regionCapture.selection = CGRect(x: 0, y: 0, width: 1, height: 1)
+                            regionCapture.isEditing = true
+                        }
+                        Button("Clear Selection") { regionCapture.selection = nil }
+                            .disabled(regionCapture.selection == nil)
+                    } label: {
+                        Image(systemName: "rectangle.dashed")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .accessibilityLabel("Selection")
+                    Text(regionCapture.selection == nil ? "Drag to select an area" : "Area selected")
+                        .font(Typo.caption)
+                    if regionCapture.selection != nil {
+                        Button("Comment") { regionCapture.isEditing = true }
+                            .controlSize(.small)
+                    }
+                } else {
+                    ProgressView().controlSize(.mini)
+                    Text("Capturing page…").font(Typo.caption)
+                }
+                Button(regionCapture == nil ? "Cancel" : "Done", action: cancelRegion)
+                    .buttonStyle(.borderless)
+                    .font(Typo.caption)
+                    .keyboardShortcut(.cancelAction)
+            }
+            .disabled(regionCapture?.isAdding == true)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Metrics.corner))
+            .overlay { RoundedRectangle(cornerRadius: Metrics.corner).strokeBorder(Palette.border, lineWidth: Metrics.outline) }
+            .elevation(.resting)
+            .padding(12)
+        }
+    }
+
+    private func addRegion() {
+        guard let regionCapture else { return }
+        regionCapture.add(to: model) {
+            model.browserReviews[tab.id] = regionCapture
+        }
+    }
+
+    private func beginRegion() {
+        guard !isCapturing, !isSelectingRegion else { return }
+        isSelectingRegion = true
+    }
+
+    private func cancelRegion() {
+        isSelectingRegion = false
+        regionCapture = nil
+        model.browserReviews[tab.id] = nil
+    }
+
+    private func prepareRegion() async {
+        guard let destination = model.reviewDestination else {
+            cancelRegion()
+            app.alert = BloomAlert(
+                title: "No conversation yet",
+                message: "Open a conversation in this workspace before adding feedback."
+            )
+            return
+        }
+        let session = self.session
+        let displayedAddress = session.displayAddress
+        let address: String
+        if let server = model.remoteServer { address = await server.displayAddress(displayedAddress) } else { address = displayedAddress }
+        let pageRect = BrowserRegionCapture.pageRect(in: session)
+        do {
+            let data = try await session.snapshot()
+            try Task.checkCancellation()
+            guard displayedAddress == session.displayAddress else {
+                cancelRegion()
+                app.alert = BloomAlert(
+                    title: "The page changed during capture",
+                    message: "Wait for the page to finish loading, then select the area again."
+                )
+                return
+            }
+            regionCapture = try BrowserRegionCapture(
+                data: data, address: address, session: destination,
+                pageRect: pageRect, viewportSize: viewportFrame.size
+            )
+            model.browserReviews[tab.id] = regionCapture
+        } catch {
+            guard !Task.isCancelled else { return }
+            cancelRegion()
+            app.alert = BloomAlert(title: "That page could not be captured", message: error.readableMessage)
+        }
+    }
+
     /// Takes the page as it is on screen and puts it in the composer, in one press.
     ///
     /// **One press, with no confirmation.** The alternative, a sheet asking where the picture
@@ -232,7 +372,7 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
     /// **It does not send the turn.** Nobody wants an agent handed a screenshot with no sentence
     /// attached. What lands is an attachment and a caret, and the user writes what is wrong with it.
     private func capture() {
-        guard !isCapturing else { return }
+        guard !isCapturing, !isSelectingRegion else { return }
         isCapturing = true
         Task {
             defer { isCapturing = false }
@@ -295,7 +435,9 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
     private func pageMenu() -> NSMenu {
         let menu = paneMenu?() ?? NSMenu()
 
-        var items: [NSMenuItem] = []
+        var items: [NSMenuItem] = [item(
+            session.viewport.isEnabled ? "Restore Full Browser Size" : "Responsive Preview"
+        ) { session.viewport.isEnabled.toggle() }]
         // Never the raw address. What may be handed to another application is `BrowserAddress`'s
         // decision, because the string was written by the page.
         if let url = BrowserAddress.external(from: session.displayAddress) {
@@ -303,10 +445,13 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
             // `TranscriptLinkMenu`.
             items.append(item("Open in External Browser") { NSWorkspace.shared.open(url) })
         }
-        if !isCapturing {
+        if !isCapturing, !isSelectingRegion {
             // The same words as the toolbar's own camera, taken from the one place that says them,
             // so the glyph and the menu item cannot drift into naming the same thing two ways.
             items.append(item(BrowserToolbar().screenshot.name, perform: capture))
+            if BrowserToolbar(page: session.page).regionCapture.isEnabled {
+                items.append(item(BrowserToolbar().regionCapture.name, perform: beginRegion))
+            }
         }
         guard !items.isEmpty else { return menu }
 

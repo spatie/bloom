@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// A normalized check record keeps the UI independent of GitHub's two rollup shapes.
 public struct CheckRun: Sendable, Hashable, Identifiable {
@@ -44,11 +45,7 @@ public struct CheckRun: Sendable, Hashable, Identifiable {
 /// Two failures rather than one, because they are different problems: `gh` missing is fixed by
 /// installing it, `gh` signed out is fixed by signing in, and a sentence that covers both says
 /// nothing useful about either.
-public enum GitHubAccess: Sendable, Equatable, Codable {
-    case ready
-    case notInstalled
-    case signedOut
-}
+public typealias GitHubAccess = BloomClient.GitHubAccess
 
 /// GitHub failures retain command context or invalid output without exposing unbounded output.
 public struct GitHubError: Error, Sendable, CustomStringConvertible {

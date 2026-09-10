@@ -4,19 +4,29 @@ import BloomClient
 /// Native form chrome over the same controls and model decisions used by the Mac composer.
 final class ComposerOptionsController: UITableViewController {
     private enum Row: CaseIterable { case model, effort, permissions, context, fast, style, discard }
-    private let store: RemoteComposerStore
+    private let store: RemoteComposerStore?
+    private var creationState: RemoteComposerState?
+    private var onSelected: ((ComposerControls) -> Void)?
     private let onApplied: (RemoteSession?) -> Void
     private var controls: ComposerControls?
     private var work: Task<Void, Never>?
+    private var state: RemoteComposerState? { store?.state ?? creationState }
+    private var hasPendingSave: Bool { store?.hasPendingSave ?? false }
+    private var isApplying: Bool { store?.isApplying ?? false }
     private var rows: [Row] {
         guard let controls else { return [] }
         return [.model, .effort, .permissions] + (controls.offersContextWindow ? [.context] : [])
             + (controls.offersFastMode ? [.fast] : []) + (controls.offersOutputStyle ? [.style] : [])
-            + (store.hasPendingSave ? [.discard] : [])
+            + (hasPendingSave ? [.discard] : [])
     }
 
     init(store: RemoteComposerStore, onApplied: @escaping (RemoteSession?) -> Void) {
         self.store = store; self.onApplied = onApplied
+        super.init(style: .insetGrouped)
+        preferredContentSize = CGSize(width: 420, height: 520)
+    }
+    init(state: RemoteComposerState, onSelected: @escaping (ComposerControls) -> Void) {
+        store = nil; creationState = state; self.onSelected = onSelected; onApplied = { _ in }
         super.init(style: .insetGrouped)
         preferredContentSize = CGSize(width: 420, height: 520)
     }
@@ -48,29 +58,29 @@ final class ComposerOptionsController: UITableViewController {
         work = Task { [weak self] in
             guard let self else { return }
             do {
-                try await store.load()
+                try await store?.load()
                 guard !Task.isCancelled else { return }
-                controls = store.pendingControls ?? store.state?.controls
+                controls = store?.pendingControls ?? state?.controls
             } catch { if Task.isCancelled { return } }
             refreshUI()
         }
     }
 
     private func refreshUI() {
-        navigationItem.rightBarButtonItem?.title = store.hasPendingSave ? "Retry save" : "Apply"
-        navigationItem.rightBarButtonItem?.isEnabled = controls != nil && (store.hasPendingSave || controls != store.state?.controls) && !store.isApplying
-        navigationItem.leftBarButtonItem?.isEnabled = !store.isApplying
-        isModalInPresentation = store.isApplying
-        tableView.isUserInteractionEnabled = !store.isApplying
+        navigationItem.rightBarButtonItem?.title = hasPendingSave ? "Retry save" : (store == nil ? "Use options" : "Apply")
+        navigationItem.rightBarButtonItem?.isEnabled = controls != nil && (hasPendingSave || controls != state?.controls) && !isApplying
+        navigationItem.leftBarButtonItem?.isEnabled = !isApplying
+        isModalInPresentation = isApplying
+        tableView.isUserInteractionEnabled = !isApplying
         tableView.reloadData()
         tableView.layoutIfNeeded()
         preferredContentSize = CGSize(width: 420, height: min(620, max(380, tableView.contentSize.height + 60)))
         navigationController?.preferredContentSize = preferredContentSize
         if controls == nil {
-            var empty = store.error == nil ? UIContentUnavailableConfiguration.loading() : .empty()
-            empty.text = store.error == nil ? "Loading agent options" : "Options unavailable"
-            empty.secondaryText = store.error
-            if store.error != nil {
+            var empty = store?.error == nil ? UIContentUnavailableConfiguration.loading() : .empty()
+            empty.text = store?.error == nil ? "Loading agent options" : "Options unavailable"
+            empty.secondaryText = store?.error
+            if store?.error != nil {
                 empty.button.title = "Try again"
                 empty.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.load() }
             }
@@ -85,10 +95,10 @@ final class ComposerOptionsController: UITableViewController {
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { rows.count }
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         guard let controls else { return nil }
-        if store.hasPendingSave {
+        if hasPendingSave {
             return "The last save has not been confirmed. Retry uses the same request, including any conversation it created."
         }
-        if controls.agentKind != store.state?.controls.agentKind {
+        if controls.agentKind != state?.controls.agentKind {
             return "Changing agents starts a new conversation in this workspace. Your current conversation stays available."
         }
         return "These options are saved on the server and used for your next message."
@@ -106,7 +116,7 @@ final class ComposerOptionsController: UITableViewController {
         case .model: content.text = "Model"; content.secondaryText = ModelLabel.readable(controls.model)
         case .effort:
             content.text = "Reasoning"
-            content.secondaryText = store.state?.choices.efforts(for: controls.agentKind, model: controls.model).first { $0.id == controls.effort }?.label ?? controls.effort.capitalized
+            content.secondaryText = state?.choices.efforts(for: controls.agentKind, model: controls.model).first { $0.id == controls.effort }?.label ?? controls.effort.capitalized
         case .permissions: content.text = "Permissions"; content.secondaryText = controls.permissionMode.label(on: controls.agentKind)
         case .context: content.text = "Context window"; content.secondaryText = CodexContextWindow.label(for: controls.codexContextWindow)
         case .style: content.text = "Output style"; content.secondaryText = controls.outputStyle == OutputStyle.defaultName ? "Default" : controls.outputStyle
@@ -117,7 +127,7 @@ final class ComposerOptionsController: UITableViewController {
             content.text = "Prefer faster replies"
             let toggle = UISwitch()
             toggle.isOn = controls.isFastMode
-            toggle.isEnabled = !store.hasPendingSave
+            toggle.isEnabled = !hasPendingSave
             toggle.accessibilityLabel = "Prefer faster replies"
             toggle.addAction(UIAction { [weak self, weak toggle] _ in
                 self?.controls?.isFastMode = toggle?.isOn == true
@@ -126,7 +136,7 @@ final class ComposerOptionsController: UITableViewController {
             cell.accessoryView = toggle
             cell.selectionStyle = .none
         }
-        if store.hasPendingSave {
+        if hasPendingSave {
             cell.accessoryType = .none
             cell.selectionStyle = .none
         }
@@ -137,7 +147,7 @@ final class ComposerOptionsController: UITableViewController {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         if rows[indexPath.row] == .discard { confirmDiscard(); return }
-        guard !store.hasPendingSave, let controls, let state = store.state else { return }
+        guard !hasPendingSave, let controls, let state = state else { return }
         let row = rows[indexPath.row]
         let title: String
         let sections: [(String, [ComposerOption])]
@@ -181,7 +191,7 @@ final class ComposerOptionsController: UITableViewController {
                                       message: "The server may already have saved these settings or created a conversation. Check your workspace before applying different settings. Forgetting the retry does not undo anything on the server.", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Keep retry", style: .cancel))
         alert.addAction(UIAlertAction(title: "Forget retry", style: .destructive) { [weak self] _ in
-            guard let self else { return }
+            guard let self, let store = self.store else { return }
             do {
                 try store.discardPendingSave()
                 controls = nil
@@ -193,7 +203,9 @@ final class ComposerOptionsController: UITableViewController {
     }
 
     private func apply() {
-        guard let controls, !store.isApplying else { return }
+        guard let controls, !isApplying else { return }
+        if let onSelected { dismiss(animated: true) { onSelected(controls) }; return }
+        guard let store else { return }
         work = Task { [weak self] in
             guard let self else { return }
             // Lock navigation before the request suspends, including interactive sheet dismissal.

@@ -20,7 +20,7 @@ type rpcRequest struct {
 	Operation map[string]json.RawMessage `json:"operation"`
 }
 
-func runtimeRequest(ctx context.Context, socket string, body []byte, id string) ([]byte, error) {
+func runtimeRequest(ctx context.Context, socket string, body []byte, expected rpcRequest) ([]byte, error) {
 	connection, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "unix", socket)
 	if err != nil {
 		return nil, err
@@ -44,8 +44,15 @@ func runtimeRequest(ctx context.Context, socket string, body []byte, id string) 
 		Version int             `json:"version"`
 		Result  json.RawMessage `json:"result"`
 	}
-	if json.Unmarshal(line, &reply) != nil || !strings.EqualFold(reply.ID, id) || reply.Version != protocolVersion || len(reply.Result) == 0 {
+	if json.Unmarshal(line, &reply) != nil || !strings.EqualFold(reply.ID, expected.ID) || len(reply.Result) == 0 {
 		return nil, errors.New("invalid runtime response")
+	}
+	if reply.Version != expected.Version {
+		_, hello := expected.Operation["hello"]
+		var result map[string]map[string]string
+		if !hello || !supportedProtocol(reply.Version) || json.Unmarshal(reply.Result, &result) != nil || len(result) != 1 || len(result["failure"]) != 1 || result["failure"]["_0"] != "Incompatible Bloom server protocol. Update the client and server." {
+			return nil, errors.New("invalid runtime response")
+		}
 	}
 	return line, nil
 }
@@ -72,7 +79,7 @@ func (server *Server) rpc(writer http.ResponseWriter, request *http.Request, con
 	var input rpcRequest
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&input) != nil || input.Version != protocolVersion || len(input.ID) != 36 || len(input.Operation) != 1 {
+	if decoder.Decode(&input) != nil || !supportedProtocol(input.Version) || len(input.ID) != 36 || len(input.Operation) != 1 {
 		http.Error(writer, "Invalid Bloom request", 400)
 		return
 	}
@@ -100,12 +107,12 @@ func (server *Server) rpc(writer http.ResponseWriter, request *http.Request, con
 			value = map[string]any{"failure": map[string]string{"_0": err.Error()}}
 		}
 		writer.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(writer).Encode(map[string]any{"version": protocolVersion, "id": input.ID, "result": value})
+		json.NewEncoder(writer).Encode(map[string]any{"version": input.Version, "id": input.ID, "result": value})
 		return
 	}
 	ctx, cancel := context.WithTimeout(request.Context(), rpcTimeout)
 	defer cancel()
-	reply, err := runtimeRequest(ctx, config.RuntimeSocket, compact.Bytes(), input.ID)
+	reply, err := runtimeRequest(ctx, config.RuntimeSocket, compact.Bytes(), input)
 	if err != nil {
 		http.Error(writer, "Runtime unavailable. Refresh before retrying this command with the same request ID.", 502)
 		return

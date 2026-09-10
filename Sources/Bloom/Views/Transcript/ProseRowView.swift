@@ -1,17 +1,20 @@
 import SwiftUI
 import BloomUI
 
-/// The Mac supplies its native rich text adapter inside the shared reading column.
+/// Live and saved messages share their boundaries and the Mac's native rich text adapter.
 struct ProseRowView: View {
     var text: String
+    var isStreaming = false
 
     var body: some View {
         BloomAssistantProse(
             maxWidth: TranscriptLayout.proseMeasure,
             horizontalInset: TranscriptLayout.inset,
-            verticalInset: TranscriptLayout.block
+            verticalInset: TranscriptLayout.block,
+            separatorColor: Palette.border,
+            separatorHeight: Metrics.hairline
         ) {
-            MarkdownView(text)
+            MarkdownView(text, isStreaming: isStreaming)
                 .font(Typo.body)
                 .proseLeading()
         }

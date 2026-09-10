@@ -38,7 +38,7 @@ struct CenterPaneView<Model: WorkspacePaneModel>: View {
     /// and the drop cannot disagree about which edge was meant.
     @State private var landing: PaneRegion?
 
-    private var tabs: WorkspaceTabsStore { .shared }
+    private var tabs: WorkspaceTabsStore { model.paneStores.tabs }
 
     /// What this pane is showing, or nothing when there is no tab for it to belong to.
     private var showing: PaneContent? {
@@ -173,7 +173,7 @@ struct CenterPaneView<Model: WorkspacePaneModel>: View {
             }
 
         case .tool(let tabID):
-            if let tab = CenterTabStore.shared.tabs(for: model.workspace.id)
+            if let tab = model.paneStores.center.tabs(for: model.workspace.id)
                 .first(where: { $0.id == tabID }) {
                 ToolPaneView(
                     model: model, tab: tab,
@@ -265,7 +265,7 @@ struct CenterPaneView<Model: WorkspacePaneModel>: View {
         let pane = pane
 
         NewPane.open(kind, in: model) { content in
-            WorkspaceTabsStore.shared.split(tab: tab, pane: pane, axis: axis, showing: content)
+            model.paneStores.tabs.split(tab: tab, pane: pane, axis: axis, showing: content)
         }
     }
 
@@ -308,7 +308,7 @@ struct CenterPaneView<Model: WorkspacePaneModel>: View {
     /// where they are two unrelated questions.
     private func droppedTab(named id: String) -> PaneContent? {
         if model.sessions.contains(where: { $0.id.rawValue == id }) { return .chat(SessionID(id)) }
-        if CenterTabStore.shared.tabs(for: model.workspace.id).contains(where: { $0.id == id }) {
+        if model.paneStores.center.tabs(for: model.workspace.id).contains(where: { $0.id == id }) {
             return .tool(id)
         }
         return nil

@@ -104,7 +104,7 @@ public enum Git {
         let exit = ProcessExitGate()
         process.terminationHandler = { _ in exit.signal() }
 
-        try process.run()
+        try ProcessLaunch.run(process)
         Shell.countSpawn()
 
         outReader.start()

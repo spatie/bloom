@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 #if os(Linux)
 import Glibc
 #endif
@@ -8,12 +9,14 @@ import Glibc
 public final class ServerDaemon: Sendable {
     public let runtime: ServerRuntime
     public let socketPath: String
+    public let bridge: BridgeServer
     private let lock: ServerLock
     private let listener: UnixSocketListener
 
-    private init(runtime: ServerRuntime, socketPath: String, lock: ServerLock, listener: UnixSocketListener) {
+    private init(runtime: ServerRuntime, socketPath: String, bridge: BridgeServer, lock: ServerLock, listener: UnixSocketListener) {
         self.runtime = runtime
         self.socketPath = socketPath
+        self.bridge = bridge
         self.lock = lock
         self.listener = listener
     }
@@ -22,9 +25,7 @@ public final class ServerDaemon: Sendable {
         directory: String,
         gatewayGroupID: UInt32? = nil,
         installedAgents: @escaping ServerRuntime.AgentDiscovery = ServerAgentAvailability.installed,
-        makeRunner: @escaping ServerRuntime.RunnerFactory = { session, path, store in
-            SessionRunnerFactory.make(session: session, workspacePath: path, store: store)
-        }
+        makeRunner: ServerRuntime.RunnerFactory? = nil
     ) async throws -> ServerDaemon {
         let lock = try ServerLock(directory: directory)
         let database = databasePath(directory: directory)
@@ -32,12 +33,40 @@ public final class ServerDaemon: Sendable {
         try await store.resetRunningSessions()
         _ = try await store.abandonPendingPermissionAsks()
         let runtime = ServerRuntime(store: store, gatewayGroupID: gatewayGroupID, installedAgents: installedAgents, makeRunner: makeRunner)
-        try await runtime.restoreQueuedPrompts()
-        let socketPath = try socketPath(directory: directory)
-        let listener = try UnixSocketListener(path: socketPath, groupID: gatewayGroupID) { connection in
-            Task { await serve(connection, runtime: runtime) }
+        do {
+            let bridge = try await runtime.startBridge(socketPath: mcpSocketPath(directory: directory))
+            try await runtime.restoreQueuedPrompts()
+            let socketPath = try socketPath(directory: directory)
+            let listener = try UnixSocketListener(path: socketPath, groupID: gatewayGroupID) { connection in
+                Task { await serve(connection, runtime: runtime) }
+            }
+            return ServerDaemon(runtime: runtime, socketPath: socketPath, bridge: bridge, lock: lock, listener: listener)
+        } catch {
+            await runtime.shutdown()
+            throw error
         }
-        return ServerDaemon(runtime: runtime, socketPath: socketPath, lock: lock, listener: listener)
+    }
+
+    deinit {
+        listener.stop()
+        let runtime = runtime, ownership = lock
+        Task {
+            await runtime.shutdown()
+            ownership.release()
+        }
+    }
+
+    public static func mcpSocketPath(directory: String) throws -> String {
+        // A dedicated directory can be mounted into a container without exposing other sockets.
+        let path = "/tmp/bloom-mcp-" + TmuxSessions.fingerprint(databasePath(directory: directory))
+        try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let attributes = try FileManager.default.attributesOfItem(atPath: path)
+        guard attributes[.type] as? FileAttributeType == .typeDirectory,
+              (attributes[.ownerAccountID] as? NSNumber)?.uint32Value == getuid(),
+              ((attributes[.posixPermissions] as? NSNumber)?.intValue ?? 0o777) & 0o077 == 0 else {
+            throw ServerFailure("The server MCP directory must be private and owned by this account.")
+        }
+        return try BridgeSocketPath.derive(databasePath: databasePath(directory: directory), directory: path)
     }
 
     public static func databasePath(directory: String) -> String {
@@ -70,11 +99,12 @@ public final class ServerDaemon: Sendable {
     public func shutdown() async {
         listener.stop()
         await runtime.shutdown()
+        lock.release()
     }
 }
 
 private final class ServerLock: Sendable {
-    private let descriptor: Int32
+    private let descriptor: Mutex<Int32?>
 
     init(directory: String) throws {
         guard directory.hasPrefix("/") else { throw ServerFailure("The server data directory must be an absolute path.") }
@@ -88,13 +118,23 @@ private final class ServerLock: Sendable {
             throw ServerFailure("Use a dedicated data directory owned by you with permissions 700.")
         }
         let path = URL(fileURLWithPath: directory).appendingPathComponent("server.lock").path
-        descriptor = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
-        guard descriptor >= 0 else { throw ServerFailure("Cannot open the server lock in \(directory).") }
-        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
-            close(descriptor)
+        let opened = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        guard opened >= 0 else { throw ServerFailure("Cannot open the server lock in \(directory).") }
+        guard flock(opened, LOCK_EX | LOCK_NB) == 0 else {
+            close(opened)
             throw ServerFailure("A Bloom server already owns this data directory.")
         }
+        descriptor = Mutex(opened)
     }
 
-    deinit { close(descriptor) }
+    func release() {
+        let opened = descriptor.withLock { value in
+            let previous = value
+            value = nil
+            return previous
+        }
+        if let opened { close(opened) }
+    }
+
+    deinit { release() }
 }

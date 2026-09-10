@@ -24,7 +24,7 @@ class ClientTests(unittest.TestCase):
         client.connect()
         command = client.command("catalogue", {})
         client.perform(command)
-        self.assertEqual([13, 12, 12], [c["version"] for c in transport.commands])
+        self.assertEqual([14, 12, 12], [c["version"] for c in transport.commands])
         self.assertEqual(transport.commands[0]["id"], transport.commands[1]["id"])
         self.assertEqual(command, transport.commands[2])
 
@@ -36,10 +36,10 @@ class ClientTests(unittest.TestCase):
 
     def test_refuses_unknown_version(self):
         with self.assertRaises(BloomError):
-            Client(ScriptedTransport([(14, {"hello": {"name": "server"}}, False)])).connect()
+            Client(ScriptedTransport([(15, {"hello": {"name": "server"}}, False)])).connect()
 
     def test_no_automatic_command_retry(self):
-        transport = ScriptedTransport([(13, {"hello": {"name": "server"}}, False), (13, {"failure": {"_0": "File changed"}}, False)])
+        transport = ScriptedTransport([(14, {"hello": {"name": "server"}}, False), (14, {"failure": {"_0": "File changed"}}, False)])
         client = Client(transport)
         client.connect()
         with self.assertRaisesRegex(BloomError, "File changed"):

@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// What an agent asked the window to put in front of the reader, once it has been read off the
 /// wire and found to make sense.
@@ -165,10 +166,4 @@ public struct PaneOrder: Sendable, Equatable {
 /// `PaneSplitTool.axis` reads one word and either has an answer or does not, and `PaneRenameTool`
 /// reads two, which is exactly what `Result` is for; the tools themselves refuse through
 /// `PaneOrderReading` or `PaneOutcome`, because those carry a success worth naming.
-public struct PaneRefusal: Error, Sendable, Equatable {
-    public let sentence: String
-
-    public init(_ sentence: String) {
-        self.sentence = sentence
-    }
-}
+public typealias PaneRefusal = BloomClient.PaneRefusal

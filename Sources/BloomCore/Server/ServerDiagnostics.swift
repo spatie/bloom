@@ -35,7 +35,7 @@ public enum ServerDiagnosticsCollector {
         #endif
         return ServerDiagnostics(checkedAt: Date(), hostname: ProcessInfo.processInfo.hostName,
                                  operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
-                                 account: NSUserName(), checks: checks)
+                                 account: NSUserName(), checks: checks, browser: browserReadiness())
     }
 
     private static func probe(_ executable: String, _ arguments: [String]) async -> Bool? {
@@ -48,7 +48,7 @@ public enum ServerDiagnosticsCollector {
 
     static func tool(_ id: ServerDiagnostics.Check.Kind, _ title: String, _ result: Bool?, required: Bool, missing: String, failed: String) -> ServerDiagnostics.Check {
         .init(id: id, title: title, status: result == true ? .ready : (result == nil && !required ? .unavailable : .attention),
-              detail: result == true ? "Available to the server account." : (result == nil ? missing : failed))
+              detail: result == true ? (id == .github ? "Signed in to GitHub as the server account." : "Available to the server account.") : (result == nil ? missing : failed))
     }
 
     static func disk(freeBytes: UInt64?) -> ServerDiagnostics.Check {

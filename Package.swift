@@ -3,7 +3,47 @@ import PackageDescription
 #if os(Linux)
 import Foundation
 
-let serverTests = ["ServerProtocolVectorTests.swift", "SharedComposerContractTests.swift", "RemoteReviewContractTests.swift", "MobileProtocolContractTests.swift", "ServerDiagnosticsTests.swift", "SetupOutputTests.swift", "WorkspacePreviewTests.swift", "BrowserAddressDisplayTests.swift", "WorkspaceExecutionTests.swift", "ServerProjectSettingsTests.swift", "ServerReviewCacheTests.swift", "CodexRunnerTests.swift", "CodexTestSupport.swift", "ServerRuntimeTests.swift", "ServerReviewTests.swift", "ServerWorkspaceTests.swift", "ServerSidebarTests.swift", "ServerPreviewTests.swift", "ServerHTTPTests.swift", "ServerTerminalStreamTests.swift", "ProcessPipeLifetimeTests.swift", "PlanApprovalTests.swift", "CodexTranslationTests.swift", "LocalServerIdentityTests.swift", "TestSupport.swift"]
+let serverTests = [
+    "AtomicCrewStartTests.swift",
+    "BridgeDrainTests.swift",
+    "CodexMcpResultTests.swift",
+    "ServerOwnershipTests.swift",
+    "ServerMCPTests.swift",
+    "ServerUIBrokerTests.swift",
+    "ServerTerminalRelayTests.swift",
+    "RemoteCreationContractTests.swift",
+    "ServerSetupTests.swift",
+    "ServerProtocolVectorTests.swift",
+    "SharedComposerContractTests.swift",
+    "RemoteReviewContractTests.swift",
+    "MobileProtocolContractTests.swift",
+    "ServerDiagnosticsTests.swift",
+    "SetupOutputTests.swift",
+    "WorkspacePreviewTests.swift",
+    "BrowserAddressDisplayTests.swift",
+    "WorkspaceExecutionTests.swift",
+    "ServerProjectSettingsTests.swift",
+    "ServerReviewCacheTests.swift",
+    "CodexRunnerTests.swift",
+    "CodexTestSupport.swift",
+    "ServerRuntimeTests.swift",
+    "ServerReviewTests.swift",
+    "ServerWorkspaceTests.swift",
+    "ServerSidebarTests.swift",
+    "ServerPreviewTests.swift",
+    "ServerHTTPTests.swift",
+    "ServerTerminalStreamTests.swift",
+    "ProcessPipeLifetimeTests.swift",
+    "PlanApprovalTests.swift",
+    "CodexTranslationTests.swift",
+    "LocalServerIdentityTests.swift",
+    "TestSupport.swift",
+    "ProcessLaunchTests.swift",
+    "WorkspaceFileAccessTests.swift",
+    "PaneStateNamespaceTests.swift",
+    "ServerCrewQueueTests.swift",
+    "ServerUIMediaTests.swift",
+]
 let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Tests/BloomCoreTests")
 let otherTests = (try FileManager.default.contentsOfDirectory(atPath: testDirectory.path)).filter { !serverTests.contains($0) }
 

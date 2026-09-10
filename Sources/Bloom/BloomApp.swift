@@ -7,11 +7,13 @@ struct BloomApp: App {
 
     init() {
         #if DEBUG
+        if ServerSetupProbe.isRequested { ServerSetupProbe.runAndExit() }
         if AppChromeProbe.isRequested { AppChromeProbe.runAndExit() }
         if ComposerInputProbe.isRequested { ComposerInputProbe.runAndExit() }
         if InspectorVisibilityProbe.isRequested { InspectorVisibilityProbe.runAndExit() }
         if MarkdownTableProbe.isRequested { MarkdownTableProbe.runAndExit() }
         #endif
+        if BrowserViewportDemo.isRequested { BrowserViewportDemo.schedule() }
         // First, before anything else in the process. Every `@AppStorage` binding in the app
         // resolves its key the moment the view holding it is created, and a binding that has
         // already answered from an empty domain would then WRITE that empty answer back, which

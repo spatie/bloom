@@ -359,10 +359,31 @@ struct CreateWorkspaceView: View {
     /// title and an `NSImage`, so a `Label` with a SwiftUI icon had the icon silently dropped.
     private var projectControl: some View {
         Menu {
-            Picker("Project", selection: $repoID) {
-                ForEach(repos) { candidate in Text(candidate.name).tag(Optional(candidate.id)) }
+            // One picker keeps the selection across visible and hidden projects, scoped to the
+            // selected destination. The menu also creates projects when there are none yet.
+            Picker("Project", selection: Binding(
+                get: { repoID ?? RepoID("") },
+                set: { repoID = $0.rawValue.isEmpty ? nil : $0 }
+            )) {
+                ForEach(ProjectMenuGroup.grouped(repos)) { group in
+                    Section(group.title) {
+                        ForEach(group.repos) { candidate in
+                            Label {
+                                Text(candidate.name)
+                            } icon: {
+                                if isRemote {
+                                    Image(systemName: "folder")
+                                } else if let mark = RepoIconImage.of(candidate) {
+                                    Image(nsImage: mark).renderingMode(.original)
+                                }
+                            }
+                            .tag(candidate.id)
+                        }
+                    }
+                }
             }
             .pickerStyle(.inline)
+            .labelsHidden()
             Divider()
             Button("Browse GitHub…") { showsGitHub = true }
             Button("Start a Project…", action: addProject)
@@ -376,7 +397,9 @@ struct CreateWorkspaceView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .disabled(isCreatingRemote)
+        .help("Choose the project")
         .accessibilityLabel("Project")
+        .accessibilityValue(repo?.name ?? "")
     }
 
     /// Where the work comes from: a new branch cut from a base, an open pull request, or a branch

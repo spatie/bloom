@@ -57,9 +57,9 @@ struct SessionTabsView<Model: WorkspacePaneModel>: View {
     /// itself, so it scrolls with them and the two sets of numbers cannot drift apart.
     private static var stripSpace: String { "bloom.tabStrip" }
 
-    private var tabs: CenterTabStore { .shared }
+    private var tabs: CenterTabStore { model.paneStores.center }
 
-    private var store: WorkspaceTabsStore { .shared }
+    private var store: WorkspaceTabsStore { model.paneStores.tabs }
 
     /// The strip, derived rather than stored.
     ///
@@ -194,7 +194,7 @@ struct SessionTabsView<Model: WorkspacePaneModel>: View {
             // kinds, which is what lets one notification carry no id of its own.
             renamingID = selected.id
         }
-        .task(id: model.workspace.id) {
+        .task(id: model.paneStateID) {
             tabs.load(workspaceID: model.workspace.id)
             // The icons this Mac has already seen, read back once per launch. Here rather than at
             // startup because this is what needs them: a workspace reopening on a browser tab
@@ -441,20 +441,12 @@ struct SessionTabsView<Model: WorkspacePaneModel>: View {
 
     /// The `+` opens a browser on the workspace's own dev server, where a split opens one on
     /// nothing. That is not drift: this item is the one that means "look at what this workspace is
-    /// running", and it is the only route that has a port to hand.
+    /// running", and it is the only route that knows where that is.
     private func newBrowser() {
         Task {
-            await preparePort()
-            let address = model.port > 0 ? "http://localhost:\(model.port)" : ""
+            let address = await model.browserAddress()
             NewPane.open(.browser, in: model, url: address) { store.select($0, in: model) }
         }
-    }
-
-    /// The workspace's own port, which is what its setup and run scripts were told to bind and so
-    /// what its dev server is answering on. Allocation lives on the model, where concurrent
-    /// callers get one block. See `WorkspaceModel.ensurePort`.
-    private func preparePort() async {
-        await model.ensurePort()
     }
 
     // MARK: - Reordering

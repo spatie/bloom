@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// Everything the shim needs to reach one session, as a value.
 public struct BridgeAttachment: Sendable, Hashable {
@@ -43,7 +44,7 @@ public enum BridgeRegistration {
     /// Claude Code has the same exposure for a milder reason: `--mcp-config` is additive over the
     /// user's own servers on purpose (never `--strict-mcp-config`, which would shut theirs out),
     /// so a shared name is a name that can be taken.
-    public static let serverName = "bloom-workspace-bridge"
+    public static let serverName = ToolHostIdentity.bridgeServerName
 
     /// The name the owner's own client registers Bloom under, **derived per copy of the app** and
     /// deliberately not `serverName`.

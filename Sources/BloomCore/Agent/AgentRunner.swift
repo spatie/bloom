@@ -78,6 +78,7 @@ public actor AgentRunner {
     /// new runner with a new file and a new token, which is exactly what a token held only in
     /// memory needs.
     private let mcpConfigPath: String?
+    private let bridge: BridgeAttachment?
     /// Whether the composer's Fast toggle is on for this session.
     ///
     /// Read from the store rather than passed in, because it is the one composer control with no
@@ -95,6 +96,7 @@ public actor AgentRunner {
     /// `session.<id>.outputStyle`. Nil rather than the word `default`, so "nothing chosen" and
     /// "chosen and then cleared" cannot drift apart on the way to argv.
     private var outputStyle: String?
+    private var awaitingSideContextAcknowledgement = false
     /// Questions this process is currently blocked on, newest last.
     ///
     /// Held here as well as in the database because the two are needed at different moments. The
@@ -146,6 +148,7 @@ public actor AgentRunner {
         session: Session,
         store: Store,
         mcpConfigPath: String? = nil,
+        bridge: BridgeAttachment? = nil,
         shutdownBudget: Duration = .seconds(5),
         makeProcess: @escaping @Sendable (AgentLaunch) -> any AgentProcessing = AgentRunner.spawn
     ) {
@@ -154,6 +157,7 @@ public actor AgentRunner {
         self.session = session
         self.store = store
         self.mcpConfigPath = mcpConfigPath
+        self.bridge = bridge
         self.shutdownBudget = shutdownBudget
         self.makeProcess = makeProcess
         self.grants = SessionGrants(store: store, workspaceID: session.workspaceID)
@@ -280,6 +284,9 @@ public actor AgentRunner {
         if let resume, !resume.isEmpty {
             arguments += ["--resume", resume]
         }
+        if session.workspaceID == nil {
+            arguments += ["--append-system-prompt", AskConversation.instructions]
+        }
         return arguments
     }
 
@@ -306,10 +313,10 @@ public actor AgentRunner {
                 resume: session.agentSessionID,
                 isFastMode: isFastMode,
                 outputStyle: outputStyle,
-                mcpConfigPath: execution.commandPrefix.isEmpty ? mcpConfigPath : nil
+                mcpConfigPath: execution.supportsBridge ? mcpConfigPath : nil
             ),
             cwd: workspacePath,
-            environment: Shell.environment()
+            environment: Shell.environment(extra: execution.bridgeEnvironment(bridge, configPath: mcpConfigPath))
         ))
     }
 
@@ -366,6 +373,8 @@ public actor AgentRunner {
         // has not exited yet, short-circuits, and the turn below is written into a process that
         // is already under SIGTERM. Neither read depends on the previous run being gone, so
         // nothing is lost by asking first.
+        let prompt = try await store.sideConversationTurn(text, sessionID: sessionID)
+        awaitingSideContextAcknowledgement = prompt != text
         await refreshFastMode()
         await refreshOutputStyle()
         await refreshExecutable()
@@ -374,7 +383,7 @@ public actor AgentRunner {
         start()
 
         let line = try Self.encodeTurn(text)
-        handle.current?.writeLine(line)
+        handle.current?.writeLine(try Self.encodeTurn(prompt))
 
         // One row, whichever it is. The crew payload carries what a person reads and what the
         // model was handed, so writing the user row beside it would put the envelope back on
@@ -556,6 +565,15 @@ public actor AgentRunner {
             if moved { await save(session) }
 
         case .assistantText(let block), .thinking(let block):
+            if awaitingSideContextAcknowledgement {
+                do {
+                    try await store.acknowledgeSideConversationContext(sessionID: sessionID)
+                    awaitingSideContextAcknowledgement = false
+                } catch {
+                    // Repeating background context is safer than losing it after a failed write.
+                    Self.log.error("Could not acknowledge side context: \(error.readableMessage, privacy: .public)")
+                }
+            }
             guard block.parentToolUseID == nil, block.usage.contextUsedTokens > 0 else { break }
             lastContextUsed = block.usage.contextUsedTokens
 

@@ -3,20 +3,24 @@ import UIKit
 /// System toolbar and containment around shared content, with no custom tab interaction model.
 final class WorkspacePaneController: UIViewController {
     private let content: UIViewController
-    private let paneTitle: String
+    var embeddedContent: UIViewController { content }
+    private var paneTitle: String
     private let image: String
+    private var headingLabel: UILabel?
     private let onClose: (() -> Void)?
     init(title: String, image: String, content: UIViewController, onClose: (() -> Void)? = nil) {
         paneTitle = title; self.image = image; self.content = content; self.onClose = onClose
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("Use init(title:image:content:)") }
+    func rename(_ title: String) { paneTitle = title; headingLabel?.text = title }
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = BloomTheme.background
         let toolbar = UIToolbar()
         toolbar.tintColor = BloomTheme.accent
         let label = BloomTheme.label(paneTitle, style: .subheadline)
+        headingLabel = label
         label.font = .preferredFont(forTextStyle: .headline)
         label.numberOfLines = 1
         label.lineBreakMode = .byTruncatingTail

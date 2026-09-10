@@ -20,10 +20,11 @@ public struct ServerDiagnostics: Codable, Sendable, Equatable {
     public var operatingSystem: String
     public var account: String
     public var checks: [Check]
+    public var browser: ServerBrowserReadiness?
 
-    public init(checkedAt: Date, hostname: String, operatingSystem: String, account: String, checks: [Check]) {
+    public init(checkedAt: Date, hostname: String, operatingSystem: String, account: String, checks: [Check], browser: ServerBrowserReadiness? = nil) {
         self.checkedAt = checkedAt; self.hostname = hostname; self.operatingSystem = operatingSystem
-        self.account = account; self.checks = checks
+        self.account = account; self.checks = checks; self.browser = browser
     }
 
     public static func decode(_ result: JSONValue) throws -> Self {
@@ -31,11 +32,11 @@ public struct ServerDiagnostics: Codable, Sendable, Equatable {
         return try JSONDecoder().decode(Self.self, from: JSONEncoder().encode(payload))
     }
 
-    public var needsAttention: Bool { checks.contains { $0.status == .attention } }
+    public var needsAttention: Bool { checks.contains { $0.status == .attention } || browser?.status == .attention }
     public var summary: String { needsAttention ? "Some checks need attention" : "Server checks complete" }
     public var text: String {
         (["\(hostname) (\(operatingSystem)), account \(account)"] + checks.map {
             "\($0.title) [\($0.status.rawValue)]: \($0.detail)"
-        }).joined(separator: "\n")
+        } + (browser.map { ["Browser testing [\($0.status.rawValue)]: \($0.detail)"] } ?? [])).joined(separator: "\n")
     }
 }

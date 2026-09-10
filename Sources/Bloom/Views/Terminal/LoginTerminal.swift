@@ -2,19 +2,12 @@ import SwiftUI
 import AppKit
 import BloomCore
 
-/// One command running in a real pseudo terminal, watched by whoever started it.
-///
-/// `gh auth login` is interactive. It asks which host, which protocol, and how you want to
-/// authenticate, then prints a one-time code and waits for Return before it opens a browser. None
-/// of that can be run silently in a subprocess and be useful, and a read-only log of the output
-/// would strand the user at the first question. So it runs where they can answer it.
-///
-/// The session owns the terminal rather than the SwiftUI view doing, because the view is a value
-/// that comes and goes with every layout pass and the pty must not. `stop` is what guarantees no
-/// `gh auth login` is left waiting on a terminal nobody can see any more.
+/// An interactive sign-in command shared by GitHub and agent settings.
+/// Keeping the process in Bloom avoids the Automation permission needed to control Terminal.app.
+/// The session owns the terminal so SwiftUI layout updates cannot restart the command.
 @MainActor
 @Observable
-final class GitHubLoginSession {
+final class LoginTerminalSession {
     /// The command, for the header above the terminal. Never anything but a program name and its
     /// flags: no output of the process is ever read back into the app.
     let label: String
@@ -27,7 +20,7 @@ final class GitHubLoginSession {
 
     /// Nil when the program is not on this Mac at all, which is the one case that cannot be a
     /// terminal because there is nothing to run in it.
-    init?(
+    convenience init?(
         executable: String,
         arguments: [String],
         directory: String,
@@ -41,36 +34,39 @@ final class GitHubLoginSession {
         variables["TERM_PROGRAM"] = "Bloom"
         if variables["LANG"] == nil { variables["LANG"] = "en_US.UTF-8" }
 
-        label = ([executable] + arguments).joined(separator: " ")
-        launch = TerminalLaunch(
+        let launch = TerminalLaunch(
             executable: path,
             execName: executable,
             arguments: arguments,
             environment: variables.map { "\($0.key)=\($0.value)" }.sorted(),
-            // The fallback is an empty folder Bloom owns rather than the home directory. A login
-            // is `gh auth login` or `claude /login`, and neither reads the folder it is standing
-            // in; a CLI started in `~` is one macOS then asks about in Bloom's name. See
-            // `AgentScratchDirectory`.
+            // An empty folder avoids macOS asking about home-directory access in Bloom's name.
             directory: FileManager.default.fileExists(atPath: directory)
                 ? directory
                 : AgentScratchDirectory.current()
         )
 
+        self.init(launch: launch, label: ([executable] + arguments).joined(separator: " "), onExit: onExit)
+    }
+
+    /// Remote sign-in supplies an SSH launch, but shares the same terminal lifetime as local login.
+    init(launch: TerminalLaunch, label: String, onExit: @escaping @MainActor (TerminalExit) -> Void) {
+        self.label = label
+        self.launch = launch
+
         terminal = BloomTerminalView(frame: .zero)
-        // Nothing here closes on a clean exit the way a terminal pane does: this terminal is one
-        // command inside a sheet, and the sheet decides what to show next from what `gh` says
-        // rather than from the status it exited with.
+        // Keep the output visible after exit so the sheet can offer retry or completion.
         terminal.onExit = { [weak self] exit in
-            self?.isRunning = false
+            guard let self, self.isRunning else { return }
+            self.isRunning = false
             onExit(exit)
         }
     }
 
     /// Idempotent, because the SwiftUI view that hosts it asks on every layout pass. Once is the
-    /// only number of times a login may be started: a second `gh auth login` under the same sheet
+    /// only number of times a login may be started: a second login under the same sheet
     /// would be two processes fighting over one pty.
     func start() {
-        guard !hasStarted else { return }
+        guard !hasStarted, isRunning else { return }
         hasStarted = true
         terminal.start(launch)
     }
@@ -85,8 +81,8 @@ final class GitHubLoginSession {
 }
 
 /// The SwiftUI face of a login terminal. It owns nothing: the live view comes from the session.
-struct GitHubLoginTerminal: NSViewRepresentable {
-    let session: GitHubLoginSession
+struct LoginTerminal: NSViewRepresentable {
+    let session: LoginTerminalSession
 
     @AppStorage(TerminalGhostty.defaultsKey) private var usesGhosttyTheme = true
     @AppStorage(TerminalTextSize.defaultsKey) private var fontSize = 0.0

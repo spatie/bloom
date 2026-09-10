@@ -44,6 +44,7 @@ public actor CodexClient {
         /// `-c` override at launch is a per-session registration exactly as Claude Code's
         /// recomputed argv is. See `BridgeRegistration.codexArguments`.
         public var bridge: BridgeAttachment?
+        public var bridgeInWrapper: Bool
         /// How large this process should be told the model's context window is, in tokens, or
         /// `CodexContextWindow.modelDefault` for Codex's own catalogue. Per process, which here is
         /// per chat, and unlike the model and the effort it cannot travel with a turn: the two
@@ -59,6 +60,7 @@ public actor CodexClient {
             clientVersion: String = "0.0.0",
             environment: [String: String] = Shell.environment(),
             bridge: BridgeAttachment? = nil,
+            bridgeInWrapper: Bool = false,
             contextWindow: Int = CodexContextWindow.modelDefault
         ) {
             self.commandPrefix = commandPrefix
@@ -69,6 +71,7 @@ public actor CodexClient {
             self.clientVersion = clientVersion
             self.environment = environment
             self.bridge = bridge
+            self.bridgeInWrapper = bridgeInWrapper
             self.contextWindow = contextWindow
         }
     }
@@ -90,7 +93,7 @@ public actor CodexClient {
         // the same trap, refusing to start on a user config holding anything this build of Codex
         // does not recognise.
         var arguments = Self.arguments
-        if configuration.commandPrefix.isEmpty, let bridge = configuration.bridge {
+        if configuration.commandPrefix.isEmpty || configuration.bridgeInWrapper, let bridge = configuration.bridge {
             arguments += BridgeRegistration.codexArguments(bridge)
         }
         arguments += CodexContextWindow.overrides(for: configuration.contextWindow)
@@ -328,7 +331,8 @@ public actor CodexClient {
         model: String? = nil,
         approvalPolicy: CodexApprovalPolicy? = nil,
         sandbox: CodexSandboxMode? = nil,
-        approvalsReviewer: CodexApprovalsReviewer? = nil
+        approvalsReviewer: CodexApprovalsReviewer? = nil,
+        developerInstructions: String? = nil
     ) async throws -> CodexThreadHandle {
         let result = try await send("thread/start", params: .object(omittingNil: [
             "cwd": .string(cwd ?? configuration.cwd),
@@ -336,6 +340,7 @@ public actor CodexClient {
             "approvalPolicy": approvalPolicy.map { .string($0.rawValue) },
             "sandbox": sandbox.map { .string($0.rawValue) },
             "approvalsReviewer": approvalsReviewer.map { .string($0.rawValue) },
+            "developerInstructions": developerInstructions.map(JSONValue.string),
         ]))
         guard let id = result["thread"]?["id"]?.stringValue else {
             throw CodexClientError.unexpectedResult(method: "thread/start")
@@ -354,10 +359,12 @@ public actor CodexClient {
         _ threadID: String,
         cwd: String? = nil,
         model: String? = nil,
-        sandbox: CodexSandboxMode? = nil
+        sandbox: CodexSandboxMode? = nil,
+        developerInstructions: String? = nil
     ) async throws -> CodexThreadHandle {
         let result = try await send("thread/resume", params: .object(omittingNil: [
             "threadId": .string(threadID),
+            "developerInstructions": developerInstructions.map(JSONValue.string),
             "cwd": .string(cwd ?? configuration.cwd),
             "model": model.map(JSONValue.string),
             "sandbox": sandbox.map { .string($0.rawValue) },

@@ -37,8 +37,7 @@ public enum ServerCommandLine {
                 ? try LocalServerIdentity(bundleID: arguments[2]).directory()
                 : arguments[2]
             if arguments[0] == "connect" {
-                let connection = try UnixSocketConnection.connect(to: ServerDaemon.socketPath(directory: directory))
-                await relay(connection)
+                try await ServerTerminalRelay.run(directory: directory)
             } else {
                 var gatewayGroupID: UInt32?
                 if let value = ProcessInfo.processInfo.environment["BLOOM_SERVER_GATEWAY_GID"] {
@@ -79,9 +78,10 @@ public enum ServerCommandLine {
         return report.needsAttention ? 1 : 0
     }
 
-    private static func relay(_ connection: UnixSocketConnection) async {
+    static func relay(_ connection: UnixSocketConnection, initial: Data = Data()) async {
         let input = FileHandle.standardInput
         let buffer = LineBuffer()
+        for line in buffer.take(initial) { connection.writeLine(line) }
         input.readabilityHandler = { handle in
             let data = handle.availableData
             if data.isEmpty {

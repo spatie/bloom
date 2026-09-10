@@ -16,7 +16,7 @@ import BloomCore
 struct CenterPanesView<Model: WorkspacePaneModel>: View {
     @Bindable var model: Model
 
-    private var tabs: WorkspaceTabsStore { .shared }
+    private var tabs: WorkspaceTabsStore { model.paneStores.tabs }
 
     /// What a split takes out of the space its two panes share. One point, because the strip the
     /// pointer aims at is drawn over the panes rather than reserved between them.
@@ -235,7 +235,7 @@ struct CenterPanesView<Model: WorkspacePaneModel>: View {
         case .chat:
             return PaneKind.chat.symbol
         case .tool(let id):
-            let open = CenterTabStore.shared.tabs(for: model.workspace.id)
+            let open = model.paneStores.center.tabs(for: model.workspace.id)
             return open.first { $0.id == id }?.icon ?? PaneKind.terminal.symbol
         }
     }

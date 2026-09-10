@@ -20,6 +20,8 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     private var fixture: RemoteTranscript?
     #endif
     private var buffer = TranscriptBuffer()
+    private var rows: [RemoteTranscriptRow] = []
+    var transcriptMessageCount: Int { buffer.messages.count }
     private var poll: Task<Void, Never>?
     private var isRefreshing = false
     private var needsRefresh = false
@@ -246,7 +248,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         }
         do {
             let transcript = try await service.transcript(sessionID: session.id, after: buffer.sequence)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, model.address == origin, model.service != nil else { return }
             applyTranscript(transcript)
         } catch {
             if !Task.isCancelled { status.text = hasPendingSubmission ? uncertainSend : error.localizedDescription }
@@ -254,12 +256,13 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     }
 
     private func applyTranscript(_ transcript: RemoteTranscript) {
-        let previousMessages = buffer.messages
+        let previousRows = rows
         let previousStreamingText = buffer.streamingText
         buffer.apply(transcript)
+        rows = RemoteTranscriptProjection.rows(messages: buffer.messages)
         let wasAtBottom = table.contentOffset.y + table.bounds.height >= table.contentSize.height - 100
-        if previousMessages != buffer.messages || previousStreamingText != buffer.streamingText {
-            updateRows(previousMessages: previousMessages, previousStreamingText: previousStreamingText)
+        if previousRows != rows || previousStreamingText != buffer.streamingText {
+            updateRows(previousRows: previousRows, previousStreamingText: previousStreamingText)
         }
         if wasAtBottom, table.numberOfRows(inSection: 0) > 0 {
             table.scrollToRow(at: IndexPath(row: table.numberOfRows(inSection: 0) - 1, section: 0), at: .bottom, animated: false)
@@ -270,7 +273,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     }
 
     #if DEBUG
-    var liveMessageCount: Int { buffer.messages.count }
+    var liveMessageCount: Int { transcriptMessageCount }
 
     func showLiveOptions() async throws {
         loadOptions()
@@ -294,7 +297,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         for (index, snapshot) in snapshots.enumerated() {
             applyTranscript(snapshot)
             table.layoutIfNeeded()
-            let expected = snapshot.messages.count + (snapshot.streamingText.isEmpty ? 0 : 1)
+            let expected = RemoteTranscriptProjection.rows(messages: snapshot.messages).count + (snapshot.streamingText.isEmpty ? 0 : 1)
             guard table.numberOfRows(inSection: 0) == expected,
                   buffer.messages == snapshot.messages,
                   buffer.streamingText == snapshot.streamingText,
@@ -308,9 +311,9 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     }
     #endif
 
-    private func updateRows(previousMessages: [RemoteMessage], previousStreamingText: String) {
-        let oldIDs = previousMessages.map { String($0.id) } + (previousStreamingText.isEmpty ? [] : ["stream"])
-        let newIDs = buffer.messages.map { String($0.id) } + (buffer.streamingText.isEmpty ? [] : ["stream"])
+    private func updateRows(previousRows: [RemoteTranscriptRow], previousStreamingText: String) {
+        let oldIDs = previousRows.map { String($0.id) } + (previousStreamingText.isEmpty ? [] : ["stream"])
+        let newIDs = rows.map { String($0.id) } + (buffer.streamingText.isEmpty ? [] : ["stream"])
         let change = TranscriptEntryChange.between(oldIDs, newIDs)
         let plan = TranscriptTableUpdate.plan(change: change, environmentMoved: false)
         UIView.performWithoutAnimation {
@@ -341,13 +344,13 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
                 break
             }
             // Retain unchanged hosting cells so streaming does not reset their selection or folds.
-            let previous = Dictionary(uniqueKeysWithValues: previousMessages.map { ($0.id, $0) })
-            var changed = buffer.messages.enumerated().compactMap { index, message -> IndexPath? in
+            let previous = Dictionary(uniqueKeysWithValues: previousRows.map { ($0.id, $0) })
+            var changed = rows.enumerated().compactMap { index, message -> IndexPath? in
                 guard let old = previous[message.id], old != message else { return nil }
                 return IndexPath(row: index, section: 0)
             }
             if !previousStreamingText.isEmpty, !buffer.streamingText.isEmpty, previousStreamingText != buffer.streamingText {
-                changed.append(IndexPath(row: buffer.messages.count, section: 0))
+                changed.append(IndexPath(row: rows.count, section: 0))
             }
             if !changed.isEmpty { table.reconfigureRows(at: changed) }
             table.layoutIfNeeded()
@@ -414,7 +417,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     private func updateStatus() {
         updateComposer()
         send.configuration?.showsActivityIndicator = isSending
-        if buffer.messages.isEmpty && buffer.streamingText.isEmpty {
+        if rows.isEmpty && buffer.streamingText.isEmpty {
             var empty = UIContentUnavailableConfiguration.empty()
             empty.image = UIImage(systemName: "bubble.left.and.text.bubble.right")
             empty.text = "Start a conversation"
@@ -443,13 +446,12 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     }
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        buffer.messages.count + (buffer.streamingText.isEmpty ? 0 : 1)
+        rows.count + (buffer.streamingText.isEmpty ? 0 : 1)
     }
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         guard let cell = tableView.dequeueReusableCell(withIdentifier: "message", for: indexPath) as? TranscriptCell else { return UITableViewCell() }
-        if indexPath.row < buffer.messages.count {
-            let message = buffer.messages[indexPath.row]
-            cell.configure(kind: message.kind, text: message.text, identity: String(message.id))
+        if indexPath.row < rows.count {
+            cell.configure(row: rows[indexPath.row])
         } else { cell.configure(kind: "assistant", text: buffer.streamingText, identity: "stream", isStreaming: true) }
         return cell
     }

@@ -38,7 +38,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  server-package:
+    runs-on: ubuntu-latest
+    container: swift:6.3.3-noble
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+      - name: Build the bundled Ubuntu server
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends libsqlite3-dev pkg-config git python3 patchelf
+          swift build --product bloom-server -j 4 -Xswiftc -warnings-as-errors
+          swift build --product bloom-bridge -j 4 -Xswiftc -warnings-as-errors
+          python3 Tools/package-linux-server.py .build/debug/bloom-server .build/bloom-server-linux-x86_64.tar.gz
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bundled-linux-server
+          path: .build/bloom-server-linux-x86_64.tar.gz
+          retention-days: 7
+
   release:
+    needs: server-package
     runs-on: macos-26
     timeout-minutes: 90
 
@@ -72,6 +96,13 @@ jobs:
           ref: ${{ steps.release.outputs.tag }}
           # The build number is a commit count, and a shallow clone counts wrong.
           fetch-depth: 0
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: bundled-linux-server
+          path: .build/server-package
+      - name: Use the matching server package
+        run: echo "BLOOM_LINUX_SERVER_ARCHIVE=$GITHUB_WORKSPACE/.build/server-package/bloom-server-linux-x86_64.tar.gz" >> "$GITHUB_ENV"
 
       # Names only. None of these are ever printed, and the point is to stop
       # before the build rather than to show what is set.

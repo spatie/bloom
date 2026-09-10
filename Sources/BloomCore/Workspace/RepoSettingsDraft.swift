@@ -43,6 +43,9 @@ public struct RepoSettingsDraft: Sendable, Hashable {
     /// most projects, which is the answer that sends a turn with nothing attached to it.
     public var mergeInstructions = ""
     public var conflictInstructions = ""
+    /// What a browser pane opens on, as typed, with the variables left unexpanded. Empty for the
+    /// port Bloom allocated, which is what most projects want.
+    public var browserURL = ""
 
     public init() {}
 
@@ -58,6 +61,7 @@ public struct RepoSettingsDraft: Sendable, Hashable {
         deleteBranchOnArchive = settings.deleteBranchOnArchive
         mergeInstructions = settings.mergeInstructions ?? ""
         conflictInstructions = settings.conflictInstructions ?? ""
+        browserURL = settings.browserURL ?? ""
     }
 
     /// The patterns, one per line. A blank line is not a pattern, and an empty field means "copy
@@ -141,6 +145,10 @@ public struct RepoSettingsDraft: Sendable, Hashable {
         let conflicts = conflictInstructions.trimmed
         if conflicts != (settings.conflictInstructions ?? "").trimmed {
             edits.append(.conflictInstructions(conflicts))
+        }
+        let url = browserURL.trimmed
+        if url != (settings.browserURL ?? "") {
+            edits.append(.browserURL(url))
         }
         return edits
     }

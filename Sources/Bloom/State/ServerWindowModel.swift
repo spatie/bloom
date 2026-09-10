@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import BloomCore
+import BloomClient
 
 /// Remote state is kept apart from AppModel so a server path can never reach a local file action.
 /// Each connection generation discards replies from an earlier server or window selection.
@@ -8,6 +9,15 @@ import BloomCore
 @Observable
 final class ServerWindowModel {
     enum ConnectionMode { case remote, local, existingLocal }
+    @ObservationIgnored private var paneStoresByConnection: [String: PaneStores] = [:]
+    @ObservationIgnored private let unconnectedPaneID = UUID().uuidString
+    var paneStores: PaneStores {
+        let key = endpoint.map(PaneStateNamespace.connectionID) ?? unconnectedPaneID
+        if let existing = paneStoresByConnection[key] { return existing }
+        let stores = PaneStores.remote(connectionID: key)
+        paneStoresByConnection[key] = stores
+        return stores
+    }
     var connectionMode = ConnectionMode.remote
     var usesHTTPS = false
     var httpsAddress = ""
@@ -18,6 +28,7 @@ final class ServerWindowModel {
     var host = ""
     var executable = ""
     var identityFile = ""
+    var knownHostsFile = ""
     var remoteDirectory = ""
     var existingLocalDirectory = ""
     var directory: String {
@@ -144,6 +155,8 @@ final class ServerWindowModel {
         catalogue = value
     }
 
+    func uiBridgeService() -> RemoteWorkspaceService? { client.map { RemoteWorkspaceService(client: $0) } }
+
     func existingWorkspaceModel(_ id: WorkspaceID) -> RemoteWorkspaceFileListing? { workspaceModels[id] }
     func existingConversation(_ id: SessionID) -> TranscriptModel? { conversationModels[id] }
     func forgetConversation(_ id: SessionID) { conversationModels[id] = nil }
@@ -155,7 +168,7 @@ final class ServerWindowModel {
     }
     func activateSession(_ id: SessionID?, in workspaceID: WorkspaceID) {
         activeSessions[workspaceID] = id
-        preferences.set(Dictionary(uniqueKeysWithValues: activeSessions.map { ($0.key.rawValue, $0.value.rawValue) }), forKey: "server.activeSessions")
+        paneStores.defaults.set(Dictionary(uniqueKeysWithValues: activeSessions.map { ($0.key.rawValue, $0.value.rawValue) }), forKey: "server.activeSessions")
         if selectedWorkspaceID == workspaceID { selectedSessionID = id }
     }
     func selectWorkspace(_ id: WorkspaceID) {
@@ -203,11 +216,6 @@ final class ServerWindowModel {
     init(preferences: UserDefaults = .standard, bundle: Bundle = .main) {
         self.preferences = preferences
         serverLabels = preferences.dictionary(forKey: "server.labels") as? [String: String] ?? [:]
-        if let saved = preferences.dictionary(forKey: "server.activeSessions") as? [String: String] {
-            activeSessions = Dictionary(uniqueKeysWithValues: saved.map { (WorkspaceID($0.key), SessionID($0.value)) })
-        }
-        if let data = preferences.data(forKey: "server.terminalPanes"),
-           let saved = try? JSONDecoder().decode([String: [ServerTerminalPane]].self, from: data) { terminalPanes = saved }
         let seed = bundle.object(forInfoDictionaryKey: "BloomRemoteConnection") as? [String: String] ?? [:]
         let saved = preferences.dictionary(forKey: "server.connection") as? [String: String] ?? [:]
         let values = seed.merging(saved) { _, saved in saved }
@@ -217,6 +225,7 @@ final class ServerWindowModel {
         host = values["host"] ?? ""
         executable = values["executable"] ?? ""
         identityFile = values["identityFile"] ?? ""
+        knownHostsFile = values["knownHostsFile"] ?? ""
         remoteDirectory = values["directory"] ?? ""
         remoteRepositoryPath = values["repository"] ?? ""
         localRepositoryPath = values["localRepository"] ?? ""
@@ -243,7 +252,7 @@ final class ServerWindowModel {
     private func saveConnection() {
         preferences.set([
             "usesHTTPS": usesHTTPS ? "true" : "false", "httpsAddress": httpsAddress,
-            "host": host, "executable": executable, "directory": remoteDirectory, "identityFile": identityFile,
+            "host": host, "executable": executable, "directory": remoteDirectory, "identityFile": identityFile, "knownHostsFile": knownHostsFile,
             "repository": remoteRepositoryPath, "localRepository": localRepositoryPath,
             "model": agentModel, "agent": agent.rawValue, "effort": effort, "permissionMode": permissionMode.rawValue,
         ], forKey: "server.connection")
@@ -314,8 +323,8 @@ final class ServerWindowModel {
     }
 
     private var terminalNames: [String: String] {
-        get { preferences.dictionary(forKey: "server.tabTerminalNames") as? [String: String] ?? [:] }
-        set { preferences.set(newValue, forKey: "server.tabTerminalNames") }
+        get { paneStores.defaults.dictionary(forKey: "server.tabTerminalNames") as? [String: String] ?? [:] }
+        set { paneStores.defaults.set(newValue, forKey: "server.tabTerminalNames") }
     }
 
     func terminalName(for tab: CenterTab) -> String { terminalNames[tab.id] ?? tab.id }
@@ -323,22 +332,15 @@ final class ServerWindowModel {
     func prepareCreatedWorkspace(_ workspace: Workspace, opensWith mode: WorkspaceStartMode) {
         // Fresh workspaces have no legacy terminal to migrate. The shared pane system opens
         // exactly the tab requested by the creation window.
-        preferences.set(true, forKey: "server.sharedTabs." + workspace.id.rawValue)
-        WorkspaceStartMode.record(mode, workspaceID: workspace.id)
+        paneStores.defaults.set(true, forKey: "server.sharedTabs." + workspace.id.rawValue)
+        WorkspaceStartMode.record(mode, workspaceID: workspace.id, defaults: paneStores.defaults)
     }
 
     func prepareTabs(for workspace: Workspace) {
-        let tabs = CenterTabStore.shared
+        let tabs = paneStores.center
         tabs.load(workspaceID: workspace.id)
-        let key = "server.sharedTabs." + workspace.id.rawValue
-        if !preferences.bool(forKey: key) {
-            let legacy = [ServerTerminalPane(id: "main", title: "Terminal")] + (terminalPanes[workspace.id.rawValue] ?? [])
-            for pane in legacy {
-                let tab = tabs.add(kind: .terminal, workspaceID: workspace.id, title: pane.title)
-                terminalNames[tab.id] = pane.id.rawValue
-            }
-            preferences.set(true, forKey: key)
-        }
+        // Unqualified remote records may belong to a copied local database or another server.
+        // Start from this connection's own tab list without importing ambiguous legacy terminals.
         for tab in tabs.tabs(for: workspace.id) where tab.kind == .terminal {
             let capturedEndpoint = endpoint
             let name = terminalName(for: tab)
@@ -441,6 +443,11 @@ final class ServerWindowModel {
         } catch { buffer.error = error.localizedDescription }
     }
 
+    func liveTerminal(named name: String, workspaceID: WorkspaceID) -> BloomTerminalView? {
+        guard let endpoint = lastEndpoint else { return nil }
+        return terminals[String(reflecting: endpoint) + workspaceID.rawValue + "/" + name]
+    }
+
     func terminal(named name: String = "main") async throws -> BloomTerminalView {
         guard let workspace = selectedWorkspace, let client, let endpoint = lastEndpoint else {
             throw ServerFailure("Connect to this workspace's server first.")
@@ -484,7 +491,7 @@ final class ServerWindowModel {
             let endpoint: ServerEndpoint
             switch connectionMode {
             case .remote:
-                if usesHTTPS { endpoint = .https(url: try ServerHTTPTransport.origin(httpsAddress).absoluteString) } else { endpoint = .ssh(host: host, executable: executable, directory: directory, identityFile: identityFile.isEmpty ? nil : identityFile) }
+                if usesHTTPS { endpoint = .https(url: try ServerHTTPTransport.origin(httpsAddress).absoluteString) } else { endpoint = .ssh(host: host, executable: executable, directory: directory, identityFile: identityFile.isEmpty ? nil : identityFile, knownHostsFile: knownHostsFile.isEmpty ? nil : knownHostsFile) }
             case .existingLocal: endpoint = .local(directory: directory)
             case .local: endpoint = try await localService.start()
             }
@@ -509,6 +516,10 @@ final class ServerWindowModel {
                     previewAddresses.removeAll()
                 }
                 lastEndpoint = endpoint
+                let saved = paneStores.defaults.dictionary(forKey: "server.activeSessions") as? [String: String] ?? [:]
+                activeSessions = Dictionary(uniqueKeysWithValues: saved.map { (WorkspaceID($0.key), SessionID($0.value)) })
+                terminalPanes = paneStores.defaults.data(forKey: "server.terminalPanes")
+                    .flatMap { try? JSONDecoder().decode([String: [ServerTerminalPane]].self, from: $0) } ?? [:]
             }
             var accessToken: ServerHTTPTransport.AccessToken?
             if case .https(let address) = endpoint {
@@ -609,12 +620,12 @@ final class ServerWindowModel {
         if terminalPanes[workspaceID.rawValue]?.contains(where: { $0.id == pane.id }) != true {
             terminalPanes[workspaceID.rawValue, default: []].append(pane)
         }
-        if let data = try? JSONEncoder().encode(terminalPanes) { preferences.set(data, forKey: "server.terminalPanes") }
+        if let data = try? JSONEncoder().encode(terminalPanes) { paneStores.defaults.set(data, forKey: "server.terminalPanes") }
         if let workspace = catalogue?.workspaces.first(where: { $0.id == workspaceID }) {
-            let tab = CenterTabStore.shared.add(kind: .terminal, workspaceID: workspaceID, title: pane.title)
+            let tab = paneStores.center.add(kind: .terminal, workspaceID: workspaceID, title: pane.title)
             terminalNames[tab.id] = pane.id.rawValue
             prepareTabs(for: workspace)
-            if let model = workspaceModels[workspaceID] { WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model) }
+            if let model = workspaceModels[workspaceID] { paneStores.tabs.reveal(.tool(tab.id), in: model) }
         }
     }
 

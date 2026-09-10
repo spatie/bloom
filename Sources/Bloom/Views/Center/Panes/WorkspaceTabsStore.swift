@@ -34,7 +34,7 @@ import BloomCore
 @MainActor
 @Observable
 final class WorkspaceTabsStore {
-    static let shared = WorkspaceTabsStore()
+    static var shared: WorkspaceTabsStore { PaneStores.local.tabs }
 
     /// One split tab: what it is filed under, its tree, and what each of its panes points at.
     ///
@@ -114,11 +114,14 @@ final class WorkspaceTabsStore {
     /// One snapshot of the app's own domain feeds all three scans below, because
     /// `dictionaryRepresentation()` materialises the merged search list and this ran it three
     /// times on the main actor before the window was usable. See `DefaultsSnapshot`.
-    private init() {
-        let defaults = UserDefaults.standard
-        var snapshot = DefaultsSnapshot.own(defaults, name: Bundle.main.bundleIdentifier)
+    private let center: CenterTabStore
+    private let defaults: UserDefaults
 
-        for tab in TabMigration.migrateAll(in: defaults, keys: snapshot.keys) {
+    init(center: CenterTabStore, defaults: UserDefaults, domain: String?, migrateLegacy: Bool) {
+        self.center = center; self.defaults = defaults
+        var snapshot = DefaultsSnapshot.own(defaults, name: domain)
+
+        for tab in migrateLegacy ? TabMigration.migrateAll(in: defaults, keys: snapshot.keys) : [] {
             // Phase A's own writes, folded back in. The scan below reads the snapshot rather than
             // defaults, so without this a launch that migrated would file no tab at all and show
             // every migrated workspace unsplit.
@@ -182,7 +185,7 @@ final class WorkspaceTabsStore {
         // members an agent started in it, and those are sidebar rows rather than tabs. See
         // `TabSet.tabbable`, which is where that rule is argued.
         let sessions = TabSet.tabbable(model.sessions)
-        let tools = CenterTabStore.shared.tabs(for: model.workspace.id).map(\.id)
+        let tools = center.tabs(for: model.workspace.id).map(\.id)
         return StripOrder.entries(
             sessions: sessions,
             tools: tools,
@@ -202,7 +205,7 @@ final class WorkspaceTabsStore {
         guard let order = StripOrder.rewritten(
             drawn,
             sessions: TabSet.tabbable(model.sessions),
-            tools: CenterTabStore.shared.tabs(for: workspaceID).map(\.id),
+            tools: center.tabs(for: workspaceID).map(\.id),
             stored: stripOrders[workspaceID] ?? []
         ) else { return }
 
@@ -244,7 +247,6 @@ final class WorkspaceTabsStore {
     }
 
     private func persistStrip(_ workspaceID: WorkspaceID) {
-        let defaults = UserDefaults.standard
         let key = TabDefaults.stripKey(workspaceID)
         guard let order = stripOrders[workspaceID], !order.isEmpty,
               let data = try? JSONEncoder().encode(order) else {
@@ -563,7 +565,7 @@ final class WorkspaceTabsStore {
     /// loads the tool tabs before it awaits, so both are settled by the time this runs.
     func reconcile(in model: any WorkspacePaneModel) {
         let workspaceID = model.workspace.id
-        let tabs = CenterTabStore.shared
+        let tabs = center
 
         var stored: [PaneContent: StoredPaneArrangement] = [:]
         for arrangement in arrangements.values {
@@ -598,19 +600,18 @@ final class WorkspaceTabsStore {
             persist(root.id)
             if root != tab {
                 arrangements[tab.id] = nil
-                UserDefaults.standard.removeObject(forKey: TabDefaults.tabKey(tab.id))
+                defaults.removeObject(forKey: TabDefaults.tabKey(tab.id))
                 if selected[workspaceID] == tab { selected[workspaceID] = root }
             }
 
         case .dissolved(let remaining):
             arrangements[tab.id] = nil
-            UserDefaults.standard.removeObject(forKey: TabDefaults.tabKey(tab.id))
+            defaults.removeObject(forKey: TabDefaults.tabKey(tab.id))
             if selected[workspaceID] == tab { selected[workspaceID] = remaining }
         }
     }
 
     private func persist(_ rootID: String) {
-        let defaults = UserDefaults.standard
         let key = TabDefaults.tabKey(rootID)
 
         // An unsplit tab is the default, so it is stored as nothing at all rather than as a record

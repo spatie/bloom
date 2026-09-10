@@ -137,6 +137,7 @@ public actor CodexRunner: SessionRunner {
         let generation = handle.generation
         let replacement = handle.prepareReplacement()
         defer { handle.finishReplacement(replacement) }
+        let prompt = try await store.sideConversationTurn(text, sessionID: sessionID)
         await applyContextWindowChange()
         try handle.check(generation)
         let client = try await connected()
@@ -160,14 +161,14 @@ public actor CodexRunner: SessionRunner {
         // a turn the server has been told to abandon is not a turn a message belongs in, whatever
         // the server answers about it.
         if let turnID = handle.steerableTurnID,
-           await steer(text, threadID: threadID, turnID: turnID, on: client) {
+           await steer(prompt, threadID: threadID, turnID: turnID, on: client) {
             return
         }
         try handle.check(generation)
 
         let turn = try await client.startTurn(
             threadID: threadID,
-            input: [.text(text)],
+            input: [.text(prompt)],
             model: wireModel,
             effort: session.effort,
             approvalPolicy: Self.approvalPolicy(for: session.permissionMode),
@@ -183,6 +184,10 @@ public actor CodexRunner: SessionRunner {
 
         session.apply(.turnStarted)
         await save(session)
+        if prompt != text {
+            // startTurn succeeded. A rejection leaves the context available for the next retry.
+            try? await store.acknowledgeSideConversationContext(sessionID: sessionID)
+        }
     }
 
     /// Stop the turn that is running, and leave the server where it is.
@@ -299,12 +304,15 @@ public actor CodexRunner: SessionRunner {
     /// The chat can be sent to again afterwards: the thread id is stored, so the next turn
     /// reconnects and resumes rather than starting a new conversation.
     public func shutdown() async {
+        let intent = handle.intent
+        // Settle the old connection's questions before making a replacement possible.
         await filePendingAsks()
-        // Stated here as well as in `interrupt`, because a chat can be closed while it is idle
-        // and can be closed while it is mid turn. `SessionLifecycle` refuses a stop on a session
-        // with no turn open, so the one that did not happen writes nothing.
-        if session.apply(.cancelled).moves { await save(session) }
-        await dropConnection()
+        let previous = detachConnection()
+        previous?.terminateNow()
+        // Detach before publishing cancellation: that row lets a caller send again, and it must
+        // not find the dying client. A new turn begun during bookkeeping owns its own state.
+        if handle.intent == intent, session.apply(.cancelled).moves { await save(session) }
+        await previous?.stop()
     }
 
     /// Kill the server and forget everything that belonged to it, leaving the chat resumable.
@@ -314,7 +322,13 @@ public actor CodexRunner: SessionRunner {
     /// no cancellation to record, and writing either would say a turn had been interrupted when
     /// none was running.
     private func dropConnection() async {
-        let previousClient = client
+        let previous = detachConnection()
+        await previous?.stop()
+    }
+
+    /// Detach without suspension so cleanup cannot clear a replacement connection.
+    private func detachConnection() -> CodexClient? {
+        let previous = client
         client = nil
         connectionID = UUID()
         // The thread belonged to the process that has just been killed. Held on to, the next
@@ -326,7 +340,7 @@ public actor CodexRunner: SessionRunner {
         pumpTask?.cancel()
         pumpTask = nil
         handle.end()
-        await previousClient?.stop()
+        return previous
     }
 
     /// Pick up a context window chosen since this server started, by starting another one.
@@ -377,8 +391,9 @@ public actor CodexRunner: SessionRunner {
             cwd: workspacePath,
             clientName: "Bloom",
             clientVersion: Self.clientVersion,
-            environment: Shell.environment(extra: execution.environment),
-            bridge: execution.commandPrefix.isEmpty ? bridge : nil,
+            environment: Shell.environment(extra: execution.environment.merging(execution.bridgeEnvironment(bridge)) { _, bridgeValue in bridgeValue }),
+            bridge: execution.supportsBridge ? bridge : nil,
+            bridgeInWrapper: execution.bridgeEnabled,
             contextWindow: contextWindow
         ))
         self.client = client
@@ -406,16 +421,20 @@ public actor CodexRunner: SessionRunner {
         if let threadID { return threadID }
 
         let sandbox = Self.sandboxMode(for: session.permissionMode)
+        let instructions = session.workspaceID == nil ? AskConversation.instructions : nil
         let handle: CodexThreadHandle
         if let stored = session.agentSessionID, !stored.isEmpty {
-            handle = try await client.resumeThread(stored, cwd: workspacePath, sandbox: sandbox)
+            handle = try await client.resumeThread(
+                stored, cwd: workspacePath, sandbox: sandbox, developerInstructions: instructions
+            )
         } else {
             handle = try await client.startThread(
                 cwd: workspacePath,
                 model: wireModel,
                 approvalPolicy: Self.approvalPolicy(for: session.permissionMode),
                 sandbox: sandbox,
-                approvalsReviewer: Self.approvalsReviewer(for: session.permissionMode)
+                approvalsReviewer: Self.approvalsReviewer(for: session.permissionMode),
+                developerInstructions: instructions
             )
         }
 

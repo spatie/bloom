@@ -38,11 +38,17 @@ public typealias WorkspaceTabListing = @Sendable (WorkspaceID) async -> Workspac
 /// so a listing cannot fetch a page or fork a shell that nobody had opened. That is the same rule
 /// `pane_list` is held to and it is the reason both are self-approved.
 public struct WorkspaceTabsTool: BridgeToolHandling {
-    private let census: WorkspaceTabListing
+    private let report: @Sendable (WorkspaceID) async -> BridgeToolResult
 
     public init(_ census: @escaping WorkspaceTabListing) {
-        self.census = census
+        report = { workspaceID in
+            guard let census = await census(workspaceID) else { return .failure("That workspace is not open in Bloom any more, so its tabs cannot be reached.") }
+            return .json(census.json)
+        }
     }
+
+    /// The same scope gate can report a census from a connected remote UI.
+    public init(report: @escaping @Sendable (WorkspaceID) async -> BridgeToolResult) { self.report = report }
 
     /// The gate the whole workspace-scoped family shares, argued once in `BridgeWorkspaceScope`.
     public let roles = BridgeWorkspaceScope.roles
@@ -83,10 +89,7 @@ public struct WorkspaceTabsTool: BridgeToolHandling {
                 BridgeWorkspaceScope.refusal(tool: "workspace_tabs", doing: "lists the tabs of")
             )
         }
-        guard let census = await census(workspaceID) else {
-            return .failure(WorkspaceTabTrouble.noWorkspace)
-        }
-        return .json(census.json)
+        return await report(workspaceID)
     }
 }
 

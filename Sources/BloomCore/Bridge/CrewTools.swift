@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// The four tools an orchestrator runs a crew with: `agent_start`, `agent_say`, `agent_list` and
 /// `agent_stop`.
@@ -32,12 +33,7 @@ import Foundation
 /// The four names, written once. Each appears in its own schema, in the refusals the other three
 /// give, and in `BridgeToolApproval.selfApproved`, and a name that is right in three of those
 /// places and wrong in the fourth is a tool an agent is told to call and cannot find.
-enum CrewToolName {
-    static let start = "agent_start"
-    static let say = "agent_say"
-    static let list = "agent_list"
-    static let stop = "agent_stop"
-}
+typealias CrewToolName = BloomClient.CrewToolName
 
 /// Which crew members count against `Crew.ceiling`, and which are just rows.
 ///

@@ -91,77 +91,9 @@ public struct AgentTextBlock: Sendable, Hashable {
     }
 }
 
-public struct AgentToolUse: Sendable, Hashable {
-    public let id: String
-    public let name: String
-    public let input: JSONValue
-    public let parentToolUseID: String?
-    public let raw: Data
-    public let messageID: String
-    public let uuid: String?
-    public let sessionID: String?
+public typealias AgentToolUse = BloomClient.AgentToolUse
 
-    public init(
-        id: String,
-        name: String,
-        input: JSONValue,
-        parentToolUseID: String? = nil,
-        raw: Data = Data(),
-        messageID: String = "",
-        uuid: String? = nil,
-        sessionID: String? = nil
-    ) {
-        self.id = id
-        self.name = name
-        self.input = input
-        self.parentToolUseID = parentToolUseID
-        self.raw = raw
-        self.messageID = messageID
-        self.uuid = uuid
-        self.sessionID = sessionID
-    }
-
-    /// The one input field worth putting in a collapsed row header for the file tools.
-    public var filePath: String? { input["file_path"]?.stringValue }
-}
-
-public struct AgentToolResult: Sendable, Hashable {
-    public let toolUseID: String
-    public let text: String
-    public let isError: Bool
-    /// Set when the call never ran. `is_error` is true for a refusal as well as for a failure, so
-    /// this is what separates the two. See `ToolRefusal`.
-    public let refusal: ToolRefusal?
-    /// Screenshots come back as image blocks. The bytes are not lifted out, only the fact that
-    /// they were there, so a row can offer to pull them from the raw payload.
-    public let hasImages: Bool
-    public let raw: Data
-    public let parentToolUseID: String?
-    public let uuid: String?
-    public let sessionID: String?
-
-    public init(
-        toolUseID: String,
-        text: String,
-        isError: Bool = false,
-        refusal: ToolRefusal? = nil,
-        hasImages: Bool = false,
-        raw: Data = Data(),
-        parentToolUseID: String? = nil,
-        uuid: String? = nil,
-        sessionID: String? = nil
-    ) {
-        self.toolUseID = toolUseID
-        self.text = text
-        self.isError = isError
-        self.refusal = refusal
-        self.hasImages = hasImages
-        self.raw = raw
-        self.parentToolUseID = parentToolUseID
-        self.uuid = uuid
-        self.sessionID = sessionID
-    }
-}
+public typealias AgentToolResult = BloomClient.AgentToolResult
 
 /// A slice of the raw Anthropic streaming API, present only with `--include-partial-messages`.
 /// Good for live typing, worthless for a transcript: the `assistant` event right behind it
@@ -646,10 +578,11 @@ public enum AgentEvent: Sendable {
             ))
 
         case "tool_use":
+            let call = ToolCallPayload(block: block)
             return .toolUse(AgentToolUse(
-                id: block["id"]?.stringValue ?? "",
-                name: block["name"]?.stringValue ?? "",
-                input: block["input"] ?? .object([:]),
+                id: call.id,
+                name: call.name,
+                input: call.input,
                 parentToolUseID: parentToolUseID,
                 raw: raw,
                 messageID: messageID,
@@ -698,20 +631,7 @@ public enum AgentEvent: Sendable {
     /// Tool result content is either a bare string or an array of blocks, and the array can hold
     /// screenshots. Both shapes reduce to text plus a flag.
     static func renderToolResultContent(_ content: JSONValue?) -> (text: String, hasImages: Bool) {
-        guard let content else { return ("", false) }
-        if let string = content.stringValue { return (string, false) }
-        guard let blocks = content.arrayValue else { return (content.prettyPrinted, false) }
-
-        var parts: [String] = []
-        var hasImages = false
-        for block in blocks {
-            switch block["type"]?.stringValue {
-            case "text": parts.append(block["text"]?.stringValue ?? "")
-            case "image": hasImages = true
-            default: break
-            }
-        }
-        return (parts.joined(separator: "\n"), hasImages)
+        ToolResultContent.render(content)
     }
 
     private static func decodeStreamEvent(_ json: JSONValue, raw: Data) -> AgentEvent {

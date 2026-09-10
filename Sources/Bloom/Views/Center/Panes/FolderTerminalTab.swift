@@ -20,7 +20,7 @@ enum FolderTerminalTab {
         NewPane.open(
             .terminal, in: model, title: target.title, directory: target.directory
         ) { content in
-            WorkspaceTabsStore.shared.reveal(content, in: model)
+            model.paneStores.tabs.reveal(content, in: model)
         }
     }
 
@@ -31,7 +31,7 @@ enum FolderTerminalTab {
     /// opens another one there rather than back at the worktree root.
     static func target(folder: String, in model: any WorkspacePaneModel) -> FolderTerminal.Target? {
         guard model.remoteServer == nil else { return nil }
-        let taken = CenterTabStore.shared.tabs(for: model.workspace.id)
+        let taken = model.paneStores.center.tabs(for: model.workspace.id)
             .filter { $0.kind == .terminal }
             .map(\.title)
         return FolderTerminal.target(folder: folder, taken: taken)

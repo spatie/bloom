@@ -1,14 +1,16 @@
 import Foundation
+import BloomClient
 
 /// A client owns a connection, never an agent. Explicit disconnect and transport failure finish
 /// waiting requests; neither sends Stop or asks the standalone server to exit.
-public actor ServerClient {
+public actor ServerClient: RemoteRequesting {
     private let socket: UnixSocketConnection?
     private let process: StreamingProcess?
     private let http: ServerHTTPTransport?
     private var pump: Task<Void, Never>?
     private var errorPump: Task<Void, Never>?
-    private var pending: [UUID: CheckedContinuation<ServerReply, Error>] = [:]
+    private var pending: [UUID: CheckedContinuation<Data, Error>] = [:]
+    private var wire: RemoteWireSession?
     private var isClosed = false
     private var stderr = ""
 
@@ -71,34 +73,58 @@ public actor ServerClient {
     }
 
     public func request(_ request: ServerRequest, timeout: Duration = .seconds(660)) async throws -> ServerReply {
+        let operation = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request.operation))
+        let value: JSONValue
+        do {
+            value = try await ServerWireTimeout.$duration.withValue(timeout) {
+                try await self.request(RemoteCommand(operation, id: request.id))
+            }
+        } catch let error as ConnectionRefusal { throw ServerRefusal(error.localizedDescription) }
+        var reply = ServerReply(id: request.id, result: try JSONDecoder().decode(ServerResult.self, from: JSONEncoder().encode(value)))
+        reply.version = await wire?.negotiatedVersion ?? ServerRequest.protocolVersion
+        return reply
+    }
+
+    public func request(_ command: RemoteCommand) async throws -> JSONValue {
         guard !isClosed else { throw ServerFailure("The server connection is closed. Reconnect to continue.") }
-        if let http { return try await http.request(request, timeout: timeout) }
-        guard pending[request.id] == nil else { throw ServerFailure("This command is already awaiting a reply.") }
-        let line = String(decoding: try JSONEncoder().encode(request), as: UTF8.self)
+        if wire == nil {
+            wire = RemoteWireSession { [weak self] body in
+                guard let self else { throw ServerFailure("The server connection closed.") }
+                return try await self.exchange(body, timeout: ServerWireTimeout.duration)
+            }
+        }
+        return try await wire!.request(command)
+    }
+
+    private func exchange(_ body: Data, timeout: Duration) async throws -> Data {
+        guard !isClosed else { throw ServerFailure("The server connection is closed. Reconnect to continue.") }
+        if let http { return try await http.exchange(body, timeout: timeout) }
+        let id = try JSONDecoder().decode(ServerWireIdentity.self, from: body).id
+        guard pending[id] == nil else { throw ServerFailure("This command is already awaiting a reply.") }
+        let line = String(decoding: body, as: UTF8.self)
         let deadline = Task { [weak self] in
             do { try await Task.sleep(for: timeout) } catch { return }
-            await self?.fail(request.id, message: "The server did not reply. Reconnect and refresh before retrying.")
+            await self?.fail(id, message: "The server did not reply. Reconnect and refresh before retrying.")
         }
         defer { deadline.cancel() }
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
-                pending[request.id] = continuation
+                pending[id] = continuation
                 if let socket { socket.writeLine(line) } else { process?.writeLine(line) }
             }
         } onCancel: {
-            Task { await self.fail(request.id, message: "The request was cancelled. It may still be running on the server.") }
+            Task { await self.fail(id, message: "The request was cancelled. It may still be running on the server.") }
         }
     }
 
     private func receive(_ line: String) {
-        guard let reply = try? JSONDecoder().decode(ServerReply.self, from: Data(line.utf8)),
-              reply.version == ServerRequest.protocolVersion else {
-            disconnect(message: "The server sent an incompatible reply.")
+        let data = Data(line.utf8)
+        guard data.count <= 16_777_216, let reply = try? JSONDecoder().decode(ServerWireIdentity.self, from: data) else {
+            disconnect(message: "The server sent an invalid reply.")
             return
         }
-        guard let continuation = pending.removeValue(forKey: reply.id) else { return }
-        if case .failure(let message) = reply.result { continuation.resume(throwing: ServerRefusal(message)) } else { continuation.resume(returning: reply) }
+        pending.removeValue(forKey: reply.id)?.resume(returning: data)
     }
 
     private func fail(_ id: UUID, message: String) {
@@ -135,3 +161,6 @@ public actor ServerClient {
         errorPump?.cancel()
     }
 }
+
+private struct ServerWireIdentity: Decodable { let id: UUID }
+private enum ServerWireTimeout { @TaskLocal static var duration: Duration = .seconds(660) }

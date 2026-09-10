@@ -98,6 +98,47 @@ struct WorkspaceExecutionTests {
         await runner.cancel()
     }
 
+    @Test("an opted-in wrapper receives only the current session bridge mount paths")
+    func containerBridgeContract() async throws {
+        let (repo, workspace) = try fixture()
+        try write("[execution]\ncommand = ['.bloom/exec']\nbridge = true", to: workspace.path + "/.bloom/settings.toml")
+        try write("#!/bin/sh\nexec \"$@\"\n", to: workspace.path + "/.bloom/exec", executable: true)
+        let attachment = BridgeAttachment(shimPath: "/opt/bloom/release/bin/bloom-bridge", socketPath: "/tmp/bloom-mcp-fixture/socket.sock", token: "fixture-secret", role: .parent)
+        let execution = try WorkspaceExecution.resolve(workspace: workspace, repo: repo, environment: [:])
+        #expect(execution.supportsBridge)
+        let mounts = execution.bridgeEnvironment(attachment, configPath: "/private/mcp-config/current.json")
+        #expect(mounts == [
+            "BLOOM_BRIDGE_SOCKET_DIRECTORY": "/tmp/bloom-mcp-fixture",
+            "BLOOM_BRIDGE_RUNTIME_DIRECTORY": "/opt/bloom/release",
+            "BLOOM_BRIDGE_SHIM_PATH": attachment.shimPath,
+            "BLOOM_BRIDGE_CONFIG_PATH": "/private/mcp-config/current.json",
+        ])
+        #expect(!mounts.values.contains(attachment.token))
+        #expect(execution.bridgeEnvironment(nil).isEmpty)
+        #expect(execution.bridgeEnvironment(attachment)["BLOOM_BRIDGE_CONFIG_PATH"] == nil)
+        let wrappedCodex = CodexClient.launch(.init(commandPrefix: execution.commandPrefix, cwd: workspace.path,
+                                                   bridge: attachment, bridgeInWrapper: execution.bridgeEnabled))
+        #expect(wrappedCodex.arguments.contains(where: { $0.contains("mcp_servers.") }))
+
+        let store = try makeTestStore("execution-bridge")
+        try await store.upsert(repo)
+        try await store.upsert(workspace)
+        let session = try await store.upsert(Session(workspaceID: workspace.id))
+        let box = ProcessBox()
+        let runner = AgentRunner(workspacePath: workspace.path, session: session, store: store,
+                                 mcpConfigPath: "/private/mcp-config/current.json", bridge: attachment, makeProcess: box.factory)
+        try await runner.send("fixture")
+        let launch = await runner.launch()
+        #expect(launch.arguments.contains("--mcp-config"))
+        #expect(launch.environment["BLOOM_BRIDGE_CONFIG_PATH"] == "/private/mcp-config/current.json")
+        #expect(launch.environment["BLOOM_BRIDGE_SOCKET_DIRECTORY"] == "/tmp/bloom-mcp-fixture")
+        await runner.cancel()
+        try write("[execution]\nbridge = false", to: workspace.path + "/.bloom/settings.local.toml")
+        let disabled = try WorkspaceExecution.resolve(workspace: workspace, repo: repo, environment: [:])
+        #expect(!disabled.supportsBridge)
+        #expect(disabled.bridgeEnvironment(attachment).isEmpty)
+    }
+
     @Test("creating from a feature branch runs that branch's setup file on the host")
     func branchSetup() async throws {
         let repo = try await TempRepo()

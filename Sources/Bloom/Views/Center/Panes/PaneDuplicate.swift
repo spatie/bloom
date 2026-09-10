@@ -74,6 +74,6 @@ enum PaneDuplicate {
 
     private static func tab(for content: PaneContent, in model: any WorkspacePaneModel) -> CenterTab? {
         guard case .tool(let tabID) = content else { return nil }
-        return CenterTabStore.shared.tabs(for: model.workspace.id).first { $0.id == tabID }
+        return model.paneStores.center.tabs(for: model.workspace.id).first { $0.id == tabID }
     }
 }

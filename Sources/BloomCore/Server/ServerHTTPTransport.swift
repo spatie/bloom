@@ -30,6 +30,10 @@ public final class ServerHTTPTransport: Sendable {
         return reply
     }
 
+    func exchange(_ body: Data, timeout: Duration) async throws -> Data {
+        try await connection.exchange(body, timeout: timeout)
+    }
+
     public func close() { connection.close() }
 
     public func terminal(workspaceID: WorkspaceID, name: String) async throws -> URLSessionWebSocketTask {

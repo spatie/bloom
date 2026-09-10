@@ -185,13 +185,20 @@ zsh Tools/package-licences.sh "$APP" "$(dirname "$(dirname "$BIN_DIR")")/checkou
 # ramp used to be, and the window would be back to two accents with nothing saying so.
 verify_accent_matches_palette() {
   local colourset=Resources/Assets.xcassets/AccentColor.colorset/Contents.json
-  local ink=Sources/BloomCore/Presentation/PaletteInk.swift
-  [[ -f "$colourset" && -f "$ink" ]] || return 0
+  local ink=Packages/BloomClient/Sources/BloomClient/PaletteInk.swift
+  if [[ ! -f "$colourset" || ! -f "$ink" ]]; then
+    echo "==> accent: missing colour set or shared PaletteInk source" >&2
+    return 1
+  fi
 
   local declared asset
   # Pair(light: 0x197593, dark: 0x197593). Both members, because a pair whose halves differ cannot
   # be one colour set and this should say so rather than silently taking the light one.
   declared="$(sed -n 's/.*accentFill = Pair(light: 0x\([0-9A-Fa-f]*\), dark: 0x\([0-9A-Fa-f]*\)).*/\1 \2/p' "$ink")"
+  if [[ ! "$declared" =~ '^[0-9A-Fa-f]{6} [0-9A-Fa-f]{6}$' ]]; then
+    echo "==> accent: could not read one accentFill pair from $ink" >&2
+    return 1
+  fi
   if [[ "${declared%% *}" != "${declared##* }" ]]; then
     echo "==> accent: PaletteInk.accentFill is a pair ($declared), which one colour set cannot be" >&2
     return 1
@@ -385,6 +392,7 @@ emit_app_intents_metadata
 
 # The dev scripts set their bundle identity before invoking this build. Derive the launch-agent
 # label from that final identity so a development app cannot register the release app's server.
+python3 Tools/embed-server-setup.py "$APP"
 python3 Tools/prepare-server-service.py "$APP"
 
 # After the metadata, because the bundle has to be signed with everything already inside it.

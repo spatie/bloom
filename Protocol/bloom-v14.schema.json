@@ -1,0 +1,3395 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://runbloom.app/protocol/bloom-v14.schema.json",
+  "title": "Bloom server protocol 14",
+  "description": "Envelope and method schema, with full review/transcript framing. DomainRecord deliberately permits evolving application records; see SERVER-PROTOCOL.md and Swift source references.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Request"
+    },
+    {
+      "$ref": "#/$defs/Reply"
+    }
+  ],
+  "$defs": {
+    "Request": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 14
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "operation": {
+          "$ref": "#/$defs/Operation"
+        }
+      },
+      "required": [
+        "version",
+        "id",
+        "operation"
+      ],
+      "additionalProperties": false
+    },
+    "Reply": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 14
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "result": {
+          "$ref": "#/$defs/Result"
+        }
+      },
+      "required": [
+        "version",
+        "id",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "Operation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "hello": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "hello"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "diagnostics": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "diagnostics"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "catalogue": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "catalogue"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reviewSnapshot": {
+              "type": "object",
+              "properties": {
+                "workspaceID": {
+                  "type": "string"
+                },
+                "scope": {
+                  "enum": [
+                    "branch",
+                    "uncommitted"
+                  ]
+                },
+                "knownRevision": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "wait": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "workspaceID",
+                "scope",
+                "wait"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "reviewSnapshot"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reviewPatch": {
+              "type": "object",
+              "properties": {
+                "workspaceID": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "scope": {
+                  "enum": [
+                    "branch",
+                    "uncommitted"
+                  ]
+                },
+                "knownRevision": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "workspaceID",
+                "path",
+                "scope"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "reviewPatch"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "creation": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/CreationAction"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "creation"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "previewAddress": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "previewAddress"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "uiBridge": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/UIBridgeOperation"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "uiBridge"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "terminalStream": {
+              "type": "object",
+              "properties": {
+                "workspaceID": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "workspaceID",
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "terminalStream"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "project": {
+              "type": "object",
+              "properties": {
+                "repoID": {
+                  "type": "string"
+                },
+                "action": {
+                  "$ref": "#/$defs/ProjectAction"
+                }
+              },
+              "required": [
+                "repoID",
+                "action"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "project"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "composer": {
+              "type": "object",
+              "properties": {
+                "sessionID": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sessionID"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "composer"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "closeSession": {
+              "type": "object",
+              "properties": {
+                "sessionID": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sessionID"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "closeSession"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "stop": {
+              "type": "object",
+              "properties": {
+                "sessionID": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sessionID"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "stop"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "setComposer": {
+              "type": "object",
+              "properties": {
+                "sessionID": {
+                  "type": "string"
+                },
+                "controls": {
+                  "$ref": "#/$defs/ComposerControls"
+                }
+              },
+              "required": [
+                "sessionID",
+                "controls"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "setComposer"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "markRead": {
+              "type": "object",
+              "properties": {
+                "sessionID": {
+                  "type": "string"
+                },
+                "seq": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "sessionID",
+                "seq"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "markRead"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "renameSession": {
+              "type": "object",
+              "properties": {
+                "sessionID": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sessionID",
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "renameSession"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "create": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/WorkspaceRequest"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "create"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "transcript": {
+              "type": "object",
+              "properties": {
+                "sessionID": {
+                  "type": "string"
+                },
+                "afterSeq": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "sessionID",
+                "afterSeq"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "transcript"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "changes": {
+              "type": "object",
+              "properties": {
+                "workspaceID": {
+                  "type": "string"
+                },
+                "scope": {
+                  "enum": [
+                    "branch",
+                    "uncommitted"
+                  ]
+                }
+              },
+              "required": [
+                "workspaceID",
+                "scope"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "changes"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "patch": {
+              "type": "object",
+              "properties": {
+                "workspaceID": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "scope": {
+                  "enum": [
+                    "branch",
+                    "uncommitted"
+                  ]
+                }
+              },
+              "required": [
+                "workspaceID",
+                "path",
+                "scope"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "patch"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "object",
+              "properties": {
+                "workspaceID": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "workspaceID",
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "file"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "type": "object",
+              "properties": {
+                "workspaceID": {
+                  "type": "string"
+                },
+                "action": {
+                  "$ref": "#/$defs/WorkspaceAction"
+                }
+              },
+              "required": [
+                "workspaceID",
+                "action"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "workspace"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "configure": {
+              "type": "object",
+              "properties": {
+                "sessionID": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "effort": {
+                  "type": "string"
+                },
+                "permissionMode": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sessionID",
+                "model",
+                "effort",
+                "permissionMode"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "configure"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "send": {
+              "type": "object",
+              "properties": {
+                "sessionID": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sessionID",
+                "text"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "send"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "cancelQueued": {
+              "type": "object",
+              "properties": {
+                "sessionID": {
+                  "type": "string"
+                },
+                "deliveryID": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sessionID",
+                "deliveryID"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "cancelQueued"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "answer": {
+              "type": "object",
+              "properties": {
+                "sessionID": {
+                  "type": "string"
+                },
+                "requestID": {
+                  "type": "string"
+                },
+                "answer": {
+                  "$ref": "#/$defs/Answer"
+                }
+              },
+              "required": [
+                "sessionID",
+                "requestID",
+                "answer"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "answer"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Result": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "hello": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "hello"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accepted": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "accepted"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "failure": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "failure"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "uiBridge": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/UIBridgeResult"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "uiBridge"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "patch": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "patch"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "changes": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/ChangedFile"
+                  }
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "changes"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "files"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/TextFile"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "file"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "download": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "string",
+                      "contentEncoding": "base64"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "download"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reviewSnapshot": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "object",
+                  "properties": {
+                    "revision": {
+                      "type": "string"
+                    },
+                    "files": {
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/ChangedFile"
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "revision"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "reviewSnapshot"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reviewPatch": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "object",
+                  "properties": {
+                    "revision": {
+                      "type": "string"
+                    },
+                    "patch": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "revision"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "reviewPatch"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "catalogue": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "object",
+                  "properties": {
+                    "repositories": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/Repository"
+                      }
+                    },
+                    "workspaces": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/Workspace"
+                      }
+                    },
+                    "sessions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/Session"
+                      }
+                    },
+                    "archivedWorkspaces": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/Workspace"
+                      }
+                    }
+                  },
+                  "required": [
+                    "repositories",
+                    "workspaces",
+                    "sessions",
+                    "archivedWorkspaces"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "catalogue"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "transcript": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "object",
+                  "properties": {
+                    "session": {
+                      "$ref": "#/$defs/Session"
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/Message"
+                      }
+                    },
+                    "pendingQuestions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "contentEncoding": "base64"
+                      }
+                    },
+                    "isBusy": {
+                      "type": "boolean"
+                    },
+                    "streamingText": {
+                      "type": "string"
+                    },
+                    "permissionDecisions": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "queuedPrompts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "queueError": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "session",
+                    "messages",
+                    "pendingQuestions",
+                    "isBusy",
+                    "streamingText",
+                    "permissionDecisions",
+                    "queuedPrompts"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "transcript"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "created": {
+              "type": "object",
+              "properties": {
+                "session": {
+                  "$ref": "#/$defs/Session"
+                },
+                "workspace": {
+                  "$ref": "#/$defs/Workspace"
+                },
+                "setupSucceeded": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "session",
+                "workspace"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "created"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "composer": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/ComposerState"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "composer"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "creation": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/CreationResult"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "creation"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "terminal": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "object",
+                  "properties": {
+                    "executable": {
+                      "type": "string"
+                    },
+                    "socket": {
+                      "type": "string"
+                    },
+                    "session": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "executable",
+                    "socket",
+                    "session"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "terminal"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "terminalPane": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "terminalPane"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "runScripts": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/DomainRecord"
+                  }
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "runScripts"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "diagnostics": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/DomainRecord"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "diagnostics"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "archivePreview": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/DomainRecord"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "archivePreview"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "projectSettings": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/DomainRecord"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "projectSettings"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "filesToCopy": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/DomainRecord"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "filesToCopy"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "WorkspaceAction": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "rename": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "rename"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "setPinned": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "setPinned"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "setUnread": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "setUnread"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "setColour": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "setColour"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "runSetup": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "runSetup"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "archivePreview": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "archivePreview"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "restore": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "restore"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "files"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pullRequest": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "pullRequest"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "runScripts": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "runScripts"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "browserAddress": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "browserAddress"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "push": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "push"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "notes": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "notes"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "archive": {
+              "type": "object",
+              "properties": {
+                "confirmation": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": [
+                "confirmation"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "archive"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "runScript": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "runScript"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "download": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "download"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "writeFile": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "revision": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "text",
+                "revision"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "writeFile"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "uploadFile": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "data": {
+                  "type": "string",
+                  "contentEncoding": "base64"
+                }
+              },
+              "required": [
+                "name",
+                "data"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "uploadFile"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "commit": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "message"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "commit"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "createPullRequest": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "body": {
+                  "type": "string"
+                },
+                "draft": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "title",
+                "body",
+                "draft"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "createPullRequest"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "terminal": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "terminal"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "closeTerminal": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "closeTerminal"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "saveNotes": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "saveNotes"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "newSession": {
+              "type": "object",
+              "properties": {
+                "agent": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "effort": {
+                  "type": "string"
+                },
+                "permissionMode": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "agent",
+                "model",
+                "effort",
+                "permissionMode"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "newSession"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ProjectAction": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "rename": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "rename"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "setHidden": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "setHidden"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "setAccent": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "setAccent"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "settings": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "settings"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "saveSettings": {
+              "type": "object",
+              "properties": {
+                "edits": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/DomainRecord"
+                  }
+                },
+                "expected": {
+                  "$ref": "#/$defs/DomainRecord"
+                }
+              },
+              "required": [
+                "edits",
+                "expected"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "saveSettings"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "filesToCopy": {
+              "type": "object",
+              "properties": {
+                "patterns": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "patterns"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "filesToCopy"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "CreationAction": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "githubRepositories": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string"
+                },
+                "page": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "query",
+                "page"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "githubRepositories"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "importGitHub": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "importGitHub"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "projectContext": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "projectContext"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "inspectProject": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "inspectProject"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "startProject": {
+              "type": "object",
+              "properties": {
+                "typed": {
+                  "type": "string"
+                },
+                "expected": {
+                  "$ref": "#/$defs/DomainRecord"
+                }
+              },
+              "required": [
+                "typed",
+                "expected"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "startProject"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceContext": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "workspaceContext"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "checkouts": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "checkouts"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "resolveReference": {
+              "type": "object",
+              "properties": {
+                "repoID": {
+                  "type": "string"
+                },
+                "reference": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "repoID",
+                "reference"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "resolveReference"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "CreationResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "project": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/DomainRecord"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "project"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "projectContext": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/DomainRecord"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "projectContext"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "inspection": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/DomainRecord"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "inspection"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceContext": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/DomainRecord"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "workspaceContext"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "checkouts": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/DomainRecord"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "checkouts"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reference": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/DomainRecord"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "reference"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "repositories": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/DomainRecord"
+                  }
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "repositories"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceStarted": {
+              "type": "object",
+              "properties": {
+                "workspace": {
+                  "$ref": "#/$defs/DomainRecord"
+                },
+                "session": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/DomainRecord"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "setupSucceeded": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "draft": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "workspace"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "workspaceStarted"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Answer": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "allowOnce": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "allowOnce"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "allowSession": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "allowSession"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "allowProject": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "allowProject"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "deny": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "deny"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "denyWithReason": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string"
+                },
+                "endsTurn": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "message",
+                "endsTurn"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "denyWithReason"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "approvePlan": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "mode"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "approvePlan"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "object",
+              "properties": {
+                "input": {}
+              },
+              "required": [
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "question"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "WorkspaceRequest": {
+      "type": "object",
+      "properties": {
+        "repositoryPath": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "prompt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseBranch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checkout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DomainRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "controls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ComposerControls"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runSetupScript": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attachments": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "sourcePath": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "data": {
+                    "type": "string",
+                    "contentEncoding": "base64"
+                  }
+                },
+                "required": [
+                  "sourcePath",
+                  "name",
+                  "data"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "repositoryPath",
+        "name",
+        "agent",
+        "model",
+        "effort",
+        "permissionMode"
+      ],
+      "additionalProperties": false
+    },
+    "ChangedFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "oldPath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "change": {
+          "enum": [
+            "A",
+            "M",
+            "D",
+            "R",
+            "C",
+            "?"
+          ]
+        },
+        "additions": {
+          "type": "integer"
+        },
+        "deletions": {
+          "type": "integer"
+        },
+        "isBinary": {
+          "type": "boolean"
+        },
+        "contentRevision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hasIncompleteStats": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "change",
+        "additions",
+        "deletions",
+        "isBinary",
+        "hasIncompleteStats"
+      ],
+      "additionalProperties": true
+    },
+    "Message": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "sessionID": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "payload": {
+          "type": "string",
+          "contentEncoding": "base64"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "durationMS": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "refID": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "sessionID",
+        "seq",
+        "kind",
+        "payload",
+        "createdAt"
+      ],
+      "additionalProperties": true
+    },
+    "TextFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "text",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "Repository": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "defaultBranch": {
+          "type": "string"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "accent": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "path",
+        "defaultBranch",
+        "hidden",
+        "accent"
+      ],
+      "additionalProperties": true
+    },
+    "Workspace": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "repoID": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "baseBranch": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "setupState": {
+          "type": "string"
+        },
+        "setupLog": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "repoID",
+        "name",
+        "path",
+        "branch",
+        "baseBranch",
+        "state",
+        "setupState",
+        "setupLog",
+        "port"
+      ],
+      "additionalProperties": true
+    },
+    "Session": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "workspaceID": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "agentKind": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "model",
+        "effort",
+        "agentKind",
+        "permissionMode",
+        "state",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": true
+    },
+    "ComposerControls": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "agentKind": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "isFastMode": {
+          "type": "boolean"
+        },
+        "outputStyle": {
+          "type": "string"
+        },
+        "codexContextWindow": {
+          "type": "integer"
+        },
+        "hasWorktree": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "model",
+        "effort",
+        "agentKind",
+        "permissionMode",
+        "isFastMode",
+        "outputStyle",
+        "codexContextWindow",
+        "hasWorktree"
+      ],
+      "additionalProperties": true
+    },
+    "ComposerState": {
+      "type": "object",
+      "properties": {
+        "controls": {
+          "$ref": "#/$defs/ComposerControls"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DomainRecord"
+          }
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DomainRecord"
+          }
+        },
+        "styles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DomainRecord"
+          }
+        },
+        "availableAgents": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "controls",
+        "models",
+        "commands",
+        "styles"
+      ],
+      "additionalProperties": true
+    },
+    "UIBridgeOperation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "attach": {
+              "type": "object",
+              "properties": {
+                "workspaceID": {
+                  "type": "string"
+                },
+                "clientID": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "actions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "workspaceID",
+                "clientID",
+                "actions"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "attach"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "poll": {
+              "type": "object",
+              "properties": {
+                "leaseID": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "token": {
+                  "type": "string"
+                },
+                "wait": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "leaseID",
+                "token",
+                "wait"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "poll"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "claim": {
+              "type": "object",
+              "properties": {
+                "leaseID": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "token": {
+                  "type": "string"
+                },
+                "requestID": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": [
+                "leaseID",
+                "token",
+                "requestID"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "claim"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "respond": {
+              "type": "object",
+              "properties": {
+                "leaseID": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "token": {
+                  "type": "string"
+                },
+                "requestID": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "result": {
+                  "$ref": "#/$defs/UIActionResult"
+                }
+              },
+              "required": [
+                "leaseID",
+                "token",
+                "requestID",
+                "result"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "respond"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "detach": {
+              "type": "object",
+              "properties": {
+                "leaseID": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "token": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "leaseID",
+                "token"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "detach"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "UIBridgeResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "attached": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/UILease"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "attached"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "requests": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/UIBatch"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "requests"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "accepted": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "accepted"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "claimed": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "claimed"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "UILease": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "token": {
+          "type": "string"
+        },
+        "workspaceID": {
+          "type": "string"
+        },
+        "expiresAtMilliseconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "token",
+        "workspaceID",
+        "expiresAtMilliseconds"
+      ],
+      "additionalProperties": false
+    },
+    "UIAction": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "arguments"
+      ],
+      "additionalProperties": false
+    },
+    "UIRequest": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "workspaceID": {
+          "type": "string"
+        },
+        "action": {
+          "$ref": "#/$defs/UIAction"
+        },
+        "expiresAtMilliseconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "workspaceID",
+        "action",
+        "expiresAtMilliseconds"
+      ],
+      "additionalProperties": false
+    },
+    "UIBatch": {
+      "type": "object",
+      "properties": {
+        "lease": {
+          "$ref": "#/$defs/UILease"
+        },
+        "requests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UIRequest"
+          }
+        }
+      },
+      "required": [
+        "lease",
+        "requests"
+      ],
+      "additionalProperties": false
+    },
+    "UIActionResult": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "isError": {
+          "type": "boolean"
+        },
+        "value": {},
+        "png": {
+          "anyOf": [
+            {
+              "type": "string",
+              "contentEncoding": "base64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "text",
+        "isError"
+      ],
+      "additionalProperties": false
+    },
+    "DomainRecord": {
+      "type": "object",
+      "description": "Application record or tagged application enum, preserved without reinterpretation. See source map in docs/SERVER-PROTOCOL.md.",
+      "additionalProperties": true
+    }
+  }
+}

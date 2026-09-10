@@ -10,8 +10,7 @@ import Foundation
 ///
 /// It is cut to a length a chat message can hold. A four thousand line patch pasted into a channel
 /// is not shared, it is inflicted, and the reader scrolls past it to ask which file it was.
-/// In the core, and `SharedDiff: Transferable` is left in the app beside `ShareLink`. Every
-/// line below is `String` and `Int` work with a budget, a column limit, a whole-hunks-or-none
+/// Kept in the core so its formatting and truncation can be tested. Every line below is `String` and `Int` work with a budget, a column limit, a whole-hunks-or-none
 /// rule and an "N more lines not shown" count maintained by hand across three branches, and none
 /// of that touches AppKit or wants to. It sat in a view, so nothing could ask it whether the
 /// count it prints matches the lines it dropped.

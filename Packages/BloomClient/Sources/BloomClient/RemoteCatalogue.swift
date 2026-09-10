@@ -18,9 +18,11 @@ public struct RemoteProject: Decodable, Sendable, Identifiable {
     public let name: String
     public let path: String
     public let hidden: Bool
+    public let defaultBranch: String?
 }
 
 public struct RemoteWorkspace: Decodable, Sendable, Identifiable {
+    public let path: String?
     public let id: WorkspaceID
     public let repoID: RepoID
     public let name: String
@@ -44,6 +46,8 @@ public struct RemoteMessage: Decodable, Sendable, Identifiable, Equatable {
     public let seq: Int
     public let kind: String
     public let payload: Data
+    public let refID: String?
+    public let durationMS: Int?
 
     public var text: String {
         guard let value = JSONValue.parse(payload) else { return String(decoding: payload, as: UTF8.self) }

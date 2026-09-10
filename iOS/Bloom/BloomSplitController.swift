@@ -118,9 +118,26 @@ final class ProjectsController: UITableViewController {
             let busy = sessions.contains { $0.state == "running" }
             let waiting = sessions.contains { $0.state == "waiting" }
             let state = waiting ? "Needs your answer" : busy ? "Agent working" : workspace.branch
-            return BloomTheme.cell(title: workspace.name, detail: state,
-                                   symbol: waiting ? "hand.raised" : busy ? "circle.dotted.circle" : "square.stack.3d.up",
-                                   tint: waiting ? BloomTheme.colour(PaletteInk.warning) : BloomTheme.accent)
+            let tint = waiting ? BloomTheme.colour(PaletteInk.warning) : BloomTheme.accent
+            let cell = BloomTheme.cell(title: workspace.name, detail: state,
+                                       symbol: waiting ? "hand.raised" : busy ? "circle.dotted.circle" : "square.stack.3d.up", tint: tint)
+            let original = cell.contentConfiguration as? UIListContentConfiguration
+            cell.automaticallyUpdatesContentConfiguration = false
+            cell.automaticallyUpdatesBackgroundConfiguration = false
+            cell.configurationUpdateHandler = { cell, state in
+                guard var content = original?.updated(for: state) else { return }
+                // UIKit's focused-row white ink assumes its own selection fill. Our neutral
+                // sidebar keeps semantic ink in every state, including hardware-keyboard focus.
+                content.textProperties.color = .label
+                content.secondaryTextProperties.color = .secondaryLabel
+                content.imageProperties.tintColor = tint
+                cell.contentConfiguration = content
+                var background = UIBackgroundConfiguration.listCell()
+                background.backgroundColor = state.isSelected || state.isHighlighted ? .secondarySystemFill : BloomTheme.background
+                cell.backgroundConfiguration = background
+            }
+            cell.setNeedsUpdateConfiguration()
+            return cell
         }
         let cell = BloomTheme.cell(title: "New workspace", symbol: "plus", disclosure: false)
         var content = cell.contentConfiguration as? UIListContentConfiguration
@@ -173,19 +190,20 @@ final class ProjectsController: UITableViewController {
     }
 
     private func importProject() {
-        let alert = UIAlertController(title: "Add GitHub project", message: "Bloom Server uses its own GitHub sign-in to clone this repository.", preferredStyle: .alert)
-        alert.addTextField { $0.placeholder = "organisation/repository"; $0.autocapitalizationType = .none; $0.autocorrectionType = .no }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Add", style: .default) { [weak self] _ in
-            guard let self, let name = alert.textFields?.first?.text, let service = self.model.service else { return }
-            let command = RemoteCommand.call("creation", ["_0": .object(["importGitHub": .object(["_0": .string(name)])])])
-            self.execute(command, service: service)
-        })
-        present(alert, animated: true)
+        let picker = GitHubRepositoryPickerController(model: model) { [weak self] project in
+            guard let self else { return }
+            self.dismiss(animated: true) { self.createWorkspace(project) }
+        }
+        present(BloomTheme.navigation(picker), animated: true)
     }
 
     private func createWorkspace(_ project: RemoteProject) {
         let controller = CreateWorkspaceController(model: model, project: project)
+        controller.onCreated = { [weak self] created, mode in
+            guard let self, let split = self.splitViewController as? BloomSplitController else { return }
+            let desk = split.openWorkspace(created.workspace, preferredSessionID: created.session?.id)
+            Task { await desk.openInitialMode(mode) }
+        }
         present(BloomTheme.navigation(controller), animated: true)
     }
 
