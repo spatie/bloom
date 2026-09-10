@@ -65,13 +65,20 @@ You need Xcode 26, or a Swift 6.2 toolchain.
 ```bash
 git clone https://github.com/spatie/bloom.git
 cd bloom
-./Tools/dev-build.sh --no-launch
+./Tools/dev-build.sh --fast --no-launch
 ```
 
 This installs `~/Applications/Bloom Dev.app` with a separate database, preferences and URL scheme.
 Open that copy when you want to try your changes. It does not replace the released application or
 use its data. See [the architecture guide](docs/ARCHITECTURE.md) before contributing.
-The dev script builds a committed revision, so commit your changes locally before rebuilding it.
+By default the dev script builds a committed revision. For current edits, including uncommitted and
+untracked files that Git does not ignore, use `make dev-fast`. It installs the same Bloom Dev.app,
+uses the same dev data, and restarts only the dev copy. It builds in debug mode with a separate,
+persistent cache for this checkout. The first build fills the cache; later builds reuse it.
+
+Use `./Tools/dev-build.sh --fast --no-launch` to install without restarting, or
+`./Tools/dev-build.sh --fast --no-install` to build without installing or launching. Fast mode cannot
+be combined with a revision. It keeps the normal assets and App Intents metadata.
 
 `make` on its own lists every target. `make build` compiles without installing or launching.
 `make app` and `make run` retain the production bundle identity, so use the isolated dev build for
