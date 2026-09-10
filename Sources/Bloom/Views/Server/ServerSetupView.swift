@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import BloomCore
+import BloomUI
 import UniformTypeIdentifiers
 
 /// One decision per page. Progress and failures share a fixed, visible output pane.
@@ -15,6 +16,7 @@ struct ServerSetupView: View {
     @State private var showsOutput = false
     @State private var copiedReport = false
     @FocusState private var addressIsFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -154,6 +156,8 @@ struct ServerSetupView: View {
         case .connecting:
             HStack { ProgressView().controlSize(.small); Text("Loading projects and verifying the connection…") }
         case .complete:
+            BloomServerIllustration(state: .complete, accent: Palette.accent)
+                .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner * 2))
             Label("Your projects and conversations live on this server.", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(Palette.accent)
             Text("Agents can keep working when you close Bloom.").foregroundStyle(.secondary)
@@ -281,9 +285,18 @@ struct ServerSetupView: View {
         HStack(spacing: Metrics.gutter) {
             ForEach(Array(["Server", "Install", "Accounts"].enumerated()), id: \.offset) { index, name in
                 if index > 0 { Image(systemName: "chevron.right").font(Typo.micro).foregroundStyle(Palette.textTertiary) }
-                Text(name).font(Typo.captionEmphasis).foregroundStyle(index == setupStep ? Palette.accent : Palette.textSecondary)
+                HStack(spacing: Metrics.spacingSmall) {
+                    Image(systemName: index < setupStep ? "checkmark.circle.fill" : index == 0 ? "server.rack" : index == 1 ? "arrow.down.circle" : "person.crop.circle")
+                        .contentTransition(.symbolEffect(.replace))
+                        .symbolEffectsRemoved(reduceMotion)
+                        .accessibilityHidden(true)
+                    Text(name)
+                }
+                .font(Typo.captionEmphasis)
+                .foregroundStyle(index <= setupStep ? Palette.accent : Palette.textSecondary)
             }
         }
+        .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: setupStep)
         .accessibilityLabel(setupStep == 3 ? "Setup complete" : "Step \(setupStep + 1) of 3")
     }
 }

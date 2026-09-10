@@ -1,44 +1,38 @@
 import SwiftUI
+import BloomUI
 
-/// Explain the outcome before asking for an address or administrator access.
+/// Introduce remote work visually, with the requirements and installation decision still in view.
 struct ServerSetupIntroduction: View {
     let showAdvanced: () -> Void
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Metrics.gutter) {
-                benefit("Let agents keep working", symbol: "play.circle",
-                        detail: "Close your laptop or quit Bloom. Your sessions keep running on the server.")
-                benefit("Pick up on another device", symbol: "laptopcomputer",
-                        detail: "Return to the same projects and conversations on your Mac, iPhone or iPad.")
-                benefit("Preview beside your chat", symbol: "globe",
-                        detail: "Open your running app inside Bloom through a private connection to your server.")
-
-                VStack(alignment: .leading, spacing: Metrics.spacing) {
-                    Text("What you’ll need").font(Typo.labelEmphasis)
-                    Text("An Ubuntu server from your preferred hosting provider, with administrator access over SSH.")
-                        .font(Typo.caption)
-                        .foregroundStyle(Palette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                BloomServerIllustration(accent: Brand.shallow)
+                    .environment(\.colorScheme, .dark)
+                    .background { BrandWater() }
+                    .background(Brand.depth)
+                    .clipShape(RoundedRectangle(cornerRadius: Metrics.corner * 2))
+                HStack(alignment: .top, spacing: Metrics.gutter * 1.5) {
+                    benefit("Keep agents working", symbol: "play.circle",
+                            detail: "Close your laptop. Your sessions keep running on the server.")
+                    benefit("Pick up anywhere", symbol: "laptopcomputer.and.iphone",
+                            detail: "The same projects and chats on your Mac, iPhone or iPad.")
+                    benefit("Preview your work", symbol: "globe",
+                            detail: "Open your app beside the chat through a private connection.")
                 }
-                .padding(Metrics.gutter)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
-
+                Divider()
                 VStack(alignment: .leading, spacing: Metrics.spacing) {
-                    Text("What Bloom will install").font(Typo.labelEmphasis)
-                    Text("Bloom Server, Git, GitHub CLI, tmux, Node.js and npm, with a dedicated server account and automatic startup. Browser testing tools are optional.")
+                    Text("Bring an Ubuntu server").font(Typo.labelEmphasis)
+                    Text("Use your preferred hosting provider. You’ll need administrator access over SSH.")
                         .font(Typo.caption).foregroundStyle(Palette.textSecondary)
-                    Text("You’ll review the installation plan and confirm before setup starts.")
+                    Text("Bloom installs its server, Git, GitHub CLI, tmux, Node.js and npm, with automatic startup. Browser testing tools are optional. You’ll review and confirm the installation first.")
                         .font(Typo.caption).foregroundStyle(Palette.textSecondary)
                 }
                 .fixedSize(horizontal: false, vertical: true)
-
                 Button("Already running Bloom Server? Connect…", action: showAdvanced)
-                    .buttonStyle(.link)
-                    .font(Typo.caption)
+                    .buttonStyle(.link).font(Typo.caption)
             }
-            .padding(.horizontal, 0)
             .padding(.vertical, Metrics.spacing)
         }
         .scrollBounceBehavior(.basedOnSize)
@@ -46,19 +40,10 @@ struct ServerSetupIntroduction: View {
     }
 
     private func benefit(_ title: String, symbol: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: Metrics.gutter) {
-            Image(systemName: symbol)
-                .font(.title2)
-                .foregroundStyle(Palette.accent)
-                .frame(width: 32, height: 32)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                Text(title).font(Typo.title)
-                Text(detail)
-                    .font(Typo.label)
-                    .foregroundStyle(Palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+            Label(title, systemImage: symbol).font(Typo.captionEmphasis).foregroundStyle(Palette.accent)
+            Text(detail).font(Typo.caption).foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

@@ -58,6 +58,7 @@ enum ServerSetupProbe {
             func capture(_ phase: String, targetWindow: NSWindow? = nil) async throws {
                 let window = targetWindow ?? window
                 window.contentView?.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(300))
                 let content = try await SCShareableContent.currentProcess
                 guard let target = content.windows.first(where: { $0.windowID == CGWindowID(window.windowNumber) }) else {
                     throw ServerFailure("The wizard's own window is unavailable for capture.")
@@ -73,7 +74,7 @@ enum ServerSetupProbe {
                 count += 1
                 try data.write(to: output.appendingPathComponent(String(format: "%02d-%@.png", count, phase)))
             }
-            try await Task.sleep(for: .milliseconds(300))
+            try await Task.sleep(for: .milliseconds(600))
             guard model.phase == .introduction else { throw ServerFailure("Adding a server must introduce the feature first.") }
             try await capture("introduction")
             model.beginSetup()
