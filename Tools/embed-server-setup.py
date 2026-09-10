@@ -8,6 +8,7 @@ import re
 import shutil
 import sys
 import tarfile
+from bloom_install_process import standalone_installer_source
 
 
 def embed(bundle, archive=None):
@@ -15,7 +16,7 @@ def embed(bundle, archive=None):
     destination = bundle / 'Contents/Resources/ServerSetup'
     destination.mkdir(parents=True, exist_ok=True)
     for name in ('install-bloom-server.py', 'install-bloom-browser.py'):
-        shutil.copy2(root / 'Tools' / name, destination / name)
+        (destination / name).write_text(standalone_installer_source(root / 'Tools' / name))
     if archive is None:
         return
     if not archive.is_file() or archive.stat().st_size > 256 * 1024 * 1024:

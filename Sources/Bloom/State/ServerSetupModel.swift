@@ -6,25 +6,32 @@ import CryptoKit
 
 @MainActor @Observable
 final class ServerSetupModel {
+    typealias InstallOperation = @Sendable (ServerSetupConnection, String, URL, URL, @escaping @Sendable (ServerInstallEvent) async -> Void) async throws -> ServerInstallEvent
     enum Phase { case introduction, address, trust, checking, readyToInstall, installing, accounts, connecting, complete }
-    var host = ""
-    var identityFile = ""
+    var host = "" { didSet { if host != oldValue { connectionInputsChanged() } } }
+    var identityFile = "" { didSet { if identityFile != oldValue { connectionInputsChanged() } } }
     var label = ""
     var installsBrowserTools = true
     private(set) var browserReadiness: ServerBrowserReadiness?
     private(set) var browserFailure: String?
     private(set) var browserRecovery: String?
     private(set) var browserAttempted = false
+    private(set) var browserDiagnostic: ServerSetupFailure?
     private(set) var phase = Phase.introduction
     private(set) var isBusy = false
+    private(set) var isStopping = false
     private(set) var fingerprint: String?
     private(set) var failure: ServerSetupFailure?
     private(set) var progress: [String] = []
+    private(set) var activity = ServerSetupActivity()
+    private(set) var isInstallingBrowser = false
     private(set) var check: ServerInstallCheck?
     private(set) var accountChecks: [ServerDiagnostics.Check] = []
     private let resources: URL?
     private let supportDirectory: URL?
     private let server: ServerWindowModel
+    private let installConnection: InstallOperation
+    private let inspectConnection: @Sendable (ServerSetupConnection, String) async throws -> ServerInstallCheck
     private var connection: ServerSetupConnection?
     private var candidate: ServerSetupHostKey?
     private var installed: ServerInstallEvent?
@@ -43,9 +50,15 @@ final class ServerSetupModel {
     private var support: URL { supportDirectory ?? Store.defaultDirectory.appendingPathComponent("server-setup", isDirectory: true) }
     private var knownHosts: URL { support.appendingPathComponent("known_hosts") }
 
-    init(server: ServerWindowModel, resources: URL? = nil, supportDirectory: URL? = nil, resumeExisting: Bool = true) {
+    init(server: ServerWindowModel, resources: URL? = nil, supportDirectory: URL? = nil, resumeExisting: Bool = true,
+         inspectConnection: @escaping @Sendable (ServerSetupConnection, String) async throws -> ServerInstallCheck = { try await $0.inspect(script: $1) },
+         installConnection: @escaping InstallOperation = { connection, script, archive, key, progress in
+             try await connection.install(script: script, archive: archive, clientPublicKey: key, progress: progress)
+         }) {
         self.resources = resources; self.supportDirectory = supportDirectory
         self.server = server
+        self.inspectConnection = inspectConnection
+        self.installConnection = installConnection
         if resumeExisting, server.isConfigured, !server.usesHTTPS, !server.knownHostsFile.isEmpty, !server.identityFile.isEmpty,
            let user = server.host.split(separator: "@").first, server.host.contains("@") {
             host = server.host; label = server.customLabel; validatedHost = server.host
@@ -69,17 +82,17 @@ final class ServerSetupModel {
 
     func inspect() async {
         await perform(.checking) {
-            self.installed = nil; self.installedKnownHosts = nil; self.accountChecks = []; self.browserReadiness = nil; self.browserFailure = nil; self.browserRecovery = nil; self.browserAttempted = false; self.check = nil; self.candidate = nil; self.fingerprint = nil
+            self.installed = nil; self.installedKnownHosts = nil; self.accountChecks = []; self.browserReadiness = nil; self.browserFailure = nil; self.browserRecovery = nil; self.browserAttempted = false; self.browserDiagnostic = nil; self.check = nil; self.candidate = nil; self.fingerprint = nil
             try self.prepareTrustStore()
             let host = self.host.trimmingCharacters(in: .whitespacesAndNewlines)
             let connection = try ServerSetupConnection(host: host, identityFile: self.identityFile, knownHostsFile: self.knownHosts.path)
             self.connection = connection
             self.validatedHost = host; self.validatedIdentity = self.identityFile
             do {
-                let check = try await connection.inspect(script: self.installerScript())
+                let check = try await self.inspectConnection(connection, self.installerScript())
                 try Task.checkCancellation()
                 self.check = check
-                self.phase = .readyToInstall
+                self.phase = .address
             } catch let error as ServerSetupFailure where error.code == .hostUnknown {
                 let candidate = try await connection.candidateKey()
                 try Task.checkCancellation()
@@ -93,21 +106,31 @@ final class ServerSetupModel {
         if await perform(.checking, operation: { try await connection.trust(candidate) }) { await inspect() }
     }
 
+    var canReviewInstallation: Bool { check?.blockers.isEmpty == true && inputsUnchanged && !isBusy }
+
+    func reviewInstallation() {
+        guard phase == .address, canReviewInstallation else { return }
+        failure = nil
+        phase = .readyToInstall
+    }
+
     func install() async {
-        guard let connection, inputsUnchanged, check?.blockers.isEmpty == true else { return }
+        guard phase == .readyToInstall, let connection, inputsUnchanged, check?.blockers.isEmpty == true else { return }
+        activity.begin(browser: installsBrowserTools)
+        progress = []
         let completed = await perform(.installing) {
             let package = try self.serverPackage()
             let script = try self.installerScript()
             let key = try await self.prepareClientKey()
             self.clientKey = key
-            self.progress.append("Uploading the server package…")
-            let installed = try await connection.install(script: script, archive: package,
-                clientPublicKey: URL(fileURLWithPath: key.path + ".pub")) { [weak self] event in
-                    guard let message = event.message, event.event == "progress" else { return }
-                    await self?.record(message)
+            self.record("Client key ready. Connecting to upload the server package.")
+            let installed = try await self.installConnection(connection, script, package,
+                URL(fileURLWithPath: key.path + ".pub")) { [weak self] event in
+                    await self?.receive(event)
                 }
             try Task.checkCancellation()
             self.installed = installed
+            self.activity.finish()
             if self.installsBrowserTools { try await self.configureBrowser() }
             try Task.checkCancellation()
             self.phase = .accounts
@@ -118,6 +141,7 @@ final class ServerSetupModel {
     func refreshAccounts() async {
         guard let endpoint = installedEndpoint else { return }
         await perform(.accounts) {
+            self.activity.start(.accounts, message: "Checking GitHub and agent sign-ins on the server")
             await self.accountClient?.disconnect()
             self.accountClient = nil
             let client = try await ServerClient.connect(to: endpoint)
@@ -128,8 +152,10 @@ final class ServerSetupModel {
                 self.accountClient = client
                 self.accountChecks = report.checks
                 self.browserReadiness = report.browser
-                if report.browser?.status == .ready { self.browserFailure = nil; self.browserRecovery = nil }
+                if report.browser?.status == .ready { self.browserFailure = nil; self.browserRecovery = nil; self.browserDiagnostic = nil }
                 self.phase = .accounts
+                self.activity.finish()
+                self.record("Account checks complete.")
             } catch { await client.disconnect(); throw error }
         }
     }
@@ -142,24 +168,37 @@ final class ServerSetupModel {
 
     private func configureBrowser() async throws {
         guard let connection, let user = installed?.serviceUser, let home = installed?.serviceHome else { return }
-        browserAttempted = true; browserFailure = nil; browserRecovery = nil
+        browserAttempted = true; browserFailure = nil; browserRecovery = nil; browserDiagnostic = nil
+        isInstallingBrowser = true
+        defer { isInstallingBrowser = false }
+        activity.start(.browser, message: "Preparing optional browser testing")
         do {
             guard let url = resource("install-bloom-browser.py") else { throw ServerSetupFailure(code: .packageMissing) }
             let script = try String(contentsOf: url, encoding: .utf8)
             let result = try await connection.installBrowser(script: script, user: user, serviceHome: home) { [weak self] event in
-                guard event.event == "progress", let message = event.message else { return }
-                await self?.record(message)
+                await self?.receive(event)
             }
             try Task.checkCancellation()
             if result.event != "complete" || result.ready != true {
-                browserFailure = result.message ?? "Optional browser testing could not be installed."
-                browserRecovery = result.recovery ?? "Retry browser setup when the server is available."
+                let diagnostic = ServerSetupFailure.installation(code: result.code ?? "installation_failed", message: result.message,
+                    recovery: result.recovery, details: result.details, command: result.command, exitStatus: result.exitStatus)
+                browserDiagnostic = diagnostic
+                browserFailure = diagnostic.message
+                browserRecovery = diagnostic.recovery
+                activity.fail(message: diagnostic.message)
+                if let command = diagnostic.command { activity.append("Command: " + command) }
+                if let status = diagnostic.exitStatus { activity.append("Exit status: \(status)") }
+                if let details = diagnostic.details, !activity.output.contains(details) { activity.append(details) }
                 record("Bloom Server is ready. Optional browser testing needs attention.")
-            } else { record("Browser sandbox and rendering verified on the server.") }
+            } else { activity.finish(); record("Browser sandbox and rendering verified on the server.") }
         } catch {
             try Task.checkCancellation()
             let failure = error as? ServerSetupFailure ?? ServerSetupFailure(code: .unknown)
+            browserDiagnostic = failure
             browserFailure = failure.message; browserRecovery = failure.recovery
+            activity.fail()
+            record(failure.message)
+            if let details = failure.details { activity.append(details) }
             record("Bloom Server is ready. Optional browser testing did not complete.")
         }
     }
@@ -168,6 +207,7 @@ final class ServerSetupModel {
         guard canConnect, let installed, let endpoint = installedEndpoint,
               case .ssh(let host, let executable, let directory, let identity, let knownHosts) = endpoint else { return }
         await perform(.connecting) {
+            self.record("Connecting to Bloom Server and loading its projects")
             await self.accountClient?.disconnect(); self.accountClient = nil
             try Task.checkCancellation()
             guard let profile = ServerConnectionProfile(values: [
@@ -178,7 +218,7 @@ final class ServerSetupModel {
             try Task.checkCancellation()
             guard connected else { throw ServerSetupFailure(code: .unreachable) }
             if self.accountChecks.contains(where: { $0.id == .agents && $0.detail.contains("codex") }) { self.server.agent = .codex }
-            self.progress.append("Connected as \(installed.serviceUser ?? "bloom").")
+            self.record("Connected as \(installed.serviceUser ?? "bloom").")
             self.phase = .complete
         }
     }
@@ -200,14 +240,82 @@ final class ServerSetupModel {
 
     func retry() async {
         switch retryStep {
-        case .installing: await install()
+        case .installing: phase = .readyToInstall; failure = nil
         case .accounts: await refreshAccounts()
         case .connecting: await refreshAccounts(); if canConnect { await connect() }
         default: await inspect()
         }
     }
 
-    func editAddress() { cancel(); phase = .address; failure = nil; installed = nil; check = nil }
+    var diagnosticReport: String {
+        var parts = ["Bloom Server setup", "Server: \(host)", "Phase: \(phase)", "Step: \(activity.currentMessage)"]
+        parts.append("Steps:\n" + ServerSetupActivity.Stage.allCases.map { "\($0.title): \(activity.status(of: $0))" }.joined(separator: "\n"))
+        if let check {
+            parts.append("System: \(check.platform), \(check.architecture), access: \(check.privilege)")
+            for notice in check.blockers { parts.append("Check failed: \(notice.code)\n\(notice.message)\n\(notice.recoverySuggestion)") }
+            for notice in check.warnings { parts.append("Warning: \(notice.message)") }
+        }
+        if let failure = failure ?? browserDiagnostic {
+            parts += ["Error: \(failure.code.rawValue)", failure.message, "Recovery: \(failure.recovery)"]
+            if let command = failure.command { parts.append("Command: " + command) }
+            if let status = failure.exitStatus { parts.append("Exit status: \(status)") }
+            if let details = failure.details { parts.append("Details:\n" + details) }
+        }
+        if let browserFailure { parts.append("Browser setup: " + browserFailure) }
+        if let browserRecovery { parts.append("Browser recovery: " + browserRecovery) }
+        if !activity.lines.isEmpty { parts.append("Server output:\n" + activity.output) }
+        return parts.joined(separator: "\n\n")
+    }
+
+    var hasInstalledServer: Bool { installed != nil }
+    var canContinueToAccounts: Bool { installedEndpoint != nil && inputsUnchanged && !isBusy }
+    var canGoBack: Bool { phase != .introduction && (!isBusy || phase == .checking) }
+
+    func goBack() async {
+        guard canGoBack else { return }
+        switch phase {
+        case .introduction: break
+        case .address: showIntroduction()
+        case .trust, .checking, .readyToInstall: editAddress()
+        case .installing:
+            failure = nil
+            phase = .readyToInstall
+        case .accounts:
+            failure = nil
+            phase = check == nil ? .address : .readyToInstall
+        case .connecting, .complete: await refreshAccounts()
+        }
+    }
+
+    func continueToAccounts() async {
+        guard canContinueToAccounts else { return }
+        await refreshAccounts()
+    }
+
+    func editAddress() { cancel(); phase = .address; failure = nil }
+
+    private func connectionInputsChanged() {
+        guard phase != .introduction else { return }
+        cancel()
+        check = nil; candidate = nil; fingerprint = nil; failure = nil; progress = []
+        installed = nil; connection = nil; activity = ServerSetupActivity()
+        phase = .address
+    }
+    func stopSetup() async {
+        guard isBusy, !isStopping else { return }
+        let operation = task
+        isStopping = true
+        cancel()
+        let stoppedGeneration = generation
+        isBusy = true
+        await operation?.value
+        guard generation == stoppedGeneration else { isStopping = false; return }
+        isBusy = false; isStopping = false
+        failure = ServerSetupFailure(code: .cancelled)
+        activity.fail(message: "Setup stopped by you")
+        record("Setup stopped by you. The output is kept below.")
+    }
+
     func cancel() {
         generation = UUID(); task?.cancel(); task = nil; isBusy = false
         if let client = accountClient { Task { await client.disconnect() } }
@@ -230,7 +338,13 @@ final class ServerSetupModel {
         let task = Task { @MainActor in
             do { try await operation() } catch {
                 guard self.generation == id else { return }
-                self.failure = error as? ServerSetupFailure ?? ServerSetupFailure(code: error is CancellationError ? .cancelled : .unknown)
+                let failure = error as? ServerSetupFailure ?? ServerSetupFailure(code: error is CancellationError ? .cancelled : .unknown)
+                self.failure = failure
+                self.activity.fail(message: failure.message)
+                if self.activity.lines.last?.text != failure.message { self.record(failure.message) }
+                if let command = failure.command { self.activity.append("Command: " + command) }
+                if let status = failure.exitStatus { self.activity.append("Exit status: \(status)") }
+                if let details = failure.details, !self.activity.output.contains(details) { self.activity.append(details) }
             }
             if self.generation == id { self.isBusy = false }
         }
@@ -239,8 +353,18 @@ final class ServerSetupModel {
         return generation == id && failure == nil && !task.isCancelled
     }
 
+    func receive(_ event: ServerInstallEvent) {
+        guard !Task.isCancelled else { return }
+        activity.receive(event)
+        if event.event == "progress", let message = event.message {
+            progress.append(String(message.prefix(300)))
+            if progress.count > 50 { progress.removeFirst(progress.count - 50) }
+        }
+    }
+
     private func record(_ message: String) {
         guard !Task.isCancelled else { return }
+        activity.append(message)
         progress.append(String(message.prefix(300)))
         if progress.count > 50 { progress.removeFirst(progress.count - 50) }
     }

@@ -8,6 +8,11 @@ import Crypto
 public struct ServerInstallNotice: Codable, Sendable, Equatable {
     public var code: String
     public var message: String
+    public var recovery: String?
+
+    public var recoverySuggestion: String {
+        recovery ?? ServerSetupFailure.installation(code: code).recovery
+    }
 }
 
 public struct ServerInstallCheck: Codable, Sendable {
@@ -33,6 +38,19 @@ public struct ServerInstallEvent: Decodable, Sendable {
     public var serviceUser: String?
     public var serviceHome: String?
     public var ready: Bool?
+    public var details: String?
+    public var command: String?
+    public var exitStatus: Int?
+
+    public init(event: String, step: String? = nil, message: String? = nil, code: String? = nil,
+                recovery: String? = nil, details: String? = nil, command: String? = nil, exitStatus: Int? = nil,
+                executable: String? = nil, dataDirectory: String? = nil, serviceUser: String? = nil,
+                serviceHome: String? = nil, ready: Bool? = nil) {
+        self.event = event; self.step = step; self.message = message; self.code = code
+        self.recovery = recovery; self.details = details; self.command = command; self.exitStatus = exitStatus
+        self.executable = executable; self.dataDirectory = dataDirectory; self.serviceUser = serviceUser
+        self.serviceHome = serviceHome; self.ready = ready
+    }
 
     public init(executable: String, dataDirectory: String, serviceUser: String, serviceHome: String? = nil) {
         event = "complete"; self.executable = executable; self.dataDirectory = dataDirectory; self.serviceUser = serviceUser; self.serviceHome = serviceHome
@@ -63,15 +81,28 @@ public struct ServerSetupConnection: Sendable {
 
     public func run(_ command: String, input: String? = nil, timeout: Duration = .seconds(25)) async throws -> ShellResult {
         let result = try await Shell.run("/usr/bin/ssh", arguments(command: command), stdin: input ?? "", timeout: timeout)
-        guard result.ok else { throw ServerSetupFailure.classify(status: result.status, stderr: result.stderr) }
+        try Task.checkCancellation()
+        guard result.ok else { throw ServerSetupFailure.classify(status: result.status, stderr: result.stderr, command: "ssh") }
         return result
     }
 
     public func inspect(script: String) async throws -> ServerInstallCheck {
         let result = try await Shell.run("/usr/bin/ssh", arguments(command: "python3 - --check"), stdin: script, timeout: .seconds(35))
+        try Task.checkCancellation()
         if let line = result.stdout.split(separator: "\n").last,
-           let check = try? JSONDecoder().decode(ServerInstallCheck.self, from: Data(line.utf8)) { return check }
-        throw ServerSetupFailure.classify(status: result.status, stderr: result.stderr)
+           var check = try? JSONDecoder().decode(ServerInstallCheck.self, from: Data(line.utf8)) {
+            check.blockers = check.blockers.map(Self.sanitisedNotice)
+            check.warnings = check.warnings.map(Self.sanitisedNotice)
+            return check
+        }
+        throw ServerSetupFailure.classify(status: result.status, stderr: result.stderr, command: "ssh")
+    }
+
+    private static func sanitisedNotice(_ notice: ServerInstallNotice) -> ServerInstallNotice {
+        var value = notice
+        value.message = ServerSetupDiagnostics.sanitise(value.message)
+        value.recovery = ServerSetupDiagnostics.optional(value.recovery)
+        return value
     }
 
     /// Scan only direct connections. Jump-host users can establish trust with their normal SSH client first.
@@ -119,15 +150,24 @@ public struct ServerSetupConnection: Sendable {
     public func install(script: String, archive: URL, clientPublicKey: URL,
                         progress: @escaping @Sendable (ServerInstallEvent) async -> Void) async throws -> ServerInstallEvent {
         let staging = "/tmp/bloom-setup-\(UUID().uuidString.lowercased())"
+        try Task.checkCancellation()
+        await progress(ServerInstallEvent(event: "progress", step: "staging", message: "Preparing a private upload directory on the server."))
         _ = try await run("umask 077; mkdir " + ServerSetupSSH.shellQuote(staging))
         do {
-            try await upload(archive, to: staging + "/server.tar.gz")
-            try await upload(clientPublicKey, to: staging + "/client.pub")
+            let bytes = (try archive.resourceValues(forKeys: [.fileSizeKey])).fileSize ?? 0
+            await progress(ServerInstallEvent(event: "progress", step: "upload-package", message: "Uploading the server package (\(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)))."))
+            try await upload(archive, to: staging + "/server.tar.gz", step: "upload-package", progress: progress)
+            await progress(ServerInstallEvent(event: "output", step: "upload-package", message: "Server package upload complete."))
+            await progress(ServerInstallEvent(event: "progress", step: "upload-key", message: "Uploading this client's public SSH key."))
+            try await upload(clientPublicKey, to: staging + "/client.pub", step: "upload-key", progress: progress)
+            await progress(ServerInstallEvent(event: "output", step: "upload-key", message: "Public key upload complete."))
             let digest = SHA256.hash(data: try Data(contentsOf: archive, options: .mappedIfSafe)).map { String(format: "%02x", $0) }.joined()
             let command = "if [ \"$(id -u)\" = 0 ]; then python3 -; else sudo -n python3 -; fi"
             // Arguments belong to python, not to the shell's condition.
             let args = ["--package", staging + "/server.tar.gz", "--sha256", digest, "--client-public-key-file", staging + "/client.pub"].map(ServerSetupSSH.shellQuote).joined(separator: " ")
             let invocation = command.replacingOccurrences(of: "python3 -", with: "python3 - " + args)
+            try Task.checkCancellation()
+            await progress(ServerInstallEvent(event: "progress", step: "launch-installer", message: "Starting the server installer."))
             let result = try await stream(invocation, script: script, progress: progress)
             _ = try? await run("rm -f " + ServerSetupSSH.shellQuote(staging + "/server.tar.gz") + " " + ServerSetupSSH.shellQuote(staging + "/client.pub") + "; rmdir " + ServerSetupSSH.shellQuote(staging))
             return result
@@ -156,45 +196,19 @@ public struct ServerSetupConnection: Sendable {
                          acceptsFailureEvent: true, progress: progress)
     }
 
-    private func upload(_ file: URL, to remotePath: String) async throws {
+    private func upload(_ file: URL, to remotePath: String, step: String,
+                        progress: @escaping @Sendable (ServerInstallEvent) async -> Void) async throws {
         // scp uses the same pinned host and identity options as the control connection.
         var options = try arguments(command: "")
         options.removeLast(2)
         options.removeAll { $0 == "-T" }
-        let result = try await Shell.run("/usr/bin/scp", options + [file.path, host + ":" + remotePath], stdin: "", timeout: .seconds(300))
-        guard result.ok else { throw ServerSetupFailure.classify(status: result.status, stderr: result.stderr) }
+        let process = StreamingProcess(executable: "/usr/bin/scp", arguments: options + [file.path, host + ":" + remotePath], mergeStderr: false)
+        _ = try await ServerSetupStream.run(process, input: "", timeout: .seconds(300), requiresCompletion: false,
+                                           commandLabel: "scp", step: step, progress: progress)
     }
 
     private func stream(_ command: String, script: String, acceptsFailureEvent: Bool = false, progress: @escaping @Sendable (ServerInstallEvent) async -> Void) async throws -> ServerInstallEvent {
         let process = StreamingProcess(executable: "/usr/bin/ssh", arguments: try arguments(command: command), mergeStderr: false)
-        let timeout = Task { try? await Task.sleep(for: .seconds(900)); if !Task.isCancelled { process.terminate() } }
-        defer { timeout.cancel() }
-        return try await withTaskCancellationHandler {
-            async let errors: String = {
-                var tail = ""
-                for await line in process.errorLines { tail = String((tail + line + "\n").suffix(8192)) }
-                return tail
-            }()
-            try process.start()
-            process.write(script)
-            process.closeStdin()
-            var completed: ServerInstallEvent?
-            var failure: ServerInstallEvent?
-            for try await line in process.lines {
-                guard let event = try? JSONDecoder().decode(ServerInstallEvent.self, from: Data(line.utf8)) else { continue }
-                await progress(event)
-                if event.event == "complete" { completed = event }
-                if event.event == "error" { failure = event }
-            }
-            let status = await process.exitStatus
-            let stderr = await errors
-            if status == 0, let completed { return completed }
-            if Task.isCancelled { throw CancellationError() }
-            if let failure {
-                if acceptsFailureEvent { return failure }
-                throw ServerSetupFailure.installation(code: failure.code ?? "installation_failed")
-            }
-            throw ServerSetupFailure.classify(status: status, stderr: stderr)
-        } onCancel: { process.terminate() }
+        return try await ServerSetupStream.run(process, input: script, acceptsFailureEvent: acceptsFailureEvent, progress: progress)
     }
 }

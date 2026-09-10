@@ -6,7 +6,7 @@ struct ServerSetupIntroduction: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Metrics.gutter * 2) {
+            VStack(alignment: .leading, spacing: Metrics.gutter) {
                 benefit("Let agents keep working", symbol: "play.circle",
                         detail: "Close your laptop or quit Bloom. Your sessions keep running on the server.")
                 benefit("Pick up on another device", symbol: "laptopcomputer",
@@ -16,7 +16,7 @@ struct ServerSetupIntroduction: View {
 
                 VStack(alignment: .leading, spacing: Metrics.spacing) {
                     Text("What you’ll need").font(Typo.labelEmphasis)
-                    Text("An Ubuntu server from your preferred hosting provider, with administrator access over SSH. Bloom will install its tools and guide you through signing in to GitHub and your agent.")
+                    Text("An Ubuntu server from your preferred hosting provider, with administrator access over SSH.")
                         .font(Typo.caption)
                         .foregroundStyle(Palette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -25,11 +25,20 @@ struct ServerSetupIntroduction: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
 
+                VStack(alignment: .leading, spacing: Metrics.spacing) {
+                    Text("What Bloom will install").font(Typo.labelEmphasis)
+                    Text("Bloom Server, Git, GitHub CLI, tmux, Node.js and npm, with a dedicated server account and automatic startup. Browser testing tools are optional.")
+                        .font(Typo.caption).foregroundStyle(Palette.textSecondary)
+                    Text("You’ll review the installation plan and confirm before setup starts.")
+                        .font(Typo.caption).foregroundStyle(Palette.textSecondary)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+
                 Button("Already running Bloom Server? Connect…", action: showAdvanced)
                     .buttonStyle(.link)
                     .font(Typo.caption)
             }
-            .padding(.horizontal, Metrics.gutter * 2)
+            .padding(.horizontal, 0)
             .padding(.vertical, Metrics.spacing)
         }
         .scrollBounceBehavior(.basedOnSize)

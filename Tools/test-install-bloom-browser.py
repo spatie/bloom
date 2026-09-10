@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -35,6 +36,34 @@ class BrowserTests(unittest.TestCase):
             info.external_attr = mode << 16
             archive.writestr(info, contents)
         return path
+
+    def test_browser_command_failure_redacts_output_and_preserves_exit_status(self):
+        with self.assertRaises(browser.BrowserError) as caught:
+            browser.command([sys.executable, "-c", "import sys;print('password=hidden-password');print('missing library');sys.exit(12)"])
+        self.assertEqual(caught.exception.metadata["exitStatus"], 12)
+        self.assertIn("missing library", caught.exception.metadata["details"])
+        self.assertNotIn("hidden-password", str(caught.exception) + str(caught.exception.metadata))
+        self.assertNotIn("-c", caught.exception.metadata["command"])
+
+    def test_browser_command_timeout_keeps_actionable_metadata(self):
+        with self.assertRaises(browser.BrowserError) as caught:
+            browser.command([sys.executable, "-c", "import time;print('waiting',flush=True);time.sleep(60)"], timeout=.1)
+        self.assertEqual(caught.exception.code, "command_timeout")
+        self.assertIn("waiting", caught.exception.metadata["details"])
+        self.assertIn("remains available", caught.exception.recovery)
+
+    def test_generic_browser_failure_preserves_redacted_exception_details(self):
+        error = OSError(13, "Permission denied", "https://user:private-password@mirror.example/browser?token=private-token")
+        with mock.patch.object(browser, "main", side_effect=error), mock.patch.object(browser, "emit") as emit:
+            status = browser.entrypoint()
+        self.assertEqual(status, 1)
+        value = emit.call_args.kwargs
+        self.assertEqual(value["code"], "browser_setup_failed")
+        self.assertIn("PermissionError", value["details"])
+        self.assertIn("Permission denied", value["details"])
+        self.assertIn("https://mirror.example/browser", value["details"])
+        self.assertNotIn("private-", str(value))
+        self.assertNotIn("exitStatus", value)
 
     def test_extract_strips_setuid_and_preserves_readable_directories(self):
         destination = self.root / "release"
@@ -136,16 +165,27 @@ class BrowserTests(unittest.TestCase):
         self.error("sandbox_unverified", lambda: browser.process_evidence("/protected/chrome", os.getuid(), "/profile", self.root))
 
     def test_install_does_not_replace_another_service_accounts_browser(self):
-        (self.root / "configuration.json").write_text(json.dumps({"uid": os.getuid() + 1, "serviceHome": "/another/home"}))
+        service_uid = 12345
+        (self.root / "configuration.json").write_text(json.dumps({"uid": service_uid + 1, "serviceHome": "/another/home"}))
         options = mock.Mock(user="bloom", service_home=str(self.root))
-        account = mock.Mock(pw_uid=os.getuid())
+        account = mock.Mock(pw_uid=service_uid)
         original_read = Path.read_text
+        original_stat = Path.stat
+        def service_home_stat(path, *args, **kwargs):
+            info = original_stat(path, *args, **kwargs)
+            if path == self.root:
+                fields = list(info)
+                fields[4] = service_uid
+                return os.stat_result(fields)
+            return info
         def read(path, *args, **kwargs):
             if str(path) == "/etc/os-release":
                 return 'ID=ubuntu\nVERSION_ID="24.04"\n'
             return original_read(path, *args, **kwargs)
-        with mock.patch.object(browser, "ROOT", self.root), mock.patch.object(browser, "protected"), mock.patch.object(browser, "container_environment", return_value=False), mock.patch.object(browser.platform, "system", return_value="Linux"), mock.patch.object(browser.platform, "machine", return_value="x86_64"), mock.patch.object(browser.os, "geteuid", return_value=0), mock.patch.object(browser.pwd, "getpwnam", return_value=account), mock.patch.object(Path, "read_text", read), mock.patch.object(browser, "dependencies") as dependencies:
+        with mock.patch.object(browser, "ROOT", self.root), mock.patch.object(browser, "protected"), mock.patch.object(browser, "container_environment", return_value=False), mock.patch.object(browser.platform, "system", return_value="Linux"), mock.patch.object(browser.platform, "machine", return_value="x86_64"), mock.patch.object(browser.os, "geteuid", return_value=0), mock.patch.object(browser.pwd, "getpwnam", return_value=account), mock.patch.object(Path, "read_text", read), mock.patch.object(Path, "stat", service_home_stat), mock.patch.object(browser, "dependencies") as dependencies:
             self.error("different_service_user", lambda: browser.install(options))
+            account.pw_uid = 0
+            self.error("invalid_service_user", lambda: browser.install(options))
             dependencies.assert_not_called()
 
 

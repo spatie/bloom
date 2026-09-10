@@ -1,24 +1,28 @@
 import Foundation
 
-/// Setup failures contain only Bloom's own copy. SSH and installer output may contain credentials
-/// or hostile remote text, so it is classified here rather than copied into an alert or a log.
+/// Stable failure categories supply recovery when a server cannot explain its failure. Installer
+/// explanations and command output are retained only after credential and terminal sanitisation.
 public struct ServerSetupFailure: Error, LocalizedError, Sendable, Equatable {
     public enum Code: String, Codable, Sendable, CaseIterable {
         case invalidAddress, authentication, hostUnknown, hostChanged, unreachable, permission
         case unsupported, packageMissing, packageInvalid, installation, busy, cancelled, unknown
-        case serverRunning, diskSpace, accountConflict, serviceFailed, backupFailed
+        case serverRunning, diskSpace, accountConflict, serviceAccountExists, serviceFailed, backupFailed, timedOut
     }
 
     public let code: Code
     public let title: String
     public let message: String
     public let recovery: String
+    public let details: String?
+    public let command: String?
+    public let exitStatus: Int?
 
     public var errorDescription: String? { message }
     public var recoverySuggestion: String? { recovery }
 
     public init(code: Code) {
         self.code = code
+        details = nil; command = nil; exitStatus = nil
         switch code {
         case .invalidAddress:
             title = "Check the connection details"
@@ -76,6 +80,10 @@ public struct ServerSetupFailure: Error, LocalizedError, Sendable, Equatable {
             title = "More disk space is needed"
             message = "The server does not have enough free disk space for installation."
             recovery = "Free at least 512 MB on the installation disk, then retry. Allow extra space for project dependencies and databases."
+        case .serviceAccountExists:
+            title = "The bloom account is already in use"
+            message = "A Unix account named bloom exists, but Bloom could not find matching installation records. Setup will not take over its files or permissions."
+            recovery = "If this account runs an existing Bloom server, connect through advanced settings. If it belongs to a retired setup, ask your administrator to inspect its files and processes, back up anything needed, then remove the unused account and check the server again. Otherwise, use a fresh server."
         case .accountConflict:
             title = "An existing installation needs attention"
             message = "The server account, installation files or permissions do not match a managed Bloom installation."
@@ -84,6 +92,10 @@ public struct ServerSetupFailure: Error, LocalizedError, Sendable, Equatable {
             title = "Bloom Server did not start"
             message = "Installation reached the service startup step, but Bloom Server did not become ready."
             recovery = "Check the Bloom Server systemd service status and journal on the server, resolve the startup error, then retry."
+        case .timedOut:
+            title = "Setup timed out"
+            message = "The setup step did not finish within its time limit."
+            recovery = "Check the last output and the server's package manager or network, then retry. A step already started remotely may still need attention."
         case .cancelled:
             title = "Setup cancelled"
             message = "Server setup was cancelled."
@@ -95,10 +107,23 @@ public struct ServerSetupFailure: Error, LocalizedError, Sendable, Equatable {
         }
     }
 
-    /// Installer codes are part of the setup contract. Unknown codes deliberately do not expose
-    /// accompanying remote messages, which can include paths, environment values or credentials.
-    public static func installation(code: String) -> Self {
+    private init(base: Self, message: String? = nil, recovery: String? = nil, details: String? = nil, command: String? = nil, exitStatus: Int? = nil) {
+        code = base.code; title = base.title
+        self.message = ServerSetupDiagnostics.optional(message) ?? base.message
+        self.recovery = ServerSetupDiagnostics.optional(recovery) ?? base.recovery
+        self.details = ServerSetupDiagnostics.optional(details)
+        self.command = ServerSetupDiagnostics.optional(command, limit: 256)
+        self.exitStatus = exitStatus
+    }
+
+    public static func installation(code: String, message: String? = nil, recovery: String? = nil,
+                                    details: String? = nil, command: String? = nil, exitStatus: Int? = nil) -> Self {
+        Self(base: installationKind(code: code), message: message, recovery: recovery, details: details, command: command, exitStatus: exitStatus)
+    }
+
+    private static func installationKind(code: String) -> Self {
         switch code {
+        case "service_account_exists": Self(code: .serviceAccountExists)
         case "server_running": Self(code: .serverRunning)
         case "server_busy", "installation_busy": Self(code: .busy)
         case "disk_space", "disk_full", "low_disk": Self(code: .diskSpace)
@@ -109,11 +134,17 @@ public struct ServerSetupFailure: Error, LocalizedError, Sendable, Equatable {
         case "database_backup_failed": Self(code: .backupFailed)
         case "permission", "administrator_required": Self(code: .permission)
         case "package_required": Self(code: .packageMissing)
+        case "timeout", "command_timeout", "timed_out": Self(code: .timedOut)
+        case "cancelled", "canceled": Self(code: .cancelled)
         default: Self(code: .installation)
         }
     }
 
-    public static func classify(status: Int32, stderr: String) -> Self {
+    public static func classify(status: Int32, stderr: String, command: String? = nil) -> Self {
+        Self(base: classified(status: status, stderr: stderr), details: stderr, command: command, exitStatus: Int(status))
+    }
+
+    private static func classified(status: Int32, stderr: String) -> Self {
         let output = stderr.lowercased()
         if output.contains("remote host identification has changed") || output.contains("revoked host key") || output.contains("offending") && output.contains("host key") {
             return Self(code: .hostChanged)

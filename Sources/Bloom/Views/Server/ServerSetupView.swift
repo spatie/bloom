@@ -1,8 +1,9 @@
 import SwiftUI
+import AppKit
 import BloomCore
 import UniformTypeIdentifiers
 
-/// Installation and connection recovery share one flow, so retrying keeps the address and key.
+/// One decision per page. Progress and failures share a fixed, visible output pane.
 struct ServerSetupView: View {
     @Bindable var model: ServerSetupModel
     let showAdvanced: () -> Void
@@ -12,315 +13,317 @@ struct ServerSetupView: View {
     @State private var login: LoginTerminalSession?
     @State private var showsKeyPicker = false
     @State private var keySelectionFailure: String?
+    @State private var showsOutput = false
+    @State private var copiedReport = false
+    @FocusState private var addressIsFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: Metrics.spacing) {
-                if model.phase == .introduction {
-                    Label("Bloom Server", systemImage: "server.rack")
-                        .font(Typo.captionEmphasis)
-                        .foregroundStyle(Palette.accent)
-                } else { setupProgress }
-                Text(title).font(model.phase == .introduction ? Typo.displayHeading : Typo.heading)
-                Text(subtitle)
-                    .font(Typo.label)
-                    .foregroundStyle(Palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                setupProgress
+                HStack(alignment: .firstTextBaseline) {
+                    Text(title).font(model.phase == .introduction ? Typo.displayHeading : Typo.heading)
+                    Spacer()
+                    if model.phase != .introduction && model.phase != .address && model.phase != .checking {
+                        Text(model.label.isEmpty ? model.host : "\(model.label) · \(model.host)")
+                            .font(Typo.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                if !subtitle.isEmpty {
+                    Text(subtitle).font(Typo.label).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .padding(Metrics.gutter * 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            if model.phase == .introduction {
-                ServerSetupIntroduction(showAdvanced: showAdvanced)
-            } else { Form {
-                phaseContent
-                if let failure = model.failure {
-                    Section {
-                        Label(failure.title, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(Palette.warning)
-                        Text(failure.message).textSelection(.enabled)
-                        Text(failure.recovery).foregroundStyle(.secondary).textSelection(.enabled)
-                    }
-                }
-                if !model.progress.isEmpty {
-                    DisclosureGroup("Setup details") {
-                        ScrollView {
-                            Text(model.progress.joined(separator: "\n"))
-                                .font(Typo.codeSmall)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .textSelection(.enabled)
+            Group {
+                if model.phase == .introduction {
+                    ServerSetupIntroduction(showAdvanced: showAdvanced)
+                } else if model.phase == .installing || model.isInstallingBrowser {
+                    ServerSetupActivityView(activity: model.activity, failure: model.failure ?? model.browserDiagnostic)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: Metrics.gutter * 1.5) {
+                            if let failure = model.failure { ServerSetupFailureView(failure: failure) }
+                            phaseContent
                         }
-                        .frame(maxHeight: 150)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .scrollBounceBehavior(.basedOnSize)
                 }
             }
-            .formStyle(.grouped)
-            }
+            .padding(.horizontal, Metrics.gutter * 2)
+            .padding(.bottom, Metrics.gutter * 2)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             Divider()
             HStack(spacing: Metrics.gutter) {
-                Button("Cancel") {
-                    model.cancel()
-                    dismissWindow(id: windowID)
+                Button(model.isStopping ? "Stopping…" : model.isBusy ? "Stop Setup" : "Cancel") {
+                    if model.isBusy { Task { await model.stopSetup() } } else { model.cancel(); dismissWindow(id: windowID) }
                 }
-                .keyboardShortcut(.cancelAction)
-                if canEditAddress {
-                    Button("Edit Address") { model.editAddress() }
-                        .disabled(model.isBusy)
+                .keyboardShortcut(.cancelAction).disabled(model.isStopping)
+                if model.phase != .introduction {
+                    Button("Back") { Task { await model.goBack() } }.disabled(!model.canGoBack)
                 }
-                if model.phase == .address {
-                    Button("Back") { model.showIntroduction() }
+                if !model.activity.lines.isEmpty && model.phase != .installing && !model.isInstallingBrowser {
+                    Button("View Output…") { showsOutput = true }.buttonStyle(.link)
+                }
+                if !model.activity.lines.isEmpty || model.failure != nil || model.check != nil {
+                    Button(copiedReport ? "Copied" : "Copy Report") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(model.diagnosticReport, forType: .string)
+                        copiedReport = true
+                    }
+                    .help("Copy the setup step, error and server output to share for troubleshooting.")
                 }
                 Spacer()
-                if model.isBusy { ProgressView().controlSize(.small) }
                 primaryButton
             }
             .padding(Metrics.gutter)
         }
-        .frame(width: 680, height: 560)
+        .frame(width: 800, height: 620)
         .sheet(isPresented: Binding(get: { login != nil }, set: { if !$0 { closeLogin() } })) {
-            if let login {
-                ServerSetupLoginView(session: login, close: closeLogin)
+            if let login { ServerSetupLoginView(session: login, close: closeLogin) }
+        }
+        .sheet(isPresented: $showsOutput) {
+            VStack(alignment: .leading, spacing: Metrics.gutter) {
+                Text("Setup Output").font(Typo.heading)
+                ServerSetupActivityView(activity: model.activity, failure: model.failure ?? model.browserDiagnostic)
+                HStack { Spacer(); Button("Done") { showsOutput = false }.keyboardShortcut(.cancelAction) }
             }
+            .padding(Metrics.gutter * 2).frame(width: 800, height: 520)
         }
         .fileImporter(isPresented: $showsKeyPicker, allowedContentTypes: [.item]) { result in
             switch result {
             case .success(let url): model.identityFile = url.path; keySelectionFailure = nil
-            case .failure: keySelectionFailure = "The SSH key file could not be selected. Try again or enter its full path."
+            case .failure: keySelectionFailure = "The key file could not be selected. Try again or enter its full path."
             }
         }
-        .task { if model.phase == .accounts { await model.refreshAccounts() } }
-        .onDisappear {
-            login?.stop()
-            model.cancel()
+        .task { focusEmptyAddress(); if model.phase == .accounts { await model.refreshAccounts() } }
+        .task(id: copiedReport) {
+            guard copiedReport else { return }
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            copiedReport = false
         }
+        .onChange(of: model.phase) { _, _ in focusEmptyAddress() }
+        .onDisappear { login?.stop(); model.cancel() }
+    }
+
+    private func focusEmptyAddress() {
+        guard model.phase == .address, model.host.isEmpty else { return }
+        addressIsFocused = true
     }
 
     private var title: String {
         switch model.phase {
         case .introduction: "Keep your work running"
-        case .address: "Add a Server"
-        case .trust: "Verify Your Server"
-        case .checking: "Checking Your Server"
-        case .readyToInstall: "Prepare Your Server"
-        case .installing: "Setting Up Bloom Server"
-        case .accounts: "Connect Your Accounts"
-        case .connecting: "Connecting to Your Server"
-        case .complete: "Your Server Is Ready"
+        case .address, .checking: "Connect your server"
+        case .trust: "Verify the server identity"
+        case .readyToInstall: model.hasInstalledServer ? "Server installed" : "Review installation"
+        case .installing: model.failure == nil ? "Installing Bloom Server" : "Setup stopped"
+        case .accounts: model.isInstallingBrowser ? "Installing browser tools" : "Connect your accounts"
+        case .connecting: "Connecting to Bloom Server"
+        case .complete: "Your server is ready"
         }
     }
 
     private var subtitle: String {
         switch model.phase {
-        case .introduction: "Run your projects on your own server, and pick up where you left off in Bloom."
-        case .address: "Enter your Ubuntu server’s SSH address. Bloom will check it before making any changes."
-        case .trust: "This is the first connection to this server. Compare its fingerprint with one provided by your administrator or hosting provider."
-        case .checking: "Checking the operating system, access and any existing Bloom installation."
-        case .readyToInstall: "Bloom will install its server component and tools, create a dedicated account, and configure automatic startup."
-        case .installing: "Setup runs over SSH. Your projects will run under a dedicated server account."
-        case .accounts: "Sign in on the server to use private GitHub repositories and your preferred agent."
-        case .connecting: "Verifying that Bloom can reach the server and load your projects."
-        case .complete: "Choose a repository and create a workspace. Setup and previews use the same flow as local workspaces."
+        case .introduction: "Run projects on your server and pick up where you left off on any device."
+        case .address, .checking: "Enter an Ubuntu server with administrator SSH access. This step only checks the server."
+        case .trust: "Compare this fingerprint with your provider’s before trusting the connection."
+        case .readyToInstall: model.hasInstalledServer ? "Your installation and sign-ins are preserved. Continue to finish connecting." : "Review the changes, then confirm to install."
+        case .accounts: model.isInstallingBrowser ? "" : "Sign in for private repositories and agent chats. You can also do this later."
+        case .installing, .connecting: ""
+        case .complete: "Choose a repository to start your first remote workspace."
         }
     }
 
     @ViewBuilder private var phaseContent: some View {
         switch model.phase {
-        case .introduction: EmptyView()
-        case .address: addressFields
+        case .introduction, .installing: EmptyView()
+        case .address, .checking:
+            addressFields
+            serverChecks
         case .trust:
-            Section("Server identity") {
-                LabeledContent("Address", value: model.host)
-                Text(model.fingerprint ?? "No fingerprint was returned.")
-                    .font(Typo.codeSmall).textSelection(.enabled)
-                Text("Only continue if the fingerprint matches.").foregroundStyle(.secondary)
-            }
-        case .checking, .installing, .connecting:
-            Section {
-                Label(model.host, systemImage: "server.rack")
-                if let latest = model.progress.last { Text(latest).foregroundStyle(.secondary) }
-            }
+            Text(model.fingerprint ?? "No fingerprint returned.").font(Typo.code).textSelection(.enabled)
+                .padding(Metrics.gutter).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
+            Text("Use Back to correct the address. Only trust a fingerprint you have verified.")
+                .font(Typo.caption).foregroundStyle(.secondary)
         case .readyToInstall: installationSummary
         case .accounts: accountFields
+        case .connecting:
+            HStack { ProgressView().controlSize(.small); Text("Loading projects and verifying the connection…") }
         case .complete:
-            Section {
-                Label(model.label.isEmpty ? model.host : model.label, systemImage: "checkmark.circle")
-                Text("Your processes can keep running when you close Bloom.").foregroundStyle(.secondary)
-            }
+            Label("Your projects and conversations live on this server.", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(Palette.accent)
+            Text("Agents can keep working when you close Bloom.").foregroundStyle(.secondary)
         }
     }
 
     private var addressFields: some View {
-        Section {
-            TextField("SSH address", text: $model.host, prompt: Text("root@203.0.113.10 or SSH alias"))
-                .help("Use an account with administrator access for installation.")
-            TextField("Server label", text: $model.label, prompt: Text("Optional, for example Development"))
-            DisclosureGroup("SSH key") {
-                HStack {
-                    TextField("Key file", text: $model.identityFile, prompt: Text("Use SSH configuration or your SSH agent"))
-                    Button("Choose…") { showsKeyPicker = true }
-                        .accessibilityLabel("Choose an SSH key file")
-                }
-                if let keySelectionFailure {
-                    Text(keySelectionFailure).font(.caption).foregroundStyle(Palette.warning)
-                }
-                Text("An explicit key file is used directly, without the SSH agent. For 1Password or an encrypted key loaded in your agent, leave this empty and use your SSH configuration. Password-only connections need an SSH key first.")
-                    .font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: Metrics.gutter) {
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                Text("SSH address").font(Typo.labelEmphasis)
+                TextField("SSH address", text: $model.host, prompt: Text("root@203.0.113.10"))
+                    .labelsHidden().textFieldStyle(.roundedBorder).focused($addressIsFocused)
+                    .accessibilityIdentifier("server-setup-address")
             }
-            Button("Connect to an existing server with advanced settings…", action: showAdvanced)
-                .buttonStyle(.link)
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                Text("Server label (optional)").font(Typo.labelEmphasis)
+                TextField("Server label", text: $model.label, prompt: Text("For example, Development"))
+                    .labelsHidden().textFieldStyle(.roundedBorder)
+            }
+            DisclosureGroup("SSH key (optional)") {
+                HStack {
+                    TextField("Key file", text: $model.identityFile, prompt: Text("Use your SSH configuration or agent"))
+                        .textFieldStyle(.roundedBorder)
+                    Button("Choose…") { showsKeyPicker = true }
+                }
+                Text("Leave empty for 1Password or your SSH agent. A selected key file is used directly.")
+                    .font(Typo.caption).foregroundStyle(.secondary)
+                if let keySelectionFailure { Text(keySelectionFailure).font(Typo.caption).foregroundStyle(Palette.warning) }
+            }
+            Button("Connect to an existing Bloom server…", action: showAdvanced).buttonStyle(.link)
         }
         .disabled(model.isBusy)
     }
 
-    @ViewBuilder private var installationSummary: some View {
-        if let check = model.check {
-            Section("Server") {
-                LabeledContent("Address", value: model.host)
-                LabeledContent("System", value: "\(check.platform) (\(check.architecture))")
-                if check.existing {
-                    Text("An existing Bloom installation was found. Setup preserves its projects and workspaces.")
-                        .foregroundStyle(.secondary)
+    @ViewBuilder private var serverChecks: some View {
+        if model.isBusy {
+            HStack { ProgressView().controlSize(.small); Text("Checking SSH access, Ubuntu compatibility and installation…") }
+                .font(Typo.caption).foregroundStyle(.secondary)
+        } else if let check = model.check {
+            VStack(alignment: .leading, spacing: Metrics.spacing) {
+                HStack {
+                    Label(check.blockers.isEmpty ? "Ready for setup" : "Setup needs attention",
+                          systemImage: check.blockers.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle")
+                        .foregroundStyle(check.blockers.isEmpty ? Palette.accent : Palette.warning)
+                    Spacer()
+                    Text("\(check.platform), \(check.architecture)").font(Typo.caption).foregroundStyle(.secondary)
                 }
-            }
-            Section("Browser testing") {
-                Toggle("Install browser testing tools", isOn: $model.installsBrowserTools)
-                Text("Adds agent-browser and sandboxed Chrome so agents can inspect and test websites on this server. Browser previews in Bloom work independently.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text("Optional. Host workspaces are supported; Docker projects need separate browser dependencies.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            if !check.blockers.isEmpty {
-                Section("Before setup can continue") {
-                    ForEach(check.blockers, id: \.code) { notice in
-                        Label(notice.message, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(Palette.warning)
-                            .textSelection(.enabled)
-                    }
+                ForEach(check.blockers, id: \.code) { notice in
+                    ServerSetupNoticeView(notice: notice, serviceUser: check.serviceUser, showAdvanced: showAdvanced)
                 }
-            }
-            if !check.warnings.isEmpty {
-                Section("Please check") {
-                    ForEach(check.warnings, id: \.code) { notice in
-                        Label(notice.message, systemImage: "info.circle")
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
+                ForEach(check.warnings, id: \.code) { notice in
+                    Text(notice.message).font(Typo.caption).foregroundStyle(.secondary)
                 }
+                if check.existing { Text("Existing Bloom installation found. Projects will be preserved.").font(Typo.caption).foregroundStyle(.secondary) }
+            }
+            .padding(Metrics.gutter)
+            .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
+        }
+    }
+
+    private var installationSummary: some View {
+        VStack(alignment: .leading, spacing: Metrics.gutter * 1.5) {
+            ServerSetupInstallPlan(compact: false)
+            Divider()
+            VStack(alignment: .leading, spacing: Metrics.spacing) {
+                Toggle("Add browser testing tools", isOn: $model.installsBrowserTools).disabled(model.hasInstalledServer)
+                Text("agent-browser, sandboxed Chrome, browser libraries and fonts. May add a Chrome-specific AppArmor rule. Docker projects need their own browser setup.")
+                    .font(Typo.caption).foregroundStyle(.secondary)
+                Text("Optional. You can preview websites in Bloom without these tools.")
+                    .font(Typo.caption).foregroundStyle(.secondary)
+            }
+            if model.hasInstalledServer {
+                Label("Already installed. Continue to Accounts without reinstalling.", systemImage: "checkmark.circle.fill")
+                    .font(Typo.caption).foregroundStyle(Palette.accent)
             }
         }
     }
 
     private var accountFields: some View {
-        Section {
-            accountRow("GitHub", detail: model.githubIsAuthenticated ? "Signed in on the server. Private repositories are available according to this account’s permissions." : "Browse and clone your private repositories.", account: .github)
-            accountRow("Codex", detail: "Install and sign in to Codex on this server.", account: .codex)
-            accountRow("Claude", detail: "Install and sign in to Claude on this server.", account: .claude)
-            ForEach(model.accountChecks.filter { $0.id != .github }) { check in
-                VStack(alignment: .leading, spacing: Metrics.spacing) {
-                    Label(check.title, systemImage: check.status == .ready ? "checkmark.circle" : "info.circle")
-                    Text(check.detail).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                }
-            }
+        VStack(alignment: .leading, spacing: Metrics.gutter) {
+            accountRow("GitHub", detail: model.githubIsAuthenticated ? "Signed in. Private repositories are available." : "Access your private repositories.", account: .github)
+            Divider()
+            accountRow("Codex", detail: "Install if needed and sign in to Codex.", account: .codex)
+            Divider()
+            accountRow("Claude", detail: "Install if needed and sign in to Claude.", account: .claude)
+            Divider()
             browserStatus
-            Button("Check Accounts") { Task { await model.refreshAccounts() } }
-                .disabled(model.isBusy)
-            Text("You can connect now and sign in later. GitHub is needed for private repositories; an authenticated agent is needed to start a chat.")
-                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("Check Accounts") { Task { await model.refreshAccounts() } }.disabled(model.isBusy)
+                if model.isBusy { ProgressView().controlSize(.small) }
+            }
+            ForEach(model.accountChecks.filter { $0.id != .github && $0.status != .ready }) { check in
+                Text(check.detail).font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
         }
     }
 
     private func accountRow(_ title: String, detail: String, account: ServerSetupAccount) -> some View {
         HStack {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                Text(detail).font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                Text(title).font(Typo.labelEmphasis)
+                Text(detail).font(Typo.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if account == .github, model.githubIsAuthenticated {
-                Label("Signed In", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            }
             Button(account == .github && model.githubIsAuthenticated ? "Change Account…" : "Sign In…") {
                 guard let launch = model.accountTerminal(account) else { return }
                 login = LoginTerminalSession(launch: launch, label: "\(title) on \(model.host)") { _ in }
             }
-            .accessibilityLabel("Sign in to \(title) on the server")
             .disabled(model.isBusy)
         }
     }
 
-    @ViewBuilder private var browserStatus: some View {
-        VStack(alignment: .leading, spacing: Metrics.spacing) {
-            Label("Browser testing", systemImage: model.browserReadiness?.status == .ready ? "checkmark.circle" : "globe")
-            if let failure = model.browserFailure {
-                Text(failure).font(.caption).foregroundStyle(Palette.warning).textSelection(.enabled)
-                if let recovery = model.browserRecovery {
-                    Text(recovery).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                }
-                Text("Bloom Server is ready. You can connect and add browser testing later.")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else {
-                Text(model.browserReadiness?.detail ?? "Optional browser testing is not installed. You can still preview websites in Bloom.")
-                    .font(.caption).foregroundStyle(.secondary)
+    private var browserStatus: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                Text("Browser testing").font(Typo.labelEmphasis)
+                Text(model.browserFailure ?? model.browserReadiness?.detail ?? "Optional. Browser tools are not installed.")
+                    .font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                if let command = model.browserDiagnostic?.command { Text(command).font(Typo.codeSmall).foregroundStyle(.secondary).textSelection(.enabled) }
+                if let recovery = model.browserRecovery { Text(recovery).font(Typo.caption).foregroundStyle(.secondary) }
             }
+            Spacer()
             if model.browserReadiness?.status != .ready, model.canInstallBrowser {
-                Button(model.browserAttempted ? "Retry Browser Setup" : "Install Browser Tools") { Task { await model.retryBrowserInstall() } }
+                Button(model.browserAttempted ? "Retry…" : "Install…") { Task { await model.retryBrowserInstall() } }
             }
-        }
-    }
-
-    private var canEditAddress: Bool {
-        switch model.phase {
-        case .introduction, .address, .complete: false
-        default: true
         }
     }
 
     @ViewBuilder private var primaryButton: some View {
-        if model.failure != nil {
-            Button("Try Again") { Task { await model.retry() } }
-                .keyboardShortcut(.defaultAction)
-                .disabled(model.isBusy)
+        if model.failure != nil && model.phase != .checking && model.phase != .address && model.phase != .trust {
+            Button(model.phase == .installing ? "Review and Retry" : "Try Again") { Task { await model.retry() } }
+                .keyboardShortcut(.defaultAction).disabled(model.isBusy)
         } else {
             switch model.phase {
-            case .introduction:
-                Button("Get Started") { model.beginSetup() }
-                    .keyboardShortcut(.defaultAction)
-            case .address:
-                Button("Check Server") { Task { await model.inspect() } }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(model.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isBusy)
+            case .introduction: Button("Get Started") { model.beginSetup() }.keyboardShortcut(.defaultAction)
+            case .address, .checking:
+                if model.canContinueToAccounts {
+                    Button("Continue to Accounts") { Task { await model.continueToAccounts() } }.keyboardShortcut(.defaultAction)
+                } else {
+                    Button(model.canReviewInstallation ? "Review Installation…" : model.check != nil || model.failure != nil ? "Check Again" : "Check Server") {
+                        if model.canReviewInstallation { model.reviewInstallation() } else { Task { await model.inspect() } }
+                    }
+                    .keyboardShortcut(.defaultAction).disabled(model.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isBusy)
+                }
             case .trust:
-                Button("Trust and Continue") { Task { await model.trustHost() } }
-                    .keyboardShortcut(.defaultAction)
+                Button("Trust and Continue") { Task { await model.trustHost() } }.keyboardShortcut(.defaultAction)
                     .disabled(model.fingerprint == nil || model.isBusy)
             case .readyToInstall:
-                Button("Set Up Server") { Task { await model.install() } }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(model.check == nil || model.check?.blockers.isEmpty == false || model.isBusy)
+                if model.canContinueToAccounts {
+                    Button("Continue to Accounts") { Task { await model.continueToAccounts() } }.keyboardShortcut(.defaultAction)
+                } else {
+                    Button("Confirm and Install") { Task { await model.install() } }.keyboardShortcut(.defaultAction)
+                        .disabled(model.check == nil || model.check?.blockers.isEmpty == false || model.isBusy)
+                }
             case .accounts:
-                Button("Connect") { Task { await model.connect() } }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!model.canConnect || model.isBusy)
+                Button("Connect") { Task { await model.connect() } }.keyboardShortcut(.defaultAction).disabled(!model.canConnect || model.isBusy)
             case .complete:
                 Button("Choose a Repository…") {
-                    StartProjectOpening.shared.isRemote = true
-                    openWindow(id: StartProjectWindow.id)
-                    dismissWindow(id: windowID)
-                }
-                .keyboardShortcut(.defaultAction)
-            case .checking, .installing, .connecting:
-                Text("Please wait…").foregroundStyle(.secondary)
+                    StartProjectOpening.shared.isRemote = true; openWindow(id: StartProjectWindow.id); dismissWindow(id: windowID)
+                }.keyboardShortcut(.defaultAction)
+            case .installing, .connecting:
+                Text(model.isBusy ? "Running on your server" : "Setup stopped").font(Typo.caption).foregroundStyle(.secondary)
             }
         }
     }
 
-    private func closeLogin() {
-        login?.stop()
-        login = nil
-        Task { await model.refreshAccounts() }
-    }
-
+    private func closeLogin() { login?.stop(); login = nil; Task { await model.refreshAccounts() } }
     private var setupStep: Int {
         switch model.phase {
         case .introduction, .address, .trust, .checking: 0
@@ -329,24 +332,14 @@ struct ServerSetupView: View {
         case .complete: 3
         }
     }
-
     private var setupProgress: some View {
         HStack(spacing: Metrics.gutter) {
-            ForEach(Array(["Server", "Setup", "Accounts"].enumerated()), id: \.offset) { index, name in
-                if index > 0 {
-                    Image(systemName: "chevron.right").font(Typo.micro).foregroundStyle(Palette.textTertiary)
-                }
-                HStack(spacing: Metrics.spacingSmall) {
-                    if index < setupStep { Image(systemName: "checkmark.circle.fill") }
-                    Text(name)
-                }
-                .font(Typo.captionEmphasis)
-                .foregroundStyle(index == setupStep ? Palette.accent : Palette.textSecondary)
+            ForEach(Array(["Server", "Install", "Accounts"].enumerated()), id: \.offset) { index, name in
+                if index > 0 { Image(systemName: "chevron.right").font(Typo.micro).foregroundStyle(Palette.textTertiary) }
+                Text(name).font(Typo.captionEmphasis).foregroundStyle(index == setupStep ? Palette.accent : Palette.textSecondary)
             }
         }
-        .accessibilityElement(children: .ignore)
         .accessibilityLabel(setupStep == 3 ? "Setup complete" : "Step \(setupStep + 1) of 3")
-        .padding(.bottom, Metrics.spacing)
     }
 }
 

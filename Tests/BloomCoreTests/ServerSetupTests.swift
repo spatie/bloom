@@ -3,6 +3,40 @@ import Testing
 @testable import BloomCore
 
 @Suite struct ServerSetupTests {
+    @Test(arguments: ["", ", \"recovery\": null"])
+    func legacyInstallerNoticesDecodeWithSafeRecoveryFallback(recoveryField: String) throws {
+        let json = "{\"code\":\"installation_conflict\",\"message\":\"The installation needs attention.\"\(recoveryField)}"
+        let notice = try JSONDecoder().decode(ServerInstallNotice.self, from: Data(json.utf8))
+        #expect(notice.message == "The installation needs attention.")
+        #expect(notice.recovery == nil)
+        #expect(notice.recoverySuggestion == ServerSetupFailure(code: .accountConflict).recovery)
+    }
+
+    @Test func installerNoticePreservesExplicitRecoveryThroughCoding() throws {
+        let json = #"{"code":"service_account_exists","message":"The account existing-bloom exists.","recovery":"Ask the administrator to inspect existing-bloom before changing it."}"#
+        let notice = try JSONDecoder().decode(ServerInstallNotice.self, from: Data(json.utf8))
+        let expected = "Ask the administrator to inspect existing-bloom before changing it."
+        #expect(notice.recovery == expected)
+        #expect(notice.recoverySuggestion == expected)
+        let roundTrip = try JSONDecoder().decode(ServerInstallNotice.self, from: JSONEncoder().encode(notice))
+        #expect(roundTrip == notice)
+    }
+
+    @Test func unmanagedServiceAccountHasDistinctRecoveryFromInstallationConflicts() throws {
+        let notice = try JSONDecoder().decode(ServerInstallNotice.self,
+            from: Data(#"{"code":"service_account_exists","message":"The bloom account exists."}"#.utf8))
+        let failure = ServerSetupFailure.installation(code: notice.code)
+        #expect(failure.code == .serviceAccountExists)
+        #expect(failure.code != ServerSetupFailure.installation(code: "installation_conflict").code)
+        #expect(notice.recoverySuggestion == failure.recovery)
+        #expect(failure.message.contains("will not take over"))
+        #expect(failure.recovery.contains("advanced settings"))
+        #expect(failure.recovery.contains("inspect its files and processes"))
+        #expect(failure.recovery.contains("back up"))
+        #expect(failure.recovery.contains("unused account"))
+        #expect(failure.recovery.contains("fresh server"))
+    }
+
     @Test func browserInstallerPreservesSourceAndTreatsPathsAsArguments() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("bloom-browser-wrapper-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -139,6 +173,7 @@ import Testing
         ("checksum_mismatch", .packageInvalid), ("unsafe_package", .packageInvalid),
         ("unsupported_architecture", .unsupported), ("systemd_required", .unsupported),
         ("installation_conflict", .accountConflict), ("untrusted_keys", .accountConflict),
+        ("service_account_exists", .serviceAccountExists),
         ("startup_failed", .serviceFailed), ("administrator_required", .permission),
         ("package_required", .packageMissing), ("unknown_remote_secret", .installation),
     ])

@@ -24,6 +24,11 @@ import urllib.request
 import uuid
 import zipfile
 
+if "stream_install_command" not in globals():
+    from bloom_install_process import InstallProcessFailure, install_exception_details, redact_install_text, standalone_installer_source, stream_install_command
+
+CURRENT_STEP = None
+
 AGENT_VERSION = "0.37.1"
 CHROME_VERSION = "153.0.8010.36"
 ROOT = Path("/opt/bloom-browser")
@@ -42,16 +47,21 @@ PINS = {
 
 
 class BrowserError(Exception):
-    def __init__(self, code, message, recovery):
+    def __init__(self, code, message, recovery, **metadata):
         super().__init__(message)
         self.code, self.recovery = code, recovery
+        self.metadata = metadata
 
 
-def fail(code, message, recovery):
-    raise BrowserError(code, message, recovery)
+def fail(code, message, recovery, **metadata):
+    raise BrowserError(code, redact_install_text(message), redact_install_text(recovery),
+        **{key: redact_install_text(value) if isinstance(value, str) else value for key, value in metadata.items()})
 
 
 def emit(event, **fields):
+    global CURRENT_STEP
+    if event == "progress" and fields.get("step"):
+        CURRENT_STEP = fields["step"]
     print(json.dumps(dict(event=event, **fields)), flush=True)
 
 
@@ -78,18 +88,26 @@ def command(args, *, account=None, env=None, timeout=300, cwd=None):
     options = {}
     if account:
         options.update(user=account.pw_uid, group=account.pw_gid, extra_groups=[])
-    result = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, timeout=timeout, cwd=cwd, env=env or {
-                                "PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8",
-                                "DEBIAN_FRONTEND": "noninteractive"}, **options)
+    # Machine-readable browser smoke responses are parsed privately, never copied to the log.
+    live = Path(args[0]).name in ("apt-get", "apparmor_parser")
+    try:
+        result = stream_install_command(args, timeout=timeout, live=live, cwd=cwd,
+            output=lambda line: emit("output", message=line, step=CURRENT_STEP),
+            env=env or {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8", "DEBIAN_FRONTEND": "noninteractive"}, **options)
+    except InstallProcessFailure as error:
+        fail(error.code, f"{error.command} " + ("timed out." if error.code == "command_timeout" else "could not complete."),
+             "Review browser setup output, check the server's package manager and network, then retry. Bloom Server remains available.",
+             command=error.command, exitStatus=error.exit_status, details=error.details)
     if result.returncode:
-        fail("command_failed", f"{Path(args[0]).name} failed: {result.stdout[-3000:]}",
-             "Review the browser setup output and retry. Bloom Server remains available.")
-    return result.stdout
+        fail("command_failed", f"{result.command} exited with status {result.returncode}.",
+             "Review browser setup output and resolve the reported problem, then retry. Bloom Server remains available.",
+             command=result.command, exitStatus=result.returncode, details=result.details)
+    return result.stdout.decode("utf-8", errors="replace")
 
 
 def download(url, destination, expected):
     digest, count = hashlib.sha256(), 0
+    reported = 0
     request = urllib.request.Request(url, headers={"User-Agent": "Bloom-Browser-Installer/1"})
     with urllib.request.urlopen(request, timeout=60) as response, destination.open("xb") as target:
         if not response.url.startswith("https://"):
@@ -100,6 +118,9 @@ def download(url, destination, expected):
                 fail("download_too_large", "Browser download exceeded its size limit.", "Check the pinned release.")
             target.write(chunk)
             digest.update(chunk)
+            if count - reported >= 16 * 1024 * 1024:
+                reported = count
+                emit("output", message=f"Downloaded {count // (1024 * 1024)} MiB of browser files", step=CURRENT_STEP)
     if digest.hexdigest() != expected:
         fail("checksum_mismatch", "Browser release checksum did not match the pinned version.", "Do not execute this download. Retry or update the reviewed release pins.")
 
@@ -394,8 +415,7 @@ def install(options):
         path = binary_dir / name
         protected(path)
         source = globals().get("__bloom_browser_source")
-        if source is None:
-            source = Path(__file__).read_text()
+        source = standalone_installer_source(__file__, source)
         path.write_text(source)
         path.chmod(0o755)
     empty = ROOT / "empty-config.json"
@@ -463,12 +483,18 @@ def main():
     emit("complete", **result)
 
 
-if __name__ == "__main__":
+def entrypoint():
     try:
         main()
+        return 0
     except BrowserError as error:
-        emit("error", ready=False, code=error.code, message=str(error), recovery=error.recovery)
-        sys.exit(1)
+        emit("error", ready=False, code=error.code, message=str(error), recovery=error.recovery, **error.metadata)
     except (OSError, ValueError, KeyError, subprocess.TimeoutExpired, zipfile.BadZipFile) as error:
-        emit("error", ready=False, code="browser_setup_failed", message=str(error)[:2000], recovery="Retry optional browser setup. Bloom Server remains available.")
-        sys.exit(1)
+        emit("error", ready=False, code="browser_setup_failed", message="Optional browser setup could not complete.",
+             recovery="Review the diagnostic below and retry optional browser setup. Bloom Server remains available.",
+             details=install_exception_details(error))
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(entrypoint())

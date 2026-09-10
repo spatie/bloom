@@ -22,37 +22,102 @@ import tempfile
 import time
 
 
+if "stream_install_command" not in globals():
+    from bloom_install_process import InstallProcessFailure, install_exception_details, redact_install_text, stream_install_command
+
+CURRENT_STEP = None
+SYSTEM_PATH = "/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+
 class InstallError(Exception):
-    def __init__(self, code, message, recovery):
+    def __init__(self, code, message, recovery, **metadata):
         super().__init__(message)
         self.code, self.message, self.recovery = code, message, recovery
+        self.metadata = metadata
 
 
-def fail(code, message, recovery):
-    raise InstallError(code, message, recovery)
+def fail(code, message, recovery, **metadata):
+    raise InstallError(code, redact_install_text(message), redact_install_text(recovery),
+        **{key: redact_install_text(value) if isinstance(value, str) else value for key, value in metadata.items()})
 
 
 def emit(event, **fields):
+    global CURRENT_STEP
+    if event == "progress" and fields.get("step"):
+        CURRENT_STEP = fields["step"]
     print(json.dumps({"event": event, **fields}, separators=(",", ":")), flush=True)
 
 
 def command(arguments, timeout=30, required=True, account=None):
-    # Never forward subprocess output: package managers and authentication helpers can echo secrets.
+    name = pathlib.Path(arguments[0]).name
+    live = name in ("apt-get", "systemctl", "useradd") and arguments[:2] not in (["systemctl", "show"], ["systemctl", "is-active"])
     try:
-        result = subprocess.run(arguments, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE if arguments[:2] == ["systemctl", "show"] else subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL, timeout=timeout, check=False,
-                                **({"user": account.pw_uid, "group": account.pw_gid, "extra_groups": []} if account else {}),
-                                env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8",
-                                     "DEBIAN_FRONTEND": "noninteractive"})
-    except (OSError, subprocess.TimeoutExpired):
-        if required:
-            fail("command_failed", "A server preparation command failed or timed out.",
-                 "Check the server's network and package manager, then retry.")
-        return None
+        result = stream_install_command(arguments, timeout=timeout, live=live,
+            output=lambda line: emit("output", message=line, step=CURRENT_STEP),
+            **({"user": account.pw_uid, "group": account.pw_gid, "extra_groups": [], "cwd": "/"} if account else {}),
+            env={"PATH": SYSTEM_PATH, "LANG": "C.UTF-8", "DEBIAN_FRONTEND": "noninteractive",
+                 **({"HOME": account.pw_dir} if account else {})})
+    except InstallProcessFailure as error:
+        if not required and error.code != "cancelled":
+            return None
+        fail(error.code, f"{error.command} " + ("timed out." if error.code == "command_timeout" else "could not complete."),
+             "Review the command output below. Check the server's network, package manager and available disk space, then retry.",
+             command=error.command, exitStatus=error.exit_status, details=error.details)
     if required and result.returncode:
-        fail("command_failed", "A server preparation command could not complete.",
-             "Check the server's network and package manager, then retry.")
+        fail("command_failed", f"{result.command} exited with status {result.returncode}.",
+             "Review the command output below. Resolve the reported package or service problem, then choose Check Again.",
+             command=result.command, exitStatus=result.returncode, details=result.details)
     return result
+
+
+def package_installed(name):
+    result = command(["dpkg-query", "-W", "-f=${db:Status-Status}", name], required=False)
+    return result is not None and result.returncode == 0 and result.stdout.strip() == b"installed"
+
+
+def node_tool_status(account):
+    status = {}
+    for name in ("node", "npm"):
+        executable = shutil.which(name, path=SYSTEM_PATH)
+        result = command([executable, "--version"], required=False, account=account) if executable else None
+        status[name] = result is not None and result.returncode == 0
+    return status
+
+
+def verify_node_tools(account, status=None):
+    status = node_tool_status(account) if status is None else status
+    if not all(status.values()):
+        missing = ", ".join(name for name, ready in status.items() if not ready)
+        fail("npm_unavailable", f"The server account cannot run {missing} from the system PATH.",
+             "Ask your administrator to repair Node.js and its matching npm installation in /usr/local/bin or /usr/bin, "
+             "then choose Check Again. A root-only nvm installation is not available to Bloom. "
+             "Bloom will not replace an existing Node.js provider or remove packages to resolve a conflict.",
+             command=missing + " --version", exitStatus=None,
+             details="Check executable permissions and ensure node and npm can run as the dedicated Bloom account.")
+
+
+def install_dependencies(args):
+    emit("progress", step="dependencies", message="Checking existing Git, GitHub CLI, tmux and Node.js/npm")
+    # Probe under an unprivileged account, using only paths the eventual service can see.
+    # In particular, NodeSource's nodejs package already contains npm and conflicts with
+    # Ubuntu's separate npm package. Never replace a working provider with that package.
+    try:
+        account = pwd.getpwnam(args.user)
+    except KeyError:
+        account = pwd.getpwnam("nobody")
+    status = node_tool_status(account)
+    packages = [name for name in ("git", "tmux", "gh", "ca-certificates") if not package_installed(name)]
+    if not all(status.values()):
+        if any(status.values()) or package_installed("nodejs"):
+            verify_node_tools(account, status=status)
+        packages.extend(name for name in ("nodejs", "npm") if not package_installed(name))
+    if not packages:
+        emit("progress", step="dependencies", message="Git, tmux, GitHub CLI, certificates and Node.js/npm are already available")
+        return
+    emit("progress", step="dependencies", message="Installing missing packages: " + ", ".join(packages))
+    command(["apt-get", "update"], timeout=180)
+    command(["apt-get", "install", "--simulate", "--no-remove", *packages], timeout=180)
+    command(["apt-get", "install", "-y", "--no-remove", *packages], timeout=600)
 
 
 def valid_path(value):
@@ -159,7 +224,11 @@ def check_ownership(args, existing):
         pwd.getpwnam(args.user)
     except KeyError:
         return
-    fail("installation_conflict", "The service account already exists outside this installation.", "Choose another service account name.")
+    fail("service_account_exists",
+         f"The Linux account '{args.user}' already exists, but no matching managed Bloom installation metadata was found.",
+         "If this account runs Bloom, connect through Advanced Settings using its existing installation. "
+         "If it belongs to a retired setup, ask an administrator to inspect its files and processes, back up anything needed, "
+         "and remove the account only after confirming it is unused. Then choose Check Again. Otherwise, use a fresh server.")
 
 
 def active_work(data_directory):
@@ -236,7 +305,7 @@ def probe(args):
         if existing and privilege == "root" and active_work(args.data_dir):
             warnings.append({"code": "server_busy", "message": "Existing work must finish before updating this server."})
     except InstallError as error:
-        blockers.append({"code": error.code, "message": error.message})
+        blockers.append({"code": error.code, "message": error.message, "recovery": error.recovery})
     target = args.install_root
     while not target.exists():
         target = target.parent
@@ -417,8 +486,30 @@ def wait_ready(args, uid):
         except OSError:
             pass
         time.sleep(0.25)
+    details = "The service did not become ready within 20 seconds."
+    try:
+        journal = command(["journalctl", "-u", args.service_name + ".service", "-n", "40", "--no-pager", "--output=cat"],
+                          timeout=5, required=False)
+        if journal is not None:
+            output = getattr(journal, "details", None)
+            if output is None:
+                output = (journal.stdout or b"").decode("utf-8", errors="replace")
+            output = redact_install_text(output)
+            if output:
+                for line in output.splitlines():
+                    emit("output", message=line, step="service")
+                details += ("\nRecent service journal:\n" if journal.returncode == 0 else "\nJournal diagnostics could not be read:\n") + output
+        else:
+            details += "\nThe service journal could not be retrieved."
+    except InstallError as error:
+        if error.code == "cancelled":
+            raise
+        details += "\nJournal diagnostics unavailable: " + error.message
+    except (OSError, ValueError) as error:
+        details += "\nJournal diagnostics unavailable: " + install_exception_details(error)
     fail("startup_failed", "Bloom Server did not start successfully.",
-         "The previous installation was restored. Check systemctl status for this service before retrying.")
+         "Review the service output below. Check the Bloom service status and correct the startup error before retrying.",
+         command="systemctl start " + args.service_name + ".service", exitStatus=None, details=redact_install_text(details))
 
 
 def atomic_text(path, value):
@@ -459,9 +550,9 @@ def backup_database(database, staging, account):
     backup = private / "server.sqlite"
     try:
         command([sys.executable, "-c", DATABASE_BACKUP, str(database), str(backup)], account=account)
-    except InstallError:
+    except InstallError as error:
         fail("database_backup_failed", "The existing server database could not be backed up.",
-             "Check free disk space and the service account's database access. The previous release and database were not replaced.")
+             "Check free disk space and the service account's database access. The previous release and database were not replaced.", **error.metadata)
     return backup
 
 
@@ -495,9 +586,7 @@ def install(args):
         bundle = extract_package(args.package, staging, args.sha256)
         # --help checks the loader and bundled libraries without opening a database.
         command([str(bundle / "bin/bloom-server"), "--help"])
-        emit("progress", step="dependencies", message="Installing Git, tmux, GitHub CLI and Node.js")
-        command(["apt-get", "update", "-qq"], timeout=180)
-        command(["apt-get", "install", "-y", "-qq", "git", "tmux", "gh", "ca-certificates", "nodejs", "npm"], timeout=300)
+        install_dependencies(args)
         emit("progress", step="account", message="Preparing a private server account")
         details = {**configuration(args), "sha256": args.sha256.lower(), "phase": "prepared"}
         if not existing:
@@ -508,6 +597,7 @@ def install(args):
             command(["useradd", "--system", "--user-group", "--create-home", "--home-dir", str(args.service_home),
                      "--shell", "/bin/bash", args.user])
         account = pwd.getpwnam(args.user)
+        verify_node_tools(account)
         for path in (args.service_home, args.data_dir):
             path.mkdir(parents=True, exist_ok=True, mode=0o700)
             path.chmod(0o700)
@@ -587,10 +677,11 @@ def main():
             install(args)
         return 0
     except InstallError as error:
-        emit("error", code=error.code, message=error.message, recovery=error.recovery)
-    except (OSError, ValueError, argparse.ArgumentTypeError):
+        emit("error", code=error.code, message=error.message, recovery=error.recovery, **error.metadata)
+    except (OSError, ValueError, argparse.ArgumentTypeError) as error:
         emit("error", code="installation_failed", message="Server preparation could not complete.",
-             recovery="Check the server's permissions and available disk space, then retry.")
+             recovery="Check the server's permissions and available disk space, then retry.",
+             details=install_exception_details(error))
     return 1
 
 

@@ -48,7 +48,7 @@ enum ServerSetupProbe {
             }
             let model = ServerSetupModel(server: server, resources: URL(fileURLWithPath: configuration.resources), supportDirectory: URL(fileURLWithPath: configuration.support), resumeExisting: false)
             model.host = configuration.host; model.identityFile = configuration.identityFile; model.label = "New Ubuntu server"
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 560), styleMask: [.titled], backing: .buffered, defer: false)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 620), styleMask: [.titled], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             window.appearance = NSAppearance(named: .aqua)
             window.title = "Bloom server setup verification"
@@ -95,6 +95,11 @@ enum ServerSetupProbe {
                 await model.trustHost()
             }
             try await capture("preflight")
+            if configuration.inspect != false, model.canReviewInstallation {
+                guard model.phase == .address else { throw ServerFailure("Check results must stay on the address page.") }
+                model.reviewInstallation()
+                try await capture("confirm-installation")
+            }
             if configuration.install, model.phase == .readyToInstall, model.check?.blockers.isEmpty == true {
                 let operation = Task { await model.install() }
                 var progressCount = -1
@@ -153,6 +158,99 @@ enum ServerSetupProbe {
             }
             if configuration.inspect == false {
                 guard model.phase == .address else { throw ServerFailure("Adding a server must start with a fresh address form.") }
+                let checked = ServerSetupModel(server: server, resources: URL(fileURLWithPath: configuration.resources),
+                    supportDirectory: URL(fileURLWithPath: configuration.support), resumeExisting: false,
+                    inspectConnection: { connection, _ in
+                        if connection.host == "root@unreachable.example" { throw ServerSetupFailure(code: .unreachable) }
+                        let blockers = connection.host == "root@blocked.example"
+                            ? "[{\"code\":\"service_account_exists\",\"message\":\"The Unix account 'bloom' already exists, but there is no matching managed Bloom installation. Setup will not take over its files or permissions.\"}]" : "[]"
+                        return try JSONDecoder().decode(ServerInstallCheck.self, from: Data("""
+                        {"platform":"Ubuntu 24.04", "architecture":"x86_64", "privilege":"root", "existing":false,
+                        "blockers":\(blockers), "warnings":[], "executable":"/opt/bloom-server/current/bin/bloom-server",
+                        "dataDirectory":"/var/lib/bloom", "serviceUser":"bloom"}
+                        """.utf8))
+                    })
+                checked.beginSetup(); checked.host = "root@preview.example"; checked.label = "Development"
+                window.contentView = NSHostingView(rootView: ServerSetupView(model: checked, showAdvanced: {}).environment(\.colorScheme, .light).background(Palette.windowBackground))
+                await checked.inspect()
+                guard checked.phase == .address, checked.canReviewInstallation else { throw ServerFailure("Successful checks left the edit page.") }
+                await checked.install()
+                guard checked.phase == .address, checked.progress.isEmpty else { throw ServerFailure("Installation bypassed the review step.") }
+                try await Task.sleep(for: .milliseconds(200))
+                try await capture("inline-checks-fixture")
+                checked.reviewInstallation()
+                guard checked.phase == .readyToInstall else { throw ServerFailure("Installation review is unavailable.") }
+                try await Task.sleep(for: .milliseconds(200))
+                try await capture("installation-review-fixture")
+                await checked.goBack()
+                guard checked.check != nil, checked.canReviewInstallation else { throw ServerFailure("Back discarded unchanged check results.") }
+                checked.identityFile = "/tmp/changed-key"
+                guard checked.check == nil, !checked.canReviewInstallation else { throw ServerFailure("Changing the key kept stale check results.") }
+                checked.identityFile = ""; checked.host = "root@blocked.example"
+                await checked.inspect(); checked.reviewInstallation()
+                guard checked.phase == .address, !checked.canReviewInstallation, checked.diagnosticReport.contains("service_account_exists") else { throw ServerFailure("Blocked checks allowed installation review.") }
+                try await Task.sleep(for: .milliseconds(200))
+                try await capture("blocked-checks-fixture")
+                checked.host = "root@unreachable.example"
+                await checked.inspect()
+                guard checked.failure != nil, !checked.isBusy else { throw ServerFailure("A failed connection did not allow correction.") }
+                try await Task.sleep(for: .milliseconds(200))
+                try await capture("failed-connection-fixture")
+                await checked.goBack()
+                guard checked.phase == .address, checked.failure == nil else { throw ServerFailure("Back did not recover from a failed check.") }
+                checked.host = "root@preview.example"
+                guard checked.failure == nil, checked.phase == .address else { throw ServerFailure("Editing the address did not clear its old failure.") }
+                await checked.inspect()
+                guard checked.canReviewInstallation else { throw ServerFailure("Retry after an address correction failed.") }
+                await checked.goBack()
+                guard checked.phase == .introduction, checked.host == "root@preview.example" else { throw ServerFailure("Back lost the address at the introduction.") }
+                checked.beginSetup(); checked.host = ""
+                try await Task.sleep(for: .milliseconds(200))
+                try await capture("empty-address-form")
+                checked.cancel()
+                let live = ServerSetupModel(server: server, resources: URL(fileURLWithPath: configuration.resources),
+                    supportDirectory: URL(fileURLWithPath: configuration.support), resumeExisting: false,
+                    inspectConnection: { _, _ in
+                        try JSONDecoder().decode(ServerInstallCheck.self, from: Data("""
+                        {"platform":"Ubuntu 26.04", "architecture":"x86_64", "privilege":"root", "existing":false,
+                        "blockers":[], "warnings":[], "executable":"/opt/bloom-server/current/bin/bloom-server",
+                        "dataDirectory":"/var/lib/bloom", "serviceUser":"bloom"}
+                        """.utf8))
+                    }, installConnection: { _, _, _, _, progress in
+                        for (step, message) in [("upload-package", "Server package uploaded (64 MB)."), ("verify", "SHA-256 checksum verified."), ("dependencies", "Preparing development tools") ] {
+                            await progress(ServerInstallEvent(event: "progress", step: step, message: message))
+                        }
+                        for line in ["$ apt-get install git tmux gh nodejs npm", "Reading package lists... Done", "Building dependency tree... Done", "nodejs : Conflicts: npm", "E: Unable to correct problems, you have held broken packages."] {
+                            await progress(ServerInstallEvent(event: "output", step: "dependencies", message: line))
+                        }
+                        try await Task.sleep(for: .seconds(2))
+                        throw ServerSetupFailure.installation(code: "command_failed", message: "Development tools could not be installed.",
+                            recovery: "The installed NodeSource package already includes npm. Use its npm instead of installing Ubuntu’s separate npm package.",
+                            details: "nodejs : Conflicts: npm", command: "apt-get install git tmux gh nodejs npm", exitStatus: 100)
+                    })
+                live.beginSetup(); live.host = "root@preview.example"; live.label = "Development"; live.installsBrowserTools = false
+                await live.inspect(); live.reviewInstallation()
+                window.contentView = NSHostingView(rootView: ServerSetupView(model: live, showAdvanced: {}).environment(\.colorScheme, .light).background(Palette.windowBackground))
+                let installation = Task { await live.install() }
+                for _ in 0..<100 where (!live.isBusy || live.activity.lines.count < 5) { try await Task.sleep(for: .milliseconds(20)) }
+                try await capture("live-installation-fixture")
+                await installation.value
+                guard live.failure?.exitStatus == 100, live.activity.output.contains("Conflicts: npm"),
+                      live.diagnosticReport.contains("Exit status: 100"), live.diagnosticReport.contains("Server output:") else {
+                    throw ServerFailure("The copyable failure report lost command status or live output.")
+                }
+                try await Task.sleep(for: .milliseconds(200))
+                try await capture("exact-failure-fixture")
+                await live.goBack()
+                let stoppedInstallation = Task { await live.install() }
+                for _ in 0..<100 where (!live.isBusy || live.activity.lines.count < 5) { try await Task.sleep(for: .milliseconds(20)) }
+                await live.stopSetup()
+                await stoppedInstallation.value
+                guard live.failure?.code == .cancelled, live.phase == .installing, !live.activity.lines.isEmpty, !live.isBusy else {
+                    throw ServerFailure("Stopping setup discarded its diagnostic output or left the action busy.")
+                }
+                try await capture("stopped-with-output-fixture")
+                live.cancel()
                 window.contentView = NSHostingView(rootView: SidebarStatusBar(filter: .constant(.all)).environment(app).environment(\.colorScheme, .light).background(Palette.windowBackground))
                 window.setContentSize(NSSize(width: 280, height: 40))
                 try await Task.sleep(for: .milliseconds(200))

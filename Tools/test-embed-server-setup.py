@@ -6,6 +6,8 @@ import pathlib
 import re
 import tarfile
 import tempfile
+import subprocess
+import sys
 import unittest
 
 root = pathlib.Path(__file__).resolve().parent.parent
@@ -31,7 +33,13 @@ class PackageTests(unittest.TestCase):
             module.embed(path / 'Bloom.app', archive)
             output = path / 'Bloom.app/Contents/Resources/ServerSetup'
             self.assertTrue((output / 'install-bloom-server.py').is_file())
-            self.assertEqual((output / 'install-bloom-browser.py').read_bytes(), (root / 'Tools/install-bloom-browser.py').read_bytes())
+            for name in ('install-bloom-server.py', 'install-bloom-browser.py'):
+                bundled = (output / name).read_text()
+                self.assertTrue(bundled.startswith('#!/usr/bin/env python3\n'))
+                self.assertIn('class InstallProcessFailure(', bundled)
+                self.assertTrue(bundled.endswith((root / 'Tools' / name).read_text()))
+                result = subprocess.run([sys.executable, '-I', str(output / name), '--help'], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual((output / 'server.tar.gz').read_bytes(), archive.read_bytes())
             self.assertEqual(json.loads((output / 'package.json').read_text())['protocolVersion'], protocol)
 

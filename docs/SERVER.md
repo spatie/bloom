@@ -29,8 +29,10 @@ change the active remote connection. This Mac's projects remain available alongs
 contain addresses and references to local key files, never the private key contents or access tokens.
 
 The assistant checks Ubuntu 24.04/26.04 x86_64, systemd, administrator access, free disk space and
-existing installation ownership. Set Up Server uploads the package bundled with Bloom, verifies
-its checksum, installs Git, tmux, gh, Node and npm, and creates a dedicated `bloom` account. The
+existing installation ownership. Results stay with the editable connection details. Review Installation
+shows the changes before Confirm and Install uploads the bundled package, verifies its checksum,
+prepares Git, tmux, gh, Node and npm, and creates a dedicated `bloom` account. Compatible tools are
+reused, including npm bundled with NodeSource's Node package; only missing packages are installed. The
 account has no sudo privileges. Its home, data and SSH keys are private; the app generates a
 separate client key and uploads only its public half. Normal connections and agents run as that
 account. No TCP control listener or public development port is opened.
@@ -46,8 +48,19 @@ then verifies the browser sandbox and a screenshot. A browser setup failure leav
 server usable and offers a retry. This host browser is separate from browser tooling inside a
 project's Docker container. See [browser provisioning](SERVER-BROWSER.md) for the boundaries.
 
-Failures retain the address and selected key. Installation progress is bounded, and raw SSH or
-package-manager output is not copied into alerts. Repeating a successful installation of the same
+Failures retain the address and selected key. A step list and selectable live output remain visible
+during installation. Structured errors retain the sanitised command, exit status and diagnostic tail;
+Copy Report includes these alongside check results and server output. Credential patterns and terminal
+control sequences are filtered before display or copying. The retained log is bounded to 1,000 lines
+and 256 KiB. Back preserves completed installation work and returns to account setup without reinstalling.
+
+The standalone installers emit JSON lines: `progress` events carry `step` and `message`, `output`
+events carry live command lines, and `error` events include `code`, `message`, `recovery` and optional
+`command`, `exitStatus` and `details`. The app recognises a final `complete` event only after a successful
+process exit. Browser and server installers embed the same subprocess/output helper, so they need no
+additional Python package on the server. These setup events are separate from the workspace RPC protocol.
+
+Repeating a successful installation of the same
 package adds the client key if needed and reuses the service. Updating a different package refuses
 a running server; stop it when idle before retrying. Startup failure restores the prior binary and
 database. This conservative update path does not yet provide a maintenance-mode handover.
