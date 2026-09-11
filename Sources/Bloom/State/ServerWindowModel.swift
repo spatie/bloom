@@ -534,18 +534,22 @@ final class ServerWindowModel {
     }
 
     func connect(automatically: Bool = false) async {
-        guard !isConnecting, !isRemovingServer, !isDisconnecting else { return }
+        guard !isConnecting, !isRemovingServer, !isDisconnecting, !Task.isCancelled else { return }
         isConnecting = true
         defer { isConnecting = false }
         shouldReconnect = true
         saveConnection()
         let generation = connectionGeneration + 1
         await disconnectTransport()
-        guard generation == connectionGeneration, shouldReconnect, !Task.isCancelled else { return }
+        guard generation == connectionGeneration else { return }
+        guard shouldReconnect, !Task.isCancelled else {
+            shouldReconnect = automatically && shouldReconnect
+            connectionRecovery.cancelAttempt(automaticallyRetry: shouldReconnect)
+            return
+        }
         connectionRecovery.beginAttempt()
         var stage = usesHTTPS ? "Connecting over HTTPS" : "Connecting over SSH"
         needsBackgroundApproval = false
-        if !automatically { error = nil }
         do {
             let endpoint: ServerEndpoint
             switch connectionMode {
@@ -574,7 +578,8 @@ final class ServerWindowModel {
                     forwards.removeAll()
                     previewAddresses.removeAll()
                 }
-                guard generation == connectionGeneration, shouldReconnect, !Task.isCancelled else { return }
+                guard generation == connectionGeneration else { return }
+                guard shouldReconnect, !Task.isCancelled else { throw CancellationError() }
                 lastEndpoint = endpoint
                 let saved = paneStores.defaults.dictionary(forKey: "server.activeSessions") as? [String: String] ?? [:]
                 activeSessions = Dictionary(uniqueKeysWithValues: saved.map { (WorkspaceID($0.key), SessionID($0.value)) })
@@ -589,26 +594,37 @@ final class ServerWindowModel {
             let connected = try await RemoteReadDeadline.run {
                 try await ServerClient.connect(to: endpoint, accessToken: token)
             }
-            guard generation == connectionGeneration, !Task.isCancelled else {
+            do {
+                guard generation == connectionGeneration, !Task.isCancelled else { throw CancellationError() }
+                stage = "Reading server identity"
+                let reply = try await connected.request(ServerRequest(.hello), timeout: .seconds(15))
+                guard case .hello(let name) = reply.result else { throw ServerFailure("The endpoint did not identify itself as a Bloom Server.") }
+                guard generation == connectionGeneration, !Task.isCancelled else { throw CancellationError() }
+                stage = "Loading workspaces"
+                let listed = try await connected.request(ServerRequest(.catalogue), timeout: .seconds(15))
+                guard case .catalogue(let value) = listed.result else { throw ServerFailure("The server did not return its workspace catalogue.") }
+                guard generation == connectionGeneration, !Task.isCancelled else { throw CancellationError() }
+                // A transport alone is not a usable connection. Publish identity and catalogue
+                // together, so polling and workspace controls cannot run halfway through setup.
+                client = connected
+                serverName = name
+                catalogue = value
+                connectionRecovery.connected()
+                error = nil
+                connectionGeneration += 1
+            } catch {
                 await connected.disconnect()
-                return
+                throw error
             }
-            client = connected
-            stage = "Reading server identity"
-            let reply = try await connected.request(ServerRequest(.hello), timeout: .seconds(15))
-            guard generation == connectionGeneration else { return }
-            if case .hello(let name) = reply.result { serverName = name }
-            stage = "Loading workspaces"
-            let listed = try await connected.request(ServerRequest(.catalogue), timeout: .seconds(15))
-            guard generation == connectionGeneration else { return }
-            if case .catalogue(let value) = listed.result { catalogue = value }
-            connectionRecovery.connected()
-            connectionGeneration += 1
         } catch {
-            if generation == connectionGeneration {
+            guard generation == connectionGeneration else { return }
+            if error is CancellationError || Task.isCancelled {
+                shouldReconnect = automatically && shouldReconnect
+                connectionRecovery.cancelAttempt(automaticallyRetry: shouldReconnect)
+                await disconnectTransport()
+            } else {
                 needsBackgroundApproval = error is LocalServerServiceError
-                if !automatically { self.error = stage + ": " + error.localizedDescription }
-                await connectionFailed(error, generation: generation)
+                await connectionFailed(error, generation: generation, stage: stage)
             }
         }
     }
@@ -715,11 +731,13 @@ final class ServerWindowModel {
         }
     }
 
-    private func connectionFailed(_ failure: Error, generation: Int) async {
+    private func connectionFailed(_ failure: Error, generation: Int, stage: String? = nil) async {
         guard generation == connectionGeneration, !isRemovingServer else { return }
         let retries = !RemoteConnectionRecovery.requiresUserAction(failure.localizedDescription)
+        let message = stage.map { $0 + ": " + failure.localizedDescription } ?? failure.localizedDescription
+        if stage != nil { error = message }
         shouldReconnect = retries
-        connectionRecovery.failed(message: failure.localizedDescription, automaticallyRetry: retries)
+        connectionRecovery.failed(message: message, automaticallyRetry: retries)
         nextConnectionRetry = Date().addingTimeInterval(Double(connectionRecovery.retryDelaySeconds))
         await disconnectTransport()
     }

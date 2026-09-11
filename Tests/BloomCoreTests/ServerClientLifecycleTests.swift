@@ -5,6 +5,73 @@ import Synchronization
 
 struct ServerClientLifecycleTests {
     @Test(.timeLimit(.minutes(1)))
+    func failedTransportRetainsFinalDiagnosticsAfterOutputEnds() async throws {
+        for _ in 0..<10 {
+            let process = StreamingProcess(executable: "/bin/sh", arguments: ["-c", #"""
+                IFS= read -r request
+                awk 'BEGIN { for (i = 0; i < 4096; i++) print "SSH diagnostic"; printf "Permission denied (publickey)." }' >&2
+                exit 255
+                """#], mergeStderr: false)
+            defer { process.kill() }
+            do {
+                let client = try await ServerClient.connect(process: process, timeout: .seconds(5))
+                await client.disconnect()
+                Issue.record("The fixture must reject the handshake")
+            } catch {
+                #expect(error.localizedDescription.hasSuffix("Permission denied (publickey).\n"))
+                #expect(error.localizedDescription.count <= 4_096)
+            }
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func failedLaunchRetainsItsReasonWithoutStderr() async throws {
+        let executable = "/missing-bloom-fixture-" + UUID().uuidString
+        let process = StreamingProcess(executable: executable, arguments: [], mergeStderr: false)
+        do {
+            let client = try await ServerClient.connect(process: process, timeout: .seconds(2))
+            await client.disconnect()
+            Issue.record("A missing executable must fail")
+        } catch {
+            #expect(error.localizedDescription.contains(executable))
+            #expect(error.localizedDescription.contains("not found"))
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func explicitDisconnectDoesNotWaitForStderrOrChildExit() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("bloom-client-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let received = directory.appendingPathComponent("received")
+        let process = StreamingProcess(executable: "/bin/sh", arguments: ["-c", #"""
+            trap '' TERM
+            IFS= read -r request
+            id=$(printf '%s' "$request" | sed -E 's/.*"id":"([^"]*)".*/\1/')
+            printf '{"id":"%s","version":%s,"result":{"hello":{"name":"Fixture"}}}\n' "$id" "$1"
+            IFS= read -r request
+            touch "$2"
+            while :; do sleep 1; done
+            """#, "fixture", String(ServerRequest.protocolVersion), received.path], mergeStderr: false)
+        defer { process.kill() }
+        let client = try await ServerClient.connect(process: process, timeout: .seconds(2))
+        let request = Task {
+            try await client.request(ServerRequest(.send(sessionID: SessionID("session"), text: "Hello")), timeout: .seconds(2))
+        }
+        await waitUntil("the child received the pending request") { FileManager.default.fileExists(atPath: received.path) }
+        await client.disconnect()
+        do {
+            _ = try await request.value
+            Issue.record("Disconnect must fail the pending request")
+        } catch {
+            #expect(error.localizedDescription == "Disconnected from the server.")
+        }
+        #expect(process.isRunning)
+        process.kill()
+        _ = await process.exitStatus
+    }
+
+    @Test(.timeLimit(.minutes(1)))
     func cancelledRequestCanRetryItsIdentityAndReceiveAnImmediateReply() async throws {
         let directory = "/tmp/bloom-client-" + UUID().uuidString
         let peer = ClientLifecyclePeer()

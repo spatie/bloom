@@ -3,7 +3,7 @@ import Foundation
 /// Progress comes from completed operations and installer events, never elapsed-time estimates.
 public struct ServerSetupActivity: Sendable {
     public enum Stage: Int, CaseIterable, Sendable, Identifiable {
-        case transfer, verify, dependencies, account, service, browser, accounts
+        case transfer, verify, dependencies, account, service, browser, docker, accounts
         public var id: Int { rawValue }
         public var title: String {
             switch self {
@@ -13,6 +13,7 @@ public struct ServerSetupActivity: Sendable {
             case .account: "Create server account"
             case .service: "Start Bloom Server"
             case .browser: "Prepare browser tools"
+            case .docker: "Prepare Docker"
             case .accounts: "Check accounts"
             }
         }
@@ -32,9 +33,10 @@ public struct ServerSetupActivity: Sendable {
 
     public init() {}
 
-    public mutating func begin(browser: Bool) {
+    public mutating func begin(browser: Bool, docker: Bool = false) {
         self = Self()
         if !browser { statuses[.browser] = .skipped }
+        if !docker { statuses[.docker] = .skipped }
         start(.transfer, message: "Preparing the connection and client key")
     }
 
@@ -95,6 +97,7 @@ public struct ServerSetupActivity: Sendable {
         case "account": .account
         case "service": .service
         case "browser_dependencies", "browser_download", "browser_smoke": .browser
+        case "docker_dependencies", "docker_account", "docker_service", "docker_verify": .docker
         case "accounts": .accounts
         default: nil
         }

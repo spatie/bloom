@@ -82,6 +82,12 @@ struct ServerSetupActivityView: View {
 
 struct ServerSetupFailureView: View {
     let failure: ServerSetupFailure
+    @State private var copiedError = false
+
+    private var diagnostic: String {
+        ServerSetupDiagnostics.sanitise([failure.message, failure.recovery, failure.command,
+            failure.exitStatus.map { "Exit status: \($0)" }, failure.details].compactMap { $0 }.joined(separator: "\n\n"))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.spacing) {
@@ -97,10 +103,17 @@ struct ServerSetupFailureView: View {
                 Text(command).font(Typo.codeSmall).foregroundStyle(.secondary).lineLimit(2)
             }
             Text(failure.recovery).font(Typo.caption).foregroundStyle(.secondary)
+            Button(copiedError ? "Copied" : "Copy Error") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(diagnostic, forType: .string)
+                copiedError = true
+            }
+            .controlSize(.small)
         }
         .textSelection(.enabled)
         .padding(Metrics.gutter)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Metrics.corner))
+        .onChange(of: failure) { copiedError = false }
     }
 }

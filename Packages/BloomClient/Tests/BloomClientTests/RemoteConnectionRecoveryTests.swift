@@ -21,6 +21,31 @@ struct RemoteConnectionRecoveryTests {
         #expect(!recovery.automaticallyRetries && recovery.phase == .disconnected)
     }
 
+    @Test func cancellingAnAttemptStopsTheIndicatorAndPreservesFailureDetails() {
+        var recovery = RemoteConnectionRecovery()
+        recovery.failed(message: "Connecting over SSH: Permission denied (publickey)", automaticallyRetry: false)
+        recovery.beginAttempt()
+        recovery.cancelAttempt()
+        #expect(recovery.phase == .disconnected)
+        #expect(!recovery.automaticallyRetries)
+        #expect(recovery.canRetry)
+        #expect(recovery.lastError == "Connecting over SSH: Permission denied (publickey)")
+    }
+
+    @Test func cancellingBackgroundRecoveryRemainsRetryableWithoutStayingConnecting() {
+        var recovery = RemoteConnectionRecovery()
+        recovery.connected()
+        recovery.failed(message: "Network unavailable")
+        recovery.beginAttempt()
+        recovery.cancelAttempt(automaticallyRetry: true)
+        #expect(recovery.phase == .offline)
+        #expect(recovery.automaticallyRetries && recovery.canRetry)
+        #expect(recovery.lastError == "Network unavailable")
+        recovery.beginAttempt()
+        recovery.connected()
+        #expect(recovery.lastError == nil)
+    }
+
     @Test(arguments: ["Permission denied (publickey)", "The server's SSH host key has changed.",
                       "This server uses another version. Update Bloom Server and the app.", "Sign-in expired"])
     func identityAndAccountFailuresNeedUserAction(message: String) {

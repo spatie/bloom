@@ -12,6 +12,13 @@ final class ServerSetupModel {
     var identityFile = "" { didSet { if identityFile != oldValue { connectionInputsChanged() } } }
     var label = ""
     var installsBrowserTools = true
+    var installsDocker = false
+    private(set) var dockerReady = false
+    private(set) var dockerAttempted = false
+    private(set) var dockerDiagnostic: ServerSetupFailure?
+    private(set) var isInstallingDocker = false
+    var isInstallingOptionalTools: Bool { isInstallingBrowser || isInstallingDocker }
+    var optionalDiagnostic: ServerSetupFailure? { dockerDiagnostic ?? browserDiagnostic }
     var hasChosenAccountMethod = false
     private(set) var browserReadiness: ServerBrowserReadiness?
     private(set) var browserFailure: String?
@@ -47,7 +54,7 @@ final class ServerSetupModel {
     private var validatedIdentity = ""
     private var accountClient: ServerClient?
 
-    var canInstallBrowser: Bool { connection != nil && installed?.serviceHome != nil && !isBusy }
+    var canInstallOptionalTools: Bool { connection != nil && installed?.serviceHome != nil && !isBusy }
     var githubIsAuthenticated: Bool { accountChecks.contains { $0.id == .github && $0.status == .ready } }
     var canConnect: Bool { installed != nil && accountClient != nil && !isBusy && !server.isConnecting && !server.isSigningIn && !server.isPerformingCommand }
     private var support: URL { supportDirectory ?? Store.defaultDirectory.appendingPathComponent("server-setup", isDirectory: true) }
@@ -87,6 +94,7 @@ final class ServerSetupModel {
     func inspect() async {
         await perform(.checking) {
             self.hasChosenAccountMethod = false
+            self.dockerReady = false; self.dockerAttempted = false; self.dockerDiagnostic = nil
             self.installed = nil; self.installedKnownHosts = nil; self.accountChecks = []; self.agentAuthentication = []; self.browserReadiness = nil; self.browserFailure = nil; self.browserRecovery = nil; self.browserAttempted = false; self.browserDiagnostic = nil; self.check = nil; self.candidate = nil; self.fingerprint = nil
             try self.prepareTrustStore()
             let host = self.host.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -143,7 +151,7 @@ final class ServerSetupModel {
 
     func install() async {
         guard phase == .readyToInstall, let connection, inputsUnchanged, check?.blockers.isEmpty == true else { return }
-        activity.begin(browser: installsBrowserTools)
+        activity.begin(browser: installsBrowserTools, docker: installsDocker)
         progress = []
         let completed = await perform(.installing) {
             let package = try self.serverPackage()
@@ -159,6 +167,7 @@ final class ServerSetupModel {
             self.installed = installed
             self.activity.finish()
             if self.installsBrowserTools { try await self.configureBrowser() }
+            if self.installsDocker { try await self.configureDocker() }
             try Task.checkCancellation()
             self.phase = .accounts
         }
@@ -190,45 +199,68 @@ final class ServerSetupModel {
     }
 
     func retryBrowserInstall() async {
-        guard canInstallBrowser else { return }
+        guard canInstallOptionalTools else { return }
         let completed = await perform(.accounts) { try await self.configureBrowser() }
         if completed, phase == .accounts { await refreshAccounts() }
     }
 
+    func retryDockerInstall() async {
+        guard canInstallOptionalTools else { return }
+        let completed = await perform(.accounts) { try await self.configureDocker() }
+        if completed, phase == .accounts { await refreshAccounts() }
+    }
+
     private func configureBrowser() async throws {
-        guard let connection, let user = installed?.serviceUser, let home = installed?.serviceHome else { return }
         browserAttempted = true; browserFailure = nil; browserRecovery = nil; browserDiagnostic = nil
         isInstallingBrowser = true
         defer { isInstallingBrowser = false }
-        activity.start(.browser, message: "Preparing optional browser testing")
+        browserDiagnostic = try await configureOptionalTool(.browser, name: "Browser testing", scriptName: "install-bloom-browser.py") { connection, script, user, home, progress in
+            try await connection.installBrowser(script: script, user: user, serviceHome: home, progress: progress)
+        }
+        browserFailure = browserDiagnostic?.message
+        browserRecovery = browserDiagnostic?.recovery
+    }
+
+    private func configureDocker() async throws {
+        dockerAttempted = true; dockerReady = false; dockerDiagnostic = nil
+        isInstallingDocker = true
+        defer { isInstallingDocker = false }
+        dockerDiagnostic = try await configureOptionalTool(.docker, name: "Docker", scriptName: "install-bloom-docker.py") { connection, script, user, home, progress in
+            try await connection.installDocker(script: script, user: user, serviceHome: home, progress: progress)
+        }
+        dockerReady = dockerDiagnostic == nil
+    }
+
+    /// Optional tools share the same streamed diagnostics and cancellation boundary. Their failure
+    /// stays attached to the failed stage while the usable server continues to account setup.
+    private func configureOptionalTool(
+        _ stage: ServerSetupActivity.Stage, name: String, scriptName: String,
+        operation: (ServerSetupConnection, String, String, String, @escaping @Sendable (ServerInstallEvent) async -> Void) async throws -> ServerInstallEvent
+    ) async throws -> ServerSetupFailure? {
+        activity.start(stage, message: "Preparing " + name)
         do {
-            guard let url = resource("install-bloom-browser.py") else { throw ServerSetupFailure(code: .packageMissing) }
+            guard let connection, let user = installed?.serviceUser, let home = installed?.serviceHome,
+                  let url = resource(scriptName) else { throw ServerSetupFailure(code: .packageMissing) }
             let script = try String(contentsOf: url, encoding: .utf8)
-            let result = try await connection.installBrowser(script: script, user: user, serviceHome: home) { [weak self] event in
-                await self?.receive(event)
-            }
+            let result = try await operation(connection, script, user, home) { [weak self] event in await self?.receive(event) }
             try Task.checkCancellation()
-            if result.event != "complete" || result.ready != true {
-                let diagnostic = ServerSetupFailure.installation(code: result.code ?? "installation_failed", message: result.message,
+            guard result.event == "complete", result.ready == true else {
+                throw ServerSetupFailure.installation(code: result.code ?? "installation_failed", message: result.message,
                     recovery: result.recovery, details: result.details, command: result.command, exitStatus: result.exitStatus)
-                browserDiagnostic = diagnostic
-                browserFailure = diagnostic.message
-                browserRecovery = diagnostic.recovery
-                activity.fail(message: diagnostic.message)
-                if let command = diagnostic.command { activity.append("Command: " + command) }
-                if let status = diagnostic.exitStatus { activity.append("Exit status: \(status)") }
-                if let details = diagnostic.details, !activity.output.contains(details) { activity.append(details) }
-                record("Bloom Server is ready. Optional browser testing needs attention.")
-            } else { activity.finish(); record("Browser sandbox and rendering verified on the server.") }
+            }
+            activity.finish()
+            record(name + " verified on the server.")
+            return nil
         } catch {
             try Task.checkCancellation()
-            let failure = error as? ServerSetupFailure ?? ServerSetupFailure(code: .unknown)
-            browserDiagnostic = failure
-            browserFailure = failure.message; browserRecovery = failure.recovery
-            activity.fail()
-            record(failure.message)
-            if let details = failure.details { activity.append(details) }
-            record("Bloom Server is ready. Optional browser testing did not complete.")
+            let diagnostic = error as? ServerSetupFailure ?? ServerSetupFailure(code: .unknown)
+            activity.fail(message: diagnostic.message)
+            record(diagnostic.message)
+            if let command = diagnostic.command { activity.append("Command: " + command) }
+            if let status = diagnostic.exitStatus { activity.append("Exit status: \(status)") }
+            if let details = diagnostic.details, !activity.output.contains(details) { activity.append(details) }
+            record("Bloom Server is ready. " + name + " needs attention.")
+            return diagnostic
         }
     }
 
@@ -290,7 +322,7 @@ final class ServerSetupModel {
             for notice in check.blockers { parts.append("Check failed: \(notice.code)\n\(notice.message)\n\(notice.recoverySuggestion)") }
             for notice in check.warnings { parts.append("Warning: \(notice.message)") }
         }
-        if let failure = failure ?? browserDiagnostic {
+        for failure in [failure, browserDiagnostic, dockerDiagnostic].compactMap({ $0 }) {
             parts += ["Error: \(failure.code.rawValue)", failure.message, "Recovery: \(failure.recovery)"]
             if let command = failure.command { parts.append("Command: " + command) }
             if let status = failure.exitStatus { parts.append("Exit status: \(status)") }
@@ -334,6 +366,7 @@ final class ServerSetupModel {
         cancel()
         check = nil; candidate = nil; fingerprint = nil; failure = nil; progress = []
         installed = nil; connection = nil; activity = ServerSetupActivity()
+        dockerReady = false; dockerAttempted = false; dockerDiagnostic = nil
         phase = .address
     }
     func stopSetup() async {

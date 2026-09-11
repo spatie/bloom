@@ -8,6 +8,7 @@ struct RemoteWorkspaceContentView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.openWindow) private var openWindow
     @State private var workspace: RemoteWorkspaceFileListing?
+    @State private var showsConnectionFailure = false
     @State private var uiBridge: RemoteUIClientSession?
 
     private var availability: RemoteWorkspaceAvailability {
@@ -40,6 +41,7 @@ struct RemoteWorkspaceContentView: View {
             uiBridge = session
             session.start(using: service)
         }
+        .popover(isPresented: $showsConnectionFailure) { ServerConnectionFailureView(server: model) }
         .onDisappear { uiBridge?.stop(); uiBridge = nil }
         .safeAreaInset(edge: .top, spacing: 0) { connectionNotice }
         .safeAreaInset(edge: .bottom) {
@@ -62,8 +64,8 @@ struct RemoteWorkspaceContentView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(recovery.title).font(Typo.captionEmphasis)
                             Text(recovery.detail).font(Typo.caption).foregroundStyle(.secondary)
-                            if !recovery.automaticallyRetries, recovery.phase == .offline, let failure = recovery.lastError {
-                                Text(ServerSetupDiagnostics.sanitise(failure)).font(Typo.caption).textSelection(.enabled)
+                            if recovery.lastError != nil {
+                                Button("Connection details…") { showsConnectionFailure = true }.font(Typo.caption)
                             }
                         }
                         Spacer(minLength: 8)

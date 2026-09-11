@@ -35,7 +35,7 @@ private struct ServerConnectionContent: View {
             } else {
                 ServerConnectionView(model: server) {
                     setup.cancel()
-                    setup = ServerSetupModel(server: server)
+                    setup = ServerSetupModel(server: server, resumeExisting: server.isConnected)
                     showsSetup = true
                 }
             }
@@ -60,49 +60,55 @@ private struct ServerConnectionView: View {
     @State private var label = ""
 
     var body: some View {
-        Form {
-            Section("Accounts") {
-                HStack {
-                    VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                        Text("GitHub, Codex and Claude").font(Typo.labelEmphasis)
-                        Text("Manage sign-ins on \(model.displayName).")
-                            .font(Typo.caption).foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            Form {
+                Section("Accounts") {
+                    HStack {
+                        VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                            Text("GitHub, Codex and Claude").font(Typo.labelEmphasis)
+                            Text("Manage sign-ins on \(model.displayName).")
+                                .font(Typo.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Sign In on Server…") { openWindow(id: ServerAccountsWindow.id) }
+                            .disabled(!model.isConfigured)
                     }
-                    Spacer()
-                    Button("Sign In on Server…") { openWindow(id: ServerAccountsWindow.id) }
-                        .disabled(!model.isConfigured)
                 }
-            }
-            if !model.savedServers.profiles.isEmpty {
-                LabeledContent("Saved servers") {
-                    Menu(model.displayName) {
-                        ForEach(model.savedServers.profiles) { profile in
-                            Button(profile.displayName) { Task { await model.selectServer(profile); loadConnection() } }
+                if !model.savedServers.profiles.isEmpty {
+                    LabeledContent("Saved servers") {
+                        Menu(model.displayName) {
+                            ForEach(model.savedServers.profiles) { profile in
+                                Button(profile.displayName) { Task { await model.selectServer(profile); loadConnection() } }
+                            }
                         }
                     }
                 }
-            }
-            if let failure = model.savedServers.failure { Text(failure).foregroundStyle(Palette.warning) }
-            TextField("Server label", text: $label, prompt: Text("Use server hostname"))
-            Picker("Connection", selection: $usesHTTPS) {
-                Text("HTTPS").tag(true)
-                Text("SSH").tag(false)
-            }
-            .pickerStyle(.segmented)
-            if usesHTTPS {
-                Section("Server") {
-                    TextField("Server address", text: $httpsAddress, prompt: Text("https://bloom.example.com"))
-                    Text("Sign in with the account allowed to access this server.")
-                        .font(.caption).foregroundStyle(.secondary)
+                if let failure = model.savedServers.failure { Text(failure).foregroundStyle(Palette.warning) }
+                TextField("Server label", text: $label, prompt: Text("Use server hostname"))
+                Picker("Connection", selection: $usesHTTPS) {
+                    Text("HTTPS").tag(true)
+                    Text("SSH").tag(false)
                 }
-            } else { Section("Remote machine") {
-                TextField("SSH host", text: $host, prompt: Text("user@machine or SSH alias"))
-                TextField("Server executable", text: $executable, prompt: Text("/absolute/path/to/bloom-server"))
-                TextField("Server data directory", text: $directory)
-                TextField("SSH key (optional)", text: $identityFile, prompt: Text("Leave empty to use your SSH agent"))
-            } }
-            if model.isConnected { ServerDiagnosticsView(model: model) }
-            if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+                .pickerStyle(.segmented)
+                if usesHTTPS {
+                    Section("Server") {
+                        TextField("Server address", text: $httpsAddress, prompt: Text("https://bloom.example.com"))
+                        Text("Sign in with the account allowed to access this server.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                } else { Section("Remote machine") {
+                    TextField("SSH host", text: $host, prompt: Text("user@machine or SSH alias"))
+                    TextField("Server executable", text: $executable, prompt: Text("/absolute/path/to/bloom-server"))
+                    TextField("Server data directory", text: $directory)
+                    TextField("SSH key (optional)", text: $identityFile, prompt: Text("Leave empty to use your SSH agent"))
+                } }
+                if model.isConnected { ServerDiagnosticsView(model: model) }
+                if let error = model.error ?? model.connectionRecovery.lastError {
+                    Text(ServerSetupDiagnostics.sanitise(error)).foregroundStyle(.red).textSelection(.enabled)
+                }
+            }
+            .formStyle(.grouped)
+            Divider()
             HStack {
                 Button("Guided Setup…", action: showSetup)
                 Button("Add Server…") { openWindow(id: ServerSetupWindow.id) }
@@ -127,9 +133,9 @@ private struct ServerConnectionView: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(usesHTTPS ? httpsAddress.isEmpty : (host.isEmpty || executable.isEmpty || directory.isEmpty))
             }
+            .padding(16)
         }
-        .formStyle(.grouped)
-        .frame(width: 660, height: (usesHTTPS ? 380 : 470) + (model.isConnected ? 160 : 0))
+        .frame(width: 660, height: (usesHTTPS ? 470 : 590) + (model.isConnected ? 160 : 0))
         .disabled(model.isConnecting || model.isSigningIn)
         .onAppear(perform: loadConnection)
         .onChange(of: model.connectionProfile?.id) { loadConnection() }

@@ -13,8 +13,6 @@ struct ServerSetupView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var showsKeyPicker = false
     @State private var keySelectionFailure: String?
-    @State private var showsOutput = false
-    @State private var copiedReport = false
     @State private var confirmsStopServer = false
     @FocusState private var addressIsFocused: Bool
 
@@ -44,8 +42,8 @@ struct ServerSetupView: View {
                     Group {
                         if model.phase == .introduction {
                             ServerSetupIntroduction(showAdvanced: showAdvanced)
-                        } else if model.phase == .installing || model.isInstallingBrowser {
-                            ServerSetupActivityView(activity: model.activity, failure: model.failure ?? model.browserDiagnostic, compact: true)
+                        } else if model.phase == .installing || model.isInstallingOptionalTools {
+                            ServerSetupActivityView(activity: model.activity, failure: model.failure ?? model.optionalDiagnostic, compact: true)
                         } else {
                             ScrollView {
                                 VStack(alignment: .leading, spacing: Metrics.gutter * 1.5) {
@@ -70,21 +68,6 @@ struct ServerSetupView: View {
                     if model.isBusy { Task { await model.stopSetup() } } else { model.cancel(); dismissWindow(id: windowID) }
                 }
                 .keyboardShortcut(.cancelAction).disabled(model.isStopping)
-                if !model.activity.lines.isEmpty || model.failure != nil || model.check != nil {
-                    Menu(copiedReport ? "Report Copied" : "Details") {
-                        if !model.activity.lines.isEmpty {
-                            Button("View Output…") { showsOutput = true }
-                        }
-                        Button("Copy Report") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(model.diagnosticReport, forType: .string)
-                            copiedReport = true
-                        }
-                    }
-                    .menuStyle(.borderlessButton).fixedSize()
-                    .help("View setup output or copy a diagnostic report.")
-                    .accessibilityLabel("Setup details")
-                }
                 Spacer()
                 if model.phase != .introduction && model.phase != .complete {
                     Button("Back") {
@@ -102,14 +85,6 @@ struct ServerSetupView: View {
         } message: {
             Text("Connected clients will disconnect, and server terminal commands may stop. Bloom checks for active agents and workspace setup first. Your projects and conversations stay on the server. Installing the update starts it again.")
         }
-        .sheet(isPresented: $showsOutput) {
-            VStack(alignment: .leading, spacing: Metrics.gutter) {
-                Text("Setup Output").font(Typo.heading)
-                ServerSetupActivityView(activity: model.activity, failure: model.failure ?? model.browserDiagnostic)
-                HStack { Spacer(); Button("Done") { showsOutput = false }.keyboardShortcut(.cancelAction) }
-            }
-            .padding(Metrics.gutter * 2).frame(width: 800, height: 520)
-        }
         .fileImporter(isPresented: $showsKeyPicker, allowedContentTypes: [.item]) { result in
             switch result {
             case .success(let url): model.identityFile = url.path; keySelectionFailure = nil
@@ -117,11 +92,6 @@ struct ServerSetupView: View {
             }
         }
         .task { focusEmptyAddress(); if model.phase == .accounts { await model.refreshAccounts() } }
-        .task(id: copiedReport) {
-            guard copiedReport else { return }
-            do { try await Task.sleep(for: .seconds(2)) } catch { return }
-            copiedReport = false
-        }
         .onChange(of: model.phase) { _, _ in focusEmptyAddress() }
         .onDisappear { model.cancel() }
     }
@@ -138,7 +108,7 @@ struct ServerSetupView: View {
         case .trust: "Verify the server identity"
         case .readyToInstall: model.hasInstalledServer ? "Server installed" : "Install Bloom Server"
         case .installing: model.failure == nil ? "Installing Bloom Server" : "Setup stopped"
-        case .accounts: model.isInstallingBrowser ? "Installing browser tools" : model.hasChosenAccountMethod ? "Sign in on your server" : "Set up your accounts"
+        case .accounts: model.isInstallingDocker ? "Installing Docker" : model.isInstallingBrowser ? "Installing browser tools" : model.hasChosenAccountMethod ? "Sign in on your server" : "Set up your accounts"
         case .connecting: "Connecting to Bloom Server"
         case .complete: "Your server is ready"
         }
@@ -150,7 +120,7 @@ struct ServerSetupView: View {
         case .address, .checking: "Enter an Ubuntu server with administrator SSH access. This step only checks the server."
         case .trust: "Compare this fingerprint with your provider’s before trusting the connection."
         case .readyToInstall: model.hasInstalledServer ? "Your installation and sign-ins are preserved. Continue to finish connecting." : "Check what will be installed, then choose Install."
-        case .accounts: model.isInstallingBrowser || !model.hasChosenAccountMethod ? "" : "Check your accounts below. You can connect more tools later."
+        case .accounts: model.isInstallingOptionalTools || !model.hasChosenAccountMethod ? "" : "Check your accounts below. You can connect more tools later."
         case .installing, .connecting: ""
         case .complete: "Choose a repository to start your first remote workspace."
         }
@@ -245,6 +215,17 @@ struct ServerSetupView: View {
                     Text("Installs agent-browser, Chrome, browser libraries and fonts. May add a Chrome-specific AppArmor rule. Docker projects need their own browser setup.")
                         .font(Typo.caption).foregroundStyle(.secondary)
                 }
+            }
+            VStack(alignment: .leading, spacing: Metrics.spacing) {
+                Toggle("Docker for container projects", isOn: $model.installsDocker).disabled(model.hasInstalledServer)
+                Text("Run a project's app and databases in containers, without configuring each tool separately.")
+                    .font(Typo.caption).foregroundStyle(.secondary)
+                DisclosureGroup("Docker installation details") {
+                    Text("Installs Ubuntu's Docker, Compose and rootless networking packages. Docker runs as the Bloom account, without administrator access, and starts automatically after a reboot.")
+                    Text("Images and container data: " + (model.check?.serviceHome ?? "/home/bloom") + "/bloom/docker/data")
+                    Text("The user service and Docker connection settings use the account's .config folder. Docker projects can still run commands and access files as the Bloom account.")
+                }
+                .font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
             if model.hasInstalledServer {
                 Label("Already installed. Continue to Accounts without reinstalling.", systemImage: "checkmark.circle.fill")

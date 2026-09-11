@@ -3,6 +3,39 @@ import Testing
 @testable import BloomCore
 
 @Suite struct ServerSetupTests {
+    @Test func setupDeadlineIncludesBlockedInstallerInputAndExplainsSSHApproval() async throws {
+        do {
+            _ = try await ServerSetupConnection.commandOutput("/bin/sh", arguments: ["-c", "exec sleep 30"],
+                input: String(repeating: "x", count: 1_048_576), timeout: .milliseconds(100))
+            Issue.record("A command that never reads its input should time out")
+        } catch let failure as ServerSetupFailure {
+            #expect(failure.code == .timedOut)
+            #expect(failure.recovery.contains("1Password"))
+            #expect(failure.recovery.contains("Check Again"))
+            #expect(failure.command == "ssh")
+            #expect(failure.exitStatus == nil)
+        }
+    }
+
+    @Test func ordinaryExitFifteenIsNotAssumedToBeADeadline() async throws {
+        let result = try await ServerSetupConnection.commandOutput("/bin/sh", arguments: ["-c", "exit 15"], input: "", timeout: .seconds(5))
+        #expect(result.status == 15)
+        let failure = ServerSetupFailure.classify(status: result.status, stderr: "", command: "ssh")
+        #expect(failure.code != .timedOut)
+    }
+
+    @Test func cancellingSetupRetainsCancellationInsteadOfShowingTimeout() async throws {
+        let task = Task {
+            try await ServerSetupConnection.commandOutput("/bin/sh", arguments: ["-c", "exec sleep 30"],
+                input: String(repeating: "x", count: 1_048_576), timeout: .seconds(5))
+        }
+        task.cancel()
+        do {
+            _ = try await task.value
+            Issue.record("Cancelled setup should not complete")
+        } catch is CancellationError { /* User cancellation is distinct from a timeout. */ }
+    }
+
     @Test func stoppedServerReturnsUnrelatedFreshBlockers() throws {
         let check = try ServerSetupConnection.stoppedServerCheck(status: 0, output: stopCheck(code: "disk_full"))
         #expect(check.existing)
@@ -94,7 +127,7 @@ import Testing
         #expect(failure.recovery.contains("fresh server"))
     }
 
-    @Test func browserInstallerPreservesSourceAndTreatsPathsAsArguments() async throws {
+    @Test(arguments: [false, true]) func optionalInstallersTreatPathsAsArguments(browser: Bool) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("bloom-browser-wrapper-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -104,17 +137,19 @@ import Testing
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fakeID.path)
         let home = "/var/lib/Bloom user's $(printf ignored)"
         let source = "import json,sys\nprint(json.dumps({'source': '__bloom_browser_source' in globals(), 'arguments': sys.argv[1:]}))\n"
-        let command = try ServerSetupConnection.browserInstallerCommand(user: "bloom", serviceHome: home)
+        let command = try browser ? ServerSetupConnection.browserInstallerCommand(user: "bloom", serviceHome: home)
+            : ServerSetupConnection.dockerInstallerCommand(user: "bloom", serviceHome: home)
         let result = try await Shell.run("/bin/sh", ["-c", command], env: ["PATH": directory.path + ":/usr/bin:/bin"], stdin: source, timeout: .seconds(5))
         #expect(result.ok)
         let decoded = try JSONDecoder().decode(JSONValue.self, from: Data(result.stdout.utf8))
-        #expect(decoded["source"] == .bool(true))
+        #expect(decoded["source"] == .bool(browser))
         #expect(decoded["arguments"] == .array([.string("--user"), .string("bloom"), .string("--service-home"), .string(home)]))
     }
 
     @Test func browserSetupRejectsInvalidServiceIdentityAndDecodesOptionalResult() throws {
         for user in ["root;command", "-option", "name\nother"] {
             #expect(throws: ServerSetupFailure.self) { try ServerSetupConnection.browserInstallerCommand(user: user, serviceHome: "/var/lib/bloom-home") }
+            #expect(throws: ServerSetupFailure.self) { try ServerSetupConnection.dockerInstallerCommand(user: user, serviceHome: "/home/bloom") }
         }
         #expect(throws: ServerSetupFailure.self) { try ServerSetupConnection.browserInstallerCommand(user: "bloom", serviceHome: "relative") }
         let installed = try JSONDecoder().decode(ServerInstallEvent.self, from: Data(#"{"event":"complete","serviceUser":"bloom","serviceHome":"/var/lib/bloom-home"}"#.utf8))

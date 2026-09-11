@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 #if canImport(CryptoKit)
 import CryptoKit
 #else
@@ -82,24 +83,44 @@ public struct ServerSetupConnection: Sendable {
     }
 
     public func run(_ command: String, input: String? = nil, timeout: Duration = .seconds(25)) async throws -> ShellResult {
-        let result = try await Shell.run("/usr/bin/ssh", arguments(command: command), stdin: input ?? "", timeout: timeout)
-        try Task.checkCancellation()
-        guard result.ok else { throw ServerSetupFailure.classify(status: result.status, stderr: result.stderr, command: "ssh") }
-        return result
+        let result = try await Self.commandOutput("/usr/bin/ssh", arguments: arguments(command: command), input: input ?? "", timeout: timeout)
+        let output = String(decoding: result.output, as: UTF8.self)
+        guard result.status == 0 else { throw ServerSetupFailure.classify(status: result.status, stderr: output, command: "ssh") }
+        return ShellResult(status: result.status, stdout: output, stderr: "")
     }
 
     public func inspect(script: String) async throws -> ServerInstallCheck {
         // Match installation privileges so preflight can inspect the private server account too.
         let command = "if [ \"$(id -u)\" = 0 ]; then python3 - --check; elif sudo -n true; then sudo -n python3 - --check; else python3 - --check; fi"
-        let result = try await Shell.run("/usr/bin/ssh", arguments(command: command), stdin: script, timeout: .seconds(35))
-        try Task.checkCancellation()
-        if let line = result.stdout.split(separator: "\n").last,
+        let result = try await Self.commandOutput("/usr/bin/ssh", arguments: arguments(command: command), input: script, timeout: .seconds(35))
+        let output = String(decoding: result.output, as: UTF8.self)
+        if let line = output.split(separator: "\n").last,
            var check = try? JSONDecoder().decode(ServerInstallCheck.self, from: Data(line.utf8)) {
             check.blockers = check.blockers.map(Self.sanitisedNotice)
             check.warnings = check.warnings.map(Self.sanitisedNotice)
             return check
         }
-        throw ServerSetupFailure.classify(status: result.status, stderr: result.stderr, command: "ssh")
+        throw ServerSetupFailure.classify(status: result.status, stderr: output, command: "ssh")
+    }
+
+    /// Authentication may pause before SSH reads stdin. Use the nonblocking capture so the
+    /// deadline also covers sending the installer, and cancellation always reaps that process.
+    static func commandOutput(_ executable: String, arguments: [String], input: String,
+                              timeout: Duration) async throws -> ServerCredentialImportProcess.Result {
+        do {
+            let result = try await RemoteReadDeadline.run(timeout: timeout) {
+                try await ServerCredentialImportProcess.run(executable, arguments, environment: Shell.environment(),
+                    input: Data(input.utf8), limit: 262_144, timeout: .infinity, captureStderr: true)
+            }
+            try Task.checkCancellation()
+            return result
+        } catch is ConnectionFailure {
+            try Task.checkCancellation()
+            throw ServerSetupFailure.installation(code: "timed_out",
+                message: "The SSH setup command did not finish in time.",
+                recovery: "Unlock your SSH agent or 1Password and approve any pending SSH request, then choose Check Again. If no approval is pending, check the server address and network connection.",
+                command: "ssh")
+        }
     }
 
     /// An explicit administrative action. The installer checks managed ownership and current
@@ -231,13 +252,22 @@ public struct ServerSetupConnection: Sendable {
     /// Static Python wrapper preserves the reviewed helper source for its protected launchers.
     /// Values are argv, never interpolated into Python source. Admin access is the pinned setup connection.
     public static func browserInstallerCommand(user: String, serviceHome: String) throws -> String {
+        try optionalInstallerCommand(user: user, serviceHome: serviceHome, preservesBrowserSource: true)
+    }
+
+    public static func dockerInstallerCommand(user: String, serviceHome: String) throws -> String {
+        try optionalInstallerCommand(user: user, serviceHome: serviceHome, preservesBrowserSource: false)
+    }
+
+    private static func optionalInstallerCommand(user: String, serviceHome: String, preservesBrowserSource: Bool) throws -> String {
         guard user.range(of: #"^[a-z_][a-z0-9_-]{0,31}$"#, options: .regularExpression) != nil,
               serviceHome.hasPrefix("/"), serviceHome.utf8.count <= 4096,
               !serviceHome.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw ServerSetupFailure(code: .invalidAddress)
         }
         let wrapper = "import sys; source=sys.stdin.read(); exec(compile(source, '<bloom-browser>', 'exec'), {'__name__':'__main__', '__bloom_browser_source':source})"
-        let python = "python3 -c " + [wrapper, "--user", user, "--service-home", serviceHome].map(ServerSetupSSH.shellQuote).joined(separator: " ")
+        let invocation = preservesBrowserSource ? ["python3", "-c", wrapper] : ["python3", "-"]
+        let python = (invocation + ["--user", user, "--service-home", serviceHome]).map(ServerSetupSSH.shellQuote).joined(separator: " ")
         return "if [ \"$(id -u)\" = 0 ]; then " + python + "; else sudo -n " + python + "; fi"
     }
 
@@ -247,6 +277,14 @@ public struct ServerSetupConnection: Sendable {
         await progress(ServerInstallEvent(event: "progress", step: "browser_dependencies", message: "Starting optional browser setup."))
         return try await stream(Self.browserInstallerCommand(user: user, serviceHome: serviceHome), script: script,
                                 acceptsFailureEvent: true, commandLabel: "python3 (browser installer)", step: "browser_dependencies", progress: progress)
+    }
+
+    public func installDocker(script: String, user: String, serviceHome: String,
+                              progress: @escaping @Sendable (ServerInstallEvent) async -> Void) async throws -> ServerInstallEvent {
+        try Task.checkCancellation()
+        await progress(ServerInstallEvent(event: "progress", step: "docker_dependencies", message: "Starting optional Docker setup."))
+        return try await stream(Self.dockerInstallerCommand(user: user, serviceHome: serviceHome), script: script,
+                                acceptsFailureEvent: true, commandLabel: "python3 (Docker installer)", step: "docker_dependencies", progress: progress)
     }
 
     private func upload(_ file: URL, to remotePath: String, step: String,

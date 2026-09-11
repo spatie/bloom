@@ -15,7 +15,8 @@ public actor ServerClient: RemoteRequesting {
     }
     private var pending: [UUID: PendingReply] = [:]
     private var wire: RemoteWireSession?
-    private var isClosed = false
+    private var closureReason: String?
+    private var isClosed: Bool { closureReason != nil }
     private var stderr = ""
 
     private init(socket: UnixSocketConnection?, process: StreamingProcess?, http: ServerHTTPTransport? = nil) {
@@ -41,6 +42,15 @@ public actor ServerClient: RemoteRequesting {
                 environment: launch.environment, mergeStderr: false
             ))
         }
+        return try await connect(client, timeout: timeout)
+    }
+
+    /// Shared subprocess handshake, also exercised with isolated local transport fixtures.
+    static func connect(process: StreamingProcess, timeout: Duration) async throws -> ServerClient {
+        try await connect(ServerClient(socket: nil, process: process), timeout: timeout)
+    }
+
+    private static func connect(_ client: ServerClient, timeout: Duration) async throws -> ServerClient {
         await client.start()
         do {
             let reply = try await client.request(ServerRequest(.hello), timeout: timeout)
@@ -65,10 +75,11 @@ public actor ServerClient: RemoteRequesting {
             let errors = process.errorLines
             let lines = process.lines
             pump = Task { [weak self] in
+                var failure: String?
                 do {
                     for try await line in lines { await self?.receive(line) }
-                } catch { /* The transport's stderr supplies the actionable SSH error. */ }
-                await self?.connectionEnded()
+                } catch { failure = (error as? ShellError)?.description ?? error.localizedDescription }
+                await self?.connectionEnded(failure: failure)
             }
             errorPump = Task { [weak self] in
                 for await line in errors { await self?.recordError(line) }
@@ -90,7 +101,7 @@ public actor ServerClient: RemoteRequesting {
     }
 
     public func request(_ command: RemoteCommand) async throws -> JSONValue {
-        guard !isClosed else { throw ServerFailure("The server connection is closed. Reconnect to continue.") }
+        if let closureReason { throw ServerFailure(closureReason) }
         if wire == nil {
             wire = RemoteWireSession { [weak self] body in
                 guard let self else { throw ServerFailure("The server connection closed.") }
@@ -101,7 +112,7 @@ public actor ServerClient: RemoteRequesting {
     }
 
     private func exchange(_ body: Data, timeout: Duration) async throws -> Data {
-        guard !isClosed else { throw ServerFailure("The server connection is closed. Reconnect to continue.") }
+        if let closureReason { throw ServerFailure(closureReason) }
         if let http { return try await http.exchange(body, timeout: timeout) }
         let id = try JSONDecoder().decode(ServerWireIdentity.self, from: body).id
         guard pending[id] == nil else { throw ServerFailure("This command is already awaiting a reply.") }
@@ -148,15 +159,23 @@ public actor ServerClient: RemoteRequesting {
 
     private func recordError(_ line: String) { stderr = String((stderr + line + "\n").suffix(4_096)) }
 
-    private func connectionEnded() {
-        disconnect(message: stderr.isEmpty ? "The server disconnected. Reconnect to see current progress." : stderr)
+    private func connectionEnded(failure: String? = nil) async {
+        // StreamingProcess finishes both streams together, but their consumers run separately.
+        // Cancelling the stderr pump at stdout EOF discarded buffered SSH diagnostics. Its
+        // bounded stream is already finished here, so joining it cannot wait for more output.
+        // Explicit disconnect remains synchronous and can cancel this drain at any suspension.
+        await errorPump?.value
+        guard !isClosed else { return }
+        disconnect(message: stderr.isEmpty
+                   ? (failure ?? "The server disconnected. Reconnect to see current progress.")
+                   : stderr)
     }
 
     public func disconnect() { disconnect(message: "Disconnected from the server.") }
 
     private func disconnect(message: String) {
         guard !isClosed else { return }
-        isClosed = true
+        closureReason = message
         http?.close()
         socket?.close()
         process?.terminate()

@@ -48,6 +48,12 @@ public struct RemoteConnectionRecovery: Sendable, Equatable {
         phase = .offline; failureCount = min(failureCount + 1, 30)
         lastError = message; automaticallyRetries = automaticallyRetry
     }
+    /// Cancellation ends the in-progress indicator without erasing the last useful failure.
+    /// Only a cancelled automatic attempt remains eligible for background recovery.
+    public mutating func cancelAttempt(automaticallyRetry: Bool = false) {
+        phase = automaticallyRetry ? .offline : .disconnected
+        automaticallyRetries = automaticallyRetry
+    }
     public mutating func disconnect() { phase = .disconnected; automaticallyRetries = false; failureCount = 0 }
     public mutating func suspend() { phase = .suspended; automaticallyRetries = false }
 

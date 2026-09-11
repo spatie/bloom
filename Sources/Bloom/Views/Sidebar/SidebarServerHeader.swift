@@ -7,12 +7,24 @@ struct SidebarServerHeader: View {
     @Environment(AppModel.self) private var app
     @Environment(\.openWindow) private var openWindow
     @State private var hovered = false
+    @State private var showsConnectionFailure = false
     @State private var isRenaming = false
     @State private var label = ""
     @State private var showsRemoval = false
     @State private var removalProfile: ServerConnectionProfile?
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            header
+            connectionStatus
+        }
+        .popover(isPresented: $showsConnectionFailure) { ServerConnectionFailureView(server: server) }
+        .onChange(of: server.isConnected) { _, connected in
+            if connected { showsConnectionFailure = false }
+        }
+    }
+
+    private var header: some View {
         HStack(spacing: Metrics.spacing) {
             Button { openWindow(id: ServerWindow.id) } label: {
                 Image(systemName: hovered ? "gearshape" : "server.rack")
@@ -49,17 +61,56 @@ struct SidebarServerHeader: View {
         }
     }
 
+    private var hasConnectionFailure: Bool {
+        server.connectionRecovery.phase != .disconnected && server.connectionRecovery.lastError != nil
+    }
+
+    @ViewBuilder private var connectionStatus: some View {
+        if !server.isConnected || server.isConnecting {
+            HStack(spacing: 6) {
+                if hasConnectionFailure {
+                    Button { showsConnectionFailure = true } label: {
+                        Label(server.isConnecting ? "Retrying connection…" : "Could not connect",
+                              systemImage: "exclamationmark.triangle")
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.warning)
+                    .help("Show the connection error and retry options")
+                } else {
+                    Text(server.isConnecting ? "Connecting…" : "Disconnected")
+                        .foregroundStyle(Palette.textSecondary)
+                }
+                Spacer(minLength: 0)
+                if !server.isConnecting {
+                    Button(hasConnectionFailure ? "Retry" : "Connect") {
+                        Task { await server.connect() }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+                    .disabled(server.isRemovingServer || server.isDisconnecting)
+                }
+            }
+            .font(Typo.caption)
+            .padding(.leading, 24)
+        }
+    }
+
     @ViewBuilder private var actions: some View {
         if server.isConnected {
             Button("Disconnect") { Task { await server.disconnect() } }
         } else {
             Button("Connect") { Task { await server.connect() } }.disabled(server.isConnecting)
         }
+        if hasConnectionFailure {
+            Button("Connection Details…") { showsConnectionFailure = true }
+        }
         Divider()
         Button("Start a Project…") {
             StartProjectOpening.shared.isRemote = true
             openWindow(id: StartProjectWindow.id)
         }
+        .disabled(!server.isConnected || server.isConnecting)
         Button("Rename Server…") { label = server.displayName; isRenaming = true }
         Button("Server Settings…") { openWindow(id: ServerWindow.id) }
         if server.savedServers.profiles.count > 1 {
@@ -73,6 +124,7 @@ struct SidebarServerHeader: View {
         }
         Button("Add Server…") { openWindow(id: ServerSetupWindow.id) }
         Button("Archived Workspaces…") { server.showsArchivedWorkspaces = true }
+            .disabled(!server.isConnected || server.isConnecting)
         Divider()
         Button("Remove Server…", role: .destructive) {
             removalProfile = server.connectionProfile

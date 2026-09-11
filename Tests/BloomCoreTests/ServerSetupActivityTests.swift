@@ -6,13 +6,13 @@ import Testing
     @Test func progressCompletesOnlyStagesActuallyStarted() {
         var activity = ServerSetupActivity()
         #expect(ServerSetupActivity.Stage.allCases.allSatisfy { activity.status(of: $0) == .pending })
-        activity.begin(browser: true)
+        activity.begin(browser: true, docker: true)
         #expect(activity.status(of: .transfer) == .running)
         #expect(activity.status(of: .verify) == .pending)
 
         let stages: [(String, ServerSetupActivity.Stage)] = [
             ("verify", .verify), ("dependencies", .dependencies), ("account", .account),
-            ("service", .service), ("browser_download", .browser), ("accounts", .accounts)
+            ("service", .service), ("browser_download", .browser), ("docker_dependencies", .docker), ("accounts", .accounts)
         ]
         var previous = ServerSetupActivity.Stage.transfer
         for (step, stage) in stages {
@@ -85,6 +85,24 @@ import Testing
         #expect(activity.activeStage == .browser)
         #expect(activity.currentMessage == "Additional preparation")
         #expect(activity.status(of: .accounts) == .pending)
+    }
+
+    @Test func optionalDockerFailureSurvivesAccountChecksAndCanBeRetried() {
+        var activity = ServerSetupActivity()
+        activity.begin(browser: false)
+        #expect(activity.status(of: .docker) == .skipped)
+        for step in ["docker_dependencies", "docker_account", "docker_service", "docker_verify"] {
+            activity.receive(ServerInstallEvent(event: "progress", step: step, message: step))
+            #expect(activity.activeStage == .docker)
+            #expect(activity.status(of: .docker) == .running)
+        }
+        activity.fail(message: "Rootless daemon did not start")
+        activity.start(.accounts, message: "Checking accounts")
+        activity.finish()
+        #expect(activity.status(of: .docker) == .failed)
+        activity.start(.docker, message: "Retrying Docker")
+        activity.finish()
+        #expect(activity.status(of: .docker) == .complete)
     }
 
     @Test func lineEvictionKeepsRecentOutputAndNeverReusesIDs() throws {

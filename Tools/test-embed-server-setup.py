@@ -33,7 +33,7 @@ class PackageTests(unittest.TestCase):
             module.embed(path / 'Bloom.app', archive)
             output = path / 'Bloom.app/Contents/Resources/ServerSetup'
             self.assertTrue((output / 'install-bloom-server.py').is_file())
-            for name in ('install-bloom-server.py', 'install-bloom-browser.py'):
+            for name in ('install-bloom-server.py', 'install-bloom-browser.py', 'install-bloom-docker.py'):
                 bundled = (output / name).read_text()
                 self.assertTrue(bundled.startswith('#!/usr/bin/env python3\n'))
                 self.assertIn('class InstallProcessFailure(', bundled)

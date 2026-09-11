@@ -11,6 +11,8 @@ struct ServerSetupAccountsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
             if !model.hasChosenAccountMethod {
+                if model.dockerDiagnostic != nil { dockerRow }
+                if model.browserDiagnostic != nil { browserRow }
                 accountChoice
             } else {
                 signIns
@@ -53,6 +55,10 @@ struct ServerSetupAccountsView: View {
             accountRow("Claude", detail: agentDetail(.claudeCode, name: "Claude"), account: .claude)
             Divider()
             browserRow
+            if model.installsDocker || model.dockerAttempted {
+                Divider()
+                dockerRow
+            }
             HStack {
                 Button("Refresh Status") { Task { await model.refreshAccounts() } }.disabled(model.isBusy)
                 if model.isBusy { ProgressView().controlSize(.small) }
@@ -122,8 +128,31 @@ struct ServerSetupAccountsView: View {
                 if let recovery = model.browserRecovery { Text(recovery).font(Typo.caption).foregroundStyle(.secondary) }
             }
             Spacer()
-            if model.browserReadiness?.status != .ready, model.canInstallBrowser {
+            if model.browserReadiness?.status != .ready, model.canInstallOptionalTools {
                 Button(model.browserAttempted ? "Retry Browser Setup" : "Install Browser Tools") { Task { await model.retryBrowserInstall() } }
+            }
+        }
+    }
+
+    private var dockerRow: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                Label(model.dockerDiagnostic == nil ? "Docker (optional)" : "Docker needs attention",
+                      systemImage: model.dockerReady ? "checkmark.circle.fill" : model.dockerDiagnostic != nil ? "exclamationmark.triangle" : "shippingbox")
+                    .font(Typo.labelEmphasis)
+                    .foregroundStyle(model.dockerDiagnostic != nil ? Palette.warning : Palette.textPrimary)
+                Text(model.dockerDiagnostic?.message ?? (model.dockerReady ? "Rootless Docker and Compose are ready for container projects." : "Install Docker to run container projects on this server."))
+                    .font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                if let diagnostic = model.dockerDiagnostic {
+                    Text("You can continue. Projects that require Docker will need this setup to finish first.")
+                        .font(Typo.caption).foregroundStyle(.secondary)
+                    if let command = diagnostic.command { Text(command).font(Typo.codeSmall).textSelection(.enabled) }
+                    Text(diagnostic.recovery).font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+            }
+            Spacer()
+            if !model.dockerReady, model.canInstallOptionalTools {
+                Button(model.dockerAttempted ? "Retry Docker Setup" : "Install Docker") { Task { await model.retryDockerInstall() } }
             }
         }
     }
