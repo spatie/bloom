@@ -253,6 +253,7 @@ struct PullRequestSummary: View {
                         method: method,
                         deletesBranch: Self.deletesBranch,
                         canMerge: canConfirmMerge,
+                        tint: status.tone.fill,
                         onConfirm: {
                             pendingMerge = nil
                             onMerge(method)
@@ -403,6 +404,7 @@ struct PullRequestSummary: View {
             .archiveConfirmation(
                 $archiveRequest,
                 canConfirm: branchActions.isAllowed && !isWorking,
+                tint: status.tone.fill,
                 onConfirm: onConfirmArchive
             )
             .buttonStyle(.borderedProminent)
