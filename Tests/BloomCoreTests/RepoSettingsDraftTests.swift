@@ -163,4 +163,36 @@ struct RepoSettingsDraftTests {
         // And reopening the window on the saved state offers nothing more to save.
         #expect(RepoSettingsDraft(reloaded).edits(comparedTo: reloaded).isEmpty)
     }
+
+    /// The crash `runScript(id:)` exists for: a row removed while SwiftUI still held its binding.
+    @Test("a removed run script row reads nothing and writes nothing")
+    func removedRunScriptRowIsInert() {
+        let dev = DraftRunScript(key: "dev", name: "Dev", command: "pnpm dev")
+        let test = DraftRunScript(key: "test", name: "Test", command: "pnpm test")
+        var draft = RepoSettingsDraft()
+        draft.runScripts = [dev, test]
+
+        draft.removeRunScript(id: test.id)
+        var late = test
+        late.command = "pnpm test --watch"
+        draft.updateRunScript(late)
+
+        #expect(draft.runScript(id: test.id) == nil)
+        #expect(draft.runScripts == [dev])
+    }
+
+    @Test("a run script row writes back in place")
+    func runScriptRowWritesInPlace() {
+        let dev = DraftRunScript(key: "dev", name: "Dev", command: "pnpm dev")
+        let test = DraftRunScript(key: "test", name: "Test", command: "pnpm test")
+        var draft = RepoSettingsDraft()
+        draft.runScripts = [dev, test]
+
+        var renamed = dev
+        renamed.name = "Serve"
+        draft.updateRunScript(renamed)
+
+        #expect(draft.runScripts == [renamed, test])
+        #expect(draft.runScript(id: dev.id)?.name == "Serve")
+    }
 }

@@ -262,6 +262,8 @@ enum ReviewRunProbe {
                     }
                 }
             }
+            await rapidNavigation(model: model, fixture: directory + "/fixture", host: host, window: window,
+                                  check: check)
             check(!hoverViews(in: host).isEmpty, "review did not render code after jumping to a file")
             check(!window.isVisible && !window.isKeyWindow, "review probe activated its window")
             window.contentView = nil
@@ -311,6 +313,55 @@ enum ReviewRunProbe {
 
     private static func progress(_ message: String) {
         FileHandle.standardError.write(Data((message + "\n").utf8))
+    }
+
+    /// A reader clicking through the inspector faster than sections lay out. Reported on
+    /// 2026-09-11 as Bloom crashing "sometimes when I change the file I want to review", on a
+    /// side-by-side review of 45 files, most of them sections still on "Laying out the diff". No
+    /// crash report came with it, so this puts the review in that state and navigates through it:
+    /// each click lands while the previous destination is on its placeholder, so `scrollTo`, the
+    /// prepared callbacks and scroll-follow all run into each other. A crash here ends the process,
+    /// which the script reports as a missing result.
+    private static func rapidNavigation(
+        model: WorkspaceModel, fixture: String, host: NSView, window: NSWindow,
+        check: (Bool, String) -> Void
+    ) async {
+        progress("Checking rapid navigation between files")
+        let root = URL(fileURLWithPath: fixture)
+        for index in 0..<40 {
+            let url = root.appendingPathComponent("Tests/Feature/Rapid/Generated\(index)Test.php")
+            try? FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            let body = (0..<(20 + index * 7)).map { "    public function test\($0)(): void {}" }
+            try? ("<?php\n\nclass Generated\(index)Test\n{\n" + body.joined(separator: "\n") + "\n}\n")
+                .write(to: url, atomically: true, encoding: .utf8)
+        }
+        // Refreshed with the review on screen, which is what the six second poll does to a reader.
+        await model.refreshChanges()
+        UserDefaults.standard.set(true, forKey: DiffLayoutSetting.storageKey)
+        await settle(window)
+
+        let paths = model.reviewFiles.map(\.path)
+        check(paths.count >= 46, "rapid navigation fixture loaded \(paths.count) files")
+        for round in 0..<3 {
+            for (step, path) in (round.isMultiple(of: 2) ? paths : paths.reversed()).enumerated() {
+                model.selectedFilePath = path
+                FileReview.open(path: path, in: model)
+                host.layoutSubtreeIfNeeded()
+                // Mostly no pause at all: the point is to arrive before layout does.
+                if step.isMultiple(of: 4) { try? await Task.sleep(for: .milliseconds(8)) }
+            }
+        }
+        // Three rounds, forwards, backwards, forwards, so the last click was the last file.
+        let last = paths.last ?? ""
+        for _ in 0..<20 {
+            await settle(window)
+            if preparedLayouts[last] != nil { break }
+        }
+        save(host, name: "all-files-rapid")
+        check(preparedLayouts[last] != nil, "rapid navigation left \(last) on its placeholder")
+        UserDefaults.standard.set(false, forKey: DiffLayoutSetting.storageKey)
     }
 
     private static func loadedLongReview(in view: NSView) -> Bool {
