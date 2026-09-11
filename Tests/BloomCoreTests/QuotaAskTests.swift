@@ -348,18 +348,46 @@ struct RequestedQuotaPayloadTests {
     @Test func readsExtraUsageAsMoneyOnceItIsSwitchedOn() throws {
         let enabled = """
         {"rate_limits_available":true,"rate_limits":{\
-        "extra_usage":{"is_enabled":true,"monthly_limit":50,"used_credits":17.2,\
+        "extra_usage":{"is_enabled":true,"monthly_limit":5000,"used_credits":1720,\
         "utilization":34.4,"currency":"USD"}}}
         """
         let quotas = AgentQuotaAdapters.quotas(fromRateLimitEvent: Data(enabled.utf8), at: now)
         let extra = try #require(quotas.first { $0.window.key == "extra_usage" })
 
+        // Cents on the wire, dollars in the row.
         #expect(extra.measure == .counted(used: 17.2, limit: 50, unit: "USD"))
         #expect(extra.fraction == 0.344)
         // No reset time and no length, which is true rather than missing: it is a balance against
         // a monthly ceiling and the provider states neither a turnover instant nor a window.
         #expect(extra.resetsAt == nil)
         #expect(extra.window.duration == nil)
+    }
+
+    /// **The report that found it**: £18.56 of £20.00 spent, shown as £1,856.00 of £2,000.00,
+    /// because pence were read as pounds.
+    @Test func readsExtraUsageInPenceAsPounds() throws {
+        let enabled = """
+        {"rate_limits_available":true,"rate_limits":{\
+        "extra_usage":{"is_enabled":true,"monthly_limit":2000,"used_credits":1856,\
+        "utilization":92.8,"currency":"gbp"}}}
+        """
+        let quotas = AgentQuotaAdapters.quotas(fromRateLimitEvent: Data(enabled.utf8), at: now)
+        let extra = try #require(quotas.first { $0.window.key == "extra_usage" })
+
+        #expect(extra.measure == .counted(used: 18.56, limit: 20, unit: "GBP"))
+    }
+
+    /// A currency with no minor unit is not divided, exactly as the CLI prints it.
+    @Test func leavesAZeroDecimalCurrencyUndivided() throws {
+        let enabled = """
+        {"rate_limits_available":true,"rate_limits":{\
+        "extra_usage":{"is_enabled":true,"monthly_limit":3000,"used_credits":1200,\
+        "utilization":40,"currency":"JPY"}}}
+        """
+        let quotas = AgentQuotaAdapters.quotas(fromRateLimitEvent: Data(enabled.utf8), at: now)
+        let extra = try #require(quotas.first { $0.window.key == "extra_usage" })
+
+        #expect(extra.measure == .counted(used: 1200, limit: 3000, unit: "JPY"))
     }
 
     /// A display name is not a key. Two spellings of one model must not become two rows for one
