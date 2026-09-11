@@ -222,6 +222,7 @@ struct ServerSetupView: View {
                     .font(Typo.caption).foregroundStyle(.secondary)
                 DisclosureGroup("Docker installation details") {
                     Text("Installs Ubuntu's Docker, Compose and rootless networking packages. Docker runs as the Bloom account, without administrator access, and starts automatically after a reboot.")
+                    Text("Raises the server's file-watch limit when needed, so development servers can watch large projects.")
                     Text("Images and container data: " + (model.check?.serviceHome ?? "/home/bloom") + "/bloom/docker/data")
                     Text("The user service and Docker connection settings use the account's .config folder. Docker projects can still run commands and access files as the Bloom account.")
                 }

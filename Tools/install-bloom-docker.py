@@ -11,6 +11,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 
 if "stream_install_command" not in globals():
     from bloom_install_process import InstallProcessFailure, install_exception_details, redact_install_text, stream_install_command
@@ -216,6 +217,41 @@ def verify(account):
                 dataDirectory=expected, socket=expected_socket, version=info.get("ServerVersion"))
 
 
+
+def configure_file_watches(path=Path("/etc/sysctl.d/90-bloom-docker.conf"), current_path=Path("/proc/sys/fs/inotify/max_user_watches")):
+    protected(path)
+    current = int(current_path.read_text().strip())
+    minimum = 262144
+    header = "# Managed by Bloom optional Docker setup\n"
+    previous = 0
+    if path.exists():
+        content = path.read_text()
+        match = re.fullmatch(re.escape(header) + r"fs\.inotify\.max_user_watches = ([0-9]+)\n", content)
+        if not match:
+            fail("unmanaged_watch_configuration", "The Bloom Docker file-watch configuration contains unrelated settings.",
+                 "Review /etc/sysctl.d/90-bloom-docker.conf before retrying. Bloom will not overwrite it.")
+        previous = int(match.group(1))
+    target = max(current, previous, minimum, int(current_path.read_text().strip()))
+    if current >= minimum and not path.exists():
+        return current
+    text = header + f"fs.inotify.max_user_watches = {target}\n"
+    if not path.exists() or path.read_text() != text:
+        protected(path.parent)
+        descriptor, temporary = tempfile.mkstemp(prefix=".bloom-docker-", dir=path.parent)
+        try:
+            with os.fdopen(descriptor, "w") as output:
+                output.write(text)
+                output.flush()
+                os.fsync(output.fileno())
+                os.fchmod(output.fileno(), 0o644)
+            os.replace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    if target > current:
+        command(["sysctl", "-w", f"fs.inotify.max_user_watches={target}"])
+    return target
+
 def install(account):
     release = Path("/etc/os-release").read_text()
     if not re.search(r'^ID=["\']?ubuntu["\']?$', release, re.M):
@@ -228,6 +264,8 @@ def install(account):
         protected(Path(path))
         if not Path(path).is_file():
             fail("missing_rootless_tool", "The Ubuntu Docker package is missing its rootless helper.", "Install an Ubuntu package version with Docker rootless support, then retry.")
+    emit("progress", step="docker_dependencies", message="Preparing file watches for development servers")
+    configure_file_watches()
     emit("progress", step="docker_account", message="Preparing private container storage and subordinate user IDs")
     reserve_ranges(account)
     environment = user_environment(account)

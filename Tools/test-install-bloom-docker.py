@@ -138,6 +138,46 @@ class DockerTests(unittest.TestCase):
         link.symlink_to("/etc")
         self.error("unsafe_path", lambda: docker.protected(link / "subuid"))
 
+    def test_file_watch_floor_is_persisted_without_changing_other_kernel_settings(self):
+        path = self.home / "90-bloom-docker.conf"
+        current = self.home / "current-watches"
+        current.write_text("30691\n")
+        with mock.patch.object(docker, "protected"), mock.patch.object(docker, "command") as command:
+            result = docker.configure_file_watches(path, current)
+        self.assertEqual(result, 262144)
+        self.assertEqual(path.read_text(), "# Managed by Bloom optional Docker setup\nfs.inotify.max_user_watches = 262144\n")
+        self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+        command.assert_called_once_with(["sysctl", "-w", "fs.inotify.max_user_watches=262144"])
+        stamp = path.stat().st_mtime_ns
+        current.write_text("262144\n")
+        with mock.patch.object(docker, "protected"), mock.patch.object(docker, "command") as command:
+            docker.configure_file_watches(path, current)
+        command.assert_not_called()
+        self.assertEqual(path.stat().st_mtime_ns, stamp)
+
+    def test_higher_existing_file_watch_limit_is_preserved(self):
+        path = self.home / "90-bloom-docker.conf"
+        current = self.home / "current-watches"
+        current.write_text("524288\n")
+        with mock.patch.object(docker, "protected"), mock.patch.object(docker, "command") as command:
+            self.assertEqual(docker.configure_file_watches(path, current), 524288)
+        command.assert_not_called()
+        self.assertFalse(path.exists())
+
+    def test_unmanaged_or_linked_file_watch_configuration_is_not_overwritten(self):
+        path = self.home / "90-bloom-docker.conf"
+        current = self.home / "current-watches"
+        current.write_text("30691\n")
+        path.write_text("fs.inotify.max_user_watches=8000\n")
+        with mock.patch.object(docker, "protected"), mock.patch.object(docker, "command") as command:
+            self.error("unmanaged_watch_configuration", lambda: docker.configure_file_watches(path, current))
+        command.assert_not_called()
+        self.assertEqual(path.read_text(), "fs.inotify.max_user_watches=8000\n")
+        path.unlink()
+        path.symlink_to(current)
+        self.error("unsafe_path", lambda: docker.configure_file_watches(path, current))
+        self.assertEqual(current.read_text(), "30691\n")
+
     def test_managed_account_must_match_root_marker(self):
         options = argparse.Namespace(user="bloom", service_name="bloom-server", service_home=str(self.home))
         account = SimpleNamespace(pw_name="bloom", pw_uid=1001, pw_gid=1001, pw_dir=str(self.home))
@@ -179,7 +219,7 @@ class DockerTests(unittest.TestCase):
 
     def test_install_commands_use_user_service_without_force_or_group_changes(self):
         with mock.patch.object(Path, "read_text", return_value='ID=ubuntu\n'), mock.patch.object(Path, "is_file", return_value=True), \
-             mock.patch.object(docker, "protected"), mock.patch.object(docker, "reserve_ranges") as reserve, \
+             mock.patch.object(docker, "protected"), mock.patch.object(docker, "configure_file_watches"), mock.patch.object(docker, "reserve_ranges") as reserve, \
              mock.patch.object(docker, "command", return_value="") as run, mock.patch.object(docker, "verify", return_value={"ready": True}):
             self.assertEqual(docker.install(self.account), {"ready": True})
         reserve.assert_called_once_with(self.account)

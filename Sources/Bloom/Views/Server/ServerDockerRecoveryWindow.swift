@@ -115,6 +115,8 @@ private struct ServerDockerRecoveryContent: View {
             Text("Set up Docker for container projects").font(Typo.labelEmphasis)
             Text("Installs Ubuntu's Docker, Compose and rootless networking packages. Docker runs as the Bloom account and starts after a reboot. It does not receive administrator access or access to the system Docker socket.")
                 .font(Typo.caption).foregroundStyle(.secondary)
+            Text("Raises the server's file-watch limit when needed, so development servers can watch large projects.")
+                .font(Typo.caption).foregroundStyle(.secondary)
             Text("Images and container data: " + home + "/bloom/docker/data\nUser service and connection settings: " + home + "/.config")
                 .font(Typo.codeSmall).foregroundStyle(.secondary).textSelection(.enabled)
             TextField("Administrator SSH address", text: $model.administratorHost, prompt: Text("root@" + model.request.destination))
