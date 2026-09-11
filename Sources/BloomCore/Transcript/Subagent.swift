@@ -80,7 +80,8 @@ public enum SubagentSignal: Sendable, Hashable {
                     summary: json["summary"]?.stringValue ?? "",
                     // Absent is a real answer and not a failure: it means there is nothing on
                     // disk to open, and the row says so by refusing the click.
-                    outputFile: json["output_file"]?.stringValue
+                    outputFile: json["output_file"]?.stringValue,
+                    raw: raw
                 ))
 
             default:
@@ -190,11 +191,17 @@ public struct SubagentReport: Sendable, Hashable {
     public let status: String
     public let summary: String
     public let outputFile: String?
+    /// The line itself, because it is the one subagent line that is ever stored: a notification
+    /// arriving between turns opens the turn the CLI starts for it. See `BackgroundWake`.
+    public let raw: Data
 
-    public init(id: SubagentID, status: String, summary: String = "", outputFile: String? = nil) {
+    public init(
+        id: SubagentID, status: String, summary: String = "", outputFile: String? = nil, raw: Data = Data()
+    ) {
         self.id = id
         self.status = status
         self.summary = summary
         self.outputFile = outputFile
+        self.raw = raw
     }
 }
