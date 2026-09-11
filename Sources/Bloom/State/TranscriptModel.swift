@@ -288,6 +288,13 @@ final class TranscriptModel {
     /// are two requests, and the composer has nothing to clear afterwards.
     private(set) var composerFocusRequests = 0
 
+    func appendSourceContext(_ context: String) {
+        draft += (draft.isEmpty ? "" : "\n\n") + "Ask about this code:\n\n" + context + "\n\n"
+        focusComposer()
+    }
+
+    func focusComposer() { composerFocusRequests += 1 }
+
     private var runner: (any SessionRunner)?
 
     func codexSubagentTranscript(for id: SubagentID) async -> SubagentTranscript? {
@@ -598,12 +605,14 @@ final class TranscriptModel {
     /// screen from the frame the key went down, in the state `Delivery.goesImmediately` says it is
     /// in: as a sent bubble if nothing is holding the queue, as a pending one if something is. See
     /// `sending`.
-    func submit(_ text: String) async {
+    func submit(_ text: String, clearingDraft sourceDraft: String? = nil) async {
         guard !isWorkspaceArchiving else { return }
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, let store else { return }
 
-        let submittedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines) == body ? draft : nil
+        // Review payloads expand compact chips into comments. Clear the source draft, while
+        // retaining anything the reader typed after that payload began being prepared.
+        let submittedDraft = SubmittedDraft.matching(current: draft, message: body, source: sourceDraft)
         if submittedDraft != nil { draft = "" }
 
         // Built here rather than inside the enqueue, so the row that goes in the table and the

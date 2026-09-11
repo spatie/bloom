@@ -103,7 +103,7 @@ uses, so Bloom and Bloom Dev can never land on one. The landmine there is `socka
 
 ## 3. The tools
 
-Thirty-six, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
+Thirty-eight, each a type of its own in `Sources/BloomCore/Bridge/`, each carrying its own role
 gate. A list of handlers rather than a switch, because a switch would put every tool in three
 places: the listing, the dispatch and the gate.
 
@@ -121,11 +121,13 @@ places: the listing, the dispatch and the gate.
 | `workspace_merge` | Ask a workspace's own agent to merge its pull request | | | ✓ |
 | `reveal` | Point Bloom's window at one workspace, or at Home narrowed by project, scope and search. Navigation and nothing else: it creates nothing and archives nothing | | | ✓ |
 | `pane_open` | Open a chat, a terminal or a browser in a new tab of the caller's own workspace | ✓ | | |
-| `pane_split` | Put one beside what is on screen rather than behind it | ✓ | | |
+| `pane_split` | Add a pane inside the calling chat's tab, defaulting to a new chat on its right | ✓ | | |
 | `pane_close` | Take one back off the screen | ✓ | | |
 | `pane_rename` | Give a tab a name the reader can find it by | ✓ | | |
 | `pane_list` | What the workspace has open: each pane's kind, its name, whether it is in the tab in front, and for a browser its number and its address | ✓ | | |
 | `workspace_tabs` | The same window read as a strip: every tab in order, what it is called, which one is in front, and one true thing about what is in it | ✓ | | |
+| `chat_list` | Unarchived chats in the caller's workspace, including subagents, with IDs, titles, states and message counts | ✓ | | |
+| `chat_read` | Read one of those chats by ID or exact title, with bounded pages of stored transcript content | ✓ | | |
 | `workspace_tab_select` | Make one of those tabs the one in front, by its number or by its name. It cannot make one | ✓ | | |
 | `browser_read` | One browser's toolbar: address, page title, load state, whether Back and Forward would do anything | ✓ | | |
 | `browser_reload` | Fetch that page again | ✓ | | |
@@ -161,6 +163,46 @@ transport failure the CLI may retry or surface as a broken server; an errored re
 model reads and can act on. "You are not allowed to do that" is something to tell the model, not
 something to tell the transport.
 
+### Tabs, panes and the chat making the request
+
+A **tab** is an entry in the top strip. It owns an arrangement of one or more **panes**, the
+regions visible together inside that tab. Selecting another tab switches the whole arrangement.
+`pane_open` creates a separate tab; `pane_split` adds a region to an existing tab. Both tools,
+`pane_list` and `workspace_tabs` explain this distinction in their model-facing descriptions.
+
+For "add a pane", "split pane in this chat", or "split vertically next to this chat", the model
+should call `pane_split` with no arguments. It defaults to a **new chat on the right**, separated
+by a vertical divider. This is `direction: "beside"` on the wire and `SplitAxis.horizontal`
+internally. `direction: "below"` stacks the panes with a horizontal divider. The optional `kind`
+can instead request a terminal or browser; `title` names the new content, not the containing tab.
+
+The default `target: "this_chat"` comes from the authenticated session, not the tab or pane that
+happens to have focus when the agent calls. The resolver finds that conversation inside its tab,
+including when another chat roots the tab or a terminal has focus beside it. A missing chat is
+refused before anything is created. `target: "active_pane"` follows the selected tab's focused
+pane only when explicitly requested. Chat creation is awaited and the destination revalidated
+before placement, so a changed target cannot produce a false success or split unrelated content.
+
+### Reading another chat
+
+`chat_list` discovers the unarchived sessions in the caller's workspace, including crew members.
+`chat_read` accepts an ID from that list or an exact title. Shared titles are refused until the
+caller names an ID. Both tools use the workspace from the authenticated identity, so neither can
+be pointed at another workspace. The owner role has no implicit workspace and does not see them.
+
+The transcript comes directly from `Store`, without selecting a tab or loading a view. User and
+assistant text, thinking and crew messages use the transcript's existing decoders; other rows
+retain their stored payload, including tool calls and results. Unknown formats remain readable as
+raw text. Attachment paths are included, but attached files and unsaved streaming text are not read.
+The answer marks the content as quoted history rather than instructions for the receiving chat.
+
+Pages contain up to 50 records by default (100 maximum) and 32,000 content characters. Pass the
+returned `next_cursor` with the chat ID until it is null. Cursors name the chat, message sequence
+and character offset, so appending messages does not shift later pages, and oversized messages
+continue on the next page without losing text. Chunks carry `offset` and `complete` for reassembly.
+Both tools are self-approved: they read conversations inside the caller's existing workspace and
+change nothing in the window or the store.
+
 ### A workspace existing and an agent running in it are two numbers
 
 `project_list` used to report one number per project, counting workspaces whose state was not
@@ -182,9 +224,9 @@ One number kept its old sense deliberately: `WorkspaceStartAllowance.running`, t
 eight on a parent agent's children, counts workspaces that are not archived and says so in its own
 doc comment. That is a brake on worktrees held open, not on turns in flight.
 
-### The twenty-four that need the app, and the twelve that do not
+### The twenty-four that need the app, and the fourteen that do not
 
-`BridgeToolbox.standard` holds the twelve that reach nothing but the store, and it is what a
+`BridgeToolbox.standard` holds the fourteen that reach nothing but the store, and it is what a
 `BridgeServer` built without the app serves, which is every test that did not ask for more.
 `AppModel.bridgeToolbox()` adds the other twenty-four to it, because starting a workspace has to reach
 the main-actor graph that runs one, asking for a merge has to reach the same path the Merge button
@@ -624,7 +666,7 @@ So `BridgeToolApproval` names the tools Bloom answers for itself:
 
 | Self-approved | Not |
 | --- | --- |
-| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `workspace_rename`, `pane_list`, `workspace_tabs`, `workspace_tab_select`, `browser_read`, `media_show`, `quick_prompt_list`, `reveal`, `agent_start`, `agent_say`, `agent_list`, `agent_stop` | everything else |
+| `whoami`, `workspace_start`, `pane_open`, `pane_split`, `pane_close`, `pane_rename`, `workspace_rename`, `pane_list`, `workspace_tabs`, `workspace_tab_select`, `chat_list`, `chat_read`, `browser_read`, `media_show`, `quick_prompt_list`, `reveal`, `agent_start`, `agent_say`, `agent_list`, `agent_stop` | everything else |
 
 It is a list rather than "anything with our prefix", so a tool added later is opted in by somebody
 thinking about it rather than by inheriting a decision made before it existed.

@@ -83,7 +83,7 @@ struct AgentCatalogTests {
         // The sentence the settings screen prints, derived so it cannot say Claude Code alone
         // again once a second backend exists.
         #expect(AgentKind.runnableSentence == "Claude Code and Codex")
-        #expect(AgentKind.claudeCode.loginCommand == "claude /login")
+        #expect(AgentKind.claudeCode.loginCommand == "claude auth login")
         #expect(AgentKind.codex.loginCommand == "codex login")
         #expect(AgentKind.codex.configPath.hasSuffix("/.codex/config.toml"))
         #expect(AgentKind.claudeCode.configPath.hasSuffix("/.claude/settings.json"))

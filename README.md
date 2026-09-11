@@ -65,13 +65,20 @@ You need Xcode 26, or a Swift 6.2 toolchain.
 ```bash
 git clone https://github.com/spatie/bloom.git
 cd bloom
-./Tools/dev-build.sh --no-launch
+./Tools/dev-build.sh --fast --no-launch
 ```
 
 This installs `~/Applications/Bloom Dev.app` with a separate database, preferences and URL scheme.
 Open that copy when you want to try your changes. It does not replace the released application or
 use its data. See [the architecture guide](docs/ARCHITECTURE.md) before contributing.
-The dev script builds a committed revision, so commit your changes locally before rebuilding it.
+By default the dev script builds a committed revision. For current edits, including uncommitted and
+untracked files that Git does not ignore, use `make dev-fast`. It installs the same Bloom Dev.app,
+uses the same dev data, and restarts only the dev copy. It builds in debug mode with a separate,
+persistent cache for this checkout. The first build fills the cache; later builds reuse it.
+
+Use `./Tools/dev-build.sh --fast --no-launch` to install without restarting, or
+`./Tools/dev-build.sh --fast --no-install` to build without installing or launching. Fast mode cannot
+be combined with a revision. It keeps the normal assets and App Intents metadata.
 
 Working with an AI agent? [AGENTS.md](AGENTS.md) indexes the shared project skills for Claude and
 Codex, including `bloom-dev-build` and `bloom-release`. In Claude, invoke `/bloom-dev-build` or
@@ -109,7 +116,11 @@ match. In Settings, General, choose where new projects are created and add other
 
 **Panes.** A workspace holds tabs, and a tab can be split. A pane is a chat, a terminal standing in
 the worktree, or a browser, so the dev server the setup script started can be read beside the
-conversation that is changing it.
+conversation that is changing it. Type `/close` to close the current chat and start a fresh one
+with the same model settings. The previous conversation is archived.
+
+Press Cmd+P to search files in the current workspace. Use the arrow keys and Return to open a
+file, or Escape to dismiss the search.
 
 **Review and ship.** The inspector lists the files the workspace changed and shows a
 syntax-highlighted diff against the merge base, with inline comments and an editor on the same

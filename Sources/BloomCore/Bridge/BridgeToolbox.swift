@@ -49,6 +49,8 @@ public struct BridgeToolbox: Sendable {
         ProjectHideTool(),
         ProjectUnhideTool(),
         WorkspaceListTool(),
+        ChatListTool(),
+        ChatReadTool(),
         // A name is one column of one row, so this needs no seam into the window either: the
         // sidebar hears about it through the store's update hook, the way it hears about a rename
         // typed into the row itself. See `WorkspaceRenameTool`.

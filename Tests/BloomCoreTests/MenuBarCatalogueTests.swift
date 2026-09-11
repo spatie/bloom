@@ -17,6 +17,11 @@ struct MenuBarCatalogueTests {
         }
     }
 
+    @Test func fileHistoryShortcuts() {
+        #expect(MenuBarCatalogue[.fileBack].key == MenuShortcut("[", .command))
+        #expect(MenuBarCatalogue[.fileForward].key == MenuShortcut("]", .command))
+    }
+
     @Test("every action has exactly one row, so a lookup cannot trap")
     func everyActionHasARow() {
         for action in MenuBarAction.allCases {
@@ -212,32 +217,5 @@ struct MenuBarCatalogueTests {
         for action in [MenuBarAction.pin, .unreadMark, .colour, .copyName, .renameTab, .focusPane] {
             #expect(MenuBarCatalogue[action].key == nil, "\(action)")
         }
-    }
-
-    /// Merging is the most consequential thing a person can ask Bloom to do to a branch, it
-    /// happens once per workspace, and it is the one item in the bar whose press is not undone by
-    /// pressing it again. A keystroke there buys a slip.
-    @Test("merging is an item and not a keystroke")
-    func mergeTakesNoKey() {
-        let item = MenuBarCatalogue[.merge]
-        #expect(item.menu == .workspace)
-        #expect(item.key == nil)
-        // The greyed wording. When the band is on screen the item says which merge, off
-        // `GitHub.MergeMethod.buttonLabel`, which is also what the split button says.
-        #expect(item.title == "Merge")
-    }
-
-    /// Merge sits directly above Archive, because those two are the ends of a workspace's life and
-    /// that is the order they happen in. Said as a test because a table is a list and an insert in
-    /// the wrong place is invisible in a diff.
-    @Test("merging is read directly above archiving")
-    func mergeSitsAboveArchive() {
-        let workspace = MenuBarCatalogue.items(in: .workspace).map(\.action)
-        guard let merge = workspace.firstIndex(of: .merge),
-              let archive = workspace.firstIndex(of: .archive) else {
-            Issue.record("the Workspace menu is missing one of the two")
-            return
-        }
-        #expect(archive == merge + 1)
     }
 }

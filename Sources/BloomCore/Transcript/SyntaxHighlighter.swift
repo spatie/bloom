@@ -103,6 +103,11 @@ private enum MultilineString: Sendable, Hashable {
 
 /// Carry state makes independently rendered lines agree about constructs opened above them.
 public struct LexState: Sendable, Hashable {
+    var jsxTag = false
+    var jsxTagName = false
+    var jsxExpressionDepth = 0
+    var embeddedLanguage: Language?
+    var embeddedEnd: String?
     fileprivate var blockCommentEnd: String?
     fileprivate var multilineString: MultilineString?
     fileprivate var heredocTag: String?
@@ -114,6 +119,13 @@ public struct LexState: Sendable, Hashable {
 /// A bounded hand-written scanner keeps highlighting cheap enough for lazy diff rows.
 public enum SyntaxHighlighter {
     public static func tokenize(line: String, language: Language, carry: inout LexState) -> [Token] {
+        if language == .vue || language == .blade || language == .html {
+            return mixedTokens(line: line, language: language, carry: &carry)
+        }
+        return lexicalTokens(line: line, language: language, carry: &carry)
+    }
+
+    static func lexicalTokens(line: String, language: Language, carry: inout LexState) -> [Token] {
         var lexer = Lexer(line: line, language: language, state: carry)
         let tokens = lexer.run()
         carry = lexer.state
@@ -163,7 +175,8 @@ private struct Lexer {
         while cursor < units.count {
             let start = cursor
 
-            if scanWhitespace()
+            if scanJSXMarkup()
+                || scanWhitespace()
                 || scanComment()
                 || scanLanguageSpecial()
                 || scanString()
@@ -559,6 +572,39 @@ private struct Lexer {
         return true
     }
 
+    private mutating func scanJSXMarkup() -> Bool {
+        guard isJavaScriptLike else { return false }
+        let start = cursor
+        if state.jsxTag {
+            if unit(at: cursor) == 123 { state.jsxExpressionDepth += 1; return false }
+            if unit(at: cursor) == 125, state.jsxExpressionDepth > 0 { state.jsxExpressionDepth -= 1; return false }
+            if state.jsxExpressionDepth == 0, unit(at: cursor) == 62 {
+                state.jsxTag = false
+                cursor += 1
+                add(.punctuation, start, cursor)
+                return true
+            }
+            return false
+        }
+        guard unit(at: cursor) == 60 else { return false }
+        let name = unit(at: cursor + 1) == 47 ? cursor + 2 : cursor + 1
+        guard isIdentifierStart(at: name) || unit(at: name) == 62 else { return false }
+        var nameEnd = name
+        while isIdentifierContinue(at: nameEnd) { nameEnd += 1 }
+        // TypeScript's generic arrow functions use <T,>, which is not a JSX tag.
+        guard unit(at: nameEnd) != 44 else { return false }
+        let before = decode(0, cursor).trimmingCharacters(in: .whitespaces)
+        let expected = before.isEmpty || before.hasSuffix("return")
+            || ["=", "(", ">", ":", "?", "&", "|", "{"].contains(String(before.suffix(1)))
+            || unit(at: cursor + 1) == 47
+        guard expected else { return false }
+        state.jsxTag = true
+        state.jsxTagName = true
+        cursor = name
+        add(.punctuation, start, cursor)
+        return true
+    }
+
     private mutating func scanIdentifier() -> Bool {
         guard isIdentifierStart(at: cursor) else { return false }
         let start = cursor
@@ -568,7 +614,10 @@ private struct Lexer {
         let lower = word.lowercased()
         let kind: TokenKind
 
-        if keywords.contains(lower) {
+        if state.jsxTag, state.jsxExpressionDepth == 0 {
+            kind = state.jsxTagName ? .type : .attribute
+            state.jsxTagName = false
+        } else if keywords.contains(lower) {
             kind = .keyword
         } else if Words.constants.contains(lower) {
             kind = .constant

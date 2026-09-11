@@ -45,21 +45,6 @@ enum Reveal {
         NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: (path as NSString).deletingLastPathComponent)
     }
 
-    /// Returns a launch error rather than silently leaving the user looking at an empty shell.
-    static func inTerminal(directory: String, executable: String, arguments: [String]) -> String? {
-        let script = TerminalLaunchScript.appleScript(
-            directory: directory, executable: executable, arguments: arguments
-        )
-        guard let apple = NSAppleScript(source: script) else {
-            return "The sign-in command could not be prepared. Try again."
-        }
-        var error: NSDictionary?
-        apple.executeAndReturnError(&error)
-        guard let error else { return nil }
-        return error[NSAppleScript.errorMessage] as? String
-            ?? "Terminal could not run the sign-in command. Try again."
-    }
-
     /// Opens a path in the editor this project was last opened in.
     ///
     /// **It used to ignore that entirely**, and `OpenInMenu`'s header recorded the consequence and

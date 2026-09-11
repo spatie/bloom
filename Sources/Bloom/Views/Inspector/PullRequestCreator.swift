@@ -29,9 +29,7 @@ struct PullRequestCreator: View {
     var branch: String
     var baseBranch: String
     var isWorking: Bool
-    /// Whether this strip may act on the branch at all. Opening a pull request pushes it, so a
-    /// turn already writing to the worktree holds the button back: see
-    /// `BranchActionAvailability`, which decides it for both halves of this band.
+    /// Creating a pull request submits a message, so a busy agent can still accept the request.
     var branchActions: BranchActionAvailability
     /// Where a sign in would run, if the quiet line below the branch is pressed.
     var worktree: String
@@ -171,10 +169,6 @@ struct PullRequestCreator: View {
             .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
             .tint(Palette.controlAccent)
             .controlSize(.regular)
-            // Held back while a turn runs, like every other button in this band: opening the
-            // pull request pushes the branch, and a worktree being written to as it is read
-            // pushes half of something. See `BranchActionAvailability`. A branch with nothing on
-            // it does not draw this button at all: see `body`.
             .disabled(!branchActions.isAllowed)
             .help(helpText)
     }

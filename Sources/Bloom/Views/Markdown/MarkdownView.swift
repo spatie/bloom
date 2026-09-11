@@ -434,6 +434,7 @@ enum InlineNSAttributes {
 
         let output = NSMutableAttributedString()
         render(inline, font: font, code: code, color: color, traits: [], into: output)
+        TranscriptLink.addSourceIcons(to: output)
         output.addAttribute(
             .paragraphStyle, value: paragraph, range: NSRange(location: 0, length: output.length)
         )
@@ -451,7 +452,9 @@ enum InlineNSAttributes {
         for value in values {
             switch value {
             case let .text(text):
-                output.append(run(text, font: faced(font, traits), color: color))
+                let child = run(text, font: faced(font, traits), color: color)
+                for (range, url) in SourceReference.links(in: text) { child.addAttribute(.link, value: url, range: range) }
+                output.append(child)
             case let .emphasis(children):
                 render(children, font: font, code: code, color: color, traits: traits.union(.italicFontMask), into: output)
             case let .strong(children):
@@ -469,11 +472,15 @@ enum InlineNSAttributes {
                     .backgroundColor, value: Palette.hoverNSColor,
                     range: NSRange(location: 0, length: child.length)
                 )
+                if let target = SourceReference.url(text) {
+                    child.addAttribute(.link, value: target, range: NSRange(location: 0, length: child.length))
+                }
                 output.append(child)
             case let .link(text, url):
                 let start = output.length
                 render(text, font: font, code: code, color: color, traits: traits, into: output)
-                if let target = URL(string: url), LinkPolicy.opens(target) {
+                if let target = SourceReference.url(url) ?? URL(string: url),
+                   LinkPolicy.opens(target) || SourceReference.location(target) != nil {
                     output.addAttribute(
                         .link, value: target,
                         range: NSRange(location: start, length: output.length - start)
@@ -503,7 +510,9 @@ enum InlineNSAttributes {
             case .link: true
             case let .emphasis(children), let .strong(children), let .strikethrough(children):
                 hasLink(children)
-            case .text, .code, .lineBreak: false
+            case let .code(text): SourceReference.url(text) != nil
+            case let .text(text): !SourceReference.links(in: text).isEmpty
+            case .lineBreak: false
             }
         }
     }
@@ -663,7 +672,8 @@ private enum InlineAttributes {
                 // streaming row drew a scheme the app refuses as a live blue link that did
                 // nothing when clicked, then flipped to plain text as the row settled, which is
                 // the settle-jump this renderer pair exists to prevent.
-                if let target = URL(string: url), LinkPolicy.opens(target) {
+                if let target = SourceReference.url(url) ?? URL(string: url),
+                   LinkPolicy.opens(target) || SourceReference.location(target) != nil {
                     var child = render(text, font: font, code: code, color: Palette.link, intents: intents)
                     child.foregroundColor = Palette.link
                     child.underlineStyle = .single
