@@ -230,6 +230,39 @@ public struct WorkspaceSourceOffering: Sendable, Hashable {
         )
     }
 
+    /// What to offer when a new branch is being cut from a branch that could have been opened.
+    ///
+    /// **The report this exists for.** "When I have an existing branch and I click + and create
+    /// the conversation on top of this branch it makes a new worktree and branch instead of using
+    /// the existing one." The picker opens on the New branch tab, the branch is right there in it,
+    /// and "New branch from" does exactly what it says. Both tabs are correct and the person still
+    /// ended up on the wrong one, so the window says what is about to happen and offers the other
+    /// verb in one click, rather than guessing which of the two was meant.
+    ///
+    /// Nothing is offered for the default branch, which is what a new branch is ordinarily cut
+    /// from and is not in `branches`, nor for a branch git would refuse: one held by the project's
+    /// own checkout or by a worktree Bloom did not make. A branch one of Bloom's own workspaces
+    /// holds is offered, because picking it goes to that workspace, which is exactly "use the
+    /// existing one".
+    ///
+    /// A pull request whose head is `base` answers before the bare branch, for the reason
+    /// `WorkspaceCheckoutPlan.offeredBranches` drops the branch: the pull request knows what the
+    /// Changes tab should be measured against. `holders` is `WorkspaceCheckoutOptions.holders`,
+    /// because a pull request row carries no holder of its own.
+    public func carryOn(
+        from base: String, holders: [String: BranchHolder] = [:]
+    ) -> WorkspaceCarryOnOffer? {
+        if let request = pullRequests.first(where: { !$0.isCrossRepository && $0.headRefName == base }) {
+            return WorkspaceCarryOnOffer(
+                source: .pullRequest(.listed(request)), branch: base, holder: holders[base]
+            )
+        }
+        guard let branch = branches.first(where: { $0.name == base }) else { return nil }
+        return WorkspaceCarryOnOffer(
+            source: .existingBranch(branch), branch: base, holder: branch.inUseBy
+        )
+    }
+
     /// The row for a number or a URL that was typed rather than picked.
     ///
     /// Nothing is offered when the list already answers the number, because the listed row knows
@@ -264,6 +297,32 @@ public struct WorkspaceSourceOffering: Sendable, Hashable {
             return lhs.position < rhs.position
         }
         return scored.prefix(limit).map(\.row)
+    }
+}
+
+/// The line the create window draws under a new branch cut from a branch it could have opened.
+/// See `WorkspaceSourceOffering.carryOn`.
+public struct WorkspaceCarryOnOffer: Sendable, Hashable {
+    /// What picking the button hands to the window's own `pick`, which already knows how to open
+    /// a branch, open a pull request and go to the workspace holding either.
+    public let source: WorkspaceSource
+    /// Says what Create is about to do, because "from" on the button is one word and is the only
+    /// place the window said it.
+    public let sentence: String
+    public let action: String
+
+    /// Nil for a holder git would refuse, so a refusal is never what the button offers.
+    init?(source: WorkspaceSource, branch: String, holder: BranchHolder?) {
+        switch holder {
+        case .none:
+            action = "Open \(branch) instead"
+        case .workspace(let name):
+            action = "Go to \(name)"
+        case .projectCheckout, .otherWorktree:
+            return nil
+        }
+        self.source = source
+        sentence = "This cuts a new branch from \(branch)."
     }
 }
 
