@@ -175,16 +175,31 @@ struct HomeBar: View {
     /// what the list shows, and a status bar is a place for reading rather than pressing: Finder's
     /// says how many items there are and offers nothing to click.
     ///
+    /// The order of the rows, and why hidden projects are here at all, is `HomeProjectMenu`.
+    ///
     /// `.menuStyle(.button)` because a borderless `Menu` on macOS throws a custom label away and
     /// draws only the chevron, which is what the sidebar's account row used to look like.
     private var projectMenu: some View {
-        Menu {
-            Toggle("All projects", isOn: allProjects)
+        let menu = HomeProjectMenu(repos)
 
-            if !repos.isEmpty {
-                Divider()
-                ForEach(repos) { repo in
-                    Toggle(repo.name, isOn: binding(for: repo))
+        return Menu {
+            Section {
+                Toggle("All projects", isOn: allProjects)
+            }
+
+            if !menu.visible.isEmpty {
+                Section {
+                    ForEach(menu.visible) { repo in
+                        Toggle(repo.name, isOn: binding(for: repo))
+                    }
+                }
+            }
+
+            if !menu.hidden.isEmpty {
+                Section("Hidden") {
+                    ForEach(menu.hidden) { repo in
+                        Toggle(repo.name, isOn: binding(for: repo))
+                    }
                 }
             }
         } label: {
