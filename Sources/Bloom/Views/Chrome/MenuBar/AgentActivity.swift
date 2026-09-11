@@ -47,6 +47,9 @@ final class AgentActivity {
     private var waitingCount = 0
     private var isBadgeEnabled = true
     private var preventsSleep = SleepPrevention.isOnByDefault
+    /// A Keep Awake session somebody started by hand. See `KeepAwakeSession`; `KeepAwakeModel`
+    /// owns it and ends it when it runs out.
+    private var keepAwakeSession: KeepAwakeSession?
 
     private init() {
         // Belt and braces. The kernel drops every assertion a process owns when it exits, so a
@@ -89,6 +92,13 @@ final class AgentActivity {
         applyAssertion()
     }
 
+    /// A session of keeping the Mac awake with no agent involved, or nothing to end one.
+    func setKeepAwakeSession(_ session: KeepAwakeSession?) {
+        guard session != keepAwakeSession else { return }
+        keepAwakeSession = session
+        applyAssertion()
+    }
+
     /// How many workspaces finished something nobody has read. See `DockBadge`.
     func setUnreadCount(_ newCount: Int) {
         guard newCount != unreadCount else { return }
@@ -124,8 +134,20 @@ final class AgentActivity {
     /// The one place the assertion is taken, retaken or dropped, so the three things that move it
     /// (an agent starting, the last one finishing, the preference changing) cannot each grow their
     /// own version of the rule.
+    ///
+    /// A Keep Awake session is the fourth, and it takes the full `.userInitiated` set whether or
+    /// not an agent is running, because holding idle sleep off is the whole of what it was asked
+    /// for. The menu bar is told afterwards whether idle sleep is being held, which is what draws
+    /// the cup beside the mark; it reads the outcome rather than restating the rule.
     private func applyAssertion() {
-        let wanted: ProcessInfo.ActivityOptions? = runningCount > 0 ? wantedOptions : nil
+        defer { MenuBarStatusItem.shared.setKeepsAwake(heldOptions == .userInitiated) }
+        let session = keepAwakeSession?.isActive(at: Date()) ?? false
+        let wanted: ProcessInfo.ActivityOptions?
+        if session {
+            wanted = .userInitiated
+        } else {
+            wanted = runningCount > 0 ? wantedOptions : nil
+        }
         guard wanted != heldOptions else { return }
 
         releaseAssertion()
@@ -135,7 +157,7 @@ final class AgentActivity {
             options: wanted,
             // Shown verbatim by `pmset -g assertions`, so it is written for somebody looking at
             // that list wondering what is holding their Mac open.
-            reason: "Coding agents are running"
+            reason: session ? "Keep Awake is on in Bloom" : "Coding agents are running"
         )
         heldOptions = wanted
     }

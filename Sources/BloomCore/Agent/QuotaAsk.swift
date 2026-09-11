@@ -207,9 +207,9 @@ public struct ClaudeCodeQuotaSource: AgentQuotaSource {
 /// same `RateLimitSnapshot` the notification carries, which is why the answer goes through the
 /// adapter Bloom already had rather than through a second reader.
 ///
-/// `rateLimitsByLimitId` and `rateLimitResetCredits` are read and deliberately dropped, for the
-/// reason `CodexQuotaAdapter` drops `credits`: they are a wallet and a per model breakdown, and
-/// this panel answers one question about the nearest wall.
+/// `rateLimitsByLimitId` carries the limits of models with an allowance of their own (Spark), and
+/// `CodexQuotaAdapter.extraLimits` reads them as windows. `rateLimitResetCredits`, `credits` and
+/// `planType` are about the account rather than a window, and `AgentAccountReader` reads those.
 public struct CodexQuotaSource: AgentQuotaSource {
     public static let provider = AgentKind.codex
 
@@ -265,14 +265,41 @@ public enum AgentQuotaSources {
         _ sources: [any AgentQuotaSource] = AgentQuotaSources.all(),
         at now: Date = Date()
     ) async -> [AgentQuota] {
-        await withTaskGroup(of: [AgentQuota].self) { group in
+        await report(sources, at: now).quotas
+    }
+
+    /// The same asks, with what each answer says about the account as well as its windows. One
+    /// ask, two readers: the plan and the balances ride in the same answer, so reading them costs
+    /// nothing extra. See `AgentAccount`.
+    public static func report(
+        _ sources: [any AgentQuotaSource] = AgentQuotaSources.all(),
+        at now: Date = Date()
+    ) async -> QuotaReport {
+        await withTaskGroup(of: QuotaReport.self) { group in
             for source in sources {
                 group.addTask {
-                    guard let payload = await source.read() else { return [] }
-                    return AgentQuotaAdapters.quotas(fromRateLimitEvent: payload, at: now)
+                    guard let payload = await source.read() else { return QuotaReport() }
+                    return QuotaReport(
+                        quotas: AgentQuotaAdapters.quotas(fromRateLimitEvent: payload, at: now),
+                        accounts: AgentAccountReader.account(from: payload, at: now).map { [$0] } ?? []
+                    )
                 }
             }
-            return await group.reduce(into: []) { $0 += $1 }
+            return await group.reduce(into: QuotaReport()) { total, next in
+                total.quotas += next.quotas
+                total.accounts += next.accounts
+            }
         }
+    }
+}
+
+/// Everything one round of asks brought back.
+public struct QuotaReport: Sendable {
+    public var quotas: [AgentQuota]
+    public var accounts: [AgentAccount]
+
+    public init(quotas: [AgentQuota] = [], accounts: [AgentAccount] = []) {
+        self.quotas = quotas
+        self.accounts = accounts
     }
 }

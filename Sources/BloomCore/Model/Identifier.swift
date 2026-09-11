@@ -43,6 +43,14 @@ extension Identifier {
     public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 }
 
+/// One metric in the usage panel: a provider and a window or balance, as `provider/key`, e.g.
+/// `claudeCode/five_hour` or `codex/weekly`. Stored in the panel's layout, so the text is a key
+/// that has to stay what it was the day somebody starred it.
+public struct UsageMetricID: Identifier {
+    public let rawValue: String
+    public init(_ rawValue: String) { self.rawValue = rawValue }
+}
+
 /// A project in the sidebar. Also `permission_grants.repo_id`, which is why a grant made for one
 /// project cannot be read back for another.
 public struct RepoID: Identifier {

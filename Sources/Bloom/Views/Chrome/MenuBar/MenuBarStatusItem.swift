@@ -2,9 +2,9 @@ import AppKit
 import SwiftUI
 import BloomCore
 
-/// The menu bar item: which agents are blocked on a question, which are running, which finished
-/// while you were away, one click to land on any of them, and the switch that decides whether the
-/// Mac may fall asleep underneath them.
+/// The menu bar item: the starred usage figures beside each provider's mark, a cup while the Mac is
+/// being kept awake, how many agents are waiting on a person and how many finished unread, and the
+/// usage panel under a click.
 ///
 /// An `NSStatusItem` rather than SwiftUI's `MenuBarExtra`. `MenuBarExtra(isInserted:)` is the
 /// obvious way to express a status item that can be switched off, and on macOS 26 a scene whose
@@ -13,12 +13,14 @@ import BloomCore
 /// true it also idles at 0%. A `SceneBuilder` has no `buildOptional`, so the scene cannot be
 /// wrapped in an `if` either. AppKit's own status item has neither problem and removes cleanly.
 ///
-/// The menu is rebuilt on every open rather than kept in sync, because it is read at most once
-/// every few minutes and building it costs one pass over the workspace list. That is also what
-/// makes the sleep switch correct for free: it is read out of `UserDefaults` at the moment the
-/// menu opens, so it agrees with the Settings pane without either of them watching the other.
+/// **A left click opens a panel rather than a menu.** The limits used to be a disabled menu item
+/// holding a hosting view at the top of an `NSMenu`, which could not scroll, could not hold a
+/// control, and was measured once and never resized. The panel is `UsagePanelController`'s, and it
+/// carries everything the menu did: the limits, the workspaces waiting, running and finished, and
+/// Open, Settings and Quit. A right click still gets a short menu, because a status item that has
+/// no menu at all is one that cannot be quit from without first finding its panel's Options.
 @MainActor
-final class MenuBarStatusItem: NSObject, NSMenuDelegate {
+final class MenuBarStatusItem: NSObject {
     static let shared = MenuBarStatusItem()
 
     /// Shared with the General settings pane, which writes it.
@@ -38,6 +40,9 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
     private weak var app: AppModel?
     private var unreadCount = 0
     private var waitingCount = 0
+    private var keepsAwake = false
+    private var strip = MenuBarUsageStrip()
+    private let panel = UsagePanelController()
 
     private override init() {}
 
@@ -46,6 +51,7 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         self.app = app
 
         guard isEnabled else {
+            panel.hide()
             if let item { NSStatusBar.system.removeStatusItem(item) }
             item = nil
             return
@@ -53,19 +59,23 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         guard item == nil else { return }
 
         let created = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        created.button?.image = Self.mark()
-        created.button?.imagePosition = .imageLeading
-        let menu = NSMenu()
-        menu.delegate = self
-        created.menu = menu
+        if let button = created.button {
+            button.image = Self.mark
+            button.imagePosition = .imageLeading
+            button.target = self
+            button.action = #selector(buttonClicked(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
         item = created
+        observeUsage()
         refreshButton()
         claimPlaceInMenuBar(created)
     }
 
     // MARK: - The mark
 
-    /// Bloom's own mark, out of the bundle, as a template image.
+    /// Bloom's own mark, out of the bundle, as a template image. Drawn when no starred metric has a
+    /// figure yet, which is also the first second of every launch.
     ///
     /// `Resources/BloomMenuBar.pdf`, drawn by `Tools/icon/menubar.py` from the same eased lane the
     /// app icon is built from. It is a reduction rather than a scaling: at fifteen points the
@@ -78,13 +88,11 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
     ///
     /// A TEMPLATE, not a white picture. The status bar tints a template with the menu bar's own
     /// label colour, which makes it white on a dark bar, near black on a light one, and inverted
-    /// again while the menu is open and the item is pressed. A white image would be right in
-    /// exactly one of those four cases, and the white the owner asked for is what a template
-    /// renders as anyway.
+    /// again while the item is pressed. A white image would be right in exactly one of those cases.
     ///
     /// The SF Symbol this replaced is kept as the fallback, for the one case that produces
     /// nothing to draw: a bundle assembled without the resource.
-    private static func mark() -> NSImage? {
+    private static let mark: NSImage? = {
         guard let url = Bundle.main.url(forResource: "BloomMenuBar", withExtension: "pdf"),
               let image = NSImage(contentsOf: url) else {
             let fallback = NSImage(
@@ -95,11 +103,9 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
             return fallback
         }
         image.isTemplate = true
-        // The item is labelled as a sentence in `refreshButton`, which can name both counts. This
-        // is what VoiceOver falls back to before there is anything to count.
         image.accessibilityDescription = "Bloom"
         return image
-    }
+    }()
 
     // MARK: - Placement
 
@@ -113,9 +119,9 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
     /// forty, and on none out of twenty an hour earlier, so it is a race whose odds move with
     /// whatever else is inserting and removing items at the same moment.
     ///
-    /// Nothing looks wrong until the item is clicked. A menu opens against the window rather than
-    /// against the drawn item, so it appears at the far right of the screen, under the clock, a
-    /// third of a screen away from the icon that opened it. That is the whole bug.
+    /// Nothing looks wrong until the item is clicked. The panel is placed against the window
+    /// rather than against the drawn item, so it appears at the far right of the screen, under the
+    /// clock, a third of a screen away from the icon that opened it. That is the whole bug.
     ///
     /// Taking the item out of the bar and putting it straight back asks for a place again, and the
     /// second ask lands. Checked rather than done blindly, so an item that was placed correctly is
@@ -146,6 +152,8 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         return window.frame.maxX >= screen.frame.maxX
     }
 
+    // MARK: - What it counts
+
     /// The same number the Dock badge shows, from the same `DockBadge` count, so the two places
     /// Bloom speaks from while it is behind another window cannot disagree.
     func setUnreadCount(_ count: Int) {
@@ -154,42 +162,80 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         refreshButton()
     }
 
-    /// Workspaces whose agent has stopped and is waiting on a person. Drawn first in the strip,
-    /// because it is the only count here that costs something to ignore.
+    /// Workspaces whose agent has stopped and is waiting on a person. Drawn first among the counts,
+    /// because it is the only one that costs something to ignore.
     func setWaitingCount(_ count: Int) {
         guard count != waitingCount else { return }
         waitingCount = count
         refreshButton()
     }
 
-    // MARK: - The glance
-
-    /// The counts beside the mark, each with the glyph that says what it counts.
-    ///
-    /// Blank when there is nothing to report, rather than "0", for the same reason the Dock badge
-    /// is cleared rather than zeroed. An attributed title rather than plain text because two bare
-    /// numbers next to each other say nothing about which is which, and the menu bar has no room
-    /// for the words.
-    private func refreshButton() {
-        guard let button = item?.button else { return }
-        let segments = MenuBarSummary.segments(waiting: waitingCount, unread: unreadCount)
-        let spoken = MenuBarSummary.tooltip(waiting: waitingCount, unread: unreadCount)
-        button.attributedTitle = Self.title(for: segments, font: button.font)
-        button.toolTip = spoken
-        // VoiceOver would otherwise read the two digits and neither glyph, which is worse than
-        // nothing. "Bloom" first, because in the menu bar the item has to name itself.
-        button.setAccessibilityLabel("Bloom. \(spoken)")
+    /// Whether idle sleep is being held off right now, by a Keep Awake session or by an agent
+    /// running with the switch on. `AgentActivity` says so after every change to the assertion.
+    func setKeepsAwake(_ isOn: Bool) {
+        guard isOn != keepsAwake else { return }
+        keepsAwake = isOn
+        refreshButton()
     }
 
-    /// Gap between the mark and the first count, and between one count and the next. Wider between
-    /// pairs than inside one, so "hand one envelope two" groups the way it is meant to be read.
+    /// Follows the quotas, the accounts, the layout and the display settings, and redraws the strip
+    /// when any of them moves.
+    ///
+    /// A tracking loop rather than a view modifier, because the strip has to stay right with every
+    /// window closed, which is exactly when a modifier on the main window stops being evaluated.
+    /// Metrics seen for the first time are adopted here, so a new window arrives starred by default
+    /// without anybody having to open the panel first.
+    private func observeUsage() {
+        guard let app, item != nil else { return }
+        let model = UsagePanelModel.shared
+        let metrics = withObservationTracking {
+            _ = model.layout
+            _ = model.options
+            _ = model.iconStyle
+            return UsageCatalogue.metrics(quotas: app.quotas, accounts: app.accounts)
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.observeUsage() }
+        }
+        model.adopt(metrics)
+        strip = MenuBarUsageStrip.make(layout: model.layout, metrics: metrics, options: model.options)
+        refreshButton()
+    }
+
+    // MARK: - The glance
+
+    /// The strip or the mark, then the cup and the counts, each with the glyph that says what it is.
+    private func refreshButton() {
+        guard let button = item?.button else { return }
+        if !strip.isEmpty,
+           let image = MenuBarStripImage.image(for: strip, style: UsagePanelModel.shared.iconStyle) {
+            button.image = image
+        } else {
+            button.image = Self.mark
+        }
+
+        let segments = MenuBarSummary.segments(waiting: waitingCount, unread: unreadCount)
+        button.attributedTitle = Self.title(for: segments, keepsAwake: keepsAwake, font: button.font)
+
+        var spoken = [MenuBarSummary.tooltip(waiting: waitingCount, unread: unreadCount)]
+        if keepsAwake { spoken.insert(KeepAwake.onHeadline, at: 0) }
+        if !strip.isEmpty { spoken.insert(strip.spoken, at: 0) }
+        button.toolTip = spoken.joined(separator: "\n")
+        // VoiceOver would otherwise read the digits and none of the glyphs, which is worse than
+        // nothing. "Bloom" first, because in the menu bar the item has to name itself.
+        button.setAccessibilityLabel("Bloom. " + spoken.joined(separator: ". "))
+    }
+
+    /// Gap between the image and the first glyph, and between one glyph and the next. Wider
+    /// between pairs than inside one, so "hand one envelope two" groups the way it is meant to.
     private static let leadingGap: CGFloat = 4
     private static let betweenGap: CGFloat = 7
 
-    private static func title(for segments: [MenuBarSummary.Segment], font: NSFont?) -> NSAttributedString {
+    private static func title(
+        for segments: [MenuBarSummary.Segment],
+        keepsAwake: Bool,
+        font: NSFont?
+    ) -> NSAttributedString {
         let title = NSMutableAttributedString()
-        guard !segments.isEmpty else { return title }
-
         // The menu bar's own font, whatever size the user's menu bar is drawn at, so the numbers
         // sit on the same baseline as every other item's text.
         let font = font ?? NSFont.menuBarFont(ofSize: 0)
@@ -199,14 +245,21 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
             // is pressed, and it can only do that to a template image and to `labelColor`.
             .foregroundColor: NSColor.labelColor,
         ]
-
-        for (index, segment) in segments.enumerated() {
-            // A space carrying the gap as kerning, rather than two or three literal spaces whose
-            // width is whatever the menu bar font happens to give them.
+        var isFirst = true
+        func gap() {
             title.append(NSAttributedString(
                 string: " ",
-                attributes: [.font: font, .kern: index == 0 ? leadingGap : betweenGap]
+                attributes: [.font: font, .kern: isFirst ? leadingGap : betweenGap]
             ))
+            isFirst = false
+        }
+
+        if keepsAwake, let cup = glyph(named: KeepAwake.menuBarSymbol, label: KeepAwake.onHeadline, font: font) {
+            gap()
+            title.append(cup)
+        }
+        for segment in segments {
+            gap()
             if let glyph = glyph(named: segment.symbolName, label: segment.label, font: font) {
                 title.append(glyph)
                 title.append(NSAttributedString(string: " ", attributes: attributes))
@@ -234,189 +287,123 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
 
         // Nothing is said about the glyph here. An attachment carries no accessible text, and
         // `NSAttributedString` has no key on macOS for giving it one, so the whole item is
-        // labelled instead, in `refreshButton`, where the sentence can name both numbers.
+        // labelled instead, in `refreshButton`, where the sentence can name every part.
         return NSAttributedString(attachment: attachment)
     }
 
-    // MARK: - Menu
+    // MARK: - Clicks
 
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
-
-        // Somebody is about to read the limits, so ask for a fresher set. Not awaited: a menu that
-        // waited on two subprocesses would open half a second after it was clicked, and the figures
-        // this drops in arrive on the store's own feed, which redraws the strip and fills the panel
-        // in the next time the menu is opened. `AppModel.refreshQuotas` is the only asker and it
-        // will decline this if it has answered recently. See `QuotaPollSchedule`.
-        if let app {
-            Task { await app.refreshQuotas(after: QuotaPollSchedule.onDemandFloor) }
+    @objc private func buttonClicked(_ sender: NSStatusBarButton) {
+        guard let app else { return }
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
+            showContextMenu(from: sender)
+        } else {
+            panel.toggle(from: sender, app: app)
         }
+    }
 
-        // First, because it is the one thing in here nowhere else in the app says, and because a
-        // person opening this menu at four in the afternoon is usually asking exactly this. The
-        // workspace lists below it are also on screen in the window; the limits are not.
-        menu.addItem(limits())
+    /// The short menu under a right click: the window, Keep Awake in Amphetamine's shape, the
+    /// panel's Settings, and Quit.
+    ///
+    /// Attached for the length of one click and taken off again, because a status item that owns
+    /// a menu shows it on every click and the left click belongs to the panel.
+    private func showContextMenu(from button: NSStatusBarButton) {
+        panel.hide()
+        let menu = NSMenu()
+        menu.addItem(ClosureMenuItem("Open Bloom") { MainWindow.raise() })
+        menu.addItem(Self.keepAwakeItem())
         menu.addItem(.separator())
-
-        // Then the machine, which is the other row here that is not about a workspace.
-        menu.addItem(sleepToggle())
-        menu.addItem(.separator())
-
-        // Which lists there are, in which order, and what each one is called: all of it in
-        // `MenuBarSummary`, so the menu cannot fall out of step with the strip above it. Both are
-        // read from the same two observable sets on `AppModel` that the counts are taken from, so
-        // a hand with a 1 beside it in the menu bar and this list always name the same workspace.
-        let sections = MenuBarSummary.sections(
-            in: app?.workspaces ?? [],
-            isRunning: { app?.isRunning($0) ?? false },
-            isAwaitingPermission: { app?.isAwaitingPermission($0) ?? false }
-        )
-
-        if sections.isEmpty {
-            menu.addItem(disabled(MenuBarSummary.emptyTitle))
-        }
-
-        for (index, section) in sections.enumerated() {
-            if index > 0 { menu.addItem(.separator()) }
-            menu.addItem(disabled(section.heading))
-            for workspace in section.workspaces {
-                menu.addItem(entry(
-                    for: workspace, symbol: section.symbolName, label: section.label
-                ))
-            }
-        }
-
-        // The three things this menu is for, and it used to stop after the first. Bloom keeps
-        // running with no window open, deliberately, so for anyone working that way this strip is
-        // the whole application: with only "Open Bloom" on it there was no way to reach the
-        // settings and no way to quit without opening a window first. Every status item on this
-        // Mac ends in Quit.
-        menu.addItem(.separator())
-        let open = NSMenuItem(title: "Open Bloom", action: #selector(openWindow), keyEquivalent: "")
-        open.target = self
-        menu.addItem(open)
-
-        let settings = NSMenuItem(
-            title: "Settings\u{2026}", action: #selector(openSettings), keyEquivalent: ""
-        )
-        settings.target = self
-        menu.addItem(settings)
-
+        menu.addItem(ClosureMenuItem("Usage Settings\u{2026}") { [weak self] in
+            guard let self, let app = self.app, let button = self.item?.button else { return }
+            self.panel.show(from: button, app: app, screen: .settings)
+        })
+        menu.addItem(ClosureMenuItem("Bloom Settings\u{2026}") { Self.openBloomSettings() })
         menu.addItem(.separator())
         // Target left nil so it travels the responder chain to `NSApp`, which is what runs
-        // `applicationShouldTerminate` and therefore what stops on a running turn. A quit wired
-        // straight to this object would be a quit that skips that question.
-        menu.addItem(
-            NSMenuItem(
-                title: "Quit Bloom",
-                action: #selector(NSApplication.terminate(_:)),
-                keyEquivalent: ""
-            )
-        )
+        // `applicationShouldTerminate` and therefore what stops on a running turn.
+        menu.addItem(NSMenuItem(title: "Quit Bloom", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+
+        item?.menu = menu
+        button.performClick(nil)
+        item?.menu = nil
     }
 
-    /// The limits panel, hosted in a menu item.
-    ///
-    /// A custom view rather than rows of text, because the one thing worth knowing here is a
-    /// proportion and a menu item's title cannot draw one. `QuotaPanel` is the whole of the
-    /// drawing and the whole of the layout; this only decides where it hangs.
-    ///
-    /// The item is disabled on purpose. AppKit highlights a custom view's item under the pointer
-    /// exactly as it would a real command, and an item that lights up when you cross it and then
-    /// does nothing when you click reads as a bug. Disabling it costs the accessibility label,
-    /// which is why one is set by hand.
-    ///
-    /// The board is built here rather than held on `AppModel` because two of its three decisions
-    /// are about the current instant: which windows have already turned over, and how long every
-    /// countdown in one drawing has left. The menu is built at the moment it opens, which is the
-    /// only moment those are worth deciding.
-    ///
-    /// The view is measured with `fittingSize` and pinned. An `NSHostingView` inside a menu item
-    /// is given no layout pass by the menu, so a view left to size itself lands with a zero height
-    /// frame and the row collapses to nothing.
-    private func limits() -> NSMenuItem {
-        let board = QuotaBoard.make(from: app?.quotas ?? [])
-        let host = NSHostingView(rootView: QuotaPanel(
-            board: board,
-            freshness: QuotaFreshness.of(board)
-        ))
-        host.frame = CGRect(origin: .zero, size: host.fittingSize)
+    private static func keepAwakeItem() -> NSMenuItem {
+        let keepAwake = KeepAwakeModel.shared
+        let menu = NSMenu()
+        if keepAwake.isActive {
+            menu.addItem(ClosureMenuItem("Stop Keeping Awake") { keepAwake.stop() })
+            menu.addItem(.separator())
+        }
+        menu.addItem(ClosureMenuItem("Indefinitely") { keepAwake.start(for: nil) })
 
-        let item = NSMenuItem()
-        item.view = host
-        item.isEnabled = false
-        item.toolTip = Self.limitCaveat
-        item.setAccessibilityLabel(MenuBarSummary.limitSentence(for: board))
-        return item
+        let minutes = NSMenu()
+        for count in KeepAwake.minuteChoices {
+            minutes.addItem(ClosureMenuItem(KeepAwake.label(minutes: count)) { keepAwake.start(for: TimeInterval(count * 60)) })
+        }
+        let minutesItem = NSMenuItem(title: "Minutes", action: nil, keyEquivalent: "")
+        minutesItem.submenu = minutes
+        menu.addItem(minutesItem)
+
+        let hours = NSMenu()
+        for count in KeepAwake.hourChoices {
+            hours.addItem(ClosureMenuItem(KeepAwake.label(hours: count)) { keepAwake.start(for: TimeInterval(count * 3600)) })
+        }
+        let hoursItem = NSMenuItem(title: "Hours", action: nil, keyEquivalent: "")
+        hoursItem.submenu = hours
+        menu.addItem(hoursItem)
+
+        menu.addItem(.separator())
+        let whileRunning = ClosureMenuItem(SleepPrevention.menuItemTitle) {
+            // Written, not just registered, so the choice survives a relaunch. `AgentActivityReporter`
+            // watches the same key and is what retakes or drops the assertion.
+            let defaults = UserDefaults.standard
+            defaults.set(!defaults.bool(forKey: SleepPrevention.settingKey), forKey: SleepPrevention.settingKey)
+        }
+        whileRunning.state = UserDefaults.standard.bool(forKey: SleepPrevention.settingKey) ? .on : .off
+        whileRunning.toolTip = SleepPrevention.caveat
+        menu.addItem(whileRunning)
+
+        let parent = NSMenuItem(title: KeepAwake.title, action: nil, keyEquivalent: "")
+        parent.image = NSImage(systemSymbolName: KeepAwake.menuBarSymbol, accessibilityDescription: nil)
+        parent.submenu = menu
+        return parent
     }
 
-    /// Said once, in the tooltip, because it explains a blank that would otherwise look broken:
-    /// a Claude window with no figure beside it has not been measured rather than gone unused.
-    private static let limitCaveat =
-        "Claude Code publishes a usage figure only once a window passes its warning threshold. "
-        + "Codex publishes one after every turn."
-
-    /// One fixed phrase with a checkmark, not a label that rewrites itself. See `SleepPrevention`.
-    ///
-    /// Read straight out of `UserDefaults` here rather than cached, because the menu is built at
-    /// the moment it opens and this is the cheapest way for it to agree with a Settings window
-    /// that may have changed the value a second ago.
-    private func sleepToggle() -> NSMenuItem {
-        let item = NSMenuItem(
-            title: SleepPrevention.menuItemTitle,
-            action: #selector(togglePreventsSleep),
-            keyEquivalent: ""
-        )
-        item.target = self
-        item.state = UserDefaults.standard.bool(forKey: SleepPrevention.settingKey) ? .on : .off
-        item.toolTip = SleepPrevention.caveat
-        return item
-    }
-
-    @objc private func togglePreventsSleep() {
-        let defaults = UserDefaults.standard
-        // Written, not just registered, so the choice survives a relaunch. `AgentActivityReporter`
-        // is watching the same key through `@AppStorage` and is what actually retakes or drops the
-        // assertion, so the switch has one owner whichever surface was clicked.
-        defaults.set(!defaults.bool(forKey: SleepPrevention.settingKey), forKey: SleepPrevention.settingKey)
-    }
-
-    private func disabled(_ title: String) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        return item
-    }
-
-    private func entry(for workspace: Workspace, symbol: String, label: String) -> NSMenuItem {
-        let item = NSMenuItem(title: workspace.name, action: #selector(select(_:)), keyEquivalent: "")
-        item.target = self
-        item.represent(workspace.id)
-        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
-        return item
-    }
-
-    @objc private func select(_ sender: NSMenuItem) {
-        guard let id = sender.represented(WorkspaceID.self) else { return }
-        MainWindow.raise()
-        OpenWorkspaceNotification.post(id)
-    }
-
-    @objc private func openWindow() {
-        MainWindow.raise()
-    }
-
-    /// Opens the `Settings` scene from a menu that is not a view.
+    /// Opens the `Settings` scene from somewhere that is not a view.
     ///
     /// `NSApp.sendAction(Selector(("showSettingsWindow:")))` is the answer usually given and it
     /// does nothing here: SwiftUI installs that action on the menu item rather than on the
     /// responder chain. Driving the item itself is what opens the window, which is the same thing
     /// `Snapshot.openSettingsWindow` records having found out.
-    @objc private func openSettings() {
+    static func openBloomSettings() {
         NSApp.activate(ignoringOtherApps: true)
         // Matched by prefix, because the item carries an ellipsis.
         guard let appMenu = NSApp.mainMenu?.items.first?.submenu,
               let index = appMenu.items.firstIndex(where: { $0.title.hasPrefix("Settings") })
         else { return }
         appMenu.performActionForItem(at: index)
+    }
+}
+
+/// A menu item that runs a closure, for the status item's short menu.
+@MainActor
+private final class ClosureMenuItem: NSMenuItem {
+    private let handler: @MainActor () -> Void
+
+    init(_ title: String, handler: @escaping @MainActor () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(fire), keyEquivalent: "")
+        target = self
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+
+    @objc private func fire() {
+        handler()
     }
 }

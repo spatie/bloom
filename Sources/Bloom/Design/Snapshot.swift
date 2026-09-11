@@ -915,7 +915,7 @@ enum Snapshot {
         // scene here whose whole point is what a CLI actually answered, and a picture of invented
         // percentages would be a picture of nothing. A machine with neither CLI installed renders
         // the panel's own empty state, which is also worth a photograph.
-        let board = QuotaBoard.make(from: await AgentQuotaSources.readAll())
+        let report = await AgentQuotaSources.report()
 
         let scenes: [(String, AnyView, CGSize)] = [
             ("workspace-setup", AnyView(WorkspaceSetupOptionGallery()), CGSize(width: 760, height: 200)),
@@ -986,16 +986,12 @@ enum Snapshot {
             // same directory, so whichever ran second replaced a real photograph with a yellow
             // bar, and they disagreed about the width while doing it (800 here, 820 there).
 
-            // On the menu's own ground rather than the window's, because every colour in this
-            // panel is an AppKit semantic one chosen to sit on a menu. See `QuotaPanel`.
+            // The usage panel's dashboard on its own ground, drawn from what the two CLIs answered.
+            // See `UsagePanelView`.
             (
                 "limits",
-                AnyView(
-                    QuotaPanel(board: board, freshness: QuotaFreshness.of(board))
-                        .padding(.vertical, 8)
-                        .background(Color(nsColor: .windowBackgroundColor))
-                ),
-                CGSize(width: QuotaPanel.width + 43, height: 300)
+                AnyView(UsagePanelSnapshot(quotas: report.quotas, accounts: report.accounts, now: Date())),
+                CGSize(width: UsagePanelView.width, height: 900)
             ),
             // And the states a real ask cannot produce on the machine this runs on: a window
             // nobody measured, a provider absent, extra usage switched on, a window past its wall.
@@ -1008,7 +1004,7 @@ enum Snapshot {
                     LimitsStateGallery()
                         .background(Color(nsColor: .windowBackgroundColor))
                 ),
-                CGSize(width: QuotaPanel.width + 43, height: 1500)
+                CGSize(width: UsagePanelView.width, height: 2400)
             ),
         ]
 
@@ -1326,16 +1322,47 @@ private struct LimitsStateGallery: View {
                 Text(scene.0)
                     .font(Font(NSFont.menuFont(ofSize: 0)).weight(.semibold))
                     .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-                    .padding(.leading, 29)
+                    .padding(.leading, 22)
                     .padding(.top, 20)
-                    .padding(.bottom, 6)
-                QuotaPanel(
-                    board: QuotaBoard.make(from: scene.1, at: Self.now),
-                    freshness: scene.2,
-                    now: Self.now
+                UsagePanelSnapshot(
+                    quotas: scene.1,
+                    staleAge: { if case .stale(let age) = scene.2 { return age } else { return nil } }(),
+                    now: Self.now,
+                    showsMachineCards: false
                 )
             }
         }
         .padding(.bottom, 20)
+    }
+}
+
+/// The usage panel's dashboard drawn from quotas handed to it, for the two limits scenes above.
+/// The panel's own model supplies the layout and the display settings, as it does on screen.
+private struct UsagePanelSnapshot: View {
+    let quotas: [AgentQuota]
+    var accounts: [AgentAccount] = []
+    /// How old every figure is, for the scene that shows a card marked "Outdated".
+    var staleAge: TimeInterval?
+    let now: Date
+    var showsMachineCards = true
+
+    var body: some View {
+        let byProvider = Dictionary(accounts.map { ($0.provider, $0) }, uniquingKeysWith: { first, _ in first })
+        let observed = staleAge.map { age in
+            Dictionary(quotas.map { ($0.provider, now.addingTimeInterval(-age)) }, uniquingKeysWith: { first, _ in first })
+        } ?? UsageDashboardView.oldestReadings(quotas)
+        UsageDashboardView(
+            metrics: UsageCatalogue.metrics(quotas: quotas, accounts: byProvider, at: now),
+            accounts: byProvider,
+            observedAt: observed,
+            isRefreshing: false,
+            agentSections: [],
+            runningCount: 0,
+            now: now,
+            showsMachineCards: showsMachineCards
+        )
+        .frame(width: UsagePanelView.width)
+        .background(UsageInk.tray)
+        .environment(UsagePanelModel.shared)
     }
 }

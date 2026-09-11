@@ -63,6 +63,9 @@ final class AppModel {
     /// from one clock reading. The menu is built at the moment it opens, so it takes that reading
     /// itself and this stays the durable half.
     private(set) var quotas: [AgentQuota] = []
+    /// What each provider said about the account on the last ask: its plan and, for Codex, its
+    /// balances. In memory rather than in the store, for the reason `AgentAccount` gives.
+    private(set) var accounts: [AgentKind: AgentAccount] = [:]
 
     /// Selecting a workspace is the moment its live model should come into existence, rather than
     /// the moment some view body happens to ask for it. Doing it here keeps model creation out of
@@ -354,8 +357,11 @@ final class AppModel {
     /// When the one asker last went out, and whether it is still out. Together they are what
     /// makes it one asker: every route into `askForQuotas` reads both, so a background poll, a
     /// menu opening and ten workspaces all collapse into a single question per interval.
-    @ObservationIgnored private var lastQuotaAskAt: Date?
-    @ObservationIgnored private var isAskingForQuotas = false
+    ///
+    /// Observed, because the usage panel's footer counts down to the next ask and says "Updating"
+    /// while one is out. Both change twice per ask, which is nothing to publish.
+    private(set) var lastQuotaAskAt: Date?
+    private(set) var isAskingForQuotas = false
     private var identityTask: Task<Void, Never>?
     /// The launch sweep for project icons. Not private, because the work it does is in
     /// `AppModel+ProjectIcons.swift`, and outside observation because nothing draws from it.
@@ -701,7 +707,11 @@ final class AppModel {
         isAskingForQuotas = true
         lastQuotaAskAt = Date()
         defer { isAskingForQuotas = false }
-        await recordQuotas(await AgentQuotaSources.readAll())
+        let report = await AgentQuotaSources.report()
+        for account in report.accounts where accounts[account.provider] != account {
+            accounts[account.provider] = account
+        }
+        await recordQuotas(report.quotas)
     }
 
     /// The background poll, which is what keeps the menu bar's own severity honest for somebody
