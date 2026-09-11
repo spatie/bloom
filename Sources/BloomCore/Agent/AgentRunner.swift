@@ -521,6 +521,16 @@ public actor AgentRunner {
             return
         }
 
+        // A background task finishing between turns is what the CLI starts a turn of its own for,
+        // and this line is the only one saying so. Stored as the row that opens that turn, so the
+        // work under it is not drawn straight after a footer as if the footer had been wrong.
+        // Read before the `init` that follows it, which is what moves the state on. See
+        // `BackgroundWake`.
+        if case .subagent(.reported(let report)) = event, !report.raw.isEmpty,
+           BackgroundWake.opensTurn(during: session.state) {
+            await persist(kind: .system, payload: report.raw)
+        }
+
         if event.isTranscriptRow || persistsStreamDeltas {
             var durationMS: Int?
             if case .result(let result) = event { durationMS = result.durationMS }
