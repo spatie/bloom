@@ -18,20 +18,41 @@ The Navigate menu contains:
   This lightweight outline recognises common declaration syntax. It is not a semantic index.
 - **Go to line:** accepts a one-based line and optional column, such as `42:7`.
 - **Go to Definition:** asks an installed language server about the symbol at the caret.
+- **Find Usages:** lists references to the symbol, excluding its declaration.
 - **Ask about selected code:** appends the file, line range and selected text to the chosen
   conversation's draft. It does not send the message.
 
 Command-click a relative import or file path to follow it. Command-click a symbol to request its
-definition. Go to Definition is also available in the editor's contextual menu. Bloom looks for
+definition. When that definition points back to the clicked symbol, Command-click lists its usages
+instead. Command-Shift-click opens the destination in a new tab, including a destination chosen
+from multiple results. A single definition or usage opens directly. Go to Definition and Find
+Usages are both available in the contextual menu. Bloom looks for
 SourceKit-LSP, TypeScript Language Server, Intelephense, Pyright, rust-analyzer, gopls, Ruby LSP or
 Vue Language Server on PATH, according to the file's language. It does not install servers.
 Lookups reuse a connection for up to a minute of inactivity, using the
 [Language Server Protocol](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/).
 Project dependencies and the server's available build information determine what it can resolve.
-Multiple definitions offer a chooser; missing servers and failed requests are reported in the pane.
+Multiple definitions open a native menu beside the symbol, with project-relative paths.
+Ignored files follow project files, and Laravel Idea helpers under `vendor/_laravel_idea/` come last; missing servers and failed requests are reported in the pane.
+
+For PHP and Blade files inside a Laravel app, Bloom also queries
+[Laravel LSP](https://github.com/laravel/lsp). Install it with
+`composer global require laravel/lsp` and put Composer's global `vendor/bin` directory on PATH.
+Intelephense handles PHP symbols and usages; Laravel LSP adds framework definitions such as
+`view('front.blog.index')`, which opens `resources/views/front/blog/index.blade.php`.
+Both use the current editor contents, including unsaved changes. Results are combined and deduplicated.
+The nearest directory containing `artisan` and `composer.json` within the workspace is the Laravel
+root. Its dependencies, including Tinker, must be installed so Laravel LSP can boot the app.
+Bloom forwards file changes to refresh Laravel's index and disables Pest helper generation.
+Quoted PHP and Blade references try language servers before the ordinary file-path fallback.
+Command-Shift-click opens the result in a new tab, including Laravel views.
+
+Hold Command over a word to underline the definition lookup target. The underline marks where a
+lookup can be requested; the language server may still return no definition. Command-[ and
+Command-] move backwards and forwards while a file or diff pane has focus.
 
 The editor supports native undo and find, automatic indentation, Tab and Shift-Tab for indenting
-selections, Command-[ and Command-] for indentation, and Command-/ for toggling comments.
+selections, Command-Option-[ and Command-Option-] for indentation, and Command-/ for toggling comments.
 Matching brackets and the current line are highlighted. Syntax colouring includes embedded script
 and style regions in Vue and HTML, Blade expressions, and JSX attributes and expressions.
 Large buffers remain editable with plain text above the highlighting limit of 400,000 UTF-16 units.
@@ -49,3 +70,8 @@ Saving still refuses a disk version that changed after the comparison was loaded
 For development, `Bloom --source-editor-probe` checks the native editor in an unshown window and
 writes light and dark screenshots under `/tmp/editor-*.png`. Add `--language-server` to check a
 real SourceKit-LSP lookup between two temporary Swift files. Use an isolated `BLOOM_DB_PATH`.
+
+`./Tools/test-core.sh EditorExperienceTests WorktreeWatcherTests` covers navigation and file
+watching. Set `BLOOM_LOCAL_LSP=1` for the real Intelephense check. To also test Laravel view links,
+set `BLOOM_LARAVEL_LSP_VENDOR` to the `vendor` directory of a disposable Laravel app with Tinker
+installed; the test creates its own app and checks unsaved content and renamed Blade files.

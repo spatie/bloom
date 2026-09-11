@@ -29,8 +29,7 @@ enum FileReview {
 
     static func open(location: CodeLocation, in model: WorkspaceModel, recording: Bool = true) {
         var location = location
-        let root = model.workspace.path + "/"
-        if location.path.hasPrefix(root) { location.path = String(location.path.dropFirst(root.count)) }
+        location.path = location.displayPath(relativeTo: model.workspace.path)
         if recording { SourceNavigation.shared.visit(location, in: model) }
         let absolute = (location.path as NSString).isAbsolutePath ? location.path
             : (model.workspace.path as NSString).appendingPathComponent(location.path)

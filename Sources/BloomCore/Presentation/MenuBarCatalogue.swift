@@ -124,6 +124,8 @@ public enum MenuBarCatalogue {
         MenuBarItem(.previousTab, in: .view, "Previous Tab", key: .init("[", .command, .shift), availability: .needsSeveralTabs),
         MenuBarItem(.nextTab, in: .view, "Next Tab", key: .init("]", .command, .shift), availability: .needsSeveralTabs),
         MenuBarItem(.goToTab, in: .view, "Go to Tab", availability: .needsTab),
+        MenuBarItem(.fileBack, in: .view, "Go Back in Files", key: .init("[", .command), availability: .needsReview),
+        MenuBarItem(.fileForward, in: .view, "Go Forward in Files", key: .init("]", .command), availability: .needsReview),
         MenuBarItem(.nextChangedFile, in: .view, "Next Changed File", key: .init("j", .command, .option), availability: .needsReview),
         MenuBarItem(.previousChangedFile, in: .view, "Previous Changed File", key: .init("k", .command, .option), availability: .needsReview),
         MenuBarItem(.toggleSidebar, in: .view, "Toggle Sidebar", key: .init("s", .command, .control)),
@@ -231,6 +233,8 @@ public enum MenuBarAction: String, CaseIterable, Sendable {
     case previousTab
     case nextTab
     case goToTab
+    case fileBack
+    case fileForward
     case nextChangedFile
     case previousChangedFile
     case toggleSidebar

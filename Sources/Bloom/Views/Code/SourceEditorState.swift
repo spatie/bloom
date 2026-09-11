@@ -26,7 +26,6 @@ final class SourceEditorState {
     var request: CodeLocation?
     var revision = 0
     @ObservationIgnored var navigationTask: Task<Void, Never>?
-    var definitions: [CodeLocation] = []
     var message: String?
     var prefersEditing = false
     @ObservationIgnored weak var textView: CodeTextView?

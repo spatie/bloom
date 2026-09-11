@@ -5,7 +5,7 @@ public enum SourceLanguageServerError: LocalizedError, Sendable {
     case failed(String)
     public var errorDescription: String? {
         switch self {
-        case let .unavailable(name): "Go to Definition needs \(name) installed on your PATH."
+        case let .unavailable(name): "Code navigation needs \(name) installed on your PATH."
         case let .failed(message): message
         }
     }
@@ -13,6 +13,9 @@ public enum SourceLanguageServerError: LocalizedError, Sendable {
 
 /// A reusable LSP connection. A short idle lifetime lets background indexing finish between clicks.
 public actor SourceLanguageServer {
+    private let laravel: Bool
+    private var root: String?
+    private var fileRegistrations: Set<String> = []
     private let process = Process()
     private let input = Pipe()
     private let output = Pipe()
@@ -32,9 +35,17 @@ public actor SourceLanguageServer {
     public var isStopped: Bool { stopped }
     public func close() { stop() }
 
-    public init() {}
+    public init(laravel: Bool = false) { self.laravel = laravel }
 
     public func definition(root: String, path: String, text: String, offset: Int, language: Language) async throws -> [CodeLocation] {
+        try await lookup(root: root, path: path, text: text, offset: offset, language: language, references: false)
+    }
+
+    public func references(root: String, path: String, text: String, offset: Int, language: Language) async throws -> [CodeLocation] {
+        try await lookup(root: root, path: path, text: text, offset: offset, language: language, references: true)
+    }
+
+    private func lookup(root: String, path: String, text: String, offset: Int, language: Language, references: Bool) async throws -> [CodeLocation] {
         idleStop?.cancel()
         let firstRequest = initialisation == nil
         activeRequests += 1
@@ -55,7 +66,7 @@ public actor SourceLanguageServer {
         documentVersion += 1
         if documents[uri] == nil {
             try send(method: "textDocument/didOpen", params: .object(["textDocument": .object([
-                "uri": .string(uri), "languageId": .string(Self.languageID(language, path: path)),
+                "uri": .string(uri), "languageId": .string(languageID(language, path: path)),
                 "version": .integer(documentVersion), "text": .string(text),
             ])]))
         } else if documents[uri] != text {
@@ -76,32 +87,40 @@ public actor SourceLanguageServer {
             }
         }
         let position = CodeLocation.position(in: text, offset: offset)
-        let params = JSONValue.object([
+        var parameters: [String: JSONValue] = [
             "textDocument": .object(["uri": .string(uri)]),
             "position": .object(["line": .integer(position.line - 1), "character": .integer(position.column - 1)]),
-        ])
-        var locations = Self.locations(try await request("textDocument/definition", params))
+        ]
+        if references { parameters["context"] = .object(["includeDeclaration": .bool(false)]) }
+        let params = JSONValue.object(parameters)
+        let method = references ? "textDocument/references" : "textDocument/definition"
+        var locations = Self.locations(try await request(method, params))
         // A fresh server can answer before SwiftPM's background build settings and index arrive.
         // Keep the connection alive, and give the first lookup a bounded chance to become useful.
-        if firstRequest, locations.isEmpty {
+        if firstRequest, !laravel, locations.isEmpty {
             for delay in [1, 2, 3] where locations.isEmpty {
                 try await Task.sleep(for: .seconds(delay))
-                locations = Self.locations(try await request("textDocument/definition", params))
+                locations = Self.locations(try await request(method, params))
             }
         }
         return locations
     }
 
     private func initialise(root: String, language: Language) async throws {
-        let command = Self.command(for: language)
+        self.root = root
+        let command = laravel ? ("laravel-lsp", [String]()) : Self.command(for: language)
         guard let executable = Shell.which(command.0) else { throw SourceLanguageServerError.unavailable(command.0) }
         try Task.checkCancellation()
         try start(executable: executable, arguments: command.1, root: root)
         let rootURI = URL(fileURLWithPath: root).absoluteString
         // The TypeScript syntax server can stop at an import alias while its semantic server
         // starts. Definition-only clients need the semantic answer on the first click.
-        let options: JSONValue = language == .typescript || language == .javascript
-            ? .object(["tsserver": .object(["useSyntaxServer": .string("never")])]) : .object([:])
+        let options: JSONValue
+        if laravel {
+            options = .object(["pestGenerateDocBlocks": .bool(false)])
+        } else if language == .typescript || language == .javascript {
+            options = .object(["tsserver": .object(["useSyntaxServer": .string("never")])])
+        } else { options = .object([:]) }
         let response = try await request("initialize", .object([
             "processId": .integer(Int(ProcessInfo.processInfo.processIdentifier)),
             "rootUri": .string(rootURI),
@@ -109,7 +128,10 @@ public actor SourceLanguageServer {
             "workspaceFolders": .array([.object(["uri": .string(rootURI), "name": .string((root as NSString).lastPathComponent)])]),
             "capabilities": .object([
                 "general": .object(["positionEncodings": .array([.string("utf-16")])]),
-                "textDocument": .object(["definition": .object(["linkSupport": .bool(true)])]),
+                "workspace": .object(["didChangeWatchedFiles": .object([
+                    "dynamicRegistration": .bool(laravel), "relativePatternSupport": .bool(laravel),
+                ])]),
+                "textDocument": .object(["definition": .object(["linkSupport": .bool(true)]), "references": .object([:])]),
             ]),
         ]))
         if let encoding = response["capabilities"]?["positionEncoding"]?.stringValue, encoding != "utf-16" {
@@ -141,7 +163,8 @@ public actor SourceLanguageServer {
         }
     }
 
-    private static func languageID(_ language: Language, path: String) -> String {
+    private func languageID(_ language: Language, path: String) -> String {
+        if language == .blade, !laravel { return "php" }
         if path.hasSuffix(".tsx") { return "typescriptreact" }
         if path.hasSuffix(".jsx") { return "javascriptreact" }
         return language == .shell ? "shellscript" : language.rawValue
@@ -155,7 +178,7 @@ public actor SourceLanguageServer {
                   let position = (value["targetSelectionRange"] ?? value["range"])?["start"],
                   let line = position["line"]?.intValue, let column = position["character"]?.intValue,
                   line >= 0, column >= 0, line < Int.max, column < Int.max else { return nil }
-            return CodeLocation(path: url.path, line: line + 1, column: column + 1)
+            return CodeLocation(path: url.standardizedFileURL.path, line: line + 1, column: column + 1)
         }
     }
 
@@ -234,10 +257,25 @@ public actor SourceLanguageServer {
             for message in try frames.append(data) {
                 if let method = message["method"]?.stringValue {
                     if let id = message["id"] {
-                        // Navigation never applies workspace edits requested by a server.
-                        let result: JSONValue = method == "workspace/configuration"
-                            ? .array((message["params"]?["items"]?.arrayValue ?? []).map { _ in .null }) : .null
-                        try? write(.object(["jsonrpc": .string("2.0"), "id": id, "result": result]))
+                        if method == "client/registerCapability", laravel {
+                            for registration in message["params"]?["registrations"]?.arrayValue ?? [] {
+                                if registration["method"]?.stringValue == "workspace/didChangeWatchedFiles",
+                                   let name = registration["id"]?.stringValue { fileRegistrations.insert(name) }
+                            }
+                            try? write(.object(["jsonrpc": .string("2.0"), "id": id, "result": .null]))
+                        } else if method == "client/unregisterCapability", laravel {
+                            for registration in message["params"]?["unregisterations"]?.arrayValue ?? [] {
+                                if let name = registration["id"]?.stringValue { fileRegistrations.remove(name) }
+                            }
+                            try? write(.object(["jsonrpc": .string("2.0"), "id": id, "result": .null]))
+                        } else if method == "workspace/configuration" {
+                            let result = JSONValue.array((message["params"]?["items"]?.arrayValue ?? []).map { _ in .null })
+                            try? write(.object(["jsonrpc": .string("2.0"), "id": id, "result": result]))
+                        } else {
+                            try? write(.object(["jsonrpc": .string("2.0"), "id": id, "error": .object([
+                                "code": .integer(-32601), "message": .string("Client method not supported."),
+                            ])]))
+                        }
                     }
                     continue
                 }
@@ -250,6 +288,15 @@ public actor SourceLanguageServer {
                 }
             }
         } catch { stop() }
+    }
+
+    public func filesChanged(_ changes: [(path: String, type: Int)]) {
+        guard !stopped, !fileRegistrations.isEmpty, let root else { return }
+        let events = changes.filter { $0.path.hasPrefix(root + "/") }.map { change in
+            JSONValue.object(["uri": .string(URL(fileURLWithPath: change.path).absoluteString), "type": .integer(change.type)])
+        }
+        guard !events.isEmpty else { return }
+        do { try send(method: "workspace/didChangeWatchedFiles", params: .object(["changes": .array(events)])) } catch { stop() }
     }
 
     private func stop() {

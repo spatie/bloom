@@ -15,10 +15,10 @@ struct SourceTools: View {
         HStack(spacing: InspectorLayout.gap) {
             Button { navigation.move(-1, in: model) } label: { Image(systemName: "chevron.left") }
                 .disabled(navigation.histories[model.workspace.id]?.canGoBack != true)
-                .help("Go back")
+                .help("Go back (Command-[)")
             Button { navigation.move(1, in: model) } label: { Image(systemName: "chevron.right") }
                 .disabled(navigation.histories[model.workspace.id]?.canGoForward != true)
-                .help("Go forward")
+                .help("Go forward (Command-])")
             Button("Find") { state.find() }
                 .help("Find in this file (Command-F)")
             Menu("Navigate") {
@@ -27,6 +27,9 @@ struct SourceTools: View {
                 Button("Go to line…") { line = ""; showsLine = true }
                 Button("Go to Definition") {
                     SourceActions.definition(at: state.selection.location, path: path, model: model, state: state)
+                }
+                Button("Find Usages") {
+                    SourceActions.references(at: state.selection.location, path: path, model: model, state: state)
                 }
                 Divider()
                 Button("Ask about selected code") { SourceActions.ask(path: path, model: model, state: state) }

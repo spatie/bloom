@@ -76,25 +76,7 @@ struct FileEditPane: View {
                 await session.refresh(path: absolutePath)
             }
         }
-        .sheet(isPresented: Binding(
-            get: { comparing || !state.definitions.isEmpty },
-            set: { if !$0 { comparing = false; state.definitions = [] } }
-        )) {
-            if comparing { comparison } else { definitionChoices }
-        }
-    }
-
-    private var definitionChoices: some View {
-        VStack(alignment: .leading, spacing: Metrics.spacing) {
-            Text("Choose a definition").font(Typo.bodyEmphasis)
-            ForEach(state.definitions, id: \.self) { location in
-                Button("\(location.path):\(location.line)") {
-                    state.definitions = []
-                    FileReview.open(location: location, in: model)
-                }
-            }
-            Button("Cancel") { state.definitions = [] }.keyboardShortcut(.cancelAction)
-        }.padding(Metrics.inset)
+        .sheet(isPresented: $comparing) { comparison }
     }
 
     @ViewBuilder
@@ -109,8 +91,10 @@ struct FileEditPane: View {
                     colorScheme: colorScheme,
                     isEditable: isEditable,
                     editorState: state,
-                    onOpenReference: { SourceActions.open($0, path: path, model: model, state: state) },
+                    onOpenReference: { SourceActions.open($0, at: $1, path: path, model: model, state: state, newTab: $2) },
                     onDefinition: { SourceActions.definition(at: $0, path: path, model: model, state: state) },
+                    onReferences: { SourceActions.references(at: $0, path: path, model: model, state: state) },
+                    onNavigateSymbol: { SourceActions.navigate(at: $0, path: path, model: model, state: state, newTab: $1) },
                     onAsk: { SourceActions.ask(path: path, model: model, state: state) }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

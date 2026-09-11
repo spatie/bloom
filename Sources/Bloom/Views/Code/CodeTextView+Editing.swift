@@ -20,11 +20,18 @@ extension CodeTextView {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // Key-equivalent lookup can visit sibling views. Only the editor holding the caret acts.
+        if window?.firstResponder === self, modifiers == [.command, .option], isEditable {
+            switch event.charactersIgnoringModifiers {
+            case "[": editLines(.outdent); return true
+            case "]": editLines(.indent); return true
+            default: break
+            }
+        }
         if window?.firstResponder === self, modifiers == .command, isEditable {
             switch event.charactersIgnoringModifiers {
             case "/": editLines(.comment); return true
-            case "]": editLines(.indent); return true
-            case "[": editLines(.outdent); return true
+            case "]" where editorState == nil: editLines(.indent); return true
+            case "[" where editorState == nil: editLines(.outdent); return true
             default: break
             }
         }
@@ -35,13 +42,21 @@ extension CodeTextView {
         if event.modifierFlags.contains(.command), onOpenReference != nil {
             let point = convert(event.locationInWindow, from: nil)
             let index = characterIndexForInsertion(at: point)
-            if let reference = reference(at: index) { onOpenReference?(reference) } else { onDefinition?(index) }
+            let newTab = event.modifierFlags.contains(.shift)
+            if let reference = reference(at: index) {
+                onOpenReference?(reference, index, newTab)
+            } else if let onNavigateSymbol {
+                onNavigateSymbol(index, newTab)
+            } else {
+                onDefinition?(index)
+            }
             return
         }
         super.mouseDown(with: event)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
+        contextOffset = characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
         let menu = super.menu(for: event) ?? NSMenu()
         menu.addItem(.separator())
         if onAsk != nil, selectedRange().length > 0 {
@@ -54,6 +69,11 @@ extension CodeTextView {
             definition.target = self
             menu.addItem(definition)
         }
+        if onReferences != nil {
+            let references = NSMenuItem(title: "Find Usages", action: #selector(findUsages), keyEquivalent: "")
+            references.target = self
+            menu.addItem(references)
+        }
         if isEditable {
             let comment = NSMenuItem(title: "Toggle Comment", action: #selector(toggleComment), keyEquivalent: "/")
             comment.target = self
@@ -63,8 +83,87 @@ extension CodeTextView {
     }
 
     @objc private func askAboutSelection() { onAsk?() }
-    @objc private func goToDefinition() { onDefinition?(selectedRange().location) }
+    @objc private func goToDefinition() { onDefinition?(contextOffset) }
+    @objc private func findUsages() { onReferences?(contextOffset) }
     @objc private func toggleComment() { editLines(.comment) }
+
+    func showDefinitions(_ locations: [CodeLocation], root: String, offset: Int, title: String = "Definitions", open: @escaping (CodeLocation) -> Void) {
+        guard let layoutManager, let textContainer, window != nil else { return }
+        let menu = NSMenu(title: title)
+        for location in locations {
+            let title = "\(location.displayPath(relativeTo: root)):\(location.line):\(location.column)"
+            let item = NSMenuItem(title: title, action: #selector(openDefinitionChoice(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = location
+            item.toolTip = location.path
+            menu.addItem(item)
+        }
+        let start = min(offset, string.utf16.count)
+        let range = NSRange(location: start, length: start < string.utf16.count ? 1 : 0)
+        let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let rect = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+        let point = NSPoint(x: rect.minX + textContainerOrigin.x, y: rect.maxY + textContainerOrigin.y)
+        definitionChoice = open
+        menu.popUp(positioning: nil, at: point, in: self)
+        definitionChoice = nil
+    }
+
+    @objc private func openDefinitionChoice(_ sender: NSMenuItem) {
+        guard let location = sender.representedObject as? CodeLocation else { return }
+        definitionChoice?(location)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas where area.owner === self { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        super.flagsChanged(with: event)
+        updateNavigationHint(command: event.modifierFlags.contains(.command))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        updateNavigationHint(command: event.modifierFlags.contains(.command))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        updateNavigationHint(command: event.modifierFlags.contains(.command))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        updateNavigationHint(command: false)
+    }
+
+    func updateNavigationHint(command: Bool) {
+        if let navigationRange {
+            layoutManager?.removeTemporaryAttribute(.underlineStyle, forCharacterRange: NSIntersectionRange(navigationRange, NSRange(location: 0, length: string.utf16.count)))
+            self.navigationRange = nil
+            NSCursor.iBeam.set()
+        }
+        guard command, onDefinition != nil, let window else { return }
+        let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        guard visibleRect.contains(point), let layoutManager, let textContainer else { return }
+        let index = characterIndexForInsertion(at: point)
+        let source = string as NSString
+        guard index < source.length, navigationSource == string else { return }
+        if let token = navigationTokens.first(where: { index >= $0.start && index < $0.start + $0.length }),
+           [.keyword, .comment, .number, .operator, .punctuation, .regex, .constant].contains(token.kind) { return }
+        let range = selectionRange(forProposedRange: NSRange(location: index, length: 0), granularity: .selectByWord)
+        guard range.length > 0, NSMaxRange(range) <= source.length,
+              source.substring(with: range).rangeOfCharacter(from: .letters) != nil else { return }
+        let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let rect = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+            .offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
+        guard rect.contains(point) else { return }
+        navigationRange = range
+        layoutManager.addTemporaryAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, forCharacterRange: range)
+        NSCursor.pointingHand.set()
+    }
 
     func editLines(_ command: SourceEditing.Command) {
         guard isEditable, let edit = SourceEditing.lines(in: string, selection: selectedRange(),
