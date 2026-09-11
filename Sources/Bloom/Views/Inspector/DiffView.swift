@@ -662,7 +662,7 @@ struct DiffView: View {
         priming = Task.detached(priority: .utility) {
             for line in lines {
                 guard !Task.isCancelled else { return }
-                _ = SyntaxCache.attributed(line: line.text, language: language, carry: line.carry)
+                _ = SyntaxCache.attributed(line: DiffLineDisplay.text(line.text), language: language, carry: line.carry)
             }
         }
     }
@@ -1022,7 +1022,7 @@ struct DiffView: View {
         func height(_ line: DiffLine?, numbers: DiffGutter.Numbers, width: CGFloat) -> CGFloat {
             let codeWidth = floor(max(1, width - DiffGutter.width(for: numbers)
                 - CodeMetrics.markerWidth - CodeMetrics.gutterPadding))
-            return WrappedCodeLayout.height(of: line?.text ?? "", width: codeWidth)
+            return WrappedCodeLayout.height(of: DiffLineDisplay.text(line?.text ?? ""), width: codeWidth)
         }
         func pairHeight(_ pair: SideBySideRow) -> CGFloat {
             let half = (width - Metrics.hairline) / 2
