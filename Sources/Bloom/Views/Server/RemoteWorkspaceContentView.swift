@@ -10,6 +10,8 @@ struct RemoteWorkspaceContentView: View {
     @State private var workspace: RemoteWorkspaceFileListing?
     @State private var showsConnectionFailure = false
     @State private var uiBridge: RemoteUIClientSession?
+    @State private var showsKeepDraftConfirmation = false
+    @State private var keepDraftCommand: RemoteCommand?
 
     private var availability: RemoteWorkspaceAvailability {
         RemoteWorkspaceAvailability.resolve(
@@ -42,6 +44,12 @@ struct RemoteWorkspaceContentView: View {
             session.start(using: service)
         }
         .popover(isPresented: $showsConnectionFailure) { ServerConnectionFailureView(server: model) }
+        .alert("Keep this message as a draft?", isPresented: $showsKeepDraftConfirmation, presenting: keepDraftCommand) { command in
+            Button("Cancel", role: .cancel) {}
+            Button("Keep as Draft") { model.keepPendingSendAsDraft(command) }
+        } message: { _ in
+            Text("The server may already have received this message. Retry Message is the safest way to confirm it. Keeping it as a draft ends retries of this attempt. Sending it later creates a new message, so check the conversation first. Your current draft will be kept.")
+        }
         .onDisappear { uiBridge?.stop(); uiBridge = nil }
         .safeAreaInset(edge: .top, spacing: 0) { connectionNotice }
         .safeAreaInset(edge: .bottom) {
@@ -84,10 +92,21 @@ struct RemoteWorkspaceContentView: View {
                             Text(sending ? "Waiting for the server to confirm receipt."
                                  : "It may already be on the server. Retry checks the same message without creating a duplicate.")
                                 .font(Typo.caption).foregroundStyle(.secondary)
+                            if !sending, let failure = model.selectedPendingSendFailure {
+                                Text(failure).font(Typo.caption).foregroundStyle(Palette.warning)
+                                    .textSelection(.enabled)
+                            }
                         }
                         Spacer(minLength: 8)
-                        Button("Retry Message") { Task { await model.retryPendingSend() } }
-                            .disabled(sending || !model.isConnected || model.isConnecting || model.isPerformingCommand)
+                        VStack(alignment: .trailing, spacing: Metrics.spacing) {
+                            Button("Retry Message") { Task { await model.retryPendingSend() } }
+                                .disabled(sending || !model.isConnected || model.isConnecting || model.isPerformingCommand)
+                            Button("Keep as Draft…") {
+                                keepDraftCommand = model.selectedPendingSend
+                                showsKeepDraftConfirmation = keepDraftCommand != nil
+                            }
+                            .disabled(sending || model.isPerformingCommand)
+                        }
                     }
                 }
             }

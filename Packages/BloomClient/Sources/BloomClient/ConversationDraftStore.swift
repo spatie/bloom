@@ -90,6 +90,16 @@ public final class ConversationDraftStore {
         }
     }
 
+    /// Only an explicit user decision may abandon an unconfirmed command. It can already be on
+    /// the server, so callers must explain that sending again creates a new message.
+    public func keepAsDraft(_ command: RemoteCommand, scope: Scope, sessionID: SessionID) throws {
+        try update(scope: scope, sessionID: sessionID) { draft in
+            guard draft.submission == command else { return }
+            if draft.text.isEmpty { draft.text = command.operation["send"]?["text"]?.stringValue ?? "" }
+            draft.submission = nil
+        }
+    }
+
     /// The caller must know which original connection owned unscoped legacy entries.
     /// Import never replaces newer scoped text or a pending submission.
     public func importLegacy(_ drafts: [String: String], scope: Scope) throws {

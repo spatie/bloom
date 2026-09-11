@@ -103,6 +103,7 @@ final class ServerWindowModel {
     var connectionRecovery = RemoteConnectionRecovery()
     private var nextConnectionRetry: Date?
     private(set) var pendingSendRevision = 0
+    private var pendingSendFailures: [UUID: String] = [:]
     private(set) var sendingSessionID: SessionID?
     var shouldReconnect = true
     private var connectionEditors: Set<UUID> = []
@@ -750,6 +751,26 @@ final class ServerWindowModel {
 
     var selectedPendingSend: RemoteCommand? { selectedSessionID.flatMap { pendingSend(sessionID: $0) } }
 
+    var selectedPendingSendFailure: String? { selectedPendingSend.flatMap { pendingSendFailures[$0.id] } }
+
+    func keepPendingSendAsDraft(_ command: RemoteCommand) {
+        guard let endpoint, let sessionID = selectedSessionID, sendingSessionID != sessionID,
+              pendingSend(sessionID: sessionID) == command else { return }
+        let scope = ConversationDraftStore.Scope(connectionID: PaneStateNamespace.connectionID(endpoint))
+        do {
+            try draftStore.save(text: conversationModels[sessionID]?.draft ?? draft, scope: scope, sessionID: sessionID)
+            try draftStore.keepAsDraft(command, scope: scope, sessionID: sessionID)
+            let restored = try draftStore.draft(scope: scope, sessionID: sessionID).text
+            draft = restored
+            conversationModels[sessionID]?.draft = restored
+            pendingSendFailures.removeValue(forKey: command.id)
+            pendingSendRevision += 1
+        } catch {
+            pendingSendFailures[command.id] = error.localizedDescription
+            self.error = error.localizedDescription
+        }
+    }
+
     func retryPendingSend() async {
         guard let id = selectedSessionID, let command = pendingSend(sessionID: id),
               let text = command.operation["send"]?["text"]?.stringValue else { return }
@@ -768,6 +789,7 @@ final class ServerWindowModel {
             self.error = error.localizedDescription
             return nil
         }
+        pendingSendFailures.removeValue(forKey: command.id)
         pendingSendRevision += 1
         sendingSessionID = sessionID
         defer { sendingSessionID = nil; pendingSendRevision += 1 }
@@ -780,6 +802,7 @@ final class ServerWindowModel {
             try draftStore.acknowledge(command, scope: scope, sessionID: sessionID)
             return reply.result
         } catch {
+            pendingSendFailures[command.id] = error.localizedDescription
             if error is ServerRefusal { self.error = error.localizedDescription } else if !Task.isCancelled {
                 await connectionFailed(error, generation: generation)
             }

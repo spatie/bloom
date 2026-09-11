@@ -60,6 +60,44 @@ struct DraftTests {
         #expect(throws: ConnectionFailure.self) { try store.save(text: "no", origin: "ssh://bloom:secret@server.example/var/lib/bloom", sessionID: session) }
     }
 
+    @Test func explicitKeepAsDraftPreservesNewerTextAndNextSendGetsANewIdentity() throws {
+        let file = location()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = ConversationDraftStore(file: file)
+        let scope = ConversationDraftStore.Scope(connectionID: "server")
+        let session = SessionID("one")
+        try store.save(text: "Original", scope: scope, sessionID: session)
+        let original = try store.prepare(scope: scope, sessionID: session)
+        try store.save(text: "Edited draft", scope: scope, sessionID: session)
+        try store.keepAsDraft(original, scope: scope, sessionID: session)
+        let relaunched = ConversationDraftStore(file: file)
+        let saved = try relaunched.draft(scope: scope, sessionID: session)
+        #expect(saved.text == "Edited draft")
+        #expect(saved.submission == nil)
+        let next = try relaunched.prepare(scope: scope, sessionID: session)
+        #expect(next.id != original.id)
+        #expect(next.operation["send"]?["text"]?.stringValue == "Edited draft")
+        try relaunched.keepAsDraft(original, scope: scope, sessionID: session)
+        #expect(try relaunched.draft(scope: scope, sessionID: session).submission == next)
+    }
+
+    @Test func explicitKeepAsDraftRestoresSentTextOnlyWhenDraftIsEmptyAndScopeMatches() throws {
+        let file = location()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let store = ConversationDraftStore(file: file)
+        let scope = ConversationDraftStore.Scope(connectionID: "server")
+        let other = ConversationDraftStore.Scope(connectionID: "other")
+        let session = SessionID("one")
+        let command = try store.prepare(scope: scope, sessionID: session, text: "Retain this prompt")
+        try store.keepAsDraft(command, scope: other, sessionID: session)
+        #expect(try store.draft(scope: scope, sessionID: session).submission == command)
+        #expect(try store.draft(scope: other, sessionID: session).text.isEmpty)
+        try store.keepAsDraft(command, scope: scope, sessionID: session)
+        let saved = try store.draft(scope: scope, sessionID: session)
+        #expect(saved.submission == nil)
+        #expect(saved.text == "Retain this prompt")
+    }
+
     @Test func matchingServerFailureDoesNotProveTheCommandNeverRan() async throws {
         let file = location()
         defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
