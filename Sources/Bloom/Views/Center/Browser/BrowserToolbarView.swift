@@ -167,15 +167,17 @@ struct BrowserToolbarView: View {
             actionGroup {
                 pageAction(toolbar.screenshot, action: capture)
                 Hairline(axis: .vertical)
+                // The style goes on the label, as in `BrowserToolbarButton`. Set on the button,
+                // `.accessoryBar` read it as the primary level and drew the glyph a level below,
+                // which is how a live Comment button came out in the grey of a disabled one.
                 Button(action: captureRegion) {
                     Label(isReviewing ? "Done" : "Comment", systemImage: isReviewing ? "checkmark" : "text.bubble")
-                        .font(Typo.label)
-                        .padding(.horizontal, Metrics.spacingSmall)
+                        .labelStyle(.iconOnly)
+                        .foregroundStyle(commentInk)
                 }
                 .buttonStyle(.accessoryBar)
-                .fixedSize(horizontal: true, vertical: false)
-                .foregroundStyle(isReviewing ? Palette.accent : Palette.textSecondary)
-                .disabled(isSavingReview || (!isReviewing && !toolbar.regionCapture.isEnabled))
+                .frame(width: pageActionWidth, height: Metrics.controlHeight)
+                .disabled(!isCommentEnabled)
                 .help(isReviewing ? "Finish reviewing this page" : "Drag over part of this page to leave a comment")
             }
             actionGroup {
@@ -187,6 +189,15 @@ struct BrowserToolbarView: View {
                 .frame(width: pageActionWidth, height: Metrics.controlHeight)
             }
         }
+    }
+
+    private var isCommentEnabled: Bool {
+        !isSavingReview && (isReviewing || toolbar.regionCapture.isEnabled)
+    }
+
+    private var commentInk: Color {
+        guard isCommentEnabled else { return Palette.textDisabled }
+        return isReviewing ? Palette.accent : Palette.textSecondary
     }
 
     private func actionGroup<Content: View>(@ViewBuilder content: () -> Content) -> some View {
