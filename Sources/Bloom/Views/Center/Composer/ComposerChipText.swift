@@ -41,11 +41,21 @@ enum InlineChip: Equatable, Sendable {
     /// without asking anything that only the press which composed the turn could answer.
     case instructions(InjectedInstruction)
 
-    /// What the chip reads.
+    /// What the chip reads. Bloom's own instruction files read as the button that sent them, the
+    /// same as the blocks it puts in the message, so a pull request turn and a merge turn draw the
+    /// same kind of chip. See `SentTurn.title(forFile:)`.
     var label: String {
         switch self {
-        case .file(let path): (path as NSString).lastPathComponent
+        case .file(let path): SentTurn.title(forFile: path) ?? (path as NSString).lastPathComponent
         case .instructions(let block): block.title
+        }
+    }
+
+    /// Whether this chip stands for instructions Bloom gave the agent, by either road.
+    var isInstructions: Bool {
+        switch self {
+        case .file(let path): SentTurn.title(forFile: path) != nil
+        case .instructions: true
         }
     }
 
@@ -521,23 +531,22 @@ final class AttachmentChipCell: NSTextAttachmentCell {
 
     /// The mark in the slot before the name.
     ///
-    /// A file gets the icon its kind is drawn with everywhere else in this window. A block of
-    /// instructions has no kind and no file for `FileTypeIcon` to answer about, so it gets a symbol
-    /// in the ground's own ink: the same `doc.text` the button under the bubble used to carry, kept
-    /// so that a reader who knew that chip still recognises this one.
+    /// A file gets the icon its kind is drawn with everywhere else in this window. Instructions
+    /// get a symbol in the ground's own ink, whether they are a block in the message or one of
+    /// Bloom's own files: the same `doc.text` the button under the bubble used to carry, kept so
+    /// that a reader who knew that chip still recognises this one. An instruction file drawn with
+    /// the markdown icon was the half of the inconsistency `SentTurn.title(forFile:)` did not fix.
     ///
     /// Built per draw rather than held, exactly as `close` is. One chip in a turn is one of these,
     /// and it is a glyph.
     private var icon: NSImage? {
-        switch subject {
-        case .file:
-            return FileTypeIcon.icon(for: label)
-        case .instructions:
-            let size = NSImage.SymbolConfiguration(pointSize: iconSize - 3, weight: .regular)
-            let colour = NSImage.SymbolConfiguration(paletteColors: [ground.ink])
-            return NSImage(systemSymbolName: "doc.text", accessibilityDescription: label)?
-                .withSymbolConfiguration(size.applying(colour))
+        if case .file(let path) = subject, !subject.isInstructions {
+            return FileTypeIcon.icon(for: (path as NSString).lastPathComponent)
         }
+        let size = NSImage.SymbolConfiguration(pointSize: iconSize - 3, weight: .regular)
+        let colour = NSImage.SymbolConfiguration(paletteColors: [ground.ink])
+        return NSImage(systemSymbolName: "doc.text", accessibilityDescription: label)?
+            .withSymbolConfiguration(size.applying(colour))
     }
 
     // MARK: - Taking it off
