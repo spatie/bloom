@@ -36,6 +36,7 @@ struct DiffView: View {
 
     @State private var phase: Phase = .loading
     @State private var rows: [DiffRow] = []
+    @State private var pendingDiffNavigation = false
     @State private var rowRevision = 0
     @State private var wrappedPresentation: WrappedPresentation?
 
@@ -175,7 +176,7 @@ struct DiffView: View {
         let absolute = (model.workspace.path as NSString).appendingPathComponent(file.path)
         _mode = State(initialValue: FileEditSession.shared.isDirty(absolute)
             || SourceEditorState.file(absolute).prefersEditing
-            || SourceEditorState.file(absolute).request != nil ? .edit : .diff)
+            || (embeddedWidth == nil && SourceEditorState.file(absolute).request != nil) ? .edit : .diff)
 
         let held = model.heldDiff(
             for: file,
@@ -255,18 +256,34 @@ struct DiffView: View {
             }
         }
         .onChange(of: SourceEditorState.file(absolutePath).revision) { _, _ in
-            if isEditable { mode = .edit }
+            if isEditable, embeddedWidth == nil { mode = .edit }
+        }
+        .onChange(of: SourceEditorState.file(absolutePath).diffRevision, initial: true) { _, _ in
+            let state = SourceEditorState.file(absolutePath)
+            guard state.diffRequest != nil, embeddedWidth != nil || state.request == nil else { return }
+            mode = .diff
+            pendingDiffNavigation = true
+            if case let .ready(document) = phase {
+                expandedRuns.formUnion(document.file.hunks.flatMap(\.lines).map(\.index))
+                rebuild()
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if mode == .diff, let message = SourceEditorState.file(absolutePath).message {
+                Text(message).font(Typo.caption).padding(8).background(Palette.surfaceSunken)
+            }
         }
     }
 
     private var observedBody: some View {
-        Group {
+        let tracksFile = navigationTarget && SourceEditorState.file(absolutePath).diffRequest == nil
+        return Group {
             if embeddedWidth != nil {
                 Section {
                     if !isCollapsed {
                         fileContent
                             .onGeometryChange(for: CGRect?.self) { proxy in
-                                navigationTarget ? proxy.frame(in: .scrollView(axis: .vertical)) : nil
+                                tracksFile ? proxy.frame(in: .scrollView(axis: .vertical)) : nil
                             } action: { frame in
                                 if let frame, abs(frame.minY - InspectorLayout.reviewHeaderHeight) > 1 {
                                     onNavigationLayout?()
@@ -609,6 +626,9 @@ struct DiffView: View {
         let document = prepared.document
         fileLines = prepared.lines
         phase = .ready(document)
+        if SourceEditorState.file(absolutePath).diffRequest != nil {
+            expandedRuns.formUnion(document.file.hunks.flatMap(\.lines).map(\.index))
+        }
         // Held for the next visit, keyed on the question it answers. `source` is the patch before
         // the whitespace setting was applied to it, which is what a later visit compares against.
         // See `DiffPresentationCache`.
@@ -722,12 +742,21 @@ struct DiffView: View {
             if let prepared = wrappedPresentation {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(prepared.rows) { row in
-                        if let heights = prepared.heights[row.id], let embeddedViewportHeight {
-                            ReviewDiffBlock(height: heights.reduce(0, +), viewportHeight: embeddedViewportHeight) {
-                                rowView(row, document: prepared.document, width: prepared.width, wrappedHeights: heights)
+                        let tracksRow = isDiffDestination(row) && navigationTarget
+                        Group {
+                            if let heights = prepared.heights[row.id], let embeddedViewportHeight {
+                                ReviewDiffBlock(height: heights.reduce(0, +), viewportHeight: embeddedViewportHeight) {
+                                    rowView(row, document: prepared.document, width: prepared.width, wrappedHeights: heights)
+                                }
+                            } else {
+                                rowView(row, document: prepared.document, width: prepared.width)
                             }
-                        } else {
-                            rowView(row, document: prepared.document, width: prepared.width)
+                        }
+                        .id(diffDestinationID(row))
+                        .onGeometryChange(for: CGRect?.self) { proxy in
+                            tracksRow ? proxy.frame(in: .scrollView(axis: .vertical)) : nil
+                        } action: { frame in
+                            if frame != nil { onNavigationLayout?() }
                         }
                     }
                 }
@@ -789,6 +818,18 @@ struct DiffView: View {
         findRevision += 1
     }
 
+    private func isDiffDestination(_ row: DiffRow) -> Bool {
+        guard let destination = SourceEditorState.file(absolutePath).diffRequest else { return false }
+        return row.sourceLines.contains { $0.kind != .deletion && $0.newNumber == destination.line }
+    }
+
+    private func diffDestinationID(_ row: DiffRow) -> String {
+        if isDiffDestination(row), let destination = SourceEditorState.file(absolutePath).diffRequest {
+            return "\(file.path):definition:\(destination.line)"
+        }
+        return "\(file.path):\(row.id)"
+    }
+
     private func standaloneDiff(_ document: DiffDocument) -> some View {
         VStack(spacing: 0) {
             diffFindBar
@@ -825,6 +866,15 @@ struct DiffView: View {
                     }), anchor: .top)
                     .defaultScrollAnchor(.topLeading)
                     .scrollBounceBehavior(.basedOnSize)
+                    .onChange(of: SourceEditorState.file(absolutePath).diffRevision, initial: true) { _, _ in
+                        if let row = rows.first(where: isDiffDestination) { reader.scrollTo(row.id, anchor: .center) }
+                    }
+                    .onChange(of: rowRevision) { _, _ in
+                        if pendingDiffNavigation, let row = rows.first(where: isDiffDestination) { reader.scrollTo(row.id, anchor: .center) }
+                    }
+                    .onScrollPhaseChange { _, phase in
+                        if phase == .tracking || phase == .interacting || phase == .decelerating { pendingDiffNavigation = false }
+                    }
                     .onChange(of: findRevision) { _, _ in
                         if let match = selectedFind, let row = rows.first(where: { $0.sourceLines.contains { $0.index == match.index } }) {
                             reader.scrollTo(row.id, anchor: .center)
@@ -872,25 +922,7 @@ struct DiffView: View {
                 }
 
             case let .line(line):
-                DiffLineView(
-                    line: line,
-                    language: document.language,
-                    carry: document.carries[line.index] ?? LexState(),
-                    emphasis: document.emphasis[line.index] ?? [],
-                    numbers: .both,
-                    width: width,
-                    isCommented: isCommented(line, numbers: .both),
-                    onComment: { if isCurrent(document) { beginDraft(at: $0) } },
-                    onDragComment: { if isCurrent(document) { extendDrag(from: $0, to: $1) } },
-                    onEndCommentDrag: {
-                        if isCurrent(document) { finishDrag() } else { rangeDrag = nil }
-                    },
-                    onEdit: { if isCurrent(document) { beginEdit(at: $0) } }
-                )
-                // Every pass over this diff rebuilds every row the stack has already realised, and a
-                // long file realises hundreds. Comparing the row's own values first is what keeps a
-                // second pass free, and the closure above is why it has to be said: see `DiffLineView`.
-                .equatable()
+                side(line, document: document, numbers: .both, width: width)
 
             case let .commentBand(placement):
                 ReviewCommentBandView(
@@ -1066,6 +1098,18 @@ struct DiffView: View {
             numbers: numbers,
             width: width,
             wrappedHeights: wrappedHeights,
+            lookupRevision: rowRevision,
+            onLookup: { view, offset, references, automatic, newTab in
+                guard isCurrent(document), let fileLines else { return }
+                SourceActions.lookupInDiff(at: offset, view: view, lines: lines, source: fileLines.joined(separator: "\n"),
+                    path: file.path, model: model, references: references, automatic: automatic, newTab: newTab) { location, newTab in
+                    guard isCurrent(document) else { return }
+                    SourceEditorState.file(absolutePath).navigationTask = Task {
+                        await FileReview.openFromDiff(location, in: model, newTab: newTab)
+                    }
+                }
+            },
+            destination: SourceEditorState.file(absolutePath).diffRequest,
             onComment: { if isCurrent(document) { beginDraft(at: $0) } },
             onDragComment: { if isCurrent(document) { extendDrag(from: $0, to: $1) } },
             onEndCommentDrag: {
@@ -1078,30 +1122,18 @@ struct DiffView: View {
         .equatable()
     }
 
+    @ViewBuilder
     private func side(
         _ line: DiffLine?,
         document: DiffDocument,
         numbers: DiffLineView.Numbers,
         width: CGFloat
     ) -> some View {
-        DiffLineView(
-            line: line,
-            language: document.language,
-            carry: line.flatMap { document.carries[$0.index] } ?? LexState(),
-            emphasis: line.flatMap { document.emphasis[$0.index] } ?? [],
-            numbers: numbers,
-            width: width,
-            isCommented: isCommented(line, numbers: numbers),
-            onComment: { if isCurrent(document) { beginDraft(at: $0) } },
-            onDragComment: { if isCurrent(document) { extendDrag(from: $0, to: $1) } },
-            onEndCommentDrag: {
-                if isCurrent(document) { finishDrag() } else { rangeDrag = nil }
-            },
-            onEdit: { if isCurrent(document) { beginEdit(at: $0) } }
-        )
-        // For the reason given at the unified call site above, and twice as much of it: the split
-        // layout builds two of these per row.
-        .equatable()
+        if line?.kind == .noNewline {
+            DiffLineView(line: line, language: document.language, numbers: numbers, width: width)
+        } else {
+            run([line], document: document, numbers: numbers, width: width)
+        }
     }
 
     // MARK: - Review comments
@@ -1472,7 +1504,8 @@ struct DiffView: View {
         // become one block of selectable text, because a `Text` per line cannot be selected
         // across two of them. `DiffRow.grouped` says why it is a post pass, `DiffRunGrouping`
         // says where a run stops.
-        rows = DiffRow.grouped(isSideBySide ? splitRows(document) : unifiedRows(document))
+        rows = DiffRow.grouped(isSideBySide ? splitRows(document) : unifiedRows(document),
+                               stoppingAt: SourceEditorState.file(absolutePath).diffRequest?.line)
 
         // The editor follows its line, and a rebuild can take that line off the screen: a reload
         // after the agent edits, or a whitespace refold dropping the expanded run the line sat

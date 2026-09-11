@@ -32,8 +32,25 @@ enum SourceActions {
         lookup(at: offset, path: path, model: model, state: state, references: false, findUsagesAtDefinition: true, newTab: newTab)
     }
 
-    private static func lookup(at offset: Int, path: String, model: WorkspaceModel, state: SourceEditorState, references: Bool, findUsagesAtDefinition: Bool = false, newTab: Bool = false, fallbackReference: String? = nil) {
-        guard let source = state.textView?.string else { return }
+    static func lookupInDiff(at offset: Int, view: CodeTextView, lines: [DiffLine?], source: String,
+                             path: String, model: WorkspaceModel, references: Bool, automatic: Bool,
+                             newTab: Bool, onOpen: @escaping (CodeLocation, Bool) -> Void) {
+        let state = SourceEditorState.file((model.workspace.path as NSString).appendingPathComponent(path))
+        state.navigationTask?.cancel()
+        guard let sourceOffset = DiffDocument.sourceOffset(in: lines, offset: offset, source: source) else {
+            state.message = "This diff line is not in the current file. Open the current source to navigate."
+            return
+        }
+        lookup(at: sourceOffset, path: path, model: model, state: state, references: references,
+               findUsagesAtDefinition: automatic, newTab: newTab, fallbackReference: view.reference(at: offset), sourceOverride: source,
+               anchor: view, anchorOffset: offset, onOpen: onOpen)
+    }
+
+    private static func lookup(at offset: Int, path: String, model: WorkspaceModel, state: SourceEditorState, references: Bool, findUsagesAtDefinition: Bool = false, newTab: Bool = false, fallbackReference: String? = nil, sourceOverride: String? = nil, anchor: CodeTextView? = nil, anchorOffset: Int? = nil, onOpen: ((CodeLocation, Bool) -> Void)? = nil) {
+        guard let source = sourceOverride ?? state.textView?.string else { return }
+        let textView = anchor ?? state.textView
+        let displayed = textView?.string
+        let openResult = onOpen ?? { open($0, model: model, newTab: $1) }
         state.navigationTask?.cancel()
         state.message = references ? "Finding usages…" : "Finding definition…"
         state.navigationTask = Task {
@@ -73,14 +90,14 @@ enum SourceActions {
                 }
                 let locations = await CodeLocation.suggestions(found, root: model.workspace.path)
                 try Task.checkCancellation()
-                guard state.textView?.string == source else {
+                guard textView?.window != nil, textView?.string == displayed else {
                     state.message = "The file changed during the lookup. Try again."
                     return
                 }
                 state.message = locations.isEmpty ? (showsUsages ? "No usages found at this position." : "No definition found at this position.") : nil
-                if locations.count == 1, let location = locations.first { open(location, model: model, newTab: newTab) } else if !locations.isEmpty {
-                    state.textView?.showDefinitions(locations, root: model.workspace.path, offset: offset, title: showsUsages ? "Usages" : "Definitions") { location in
-                        open(location, model: model, newTab: newTab)
+                if locations.count == 1, let location = locations.first { openResult(location, newTab) } else if !locations.isEmpty {
+                    textView?.showDefinitions(locations, root: model.workspace.path, offset: anchorOffset ?? offset, title: showsUsages ? "Usages" : "Definitions") { location in
+                        openResult(location, newTab)
                     }
                 }
             } catch is CancellationError {

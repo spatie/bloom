@@ -99,6 +99,7 @@ enum SourceEditorProbe {
                 check(draft.state.textView?.selectedRange().location == expected, "appearance or size change lost the caret")
             }
         }
+        await checkHorizontalScrolling(draft: draft, window: window, check: check)
         draft.state.wraps = true
         await settle(window)
         check(draft.state.textView?.textContainer?.widthTracksTextView == true, "wrap toggle did not update TextKit")
@@ -144,6 +145,31 @@ enum SourceEditorProbe {
         print("Source editor probe: \(checks) checks, \(failures.count) failures")
         for failure in failures { print("FAIL: \(failure)") }
         exit(failures.isEmpty ? 0 : 1)
+    }
+
+    private static func checkHorizontalScrolling(
+        draft: Draft, window: NSWindow, check: (Bool, String) -> Void
+    ) async {
+        draft.text = String(repeating: "longLine ", count: 400) + "endOfLine"
+        await settle(window)
+        guard let view = draft.state.textView, let scroll = view.enclosingScrollView,
+              let ruler = scroll.verticalRulerView else {
+            check(false, "long-line preview missing")
+            return
+        }
+        ruler.viewWillDraw()
+        let inset = view.textContainerInset.width
+        let initial = view.convert(view.textContainerOrigin, to: scroll).x
+        scroll.contentView.scroll(to: NSPoint(x: 500, y: 0))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        ruler.viewWillDraw()
+        await settle(window)
+        check(scroll.contentView.bounds.minX >= 499, "long-line preview did not scroll horizontally")
+        check(abs(view.textContainerInset.width - inset) < 1, "scrolling changed the gutter inset")
+        let shifted = view.convert(view.textContainerOrigin, to: scroll).x
+        check(initial - shifted >= 499, "horizontal scrolling did not reveal later text")
+        scroll.contentView.scroll(to: .zero)
+        scroll.reflectScrolledClipView(scroll.contentView)
     }
 
     private static func settle(_ window: NSWindow) async {

@@ -75,3 +75,13 @@ real SourceKit-LSP lookup between two temporary Swift files. Use an isolated `BL
 watching. Set `BLOOM_LOCAL_LSP=1` for the real Intelephense check. To also test Laravel view links,
 set `BLOOM_LARAVEL_LSP_VENDOR` to the `vendor` directory of a disposable Laravel app with Tinker
 installed; the test creates its own app and checks unsaved content and renamed Blade files.
+
+The changes view supports the same Cmd-click, Cmd-Shift-click, definition and usage actions.
+A destination included in the current diff opens at that line in the changes view. Other
+destinations open in a pinned source tab. Multiple results use the menu beside the clicked token.
+Lookups map diff positions to the complete current file; removed or stale lines cannot be used
+as current-source positions.
+
+Opening the file tree reveals the active file and expands its parent folders. Expanded folders
+are saved per workspace, including when the tree is reopened without an active file. Filtering
+keeps its temporary expansions separate from those saved folders.

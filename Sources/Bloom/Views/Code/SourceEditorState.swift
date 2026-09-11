@@ -8,6 +8,7 @@ import BloomCore
 final class SourceEditorState {
     private static var files: [String: SourceEditorState] = [:]
     static func file(_ path: String) -> SourceEditorState {
+        let path = URL(fileURLWithPath: path).standardizedFileURL.path
         if let state = files[path] { return state }
         let state = SourceEditorState()
         files[path] = state
@@ -21,6 +22,8 @@ final class SourceEditorState {
     var wraps = false
     var diffRow: String?
     var diffLine = 1
+    var diffRequest: CodeLocation?
+    var diffRevision = 0
     var line = 1
     var column = 1
     var request: CodeLocation?
