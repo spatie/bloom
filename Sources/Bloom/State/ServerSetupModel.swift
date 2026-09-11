@@ -13,12 +13,19 @@ final class ServerSetupModel {
     var label = ""
     var installsBrowserTools = true
     var installsDocker = true
+    var installsSwap = true
+    private(set) var swapReady = false
+    private(set) var swapAttempted = false
+    private(set) var swapDiagnostic: ServerSetupFailure?
+    private(set) var swapStatusMessage: String?
+    private(set) var isInstallingSwap = false
+    var willInstallSwap: Bool { installsSwap && check?.shouldOfferSwapInstall == true }
     private(set) var dockerReady = false
     private(set) var dockerAttempted = false
     private(set) var dockerDiagnostic: ServerSetupFailure?
     private(set) var isInstallingDocker = false
-    var isInstallingOptionalTools: Bool { isInstallingBrowser || isInstallingDocker }
-    var optionalDiagnostic: ServerSetupFailure? { dockerDiagnostic ?? browserDiagnostic }
+    var isInstallingOptionalTools: Bool { isInstallingBrowser || isInstallingDocker || isInstallingSwap }
+    var optionalDiagnostic: ServerSetupFailure? { swapDiagnostic ?? dockerDiagnostic ?? browserDiagnostic }
     var hasChosenAccountMethod = false
     private(set) var browserReadiness: ServerBrowserReadiness?
     private(set) var browserFailure: String?
@@ -73,6 +80,7 @@ final class ServerSetupModel {
            let user = server.host.split(separator: "@").first, server.host.contains("@") {
             // Returning to accounts does not schedule a new administrator installation.
             installsDocker = false
+            installsSwap = false
             host = server.host; label = server.customLabel; validatedHost = server.host
             clientKey = URL(fileURLWithPath: server.identityFile)
             installedKnownHosts = URL(fileURLWithPath: server.knownHostsFile)
@@ -97,6 +105,7 @@ final class ServerSetupModel {
         await perform(.checking) {
             self.hasChosenAccountMethod = false
             self.dockerReady = false; self.dockerAttempted = false; self.dockerDiagnostic = nil
+            self.resetSwapStatus()
             self.installed = nil; self.installedKnownHosts = nil; self.accountChecks = []; self.agentAuthentication = []; self.browserReadiness = nil; self.browserFailure = nil; self.browserRecovery = nil; self.browserAttempted = false; self.browserDiagnostic = nil; self.check = nil; self.candidate = nil; self.fingerprint = nil
             try self.prepareTrustStore()
             let host = self.host.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -153,7 +162,7 @@ final class ServerSetupModel {
 
     func install() async {
         guard phase == .readyToInstall, let connection, inputsUnchanged, check?.blockers.isEmpty == true else { return }
-        activity.begin(browser: installsBrowserTools, docker: installsDocker)
+        activity.begin(browser: installsBrowserTools, docker: installsDocker, swap: willInstallSwap)
         progress = []
         let completed = await perform(.installing) {
             let package = try self.serverPackage()
@@ -168,6 +177,7 @@ final class ServerSetupModel {
             try Task.checkCancellation()
             self.installed = installed
             self.activity.finish()
+            if self.willInstallSwap { try await self.configureSwap() }
             if self.installsBrowserTools { try await self.configureBrowser() }
             if self.installsDocker { try await self.configureDocker() }
             try Task.checkCancellation()
@@ -210,6 +220,28 @@ final class ServerSetupModel {
         guard canInstallOptionalTools else { return }
         let completed = await perform(.accounts) { try await self.configureDocker() }
         if completed, phase == .accounts { await refreshAccounts() }
+    }
+
+    func retrySwapInstall() async {
+        guard canInstallOptionalTools, swapAttempted else { return }
+        let completed = await perform(.accounts) { try await self.configureSwap() }
+        if completed, phase == .accounts { await refreshAccounts() }
+    }
+
+    private func configureSwap() async throws {
+        swapAttempted = true; swapReady = false; swapDiagnostic = nil; swapStatusMessage = nil
+        isInstallingSwap = true
+        defer { isInstallingSwap = false }
+        swapDiagnostic = try await configureOptionalTool(.swap, name: "Swap", scriptName: "install-bloom-swap.py") { connection, script, user, home, progress in
+            let result = try await connection.installSwap(script: script, user: user, serviceHome: home, progress: progress)
+            self.swapStatusMessage = result.message
+            return result
+        }
+        swapReady = swapDiagnostic == nil
+    }
+
+    private func resetSwapStatus() {
+        swapReady = false; swapAttempted = false; swapDiagnostic = nil; swapStatusMessage = nil
     }
 
     private func configureBrowser() async throws {
@@ -324,7 +356,7 @@ final class ServerSetupModel {
             for notice in check.blockers { parts.append("Check failed: \(notice.code)\n\(notice.message)\n\(notice.recoverySuggestion)") }
             for notice in check.warnings { parts.append("Warning: \(notice.message)") }
         }
-        for failure in [failure, browserDiagnostic, dockerDiagnostic].compactMap({ $0 }) {
+        for failure in [failure, browserDiagnostic, dockerDiagnostic, swapDiagnostic].compactMap({ $0 }) {
             parts += ["Error: \(failure.code.rawValue)", failure.message, "Recovery: \(failure.recovery)"]
             if let command = failure.command { parts.append("Command: " + command) }
             if let status = failure.exitStatus { parts.append("Exit status: \(status)") }
@@ -369,6 +401,7 @@ final class ServerSetupModel {
         check = nil; candidate = nil; fingerprint = nil; failure = nil; progress = []
         installed = nil; connection = nil; activity = ServerSetupActivity()
         dockerReady = false; dockerAttempted = false; dockerDiagnostic = nil
+        resetSwapStatus()
         phase = .address
     }
     func stopSetup() async {

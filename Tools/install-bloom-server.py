@@ -27,6 +27,9 @@ import time
 if "stream_install_command" not in globals():
     from bloom_install_process import InstallProcessCancelled, InstallProcessFailure, install_cancellation_scope, install_exception_details, redact_install_text, stream_install_command
 
+if "read_swap_status" not in globals():
+    from bloom_swap_state import read_swap_status
+
 CURRENT_STEP = None
 SYSTEM_PATH = "/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
@@ -566,7 +569,13 @@ def probe(args):
             warnings.append({"code": "limited_memory", "message": "This server has less than 2 GB of memory. Larger projects and containers may need more."})
     except (ValueError, OSError):
         pass
-    return {"ok": not blockers, "freeDiskBytes": free, "memoryBytes": memory_bytes, "platform": "Ubuntu " + version if supported else "unsupported",
+    try:
+        swap = read_swap_status()
+    except (OSError, ValueError):
+        swap = {"activeSwapBytes": None, "configuredSwap": None}
+    return {"ok": not blockers, "freeDiskBytes": free, "memoryBytes": memory_bytes,
+            "activeSwapBytes": swap["activeSwapBytes"], "configuredSwap": swap["configuredSwap"],
+            "platform": "Ubuntu " + version if supported else "unsupported",
             "architecture": platform.machine(), "privilege": privilege, "existing": bool(existing),
             "blockers": blockers, "warnings": warnings, **metadata(args)}
 

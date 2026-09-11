@@ -127,7 +127,7 @@ import Testing
         #expect(failure.recovery.contains("fresh server"))
     }
 
-    @Test(arguments: [false, true]) func optionalInstallersTreatPathsAsArguments(browser: Bool) async throws {
+    @Test(arguments: ["browser", "docker", "swap"]) func optionalInstallersTreatPathsAsArguments(installer: String) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("bloom-browser-wrapper-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -137,12 +137,15 @@ import Testing
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fakeID.path)
         let home = "/var/lib/Bloom user's $(printf ignored)"
         let source = "import json,sys\nprint(json.dumps({'source': '__bloom_browser_source' in globals(), 'arguments': sys.argv[1:]}))\n"
-        let command = try browser ? ServerSetupConnection.browserInstallerCommand(user: "bloom", serviceHome: home)
-            : ServerSetupConnection.dockerInstallerCommand(user: "bloom", serviceHome: home)
+        let command = switch installer {
+        case "browser": try ServerSetupConnection.browserInstallerCommand(user: "bloom", serviceHome: home)
+        case "swap": try ServerSetupConnection.swapInstallerCommand(user: "bloom", serviceHome: home)
+        default: try ServerSetupConnection.dockerInstallerCommand(user: "bloom", serviceHome: home)
+        }
         let result = try await Shell.run("/bin/sh", ["-c", command], env: ["PATH": directory.path + ":/usr/bin:/bin"], stdin: source, timeout: .seconds(5))
         #expect(result.ok)
         let decoded = try JSONDecoder().decode(JSONValue.self, from: Data(result.stdout.utf8))
-        #expect(decoded["source"] == .bool(browser))
+        #expect(decoded["source"] == .bool(installer == "browser"))
         #expect(decoded["arguments"] == .array([.string("--user"), .string("bloom"), .string("--service-home"), .string(home)]))
     }
 
@@ -150,6 +153,7 @@ import Testing
         for user in ["root;command", "-option", "name\nother"] {
             #expect(throws: ServerSetupFailure.self) { try ServerSetupConnection.browserInstallerCommand(user: user, serviceHome: "/var/lib/bloom-home") }
             #expect(throws: ServerSetupFailure.self) { try ServerSetupConnection.dockerInstallerCommand(user: user, serviceHome: "/home/bloom") }
+            #expect(throws: ServerSetupFailure.self) { try ServerSetupConnection.swapInstallerCommand(user: user, serviceHome: "/home/bloom") }
         }
         #expect(throws: ServerSetupFailure.self) { try ServerSetupConnection.browserInstallerCommand(user: "bloom", serviceHome: "relative") }
         let installed = try JSONDecoder().decode(ServerInstallEvent.self, from: Data(#"{"event":"complete","serviceUser":"bloom","serviceHome":"/var/lib/bloom-home"}"#.utf8))
@@ -294,6 +298,30 @@ import Testing
         #expect(ServerSetupFailure.classify(status: 255, stderr: "").code == .unreachable)
         #expect(ServerSetupFailure.classify(status: 1, stderr: "").code == .unknown)
     }
+    @Test func swapIsOfferedOnlyAfterAnExplicitCheckFindsNone() throws {
+        let data = Data(#"{"platform":"Ubuntu 26.04","architecture":"x86_64","privilege":"root","existing":false,"blockers":[],"warnings":[],"executable":"/home/bloom/bloom/runtime/current/bin/bloom-server","dataDirectory":"/home/bloom/bloom/data","serviceUser":"bloom"}"#.utf8)
+        let legacy = try JSONDecoder().decode(ServerInstallCheck.self, from: data)
+        #expect(legacy.memoryBytes == nil && legacy.activeSwapBytes == nil && legacy.configuredSwap == nil)
+        #expect(!legacy.shouldOfferSwapInstall)
+        for (active, configured, offered) in [(Int64(0), false, true), (Int64(0), true, false), (Int64(2_147_483_648), false, false), (Int64(2_147_483_648), true, false)] {
+            var check = legacy
+            check.memoryBytes = 1_073_741_824
+            check.activeSwapBytes = active
+            check.configuredSwap = configured
+            let decoded = try JSONDecoder().decode(ServerInstallCheck.self, from: JSONEncoder().encode(check))
+            #expect(decoded.shouldOfferSwapInstall == offered)
+            #expect(decoded.memoryBytes == check.memoryBytes)
+            #expect(decoded.activeSwapBytes == active)
+            #expect(decoded.configuredSwap == configured)
+        }
+        var unknown = legacy
+        unknown.activeSwapBytes = 0
+        #expect(!unknown.shouldOfferSwapInstall)
+        unknown.activeSwapBytes = nil
+        unknown.configuredSwap = false
+        #expect(!unknown.shouldOfferSwapInstall)
+    }
+
     @Test func installationLocationsComeFromPreflight() throws {
         let data = Data(#"{"platform":"Ubuntu 26.04","architecture":"x86_64","privilege":"root","existing":false,"blockers":[],"warnings":[],"executable":"/opt/custom/current/bin/bloom-server","dataDirectory":"/var/lib/custom-data","serviceUser":"custom","installationRoot":"/opt/custom","serviceHome":"/var/lib/custom-home"}"#.utf8)
         let check = try JSONDecoder().decode(ServerInstallCheck.self, from: data)

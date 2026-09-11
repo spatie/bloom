@@ -11,6 +11,7 @@ struct ServerSetupAccountsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
             if !model.hasChosenAccountMethod {
+                if model.swapDiagnostic != nil { swapRow }
                 if model.dockerDiagnostic != nil { dockerRow }
                 if model.browserDiagnostic != nil { browserRow }
                 accountChoice
@@ -58,6 +59,10 @@ struct ServerSetupAccountsView: View {
             if model.installsDocker || model.dockerAttempted {
                 Divider()
                 dockerRow
+            }
+            if model.swapAttempted {
+                Divider()
+                swapRow
             }
             HStack {
                 Button("Refresh Status") { Task { await model.refreshAccounts() } }.disabled(model.isBusy)
@@ -135,25 +140,39 @@ struct ServerSetupAccountsView: View {
     }
 
     private var dockerRow: some View {
+        optionalToolRow("Docker", ready: model.dockerReady, diagnostic: model.dockerDiagnostic,
+            detail: model.dockerReady ? "Rootless Docker and Compose are ready for container projects." : "Install Docker to run container projects on this server.",
+            recoveryNote: "You can continue. Projects that require Docker will need this setup to finish first.",
+            buttonTitle: model.dockerAttempted ? "Retry Docker Setup" : "Install Docker",
+            symbol: "shippingbox") { Task { await model.retryDockerInstall() } }
+    }
+
+    private var swapRow: some View {
+        optionalToolRow("Swap", ready: model.swapReady, diagnostic: model.swapDiagnostic,
+            detail: model.swapStatusMessage ?? "Swap setup has not finished.",
+            recoveryNote: "You can continue without swap. Retry when the server has enough free disk space and supports swap files.",
+            buttonTitle: "Retry Swap Setup", symbol: "internaldrive") { Task { await model.retrySwapInstall() } }
+    }
+
+    private func optionalToolRow(_ title: String, ready: Bool, diagnostic: ServerSetupFailure?,
+                                 detail: String, recoveryNote: String, buttonTitle: String, symbol: String,
+                                 retry: @escaping () -> Void) -> some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                Label(model.dockerDiagnostic == nil ? "Docker (optional)" : "Docker needs attention",
-                      systemImage: model.dockerReady ? "checkmark.circle.fill" : model.dockerDiagnostic != nil ? "exclamationmark.triangle" : "shippingbox")
+                Label(diagnostic == nil ? title + " (optional)" : title + " needs attention",
+                      systemImage: ready ? "checkmark.circle.fill" : diagnostic != nil ? "exclamationmark.triangle" : symbol)
                     .font(Typo.labelEmphasis)
-                    .foregroundStyle(model.dockerDiagnostic != nil ? Palette.warning : Palette.textPrimary)
-                Text(model.dockerDiagnostic?.message ?? (model.dockerReady ? "Rootless Docker and Compose are ready for container projects." : "Install Docker to run container projects on this server."))
+                    .foregroundStyle(diagnostic != nil ? Palette.warning : Palette.textPrimary)
+                Text(diagnostic?.message ?? detail)
                     .font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                if let diagnostic = model.dockerDiagnostic {
-                    Text("You can continue. Projects that require Docker will need this setup to finish first.")
-                        .font(Typo.caption).foregroundStyle(.secondary)
+                if let diagnostic {
+                    Text(recoveryNote).font(Typo.caption).foregroundStyle(.secondary)
                     if let command = diagnostic.command { Text(command).font(Typo.codeSmall).textSelection(.enabled) }
                     Text(diagnostic.recovery).font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 }
             }
             Spacer()
-            if !model.dockerReady, model.canInstallOptionalTools {
-                Button(model.dockerAttempted ? "Retry Docker Setup" : "Install Docker") { Task { await model.retryDockerInstall() } }
-            }
+            if !ready, model.canInstallOptionalTools { Button(buttonTitle, action: retry) }
         }
     }
 

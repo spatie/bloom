@@ -6,13 +6,13 @@ import Testing
     @Test func progressCompletesOnlyStagesActuallyStarted() {
         var activity = ServerSetupActivity()
         #expect(ServerSetupActivity.Stage.allCases.allSatisfy { activity.status(of: $0) == .pending })
-        activity.begin(browser: true, docker: true)
+        activity.begin(browser: true, docker: true, swap: true)
         #expect(activity.status(of: .transfer) == .running)
         #expect(activity.status(of: .verify) == .pending)
 
         let stages: [(String, ServerSetupActivity.Stage)] = [
             ("verify", .verify), ("dependencies", .dependencies), ("account", .account),
-            ("service", .service), ("browser_download", .browser), ("docker_dependencies", .docker), ("accounts", .accounts)
+            ("service", .service), ("swap_check", .swap), ("browser_download", .browser), ("docker_dependencies", .docker), ("accounts", .accounts)
         ]
         var previous = ServerSetupActivity.Stage.transfer
         for (step, stage) in stages {
@@ -85,6 +85,26 @@ import Testing
         #expect(activity.activeStage == .browser)
         #expect(activity.currentMessage == "Additional preparation")
         #expect(activity.status(of: .accounts) == .pending)
+    }
+
+    @Test func optionalSwapIsSkippedUnlessSelectedAndFailureSurvivesLaterStages() {
+        var activity = ServerSetupActivity()
+        activity.begin(browser: false)
+        #expect(activity.status(of: .swap) == .skipped)
+        activity.begin(browser: false, swap: true)
+        #expect(activity.status(of: .swap) == .pending)
+        activity.start(.service, message: "Starting server")
+        for step in ["swap_check", "swap_create", "swap_activate", "swap_persist"] {
+            activity.receive(ServerInstallEvent(event: "progress", step: step, message: step))
+            #expect(activity.activeStage == .swap)
+            #expect(activity.status(of: .swap) == .running)
+        }
+        #expect(activity.status(of: .service) == .complete)
+        activity.fail(message: "Swap could not be enabled")
+        activity.start(.accounts, message: "Checking accounts")
+        activity.finish()
+        #expect(activity.status(of: .swap) == .failed)
+        #expect(activity.status(of: .accounts) == .complete)
     }
 
     @Test func optionalDockerFailureSurvivesAccountChecksAndCanBeRetried() {

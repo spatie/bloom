@@ -108,10 +108,17 @@ struct ServerSetupView: View {
         case .trust: "Verify the server identity"
         case .readyToInstall: model.hasInstalledServer ? "Server installed" : "Install Bloom Server"
         case .installing: model.failure == nil ? "Installing Bloom Server" : "Setup stopped"
-        case .accounts: model.isInstallingDocker ? "Installing Docker" : model.isInstallingBrowser ? "Installing browser tools" : model.hasChosenAccountMethod ? "Sign in on your server" : "Set up your accounts"
+        case .accounts: accountsTitle
         case .connecting: "Connecting to Bloom Server"
         case .complete: "Your server is ready"
         }
+    }
+
+    private var accountsTitle: String {
+        if model.isInstallingSwap { return "Preparing swap space" }
+        if model.isInstallingDocker { return "Installing Docker" }
+        if model.isInstallingBrowser { return "Installing browser tools" }
+        return model.hasChosenAccountMethod ? "Sign in on your server" : "Set up your accounts"
     }
 
     private var subtitle: String {
@@ -207,6 +214,7 @@ struct ServerSetupView: View {
         VStack(alignment: .leading, spacing: Metrics.gutter * 1.5) {
             ServerSetupInstallPlan(installationRoot: model.check?.installationRoot, serviceHome: model.check?.serviceHome, dataDirectory: model.check?.dataDirectory)
             Divider()
+            swapOption
             VStack(alignment: .leading, spacing: Metrics.spacing) {
                 Toggle("Add browser testing tools", isOn: $model.installsBrowserTools).disabled(model.hasInstalledServer)
                 Text("Lets agents test websites with sandboxed Chrome. Website previews work without it.")
@@ -231,6 +239,35 @@ struct ServerSetupView: View {
             if model.hasInstalledServer {
                 Label("Already installed. Continue to Accounts without reinstalling.", systemImage: "checkmark.circle.fill")
                     .font(Typo.caption).foregroundStyle(Palette.controlAccent)
+            }
+        }
+    }
+
+    @ViewBuilder private var swapOption: some View {
+        VStack(alignment: .leading, spacing: Metrics.spacing) {
+            if model.check?.shouldOfferSwapInstall == true {
+                HStack {
+                    Toggle("Add 2 GB of swap", isOn: $model.installsSwap).disabled(model.hasInstalledServer)
+                    Image(systemName: "questionmark.circle")
+                        .foregroundStyle(.secondary)
+                        .help("Swap uses disk space when memory is full. Bloom creates /var/lib/bloom/swapfile, protected by root, and enables it after reboots. Setup requires 4 GB free so at least 2 GB remains available. Existing swap is always preserved.")
+                        .accessibilityLabel("About swap: uses 2 GB of disk space and starts after reboots")
+                }
+                Text("Helps keep the server responsive during memory spikes. Uses 2 GB of disk space.")
+                    .font(Typo.caption).foregroundStyle(.secondary)
+            } else if let bytes = model.check?.activeSwapBytes, bytes > 0 {
+                Label("Swap is already active", systemImage: "checkmark.circle")
+                    .font(Typo.label).foregroundStyle(Palette.controlAccent)
+                Text(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .memory) + " of swap. Existing swap will be kept.")
+                    .font(Typo.caption).foregroundStyle(.secondary)
+            } else if model.check?.configuredSwap == true {
+                Label("Existing swap configuration", systemImage: "internaldrive")
+                    .font(Typo.label)
+                Text("Swap is configured but not active. Bloom will keep your settings and will not add another swap file.")
+                    .font(Typo.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Swap could not be checked. Setup will leave it unchanged.")
+                    .font(Typo.caption).foregroundStyle(.secondary)
             }
         }
     }

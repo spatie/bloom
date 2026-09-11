@@ -394,6 +394,28 @@ class InstallerTests(unittest.TestCase):
             self.addCleanup(patch.stop)
         return args
 
+    def test_probe_reports_active_and_configured_swap_without_mutation(self):
+        args = self.activity_probe_fixture()
+        for active, configured in ((0, False), (0, True), (2147483648, True)):
+            with self.subTest(active=active, configured=configured):
+                with mock.patch.object(installer, "read_swap_status", return_value={
+                    "activeSwapBytes": active, "configuredSwap": configured,
+                }):
+                    check = installer.probe(args)
+                self.assertEqual(check["activeSwapBytes"], active)
+                self.assertEqual(check["configuredSwap"], configured)
+                installer.command.assert_not_called()
+
+    def test_probe_does_not_claim_unknown_swap_is_absent(self):
+        args = self.activity_probe_fixture()
+        for failure in (PermissionError("Cannot read configuration"), ValueError("Invalid active listing")):
+            with self.subTest(failure=type(failure).__name__):
+                with mock.patch.object(installer, "read_swap_status", side_effect=failure):
+                    check = installer.probe(args)
+                self.assertIsNone(check["activeSwapBytes"])
+                self.assertIsNone(check["configuredSwap"])
+                installer.command.assert_not_called()
+
     def test_probe_blocks_running_service_with_exact_stop_instructions(self):
         args = self.activity_probe_fixture()
         installer.service_running.return_value = True

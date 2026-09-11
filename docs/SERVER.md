@@ -46,8 +46,20 @@ opens Bloom's existing repository picker.
 Existing-server sign-ins are under **Server Settings > Accounts**, the first settings section.
 The GitHub repository picker links to the same account screen when authentication is needed.
 GitHub, Codex and Claude use one shared sign-in view in setup and settings. Installation locations
-are shown directly in the review step. Optional browser or Docker availability does not block
+are shown directly in the review step. Optional browser, Docker or swap availability does not block
 connecting to the core server.
+
+**Add 2 GB of swap** is selected by default when the server check finds no active or configured
+swap. It provides extra room during memory spikes, including development builds, and can be
+turned off. Existing active swap and inactive swap configuration are preserved. An unknown check
+result never opts the server into swap provisioning.
+
+Swap uses a root-owned `/var/lib/bloom/swapfile` and a dedicated systemd swap unit for subsequent
+boots. It stays outside the service account's writable home because that account must not be able
+to replace a file activated by root. Provisioning requires 4 GiB free on ext4 or XFS: 2 GiB for the
+file and 2 GiB remaining disk space. Unsupported filesystems or insufficient space produce a
+copyable error and retry action, while the rest of setup can continue. Bloom never disables
+existing swap or rewrites unrelated swap settings.
 
 The optional browser step installs a pinned agent-browser and Chrome for the service account,
 then verifies the browser sandbox and a screenshot. A browser setup failure leaves the core

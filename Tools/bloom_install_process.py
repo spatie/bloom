@@ -249,6 +249,8 @@ def standalone_installer_source(path, source=None):
     if "class InstallProcessFailure(" in source:
         return source
     helper = pathlib.Path(path).with_name("bloom_install_process.py").read_text()
+    if "read_swap_status" in source:
+        helper += "\n" + pathlib.Path(path).with_name("bloom_swap_state.py").read_text()
     return "#!/usr/bin/env python3\n" + helper + "\n" + source
 
 

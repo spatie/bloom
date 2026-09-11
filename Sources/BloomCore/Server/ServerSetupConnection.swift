@@ -19,6 +19,10 @@ public struct ServerInstallNotice: Codable, Sendable, Equatable {
 public struct ServerInstallCheck: Codable, Sendable {
     public var installationRoot: String?
     public var serviceHome: String?
+    public var memoryBytes: Int64?
+    public var activeSwapBytes: Int64?
+    public var configuredSwap: Bool?
+    public var shouldOfferSwapInstall: Bool { activeSwapBytes == 0 && configuredSwap == false }
     public var platform: String
     public var architecture: String
     public var privilege: String
@@ -259,6 +263,10 @@ public struct ServerSetupConnection: Sendable {
         try optionalInstallerCommand(user: user, serviceHome: serviceHome, preservesBrowserSource: false)
     }
 
+    public static func swapInstallerCommand(user: String, serviceHome: String) throws -> String {
+        try optionalInstallerCommand(user: user, serviceHome: serviceHome, preservesBrowserSource: false)
+    }
+
     private static func optionalInstallerCommand(user: String, serviceHome: String, preservesBrowserSource: Bool) throws -> String {
         guard user.range(of: #"^[a-z_][a-z0-9_-]{0,31}$"#, options: .regularExpression) != nil,
               serviceHome.hasPrefix("/"), serviceHome.utf8.count <= 4096,
@@ -285,6 +293,14 @@ public struct ServerSetupConnection: Sendable {
         await progress(ServerInstallEvent(event: "progress", step: "docker_dependencies", message: "Starting optional Docker setup."))
         return try await stream(Self.dockerInstallerCommand(user: user, serviceHome: serviceHome), script: script,
                                 acceptsFailureEvent: true, commandLabel: "python3 (Docker installer)", step: "docker_dependencies", progress: progress)
+    }
+
+    public func installSwap(script: String, user: String, serviceHome: String,
+                            progress: @escaping @Sendable (ServerInstallEvent) async -> Void) async throws -> ServerInstallEvent {
+        try Task.checkCancellation()
+        await progress(ServerInstallEvent(event: "progress", step: "swap_check", message: "Checking existing swap before setup."))
+        return try await stream(Self.swapInstallerCommand(user: user, serviceHome: serviceHome), script: script,
+                                acceptsFailureEvent: true, commandLabel: "python3 (swap installer)", step: "swap_check", progress: progress)
     }
 
     private func upload(_ file: URL, to remotePath: String, step: String,

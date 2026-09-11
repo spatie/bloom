@@ -15,7 +15,7 @@ def embed(bundle, archive=None):
     root = pathlib.Path(__file__).resolve().parent.parent
     destination = bundle / 'Contents/Resources/ServerSetup'
     destination.mkdir(parents=True, exist_ok=True)
-    for name in ('install-bloom-server.py', 'install-bloom-browser.py', 'install-bloom-docker.py'):
+    for name in ('install-bloom-server.py', 'install-bloom-browser.py', 'install-bloom-docker.py', 'install-bloom-swap.py'):
         (destination / name).write_text(standalone_installer_source(root / 'Tools' / name))
     if archive is None:
         return
