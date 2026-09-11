@@ -151,37 +151,56 @@ struct KeepAwakeCard: View {
         )
         VStack(alignment: .leading, spacing: scale.headerToCard) {
             UsageSectionHeader(symbol: KeepAwake.menuBarSymbol, title: KeepAwake.title)
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                // The state on a line of its own, with only Stop beside it. Stop and the duration
+                // menu used to share this row, which left the headline a third of the card and
+                // broke "Keeping this Mac awake" over three lines.
                 HStack(alignment: .center, spacing: 10) {
                     Image(systemName: status.isOn ? KeepAwake.menuBarSymbol : "moon.zzz.fill")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(status.isOn ? UsageInk.normal : Color.secondary)
-                        .frame(width: 20)
+                        .frame(width: Self.iconWidth)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(status.headline)
                             .font(.system(size: scale.label, weight: .semibold))
+                            .lineLimit(1)
                         Text(status.detail)
                             .font(.system(size: scale.supporting))
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
+                            .lineLimit(1)
                             .contentTransition(.numericText())
                     }
+                    .accessibilityElement(children: .combine)
                     Spacer(minLength: 8)
                     if keepAwake.session != nil {
                         Button("Stop") { keepAwake.stop() }
                             .controlSize(.small)
                     }
-                    startMenu
                 }
                 .padding(.horizontal, 14)
-                .padding(.vertical, scale.barRowPadding)
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("\(status.headline). \(status.detail)")
+                .padding(.top, scale.barRowPadding)
+
+                // The choices under the words they change, lined up with the text rather than the
+                // icon, so the card reads top to bottom: what is happening, then what to do.
+                HStack(spacing: 8) {
+                    startMenu
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 14 + Self.iconWidth + 10)
+                .padding(.trailing, 14)
+                .padding(.top, 8)
+                .padding(.bottom, scale.barRowPadding)
 
                 if choosesTime {
                     untilRow
                         .transition(.opacity)
                 }
+
+                Rectangle()
+                    .fill(.separator)
+                    .frame(height: 0.5)
+                    .padding(.horizontal, 14)
 
                 HStack(spacing: 10) {
                     Text(SleepPrevention.menuItemTitle.replacingOccurrences(of: "Prevent Sleep ", with: ""))
@@ -193,13 +212,15 @@ struct KeepAwakeCard: View {
                         .controlSize(.mini)
                 }
                 .padding(.horizontal, 14)
-                .padding(.vertical, scale.textRowPadding)
+                .padding(.vertical, scale.controlRow)
                 .usageTooltip(SleepPrevention.caveat)
             }
             .padding(.vertical, scale.cardGutter)
             .usageCard()
         }
     }
+
+    private static let iconWidth: CGFloat = 20
 
     private var startMenu: some View {
         Menu {
@@ -220,7 +241,7 @@ struct KeepAwakeCard: View {
                 withAnimation(UsageMotion.spring) { choosesTime = true }
             }
         } label: {
-            Text(keepAwake.session == nil ? "Start" : "Change")
+            Text(keepAwake.session == nil ? "Keep Awake For\u{2026}" : "Change Duration\u{2026}")
         }
         .menuStyle(.button)
         .controlSize(.small)
@@ -249,7 +270,8 @@ struct KeepAwakeCard: View {
             .foregroundStyle(.secondary)
             .accessibilityLabel("Cancel")
         }
-        .padding(.horizontal, 14)
-        .padding(.bottom, scale.textRowPadding)
+        .padding(.leading, 14 + Self.iconWidth + 10)
+        .padding(.trailing, 14)
+        .padding(.bottom, scale.barRowPadding)
     }
 }

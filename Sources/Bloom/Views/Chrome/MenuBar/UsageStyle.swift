@@ -122,9 +122,20 @@ private struct UsageTooltipModifier: ViewModifier {
 }
 
 /// Draws the one tooltip the panel is showing, above its anchor, or below when there is no room.
+///
+/// **The text is set at an explicit width, never a maximum.** The first version framed it with a
+/// `maxWidth` and then fixed the whole bubble to its ideal size, and those two disagree: the ideal
+/// size of a paragraph is one unbroken line, so the bubble was drawn for one or two lines while
+/// the text inside wrapped to three and spilled over the rows beneath. So the text's one line
+/// width is measured first, the bubble is that wide or `maximumWidth`, whichever is less, and the
+/// height follows from the wrap at that width.
 struct UsageTooltipLayer: View {
     let tooltip: UsagePanelModel.Tooltip?
     @State private var size: CGSize = .zero
+    @State private var lineWidth: CGFloat = 0
+
+    private static let maximumWidth: CGFloat = 240
+    private static let font = Font.system(size: 12)
 
     var body: some View {
         GeometryReader { proxy in
@@ -133,25 +144,34 @@ struct UsageTooltipLayer: View {
                 let above = tooltip.anchor.minY - 8 - size.height
                 let y = above >= 4 ? above : tooltip.anchor.maxY + 8
                 Text(tooltip.text)
-                    .font(.system(size: 12))
+                    .font(Self.font)
                     .multilineTextAlignment(.center)
+                    .frame(width: min(max(lineWidth, 1), Self.maximumWidth))
                     .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 260)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
                     .background {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
                             .fill(Color(nsColor: .windowBackgroundColor))
-                            .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
+                            .shadow(color: .black.opacity(0.22), radius: 6, y: 2)
                     }
                     .overlay {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
                             .stroke(.separator, lineWidth: 0.5)
                     }
-                    .fixedSize()
                     .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
                     .offset(x: x, y: y)
                     .transition(.opacity)
+            }
+        }
+        .background {
+            // The unbroken line, measured out of sight, which is what decides the bubble's width.
+            if let tooltip {
+                Text(tooltip.text)
+                    .font(Self.font)
+                    .fixedSize()
+                    .hidden()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { lineWidth = $0 }
             }
         }
         .allowsHitTesting(false)

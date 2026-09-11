@@ -700,8 +700,16 @@ final class AppModel {
     /// Nothing is thrown and nothing is reported. A provider that is not installed or not logged
     /// in answers nothing, which is the same as never having been asked, and the panel keeps
     /// saying what it already knew.
+    ///
+    /// Not before the store is open. The windows an ask brings back are written to the store and
+    /// reach the panel through its feed, while the account facts are kept here in memory, so an
+    /// ask made with no store half landed: the plan and the Codex balances appeared, every window
+    /// was dropped, and the ask still counted, so nothing asked again for ten minutes. That is
+    /// what a panel opened in the first second of a launch, or on a database that would not open,
+    /// used to show.
     func refreshQuotas(after gap: TimeInterval = QuotaPollSchedule.interval) async {
-        guard !isAskingForQuotas,
+        guard store != nil,
+              !isAskingForQuotas,
               QuotaPollSchedule.isDue(lastAskedAt: lastQuotaAskAt, at: Date(), after: gap)
         else { return }
         isAskingForQuotas = true
