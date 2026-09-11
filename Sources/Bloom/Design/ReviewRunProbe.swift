@@ -124,7 +124,7 @@ enum ReviewRunProbe {
                 app: app
             )
             await model.refreshChanges()
-            check(model.changedFiles.count == 6, "review fixture did not load its six changed files")
+            check(model.changedFiles.count == 11, "review fixture did not load its eleven changed files")
             check(model.reviewFiles.last?.path == "README.md", "review order did not put root files after folders")
             let fresh = CenterTab(workspaceID: model.workspace.id, kind: .review, title: CenterTab.reviewTitle)
             check(fresh.showsAllFiles, "a new review did not default to all files")
@@ -261,6 +261,26 @@ enum ReviewRunProbe {
                         scrollSteps.append(ProcessInfo.processInfo.systemUptime - start)
                     }
                 }
+                // Down, up, next door and back to a file already laid out once. A destination is
+                // reached when its first line sits under its own header, and it has to still be
+                // there once every file around it has finished loading.
+                for part in [3, 1, 5, 2, 4, 3] {
+                    let path = "Tests/Part\(part).swift"
+                    let marker = "let part\(part)Line0 = 0"
+                    model.selectedFilePath = path
+                    FileReview.open(path: path, in: model)
+                    for _ in 0..<40 {
+                        await settle(window)
+                        if topCode(in: scroll)?.text.hasPrefix(marker) == true { break }
+                    }
+                    for _ in 0..<10 { await settle(window) }
+                    let top = topCode(in: scroll)
+                    let offset = top?.offset ?? -1
+                    check(top?.text.hasPrefix(marker) == true
+                            && (0...(InspectorLayout.reviewHeaderHeight + 80)).contains(offset),
+                          "jumping to \(path) showed \(top.map { String($0.text.prefix(24)) } ?? "nothing") at \(offset)")
+                    save(host, name: "all-files-part\(part)")
+                }
             }
             check(!hoverViews(in: host).isEmpty, "review did not render code after jumping to a file")
             check(!window.isVisible && !window.isKeyWindow, "review probe activated its window")
@@ -316,6 +336,24 @@ enum ReviewRunProbe {
     private static func loadedLongReview(in view: NSView) -> Bool {
         if let text = view as? WrappedCodeText.TextView, text.string.contains("let reviewLine0 = 0") { return true }
         return view.subviews.contains { loadedLongReview(in: $0) }
+    }
+
+    /// The first run of code below the pinned file header, and how far below the top it starts.
+    private static func topCode(in scroll: NSScrollView) -> (text: String, offset: CGFloat)? {
+        let visible = scroll.contentView.bounds
+        let edge = visible.minY + InspectorLayout.reviewHeaderHeight
+        // A lazy stack keeps some views it has stopped drawing, hidden or clipped away.
+        return codeViews(in: scroll.documentView ?? scroll)
+            .filter { !$0.isHiddenOrHasHiddenAncestor && !$0.visibleRect.isEmpty }
+            .map { (text: $0.string, frame: $0.convert($0.bounds, to: scroll.contentView)) }
+            .filter { $0.frame.maxY > edge && $0.frame.minY < visible.maxY }
+            .min { $0.frame.minY < $1.frame.minY }
+            .map { (text: $0.text, offset: $0.frame.minY - visible.minY) }
+    }
+
+    private static func codeViews(in view: NSView) -> [WrappedCodeText.TextView] {
+        if let text = view as? WrappedCodeText.TextView { return [text] }
+        return view.subviews.flatMap { codeViews(in: $0) }
     }
 
     private static func scroll(to target: CGFloat, in scroll: NSScrollView, window: NSWindow) async {

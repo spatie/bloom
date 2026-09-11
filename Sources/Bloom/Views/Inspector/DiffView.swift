@@ -15,7 +15,6 @@ struct DiffView: View {
     let embeddedViewportHeight: CGFloat?
     let isCollapsed: Bool
     var onScrollFocus: (() -> Void)?
-    var onPrepared: (() -> Void)?
     var onToggleCollapsed: (() -> Void)?
 
     /// Above this many changed lines the diff is gated behind a tap. Rendering is lazy and would
@@ -150,8 +149,7 @@ struct DiffView: View {
     init(
         model: WorkspaceModel, file: ChangedFile, embeddedWidth: CGFloat? = nil,
         embeddedViewportHeight: CGFloat? = nil, isCollapsed: Bool = false,
-        onScrollFocus: (() -> Void)? = nil, onPrepared: (() -> Void)? = nil,
-        onToggleCollapsed: (() -> Void)? = nil
+        onScrollFocus: (() -> Void)? = nil, onToggleCollapsed: (() -> Void)? = nil
     ) {
         self.model = model
         self.file = file
@@ -159,7 +157,6 @@ struct DiffView: View {
         self.embeddedViewportHeight = embeddedViewportHeight
         self.isCollapsed = isCollapsed
         self.onScrollFocus = onScrollFocus
-        self.onPrepared = onPrepared
         self.onToggleCollapsed = onToggleCollapsed
         let absolute = (model.workspace.path as NSString).appendingPathComponent(file.path)
         _mode = State(initialValue: FileEditSession.shared.isDirty(absolute) ? .edit : .diff)
@@ -853,7 +850,6 @@ struct DiffView: View {
             revision: revision, document: document, rows: currentRows, width: width, heights: heights,
             codeHeight: heights.values.reduce(0) { $0 + $1.reduce(0, +) }
         )
-        onPrepared?()
         #if DEBUG
         if CommandLine.arguments.contains("--review-run-probe") {
             ReviewRunProbe.preparedLayouts[file.path] = "rows=\(currentRows.count), blocks=\(heights.count), height=\(heights.values.flatMap { $0 }.reduce(0, +)), width=\(width), viewport=\(embeddedViewportHeight ?? -1)"

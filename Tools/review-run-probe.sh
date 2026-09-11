@@ -66,6 +66,13 @@ git('-c', 'commit.gpgsign=false', '-c', 'user.name=Review Probe',
 (fixture / 'Sources/LongReview.swift').write_text(
     ''.join(f'let reviewLine{line} = {line}\n' for line in range(1800 if '--review-scroll-profile' in arguments else 120))
 )
+# Several screens each, so a jump crosses files that load and grow around its destination.
+# After Sources in review order, so the offsets measured around LongReview.swift stay put.
+(fixture / 'Tests').mkdir()
+for part in range(1, 6):
+    (fixture / f'Tests/Part{part}.swift').write_text(
+        ''.join(f'let part{part}Line{line} = {line}\n' for line in range(160))
+    )
 try:
     subprocess.run(
         ['open', '-g', '-n', '-W', '-a', str(pathlib.Path(binary).parents[2]),
