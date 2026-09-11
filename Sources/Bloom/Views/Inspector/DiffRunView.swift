@@ -292,8 +292,9 @@ struct DiffRunView: View, Equatable {
         lines.map { entry in
             CodeRunLine(
                 // A row with nothing opposite it still occupies a line in the run, or every line
-                // below it in the split layout would sit one row too high.
-                text: entry.line?.text ?? "",
+                // below it in the split layout would sit one row too high. Shortened for drawing
+                // only: see `DiffLineDisplay`.
+                text: DiffLineDisplay.text(entry.line?.text ?? ""),
                 carry: entry.carry,
                 emphasis: entry.emphasis,
                 emphasisColor: DiffWash.emphasis(of: entry.line)
