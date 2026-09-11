@@ -12,7 +12,7 @@ final class ServerSetupModel {
     var identityFile = "" { didSet { if identityFile != oldValue { connectionInputsChanged() } } }
     var label = ""
     var installsBrowserTools = true
-    var installsDocker = false
+    var installsDocker = true
     private(set) var dockerReady = false
     private(set) var dockerAttempted = false
     private(set) var dockerDiagnostic: ServerSetupFailure?
@@ -71,6 +71,8 @@ final class ServerSetupModel {
         self.installConnection = installConnection
         if resumeExisting, server.isConfigured, !server.usesHTTPS, !server.knownHostsFile.isEmpty, !server.identityFile.isEmpty,
            let user = server.host.split(separator: "@").first, server.host.contains("@") {
+            // Returning to accounts does not schedule a new administrator installation.
+            installsDocker = false
             host = server.host; label = server.customLabel; validatedHost = server.host
             clientKey = URL(fileURLWithPath: server.identityFile)
             installedKnownHosts = URL(fileURLWithPath: server.knownHostsFile)

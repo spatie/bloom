@@ -36,8 +36,22 @@ struct SidebarServerHeader: View {
                 .accessibilityAddTraits(.isHeader)
             if server.isConnecting { ProgressView().controlSize(.mini) }
             Spacer(minLength: 0)
-            Menu { actions } label: { Image(systemName: "ellipsis").frame(width: 22, height: 18) }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            Menu { actions } label: {
+                Label("Server actions", systemImage: "ellipsis")
+                    .labelStyle(.iconOnly)
+                    .font(Typo.label)
+                    .frame(width: Metrics.headerButton.width, height: Metrics.headerButton.height)
+                    .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+                    .background(hovered ? Palette.hover : .clear,
+                                in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+            }
+            // Match the adjacent project buttons. The borderless menu style supplies its own
+            // label sizing and ink, so a frame on its image did not align the actual control.
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .foregroundStyle(hovered ? Palette.textPrimary : Palette.textSecondary)
             .help("Server actions")
         }
         .font(Typo.captionEmphasis)

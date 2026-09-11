@@ -14,8 +14,13 @@ struct CenterColumnView<Model: WorkspacePaneModel>: View {
     var body: some View {
         VStack(spacing: 0) {
             SessionTabsView(model: model)
-            WorkspaceSetupStatusView(model: model)
-            CenterPanesView(model: model)
+            GeometryReader { geometry in
+                VStack(spacing: 0) {
+                    WorkspaceSetupStatusView(model: model, paneHeight: geometry.size.height)
+                        .id(model.workspace.id)
+                    CenterPanesView(model: model)
+                }
+            }
         }
         .id(model.paneStores.identity)
         .background(Palette.windowBackground)

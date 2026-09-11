@@ -5,20 +5,37 @@ import BloomCore
 /// Keep the same row and disclosure available above their panes, including remote workspaces.
 struct WorkspaceSetupStatusView<Model: WorkspacePaneModel>: View {
     @Bindable var model: Model
+    let paneHeight: CGFloat
     @Environment(\.openWindow) private var openWindow
     @State private var isRetrying = false
     @State private var contentHeight: CGFloat = 36
+    @State private var followsEnd = true
+    @State private var isUserScrolling = false
 
     var body: some View {
         if model.remoteServer != nil || model.sessions.isEmpty, let event {
-            ScrollView {
-                WorkspaceEventRow(event: event, isFirstThing: false, model: model.localWorkspaceModel,
-                                  onRunSetupAgain: retryAction, onRecoverDocker: dockerAction)
-                    .padding(.top, Metrics.spacing)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+            ScrollViewReader { reader in
+                ScrollView {
+                    WorkspaceEventRow(event: event, isFirstThing: false, paneHeight: paneHeight, model: model.localWorkspaceModel,
+                                      onRunSetupAgain: retryAction, onRecoverDocker: dockerAction,
+                                      onShowLogEnd: { wasAsked in
+                                          if wasAsked || followsEnd { reader.scrollTo(WorkspaceEventRow.endID, anchor: .bottom) }
+                                      })
+                        .padding(.top, Metrics.spacing)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .onScrollPhaseChange { _, phase in
+                    isUserScrolling = phase == .tracking || phase == .interacting || phase == .decelerating
+                }
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    geometry.visibleRect.maxY >= geometry.contentSize.height - 24
+                } action: { _, atEnd in
+                    if isUserScrolling { followsEnd = atEnd }
+                }
             }
-            .frame(height: min(max(contentHeight, 36), 220))
+            .frame(height: CGFloat(SetupTailWindow.viewportHeight(contentHeight: Double(contentHeight), paneHeight: Double(paneHeight))))
             Divider().overlay(Palette.border)
         }
     }

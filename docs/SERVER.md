@@ -54,7 +54,7 @@ then verifies the browser sandbox and a screenshot. A browser setup failure leav
 server usable and offers a retry. This host browser is separate from browser tooling inside a
 project's Docker container. See [browser provisioning](SERVER-BROWSER.md) for the boundaries.
 
-Container projects can opt into **Docker for container projects** during installation. This installs
+**Docker for container projects** is selected by default during installation and can be turned off. This installs
 Ubuntu's Docker, Compose and rootless dependencies, reserves subordinate user/group IDs and enables
 a separate lingering user service. Images and container data live under `~/bloom/docker/data`.
 Bloom never joins the rootful Docker group or exposes a public Docker socket. Ordinary Docker
