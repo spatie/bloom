@@ -75,6 +75,20 @@ public enum TabSurgery {
 
     // MARK: - The two decisions
 
+    /// A fresh conversation takes every occurrence of the old one without moving its panes.
+    /// Carry the root explicitly so clearing it cannot rename the tab after a neighbouring chat.
+    public static func replace(
+        _ content: PaneContent, with replacement: PaneContent,
+        in stored: StoredPaneArrangement, root: PaneContent
+    ) -> Outcome {
+        guard stored.contents.values.contains(content) else { return .unchanged }
+        let next = StoredPaneArrangement(
+            layout: stored.layout,
+            contents: stored.contents.mapValues { $0 == content ? replacement : $0 }
+        )
+        return settle(next, root: root == content ? replacement : root)
+    }
+
     /// Whether what is left is still a tab, and what it is called.
     ///
     /// Public because closing a pane is not the only way to reach these two questions: pointing a

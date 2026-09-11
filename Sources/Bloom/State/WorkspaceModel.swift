@@ -453,6 +453,23 @@ final class WorkspaceModel {
         return stored
     }
 
+    /// Retires the old runner only after its replacement has been saved successfully.
+    func clearConversation(_ previous: Session, controls: ComposerControls) async -> Session? {
+        guard !app.isArchiving(workspace.id), let store else { return nil }
+        do {
+            let next = try await store.replaceWorkspaceConversation(id: previous.id, controls: controls)
+            transcripts.removeValue(forKey: previous.id)?.teardown()
+            app.bridge?.retire(sessionID: previous.id)
+            WorkspaceTabsStore.shared.replaceConversation(previous.id, with: next.id, in: self)
+            if let index = sessions.firstIndex(where: { $0.id == previous.id }) { sessions[index] = next }
+            activeSessionID = next.id
+            return next
+        } catch {
+            app.notice = BloomNotice(message: "Could not clear the conversation: \(error.readableMessage)")
+            return nil
+        }
+    }
+
     /// Puts the workspace's conversations in a given order, and writes it back.
     ///
     /// Ids rather than an offset, because the strip the user drags in is not the list this holds: a

@@ -485,7 +485,7 @@ struct ComposerView: View {
         Task { @MainActor in
             defer { isClearingChat = false }
             if let model {
-                guard await model.createSession(controls: controls) != nil else { return }
+                guard await model.clearConversation(previous.session, controls: controls) != nil else { return }
             } else {
                 await app.ask.startFresh(controls: controls)
                 guard let current = app.ask.session, current.id != previous.session.id else { return }
