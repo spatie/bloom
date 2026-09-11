@@ -64,10 +64,10 @@ Xcode still emits its existing unused AppIntents metadata extraction warning. Ga
 and `go vet ./...` passed, including regressions that failed before the two lifecycle fixes.
 
 Fault-injection tests establish the tested recovery behaviour. This batch did not include a live
-train-style network interruption or a new iOS device deployment. Linux execution and a fresh
-runtime archive remain pending because the local container engine is stopped. Reusing the previous
-protocol-compatible installer archive does not include the new server fixes. The Server workflow
-builds and exercises Linux, including packaged runtime checks without Swift installed.
+train-style network interruption or a new iOS device deployment. The subsequent Server workflow
+for commit `3a572b50` passed its Linux tests and packaged runtime checks on Ubuntu 24.04 and 26.04
+without Swift installed. That tested archive is now embedded in the Remote build. Later Mac SSH
+connection and wizard changes have their own focused local tests.
 
 ## Follow-up priorities
 

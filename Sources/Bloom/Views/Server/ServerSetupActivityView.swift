@@ -9,19 +9,20 @@ struct ServerSetupActivityView: View {
     @State private var copiedOutput = false
 
     var compact = false
+    var stages = ServerSetupActivity.Stage.allCases
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
             if let failure { ServerSetupFailureView(failure: failure) }
             if compact {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 2), alignment: .leading, spacing: Metrics.spacing) {
-                    ForEach(ServerSetupActivity.Stage.allCases) { stage in stageRow(stage) }
+                    ForEach(stages) { stage in stageRow(stage) }
                 }
                 output
             } else {
                 HStack(alignment: .top, spacing: Metrics.gutter * 2) {
                     VStack(alignment: .leading, spacing: Metrics.gutter) {
-                        ForEach(ServerSetupActivity.Stage.allCases) { stage in stageRow(stage) }
+                        ForEach(stages) { stage in stageRow(stage) }
                         Spacer(minLength: 0)
                     }
                     .frame(width: 185, alignment: .leading)

@@ -127,6 +127,7 @@ struct WorkspaceEventRow: View {
     var paneHeight: CGFloat = 0
     var model: WorkspaceModel?
     var onRunSetupAgain: (@MainActor () -> Void)?
+    var onRecoverDocker: (@MainActor () -> Void)?
     /// See `endID`, and `WorkspaceEventsView.onShowLogEnd`.
     var onShowLogEnd: (@MainActor (Bool) -> Void)?
 
@@ -198,6 +199,9 @@ struct WorkspaceEventRow: View {
                     }
                 } else {
                     header
+                }
+                if event.kind == .setup, event.outcome == .failed, let onRecoverDocker {
+                    Button("Start Docker…", action: onRecoverDocker).font(Typo.caption)
                 }
                 if showsRunSetupAgain {
                     retryButton.padding(.trailing, TranscriptLayout.inset)

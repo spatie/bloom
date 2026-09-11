@@ -180,7 +180,7 @@ struct WorkspaceEvent: Identifiable, Equatable {
                 // row must always carry: whether anything else happened. See `SetupFailure`.
                 note: [
                     diagnosis.sentence,
-                    diagnosis.advice.isEmpty ? SetupFailure.instruction : SetupFailure.agentStarted,
+                    diagnosis.advice.isEmpty ? SetupFailure.instruction : SetupFailure.workspaceAvailable,
                 ]
                     .filter { !$0.isEmpty }
                     .joined(separator: " "),
@@ -216,14 +216,9 @@ struct WorkspaceEvent: Identifiable, Equatable {
 /// is the way out.
 enum SetupFailure {
     static let instruction =
-        "The agent was started anyway. Check the setup output and run setup again."
+        "Your workspace is still available. Check the setup output and run setup again."
 
-    /// The half of that sentence which is true whatever went wrong, for the rows where
-    /// `SetupDiagnosis` already said what to do and saying it twice would be the only result.
-    ///
-    /// It is the half that must never be dropped. A red row that leaves somebody guessing whether
-    /// their worktree survived, or whether an agent is off working in it anyway, is worse than one
-    /// that explains nothing. It used to read "No agent was started", which was the honest answer
-    /// while a failed setup held the queue; it does not any more. See `DeliveryHold`.
-    static let agentStarted = "The agent was started anyway."
+    // Local and remote creation handle the first prompt differently after setup fails. The
+    // shared event knows only the setup result, so it must not claim an agent was started.
+    static let workspaceAvailable = "Your workspace is still available."
 }

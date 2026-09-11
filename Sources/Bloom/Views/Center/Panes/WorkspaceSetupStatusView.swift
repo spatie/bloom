@@ -5,6 +5,7 @@ import BloomCore
 /// Keep the same row and disclosure available above their panes, including remote workspaces.
 struct WorkspaceSetupStatusView<Model: WorkspacePaneModel>: View {
     @Bindable var model: Model
+    @Environment(\.openWindow) private var openWindow
     @State private var isRetrying = false
     @State private var contentHeight: CGFloat = 36
 
@@ -12,7 +13,7 @@ struct WorkspaceSetupStatusView<Model: WorkspacePaneModel>: View {
         if model.remoteServer != nil || model.sessions.isEmpty, let event {
             ScrollView {
                 WorkspaceEventRow(event: event, isFirstThing: false, model: model.localWorkspaceModel,
-                                  onRunSetupAgain: retryAction)
+                                  onRunSetupAgain: retryAction, onRecoverDocker: dockerAction)
                     .padding(.top, Metrics.spacing)
                     .fixedSize(horizontal: false, vertical: true)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
@@ -30,13 +31,21 @@ struct WorkspaceSetupStatusView<Model: WorkspacePaneModel>: View {
                                     durationMS: nil)
     }
 
+    private var dockerAction: (@MainActor () -> Void)? {
+        guard let server = model.remoteServer, let event, event.outcome == .failed,
+              ServerDockerRecovery.isSetupFailure(log: event.log),
+              let request = ServerDockerRecoveryRequest(server: server, workspaceID: model.workspace.id) else { return nil }
+        return { openWindow(id: ServerDockerRecoveryWindow.id, value: request) }
+    }
+
     private var retryAction: (@MainActor () -> Void)? {
-        guard let server = model.remoteServer, !isRetrying, !model.isRunningSetup,
+        guard let server = model.remoteServer, let endpoint = server.endpoint, !isRetrying, !model.isRunningSetup,
               !server.isRunning(model.workspace), !server.isAwaitingPermission(model.workspace) else { return nil }
         return {
             let workspace = model.workspace
             isRetrying = true
             Task {
+                guard server.endpoint == endpoint else { isRetrying = false; return }
                 await server.updateWorkspace(workspace, action: .runSetup)
                 isRetrying = false
             }

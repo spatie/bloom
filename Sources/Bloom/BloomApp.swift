@@ -213,6 +213,7 @@ struct BloomApp: App {
         ServerWindow(model: model)
         ServerAccountsWindow(model: model)
         ServerSetupWindow(model: model)
+        ServerDockerRecoveryWindow(model: model)
 
         Settings {
             SettingsView()

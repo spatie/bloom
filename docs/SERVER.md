@@ -54,9 +54,25 @@ then verifies the browser sandbox and a screenshot. A browser setup failure leav
 server usable and offers a retry. This host browser is separate from browser tooling inside a
 project's Docker container. See [browser provisioning](SERVER-BROWSER.md) for the boundaries.
 
+Container projects can opt into **Docker for container projects** during installation. This installs
+Ubuntu's Docker, Compose and rootless dependencies, reserves subordinate user/group IDs and enables
+a separate lingering user service. Images and container data live under `~/bloom/docker/data`.
+Bloom never joins the rootful Docker group or exposes a public Docker socket. Ordinary Docker
+commands use the service account's private rootless context.
+
+On macOS, a Docker-related workspace setup failure offers **Start Docker** beside the retry action.
+It starts only an existing, managed rootless user service. If that service is missing, the recovery
+window offers explicit administrator SSH setup, preserving the selected server's host-key pin.
+Successful recovery can rerun setup in the original workspace. Administrator privileges are needed
+for initial provisioning; restarting an already configured user service does not need root.
+
+Repository setup still comes from the selected branch. Bloom does not rewrite a project's macOS
+setup script into a Linux one. Container-ready branches should commit their `.bloom/settings.toml`
+and setup script, including creation of development environment files when required.
+
 Failures retain the address and selected key. A step list and selectable live output remain visible
 during installation. Structured errors retain the sanitised command, exit status and diagnostic tail;
-Copy Report includes these alongside check results and server output. Credential patterns and terminal
+Copy Error retains the failure diagnostic; Copy Output sits beside the live log. Credential patterns and terminal
 control sequences are filtered before display or copying. The retained log is bounded to 1,000 lines
 and 256 KiB. Back preserves completed installation work and returns to account setup without reinstalling.
 

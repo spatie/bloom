@@ -28,6 +28,9 @@ struct ServerDiagnosticsView: View {
                             Label(check.title, systemImage: symbol(check.status))
                                 .foregroundStyle(check.status == .attention ? Color.orange : Color.secondary)
                             Text(check.detail).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            if check.id == .docker, check.status != .ready, let request = ServerDockerRecoveryRequest(server: model) {
+                                Button("Set Up or Start Docker…") { openWindow(id: ServerDockerRecoveryWindow.id, value: request) }
+                            }
                             if check.id == .github && check.status != .ready {
                                 Button("Sign In on Server…") { openWindow(id: ServerAccountsWindow.id) }
                             }
