@@ -30,6 +30,13 @@ struct TurnFooterView: View {
     ///
     /// A turn that failed carries none of this. See `TranscriptModel.abandonRetryRun`.
     var recovered: RetryRun?
+    /// What the agent left running in the background, named, or nothing.
+    ///
+    /// Only ever handed to the footer that closes the transcript. A turn that ends while a
+    /// backgrounded command is still going is not the agent being finished, and "Completed" on its
+    /// own, under a tab that is still breathing, is what made that look like a stuck turn. See
+    /// `BackgroundWork`.
+    var stillRunning: String?
 
     /// More chips than this and the footer stops being a footer.
     private static let visibleFileLimit = 6
@@ -175,6 +182,17 @@ struct TurnFooterView: View {
                 .frame(maxWidth: TranscriptLayout.proseMeasure, alignment: .leading)
                 .padding(.horizontal, TranscriptLayout.inset)
                 .padding(.bottom, TranscriptLayout.inset)
+            }
+
+            // Secondary rather than tertiary: unlike the retry note below, this is news now, and it
+            // is the answer to why the tab is still busy.
+            if let stillRunning {
+                Text(stillRunning)
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, TranscriptLayout.inset)
+                    .padding(.bottom, TranscriptLayout.inset)
             }
 
             // Tertiary rather than secondary, and under everything else: it explains a duration
