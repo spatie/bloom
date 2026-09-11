@@ -17,6 +17,7 @@ enum FileReview {
     static func open(path: String, in model: WorkspaceModel, focusing: Bool = false) {
         let location = CodeLocation.parse(path)
         if location.path != path { open(location: location, in: model); return }
+        SourceEditorState.file((model.workspace.path as NSString).appendingPathComponent(path)).diffRequest = nil
         SourceNavigation.shared.visit(location, in: model)
         if model.changedFiles.contains(where: { $0.path == path }) { model.selectedFilePath = path }
         show(path: path, in: model, focusing: focusing)
@@ -39,6 +40,44 @@ enum FileReview {
             CenterTabStore.shared.setShowsAllFiles(false, for: tab)
         }
         if model.changedFiles.contains(where: { $0.path == location.path }) { model.selectedFilePath = location.path }
+    }
+
+    static func activePath(in model: WorkspaceModel) -> String? {
+        let workspaceTabs = WorkspaceTabsStore.shared
+        guard let selected = workspaceTabs.selectedTab(in: model) else { return nil }
+        let layout = workspaceTabs.layout(of: selected)
+        let panes = [layout.focus] + layout.panes.filter { $0 != layout.focus }
+        let tabs = CenterTabStore.shared.tabs(for: model.workspace.id)
+        for pane in panes {
+            guard case let .tool(id) = workspaceTabs.content(of: pane, in: selected),
+                  let tab = tabs.first(where: { $0.id == id && $0.kind == .review }) else { continue }
+            let path = tab.showsAllFiles && !tab.isPinnedToPath ? model.selectedFilePath ?? tab.path : tab.path
+            if !path.isEmpty { return CodeLocation(path: path).displayPath(relativeTo: model.workspace.path) }
+        }
+        return nil
+    }
+
+    static func openFromDiff(_ target: CodeLocation, in model: WorkspaceModel, newTab: Bool) async {
+        var location = target
+        location.path = location.displayPath(relativeTo: model.workspace.path)
+        if !newTab, let file = model.reviewFiles.first(where: { $0.path == location.path }) {
+            let patch = await model.patch(for: file)
+            guard !Task.isCancelled else { return }
+            if let diff = DiffDocument.parse(patch: patch, path: file.path), DiffDocument.contains(location, in: diff) {
+                let absolute = (model.workspace.path as NSString).appendingPathComponent(location.path)
+                let state = SourceEditorState.file(absolute)
+                state.request = nil
+                state.prefersEditing = false
+                state.diffLine = location.line
+                state.diffRequest = location
+                state.diffRevision &+= 1
+                SourceNavigation.shared.visit(location, in: model)
+                model.selectedFilePath = location.path
+                show(path: location.path, in: model, focusing: true)
+                return
+            }
+        }
+        openInNewTab(path: "\(location.path):\(location.line):\(location.column)", in: model)
     }
 
     /// The one door, with the one thing the two callers disagree about.

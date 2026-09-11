@@ -65,6 +65,7 @@ struct EditorExperienceTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["BLOOM_LARAVEL_LSP_VENDOR"] != nil), .timeLimit(.minutes(2)))
     func laravelViewsAndPhpDefinitionsWorkTogether() async throws {
         let vendor = try #require(ProcessInfo.processInfo.environment["BLOOM_LARAVEL_LSP_VENDOR"])
+        try #require(FileManager.default.fileExists(atPath: vendor + "/autoload.php"))
         let root = TestScratch.path("laravel")
         for directory in ["bootstrap/cache", "resources/views/front/blog", "storage/framework/views", "storage/logs", "config"] {
             try FileManager.default.createDirectory(atPath: root + "/" + directory, withIntermediateDirectories: true)
@@ -316,6 +317,39 @@ struct EditorExperienceTests {
         let refreshed = draft.acceptDisk(disk)
         #expect(refreshed)
         #expect(draft.text == "agent version")
+    }
+
+    @Test func diffOffsetsUseSourceLinesAndUtf16Columns() {
+        let source = "<?php\r\n// header\r\n😀 Navigation::open();\r\nlast();"
+        let lines: [DiffLine?] = [
+            DiffLine(kind: .deletion, text: "old();", oldNumber: 2),
+            nil,
+            DiffLine(kind: .addition, text: "😀 Navigation::open();", newNumber: 3),
+            DiffLine(kind: .context, text: "last();", oldNumber: 4, newNumber: 4),
+        ]
+        #expect(DiffDocument.sourceOffset(in: lines, offset: 11, source: source) == (source as NSString).range(of: "Navigation").location)
+        #expect(DiffDocument.sourceOffset(in: lines, offset: 2, source: source) == nil)
+        #expect(DiffDocument.sourceOffset(in: lines, offset: 7, source: source) == nil)
+        #expect(DiffDocument.sourceOffset(in: lines, offset: -1, source: source) == nil)
+        #expect(DiffDocument.sourceOffset(in: lines, offset: 1000, source: source) == nil)
+        #expect(DiffDocument.sourceOffset(in: lines, offset: 11, source: source.replacingOccurrences(of: "Navigation", with: "Changed")) == nil)
+    }
+
+    @Test func diffDestinationsMustBePresentOnTheNewSide() throws {
+        let patch = """
+        diff --git a/example.php b/example.php
+        --- a/example.php
+        +++ b/example.php
+        @@ -10,2 +10,2 @@
+        -old();
+        +new();
+         context();
+        """
+        let file = try #require(DiffDocument.parse(patch: patch, path: "example.php"))
+        #expect(DiffDocument.contains(CodeLocation(path: "example.php", line: 10), in: file))
+        #expect(DiffDocument.contains(CodeLocation(path: "example.php", line: 11), in: file))
+        #expect(!DiffDocument.contains(CodeLocation(path: "example.php", line: 3), in: file))
+        #expect(!DiffDocument.contains(CodeLocation(path: "example.php", line: 12), in: file))
     }
 
     @Test func definitionLinksNormaliseRepeatedPathSeparators() throws {

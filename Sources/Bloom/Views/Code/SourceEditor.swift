@@ -388,7 +388,7 @@ struct SourceEditor: NSViewRepresentable {
 /// `lineFragmentPadding` is the five points the container then takes off the front of every line.
 /// The prompt was drawn from the inset alone and sat five points to the left of the text it was
 /// standing in for, which is small enough to read as a rendering quirk and is not one.
-final class CodeTextView: NSTextView {
+class CodeTextView: NSTextView {
     weak var editorState: SourceEditorState?
     var codeLanguage: Language = .plainText
     var onOpenReference: ((String, Int, Bool) -> Void)?

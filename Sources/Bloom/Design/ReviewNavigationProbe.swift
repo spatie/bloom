@@ -41,9 +41,89 @@ enum ReviewNavigationProbe {
         FileReview.open(path: "File03.swift", in: model)
         await settle(window)
         checkLanding(index: 3, host: host, check: check)
+        await checkDefinitionNavigation(model: model, host: host, window: window, check: check)
+        await checkFileTreeRestoration(model: model, check: check)
         check(!window.isVisible && !window.isKeyWindow, "navigation probe activated its window")
         window.contentView = nil
         withExtendedLifetime(app) {}
+    }
+
+    private static func checkFileTreeRestoration(model: WorkspaceModel, check: (Bool, String) -> Void) async {
+        let key = "fileTree.expanded." + model.workspace.id.rawValue
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+        do {
+            let parent = model.workspace.path + "/Sources/Nested"
+            try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
+            try "let active = 1\n".write(toFile: parent + "/Active.swift", atomically: true, encoding: .utf8)
+            await model.refreshFileTree(force: true)
+            UserDefaults.standard.set(["Remembered", "Remembered/Child"], forKey: key)
+            FileReview.openInNewTab(path: "Sources/Nested/Active.swift", in: model)
+            check(FileReview.activePath(in: model) == "Sources/Nested/Active.swift", "file tree chose a different file than the active pinned tab")
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 500),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+            window.contentView = NSHostingView(rootView: FileTreeView(model: model))
+            await settle(window)
+            let expanded = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+            check(expanded.isSuperset(of: ["Sources", "Sources/Nested", "Remembered", "Remembered/Child"]),
+                  "opening the file tree did not reveal the active file or preserve previous folders")
+            window.contentView = nil
+            let notes = CenterTabStore.shared.showNotes(workspaceID: model.workspace.id)
+            WorkspaceTabsStore.shared.reveal(.tool(notes.id), in: model)
+            check(FileReview.activePath(in: model) == nil, "a hidden file tab was treated as active")
+            window.contentView = NSHostingView(rootView: FileTreeView(model: model))
+            await settle(window)
+            check(Set(UserDefaults.standard.stringArray(forKey: key) ?? []) == expanded,
+                  "opening the file tree without an active file lost its expanded folders")
+            check(!window.isVisible && !window.isKeyWindow, "file tree probe activated its window")
+            window.contentView = nil
+        } catch { check(false, "file tree fixture failed: \(error)") }
+    }
+
+    private static func checkDefinitionNavigation(model: WorkspaceModel, host: NSView, window: NSWindow,
+                                                  check: (Bool, String) -> Void) async {
+        let destination = CodeLocation(path: "File06.swift", line: 19, column: 5)
+        await FileReview.openFromDiff(destination, in: model, newTab: false)
+        await settle(window)
+        check(CenterTabStore.shared.review(for: model.workspace.id)?.showsAllFiles == true, "definition left the all-files diff")
+        if let text = textViews(in: host).first(where: { $0.string.hasPrefix("let file6Line18 =") }),
+           let scroll = scrollView(in: host) {
+            let rect = text.convert(text.bounds, to: scroll.contentView)
+            check(rect.intersects(scroll.contentView.bounds), "definition token landed outside the visible diff")
+            check(text.onDefinition != nil && text.onReferences != nil, "diff code has no definition or usage actions")
+            let offset = (text.string as NSString).range(of: "file6Line18").location
+            if let manager = text.layoutManager, let container = text.textContainer {
+                let glyphs = manager.glyphRange(forCharacterRange: NSRange(location: offset, length: 1), actualCharacterRange: nil)
+                let glyph = manager.boundingRect(forGlyphRange: glyphs, in: container)
+                let point = text.convert(NSPoint(x: glyph.midX + text.textContainerOrigin.x, y: glyph.midY + text.textContainerOrigin.y), to: nil)
+                if let event = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [.command, .shift],
+                                                  timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                                                  eventNumber: 0, clickCount: 1, pressure: 1) {
+                    var clicked: (Int, Bool)?
+                    text.onNavigateSymbol = { clicked = ($0, $1) }
+                    text.mouseDown(with: event)
+                    check(clicked?.1 == true && abs((clicked?.0 ?? -100) - offset) <= 1, "Cmd-Shift-click lost its diff offset or tab intent")
+                    let titles = text.menu(for: event)?.items.map(\.title) ?? []
+                    check(titles.contains("Go to Definition") && titles.contains("Find Usages"), "diff context menu lost navigation actions")
+                }
+            }
+        } else {
+            check(false, "definition target did not render as its own diff row: \(textViews(in: host).map { String($0.string.prefix(28)) }), request=\(String(describing: SourceEditorState.file(model.workspace.path + "/File06.swift").diffRequest)), layouts=\(ReviewRunProbe.preparedLayouts)")
+        }
+        await FileReview.openFromDiff(destination, in: model, newTab: true)
+        await settle(window)
+        check(textViews(in: host).contains { $0.string.hasPrefix("let file6Line18 =") },
+              "opening a source tab switched the existing diff into edit mode")
+        check(CenterTabStore.shared.tabs(for: model.workspace.id).contains { $0.isPinnedToPath && $0.path == destination.path },
+              "forced new-tab navigation reused the diff")
+        let outside = CodeLocation(path: "Outside.swift", line: 2, column: 5)
+        do {
+            try "// outside the loaded diff\nlet outside = 1\n".write(toFile: model.workspace.path + "/Outside.swift", atomically: true, encoding: .utf8)
+            await FileReview.openFromDiff(outside, in: model, newTab: false)
+            check(CenterTabStore.shared.tabs(for: model.workspace.id).contains { $0.isPinnedToPath && $0.path == outside.path },
+                  "a definition outside the diff did not open a new tab")
+            check(SourceEditorState.file(model.workspace.path + "/Outside.swift").request == outside,
+                  "new-tab navigation lost the destination position")
+        } catch { check(false, "could not create the outside-diff fixture: \(error)") }
     }
 
     private static func checkLanding(index: Int, host: NSView, check: (Bool, String) -> Void) {

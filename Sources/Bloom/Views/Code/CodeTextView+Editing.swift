@@ -179,7 +179,7 @@ extension CodeTextView {
         scrollRangeToVisible(edit.selection)
     }
 
-    private func reference(at index: Int) -> String? {
+    func reference(at index: Int) -> String? {
         let ns = string as NSString
         guard index < ns.length else { return nil }
         let lineRange = ns.lineRange(for: NSRange(location: index, length: 0))

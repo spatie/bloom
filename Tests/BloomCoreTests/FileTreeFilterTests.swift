@@ -13,6 +13,21 @@ struct FileTreeFilterTests {
         "tests/Feature/UserTest.php",
     ])
 
+    @Test func revealingAFileKeepsOtherExpandedFolders() throws {
+        let ancestors = try #require(FileTreeNode.ancestors(of: "app/Http/Controllers/UserController.php", in: index))
+        let restored: Set<String> = ["tests", "tests/Feature"]
+        let expanded = restored.union(ancestors)
+        #expect(ancestors == ["app", "app/Http", "app/Http/Controllers"])
+        let paths = FileTreeRowItem.flatten(children: index, expanded: expanded).map(\.node.path)
+        #expect(paths.contains("app/Http/Controllers/UserController.php"))
+        #expect(paths.contains("tests/Feature/UserTest.php"))
+        #expect(FileTreeNode.ancestors(of: "README.md", in: index) == [])
+        #expect(FileTreeNode.ancestors(of: "missing.php", in: index) == nil)
+        #expect(FileTreeNode.ancestors(of: "app/Http", in: index) == nil)
+        #expect(FileTreeNode.ancestors(of: "/app/Http/Kernel.php", in: index) == nil)
+        #expect(FileTreeNode.ancestors(of: "../app/Http/Kernel.php", in: index) == nil)
+    }
+
     private func rows(_ outcome: FileTreeFilter.Outcome) -> [String] {
         FileTreeRowItem.flatten(children: outcome.children, expanded: outcome.open)
             .map(\.node.path)
