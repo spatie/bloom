@@ -287,6 +287,48 @@ struct WorkspaceManagerTests {
     }
 
     @Test(
+        "cancelling a setup run stops the script and files it as stopped",
+        .tags(.subprocess), .timeLimit(.minutes(1))
+    )
+    func cancellingSetupStopsTheScript() async throws {
+        let repo = try await TempRepo()
+        defer { repo.cleanUp() }
+        // Ignores SIGTERM, which is what a Stop has to get past as well as the ordinary case.
+        try repo.write(".conductor/settings.toml", """
+        [scripts]
+        setup = '''
+        trap '' TERM
+        echo "seeding"
+        for _ in $(seq 1 600); do sleep 0.05; done
+        touch finished.txt
+        '''
+        """)
+
+        let store = try makeTestStore("wm")
+        let manager = WorkspaceManager(store: store)
+        let registered = try await manager.addRepository(at: repo.path)
+        let workspace = try await manager.createWorkspace(repo: registered, prompt: "Stop setup")
+
+        let collector = LineCollector()
+        let run = Task {
+            await manager.runSetup(workspace: workspace, repo: registered, port: 0) { collector.append($0) }
+        }
+        await waitUntil("the script has printed its first line") {
+            collector.joined.contains("seeding")
+        }
+
+        run.cancel()
+        let succeeded = await run.value
+        #expect(succeeded == false)
+
+        let stored = try #require(try await store.workspace(id: workspace.id))
+        #expect(stored.setupState == .failed)
+        #expect(stored.setupLog.contains("seeding"))
+        #expect(stored.setupLog.contains(WorkspaceManager.setupStoppedNote))
+        #expect(!TempRepo(existing: workspace.path).exists("finished.txt"))
+    }
+
+    @Test(
         "a finishing setup run does not undo edits made while it ran",
         .tags(.subprocess), .timeLimit(.minutes(1))
     )

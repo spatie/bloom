@@ -161,6 +161,8 @@ enum TranscriptLink {
             }
         }
 
+        addSourceIcons(to: output)
+
         // Said once over the whole turn, so the line a chip sits on is led like every other line.
         output.addAttribute(
             .paragraphStyle, value: paragraph, range: NSRange(location: 0, length: output.length)
@@ -184,6 +186,40 @@ enum TranscriptLink {
             run.addAttribute(.link, value: url, range: range)
         }
         return run
+    }
+
+    @MainActor
+    static func addSourceIcons(to text: NSMutableAttributedString) {
+        var links: [(NSRange, CodeLocation)] = []
+        text.enumerateAttribute(.link, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+            guard let url = value as? URL, let location = SourceReference.location(url) else { return }
+            links.append((range, location))
+        }
+        for (range, location) in links.reversed() {
+            let attributes = text.attributes(at: range.location, effectiveRange: nil)
+            let font = attributes[.font] as? NSFont ?? .systemFont(ofSize: NSFont.systemFontSize)
+            let size = ceil(font.pointSize)
+            let attachment = NSTextAttachment()
+            attachment.image = FileTypeIcon.icon(for: location.path)
+            attachment.bounds = CGRect(x: 0, y: (font.capHeight - size) / 2, width: size, height: size)
+            let icon = NSMutableAttributedString(attachment: attachment)
+            icon.addAttributes(attributes, range: NSRange(location: 0, length: icon.length))
+            text.insert(icon, at: range.location)
+        }
+    }
+
+    @MainActor
+    static func selectedText(in storage: NSAttributedString, range: NSRange) -> String {
+        let selection = NSMutableAttributedString(attributedString: storage.attributedSubstring(from: range))
+        var icons: [NSRange] = []
+        selection.enumerateAttribute(.attachment, in: NSRange(location: 0, length: selection.length)) { value, range, _ in
+            guard value is NSTextAttachment,
+                  let url = selection.attribute(.link, at: range.location, effectiveRange: nil) as? URL,
+                  SourceReference.location(url) != nil else { return }
+            icons.append(range)
+        }
+        for range in icons.reversed() { selection.deleteCharacters(in: range) }
+        return ComposerChipText.draft(of: selection)
     }
 
     /// What a transcript row does with an address, in one place so every row does the same.
@@ -225,6 +261,11 @@ enum TranscriptLink {
                 TranscriptLinkMenu.items(
                     for: url, placement: BrowserTab.placement(of: pane, in: model)
                 )
+            },
+            previewSource: { url in
+                guard let location = SourceReference.location(url), let model else { return nil }
+                let target = FileChipTarget.resolve(location.path, in: model.workspace.path)
+                return PromptAttachment.sent(path: target.path).url(in: target.worktree)
             }
         )
     }
