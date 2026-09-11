@@ -450,7 +450,17 @@ public struct WorkspaceManager: Sendable {
         return env
     }
 
+    /// What the setup log says when a run was stopped before the script exited.
+    public static let setupStoppedNote = "[bloom] Setup was stopped before it finished. "
+        + "Run setup again to finish it."
+
+    /// How long a stopped setup script has to exit after SIGTERM before it is killed.
+    static let setupStopGrace: Duration = .seconds(5)
+
     /// Runs the setup script, streaming output line by line. Returns whether it succeeded.
+    ///
+    /// Cancelling the calling task stops the script, and the run is filed as failed with
+    /// `setupStoppedNote` at the end of its log.
     ///
     /// - Parameter onExit: the status the script ended on, reported once and only when one
     ///   exists. A run that never started a process has no status, and reporting a made up zero
@@ -507,6 +517,20 @@ public struct WorkspaceManager: Sendable {
         } catch {
             log += "\n\(error)\n"
             onOutput("\(error)")
+        }
+
+        // Stopped rather than finished: the reader pressed Stop, or the workspace is being archived
+        // or the app is quitting. Cancelling ends `lines`, and its termination handler sends
+        // SIGTERM to the script's process group. A seeder or a watcher that ignores it would hold
+        // `exitStatus` for ever and leave the row `running`, so it gets SIGKILL after a grace
+        // period. The line in the log is what tells a reader later that nobody's script failed.
+        if Task.isCancelled {
+            Task.detached {
+                try? await Task.sleep(for: Self.setupStopGrace)
+                runner.kill()
+            }
+            log += Self.setupStoppedNote + "\n"
+            onOutput(Self.setupStoppedNote)
         }
 
         let status = await runner.exitStatus

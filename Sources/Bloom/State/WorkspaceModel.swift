@@ -330,6 +330,12 @@ final class WorkspaceModel {
     /// A setup script can run for minutes (`composer install`, `npm ci`). Without a handle,
     /// archiving mid-setup cannot stop it and it outlives the app.
     private var setupTask: Task<Void, Never>?
+    /// The script alone, where `setupTask` is the script and whatever follows it. Stop cancels
+    /// this one, so the queue behind the run still drains; archiving and quitting cancel the
+    /// outer task, which reaches this through `stream`'s cancellation handler.
+    @ObservationIgnored private var setupRunTask: Task<Bool, Never>?
+    /// Set by `stopSetup`, so a run the reader stopped is not announced as a failed setup.
+    @ObservationIgnored private var setupWasStopped = false
 
     init(workspace: Workspace, app: AppModel) {
         self.workspace = workspace
@@ -1042,7 +1048,7 @@ final class WorkspaceModel {
             // its way out is the one thing that must not happen here.
             guard !Task.isCancelled else { return }
 
-            if !succeeded {
+            if !succeeded, !setupWasStopped {
                 // The one sentence every route says about a failed setup, rather than a second
                 // one written here that would drift from it. It names no tab, which is what makes
                 // it survive the tab it used to name. See `SetupFailure`.
@@ -1140,6 +1146,7 @@ final class WorkspaceModel {
     @discardableResult
     private func stream(setupIn repo: Repo, through manager: WorkspaceManager) async -> Bool {
         isRunningSetup = true
+        setupWasStopped = false
         setupStartedAt = .now
         setupDurationMS = nil
         setupExitStatus = nil
@@ -1162,14 +1169,25 @@ final class WorkspaceModel {
             }
         }
 
-        let succeeded = await manager.runSetup(
-            workspace: workspace, repo: repo, port: port,
-            onExit: { [weak self] status in
-                Task { @MainActor in self?.setupExitStatus = status }
+        let workspace = workspace
+        let port = port
+        let run = Task {
+            await manager.runSetup(
+                workspace: workspace, repo: repo, port: port,
+                onExit: { [weak self] status in
+                    Task { @MainActor in self?.setupExitStatus = status }
+                }
+            ) { line in
+                buffer.append(line)
             }
-        ) { line in
-            buffer.append(line)
         }
+        setupRunTask = run
+        let succeeded = await withTaskCancellationHandler {
+            await run.value
+        } onCancel: {
+            run.cancel()
+        }
+        if setupRunTask == run { setupRunTask = nil }
 
         flusher.cancel()
         appendSetupOutput(buffer.drain())
@@ -1235,6 +1253,18 @@ final class WorkspaceModel {
             guard let self, self.setupGeneration == generation else { return }
             self.setupTask = nil
         }
+    }
+
+    /// Stops the setup script that is running in this worktree.
+    ///
+    /// Only the script: whatever was waiting for setup to finish goes on as it would after a
+    /// failure, so a prompt queued behind a seeder that hangs reaches the agent rather than
+    /// sitting there until the workspace is archived. The run is filed as failed, which is what
+    /// puts "Run setup again" on its row. See `WorkspaceManager.setupStoppedNote`.
+    func stopSetup() {
+        guard isRunningSetup, let run = setupRunTask else { return }
+        setupWasStopped = true
+        run.cancel()
     }
 
     /// Re-reads what setup ended up as.
