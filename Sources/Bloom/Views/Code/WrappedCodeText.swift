@@ -60,6 +60,9 @@ struct WrappedCodeText: NSViewRepresentable {
     var onEdit: (Int) -> Void
     var commentable: [Bool]
     var editable: [Bool]
+    var wraps = true
+    var onLookup: ((CodeTextView, Int, Bool, Bool, Bool) -> Void)?
+    var highlightedOffset: Int?
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -92,6 +95,26 @@ struct WrappedCodeText: NSViewRepresentable {
     }
 
     func updateNSView(_ view: TextView, context: Context) {
+        view.codeLanguage = language
+        view.onDefinition = onLookup.map { lookup in { [weak view] offset in
+            if let view { lookup(view, offset, false, false, false) }
+        } }
+        view.onReferences = onLookup.map { lookup in { [weak view] offset in
+            if let view { lookup(view, offset, true, false, false) }
+        } }
+        view.onNavigateSymbol = onLookup.map { lookup in { [weak view] offset, newTab in
+            if let view { lookup(view, offset, false, true, newTab) }
+        } }
+        view.onOpenReference = onLookup.map { lookup in { [weak view] _, offset, newTab in
+            if let view { lookup(view, offset, false, false, newTab) }
+        } }
+        defer {
+            view.layoutManager?.removeTemporaryAttribute(.backgroundColor, forCharacterRange: NSRange(location: 0, length: view.string.utf16.count))
+            if let highlightedOffset, highlightedOffset < view.string.utf16.count {
+                let range = view.selectionRange(forProposedRange: NSRange(location: highlightedOffset, length: 0), granularity: .selectByWord)
+                view.layoutManager?.addTemporaryAttribute(.backgroundColor, value: NSColor.controlAccentColor.withAlphaComponent(0.3), forCharacterRange: range)
+            }
+        }
         view.rowHeights = heights
         view.onComment = onComment
         view.onEdit = onEdit
@@ -99,12 +122,13 @@ struct WrappedCodeText: NSViewRepresentable {
         view.editableRows = editable
         let previous = context.coordinator
         guard previous.lines != lines || previous.language != language || previous.width != width
-                || previous.heights != heights || previous.scheme != colorScheme else { return }
+                || previous.heights != heights || previous.scheme != colorScheme || previous.wraps != wraps else { return }
         previous.lines = lines
         previous.language = language
         previous.width = width
         previous.heights = heights
         previous.scheme = colorScheme
+        previous.wraps = wraps
 
         let value = NSMutableAttributedString(string: "")
         for (index, line) in lines.enumerated() {
@@ -113,7 +137,7 @@ struct WrappedCodeText: NSViewRepresentable {
                 emphasis: line.emphasis, emphasisColor: line.emphasisColor
             )
             let text = line.text + (index + 1 < lines.count ? "\n" : "")
-            let spacing = max(0, heights[index] - WrappedCodeLayout.height(of: line.text, width: width))
+            let spacing = wraps ? max(0, heights[index] - WrappedCodeLayout.height(of: line.text, width: width)) : 0
             let paragraph = NSMutableAttributedString(string: text, attributes: [
                 .font: CodeMetrics.font, .paragraphStyle: WrappedCodeLayout.paragraph(spacing: spacing),
                 .foregroundColor: NSColor(Palette.textPrimary),
@@ -133,10 +157,22 @@ struct WrappedCodeText: NSViewRepresentable {
             value.append(paragraph)
         }
         let selection = view.selectedRanges
-        let sameText = view.string == value.string
-        view.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        // Canonically equal text can be shorter in UTF-16, invalidating the old selection.
+        let sameText = view.string.utf8.elementsEqual(value.string.utf8)
+        view.textContainer?.widthTracksTextView = wraps
+        view.textContainer?.containerSize = NSSize(width: wraps ? width : .greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
         view.textStorage?.setAttributedString(value)
         if sameText { view.selectedRanges = selection }
+        view.navigationSource = value.string
+        var tokenStart = 0
+        view.navigationTokens = lines.flatMap { line in
+            var carry = line.carry
+            let runs = SyntaxHighlighter.tokenize(line: line.text, language: language, carry: &carry).map {
+                SourceEditor.ColorRun(start: tokenStart + $0.range.lowerBound, length: $0.range.count, kind: $0.kind)
+            }
+            tokenStart += line.text.utf16.count + 1
+            return runs
+        }
     }
 
     final class Coordinator {
@@ -145,9 +181,10 @@ struct WrappedCodeText: NSViewRepresentable {
         var width: CGFloat = 0
         var heights: [CGFloat] = []
         var scheme: ColorScheme?
+        var wraps = true
     }
 
-    final class TextView: NSTextView {
+    final class TextView: CodeTextView {
         var rowHeights: [CGFloat] = []
         var commentable: [Bool] = []
         var editableRows: [Bool] = []
@@ -163,7 +200,7 @@ struct WrappedCodeText: NSViewRepresentable {
             let row = menuRow
             menuComment = row.flatMap { row in onComment.map { callback in { callback(row) } } }
             menuEdit = row.flatMap { row in onEdit.map { callback in { callback(row) } } }
-            let menu = NSMenu()
+            let menu = super.menu(for: event) ?? NSMenu()
             menu.autoenablesItems = false
             if let row = menuRow {
                 if commentable.indices.contains(row), commentable[row] {
@@ -175,10 +212,6 @@ struct WrappedCodeText: NSViewRepresentable {
                     item.target = self
                 }
             }
-            if !menu.items.isEmpty { menu.addItem(.separator()) }
-            let copy = menu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "")
-            copy.target = self
-            copy.isEnabled = selectedRange().length > 0
             return menu
         }
 

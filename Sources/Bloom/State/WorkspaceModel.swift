@@ -19,6 +19,7 @@ final class WorkspaceModel {
     private unowned let app: AppModel
 
     var sessions: [Session] = []
+    var sideConversations: [SessionID: SideConversationState] = [:]
 
     /// Whether the store has answered about this workspace's sessions at all, this launch.
     ///
@@ -329,6 +330,12 @@ final class WorkspaceModel {
     /// A setup script can run for minutes (`composer install`, `npm ci`). Without a handle,
     /// archiving mid-setup cannot stop it and it outlives the app.
     private var setupTask: Task<Void, Never>?
+    /// The script alone, where `setupTask` is the script and whatever follows it. Stop cancels
+    /// this one, so the queue behind the run still drains; archiving and quitting cancel the
+    /// outer task, which reaches this through `stream`'s cancellation handler.
+    @ObservationIgnored private var setupRunTask: Task<Bool, Never>?
+    /// Set by `stopSetup`, so a run the reader stopped is not announced as a failed setup.
+    @ObservationIgnored private var setupWasStopped = false
 
     init(workspace: Workspace, app: AppModel) {
         self.workspace = workspace
@@ -338,12 +345,12 @@ final class WorkspaceModel {
     }
 
     /// What this workspace's repository asks for: the setup script, the run scripts, the rest of
-    /// `.conductor/settings.toml`.
+    /// the repository settings files.
     ///
     /// Held here rather than read where it is needed because the Workspace menu reads it, and a
     /// `Commands` body is not a view: it cannot await a file, and it cannot carry a task. It is
-    /// re-read whenever the workspace is selected, so a run script added in the project settings
-    /// window is in the menu the next time the workspace is on screen.
+    /// re-read whenever the workspace is selected and after project settings are saved, so a new
+    /// run script appears in the menu without switching workspaces.
     private(set) var settings = RepoSettings()
 
     /// Off the main actor, because this parses up to six files and is called on every switch.
@@ -383,8 +390,8 @@ final class WorkspaceModel {
     // MARK: - Sessions
 
     var activeSession: Session? {
-        guard let activeSessionID else { return sessions.first }
-        return sessions.first { $0.id == activeSessionID } ?? sessions.first
+        guard let activeSessionID else { return sessions.first { $0.sideConversationParentID == nil } }
+        return sessions.first { $0.id == activeSessionID } ?? sessions.first { $0.sideConversationParentID == nil }
     }
 
     /// Reads the session list back from the store.
@@ -406,7 +413,7 @@ final class WorkspaceModel {
         if !hasReadSessions { hasReadSessions = true }
         SwitchTrace.mark("sessions.assigned", workspace: workspace.id)
         if activeSessionID == nil || !sessions.contains(where: { $0.id == activeSessionID }) {
-            activeSessionID = sessions.first?.id
+            activeSessionID = sessions.first { $0.sideConversationParentID == nil }?.id
         } else {
             // The setter above prepares the transcript for us. This is the other branch, where the
             // active session has not moved and the transcript may still be the one this launch has
@@ -921,6 +928,7 @@ final class WorkspaceModel {
     /// agents are killed here rather than merely interrupted, and killed first, which is what lets
     /// every SIGTERM escalation run at the same time instead of one after another.
     func stopEverything() {
+        for state in sideConversations.values { state.task?.cancel() }
         for transcript in transcripts.values { transcript.terminateNow() }
         setupTask?.cancel()
         setupTask = nil
@@ -950,11 +958,13 @@ final class WorkspaceModel {
         stopEverything()
         for transcript in transcripts.values { transcript.teardown() }
         transcripts.removeAll()
+        sideConversations.removeAll()
     }
 
     /// The quit path: the same teardown, but it waits for the agents to actually be gone rather
     /// than only asking them to leave.
     func shutdown() async {
+        for state in sideConversations.values { state.task?.cancel() }
         setupTask?.cancel()
         setupTask = nil
         // Nilled like the three above: a cancelled refresh returns through its
@@ -1038,7 +1048,7 @@ final class WorkspaceModel {
             // its way out is the one thing that must not happen here.
             guard !Task.isCancelled else { return }
 
-            if !succeeded {
+            if !succeeded, !setupWasStopped {
                 // The one sentence every route says about a failed setup, rather than a second
                 // one written here that would drift from it. It names no tab, which is what makes
                 // it survive the tab it used to name. See `SetupFailure`.
@@ -1136,6 +1146,7 @@ final class WorkspaceModel {
     @discardableResult
     private func stream(setupIn repo: Repo, through manager: WorkspaceManager) async -> Bool {
         isRunningSetup = true
+        setupWasStopped = false
         setupStartedAt = .now
         setupDurationMS = nil
         setupExitStatus = nil
@@ -1158,14 +1169,25 @@ final class WorkspaceModel {
             }
         }
 
-        let succeeded = await manager.runSetup(
-            workspace: workspace, repo: repo, port: port,
-            onExit: { [weak self] status in
-                Task { @MainActor in self?.setupExitStatus = status }
+        let workspace = workspace
+        let port = port
+        let run = Task {
+            await manager.runSetup(
+                workspace: workspace, repo: repo, port: port,
+                onExit: { [weak self] status in
+                    Task { @MainActor in self?.setupExitStatus = status }
+                }
+            ) { line in
+                buffer.append(line)
             }
-        ) { line in
-            buffer.append(line)
         }
+        setupRunTask = run
+        let succeeded = await withTaskCancellationHandler {
+            await run.value
+        } onCancel: {
+            run.cancel()
+        }
+        if setupRunTask == run { setupRunTask = nil }
 
         flusher.cancel()
         appendSetupOutput(buffer.drain())
@@ -1231,6 +1253,18 @@ final class WorkspaceModel {
             guard let self, self.setupGeneration == generation else { return }
             self.setupTask = nil
         }
+    }
+
+    /// Stops the setup script that is running in this worktree.
+    ///
+    /// Only the script: whatever was waiting for setup to finish goes on as it would after a
+    /// failure, so a prompt queued behind a seeder that hangs reaches the agent rather than
+    /// sitting there until the workspace is archived. The run is filed as failed, which is what
+    /// puts "Run setup again" on its row. See `WorkspaceManager.setupStoppedNote`.
+    func stopSetup() {
+        guard isRunningSetup, let run = setupRunTask else { return }
+        setupWasStopped = true
+        run.cancel()
     }
 
     /// Re-reads what setup ended up as.
@@ -1465,6 +1499,9 @@ final class WorkspaceModel {
     /// `DiffView.body` reads this for every pass it makes over the diff and a keystroke must not
     /// be a reason to make one.
     var reviewDrafts: [String: ReviewDraft] = [:]
+
+    /// A browser review survives switching tabs, just like a half-written diff comment.
+    var browserReviews: [String: BrowserRegionCapture] = [:]
 
     /// Which comments are open for editing in place. Here for the same reason `reviewDrafts` is,
     /// and the reason is not hypothetical for an edit either: the band being edited sits in the

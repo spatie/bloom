@@ -15,6 +15,10 @@ import BloomCore
 enum FileReview {
     /// Opens the workspace's review on a file, or points the open one at it.
     static func open(path: String, in model: WorkspaceModel, focusing: Bool = false) {
+        let location = CodeLocation.parse(path)
+        if location.path != path { open(location: location, in: model); return }
+        SourceEditorState.file((model.workspace.path as NSString).appendingPathComponent(path)).diffRequest = nil
+        SourceNavigation.shared.visit(location, in: model)
         if model.changedFiles.contains(where: { $0.path == path }) { model.selectedFilePath = path }
         show(path: path, in: model, focusing: focusing)
         // A new shared review defaults to all changes, but unchanged files open on their own.
@@ -22,6 +26,58 @@ enum FileReview {
            let tab = CenterTabStore.shared.review(for: model.workspace.id) {
             CenterTabStore.shared.setShowsAllFiles(false, for: tab)
         }
+    }
+
+    static func open(location: CodeLocation, in model: WorkspaceModel, recording: Bool = true) {
+        var location = location
+        location.path = location.displayPath(relativeTo: model.workspace.path)
+        if recording { SourceNavigation.shared.visit(location, in: model) }
+        let absolute = (location.path as NSString).isAbsolutePath ? location.path
+            : (model.workspace.path as NSString).appendingPathComponent(location.path)
+        SourceEditorState.file(absolute).go(to: location)
+        show(path: location.path, in: model, focusing: true)
+        if let tab = CenterTabStore.shared.review(for: model.workspace.id) {
+            CenterTabStore.shared.setShowsAllFiles(false, for: tab)
+        }
+        if model.changedFiles.contains(where: { $0.path == location.path }) { model.selectedFilePath = location.path }
+    }
+
+    static func activePath(in model: WorkspaceModel) -> String? {
+        let workspaceTabs = WorkspaceTabsStore.shared
+        guard let selected = workspaceTabs.selectedTab(in: model) else { return nil }
+        let layout = workspaceTabs.layout(of: selected)
+        let panes = [layout.focus] + layout.panes.filter { $0 != layout.focus }
+        let tabs = CenterTabStore.shared.tabs(for: model.workspace.id)
+        for pane in panes {
+            guard case let .tool(id) = workspaceTabs.content(of: pane, in: selected),
+                  let tab = tabs.first(where: { $0.id == id && $0.kind == .review }) else { continue }
+            let path = tab.showsAllFiles && !tab.isPinnedToPath ? model.selectedFilePath ?? tab.path : tab.path
+            if !path.isEmpty { return CodeLocation(path: path).displayPath(relativeTo: model.workspace.path) }
+        }
+        return nil
+    }
+
+    static func openFromDiff(_ target: CodeLocation, in model: WorkspaceModel, newTab: Bool) async {
+        var location = target
+        location.path = location.displayPath(relativeTo: model.workspace.path)
+        if !newTab, let file = model.reviewFiles.first(where: { $0.path == location.path }) {
+            let patch = await model.patch(for: file)
+            guard !Task.isCancelled else { return }
+            if let diff = DiffDocument.parse(patch: patch, path: file.path), DiffDocument.contains(location, in: diff) {
+                let absolute = (model.workspace.path as NSString).appendingPathComponent(location.path)
+                let state = SourceEditorState.file(absolute)
+                state.request = nil
+                state.prefersEditing = false
+                state.diffLine = location.line
+                state.diffRequest = location
+                state.diffRevision &+= 1
+                SourceNavigation.shared.visit(location, in: model)
+                model.selectedFilePath = location.path
+                show(path: location.path, in: model, focusing: true)
+                return
+            }
+        }
+        openInNewTab(path: "\(location.path):\(location.line):\(location.column)", in: model)
     }
 
     /// The one door, with the one thing the two callers disagree about.
@@ -47,7 +103,14 @@ enum FileReview {
     /// never the one `showReview` repoints, so a reading you set aside survives the next filename
     /// you click. See `CenterTab.isPinnedToPath`.
     static func openInNewTab(path: String, in model: WorkspaceModel) {
-        let tab = CenterTabStore.shared.openPinnedReview(path: path, workspaceID: model.workspace.id)
+        let location = CodeLocation.parse(path)
+        SourceNavigation.shared.visit(location, in: model)
+        if location.path != path {
+            let absolute = (location.path as NSString).isAbsolutePath ? location.path
+                : (model.workspace.path as NSString).appendingPathComponent(location.path)
+            SourceEditorState.file(absolute).go(to: location)
+        }
+        let tab = CenterTabStore.shared.openPinnedReview(path: location.path, workspaceID: model.workspace.id)
         WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
     }
 

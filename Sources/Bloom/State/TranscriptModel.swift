@@ -122,7 +122,8 @@ final class TranscriptModel {
                     || TranscriptRowInk.drawsNothing(kind: row.kind, payload: row.payload),
                 settled: settled,
                 toolUseID: row.kind == .toolUse ? row.refID : nil,
-                parentToolUseID: row.parentToolUseID
+                parentToolUseID: row.parentToolUseID,
+                opensTurn: BackgroundWake.isRow(kind: row.kind, payload: row.payload)
             )
         })
     }
@@ -287,6 +288,13 @@ final class TranscriptModel {
     /// meant to carry on writing. A counter for `liveEndRequests`'s reason: two requests in a row
     /// are two requests, and the composer has nothing to clear afterwards.
     private(set) var composerFocusRequests = 0
+
+    func appendSourceContext(_ context: String) {
+        draft += (draft.isEmpty ? "" : "\n\n") + "Ask about this code:\n\n" + context + "\n\n"
+        focusComposer()
+    }
+
+    func focusComposer() { composerFocusRequests += 1 }
 
     private var runner: (any SessionRunner)?
 
@@ -598,12 +606,14 @@ final class TranscriptModel {
     /// screen from the frame the key went down, in the state `Delivery.goesImmediately` says it is
     /// in: as a sent bubble if nothing is holding the queue, as a pending one if something is. See
     /// `sending`.
-    func submit(_ text: String) async {
+    func submit(_ text: String, clearingDraft sourceDraft: String? = nil) async {
         guard !isWorkspaceArchiving else { return }
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, let store else { return }
 
-        let submittedDraft = draft.trimmingCharacters(in: .whitespacesAndNewlines) == body ? draft : nil
+        // Review payloads expand compact chips into comments. Clear the source draft, while
+        // retaining anything the reader typed after that payload began being prepared.
+        let submittedDraft = SubmittedDraft.matching(current: draft, message: body, source: sourceDraft)
         if submittedDraft != nil { draft = "" }
 
         // Built here rather than inside the enqueue, so the row that goes in the table and the
@@ -1530,6 +1540,10 @@ final class TranscriptModel {
 
         case .subagent(let signal):
             subagents.apply(signal)
+            // Between turns the runner has just stored this as the line opening the turn the CLI
+            // is about to start, and nothing else would read it in until that turn's first row
+            // arrived. See `BackgroundWake`.
+            if case .reported = signal, !isRunning { await appendLatestMessages() }
 
         case .hook, .unknown:
             break

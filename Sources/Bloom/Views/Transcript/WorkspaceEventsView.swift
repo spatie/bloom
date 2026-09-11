@@ -457,7 +457,7 @@ struct WorkspaceEventRow: View {
             // behind a condition of its own instead of being an `HStack` that is sometimes empty:
             // an empty stack is still a view, and the gap above it would be drawn under every
             // finished run.
-            if showsExpandLink || showsRunSetupAgain {
+            if showsExpandLink || showsRunSetupAgain || showsStopSetup {
                 // Wider than the `spacing` rung most pairs use. The gap was the only thing
                 // saying these were two controls back when both were plain words, and at six
                 // points "Show more of the log Run setup again" read as one sentence somebody had
@@ -496,6 +496,16 @@ struct WorkspaceEventRow: View {
                             .font(Typo.caption)
                             .help("Asks, then runs this repository's setup script in this workspace again")
                     }
+
+                    // No confirmation, unlike the run: stopping costs nothing that "Run setup
+                    // again" on the failed row it leaves behind cannot give back.
+                    if showsStopSetup, let model {
+                        Button("Stop setup") { model.stopSetup() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .font(Typo.caption)
+                            .help("Stops the setup script. Anything waiting for it goes to the agent")
+                    }
                 }
                 .padding(.leading, TranscriptLayout.block)
             }
@@ -528,6 +538,11 @@ struct WorkspaceEventRow: View {
     /// a wrong answer.
     private var showsRunSetupAgain: Bool {
         event.kind == .setup && event.outcome == .failed && model?.canRunSetup == true
+    }
+
+    /// Whether this row offers to stop the run, which is for as long as the script is going.
+    private var showsStopSetup: Bool {
+        event.kind == .setup && event.isRunning && model?.isRunningSetup == true
     }
 
     /// Whether unfolding this row would actually show anything the reader cannot already see.

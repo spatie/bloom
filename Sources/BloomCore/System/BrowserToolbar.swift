@@ -155,6 +155,15 @@ public struct BrowserToolbar: Equatable, Sendable {
         )
     }
 
+    public var regionCapture: Control {
+        Control(
+            symbol: "crop",
+            name: "Comment on an Area",
+            help: "Select part of this page and add a comment to the draft",
+            isEnabled: destination != nil && !isCapturing
+        )
+    }
+
     // MARK: - Sharing
 
     /// What the system's share sheet is handed, or nil when the pane has not been anywhere yet.

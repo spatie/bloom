@@ -40,8 +40,11 @@ An `ANTHROPIC_API_KEY` in the environment means API key auth instead, and takes 
 what is displayed. Config file to offer for opening: `~/.claude/settings.json` (a symlink into
 the user's dotfiles here, so resolve symlinks before revealing it).
 
-Login command: `claude /login`. Bloom cannot run that inline because it is interactive, so the
-button must open it in a terminal, the way `Reveal.inTerminal(_:)` already does.
+Login command: `claude auth login`. Agent sign-in runs in an embedded terminal sheet, using the
+same `LoginTerminalSession` as GitHub sign-in. It launches the detected executable directly,
+without controlling Terminal.app or requiring Automation permission. The sheet supports retry,
+cancellation, and copying the command to run elsewhere. Account details refresh when the command
+exits and when the sheet closes. Signing in with another account changes the CLI's shared login.
 
 ## Codex
 

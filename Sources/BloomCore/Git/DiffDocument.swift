@@ -21,6 +21,30 @@ public struct DiffDocument: Sendable {
     /// A horizontal scroll wider than this helps nobody and makes the scroller useless.
     private static let columnLimit = 800
 
+    public static func sourceOffset(in lines: [DiffLine?], offset: Int, source: String) -> Int? {
+        guard offset >= 0 else { return nil }
+        var start = 0
+        let full = source as NSString
+        for entry in lines {
+            let length = entry?.text.utf16.count ?? 0
+            if offset >= start, offset < start + length {
+                guard let entry, let number = entry.newNumber, entry.kind == .addition || entry.kind == .context else { return nil }
+                let lineStart = CodeLocation.offset(in: source, line: number)
+                guard lineStart < full.length else { return nil }
+                let range = full.lineRange(for: NSRange(location: lineStart, length: 0))
+                let text = full.substring(with: range).trimmingCharacters(in: .newlines)
+                guard text.utf8.elementsEqual(entry.text.utf8) else { return nil }
+                return lineStart + offset - start
+            }
+            start += length + 1
+        }
+        return nil
+    }
+
+    public static func contains(_ location: CodeLocation, in file: FileDiff) -> Bool {
+        file.hunks.flatMap(\.lines).contains { ($0.kind == .addition || $0.kind == .context) && $0.newNumber == location.line }
+    }
+
     public static func parse(patch: String, path: String) -> FileDiff? {
         let files = DiffParser.parse(patch)
         return files.first { $0.displayPath == path } ?? files.first
@@ -33,8 +57,8 @@ public struct DiffDocument: Sendable {
     /// Context skipped between hunks is a known gap in this reasoning. Git only gives us the lines
     /// it printed, so a construct opened inside the skipped region cannot be seen, and the first
     /// lines of the next hunk may highlight as if it were never opened.
-    public static func prepare(file: FileDiff, path: String) -> DiffDocument {
-        let language = Language.detect(path: path)
+    public static func prepare(file: FileDiff, path: String, language override: Language? = nil) -> DiffDocument {
+        let language = override ?? Language.detect(path: path)
         // Plain text has no construct that can span a line, so the whole sequential pass would
         // only ever hand back a clean state. Skipping it makes an unrecognised file free.
         let needsCarry = language != .plainText

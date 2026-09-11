@@ -23,11 +23,10 @@ struct BloomCommands: Commands {
     @FocusedValue(\.focusedWorkspaceRow) private var focusedRow: FocusedWorkspaceRow?
 
     /// The focused window's Save, when it has one. See `FocusedMenuValues`.
+    @FocusedValue(\.sourceFind) private var sourceFind
     @FocusedValue(\.saveAction) private var saveAction: SaveAction?
 
-    /// Landing the branch, published by the pull request band because that is where the
-    /// confirmation lives. Nil whenever that band is not on screen, which greys the item.
-    @FocusedValue(\.mergeAction) private var mergeAction
+    @FocusedValue(\.composerTranscript) private var composerTranscript: TranscriptModel?
     @FocusedValue(\.isTypingProse) private var isTypingProse: Bool?
 
     /// Opens the project settings window, which is a scene rather than a sheet.
@@ -361,6 +360,18 @@ struct BloomCommands: Commands {
             // hidden button and on a menu item is not a tie, the button wins and the item never
             // fires, so it has to be one or the other. Here it is the menu, which greys itself out
             // when there is nothing to step through and says the keys out loud.
+            MenuCommand(.fileBack) {
+                guard let workspace = model.selectedModel else { return }
+                SourceNavigation.shared.move(-1, in: workspace)
+            }
+            .disabled(fileHistory?.canGoBack != true)
+
+            MenuCommand(.fileForward) {
+                guard let workspace = model.selectedModel else { return }
+                SourceNavigation.shared.move(1, in: workspace)
+            }
+            .disabled(fileHistory?.canGoForward != true)
+
             MenuCommand(.nextChangedFile) { stepChangedFile(1) }
                 .disabled(!canStepChangedFiles)
 
@@ -488,15 +499,6 @@ struct BloomCommands: Commands {
 
             Divider()
 
-            // The title is the band's when the band is on screen, and the table's fallback when
-            // it is not, which is what lets a greyed row still say what the item is. It goes
-            // through the band's own `propose`, so the sign in gate and the confirmation are the
-            // ones the button raises rather than a second copy of them. See `MergeAction`.
-            Button(mergeAction?.title ?? MenuBarCatalogue[.merge].title) {
-                mergeAction?.perform()
-            }
-            .disabled(mergeAction?.isEnabled != true)
-
             // **Greyed while somebody is typing, and that is not tidiness.** Command-Backspace
             // deletes to the start of the line in every text box on macOS, and AppKit checks a
             // menu's key equivalents before the responder chain sees the key, so the text view
@@ -562,9 +564,9 @@ struct BloomCommands: Commands {
             // stops the agent that row is about. It is `existingModel`, which only reads: a
             // workspace this launch has never opened has no transcript to stop anyway.
             MenuCommand(.stopAgent) {
-                subjectModel?.activeTranscript?.stop()
+                (composerTranscript ?? subjectModel?.activeTranscript)?.stop()
             }
-            .disabled(subjectModel?.activeTranscript?.isRunning != true)
+            .disabled((composerTranscript ?? subjectModel?.activeTranscript)?.isRunning != true)
         }
 
         CommandGroup(replacing: .help) {
@@ -928,6 +930,16 @@ struct BloomCommands: Commands {
 
     // MARK: - Walking a review
 
+    private var fileHistory: SourceHistory? {
+        guard let workspace = model.selectedModel,
+              let tab = WorkspaceTabsStore.shared.selectedTab(in: workspace),
+              case let .tool(id) = WorkspaceTabsStore.shared.content(
+                of: WorkspaceTabsStore.shared.focusedPane(of: tab), in: tab),
+              CenterTabStore.shared.tabs(for: workspace.workspace.id).contains(where: { $0.id == id && $0.kind == .review })
+        else { return nil }
+        return SourceNavigation.shared.histories[workspace.workspace.id]
+    }
+
     /// Greyed when there is no review open or nothing changed in the worktree, which is the state
     /// the two hidden buttons expressed by not existing.
     private var canStepChangedFiles: Bool {
@@ -976,6 +988,10 @@ struct BloomCommands: Commands {
     /// Cmd+F. The pane in front gets first refusal, and the workspace search is what is left when
     /// nothing there can find. See `FindCommand`, which is the rule and holds the tests.
     private func find() {
+        if !FindInPlace.isAvailable, let sourceFind {
+            sourceFind.perform(.showFindInterface)
+            return
+        }
         switch FindCommand.find(
             canFindInPlace: FindInPlace.isAvailable, hasProjects: !model.repos.isEmpty
         ) {
@@ -989,6 +1005,10 @@ struct BloomCommands: Commands {
     }
 
     private func step(_ action: NSTextFinder.Action) {
+        if !FindInPlace.isAvailable, let sourceFind {
+            sourceFind.perform(action)
+            return
+        }
         guard FindCommand.step(canFindInPlace: FindInPlace.isAvailable) == .findInPlace else {
             return
         }

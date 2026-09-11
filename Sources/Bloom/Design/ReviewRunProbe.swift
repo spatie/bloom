@@ -27,6 +27,19 @@ enum ReviewRunProbe {
             if !condition { failures.append(message) }
         }
 
+        if let directory = ProbeHarness.value(for: "--review-run-probe") {
+            progress("Checking file navigation alignment")
+            await ReviewNavigationProbe.run(directory: directory, check: check)
+        }
+        if CommandLine.arguments.contains("--review-navigation-only") {
+            await ReviewWrappingProbe.run(check: check, save: { _, _ in })
+            let result: JSONValue = .object([
+                "checks": .integer(checks), "passed": .bool(failures.isEmpty), "failures": .strings(failures),
+            ])
+            if let data = try? JSONEncoder().encode(result) { FileHandle.standardOutput.write(data) }
+            exit(failures.isEmpty ? 0 : 1)
+        }
+
         progress("Checking comment scrolling and focus")
         for numbers in [DiffGutter.Numbers.both, .old, .new] {
             let fixture = ReviewRunFixture()

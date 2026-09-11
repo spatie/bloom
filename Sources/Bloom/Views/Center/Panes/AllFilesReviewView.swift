@@ -7,10 +7,11 @@ struct AllFilesReviewView: View {
     let model: WorkspaceModel
     let selectedPath: String
     let navigationRevision: Int
-    /// Keep the destination anchored while loading replaces short placeholders with full diffs.
+    /// A prepared file can still move when neighbouring diffs load or the lazy stack lays out.
+    /// Hold the clicked destination until the reader scrolls or collapses a section.
     @State private var pendingDestination: String?
     @State private var layoutRevision = 0
-    @State private var preparedPaths: Set<String> = []
+    @State private var destinationPrepared = false
     @State private var collapsedPaths: Set<String> = []
     @State private var hasNavigated = false
 
@@ -32,10 +33,16 @@ struct AllFilesReviewView: View {
                                     embeddedViewportHeight: geometry.size.height,
                                     isCollapsed: collapsedPaths.contains(file.path),
                                     onScrollFocus: {
+                                        guard hasNavigated, pendingDestination == nil else { return }
                                         if model.selectedFilePath != file.path { model.selectedFilePath = file.path }
                                     },
+                                    navigationTarget: pendingDestination == file.path,
+                                    onNavigationLayout: {
+                                        guard pendingDestination == file.path else { return }
+                                        scroll(to: file.path, using: reader)
+                                    },
                                     onPrepared: {
-                                        preparedPaths.insert(file.path)
+                                        if pendingDestination == file.path { destinationPrepared = true }
                                         layoutRevision += 1
                                     },
                                     onToggleCollapsed: {
@@ -48,6 +55,11 @@ struct AllFilesReviewView: View {
                                 .id(file.path)
                             }
                         }
+                        .background {
+                            ReviewNavigationInput(armed: pendingDestination != nil) {
+                                pendingDestination = nil
+                            }
+                        }
                     }
                     .defaultScrollAnchor(.topLeading)
                     .onScrollPhaseChange { _, phase in
@@ -58,7 +70,7 @@ struct AllFilesReviewView: View {
                     .onScrollGeometryChange(for: Bool.self) { geometry in
                         geometry.contentOffset.y <= geometry.contentInsets.top
                     } action: { _, atTop in
-                        if atTop, let path = model.reviewFiles.first?.path,
+                        if hasNavigated, pendingDestination == nil, atTop, let path = model.reviewFiles.first?.path,
                            model.selectedFilePath != path {
                             model.selectedFilePath = path
                         }
@@ -69,22 +81,34 @@ struct AllFilesReviewView: View {
                         let path = requested.isEmpty ? model.reviewFiles.first?.path : requested
                         guard let path, model.reviewFiles.contains(where: { $0.path == path }) else { return }
                         collapsedPaths.remove(path)
-                        pendingDestination = preparedPaths.contains(path) ? nil : path
+                        destinationPrepared = false
+                        pendingDestination = path
+                        model.selectedFilePath = path
                         reader.scrollTo(path, anchor: .top)
                     }
+                    .onScrollGeometryChange(for: CGSize.self) { geometry in
+                        geometry.contentSize
+                    } action: { _, _ in
+                        if let path = pendingDestination { scroll(to: path, using: reader) }
+                    }
                     .onChange(of: layoutRevision) { _, _ in
-                        if let path = pendingDestination {
-                            reader.scrollTo(path, anchor: .top)
-                            if preparedPaths.contains(path) { pendingDestination = nil }
-                        }
+                        if let path = pendingDestination { scroll(to: path, using: reader) }
                     }
                     .onChange(of: model.reviewFiles.map(\.path)) { _, paths in
                         collapsedPaths.formIntersection(paths)
-                        preparedPaths.formIntersection(paths)
                         if let pendingDestination, !paths.contains(pendingDestination) { self.pendingDestination = nil }
                     }
                 }
             }
+        }
+    }
+
+    private func scroll(to path: String, using reader: ScrollViewProxy) {
+        let absolute = (model.workspace.path as NSString).appendingPathComponent(path)
+        if destinationPrepared, let destination = SourceEditorState.file(absolute).diffRequest {
+            reader.scrollTo("\(path):definition:\(destination.line)", anchor: .center)
+        } else {
+            reader.scrollTo(path, anchor: .top)
         }
     }
 }

@@ -95,6 +95,7 @@ public actor AgentRunner {
     /// `session.<id>.outputStyle`. Nil rather than the word `default`, so "nothing chosen" and
     /// "chosen and then cleared" cannot drift apart on the way to argv.
     private var outputStyle: String?
+    private var awaitingSideContextAcknowledgement = false
     /// Questions this process is currently blocked on, newest last.
     ///
     /// Held here as well as in the database because the two are needed at different moments. The
@@ -365,6 +366,8 @@ public actor AgentRunner {
         // has not exited yet, short-circuits, and the turn below is written into a process that
         // is already under SIGTERM. Neither read depends on the previous run being gone, so
         // nothing is lost by asking first.
+        let prompt = try await store.sideConversationTurn(text, sessionID: sessionID)
+        awaitingSideContextAcknowledgement = prompt != text
         await refreshFastMode()
         await refreshOutputStyle()
         await refreshExecutable()
@@ -372,7 +375,7 @@ public actor AgentRunner {
         start()
 
         let line = try Self.encodeTurn(text)
-        handle.current?.writeLine(line)
+        handle.current?.writeLine(try Self.encodeTurn(prompt))
 
         // One row, whichever it is. The crew payload carries what a person reads and what the
         // model was handed, so writing the user row beside it would put the envelope back on
@@ -521,6 +524,16 @@ public actor AgentRunner {
             return
         }
 
+        // A background task finishing between turns is what the CLI starts a turn of its own for,
+        // and this line is the only one saying so. Stored as the row that opens that turn, so the
+        // work under it is not drawn straight after a footer as if the footer had been wrong.
+        // Read before the `init` that follows it, which is what moves the state on. See
+        // `BackgroundWake`.
+        if case .subagent(.reported(let report)) = event, !report.raw.isEmpty,
+           BackgroundWake.opensTurn(during: session.state) {
+            await persist(kind: .system, payload: report.raw)
+        }
+
         if event.isTranscriptRow || persistsStreamDeltas {
             var durationMS: Int?
             if case .result(let result) = event { durationMS = result.durationMS }
@@ -554,6 +567,15 @@ public actor AgentRunner {
             if moved { await save(session) }
 
         case .assistantText(let block), .thinking(let block):
+            if awaitingSideContextAcknowledgement {
+                do {
+                    try await store.acknowledgeSideConversationContext(sessionID: sessionID)
+                    awaitingSideContextAcknowledgement = false
+                } catch {
+                    // Repeating background context is safer than losing it after a failed write.
+                    Self.log.error("Could not acknowledge side context: \(error.readableMessage, privacy: .public)")
+                }
+            }
             guard block.parentToolUseID == nil, block.usage.contextUsedTokens > 0 else { break }
             lastContextUsed = block.usage.contextUsedTokens
 

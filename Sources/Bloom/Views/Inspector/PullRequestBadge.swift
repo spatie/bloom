@@ -7,9 +7,8 @@ import BloomCore
 /// which did nothing at all when clicked, and a separate borderless arrow button beside it, which
 /// was the only way out to GitHub. The number is the obvious thing to click and it was the half
 /// that was inert, which is the sort of dead control people learn to distrust a whole strip over.
-/// So the two halves became one button. Both of them open the same page, through the same
-/// `GitHubBridge.open` the arrow always used, and the hairline between them is a seam rather than
-/// a boundary: it says the arrow belongs to the number, not that it does something else.
+/// Both now open the same page through `GitHubBridge.open`. A divider still made them look like
+/// separate actions, so the number and arrow share padding inside one uninterrupted outline.
 ///
 /// Outlined rather than filled, and the numbers are measured off the control this is meant to
 /// match rather than chosen: 24 points tall, 12 point text, the outline at twenty percent. Filled
@@ -34,7 +33,7 @@ struct PullRequestBadge: View {
 
     var body: some View {
         Button(action: open) {
-            HStack(spacing: 0) {
+            HStack(spacing: Metrics.spacingSmall) {
                 // `verbatim`, and this is not a style choice. A `Text` built from a
                 // `LocalizedStringKey` formats an interpolated `Int` for the current locale, so on
                 // a machine set to Dutch #2631 came out as "#2.631": a pull request number with a
@@ -45,16 +44,11 @@ struct PullRequestBadge: View {
                     // shape and the badge cannot appear to jitter as a poll comes back.
                     .font(Typo.label)
                     .monospacedDigit()
-                    .padding(.horizontal, InspectorLayout.badgeInset)
-
-                Rectangle()
-                    .fill(ink.opacity(InspectorLayout.badgeStrokeOpacity))
-                    .frame(width: Metrics.hairline)
 
                 Image(systemName: "arrow.up.forward")
                     .font(Typo.caption)
-                    .padding(.horizontal, InspectorLayout.badgeInset)
             }
+            .padding(.horizontal, InspectorLayout.badgeInset)
             .foregroundStyle(ink)
             .frame(height: InspectorLayout.badgeHeight)
             .background {

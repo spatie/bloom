@@ -204,7 +204,7 @@ struct DiffLineView: View, Equatable {
                 // the tint says the line changed, the emphasis says which part of it did.
                 HStack(spacing: 0) {
                     DiffMarker(line: line)
-                    CodeText(line: line.text, language: language, carry: carry)
+                    CodeText(line: DiffLineDisplay.text(line.text), language: language, carry: carry)
                         .emphasizing(emphasis, color: DiffWash.emphasis(of: line))
                     Spacer(minLength: 0)
                 }

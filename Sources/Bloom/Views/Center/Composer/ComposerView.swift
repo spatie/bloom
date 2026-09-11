@@ -24,6 +24,8 @@ struct ComposerView: View {
     /// passes its own, because a conversation that cannot change a file should not open by
     /// inviting somebody to ask it to.
     var placeholder: String = ComposerEditor.chatPlaceholder
+    var onDismiss: (() -> Void)?
+    var includesReviewComments = true
     var destinationLabel: String?
     /// The chats this composer may be pointed at, when the caller is offering a choice. Empty,
     /// the default, leaves the strip above the box a plain sentence. See
@@ -38,8 +40,8 @@ struct ComposerView: View {
     /// The space a short pane keeps for the conversation when the draft grows.
     private static let minTranscriptHeight: CGFloat = 120
 
-    /// What the wrapped text occupies, already clamped by `ComposerTextEditor` to its line window.
     @State private var contentHeight = ComposerTextEditor.lineHeight
+    @State private var draggedHeight: CGFloat?
     /// Everything in the composer that is not the editor: the footer, the box and the
     /// padding. Measured rather than assumed, because the footer's height comes from its controls.
     ///
@@ -72,6 +74,18 @@ struct ComposerView: View {
                     onSelect: onSelectDestination
                 )
             }
+
+            PaneDivider(
+                axis: .vertical,
+                length: Binding(
+                    get: { Double(editorHeight) },
+                    set: { draggedHeight = $0 == Double(automaticEditorHeight) ? nil : CGFloat($0) }
+                ),
+                bounds: Double(ComposerTextEditor.lineHeight)...Double(maxEditorHeight),
+                reset: Double(automaticEditorHeight),
+                label: "Message height"
+            )
+            .help("Drag to resize. Double-click to fit the text.")
 
             composer
         }
@@ -134,7 +148,8 @@ struct ComposerView: View {
                 onAttach: actions.attach,
                 onQuickPrompt: { fire($0, insert: actions.insert) },
                 onSend: send,
-                onStop: transcript.stop
+                onStop: transcript.stop,
+                onSideConversation: canOpenSideConversation ? openSideConversation : nil
             )
         }
         .task(id: transcript.session.id) { await prepare() }
@@ -146,22 +161,27 @@ struct ComposerView: View {
             isFocused = true
             caret = 0
         }
+        .focusedValue(\.composerTranscript, isFocused ? transcript : nil)
         .onDisappear(perform: saveDraftNow)
     }
 
     // MARK: - Height
 
-    /// The text editor measures up to ten lines, then scrolls internally. A short pane may
-    /// cap it earlier so the conversation always keeps some room above the writing surface.
     private var editorHeight: CGFloat {
-        let minimum = ComposerTextEditor.lineHeight
-        let maximum = PaneMeasure.editorCap(
+        min(max(draggedHeight ?? automaticEditorHeight, ComposerTextEditor.lineHeight), maxEditorHeight)
+    }
+
+    private var automaticEditorHeight: CGFloat {
+        min(max(contentHeight, ComposerTextEditor.lineHeight), maxEditorHeight)
+    }
+
+    private var maxEditorHeight: CGFloat {
+        PaneMeasure.editorCap(
             room: room.height,
             chrome: chromeHeight + ComposerLayout.bottomInset + ComposerLayout.textClearance,
             floor: Self.minTranscriptHeight,
-            atLeast: minimum
+            atLeast: ComposerTextEditor.lineHeight
         )
-        return min(max(contentHeight, minimum), maximum)
     }
 
     // MARK: - Derived state
@@ -194,7 +214,7 @@ struct ComposerView: View {
 
     /// The pending review, which rides with whatever is sent next from this workspace.
     private var reviewComments: [ReviewComment] {
-        model?.reviewComments ?? []
+        includesReviewComments ? (model?.reviewComments ?? []) : []
     }
 
     /// Attachments alone are a turn. Dropping a screenshot in and pressing send is a sentence, and
@@ -216,7 +236,7 @@ struct ComposerView: View {
             send()
             return true
         case .escape:
-            isFocused = false
+            if let onDismiss { onDismiss() } else { isFocused = false }
             return true
         case .up, .down, .tab:
             return false
@@ -362,9 +382,36 @@ struct ComposerView: View {
     /// `TranscriptModel.submit`'s decision, not this view's: they join the chat's queue and go
     /// when the queue is allowed to move. Deciding it here would be a second copy of the rule, and
     /// the rule already exists in a place the suite can reach it. See `DeliveryHold`.
+    private var canOpenSideConversation: Bool {
+        model != nil && transcript.session.sideConversationParentID == nil && onDismiss == nil
+    }
+
+    private func openSideConversation() {
+        model?.openSideConversation(from: transcript)
+    }
+
     private func send() {
         guard canSend else { return }
         draftSaveTask?.cancel()
+
+        if let question = SideConversation.question(in: transcript.draft) {
+            guard canOpenSideConversation, let model else {
+                app.notice = BloomNotice(message: "Use /btw in a workspace chat to open a side conversation.")
+                return
+            }
+            // The command itself belongs to Bloom. Leave review comments on the main chat.
+            guard model.openSideConversation(from: transcript, question: question) else { return }
+            transcript.draft = ""
+            caret = 0
+            saveDraftNow()
+            return
+        }
+
+        if onDismiss != nil,
+           ChatClearCommand.matches(transcript.draft) || ChatCloseCommand.matches(transcript.draft) {
+            app.notice = BloomNotice(message: "Use Keep and start new in the side conversation menu.")
+            return
+        }
 
         if ChatCloseCommand.matches(transcript.draft) {
             startFreshChat(closingPrevious: true)
@@ -382,25 +429,31 @@ struct ComposerView: View {
         // and a file that fails it is taken out of the sentence rather than sent as a path to
         // nothing.
         let worktree = transcript.cwd
-        let text = AttachmentDraft
-            .parse(transcript.draft, paths: attachments.map(\.path))
+        let sourceDraft = transcript.draft
+        let draftText = AttachmentDraft
+            .parse(sourceDraft, paths: attachments.map(\.path))
             .keeping { path in
                 FileManager.default.fileExists(
                     atPath: PromptAttachment.sent(path: path).url(in: worktree).path
                 )
             }
 
+        let imageComments = Dictionary(attachments.compactMap { attachment in
+            attachment.imageComment.map { (attachment.path, $0) }
+        }, uniquingKeysWith: { first, _ in first })
+        let text = BrowserImageComment.expand(draftText, comments: imageComments)
+
         // The records go and the files the message names stay. The prompt the agent is now reading
         // names those paths, and deleting them out from under it would break the one thing they
         // were for.
         PromptAttachmentStore.shared.settle(
-            sent: text, sessionID: transcript.session.id.rawValue, workspace: worktree
+            sent: draftText, sessionID: transcript.session.id.rawValue, workspace: worktree
         )
         caret = 0
         let transcript = transcript
         let comments = reviewComments
         guard !comments.isEmpty else {
-            Task { await transcript.submit(text) }
+            Task { await transcript.submit(text, clearingDraft: sourceDraft) }
             return
         }
 
@@ -421,7 +474,7 @@ struct ComposerView: View {
                     template: template
                 )
             }.value
-            await transcript.submit(composed)
+            await transcript.submit(composed, clearingDraft: sourceDraft)
             await model?.removeReviewComments(ids: comments.map(\.id))
         }
     }

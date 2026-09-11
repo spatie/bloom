@@ -1491,3 +1491,31 @@ struct AgentRunnerPermissionTests {
         #expect(answers(on: process).count == 1)
     }
 }
+
+@Suite("Side conversation Claude transport", .scratchDirectory)
+struct SideConversationClaudeRunnerTests {
+    @Test func contextUsesStdinAndNeverResumesTheParent() async throws {
+        let store = try makeTestStore("side-claude-wire")
+        let createdParent = try await makeSession(store)
+        let parent = try #require(try await store.session(id: createdParent.id))
+        let child = try await store.openSideConversation(parentID: parent.id, streamingText: "Original context")
+        let recorder = ProcessRecorder()
+        let runner = AgentRunner(workspacePath: "/tmp/w", session: child, store: store, makeProcess: recorder.factory)
+        try await runner.send("Why?")
+        let process = try #require(recorder.last)
+        #expect(!process.launch.arguments.contains("--resume"))
+        #expect(!process.launch.arguments.joined().contains("Original context"))
+        #expect(process.stdin.first?.contains("Original context") == true)
+        let messages = try await store.messages(sessionID: child.id)
+        let question = try #require(messages.first(where: { $0.kind == .user }))
+        #expect(UserTurnPrompt.text(in: question.payload) == "Why?")
+        process.emit(#"{"type":"assistant","message":{"content":[{"type":"text","text":"Because it preserves ordering"}]}}"#)
+        await waitUntil("context acknowledged") {
+            (try? await store.setting(SideConversation.contextDeliveredKey(child.id))) == "1"
+        }
+        try await runner.send("And the tests?")
+        #expect(process.stdin.last?.contains("Original context") == false)
+        #expect(try await store.session(id: parent.id) == parent)
+        await runner.cancel()
+    }
+}

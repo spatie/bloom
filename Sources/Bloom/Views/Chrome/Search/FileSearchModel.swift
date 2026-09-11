@@ -27,7 +27,7 @@ final class FileSearchModel {
         isLoading = true
         matches = []
         highlighted = nil
-        let query = FileNeedle.canonical(query)
+        let query = FileNeedle.canonical(CodeLocation.parse(query).path)
         let paths = await FileIndex.shared.files(workspacePath: workspace.path)
         guard !Task.isCancelled else { return }
         let found = await Task.detached(priority: .userInitiated) {
