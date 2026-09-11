@@ -475,8 +475,8 @@ enum Palette {
     /// It is NOT the merge confirmation's button label, which is what it was first spent on. The
     /// owner reported that from a screenshot: this colour says a pull request HAS merged, so on
     /// the button that has not merged anything yet it named the state rather than the action, and
-    /// the dialog was wearing its own answer. That button is `positive` now, and
-    /// `ConfirmationTone.completing` carries the rest of the reasoning.
+    /// the dialog was wearing its own answer. That button now takes the fill of the merge control
+    /// it is attached to, `PullRequestStatus.Tone.fill`, so it matches the band's button.
     ///
     /// So it is the colour of merged and of nothing else. `PullRequestStatus.Tone` has a `merged`
     /// case, `PullRequestTint` resolves it here, and `WorkspaceStatusGlyph` draws the merge mark
