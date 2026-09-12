@@ -232,6 +232,8 @@ for every operation. Names and field names are case-sensitive.
 | `uiBridge` | `_0: UIBridgeOperation` | `uiBridge._0` | R |
 | `hello` | none | `hello: {name}` | R |
 | `diagnostics` | none, protocol 13 or later | `diagnostics._0` | R |
+| `storage` | none, requires `diagnostics.storageManagement == true` | `storage._0` | R |
+| `cleanupStorage` | `targets` array of `buildCache` and/or `unusedImages`, same capability | `storageCleanup._0` | M |
 | `catalogue` | none | `catalogue._0` | R |
 | `creation` | `_0: CreationAction` | `creation._0` | mixed |
 | `previewAddress` | `_0: address` | `text._0` | R |
@@ -520,3 +522,45 @@ metadata may use this field, because older servers ignore it. The server atomica
 the same pending head ID and text, an authentication pause, and no delivery receipt. It resumes
 that existing delivery without inserting another. A removed, changed or already delivered
 message is refused. Ordinary `send` calls without this field retain distinct identical prompts.
+
+
+### Storage inspection and cleanup
+
+Storage management is an additive capability on protocol 13 and 14. Read `diagnostics` first and
+require `diagnostics._0.storageManagement == true` before sending either operation. A missing or
+false flag means this server needs an update. Never probe support by attempting cleanup. The
+shared Swift wire session performs this check and keeps the existing connection usable on older
+servers, including protocol 14 builds without storage management.
+
+`{"storage":{}}` returns `storage._0`, containing `checkedAt` (the standard 2001 date epoch),
+optional `totalBytes` and `freeBytes` for the server data filesystem, `dockerState` (`ready`,
+`unavailable`, `failed`), optional `dockerMessage`, `usage`, and `notes`. Each usage row contains
+`kind`, optional `totalCount` and `activeCount`, `sizeLabel`, and optional `reclaimableLabel`.
+Docker labels are rounded estimates. Categories can share image layers, so clients must not add
+them together or present an estimated total reclaimable byte count. Reclaimable labels are
+provided only for build cache, not Docker's potentially misleading image percentage.
+
+After explicit confirmation, send `{"cleanupStorage":{"targets":["buildCache","unusedImages"]}}`
+with a fresh durable command UUID. Targets must be distinct and nonempty. They remove only unused
+builder cache and images unused by every container in Bloom's validated private rootless Docker
+engine. No command removes containers, volumes, workspace folders, databases, credentials, or
+arbitrary client-supplied paths. Cache and image downloads may be needed again for later builds.
+
+The reply `storageCleanup._0` contains `outcomes`, optional refreshed `report`, and `interrupted`.
+Each outcome has its `target`, `status` (`completed`, `uncertain`, `failed`), `message`, and optional
+Docker-reported `reclaimedLabel`. Completed categories remain completed when a later category
+fails. An uncertain outcome can mean Docker already removed some data or is still finishing.
+Refresh the report before offering another cleanup; never automatically retry with a fresh ID.
+After a lost connection, retry the exact original request UUID to retrieve the journalled result.
+A deliberate later cleanup uses a new UUID after reviewing and confirming it again.
+
+Inspection and cleanup use the existing owner-control transport boundary. SSH requires the
+runtime account's Unix-socket access. HTTPS requires the gateway's configured access-token scopes
+and subject/email allowlist, with the API audience. Preview tokens grant no control access.
+There are currently no separate viewer/operator roles inside a runtime, so these records do not
+invent a per-principal `canCleanup` permission. Use separate runtimes for that isolation.
+The engine refuses unknown Docker contexts, rootful daemons, or storage outside the managed
+account. Cleanup is serialised and its category outcomes are journalled like other mutations.
+
+Portable DTOs: `Packages/BloomClient/Sources/BloomClient/ServerStorage.swift`. The JSON Schema and
+production Codable vectors include both storage operations and their reports.

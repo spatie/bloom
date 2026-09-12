@@ -96,6 +96,33 @@
     }
   },
   {
+    "name" : "request-storage",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "storage" : {
+
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-cleanupStorage",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "cleanupStorage" : {
+          "targets" : [
+            "buildCache",
+            "unusedImages"
+          ]
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
     "name" : "request-composer",
     "value" : {
       "id" : "00000000-0000-4000-8000-000000000001",
@@ -751,6 +778,83 @@
             "executable" : "/usr/local/bin/bloom-server",
             "session" : "terminal-example",
             "socket" : "/tmp/bloom-terminal-example.sock"
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-storage",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "storage" : {
+          "_0" : {
+            "checkedAt" : 0,
+            "dockerState" : "ready",
+            "freeBytes" : 8589934592,
+            "notes" : [
+
+            ],
+            "totalBytes" : 42949672960,
+            "usage" : [
+              {
+                "activeCount" : 2,
+                "kind" : "Build Cache",
+                "reclaimableLabel" : "200MB (16%)",
+                "sizeLabel" : "1.2GB",
+                "totalCount" : 12
+              }
+            ]
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-storageCleanup",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "storageCleanup" : {
+          "_0" : {
+            "interrupted" : true,
+            "outcomes" : [
+              {
+                "message" : "Unused cache removed",
+                "reclaimedLabel" : "200MB",
+                "status" : "completed",
+                "target" : "buildCache"
+              },
+              {
+                "message" : "Refresh storage before retrying",
+                "status" : "uncertain",
+                "target" : "unusedImages"
+              }
+            ]
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-storageCapability",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "diagnostics" : {
+          "_0" : {
+            "account" : "bloom",
+            "checkedAt" : 0,
+            "checks" : [
+
+            ],
+            "hostname" : "example-server",
+            "operatingSystem" : "Ubuntu",
+            "storageManagement" : true
           }
         }
       },

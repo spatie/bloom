@@ -37,7 +37,7 @@ public enum ServerDiagnosticsCollector {
         #endif
         return ServerDiagnostics(checkedAt: Date(), hostname: ProcessInfo.processInfo.hostName,
                                  operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
-                                 account: NSUserName(), checks: checks, browser: browserReadiness())
+                                 account: NSUserName(), checks: checks, browser: browserReadiness(), storageManagement: true)
     }
 
     private static func probe(_ executable: String, _ arguments: [String]) async -> Bool? {

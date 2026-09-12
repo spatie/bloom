@@ -89,6 +89,21 @@
         {
           "type": "object",
           "properties": {
+            "storage": {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "storage"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
             "catalogue": {
               "type": "object",
               "properties": {},
@@ -98,6 +113,36 @@
           },
           "required": [
             "catalogue"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "cleanupStorage": {
+              "type": "object",
+              "properties": {
+                "targets": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "buildCache",
+                      "unusedImages"
+                    ]
+                  },
+                  "minItems": 1,
+                  "maxItems": 2,
+                  "uniqueItems": true
+                }
+              },
+              "required": [
+                "targets"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "cleanupStorage"
           ],
           "additionalProperties": false
         },
@@ -1368,6 +1413,48 @@
           },
           "required": [
             "diagnostics"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "storage": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/ServerStorageReport"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "storage"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "storageCleanup": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/ServerStorageCleanupResult"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "storageCleanup"
           ],
           "additionalProperties": false
         },
@@ -3176,6 +3263,182 @@
       ],
       "additionalProperties": false
     },
+    "ServerStorageReport": {
+      "type": "object",
+      "properties": {
+        "checkedAt": {
+          "type": "number"
+        },
+        "totalBytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "freeBytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dockerState": {
+          "enum": [
+            "ready",
+            "unavailable",
+            "failed"
+          ]
+        },
+        "dockerMessage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "usage": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ServerStorageUsage"
+          }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "checkedAt",
+        "dockerState",
+        "usage",
+        "notes"
+      ],
+      "additionalProperties": true
+    },
+    "ServerStorageUsage": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "totalCount": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "activeCount": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sizeLabel": {
+          "type": "string"
+        },
+        "reclaimableLabel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "sizeLabel"
+      ],
+      "additionalProperties": true
+    },
+    "ServerStorageCleanupOutcome": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "enum": [
+            "buildCache",
+            "unusedImages"
+          ]
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "uncertain",
+            "failed"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "reclaimedLabel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "target",
+        "status",
+        "message"
+      ],
+      "additionalProperties": true
+    },
+    "ServerStorageCleanupResult": {
+      "type": "object",
+      "properties": {
+        "outcomes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ServerStorageCleanupOutcome"
+          }
+        },
+        "report": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServerStorageReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "interrupted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "outcomes",
+        "interrupted"
+      ],
+      "additionalProperties": true
+    },
     "ServerDiagnostics": {
       "type": "object",
       "properties": {
@@ -3214,6 +3477,16 @@
               "items": {
                 "$ref": "#/$defs/AgentAuthentication"
               }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "storageManagement": {
+          "anyOf": [
+            {
+              "type": "boolean"
             },
             {
               "type": "null"

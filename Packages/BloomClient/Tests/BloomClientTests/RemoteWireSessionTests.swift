@@ -47,6 +47,13 @@ struct RemoteWireSessionTests {
         #expect(await host.frames.allSatisfy { $0.operation["hello"] != nil })
     }
 
+    @Test func storageIsNotSentToServersWithoutDiagnostics() async {
+        let host = WireHost(version: 12)
+        let client = RemoteWireSession { try await host.exchange($0) }
+        await #expect(throws: ConnectionRefusal.self) { try await client.request(.call("cleanupStorage", ["targets": .array([.string("buildCache")])])) }
+        #expect(await host.frames.allSatisfy { $0.operation["hello"] != nil })
+    }
+
     @Test(arguments: [12, 13])
     func uiRequestsAreNotSentToOlderServers(version: Int) async throws {
         let host = WireHost(version: version)

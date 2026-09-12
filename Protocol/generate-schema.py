@@ -70,7 +70,8 @@ ui_operations = {
 }
 ui_results = {"attached": payload(ref("UILease")), "requests": payload(ref("UIBatch")), "accepted": obj(), "claimed": payload(B)}
 operations = {
-    **{name: obj() for name in ["hello", "diagnostics", "catalogue"]},
+    **{name: obj() for name in ["hello", "diagnostics", "storage", "catalogue"]},
+    "cleanupStorage": obj({"targets": {"type": "array", "items": {"enum": ["buildCache", "unusedImages"]}, "minItems": 1, "maxItems": 2, "uniqueItems": True}}),
     "reviewSnapshot": obj({"workspaceID": S, "scope": SCOPE, "knownRevision": optional(S), "wait": B}, ["workspaceID", "scope", "wait"]),
     "reviewPatch": obj({"workspaceID": S, "path": S, "scope": SCOPE, "knownRevision": optional(S)}, ["workspaceID", "path", "scope"]),
     "creation": payload(ref("CreationAction")), "previewAddress": payload(S),
@@ -109,6 +110,7 @@ results = {
     "terminalPane": payload(obj({"id": S, "title": S})), "runScripts": payload(array(R)),
     "archivePreview": payload(ref("ArchivePreview")),
     "diagnostics": payload(ref("ServerDiagnostics")),
+    "storage": payload(ref("ServerStorageReport")), "storageCleanup": payload(ref("ServerStorageCleanupResult")),
     **{name: payload(R) for name in ["projectSettings", "filesToCopy"]},
 }
 creation_results = {name: payload(R) for name in ["project", "projectContext", "inspection", "workspaceContext", "checkouts", "reference"]}
@@ -185,9 +187,19 @@ def build():
                 "ComposerState": obj({"controls": ref("ComposerControls"), "models": array(R), "commands": array(R), "styles": array(R),
                                       "availableAgents": optional(array(S)), "authentication": optional(array(ref("AgentAuthentication")))}, ["controls", "models", "commands", "styles"], True),
                 "AgentAuthentication": obj({"agent": S, "state": {"enum": ["ready", "signInRequired", "unavailable", "unknown"]}}),
+                "ServerStorageReport": obj({"checkedAt": {"type": "number"}, "totalBytes": optional(I), "freeBytes": optional(I),
+                                            "dockerState": {"enum": ["ready", "unavailable", "failed"]}, "dockerMessage": optional(S),
+                                            "usage": array(ref("ServerStorageUsage")), "notes": array(S)}, ["checkedAt", "dockerState", "usage", "notes"], True),
+                "ServerStorageUsage": obj({"kind": S, "totalCount": optional(I), "activeCount": optional(I), "sizeLabel": S,
+                                           "reclaimableLabel": optional(S)}, ["kind", "sizeLabel"], True),
+                "ServerStorageCleanupOutcome": obj({"target": {"enum": ["buildCache", "unusedImages"]},
+                                                    "status": {"enum": ["completed", "uncertain", "failed"]}, "message": S,
+                                                    "reclaimedLabel": optional(S)}, ["target", "status", "message"], True),
+                "ServerStorageCleanupResult": obj({"outcomes": array(ref("ServerStorageCleanupOutcome")),
+                                                   "report": optional(ref("ServerStorageReport")), "interrupted": B}, ["outcomes", "interrupted"], True),
                 "ServerDiagnostics": obj({"checkedAt": {"type": "number"}, "hostname": S, "operatingSystem": S,
                                           "account": S, "checks": array(R), "browser": optional(R),
-                                          "authentication": optional(array(ref("AgentAuthentication")))},
+                                          "authentication": optional(array(ref("AgentAuthentication"))), "storageManagement": optional(B)},
                                          ["checkedAt", "hostname", "operatingSystem", "account", "checks"], True),
                 "UIBridgeOperation": cases(ui_operations), "UIBridgeResult": cases(ui_results),
                 "UILease": obj({"id": U, "token": S, "workspaceID": S, "expiresAtMilliseconds": I}),

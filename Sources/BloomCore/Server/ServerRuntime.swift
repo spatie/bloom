@@ -9,6 +9,7 @@ public actor ServerRuntime {
     private let authentication: ServerAgentAuthentication.Check
     public typealias RunnerFactory = @Sendable (Session, String, Store) -> any SessionRunner
     private let store: Store
+    private let storage: ServerStorageService
     private let makeRunner: RunnerFactory?
     private var bridge: BridgeServer?
     private var bridgeArchives: [SessionID: Task<Void, Never>] = [:]
@@ -38,9 +39,10 @@ public actor ServerRuntime {
     }
 
     init(store: Store, authentication: @escaping ServerAgentAuthentication.Check = ServerAgentAuthentication.inspect, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery,
-         makeRunner: RunnerFactory? = nil, workspaceAdmissions: ServerWorkspaceAdmissions) {
+         makeRunner: RunnerFactory? = nil, workspaceAdmissions: ServerWorkspaceAdmissions, storageService: ServerStorageService? = nil) {
         self.workspaceAdmissions = workspaceAdmissions
         self.store = store
+        storage = storageService ?? ServerStorageService(directory: (store.path as NSString).deletingLastPathComponent)
         self.installedAgents = installedAgents
         self.authentication = authentication
         terminalStreams = ServerTerminalStreams(groupID: gatewayGroupID)
@@ -106,6 +108,13 @@ public actor ServerRuntime {
     private func dispatch(_ request: ServerRequest) async -> ServerReply {
         if case .uiBridge = request.operation, request.version < 14 {
             return ServerReply(id: request.id, result: .failure("Workspace UI tools require Bloom protocol 14."))
+        }
+        if request.version < 13 {
+            switch request.operation {
+            case .storage, .cleanupStorage:
+                return ServerReply(id: request.id, result: .failure("Storage management requires Bloom protocol 13 and the storageManagement capability."))
+            default: break
+            }
         }
         if case .diagnostics = request.operation, request.version < 13 {
             return ServerReply(id: request.id, result: .failure("Server diagnostics require Bloom protocol 13."))
@@ -198,6 +207,10 @@ public actor ServerRuntime {
             return .reviewSnapshot(try await reviewCache.snapshot(workspace: workspace(id, readingDuringSetup: true), scope: scope, knownRevision: revision, wait: wait))
         case .reviewPatch(let id, let path, let scope, let revision):
             return .reviewPatch(try await reviewCache.patch(workspace: workspace(id, readingDuringSetup: true), path: path, scope: scope, knownRevision: revision))
+        case .storage:
+            return .storage(await storage.inspect())
+        case .cleanupStorage(let targets):
+            return .storageCleanup(try await storage.clean(targets))
         case .diagnostics:
             return .diagnostics(await ServerDiagnosticsCollector.collect(directory: (store.path as NSString).deletingLastPathComponent,
                 authentication: await authenticationStatuses(await installedAgents(store))))

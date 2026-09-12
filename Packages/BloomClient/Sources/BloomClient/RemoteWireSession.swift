@@ -6,6 +6,7 @@ public actor RemoteWireSession: RemoteRequesting {
     public typealias Exchange = @Sendable (Data) async throws -> Data
     private let exchange: Exchange
     private var established: Handshake?
+    private var storageManagement: Bool?
     private var pending: Task<Void, Never>?
     private var pendingID: UUID?
     private var waiters: [UUID: CheckedContinuation<Handshake, Error>] = [:]
@@ -27,8 +28,27 @@ public actor RemoteWireSession: RemoteRequesting {
         if connection.version < 14, command.operation["uiBridge"] != nil {
             throw ConnectionRefusal("Agent UI tools require Bloom Server protocol 14. Update the server to use panes, tabs and browser tools remotely.")
         }
+        if command.operation["storage"] != nil || command.operation["cleanupStorage"] != nil {
+            guard connection.version >= 13 else { throw Self.storageUnavailable }
+            if storageManagement == nil {
+                let probe = RemoteCommand.call("diagnostics")
+                let data = try await exchange(Self.encode(probe, version: connection.version))
+                let result = try RemoteClient.decode(data, commandID: probe.id, expectedVersion: connection.version)
+                storageManagement = result["diagnostics"]?["_0"]?["storageManagement"] == .bool(true)
+            }
+            guard storageManagement == true else { throw Self.storageUnavailable }
+        }
+        try Task.checkCancellation()
         let data = try await exchange(Self.encode(command, version: connection.version))
-        return try RemoteClient.decode(data, commandID: command.id, expectedVersion: connection.version)
+        let result = try RemoteClient.decode(data, commandID: command.id, expectedVersion: connection.version)
+        if command.operation["diagnostics"] != nil {
+            storageManagement = result["diagnostics"]?["_0"]?["storageManagement"] == .bool(true)
+        }
+        return result
+    }
+
+    private static var storageUnavailable: ConnectionRefusal {
+        ConnectionRefusal("Update Bloom Server to inspect storage and clean unused Docker data. Other workspace features remain available.")
     }
 
     private func negotiate(helloID: UUID) async throws -> Handshake {

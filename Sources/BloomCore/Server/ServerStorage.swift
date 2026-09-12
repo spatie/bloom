@@ -1,0 +1,9 @@
+import BloomClient
+
+public typealias ServerStorageReport = BloomClient.ServerStorageReport
+public typealias ServerStorageDockerState = BloomClient.ServerStorageDockerState
+public typealias ServerStorageUsage = BloomClient.ServerStorageUsage
+public typealias ServerStorageCleanupTarget = BloomClient.ServerStorageCleanupTarget
+public typealias ServerStorageCleanupStatus = BloomClient.ServerStorageCleanupStatus
+public typealias ServerStorageCleanupOutcome = BloomClient.ServerStorageCleanupOutcome
+public typealias ServerStorageCleanupResult = BloomClient.ServerStorageCleanupResult

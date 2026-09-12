@@ -52,10 +52,12 @@ def main():
         {"version": generator.VERSION, "id": "not-a-uuid", "operation": {"hello": {}}},
         {"version": generator.VERSION, "id": "00000000-0000-4000-8000-000000000001", "operation": {"hello": {}, "catalogue": {}}},
         {"version": generator.VERSION, "id": "00000000-0000-4000-8000-000000000001", "operation": {"workspace": {"workspaceID": "w", "action": {"deleteEverything": {}}}}},
+        *({"version": generator.VERSION, "id": "00000000-0000-4000-8000-000000000001", "operation": {"cleanupStorage": {"targets": targets}}}
+          for targets in [[], ["volumes"], ["buildCache", "buildCache"]]),
     ]:
         if validator.is_valid(invalid):
             raise SystemExit("Schema accepted malformed framing.")
-    print(f"Validated {len(vectors)} production Swift vectors and 7 malformed-envelope/safety regressions.")
+    print(f"Validated {len(vectors)} production Swift vectors and 10 malformed-envelope/safety regressions.")
 
 
 if __name__ == "__main__":

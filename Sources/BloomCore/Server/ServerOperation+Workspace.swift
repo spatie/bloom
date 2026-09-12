@@ -20,7 +20,7 @@ extension ServerOperation {
         case .send(let id, _, _), .setComposer(let id, _), .configure(let id, _, _, _),
              .closeSession(let id), .stop(let id), .answer(let id, _, _), .cancelQueued(let id, _),
              .renameSession(let id, _), .markRead(let id, _): return .session(id)
-        case .uiBridge, .creation, .reviewSnapshot, .reviewPatch, .diagnostics, .hello, .previewAddress,
+        case .uiBridge, .creation, .reviewSnapshot, .reviewPatch, .diagnostics, .storage, .cleanupStorage, .hello, .previewAddress,
              .composer, .project, .catalogue, .create, .transcript, .changes, .patch, .file: return nil
         }
     }

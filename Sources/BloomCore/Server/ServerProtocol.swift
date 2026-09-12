@@ -19,6 +19,8 @@ public enum ServerOperation: Codable, Sendable, Equatable {
     case uiBridge(RemoteUIBridgeOperation)
     case hello
     case diagnostics
+    case storage
+    case cleanupStorage(targets: [ServerStorageCleanupTarget])
     case reviewSnapshot(workspaceID: WorkspaceID, scope: ServerDiffScope, knownRevision: String?, wait: Bool)
     case reviewPatch(workspaceID: WorkspaceID, path: String, scope: ServerDiffScope, knownRevision: String?)
     case creation(ServerCreationOperation)
@@ -45,10 +47,10 @@ public enum ServerOperation: Codable, Sendable, Equatable {
 
     var mutates: Bool {
         switch self {
-        case .uiBridge, .reviewSnapshot, .reviewPatch, .hello, .diagnostics, .catalogue, .previewAddress, .transcript, .changes, .patch, .file, .composer: false
+        case .uiBridge, .reviewSnapshot, .reviewPatch, .hello, .diagnostics, .storage, .catalogue, .previewAddress, .transcript, .changes, .patch, .file, .composer: false
         case .creation(let action): action.mutates
         case .project(_, let action): action.mutates
-        case .create, .send, .stop, .answer, .configure, .cancelQueued, .setComposer, .markRead, .renameSession, .closeSession, .terminalStream: true
+        case .cleanupStorage, .create, .send, .stop, .answer, .configure, .cancelQueued, .setComposer, .markRead, .renameSession, .closeSession, .terminalStream: true
         case .workspace(_, let action): action.mutates
         }
     }
@@ -106,6 +108,8 @@ public enum ServerResult: Codable, Sendable {
     case reviewPatch(ServerPatchSnapshot)
     case hello(name: String)
     case diagnostics(ServerDiagnostics)
+    case storage(ServerStorageReport)
+    case storageCleanup(ServerStorageCleanupResult)
     case creation(ServerCreationResult)
     case catalogue(ServerCatalogue)
     case composer(ServerComposerState)
