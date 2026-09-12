@@ -68,6 +68,20 @@ def run(args,home,timeout=15,stream=False):
         try: os.killpg(process.pid,signal.SIGKILL)
         except ProcessLookupError: pass
         process.wait();process.stdout.close()
+def package_metadata(path):
+    # Package files can be damaged mid-install. A FIFO must not strand a remote helper,
+    # and malformed or oversized JSON must not take down inspection of the other tool.
+    descriptor=os.open(path,os.O_RDONLY|os.O_NONBLOCK|os.O_NOFOLLOW)
+    with os.fdopen(descriptor,'rb') as source:
+        info=os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.getuid() or info.st_mode & 0o022:
+            refuse('Unsafe package metadata.')
+        if info.st_size>65536: refuse('Package metadata is too large.')
+        data=source.read(65537)
+        if len(data)>65536: refuse('Package metadata is too large.')
+    value=json.loads(data)
+    if not isinstance(value,dict): refuse('Package metadata must be a JSON object.')
+    return value
 def installation(tool,home):
     binary=shutil.which(tool,path=environment(home)['PATH'])
     value=dict(tool=tool,version=None,path=binary,method=None,detail='Not installed. Open Accounts to install and sign in.')
@@ -85,12 +99,13 @@ def installation(tool,home):
     try:
         package_root=metadata.parent
         if owned(metadata,home) and resolved.is_relative_to(package_root):
-            data=json.loads(metadata.read_text())
+            data=package_metadata(metadata)
             if data.get('name')==PACKAGES[tool]:
                 value['method']='npm';value['detail']='User installation, updated with npm.'
         elif tool=='claude' and resolved.is_relative_to(home/'.local/share/claude/versions'):
             value['method']='native';value['detail']='Native installation, updated using its configured release channel.'
-    except (OSError,ValueError): pass
+    except (OSError,ValueError,RecursionError,Refusal):
+        value['detail']='The tool package metadata is invalid or unreadable. Repair this installation on the server.'
     if value['method']:
         try:
             status,version=run([str(path),'--version'],home)
@@ -100,6 +115,22 @@ def installation(tool,home):
         except (Refusal,OSError,subprocess.TimeoutExpired) as error:
             value['method']=None;value['detail']=str(error)
     return value
+def entrypoint_arguments(args):
+    # Interpreter source is code, not a launcher path. It may contain our own package
+    # checks or an agent prompt. Shells also accept combined options such as -lc.
+    shell=pathlib.PurePosixPath(args[0].decode('utf-8','replace')).name in ('sh','bash','dash','zsh','ksh') if args else False
+    result=[]
+    for index,arg in enumerate(args[:3]):
+        previous=args[index-1] if index else b''
+        inline=previous in (b'-c',b'-e',b'--eval',b'-p',b'--print')
+        if shell and previous.startswith(b'-') and b'c' in previous[1:]: inline=True
+        if inline or arg.startswith(b'-'): continue
+        result.append(pathlib.PurePosixPath(arg.decode('utf-8','replace')))
+    return result
+def agent_package_entrypoint(path):
+    parts=path.parts
+    return any(parts[index:index+3] in (('node_modules','@anthropic-ai','claude-code'),
+        ('node_modules','@openai','codex')) for index in range(len(parts)-2))
 def active_agents(home,proc=pathlib.Path('/proc')):
     if not proc.is_dir(): refuse('Tool updates require Linux process inspection.')
     for entry in proc.iterdir():
@@ -107,9 +138,9 @@ def active_agents(home,proc=pathlib.Path('/proc')):
         try:
             if entry.stat().st_uid!=os.getuid(): continue
             args=(entry/'cmdline').read_bytes().split(b'\0')
-            names=[pathlib.Path(arg.decode('utf-8','replace')).name for arg in args[:3]]
-            if any(name in ('claude','codex','codex.js','claude.js') for name in names): return True
-            if any(b'/node_modules/@anthropic-ai/claude-code/' in arg or b'/node_modules/@openai/codex/' in arg for arg in args[:3]): return True
+            paths=entrypoint_arguments(args)
+            if any(path.name in ('claude','codex','codex.js','claude.js') for path in paths): return True
+            if any(agent_package_entrypoint(path) for path in paths): return True
             executable=(entry/'exe').resolve()
             if executable.is_relative_to(home/'.local/share/claude/versions'): return True
         except (FileNotFoundError,ProcessLookupError): continue

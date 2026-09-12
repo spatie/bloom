@@ -85,6 +85,41 @@ class ToolUpdatesTests(unittest.TestCase):
         (target.parent.parent / 'package.json').write_text('{"name":"other"}')
         self.assertIsNone(self.inspect()['method'])
 
+    def test_malformed_package_metadata_does_not_abort_inspection(self):
+        _, target = self.npm()
+        metadata = target.parent.parent / 'package.json'
+        for value in ['[]', 'null', '"codex"', '{invalid', '[' * 1500 + ']' * 1500]:
+            with self.subTest(value=value):
+                metadata.write_text(value)
+                with mock.patch.object(helper, 'run') as run:
+                    result = helper.installation('codex', self.home)
+                self.assertIsNone(result['method'])
+                self.assertIn('metadata', result['detail'])
+                run.assert_not_called()
+
+    def test_oversized_package_metadata_is_not_an_update_candidate(self):
+        _, target = self.npm()
+        metadata = target.parent.parent / 'package.json'
+        metadata.write_text(json.dumps({'name': helper.PACKAGES['codex'], 'padding': 'x' * 65536}))
+        with mock.patch.object(helper, 'run', return_value=(0, 'codex-cli 1.2.3')) as run:
+            result = helper.installation('codex', self.home)
+        self.assertIsNone(result['method'])
+        run.assert_not_called()
+
+    def test_fifo_package_metadata_cannot_hang_remote_inspection(self):
+        _, target = self.npm()
+        metadata = target.parent.parent / 'package.json'
+        metadata.unlink()
+        os.mkfifo(metadata, 0o600)
+        # Run the exact helper in another process so a regression fails on the deadline,
+        # rather than blocking the test runner on a FIFO with no writer.
+        invocation = script + "\nprint(json.dumps(installation('codex', pathlib.Path(sys.argv[1]))))"
+        result = subprocess.run([sys.executable, '-c', "__name__ = 'test_helper'\n" + invocation, str(self.home)],
+            capture_output=True, text=True, timeout=2, check=True)
+        value = json.loads(result.stdout)
+        self.assertIsNone(value['method'])
+        self.assertIn('metadata', value['detail'])
+
     def test_refuses_writable_parent(self):
         self.npm()
         (self.home / '.local').chmod(0o777)
@@ -106,6 +141,47 @@ class ToolUpdatesTests(unittest.TestCase):
         proc.mkdir(parents=True)
         (proc / 'cmdline').write_bytes(b'/home/bloom/.local/bin/codex\0app-server\0')
         self.assertTrue(helper.active_agents(self.home, proc.parent))
+
+    def test_helper_inspection_is_not_mistaken_for_a_running_agent(self):
+        proc = self.home / 'proc/123'
+        proc.mkdir(parents=True)
+        (proc / 'cmdline').write_bytes(b'python3\0-c\0' + script.encode() + b'\0inspect\0')
+        (proc / 'exe').symlink_to(sys.executable)
+        self.assertFalse(helper.active_agents(self.home, proc.parent))
+
+    def test_detects_node_agent_package_entry_point(self):
+        proc = self.home / 'proc/123'
+        proc.mkdir(parents=True)
+        entry = str(self.home / '.local/lib/node_modules/@anthropic-ai/claude-code/cli.js')
+        (proc / 'cmdline').write_bytes(b'node\0' + entry.encode() + b'\0--print\0')
+        self.assertTrue(helper.active_agents(self.home, proc.parent))
+
+    def test_detects_relative_node_agent_package_entry_points(self):
+        proc = self.home / 'proc/123'
+        proc.mkdir(parents=True)
+        (proc / 'exe').symlink_to('/usr/bin/node')
+        for entry in ['.local/lib/node_modules/@anthropic-ai/claude-code/cli.js',
+                      './node_modules/@anthropic-ai/claude-code/cli.js',
+                      '../node_modules/@openai/codex/bin/entry.js',
+                      'node_modules/@openai/codex/bin/entry.js']:
+            with self.subTest(entry=entry):
+                (proc / 'cmdline').write_bytes(b'node\0' + entry.encode() + b'\0--print\0')
+                self.assertTrue(helper.active_agents(self.home, proc.parent))
+
+    def test_inline_interpreter_source_is_not_an_agent_entry_point(self):
+        proc = self.home / 'proc/123'
+        proc.mkdir(parents=True)
+        (proc / 'exe').symlink_to(sys.executable)
+        source = b"print('/node_modules/@anthropic-ai/claude-code/cli.js')"
+        for interpreter, option in [(b'python3', b'-c'), (b'node', b'-e'),
+                                    (b'node', b'--eval'), (b'node', b'--print'),
+                                    (b'bash', b'-lc')]:
+            with self.subTest(interpreter=interpreter, option=option):
+                (proc / 'cmdline').write_bytes(interpreter + b'\0' + option + b'\0' + source + b'\0')
+                self.assertFalse(helper.active_agents(self.home, proc.parent))
+        # A prompt or expression can be exactly a tool name too.
+        (proc / 'cmdline').write_bytes(b'python3\0-c\0claude\0')
+        self.assertFalse(helper.active_agents(self.home, proc.parent))
 
     def test_active_agent_prevents_update(self):
         self.npm()
