@@ -98,7 +98,7 @@ struct DefaultBackendTests {
         let resolved = ComposerDefaults.resolve(
             repo: repo,
             app: AppDefaults(),
-            codexModels: Self.codexModels
+            models: [.codex: Self.codexModels.map(\.agentModel)]
         )
         #expect(resolved.model == "gpt-5.5")
         #expect(resolved.backend == .codex)
@@ -114,7 +114,7 @@ struct DefaultBackendTests {
         let resolved = ComposerDefaults.resolve(
             repo: repo,
             app: AppDefaults(model: "gpt-5.6-sol", backend: .codex),
-            codexModels: Self.codexModels
+            models: [.codex: Self.codexModels.map(\.agentModel)]
         )
         #expect(resolved.backend == .claudeCode)
     }
@@ -129,7 +129,7 @@ struct DefaultBackendTests {
         let opened = ComposerDefaults.resolve(
             repo: repo,
             app: AppDefaults(),
-            codexModels: Self.codexModels
+            models: [.codex: Self.codexModels.map(\.agentModel)]
         )
         #expect(opened.backend == .claudeCode)
 
@@ -137,7 +137,7 @@ struct DefaultBackendTests {
             repo: repo,
             app: AppDefaults(),
             running: .codex,
-            codexModels: Self.codexModels
+            models: [.codex: Self.codexModels.map(\.agentModel)]
         )
         #expect(inACodexChat.backend == .codex)
     }
@@ -157,7 +157,7 @@ struct DefaultBackendTests {
         let resolved = ComposerDefaults.resolve(
             repo: repo,
             app: AppDefaults(),
-            codexModels: Self.codexModels
+            models: [.codex: Self.codexModels.map(\.agentModel)]
         )
         #expect(resolved.model == "gpt-5.6-sol")
         #expect(resolved.backend == .codex)
@@ -187,7 +187,7 @@ struct DefaultBackendTests {
         let resolved = ComposerDefaults.resolve(
             repo: repo,
             app: AppDefaults(),
-            codexModels: Self.codexModels
+            models: [.codex: Self.codexModels.map(\.agentModel)]
         )
         #expect(resolved.model == "gpt-5.5")
         #expect(resolved.backend == .codex)
@@ -202,7 +202,7 @@ struct DefaultBackendTests {
         let resolved = ComposerDefaults.resolve(
             repo: RepoSettings(),
             app: stale,
-            codexModels: Self.codexModels
+            models: [.codex: Self.codexModels.map(\.agentModel)]
         )
         #expect(resolved.model == "gpt-5.6-sol")
         #expect(resolved.backend == .codex)
@@ -214,10 +214,10 @@ struct DefaultBackendTests {
     @Test("the model menu places it in the same section")
     func theMenuPlacesItTheSameWay() {
         #expect(DefaultBackend.kind(
-            ofModel: "codex:gpt-5.6-sol", running: .claudeCode, codexModels: Self.codexModels
+            ofModel: "codex:gpt-5.6-sol", running: .claudeCode, models: [.codex: Self.codexModels.map(\.agentModel)]
         ) == .codex)
         #expect(DefaultBackend.kind(
-            ofModel: "claude:opus", running: .codex, codexModels: Self.codexModels
+            ofModel: "claude:opus", running: .codex, models: [.codex: Self.codexModels.map(\.agentModel)]
         ) == .claudeCode)
     }
 
@@ -246,14 +246,14 @@ struct DefaultBackendTests {
         let resolved = ComposerDefaults.resolve(
             repo: RepoSettings(),
             app: AppDefaults(model: "gpt-5.5", effort: "max", backend: .codex),
-            codexModels: Self.codexModels
+            models: [.codex: Self.codexModels.map(\.agentModel)]
         )
         #expect(resolved.effort == "medium")
 
         let takesIt = ComposerDefaults.resolve(
             repo: RepoSettings(),
             app: AppDefaults(model: "gpt-5.6-sol", effort: "ultra", backend: .codex),
-            codexModels: Self.codexModels
+            models: [.codex: Self.codexModels.map(\.agentModel)]
         )
         #expect(takesIt.effort == "ultra")
     }

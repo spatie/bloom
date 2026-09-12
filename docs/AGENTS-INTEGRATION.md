@@ -96,6 +96,19 @@ the one place that decides which backends a chat can be started on. Cursor and O
 detected and configurable and neither has a runner, so neither is offered anywhere a chat is
 started. The UI must say so plainly rather than implying a connected CLI is a usable backend.
 
+## Adding a backend
+
+For model discovery, add a source to `AgentModelSource.live`. It returns `AgentModel` values to
+the composer, Settings, defaults resolution and workspace bridge. Keep protocol decoding and
+ranking in the backend, and use `AgentModelCache` for concurrent fetch sharing, expiry and retry.
+The shared model keeps hidden entries available for resolving stored ids while excluding them
+from new selections. Model ids and effort ids remain the CLI's own strings.
+
+An additional backend still needs an `AgentKind`, a `SessionRunner`, runner construction and its
+protocol and permission adapters. Sharing discovery does not imply that cancellation or session
+resuming work the same way. Cover those behaviours in the backend's runner tests; the shared
+cache and selection rules are covered by `AgentModelCacheTests` and `AgentModelTests`.
+
 ## Registering Bloom in a client the owner runs themselves
 
 Measured on claude 2.1.241 on 2026-08-23, by running the commands.

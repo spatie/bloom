@@ -324,6 +324,7 @@ id_type_allowed_lines=(
   'Sources/BloomCore/Persistence/Settings.swift'                  # a run script named in settings
   'Sources/BloomCore/Agent/Codex/CodexModelCatalog.swift'         # a model name the CLI offers
   'Sources/BloomCore/Agent/Grok/GrokModelCatalog.swift'           # a model name the CLI offers
+  'Sources/BloomCore/Agent/AgentModel.swift'                      # model and effort names the CLIs offer
   'Sources/BloomCore/System/EditorCatalog.swift'             # an application, by bundle id
   'Sources/Bloom/Views/Center/Composer/ComposerOption.swift'   # a picker entry, "opus" and friends
   'Sources/Bloom/Views/Center/Panes/CenterTab.swift'       # a tab: a terminal row, a browser or the review pane

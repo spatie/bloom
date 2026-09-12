@@ -46,7 +46,7 @@ struct ModelIdentifierTests {
 
     @Test("the backend in front of the id is read rather than stored")
     func theNamespaceIsRead() {
-        let resolved = ModelIdentifier.resolve("codex:gpt-5.6-sol", codexModels: Self.codexModels)
+        let resolved = ModelIdentifier.resolve("codex:gpt-5.6-sol", models: [.codex: Self.codexModels.map(\.agentModel)])
         #expect(resolved.model == "gpt-5.6-sol")
         #expect(resolved.kind == .codex)
         #expect(resolved.namesBackend)
@@ -72,7 +72,7 @@ struct ModelIdentifierTests {
         ("claude:opus", AgentKind.claudeCode, "opus"),
     ])
     func theSpellings(raw: String, kind: AgentKind, model: String) {
-        let resolved = ModelIdentifier.resolve(raw, codexModels: Self.codexModels)
+        let resolved = ModelIdentifier.resolve(raw, models: [.codex: Self.codexModels.map(\.agentModel)])
         #expect(resolved.kind == kind)
         #expect(resolved.model == model)
         #expect(resolved.namesBackend)
@@ -90,7 +90,7 @@ struct ModelIdentifierTests {
         "gpt 5.6 sol",
     ])
     func aLabelIsReadBack(raw: String) {
-        let resolved = ModelIdentifier.resolve(raw, codexModels: Self.codexModels)
+        let resolved = ModelIdentifier.resolve(raw, models: [.codex: Self.codexModels.map(\.agentModel)])
         #expect(resolved.model == "gpt-5.6-sol")
         #expect(resolved.kind == .codex)
     }
@@ -116,15 +116,15 @@ struct ModelIdentifierTests {
         "internal-preview-3",
     ])
     func realIDsSurvive(id: String) {
-        #expect(ModelIdentifier.resolve(id, codexModels: Self.codexModels).model == id)
-        #expect(!ModelIdentifier.resolve(id, codexModels: Self.codexModels).namesBackend)
+        #expect(ModelIdentifier.resolve(id, models: [.codex: Self.codexModels.map(\.agentModel)]).model == id)
+        #expect(!ModelIdentifier.resolve(id, models: [.codex: Self.codexModels.map(\.agentModel)]).namesBackend)
     }
 
     /// A colon whose left side is not a backend Bloom has. Some other tool's namespace is not
     /// Bloom's to unpick, and the open-set rule stands: keep it, show it, let it be changed.
     @Test("a namespace that is not a backend is left alone")
     func anUnknownNamespaceSurvives() {
-        let resolved = ModelIdentifier.resolve("openrouter:openai/gpt-4", codexModels: Self.codexModels)
+        let resolved = ModelIdentifier.resolve("openrouter:openai/gpt-4", models: [.codex: Self.codexModels.map(\.agentModel)])
         #expect(resolved.model == "openrouter:openai/gpt-4")
         #expect(resolved.kind == nil)
         #expect(!resolved.namesBackend)
@@ -160,7 +160,7 @@ struct ModelIdentifierTests {
             model: "codex:gpt-5.6-sol",
             on: .claudeCode,
             hasSpoken: false,
-            codexModels: Self.codexModels
+            models: [.codex: Self.codexModels.map(\.agentModel)]
         ))
         #expect(repair.model == "gpt-5.6-sol")
         #expect(repair.kind == .codex)
@@ -175,7 +175,7 @@ struct ModelIdentifierTests {
             model: "codex:gpt-5.6-sol",
             on: .claudeCode,
             hasSpoken: true,
-            codexModels: Self.codexModels
+            models: [.codex: Self.codexModels.map(\.agentModel)]
         ))
         #expect(repair.model == "gpt-5.6-sol")
         #expect(repair.kind == .claudeCode)
@@ -191,7 +191,7 @@ struct ModelIdentifierTests {
             model: model,
             on: .claudeCode,
             hasSpoken: false,
-            codexModels: Self.codexModels
+            models: [.codex: Self.codexModels.map(\.agentModel)]
         ) == nil)
     }
 
@@ -203,12 +203,12 @@ struct ModelIdentifierTests {
     func theMenuAgrees() {
         let stuck = "codex:gpt-5.6-sol"
         #expect(DefaultBackend.kind(
-            ofModel: stuck, running: .claudeCode, codexModels: Self.codexModels
+            ofModel: stuck, running: .claudeCode, models: [.codex: Self.codexModels.map(\.agentModel)]
         ) == .codex)
 
-        let repaired = ModelIdentifier.resolve(stuck, codexModels: Self.codexModels).model
+        let repaired = ModelIdentifier.resolve(stuck, models: [.codex: Self.codexModels.map(\.agentModel)]).model
         #expect(DefaultBackend.kind(
-            ofModel: repaired, running: .claudeCode, codexModels: Self.codexModels
+            ofModel: repaired, running: .claudeCode, models: [.codex: Self.codexModels.map(\.agentModel)]
         ) == .codex)
     }
 }

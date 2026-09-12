@@ -33,10 +33,18 @@ public struct GrokModel: Sendable, Hashable, Identifiable {
 
     public var effortIDs: [String] { supportedEfforts.map(\.id) }
 
+    public var agentModel: AgentModel {
+        AgentModel(
+            id: id,
+            displayName: displayName,
+            isDefault: isDefault,
+            supportedEfforts: supportedEfforts.map { AgentModelEffort(id: $0.id, label: $0.label) },
+            defaultEffort: defaultEffort
+        )
+    }
+
     public func resolvedEffort(preferring wanted: String) -> String {
-        if effortIDs.contains(wanted) { return wanted }
-        if !defaultEffort.isEmpty { return defaultEffort }
-        return effortIDs.first ?? ""
+        agentModel.resolvedEffort(preferring: wanted)
     }
 
     static func decode(_ json: JSONValue, currentModelID: String) -> GrokModel? {
@@ -107,22 +115,17 @@ public struct GrokReasoningEffort: Sendable, Hashable, Identifiable {
 /// fetch, the same shape as `CodexModelCatalog`, so listing models is not a process the user
 /// did not ask for hanging around between picker openings.
 public actor GrokModelCatalog {
-    public static let freshness: TimeInterval = 15 * 60
+    public static let freshness = AgentModelCache<GrokModel>.freshness
 
-    private let fetch: @Sendable () async throws -> [GrokModel]
-    private let now: @Sendable () -> Date
+    private let cache: AgentModelCache<GrokModel>
 
-    private var cached: [GrokModel] = []
-    private var fetchedAt: Date?
-    private var inFlight: Task<[GrokModel], Error>?
-    public private(set) var fetchCount = 0
+    public var fetchCount: Int { get async { await cache.fetchCount } }
 
     public init(
         fetch: @escaping @Sendable () async throws -> [GrokModel],
         now: @escaping @Sendable () -> Date = Date.init
     ) {
-        self.fetch = fetch
-        self.now = now
+        cache = AgentModelCache(fetch: { Self.sorted(try await fetch()) }, now: now)
     }
 
     public static func live(
@@ -143,42 +146,18 @@ public actor GrokModelCatalog {
     }
 
     public func models() async throws -> [GrokModel] {
-        if let fetchedAt, now().timeIntervalSince(fetchedAt) < Self.freshness, !cached.isEmpty {
-            return cached
-        }
-
-        let task: Task<[GrokModel], Error>
-        if let running = inFlight {
-            task = running
-        } else {
-            fetchCount += 1
-            let fetch = self.fetch
-            task = Task { try await fetch() }
-            inFlight = task
-        }
-
-        // A failed fetch must be retryable. Keep the identity check so an old failure cannot
-        // clear a replacement fetch started after invalidation.
-        defer { if inFlight == task { inFlight = nil } }
-        let models = try await task.value
-        if inFlight == task {
-            cached = Self.sorted(models)
-            fetchedAt = now()
-        }
-        return Self.sorted(models)
+        try await cache.models()
     }
 
     public func pickerModels() async throws -> [GrokModel] {
         try await models()
     }
 
-    public func invalidate() {
-        cached = []
-        fetchedAt = nil
-        inFlight = nil
+    public func invalidate() async {
+        await cache.invalidate()
     }
 
-    public var lastKnown: [GrokModel] { cached }
+    public var lastKnown: [GrokModel] { get async { await cache.lastKnown } }
 
     static func sorted(_ models: [GrokModel]) -> [GrokModel] {
         GrokModelRank.ordered(models)

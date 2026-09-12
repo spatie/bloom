@@ -60,16 +60,15 @@ public struct DefaultBackend: Equatable, Sendable {
     ///   - model: the model actually in force, which is not always `app.model`: a repository's
     ///     settings file outranks the Models screen. See `ComposerDefaults.resolve`.
     ///   - running: the backend to keep when nothing recognises the model, which is question 3.
-    ///   - codexModels: what `model/list` last answered, empty when it has not answered yet.
+    ///   - models: the last fetched lists, empty when discovery has not answered yet.
     public static func resolve(
         model: String,
         effort: String,
         app: AppDefaults,
         running: AgentKind = .claudeCode,
-        codexModels: [CodexModel] = [],
-        grokModels: [GrokModel] = []
+        models: [AgentKind: [AgentModel]] = [:]
     ) -> DefaultBackend {
-        let identity = ModelIdentifier.resolve(model, codexModels: codexModels, grokModels: grokModels)
+        let identity = ModelIdentifier.resolve(model, models: models)
         let kind: AgentKind
         if identity.namesBackend, let named = identity.kind {
             kind = named
@@ -85,8 +84,7 @@ public struct DefaultBackend: Equatable, Sendable {
                 effort,
                 on: kind,
                 model: identity.model,
-                codexModels: codexModels,
-                grokModels: grokModels
+                models: models
             )
         )
     }
@@ -99,10 +97,9 @@ public struct DefaultBackend: Equatable, Sendable {
     public static func kind(
         ofModel model: String,
         running: AgentKind,
-        codexModels: [CodexModel],
-        grokModels: [GrokModel] = []
+        models: [AgentKind: [AgentModel]] = [:]
     ) -> AgentKind {
-        ModelIdentifier.resolve(model, codexModels: codexModels, grokModels: grokModels).kind ?? running
+        ModelIdentifier.resolve(model, models: models).kind ?? running
     }
 
     /// The effort a model actually takes, which on Codex is the model's business and not ours.
@@ -115,15 +112,8 @@ public struct DefaultBackend: Equatable, Sendable {
         _ wanted: String,
         on kind: AgentKind,
         model: String,
-        codexModels: [CodexModel],
-        grokModels: [GrokModel] = []
+        models: [AgentKind: [AgentModel]] = [:]
     ) -> String {
-        if kind == .codex, let found = codexModels.first(where: { $0.id == model }) {
-            return found.resolvedEffort(preferring: wanted)
-        }
-        if kind == .grok, let found = grokModels.first(where: { $0.id == model }) {
-            return found.resolvedEffort(preferring: wanted)
-        }
-        return wanted
+        models[kind]?.first { $0.id == model }?.resolvedEffort(preferring: wanted) ?? wanted
     }
 }
