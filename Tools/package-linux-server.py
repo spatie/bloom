@@ -4,6 +4,7 @@
 import argparse
 import hashlib
 import json
+import os
 import pathlib
 import platform
 import re
@@ -85,7 +86,13 @@ def package(binary, output):
                     copy_notice(notice, notices / dependency / notice.relative_to(checkout))
 
         protocol = int(re.search(r"version = (\d+)", (root / "Packages/BloomClient/Sources/BloomClient/RemoteCommand.swift").read_text())[1])
-        manifest = {"protocolVersion": protocol, "architecture": platform.machine(), "glibc": run("getconf", "GNU_LIBC_VERSION"),
+        version = os.environ.get("BLOOM_SERVER_VERSION", "").removeprefix("v")
+        if not version:
+            version = "0.0.0-dev." + run("git", "rev-parse", "--short=12", "HEAD")
+        if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", version):
+            raise RuntimeError("BLOOM_SERVER_VERSION must be an exact semantic version")
+        manifest = {"protocolVersion": protocol, "maintenanceProtocolVersion": 1, "version": version,
+                    "architecture": platform.machine(), "glibc": run("getconf", "GNU_LIBC_VERSION"),
                     "swift": swift_version, "libraries": {}}
         for name, source in sorted(libraries.items()):
             destination = bundle / "lib" / name

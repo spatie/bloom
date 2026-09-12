@@ -28,17 +28,18 @@ public final class ServerDaemon: Sendable {
         directory: String,
         gatewayGroupID: UInt32? = nil,
         installedAgents: @escaping ServerRuntime.AgentDiscovery = ServerAgentAvailability.installed,
-        makeRunner: ServerRuntime.RunnerFactory? = nil
+        makeRunner: ServerRuntime.RunnerFactory? = nil,
+        maintenanceTrial: Bool = false
     ) async throws -> ServerDaemon {
         let lock = try ServerLock(directory: directory)
         let database = databasePath(directory: directory)
         let store = try Store(path: database)
         try await store.resetRunningSessions()
         _ = try await store.abandonPendingPermissionAsks()
-        let runtime = ServerRuntime(store: store, authentication: authentication, gatewayGroupID: gatewayGroupID, installedAgents: installedAgents, makeRunner: makeRunner)
+        let runtime = ServerRuntime(store: store, authentication: authentication, gatewayGroupID: gatewayGroupID, installedAgents: installedAgents, makeRunner: makeRunner, maintenanceTrial: maintenanceTrial)
         do {
             let bridge = try await runtime.startBridge(socketPath: mcpSocketPath(directory: directory))
-            try await runtime.restoreQueuedPrompts()
+            if !maintenanceTrial { try await runtime.restoreQueuedPrompts() }
             let socketPath = try socketPath(directory: directory)
             let connections = ServerConnections { request in await runtime.respond(to: request) }
             let listener = try UnixSocketListener(path: socketPath, groupID: gatewayGroupID) { connections.accept($0) }

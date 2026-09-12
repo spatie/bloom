@@ -46,9 +46,11 @@ public enum ServerCommandLine {
                     }
                     gatewayGroupID = parsed
                 }
-                let daemon = try await ServerDaemon.start(directory: directory, gatewayGroupID: gatewayGroupID)
+                let maintenance = try ServerMaintenanceControl.inherited()
+                let daemon = try await ServerDaemon.start(directory: directory, gatewayGroupID: gatewayGroupID,
+                                                         maintenanceTrial: maintenance?.trialID != nil)
                 complain("Bloom server listening at \(daemon.socketPath)")
-                await waitForTermination()
+                await waitForTermination(maintenance: maintenance, runtime: daemon.runtime)
                 await daemon.shutdown()
             }
             return 0
@@ -104,7 +106,7 @@ public enum ServerCommandLine {
         connection.close()
     }
 
-    private static func waitForTermination() async {
+    private static func waitForTermination(maintenance: ServerMaintenanceControl? = nil, runtime: ServerRuntime? = nil) async {
         let (stream, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let sources = [SIGTERM, SIGINT].map { number -> any DispatchSourceSignal in
             signal(number, SIG_IGN)
@@ -113,7 +115,15 @@ public enum ServerCommandLine {
             source.resume()
             return source
         }
+        let supervisor = Task {
+            if let maintenance, let runtime {
+                await maintenance.run(runtime: runtime)
+                continuation.yield(())
+            }
+        }
         for await _ in stream { break }
+        maintenance?.close()
+        await supervisor.value
         for source in sources { source.cancel() }
     }
 

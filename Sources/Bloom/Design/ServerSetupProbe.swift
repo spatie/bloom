@@ -217,7 +217,7 @@ enum ServerSetupProbe {
                         "blockers":[], "warnings":[], "executable":"/home/bloom/bloom/server/current/bin/bloom-server",
                         "dataDirectory":"/home/bloom/bloom/data", "serviceUser":"bloom"}
                         """.utf8))
-                    }, installConnection: { _, _, _, _, progress in
+                    }, installConnection: { _, _, _, _, _, progress in
                         for (step, message) in [("upload-package", "Server package uploaded (64 MB)."), ("verify", "SHA-256 checksum verified."), ("dependencies", "Preparing development tools") ] {
                             await progress(ServerInstallEvent(event: "progress", step: step, message: message))
                         }

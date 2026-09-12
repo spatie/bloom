@@ -32,14 +32,22 @@ public actor ServerRuntime {
     private var isClosed = false
     private var shutdownTask: Task<Void, Never>?
     private var promptQueue: ServerPromptQueue?
+    private var maintenanceQuiescing = false
+    private var maintenanceTrial = false
+    private var maintenanceWorkspaceStarts = 0
+    private var maintenanceBridgeCalls = 0
+    private enum MaintenanceCommitState { case pending, restoring, failed(String), complete }
+    private var maintenanceCommitState: MaintenanceCommitState = .pending
+    private let maintenanceRestoration: (@Sendable () async throws -> Void)?
 
-    public init(store: Store, authentication: @escaping ServerAgentAuthentication.Check = ServerAgentAuthentication.inspect, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery = ServerAgentAvailability.installed, makeRunner: RunnerFactory? = nil) {
+    public init(store: Store, authentication: @escaping ServerAgentAuthentication.Check = ServerAgentAuthentication.inspect, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery = ServerAgentAvailability.installed, makeRunner: RunnerFactory? = nil, maintenanceTrial: Bool = false) {
         self.init(store: store, authentication: authentication, gatewayGroupID: gatewayGroupID, installedAgents: installedAgents, makeRunner: makeRunner,
-                  workspaceAdmissions: ServerWorkspaceAdmissions())
+                  workspaceAdmissions: ServerWorkspaceAdmissions(), maintenanceTrial: maintenanceTrial)
     }
 
     init(store: Store, authentication: @escaping ServerAgentAuthentication.Check = ServerAgentAuthentication.inspect, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery,
-         makeRunner: RunnerFactory? = nil, workspaceAdmissions: ServerWorkspaceAdmissions, storageService: ServerStorageService? = nil) {
+         makeRunner: RunnerFactory? = nil, workspaceAdmissions: ServerWorkspaceAdmissions, storageService: ServerStorageService? = nil, maintenanceTrial: Bool = false,
+         maintenanceRestoration: (@Sendable () async throws -> Void)? = nil) {
         self.workspaceAdmissions = workspaceAdmissions
         self.store = store
         storage = storageService ?? ServerStorageService(directory: (store.path as NSString).deletingLastPathComponent)
@@ -47,6 +55,8 @@ public actor ServerRuntime {
         self.authentication = authentication
         terminalStreams = ServerTerminalStreams(groupID: gatewayGroupID)
         self.makeRunner = makeRunner
+        self.maintenanceTrial = maintenanceTrial
+        self.maintenanceRestoration = maintenanceRestoration
     }
 
     private func authenticationStatuses(_ agents: [AgentKind], workspace: Workspace? = nil) async -> [AgentAuthenticationStatus] {
@@ -106,6 +116,9 @@ public actor ServerRuntime {
     }
 
     private func dispatch(_ request: ServerRequest) async -> ServerReply {
+        if maintenanceTrial || (maintenanceQuiescing && !request.operation.allowedDuringMaintenance) {
+            return ServerReply(id: request.id, result: .failure("Bloom Server is preparing an update. Existing work can finish; new work will be available when maintenance ends."))
+        }
         if case .uiBridge = request.operation, request.version < 14 {
             return ServerReply(id: request.id, result: .failure("Workspace UI tools require Bloom protocol 14."))
         }
@@ -189,6 +202,8 @@ public actor ServerRuntime {
     private func execute(_ operation: ServerOperation) async throws -> ServerResult {
         guard !isClosed else { throw ServerFailure("The server is shutting down.") }
         switch operation {
+        case .maintenance:
+            throw ServerFailure("Server updates require the managed maintenance service. Enable it through server setup, then reconnect.")
         case .uiBridge: throw ServerFailure("UI leases must be handled by the owning runtime.")
         case .creation(let action):
             var models: [CodexModel] = []
@@ -497,6 +512,9 @@ public actor ServerRuntime {
     }
 
     private func startWorkspace(_ request: ServerWorkspaceRequest, origin: WorkspaceOrigin = .user) async throws -> ServerResult {
+        try requireMaintenanceAdmission()
+        maintenanceWorkspaceStarts += 1
+        defer { maintenanceWorkspaceStarts -= 1 }
         let controls = request.controls ?? ComposerControls(model: request.model, effort: request.effort,
             agentKind: request.agent, permissionMode: request.permissionMode)
         let mode = request.mode ?? .chat
@@ -638,8 +656,83 @@ public actor ServerRuntime {
 }
 
 extension ServerRuntime {
+    /// Only the inherited supervisor channel calls these methods. Ordinary RPC and MCP never
+    /// acquire maintenance authority, and closing admission happens before any awaited checks.
+    func maintenanceControl(_ action: String) async throws -> ServerMaintenanceControl.Status {
+        switch action {
+        case "quiesce":
+            guard !maintenanceTrial else { throw ServerFailure("The candidate has not been committed.") }
+            maintenanceQuiescing = true
+        case "resume":
+            guard !maintenanceTrial else { throw ServerFailure("Commit the candidate before accepting work.") }
+            maintenanceQuiescing = false
+        case "commit":
+            guard !isClosed else { throw ServerFailure("The server is shutting down.") }
+            guard maintenanceTrial else { return .init(ready: true, busy: false, message: nil) }
+            switch maintenanceCommitState {
+            case .restoring: throw ServerFailure("The candidate is still restoring its queues.")
+            case .failed(let message): throw ServerFailure("The candidate could not finish starting. Restart it before trying again. " + message)
+            case .pending, .complete: break
+            }
+            maintenanceCommitState = .restoring
+            do {
+                if let maintenanceRestoration { try await maintenanceRestoration() } else { try await restoreQueuedPrompts() }
+                guard !isClosed else { throw ServerFailure("The server shut down while restoring its queues.") }
+                maintenanceCommitState = .complete
+                maintenanceTrial = false
+            } catch {
+                maintenanceCommitState = .failed(error.localizedDescription)
+                throw error
+            }
+        case "status": break
+        default: throw ServerFailure("Unknown supervisor control action.")
+        }
+        if maintenanceTrial {
+            switch maintenanceCommitState {
+            case .restoring: return .init(ready: false, busy: true, message: "Restoring queued work.")
+            case .failed(let message): return .init(ready: false, busy: true, message: "Candidate startup failed: " + message)
+            case .pending, .complete: return .init(ready: false, busy: false, message: "Waiting for update validation.")
+            }
+        }
+        let draining = await promptQueue?.activeDrainCount ?? 0
+        var busy = draining > 0 || maintenanceWorkspaceStarts > 0 || maintenanceBridgeCalls > 0 || !commands.isEmpty || !creating.isEmpty
+            || !changingWorkspaces.isEmpty || !settingUpWorkspaces.isEmpty || !bridgeArchives.isEmpty
+            || workspaceAdmissions.hasActiveOperations
+        for session in Array(sessions.values) {
+            busy = await session.isBusy || busy
+        }
+        let terminalConnections = await terminalStreams.hasConnections
+        let terminalWork = await terminals.hasMaintenanceBlockers()
+        busy = busy || terminalConnections || terminalWork
+        return .init(ready: !isClosed, busy: busy, message: terminalConnections || terminalWork
+            ? "Close terminal connections and stop terminal work before updating."
+            : busy ? "Waiting for running agents and workspace operations to finish." : nil)
+    }
+
+    private func requireMaintenanceAdmission() throws {
+        guard !maintenanceQuiescing, !maintenanceTrial else {
+            throw ServerFailure("Bloom Server is preparing an update. Try again after maintenance ends.")
+        }
+    }
+
+    func maintenanceBridgeCall(_ handler: any BridgeToolHandling, request: MCPRequest,
+                               identity: BridgeIdentity, store: Store) async -> BridgeToolResult {
+        guard !isClosed, !maintenanceTrial else { return .failure("Bloom Server is starting an update. Try again after maintenance ends.") }
+        // Register before asking the session actor whether it is busy. A quiesce/status call
+        // must count this admission check and the entire direct-to-Store tool operation.
+        maintenanceBridgeCalls += 1
+        defer { maintenanceBridgeCalls -= 1 }
+        if maintenanceQuiescing {
+            guard let id = identity.sessionID, let session = sessions[id], await session.isBusy else {
+                return .failure("Bloom Server is preparing an update. New tool calls can resume after maintenance ends.")
+            }
+        }
+        guard !isClosed, !Task.isCancelled else { return .failure("The tool call was cancelled before it started.") }
+        return await handler.call(request, as: identity, store: store)
+    }
+
     private func bridgeToolbox() -> BridgeToolbox {
-        BridgeToolbox(handlers: BridgeToolbox.standard.handlers + ServerUIBridgeTools.handlers(broker: uiBroker, store: store) + [
+        let handlers = BridgeToolbox.standard.handlers + ServerUIBridgeTools.handlers(broker: uiBroker, store: store) + [
             WorkspaceStartTool { [weak self] order, project, identity, origin in
                 guard let self else { throw ServerFailure("The server is shutting down.") }
                 return try await self.startWorkspaceForBridge(order, project: project, identity: identity, origin: origin)
@@ -664,7 +757,13 @@ extension ServerRuntime {
                 guard let self else { return .refused("The server is shutting down.") }
                 return await self.mergeForBridge(workspace, pullRequest: pullRequest, method: method)
             },
-        ])
+        ]
+        return BridgeToolbox(handlers: handlers.map { handler in
+            ServerMaintenanceBridgeTool(wrapped: handler, perform: { [weak self] request, identity, store in
+                guard let self else { return .failure("The server is shutting down.") }
+                return await self.maintenanceBridgeCall(handler, request: request, identity: identity, store: store)
+            })
+        })
     }
 }
 
@@ -687,6 +786,7 @@ extension ServerRuntime {
 extension ServerRuntime {
     private func startCrewForBridge(_ order: CrewOrder, sessionID: SessionID, workspaceID: WorkspaceID) async -> CrewStartOutcome {
         do {
+            try requireMaintenanceAdmission()
             let permit = try workspaceAdmissions.admit(workspaceID)
             defer { permit.release() }
             guard !isClosed, !closingSessions.contains(sessionID) else { throw Crew.StartRefusal.parentUnavailable }
@@ -702,6 +802,7 @@ extension ServerRuntime {
 
     private func sayForBridge(_ name: String?, text: String, sessionID: SessionID, workspaceID: WorkspaceID) async -> CrewSayOutcome {
         do {
+            try requireMaintenanceAdmission()
             let permit = try workspaceAdmissions.admit(workspaceID)
             defer { permit.release() }
             let caller = try await storedSession(sessionID)

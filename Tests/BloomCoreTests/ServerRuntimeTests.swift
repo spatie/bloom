@@ -5,6 +5,139 @@ import Testing
 
 @Suite("ServerRuntime", .tags(.persistence, .subprocess), .scratchDirectory)
 struct ServerRuntimeTests {
+    @Test func maintenanceTerminalInspectionProtectsDetachedJobsAndUnknownProcesses() {
+        #expect(!ServerTerminalService.panesBlockMaintenance("0\tbash\t123\n", children: { _ in "" }))
+        #expect(ServerTerminalService.panesBlockMaintenance("0\tbash\t123\n", children: { _ in "456" }))
+        #expect(ServerTerminalService.panesBlockMaintenance("0\tbash\t123\n", children: { _ in nil }))
+        #expect(ServerTerminalService.panesBlockMaintenance("0\tphp\t123\n", children: { _ in "" }))
+        #expect(ServerTerminalService.panesBlockMaintenance("unexpected format", children: { _ in "" }))
+        #expect(!ServerTerminalService.panesBlockMaintenance("1\tphp\t123\n", children: { _ in nil }))
+    }
+
+    @Test func maintenanceBlocksStandardMCPWritesButLetsAnExistingTurnFinishItsTools() async throws {
+        let fixture = try await ServerFixture()
+        let runtime = fixture.runtime()
+        let workspaceID = try #require(fixture.session.workspaceID)
+        let request = MCPRequest(id: .number(1), method: "workspace_rename",
+            params: .object(["workspace": .string(workspaceID.rawValue), "name": .string("Owner write")]))
+        _ = try await runtime.maintenanceControl("quiesce")
+        let refused = await runtime.maintenanceBridgeCall(WorkspaceRenameTool(), request: request, identity: .owner, store: fixture.store)
+        #expect(refused.isError)
+        #expect(try await fixture.store.workspace(id: workspaceID)?.name == "Fixture")
+        _ = try await runtime.maintenanceControl("resume")
+        _ = await runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "Finish this turn")))
+        await waitUntil("existing turn has started") { await fixture.runner.sends.count == 1 }
+        _ = try await runtime.maintenanceControl("quiesce")
+        let identity = BridgeIdentity(sessionID: fixture.session.id, workspaceID: workspaceID, role: .parent)
+        let finish = MCPRequest(id: .number(2), method: "workspace_rename", params: .object(["name": .string("Finished tool")]))
+        let completed = await runtime.maintenanceBridgeCall(WorkspaceRenameTool(), request: finish, identity: identity, store: fixture.store)
+        #expect(!completed.isError)
+        #expect(try await fixture.store.workspace(id: workspaceID)?.name == "Finished tool")
+        await fixture.runner.finish()
+        await waitUntil("turn drains before idle tool attempt") { (try? await runtime.maintenanceControl("status").busy) == false }
+        let idleCall = await runtime.maintenanceBridgeCall(WorkspaceRenameTool(), request: finish, identity: identity, store: fixture.store)
+        #expect(idleCall.isError)
+        await runtime.shutdown()
+        let trial = ServerRuntime(store: fixture.store, maintenanceTrial: true)
+        let trialCall = await trial.maintenanceBridgeCall(WorkspaceRenameTool(), request: request, identity: .owner, store: fixture.store)
+        #expect(trialCall.isError)
+        #expect(try await fixture.store.workspace(id: workspaceID)?.name == "Finished tool")
+        await trial.shutdown()
+    }
+
+    @Test func maintenanceCountsAnAcceptedMCPCallUntilItsStoreWriteCompletes() async throws {
+        let fixture = try await ServerFixture()
+        let runtime = fixture.runtime()
+        let gate = ServerQueueGate()
+        let workspaceID = try #require(fixture.session.workspaceID)
+        let request = MCPRequest(id: .number(1), method: "workspace_rename",
+            params: .object(["workspace": .string(workspaceID.rawValue), "name": .string("Accepted before quiesce")]))
+        let handler = ServerMaintenanceBridgeTool(wrapped: WorkspaceRenameTool(), perform: { request, identity, store in
+            await gate.wait()
+            return await WorkspaceRenameTool().call(request, as: identity, store: store)
+        })
+        let call = Task { await runtime.maintenanceBridgeCall(handler, request: request, identity: .owner, store: fixture.store) }
+        await waitUntil("MCP store mutation is suspended") { await gate.entered }
+        let draining = try await runtime.maintenanceControl("quiesce")
+        #expect(draining.busy)
+        #expect(try await fixture.store.workspace(id: workspaceID)?.name == "Fixture")
+        await gate.release()
+        let result = await call.value
+        #expect(!result.isError)
+        #expect(try await fixture.store.workspace(id: workspaceID)?.name == "Accepted before quiesce")
+        #expect(try await !runtime.maintenanceControl("status").busy)
+        await runtime.shutdown()
+    }
+
+    @Test func failedCandidateCommitKeepsAdmissionClosedAndCannotReplayRestoration() async throws {
+        let fixture = try await ServerFixture()
+        let gate = ServerQueueGate()
+        let attempts = Mutex(0)
+        let runtime = ServerRuntime(store: fixture.store, authentication: { agent, _, _ in .init(agent: agent, state: .unknown) },
+            installedAgents: { _ in [.claudeCode] }, workspaceAdmissions: ServerWorkspaceAdmissions(), maintenanceTrial: true,
+            maintenanceRestoration: {
+                attempts.withLock { $0 += 1 }
+                await gate.wait()
+                throw ServerFailure("Fixture queue restoration failed")
+            })
+        let commit = Task { try await runtime.maintenanceControl("commit") }
+        await waitUntil("candidate restoration is suspended") { await gate.entered }
+        let restoring = try await runtime.maintenanceControl("status")
+        #expect(!restoring.ready && restoring.busy)
+        #expect(await runtime.respond(to: ServerRequest(.catalogue)).failure != nil)
+        await #expect(throws: ServerFailure.self) { try await runtime.maintenanceControl("commit") }
+        await gate.release()
+        await #expect(throws: ServerFailure.self) { try await commit.value }
+        let failed = try await runtime.maintenanceControl("status")
+        #expect(!failed.ready && failed.busy)
+        #expect(await runtime.respond(to: ServerRequest(.catalogue)).failure != nil)
+        await #expect(throws: ServerFailure.self) { try await runtime.maintenanceControl("commit") }
+        #expect(attempts.withLock { $0 } == 1)
+        #expect(await fixture.runner.sends.isEmpty)
+        await runtime.shutdown()
+    }
+
+    @Test func maintenanceDrainsExistingTurnAndRefusesNewWorkWithoutJournallingTheRefusal() async throws {
+        let fixture = try await ServerFixture()
+        let runtime = fixture.runtime()
+        _ = await runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "Existing work")))
+        await waitUntil("first prompt is running") { await fixture.runner.sends.count == 1 }
+        let waiting = try await runtime.maintenanceControl("quiesce")
+        #expect(waiting.ready && waiting.busy)
+        let next = ServerRequest(.send(sessionID: fixture.session.id, text: "After maintenance"))
+        #expect(await runtime.respond(to: next).failure?.contains("preparing an update") == true)
+        #expect(try await fixture.store.setting("server.command.\(next.id.uuidString)") == nil)
+        await fixture.runner.finish()
+        await waitUntil("accepted work drains") { (try? await runtime.maintenanceControl("status").busy) == false }
+        _ = try await runtime.maintenanceControl("resume")
+        #expect(await runtime.respond(to: next).isAccepted)
+        await waitUntil("retry starts after maintenance") { await fixture.runner.sends.count == 2 }
+        await runtime.shutdown()
+    }
+
+    @Test func maintenanceTrialDoesNotReplayPromptsUntilCommitted() async throws {
+        let fixture = try await ServerFixture()
+        _ = try await fixture.store.enqueueDelivery(Delivery(targetSessionID: fixture.session.id, body: "Queued before restart"))
+        let runtime = ServerRuntime(store: fixture.store, authentication: { agent, _, _ in .init(agent: agent, state: .unknown) },
+            installedAgents: { _ in [.claudeCode] }, makeRunner: { _, _, _ in fixture.runner }, maintenanceTrial: true)
+        #expect(await runtime.respond(to: ServerRequest(.catalogue)).failure != nil)
+        await #expect(throws: ServerFailure.self) { try await runtime.maintenanceControl("resume") }
+        #expect(await fixture.runner.sends.isEmpty)
+        _ = try await runtime.maintenanceControl("commit")
+        await waitUntil("commit releases queued prompt") { await fixture.runner.sends.count == 1 }
+        #expect(await runtime.respond(to: ServerRequest(.catalogue)).failure == nil)
+        await runtime.shutdown()
+    }
+
+    @Test func maintenanceCredentialsNeverEnterWorkspaceCommandJournal() async throws {
+        let fixture = try await ServerFixture()
+        let runtime = fixture.runtime()
+        let request = ServerRequest(.maintenance(.init(action: .start, credential: "fixture-only-maintenance-key", planID: UUID().uuidString, mode: .whenIdle)))
+        #expect(await runtime.respond(to: request).failure != nil)
+        #expect(try await fixture.store.setting("server.command.\(request.id.uuidString)") == nil)
+        await runtime.shutdown()
+    }
+
     @Test func cancellingQueuedMessageBlocksReplacementDrainUntilDeletionFinishes() async throws {
         let fixture = try await ServerFixture()
         let first = ServerQueueGate(), second = ServerQueueGate(), settlement = ServerQueueGate()

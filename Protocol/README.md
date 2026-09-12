@@ -6,6 +6,8 @@ Start with [the server protocol guide](../docs/SERVER-PROTOCOL.md).
 - `generate-schema.py`: regenerates the schema and checks version, method inventories and argument names against the Swift source.
 - `vectors-v14.json`: checked-in output from production Swift encoding, with synthetic identifiers/data.
 - `verify.py`: validates vectors encoded by the production Swift Codable types.
+- `maintenance-v1.schema.json`: capability-gated supervisor maintenance payloads, included in protocol 14.
+- `verify-maintenance.py`: validates maintenance DTO exports and malformed request/outcome regressions.
 - `examples/bloom_client.py`: read-only SSH/HTTPS Python client with strict host/TLS verification.
 - `examples/test_bloom_client.py`: framing, negotiation and credential-boundary regressions.
 
@@ -19,3 +21,6 @@ The scripts run locally and do not deploy a server. Schema verification requires
 The SSH example uses POSIX nonblocking pipes and a locally installed OpenSSH client.
 
 Version 13 schema and vectors remain checked in for existing clients. Version 14 adds the leased UI bridge.
+
+Supervised updates require `diagnostics.maintenanceManagement: true` and separate maintenance
+authentication. See [maintenance lifecycle and client rules](../docs/SERVER-MAINTENANCE.md).

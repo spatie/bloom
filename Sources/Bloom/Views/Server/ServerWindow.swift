@@ -22,6 +22,7 @@ private struct ServerConnectionContent: View {
     @State private var showsSetup: Bool
     @State private var storage: ServerStorageModel
     @State private var updates: ServerToolUpdatesModel
+    @State private var maintenance: ServerMaintenanceModel
     @State private var editorID = UUID()
 
     init(server: ServerWindowModel) {
@@ -30,6 +31,7 @@ private struct ServerConnectionContent: View {
         _showsSetup = State(initialValue: false)
         _storage = State(initialValue: ServerStorageModel(server: server))
         _updates = State(initialValue: ServerToolUpdatesModel(server: server))
+        _maintenance = State(initialValue: ServerMaintenanceModel(server: server))
     }
 
     var body: some View {
@@ -37,7 +39,7 @@ private struct ServerConnectionContent: View {
             if showsSetup {
                 ServerSetupView(model: setup) { showsSetup = false }
             } else {
-                ServerConnectionView(model: server, storage: storage, updates: updates) {
+                ServerConnectionView(model: server, storage: storage, updates: updates, maintenance: maintenance) {
                     setup.cancel()
                     setup = ServerSetupModel(server: server, resumeExisting: server.isConnected)
                     showsSetup = true
@@ -53,6 +55,7 @@ private struct ServerConnectionView: View {
     @Bindable var model: ServerWindowModel
     let storage: ServerStorageModel
     let updates: ServerToolUpdatesModel
+    let maintenance: ServerMaintenanceModel
     let showSetup: () -> Void
     @Environment(AppModel.self) private var app
     @Environment(\.dismissWindow) private var dismissWindow
@@ -91,7 +94,7 @@ private struct ServerConnectionView: View {
                     ServerStorageView(model: storage) { section = .connection }
                         .disabled(updates.updating != nil)
                 case .updates:
-                    ServerToolUpdatesView(model: updates, showConnection: { section = .connection },
+                    ServerMaintenanceView(model: maintenance, legacy: updates, showConnection: { section = .connection },
                                           showAccounts: { section = .accounts })
                         .disabled(storage.isCleaning)
                 }

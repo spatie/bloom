@@ -54,6 +54,26 @@ Credentials live in the Mac app's Keychain. Preferences store only the server ad
 transport refuses HTTP redirects carrying bearer credentials. Local sign-out removes local
 credentials; provider-side session revocation remains the identity provider's responsibility.
 
+## Managed server updates
+
+For a supervised Bloom installation, set `runtime_socket` to its root-owned
+`/run/bloom-maintenance/<server-fingerprint>.sock` instead of the runtime's temporary socket.
+The supervisor forwards ordinary RPCs and serves maintenance status while the runtime restarts.
+It also answers connection negotiation during that interval, so a newly opened client can
+recover the same update job. The [maintenance protocol](../docs/SERVER-MAINTENANCE.md) is shared
+by native and web clients.
+
+Give the dedicated gateway service access to the socket's group, for example with
+`SupplementaryGroups=bloom`. For terminal streaming, set `gateway_group_id` in the protected
+supervisor configuration to that shared group ID. The runtime continues to keep agent and
+database files private. Do not make either control socket world-accessible.
+
+Gateway OAuth access is still required. A maintenance request additionally carries the separate
+maintenance key, which the supervisor verifies. Ordinary workspace access does not grant update
+authority. Keep this key out of browser persistent storage, logs and preview pages; a web panel
+should retain administrative credentials on its backend and protect its own session and CSRF
+boundary. Responses retain `Cache-Control: no-store`.
+
 ## Browser previews
 
 Register each preview explicitly with a hostname, workspace ID, loopback port and its own

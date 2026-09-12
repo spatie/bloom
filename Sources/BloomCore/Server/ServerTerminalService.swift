@@ -81,6 +81,49 @@ actor ServerTerminalService {
         }
     }
 
+    /// SSH attaches directly to tmux and never enters ServerTerminalStreams. Check both clients
+    /// and detached commands before replacing a runtime that owns the tmux process.
+    func hasMaintenanceBlockers() async -> Bool {
+        guard starts.isEmpty else { return true }
+        for command in Array(commands.values) {
+            let directory = URL(fileURLWithPath: command.configPath).deletingLastPathComponent().path
+            do {
+                let clients = try await run(command, ["list-clients", "-F", "#{client_session}"], directory)
+                if clients.ok, !clients.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+                let panes = try await run(command, ["list-panes", "-a", "-F", "#{pane_dead}\t#{pane_current_command}\t#{pane_pid}"], directory)
+                if !panes.ok {
+                    // A reaped foreground daemon has no terminal work. A live one that cannot
+                    // be inspected must not be treated as idle.
+                    if processes.values.contains(where: \.isRunning) { return true }
+                    continue
+                }
+                if Self.panesBlockMaintenance(panes.stdout) { return true }
+            } catch { return true }
+        }
+        return false
+    }
+
+    static func panesBlockMaintenance(_ output: String, children: (Int32) -> String? = processChildren) -> Bool {
+        for line in output.split(separator: "\n") {
+            let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
+            guard fields.count == 3, fields[0] == "0" || fields[0] == "1" else { return true }
+            if fields[0] == "1" { continue }
+            guard ["bash", "zsh", "sh", "dash", "fish"].contains(String(fields[1])),
+                  let pid = Int32(fields[2]), pid > 1, let running = children(pid),
+                  running.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return true }
+        }
+        return false
+    }
+
+    private static func processChildren(_ pid: Int32) -> String? {
+        #if os(Linux)
+        return try? String(contentsOfFile: "/proc/\(pid)/task/\(pid)/children", encoding: .utf8)
+        #else
+        // Managed replacement currently targets Linux. Unknown process state fails closed.
+        return nil
+        #endif
+    }
+
     func shutdown() async {
         if let shutdownTask { await shutdownTask.value; return }
         isClosed = true

@@ -175,6 +175,7 @@ final class ServerWindowModel {
     }
 
     func uiBridgeService() -> RemoteWorkspaceService? { client.map { RemoteWorkspaceService(client: $0) } }
+    func maintenanceService() -> RemoteWorkspaceService? { client.map { RemoteWorkspaceService(client: $0) } }
 
     func existingWorkspaceModel(_ id: WorkspaceID) -> RemoteWorkspaceFileListing? { workspaceModels[id] }
     func existingConversation(_ id: SessionID) -> TranscriptModel? { conversationModels[id] }

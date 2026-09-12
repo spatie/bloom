@@ -251,6 +251,12 @@ def standalone_installer_source(path, source=None):
     helper = pathlib.Path(path).with_name("bloom_install_process.py").read_text()
     if "read_swap_status" in source:
         helper += "\n" + pathlib.Path(path).with_name("bloom_swap_state.py").read_text()
+    if "MaintenanceInstallation" in source:
+        helper += "\n" + pathlib.Path(path).with_name("bloom_maintenance_install.py").read_text()
+        supervisor = pathlib.Path(path).with_name("bloom-maintenance.py").read_text()
+        helper += "\nMAINTENANCE_SUPERVISOR_SOURCE = " + repr(supervisor) + "\n"
+        docker = pathlib.Path(path).with_name("bloom_maintenance_docker.py").read_text()
+        helper += "MAINTENANCE_DOCKER_SOURCE = " + repr(docker) + "\n"
     return "#!/usr/bin/env python3\n" + helper + "\n" + source
 
 

@@ -1,0 +1,439 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://runbloom.app/protocol/maintenance-v1.schema.json",
+  "title": "Bloom supervised maintenance contract 1",
+  "description": "Payloads for the capability-gated maintenance operation inside Bloom protocol 14. Credentials are transport-only. See docs/SERVER-MAINTENANCE.md.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ServerMaintenanceRequest"
+    },
+    {
+      "$ref": "#/$defs/ServerMaintenanceResponse"
+    }
+  ],
+  "$defs": {
+    "ServerMaintenanceRequest": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "enum": [
+            "inspect",
+            "prepare",
+            "start",
+            "status",
+            "cancel"
+          ]
+        },
+        "credential": {
+          "anyOf": [
+            {
+              "type": "string",
+              "writeOnly": true,
+              "description": "Maintenance credential. Never log, return, or persist in an idempotency record."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "component": {
+          "anyOf": [
+            {
+              "enum": [
+                "server",
+                "claude",
+                "codex",
+                "docker"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "planID": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "jobID": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "now",
+                "whenIdle"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "afterSequence": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "prepare"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "component"
+            ],
+            "properties": {
+              "component": {
+                "enum": [
+                  "server",
+                  "claude",
+                  "codex",
+                  "docker"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "start"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "planID"
+            ],
+            "properties": {
+              "planID": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "cancel"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "jobID"
+            ],
+            "properties": {
+              "jobID": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ServerMaintenanceResponse": {
+      "type": "object",
+      "properties": {
+        "authorized": {
+          "type": "boolean"
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ServerMaintenanceComponent"
+          }
+        },
+        "plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServerMaintenancePlan"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "jobs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ServerMaintenanceJob"
+          }
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServerMaintenanceFailure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "authorized",
+        "components",
+        "jobs"
+      ],
+      "additionalProperties": false
+    },
+    "ServerMaintenanceComponent": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "enum": [
+            "server",
+            "claude",
+            "codex",
+            "docker"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "installedVersion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "availableVersion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "canUpdate": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "canUpdate",
+        "detail"
+      ],
+      "additionalProperties": false
+    },
+    "ServerMaintenancePlan": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "component": {
+          "enum": [
+            "server",
+            "claude",
+            "codex",
+            "docker"
+          ]
+        },
+        "fromVersion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "targetVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "summary": {
+          "type": "string"
+        },
+        "restarts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "targetVersion",
+        "summary",
+        "restarts",
+        "expiresAt"
+      ],
+      "additionalProperties": false
+    },
+    "ServerMaintenanceJob": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "planID": {
+          "type": "string",
+          "minLength": 1
+        },
+        "component": {
+          "enum": [
+            "server",
+            "claude",
+            "codex",
+            "docker"
+          ]
+        },
+        "targetVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phase": {
+          "enum": [
+            "queued",
+            "waiting",
+            "downloading",
+            "installing",
+            "restarting",
+            "verifying",
+            "succeeded",
+            "failed",
+            "rolledBack",
+            "cancelled",
+            "interrupted"
+          ]
+        },
+        "logs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ServerMaintenanceLog"
+          }
+        },
+        "nextSequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "canCancel": {
+          "type": "boolean"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "planID",
+        "component",
+        "targetVersion",
+        "phase",
+        "logs",
+        "nextSequence",
+        "canCancel",
+        "updatedAt"
+      ],
+      "additionalProperties": false
+    },
+    "ServerMaintenanceLog": {
+      "type": "object",
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sequence",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "ServerMaintenanceFailure": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string"
+        },
+        "recovery": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "recovery"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

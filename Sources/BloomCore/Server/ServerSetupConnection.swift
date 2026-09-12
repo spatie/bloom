@@ -48,6 +48,7 @@ public struct ServerInstallEvent: Decodable, Sendable {
     public var details: String?
     public var command: String?
     public var exitStatus: Int?
+    public var maintenanceKeyAccepted: Bool?
 
     public init(event: String, step: String? = nil, message: String? = nil, code: String? = nil,
                 recovery: String? = nil, details: String? = nil, command: String? = nil, exitStatus: Int? = nil,
@@ -217,7 +218,7 @@ public struct ServerSetupConnection: Sendable {
         try handle.write(contentsOf: Data(("\n" + key.line).utf8))
     }
 
-    public func install(script: String, archive: URL, clientPublicKey: URL,
+    public func install(script: String, archive: URL, clientPublicKey: URL, maintenanceKeySHA256: String? = nil,
                         progress: @escaping @Sendable (ServerInstallEvent) async -> Void) async throws -> ServerInstallEvent {
         // The server may have started work since the review screen was opened. Check again
         // before creating remote files or uploading the package; the installer also rechecks.
@@ -240,7 +241,14 @@ public struct ServerSetupConnection: Sendable {
             let digest = SHA256.hash(data: try Data(contentsOf: archive, options: .mappedIfSafe)).map { String(format: "%02x", $0) }.joined()
             let command = "if [ \"$(id -u)\" = 0 ]; then python3 -; else sudo -n python3 -; fi"
             // Arguments belong to python, not to the shell's condition.
-            let args = ["--package", staging + "/server.tar.gz", "--sha256", digest, "--client-public-key-file", staging + "/client.pub"].map(ServerSetupSSH.shellQuote).joined(separator: " ")
+            var arguments = ["--package", staging + "/server.tar.gz", "--sha256", digest, "--client-public-key-file", staging + "/client.pub"]
+            if let maintenanceKeySHA256 {
+                guard maintenanceKeySHA256.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil else {
+                    throw ServerFailure("Invalid maintenance credential digest.")
+                }
+                arguments += ["--maintenance-key-sha256", maintenanceKeySHA256]
+            }
+            let args = arguments.map(ServerSetupSSH.shellQuote).joined(separator: " ")
             let invocation = command.replacingOccurrences(of: "python3 -", with: "python3 - " + args)
             try Task.checkCancellation()
             await progress(ServerInstallEvent(event: "progress", step: "launch-installer", message: "Starting the server installer."))

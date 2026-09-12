@@ -7,6 +7,7 @@ public actor RemoteWireSession: RemoteRequesting {
     private let exchange: Exchange
     private var established: Handshake?
     private var storageManagement: Bool?
+    private var maintenanceManagement: Bool?
     private var pending: Task<Void, Never>?
     private var pendingID: UUID?
     private var waiters: [UUID: CheckedContinuation<Handshake, Error>] = [:]
@@ -28,6 +29,16 @@ public actor RemoteWireSession: RemoteRequesting {
         if connection.version < 14, command.operation["uiBridge"] != nil {
             throw ConnectionRefusal("Agent UI tools require Bloom Server protocol 14. Update the server to use panes, tabs and browser tools remotely.")
         }
+        if command.operation["maintenance"] != nil {
+            guard connection.version >= 13 else { throw Self.maintenanceUnavailable }
+            if maintenanceManagement == nil {
+                let probe = RemoteCommand.call("diagnostics")
+                let data = try await exchange(Self.encode(probe, version: connection.version))
+                let result = try RemoteClient.decode(data, commandID: probe.id, expectedVersion: connection.version)
+                maintenanceManagement = result["diagnostics"]?["_0"]?["maintenanceManagement"] == .bool(true)
+            }
+            guard maintenanceManagement == true else { throw Self.maintenanceUnavailable }
+        }
         if command.operation["storage"] != nil || command.operation["cleanupStorage"] != nil {
             guard connection.version >= 13 else { throw Self.storageUnavailable }
             if storageManagement == nil {
@@ -43,12 +54,17 @@ public actor RemoteWireSession: RemoteRequesting {
         let result = try RemoteClient.decode(data, commandID: command.id, expectedVersion: connection.version)
         if command.operation["diagnostics"] != nil {
             storageManagement = result["diagnostics"]?["_0"]?["storageManagement"] == .bool(true)
+            maintenanceManagement = result["diagnostics"]?["_0"]?["maintenanceManagement"] == .bool(true)
         }
         return result
     }
 
     private static var storageUnavailable: ConnectionRefusal {
         ConnectionRefusal("Update Bloom Server to inspect storage and clean unused Docker data. Other workspace features remain available.")
+    }
+
+    private static var maintenanceUnavailable: ConnectionRefusal {
+        ConnectionRefusal("Update Bloom Server to enable supervised maintenance. Other workspace features remain available.")
     }
 
     private func negotiate(helloID: UUID) async throws -> Handshake {

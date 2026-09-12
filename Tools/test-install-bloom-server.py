@@ -38,11 +38,11 @@ class InstallerTests(unittest.TestCase):
             action()
         self.assertEqual(error.exception.code, code)
 
-    def package(self, additions=None):
+    def package(self, additions=None, manifest=None):
         path = self.root / "package.tar.gz"
         prefix = "bloom-server-linux-x86_64/"
         entries = [(prefix + "bin/bloom-server", b"#!/bin/sh\nexit 0\n", 0o755),
-                   (prefix + "manifest.json", b'{"architecture":"x86_64"}', 0o644)]
+                   (prefix + "manifest.json", json.dumps(manifest or {"architecture": "x86_64"}).encode(), 0o644)]
         with tarfile.open(path, "w:gz") as archive:
             for directory in ("lib", "licences"):
                 item = tarfile.TarInfo(prefix + directory)
@@ -464,8 +464,9 @@ class InstallerTests(unittest.TestCase):
         installer.command.assert_not_called()
         installer.install_dependencies.assert_not_called()
 
-    def installation_fixture(self):
-        package, checksum = self.package()
+    def installation_fixture(self, maintenance=False):
+        package, checksum = self.package(manifest={"architecture": "x86_64", "protocolVersion": 14,
+            "maintenanceProtocolVersion": 1, "version": "test-1"} if maintenance else None)
         key = self.root / "client.pub"
         key.write_text(self.key())
         args = installer.parser().parse_args([
@@ -473,6 +474,13 @@ class InstallerTests(unittest.TestCase):
             "--service-home", str(self.root / "home"), "--systemd-dir", str(self.root / "systemd"),
             "--package", str(package), "--sha256", checksum, "--client-public-key-file", str(key),
         ])
+        if maintenance:
+            args.maintenance_key_sha256 = "a" * 64
+            helper = installer.MaintenanceInstallation
+            factory = lambda values, protect: helper(values, protect, base=self.root / "maintenance",
+                launcher=self.root / "libexec/bloom-maintenance.py", runtime=self.root / "run", owner_uid=os.getuid())
+            patch = mock.patch.object(installer, "MaintenanceInstallation", side_effect=factory)
+            patch.start(); self.addCleanup(patch.stop)
         args.systemd_dir.mkdir()
         account = mock.Mock(pw_uid=os.getuid(), pw_gid=os.getgid())
         for name, value in [("probe", {"ok": True}), ("marker", None), ("command", mock.Mock(returncode=0)),
@@ -504,6 +512,37 @@ class InstallerTests(unittest.TestCase):
         installer.command.assert_any_call(["systemctl", "start", "bloom-server.service"])
         installer.install_dependencies.assert_called_once_with(args)
         installer.verify_node_tools.assert_called_once()
+
+    def test_supervised_install_accepts_digest_only_after_successful_start(self):
+        args = self.installation_fixture(maintenance=True)
+        installer.install(args)
+        config = self.root / "maintenance/bloom-server/config.json"
+        self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+        unit = (args.systemd_dir / "bloom-server.service").read_text()
+        self.assertIn("User=root\nGroup=root\n", unit)
+        self.assertIn("NoNewPrivileges=true", unit)
+        self.assertNotIn("a" * 64, unit)
+        completed = [call for call in installer.emit.call_args_list if call.args[0] == "complete"]
+        self.assertEqual(len(completed), 1)
+        self.assertTrue(completed[0].kwargs["maintenanceKeyAccepted"])
+
+    def test_supervised_start_failure_restores_metadata_and_never_accepts_key(self):
+        args = self.installation_fixture(maintenance=True)
+        installer.wait_ready.side_effect = installer.InstallError("startup_failed", "Failed", "Inspect server")
+        with self.assertRaises(installer.InstallError):
+            installer.install(args)
+        self.assertFalse((self.root / "maintenance/bloom-server/config.json").exists())
+        self.assertFalse((self.root / "maintenance/bloom-server/current.json").exists())
+        self.assertFalse((self.root / "libexec/bloom-maintenance.py").exists())
+        self.assertFalse((args.install_root / "current").exists())
+        self.assertFalse(any(call.args[0] == "complete" for call in installer.emit.call_args_list))
+
+    def test_maintenance_digest_validation_does_not_echo_bad_secret(self):
+        args = installer.parser().parse_args(["--maintenance-key-sha256", "raw-private-key"])
+        with self.assertRaises(installer.InstallError) as raised:
+            installer.configuration(args)
+        self.assertEqual(raised.exception.code, "invalid_maintenance_key")
+        self.assertNotIn("raw-private-key", raised.exception.message)
 
     def test_running_server_update_does_not_restart_it(self):
         args = self.installation_fixture()

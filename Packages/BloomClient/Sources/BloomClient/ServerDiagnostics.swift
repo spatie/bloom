@@ -23,10 +23,12 @@ public struct ServerDiagnostics: Codable, Sendable, Equatable {
     public var browser: ServerBrowserReadiness?
     public var authentication: [AgentAuthenticationStatus]?
     public var storageManagement: Bool?
+    public var maintenanceManagement: Bool?
 
-    public init(checkedAt: Date, hostname: String, operatingSystem: String, account: String, checks: [Check], browser: ServerBrowserReadiness? = nil, authentication: [AgentAuthenticationStatus]? = nil, storageManagement: Bool? = nil) {
+    public init(checkedAt: Date, hostname: String, operatingSystem: String, account: String, checks: [Check], browser: ServerBrowserReadiness? = nil, authentication: [AgentAuthenticationStatus]? = nil, storageManagement: Bool? = nil, maintenanceManagement: Bool? = nil) {
         self.checkedAt = checkedAt; self.hostname = hostname; self.operatingSystem = operatingSystem
         self.account = account; self.checks = checks; self.browser = browser; self.authentication = authentication; self.storageManagement = storageManagement
+        self.maintenanceManagement = maintenanceManagement
     }
 
     public static func decode(_ result: JSONValue) throws -> Self {

@@ -109,6 +109,12 @@ final class ServerWorkspaceAdmissions: Sendable {
     }
 
     var waitingCount: Int { state.withLock { $0.entries.values.filter { $0.waiter != nil }.count } }
+    var hasActiveOperations: Bool {
+        state.withLock { $0.entries.values.contains { entry in
+            if case .closing = entry.phase { return true }
+            return !entry.permits.isEmpty
+        } }
+    }
 
     func stop() {
         let waiters = state.withLock { state in

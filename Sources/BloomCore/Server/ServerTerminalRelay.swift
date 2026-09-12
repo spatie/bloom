@@ -15,7 +15,8 @@ enum ServerTerminalRelay {
         let line = initial.prefix { $0 != 10 }
         let object = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any]
         guard object?["terminalSocket"] != nil || object?["terminalProtocol"] != nil else {
-            let connection = try UnixSocketConnection.connect(to: ServerDaemon.socketPath(directory: directory))
+            let path = try ServerMaintenanceRoute.available(directory: directory) ?? ServerDaemon.socketPath(directory: directory)
+            let connection = try UnixSocketConnection.connect(to: path)
             await ServerCommandLine.relay(connection, initial: initial)
             return
         }

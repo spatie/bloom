@@ -2,11 +2,12 @@ import Foundation
 import Observation
 import BloomCore
 import BloomClient
+import BloomAuthentication
 import CryptoKit
 
 @MainActor @Observable
 final class ServerSetupModel {
-    typealias InstallOperation = @Sendable (ServerSetupConnection, String, URL, URL, @escaping @Sendable (ServerInstallEvent) async -> Void) async throws -> ServerInstallEvent
+    typealias InstallOperation = @Sendable (ServerSetupConnection, String, URL, URL, String?, @escaping @Sendable (ServerInstallEvent) async -> Void) async throws -> ServerInstallEvent
     enum Phase { case introduction, address, trust, checking, readyToInstall, installing, accounts, connecting, complete }
     var host = "" { didSet { if host != oldValue { connectionInputsChanged() } } }
     var identityFile = "" { didSet { if identityFile != oldValue { connectionInputsChanged() } } }
@@ -69,8 +70,8 @@ final class ServerSetupModel {
 
     init(server: ServerWindowModel, resources: URL? = nil, supportDirectory: URL? = nil, resumeExisting: Bool = true,
          inspectConnection: @escaping @Sendable (ServerSetupConnection, String) async throws -> ServerInstallCheck = { try await $0.inspect(script: $1) },
-         installConnection: @escaping InstallOperation = { connection, script, archive, key, progress in
-             try await connection.install(script: script, archive: archive, clientPublicKey: key, progress: progress)
+         installConnection: @escaping InstallOperation = { connection, script, archive, key, maintenanceDigest, progress in
+             try await connection.install(script: script, archive: archive, clientPublicKey: key, maintenanceKeySHA256: maintenanceDigest, progress: progress)
          }) {
         self.resources = resources; self.supportDirectory = supportDirectory
         self.server = server
@@ -169,13 +170,23 @@ final class ServerSetupModel {
             let script = try self.installerScript()
             let key = try await self.prepareClientKey()
             self.clientKey = key
+            // Save before installation so a lost reply cannot strand the only administrative
+            // credential. Only its digest crosses the administrator SSH connection.
+            let pendingKey = "setup:" + self.validatedHost
+            let maintenanceKey = try ServerMaintenanceCredentials.load(serverID: pendingKey)
+                ?? SymmetricKey(size: .bits256).withUnsafeBytes { Data($0).base64EncodedString() }
+            try ServerMaintenanceCredentials.save(token: maintenanceKey, serverID: pendingKey)
+            let maintenanceDigest = SHA256.hash(data: Data(maintenanceKey.utf8)).map { String(format: "%02x", $0) }.joined()
             self.record("Client key ready. Connecting to upload the server package.")
             let installed = try await self.installConnection(connection, script, package,
-                URL(fileURLWithPath: key.path + ".pub")) { [weak self] event in
+                URL(fileURLWithPath: key.path + ".pub"), maintenanceDigest) { [weak self] event in
                     await self?.receive(event)
                 }
             try Task.checkCancellation()
             self.installed = installed
+            if installed.maintenanceKeyAccepted == true, let endpoint = self.installedEndpoint {
+                try ServerMaintenanceCredentials.save(token: maintenanceKey, serverID: PaneStateNamespace.connectionID(endpoint))
+            }
             self.activity.finish()
             if self.willInstallSwap { try await self.configureSwap() }
             if self.installsBrowserTools { try await self.configureBrowser() }

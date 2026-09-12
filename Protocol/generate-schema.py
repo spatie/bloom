@@ -75,7 +75,7 @@ operations = {
     "reviewSnapshot": obj({"workspaceID": S, "scope": SCOPE, "knownRevision": optional(S), "wait": B}, ["workspaceID", "scope", "wait"]),
     "reviewPatch": obj({"workspaceID": S, "path": S, "scope": SCOPE, "knownRevision": optional(S)}, ["workspaceID", "path", "scope"]),
     "creation": payload(ref("CreationAction")), "previewAddress": payload(S),
-    "uiBridge": payload(ref("UIBridgeOperation")),
+    "uiBridge": payload(ref("UIBridgeOperation")), "maintenance": payload(ref("ServerMaintenanceRequest")),
     "terminalStream": obj({"workspaceID": S, "name": S}), "project": obj({"repoID": S, "action": ref("ProjectAction")}),
     **{name: obj({"sessionID": S}) for name in ["composer", "closeSession", "stop"]},
     "setComposer": obj({"sessionID": S, "controls": ref("ComposerControls")}), "markRead": obj({"sessionID": S, "seq": I}),
@@ -111,6 +111,7 @@ results = {
     "archivePreview": payload(ref("ArchivePreview")),
     "diagnostics": payload(ref("ServerDiagnostics")),
     "storage": payload(ref("ServerStorageReport")), "storageCleanup": payload(ref("ServerStorageCleanupResult")),
+    "maintenance": payload(ref("ServerMaintenanceResponse")),
     **{name: payload(R) for name in ["projectSettings", "filesToCopy"]},
 }
 creation_results = {name: payload(R) for name in ["project", "projectContext", "inspection", "workspaceContext", "checkouts", "reference"]}
@@ -161,6 +162,7 @@ def build():
             "description": "Envelope and method schema, with full review/transcript framing. DomainRecord deliberately permits evolving application records; see SERVER-PROTOCOL.md and Swift source references.",
             "oneOf": [ref("Request"), ref("Reply")],
             "$defs": {
+                **json.loads((ROOT / "Protocol/maintenance-v1.schema.json").read_text())["$defs"],
                 "Request": obj({"version": {"const": VERSION}, "id": U, "operation": ref("Operation")}),
                 "Reply": obj({"version": {"const": VERSION}, "id": U, "result": ref("Result")}),
                 "Operation": cases(operations), "Result": cases(results), "WorkspaceAction": cases(workspace_actions),
@@ -199,7 +201,7 @@ def build():
                                                    "report": optional(ref("ServerStorageReport")), "interrupted": B}, ["outcomes", "interrupted"], True),
                 "ServerDiagnostics": obj({"checkedAt": {"type": "number"}, "hostname": S, "operatingSystem": S,
                                           "account": S, "checks": array(R), "browser": optional(R),
-                                          "authentication": optional(array(ref("AgentAuthentication"))), "storageManagement": optional(B)},
+                                          "authentication": optional(array(ref("AgentAuthentication"))), "storageManagement": optional(B), "maintenanceManagement": optional(B)},
                                          ["checkedAt", "hostname", "operatingSystem", "account", "checks"], True),
                 "UIBridgeOperation": cases(ui_operations), "UIBridgeResult": cases(ui_results),
                 "UILease": obj({"id": U, "token": S, "workspaceID": S, "expiresAtMilliseconds": I}),

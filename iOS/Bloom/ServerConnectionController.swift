@@ -45,7 +45,11 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
                     if model.address.hasPrefix("https:") { try model.authentication.signOut(address: model.address) }
                     model.disconnect(); dismiss(animated: true)
                 } catch { show(error) }
+            }), .flexibleSpace(), UIBarButtonItem(title: "Updates", image: UIImage(systemName: "arrow.down.circle"), primaryAction: UIAction { [weak self] _ in
+                guard let self else { return }
+                navigationController?.pushViewController(ServerMaintenanceController(model: model), animated: true)
             })]
+            toolbarItems?.last?.accessibilityLabel = "Server updates"
             navigationController?.setToolbarHidden(false, animated: false)
         }
         let saved = UserDefaults.standard.data(forKey: "server.ssh").flatMap { try? JSONDecoder().decode(SSHConfiguration.self, from: $0) }

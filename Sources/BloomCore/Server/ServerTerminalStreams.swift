@@ -20,6 +20,7 @@ actor ServerTerminalStreams {
     private var expirations: [UUID: Task<Void, Never>] = [:]
     private var terminations: [UUID: Task<Void, Never>] = [:]
     private var closed = false
+    var hasConnections: Bool { !entries.isEmpty || !workers.isEmpty || !terminations.isEmpty }
 
     init(groupID: UInt32?, makeProcess: (@Sendable (ServerTerminal, Workspace) -> StreamingProcess)? = nil) {
         self.groupID = groupID
