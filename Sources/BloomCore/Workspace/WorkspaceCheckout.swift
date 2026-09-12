@@ -72,6 +72,7 @@ public struct ExistingBranch: Sendable, Hashable, Identifiable, Codable {
     /// Whether there is a local `refs/heads` copy. False means the branch is only on the remote,
     /// which needs a tracking branch made for it rather than a plain checkout.
     public let isLocal: Bool
+    public let remoteName: String?
     /// What is already sitting on this branch, or nil when it is free.
     ///
     /// Carried on the branch rather than worked out by the picker, because the picker used to be
@@ -88,9 +89,10 @@ public struct ExistingBranch: Sendable, Hashable, Identifiable, Codable {
 
     public var id: String { name }
 
-    public init(name: String, isLocal: Bool, inUseBy: BranchHolder? = nil) {
+    public init(name: String, isLocal: Bool, inUseBy: BranchHolder? = nil, remoteName: String? = nil) {
         self.name = name
         self.isLocal = isLocal
+        self.remoteName = remoteName
         self.inUseBy = inUseBy
     }
 }
@@ -233,19 +235,23 @@ public enum WorkspaceCheckoutPlan {
         remote: [String],
         defaultBranch: String,
         inUse: [String: BranchHolder] = [:],
-        pullRequestHeads: Set<String> = []
+        pullRequestHeads: Set<String> = [],
+        remoteNames: [String] = ["origin"]
     ) -> [ExistingBranch] {
         var byName: [String: Bool] = [:]
+        var remoteByName: [String: String] = [:]
         for name in local where !name.isEmpty { byName[name] = true }
         for reference in remote {
-            let name = remoteBranchName(reference)
+            let remote = remoteNames.sorted { $0.count > $1.count }.first { reference.hasPrefix($0 + "/") }
+            let name = remote.flatMap { remoteBranchName(reference, remote: $0) }
             guard let name, byName[name] == nil else { continue }
             byName[name] = false
+            remoteByName[name] = remote
         }
         byName[defaultBranch] = nil
         for name in pullRequestHeads { byName[name] = nil }
         return byName
-            .map { ExistingBranch(name: $0.key, isLocal: $0.value, inUseBy: inUse[$0.key]) }
+            .map { ExistingBranch(name: $0.key, isLocal: $0.value, inUseBy: inUse[$0.key], remoteName: remoteByName[$0.key]) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
@@ -264,11 +270,11 @@ public enum WorkspaceCheckoutPlan {
     /// Pull request heads are not dropped either, for the same reason: there is no pull request
     /// row here to offer instead.
     public static func everyBranch(
-        local: [String], remote: [String], inUse: [String: BranchHolder] = [:]
+        local: [String], remote: [String], inUse: [String: BranchHolder] = [:], remoteNames: [String] = ["origin"]
     ) -> [ExistingBranch] {
         // The empty string excludes nothing: `offeredBranches` drops the branch it is given as the
         // default, and no branch is called "". One merge rule, asked for twice.
-        offeredBranches(local: local, remote: remote, defaultBranch: "", inUse: inUse)
+        offeredBranches(local: local, remote: remote, defaultBranch: "", inUse: inUse, remoteNames: remoteNames)
     }
 
     /// The branches the offered pull requests are already speaking for.

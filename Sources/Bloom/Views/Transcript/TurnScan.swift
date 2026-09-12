@@ -140,6 +140,20 @@ enum TurnScanCache {
         return cache
     }()
 
+    private static let snapshots: NSCache<NSString, TurnFilesBox> = {
+        let cache = NSCache<NSString, TurnFilesBox>()
+        cache.countLimit = limit
+        return cache
+    }()
+
+    static func files(snapshotID: GitSnapshotID) -> [TurnFile]? {
+        snapshots.object(forKey: snapshotID.rawValue as NSString)?.value
+    }
+
+    static func remember(_ files: [TurnFile], snapshotID: GitSnapshotID) {
+        snapshots.setObject(TurnFilesBox(files), forKey: snapshotID.rawValue as NSString)
+    }
+
     static func files(rowID: Int64) -> [TurnFile]? {
         values.object(forKey: NSNumber(value: rowID))?.value
     }

@@ -35,6 +35,7 @@ struct ToolPaneView: View {
 
     /// Read for the setup strip's slide. See the `.animation` in `body`.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(AppModel.self) private var app
 
     var body: some View {
         switch tab.kind {
@@ -54,7 +55,9 @@ struct ToolPaneView: View {
                             port: model.port,
                             directory: tab.directory,
                             onCloseTab: { Task { await CenterTabStore.shared.close(tab) } },
-                            splitColumn: splitColumn
+                            splitColumn: splitColumn,
+                            terminalLabel: tab.title,
+                            onAddToChat: terminalHandoff
                         )
                         .id(tab.id)
                     } else {
@@ -104,6 +107,18 @@ struct ToolPaneView: View {
             isRunningSetup: model.isRunningSetup,
             setupState: model.workspace.setupState
         )
+    }
+
+    private var terminalHandoff: (@MainActor (TerminalExcerpt) -> Void)? {
+        guard let sessionID = model.activeSession?.id else { return nil }
+        let destination = model
+        return { excerpt in
+            Task { @MainActor in
+                if let failure = await TerminalExcerptHandoff.attach(excerpt, to: destination, sessionID: sessionID) {
+                    app.notice = BloomNotice(message: failure)
+                }
+            }
+        }
     }
 
     /// The store a shell's environment is built from, and the workspace's port, which is the one

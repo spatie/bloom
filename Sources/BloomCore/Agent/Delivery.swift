@@ -40,6 +40,13 @@ public struct Delivery: Identifiable, Sendable, Hashable {
         case report
     }
 
+    public enum State: String, Sendable, Hashable, Codable {
+        case pending, claimed, accepted, uncertain
+    }
+
+    public var state: State
+    public var interactionMode: InteractionMode?
+    public var providerTurnID: String?
     public var id: DeliveryID
     /// The conversation this is addressed to, resolved when it was asked for rather than when it
     /// goes. A workspace can hold several chats, so a message addressed to a workspace is
@@ -86,8 +93,14 @@ public struct Delivery: Identifiable, Sendable, Hashable {
         crewPayload: Data? = nil,
         createdAt: Date = Date(),
         deliveredAt: Date? = nil,
-        deliveredSeq: Int? = nil
+        deliveredSeq: Int? = nil,
+        state: State? = nil,
+        interactionMode: InteractionMode? = nil,
+        providerTurnID: String? = nil
     ) {
+        self.state = state ?? (deliveredAt == nil ? .pending : .accepted)
+        self.interactionMode = interactionMode
+        self.providerTurnID = providerTurnID
         self.id = id
         self.targetSessionID = targetSessionID
         self.sourceWorkspaceID = sourceWorkspaceID
@@ -139,7 +152,7 @@ public struct Delivery: Identifiable, Sendable, Hashable {
     /// place decides which of the two renderings goes to the model.
     public var sent: String { crewMessage?.sent ?? body }
 
-    public var isPending: Bool { deliveredAt == nil }
+    public var isPending: Bool { state == .pending || state == .uncertain }
 
     /// Everything that may be handed over right now, in the order it was asked for.
     ///
@@ -168,8 +181,9 @@ public struct Delivery: Identifiable, Sendable, Hashable {
         from pending: [Delivery], hold: DeliveryHold, on agent: AgentKind
     ) -> [Delivery] {
         guard hold.allowsDelivery(on: agent) else { return [] }
-        guard agent.acceptsMidTurnMessage else { return Array(pending.prefix(1)) }
-        return pending
+        let ready = Array(pending.prefix { $0.state == .pending })
+        guard agent.acceptsMidTurnMessage else { return Array(ready.prefix(1)) }
+        return ready
     }
 
     /// Which of the waiting messages goes next, if any may go at all.
@@ -206,6 +220,6 @@ public struct Delivery: Identifiable, Sendable, Hashable {
         // Anything already waiting is in front of it, and the front of the queue always wins.
         // This is the guard that keeps immediate delivery from being a reordering: a backend that
         // takes a message mid turn still takes the oldest one first.
-        return next(from: pending, hold: hold, on: agent) == nil
+        return pending.isEmpty
     }
 }

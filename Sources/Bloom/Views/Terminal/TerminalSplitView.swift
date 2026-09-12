@@ -26,6 +26,8 @@ struct TerminalSplitView: View {
     var onCloseTab: @MainActor () -> Void
     /// Called when a split asks for something a shell tree cannot hold. See `handle`.
     var splitColumn: @MainActor (SplitAxis, PaneKind) -> Void
+    var terminalLabel: String = "Terminal"
+    var onAddToChat: (@MainActor (TerminalExcerpt) -> Void)?
 
     /// The same switch the terminal itself reads, so turning the Ghostty theme off also turns off
     /// Ghostty's way of fading the panes that do not have the keyboard.
@@ -124,9 +126,16 @@ struct TerminalSplitView: View {
                 onCommand: { handle($0, from: id) },
                 onExit: { finished($0, in: id) },
                 onContextMenu: {
-                    TerminalPaneMenu.make(
+                    let excerpt = TerminalSessionStore.shared.excerpt(
+                        inPaneID: id, workspaceID: workspace.id, label: terminalLabel
+                    )
+                    let add: (@MainActor () -> Void)? = if let excerpt, let onAddToChat {
+                        { onAddToChat(excerpt) }
+                    } else { nil }
+                    return TerminalPaneMenu.make(
                         canClose: layout.paneCount > 1,
-                        isZoomed: layout.zoomed == id
+                        isZoomed: layout.zoomed == id,
+                        onAddToChat: add
                     ) { _ = handle($0, from: id) }
                 }
             )

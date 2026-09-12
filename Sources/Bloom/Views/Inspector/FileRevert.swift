@@ -56,28 +56,8 @@ enum FileRevert {
         }
 
         do {
-            // The same divergence point the diff was drawn from. Reverting to a different one
-            // would restore a version of the file the user was never shown.
-            let base = try await Git.baseline(workspace.baseBranch, in: worktree)
-
-            // A rename is two paths: the old one has to come back and the new one has to go, and
-            // doing only half of it leaves the file present under both names.
-            if file.change == .renamed, let oldPath = file.oldPath {
-                try await git(["checkout", base, "--", oldPath], in: worktree)
-                try await git(["rm", "-f", "--", file.path], in: worktree)
-                return nil
-            }
-
-            if try await exists(file.path, at: base, in: worktree) {
-                try await git(["checkout", base, "--", file.path], in: worktree)
-            } else {
-                // Added since the base, so there is nothing to restore and the file itself is
-                // the change.
-                try await git(["rm", "-f", "--", file.path], in: worktree)
-            }
+            try await Git.revertTrackedFile(file, worktree: worktree, base: workspace.baseBranch)
             return nil
-        } catch let failure as Failure {
-            return "Could not revert \(file.filename): \(failure.message)"
         } catch let error as ShellError {
             return "Could not revert \(file.filename): \(error.stderr)"
         } catch {
@@ -85,33 +65,4 @@ enum FileRevert {
         }
     }
 
-    private static func exists(
-        _ path: String, at ref: String, in worktree: String
-    ) async throws -> Bool {
-        let result = try await Shell.run(
-            "git", ["cat-file", "-e", "\(ref):\(path)"], cwd: worktree, env: environment
-        )
-        return result.ok
-    }
-
-    /// `ShellError`'s memberwise initialiser is internal to BloomCore, and a failed revert only
-    /// needs the one sentence anyway.
-    private struct Failure: Error {
-        var message: String
-    }
-
-    private static func git(_ arguments: [String], in worktree: String) async throws {
-        let result = try await Shell.run("git", arguments, cwd: worktree, env: environment)
-        guard result.ok else {
-            let detail = result.stderr.isEmpty ? result.stdout : result.stderr
-            throw Failure(message: detail.trimmingCharacters(in: .whitespacesAndNewlines))
-        }
-    }
-
-    /// The same two variables `Git` sets, so a revert cannot be the one command that stops to ask
-    /// for a password or fights the index lock the refresh loop is holding.
-    private static let environment = [
-        "GIT_TERMINAL_PROMPT": "0",
-        "GIT_OPTIONAL_LOCKS": "0",
-    ]
 }

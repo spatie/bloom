@@ -51,9 +51,8 @@ public enum Shell {
     /// is synchronised against it.
     private static let spawns = Atomic<Int>(0)
 
-    /// Called by every site that starts a process. `Git.runRaw` has its own `Process` for the
-    /// byte-preserving parsers, so it calls this too, and a new spawn site that forgets to is a
-    /// probe that quietly under-reports.
+    /// Called by the captured-process worker and other process launchers. Git's raw and text
+    /// reads share that worker, so both contribute exactly once.
     static func countSpawn() {
         spawns.add(1, ordering: .relaxed)
     }
@@ -135,102 +134,38 @@ public enum Shell {
         cwd: String? = nil,
         env: [String: String] = [:],
         stdin: String? = nil,
-        timeout: Duration? = nil
+        timeout: Duration? = nil,
+        outputLimit: Int = 64 * 1_024 * 1_024
     ) async throws -> ShellResult {
-        // Spawning a process the caller has already given up on is pure cost: the cancellation
-        // handler below would fork it and SIGTERM it in the same breath. The refresh loop's five
-        // second deadline cancels a whole queue of these at once.
-        try Task.checkCancellation()
+        let result = try await runBytes(
+            executable, arguments, cwd: cwd, env: env,
+            stdin: stdin.map { Data($0.utf8) }, timeout: timeout, outputLimit: outputLimit
+        )
+        return ShellResult(
+            status: result.status,
+            stdout: String(decoding: result.stdout, as: UTF8.self),
+            stderr: String(decoding: result.stderr, as: UTF8.self)
+        )
+    }
 
+    /// Limits fail explicitly, so a partial status or patch can never masquerade as complete.
+    public static func runBytes(
+        _ executable: String,
+        _ arguments: [String] = [],
+        cwd: String? = nil,
+        env: [String: String] = [:],
+        stdin: Data? = nil,
+        timeout: Duration? = nil,
+        outputLimit: Int = 64 * 1_024 * 1_024
+    ) async throws -> ShellBytes {
+        try Task.checkCancellation()
         guard let path = which(executable) else {
             throw ShellError(command: executable, status: 127, stderr: "\(executable) not found on PATH")
         }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = arguments
-        process.environment = environment(extra: env)
-        if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
-
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = errPipe
-
-        let inPipe: Pipe? = stdin == nil ? nil : Pipe()
-        if let inPipe { process.standardInput = inPipe }
-
-        let collector = PipeCollector()
-
-        // Read each pipe to EOF on its own thread rather than through `readabilityHandler`.
-        //
-        // The handler approach has a race that loses output: clearing the handler after the
-        // process exits can discard whatever the dispatch source had already buffered, and
-        // draining with `readToEnd` afterwards then returns nothing. It is rare and load
-        // dependent, which is the worst kind: under a parallel test run it turned up as an empty
-        // `git diff`, and in the app it would have been an empty diff shown as though the file
-        // had not changed. Reading to EOF cannot lose anything, and EOF is also the signal that
-        // the child is done writing.
-        let outReader = Thread {
-            let data = outPipe.fileHandleForReading.readDataToEndOfFile()
-            collector.appendOut(data)
-            collector.finishOut()
-        }
-        let errReader = Thread {
-            let data = errPipe.fileHandleForReading.readDataToEndOfFile()
-            collector.appendErr(data)
-            collector.finishErr()
-        }
-        outReader.stackSize = 512 * 1_024
-        errReader.stackSize = 512 * 1_024
-
-        // Installed before `run()`, never after. See `ProcessExitGate`: a child that exits before
-        // the handler exists never calls it, and the wait below would never end.
-        let exit = ProcessExitGate()
-        process.terminationHandler = { _ in exit.signal() }
-
-        try process.run()
-        Shell.countSpawn()
-
-        outReader.start()
-        errReader.start()
-
-        if let inPipe, let stdin {
-            // The same SIGPIPE that `StreamingProcess.init` and `UnixSocketConnection` guard
-            // against, on the only other descriptor in the tree Bloom writes a child on. A child
-            // that exited between `run()` above and this line leaves nobody reading, and the
-            // default disposition of the signal that raises is to kill Bloom. `Git.run` passes a
-            // commit message and a patch through here, so the child dying early is a bad
-            // invocation rather than a hypothetical.
-            _ = fcntl(inPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
-            try? inPipe.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
-            try? inPipe.fileHandleForWriting.close()
-        }
-
-        let timeoutTask: Task<Void, Never>? = timeout.map { duration in
-            Task {
-                try? await Task.sleep(for: duration)
-                if process.isRunning { process.terminate() }
-            }
-        }
-
-        await withTaskCancellationHandler {
-            await exit.wait()
-        } onCancel: {
-            if process.isRunning { process.terminate() }
-        }
-
-        timeoutTask?.cancel()
-
-        // The child has exited, but its output is only complete once both pipes have reached EOF.
-        // Returning before that is exactly how output goes missing.
-        await collector.waitForEOF()
-
-        return ShellResult(
-            status: process.terminationStatus,
-            stdout: String(decoding: collector.out, as: UTF8.self),
-            stderr: String(decoding: collector.err, as: UTF8.self)
-        )
+        return try await CapturedProcess(
+            executable: path, arguments: arguments, cwd: cwd, environment: environment(extra: env),
+            input: stdin, timeout: timeout, outputLimit: outputLimit
+        ).run()
     }
 
     /// Run and throw unless the exit status is zero.
@@ -264,50 +199,4 @@ public enum Shell {
     ) async throws -> ShellResult {
         try await run("/bin/zsh", ["-c", source], cwd: cwd, env: env, timeout: timeout)
     }
-}
-
-/// Thread-safe accumulator for a subprocess's two output streams, and the gate that says both are
-/// complete. `Shell.run` and `Git.runRaw` share it, because it was two identical classes whose
-/// only difference was whether the caller decoded stdout afterwards.
-///
-/// The two buffers share one `Mutex` because they are two halves of one result, read together
-/// once both streams have finished. `Mutex<State>` rather than `NSLock` plus
-/// `@unchecked Sendable`, for the reason given on `EventFanout` in `SessionRunner`.
-final class PipeCollector: Sendable {
-    private struct State {
-        var out = Data()
-        var err = Data()
-    }
-
-    private let state = Mutex(State())
-    /// One count per stream. Waiting on both is what guarantees nothing is still in flight.
-    private let eof = DispatchGroup()
-
-    init() {
-        eof.enter()
-        eof.enter()
-    }
-
-    func appendOut(_ data: Data) {
-        state.withLock { $0.out.append(data) }
-    }
-
-    func appendErr(_ data: Data) {
-        state.withLock { $0.err.append(data) }
-    }
-
-    func finishOut() { eof.leave() }
-    func finishErr() { eof.leave() }
-
-    func waitForEOF() async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            eof.notify(queue: .global()) { continuation.resume() }
-        }
-    }
-
-    /// Bytes, undecoded, because git's `-z` output is byte strings that a `String` round trip
-    /// would silently rewrite. `Shell.run` decodes at the call site instead.
-    var out: Data { state.withLock(\.out) }
-
-    var err: Data { state.withLock(\.err) }
 }

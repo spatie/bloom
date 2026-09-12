@@ -603,7 +603,8 @@ struct TranscriptListView: View {
                                 agentKind: agentKind,
                                 wasStopped: wasStopped,
                                 recovered: recovered,
-                                stillRunning: stillRunning
+                                stillRunning: stillRunning,
+                                transcript: transcript
                             )
                             .arrivingRow(settles && arrivals.isArriving(row.seq))
                             .padding(.horizontal, TranscriptLayout.inset)
@@ -1105,11 +1106,7 @@ struct TranscriptListView: View {
         // than on the row, so the question survives its row leaving, which is exactly what happens
         // when the queue moves while it is open.
         .confirmation($transcript.discarding) { delivery in
-            let question = PendingMessageDiscard.question(
-                for: PendingMessageDiscard.recovery(
-                    of: delivery, composerDraft: transcript.draft
-                )
-            )
+            let question = PendingMessageDiscard.question(for: delivery, composerDraft: transcript.draft)
             return Confirmation(
                 title: question.title,
                 message: question.message,

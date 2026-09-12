@@ -14,7 +14,7 @@ import Foundation
 
 extension Git {
     public static func worktrees(of repo: String) async throws -> [WorktreeEntry] {
-        WorktreeListing.parse(try await check(["worktree", "list", "--porcelain"], in: repo).stdout)
+        WorktreeListing.parse(try await checkRaw(["worktree", "list", "--porcelain", "-z"], in: repo).stdout)
     }
 
     /// Cuts a worktree, creating the branch when it is not already there.
@@ -40,6 +40,7 @@ extension Git {
         branchIsNew: Bool? = nil,
         replacingPrunableWorktreeAt previousPath: String? = nil
     ) async throws {
+        guard FileManager.default.fileExists(atPath: repo) else { throw WorkspaceError.projectFolderMissing }
         try validate(branch: branch)
         try validate(ref: base, label: "base branch")
         try validate(ref: path, label: "worktree path")
