@@ -338,8 +338,6 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         durations.addItem(Self.submenu("Hours", KeepAwake.hourChoices.map { count in
             ClosureMenuItem(KeepAwake.label(hours: count)) { keepAwake.start(for: TimeInterval(count * 3600)) }
         }))
-        durations.addItem(.separator())
-        durations.addItem(ClosureMenuItem("Until a Time\u{2026}") { Self.askForTime() })
         let durationsItem = NSMenuItem(title: "Keep Awake For", action: nil, keyEquivalent: "")
         durationsItem.submenu = durations
 
@@ -368,26 +366,6 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         parent.submenu = menu
         return parent
-    }
-
-    /// "Until a Time…", as a sheetless alert with a clock in it, because a menu cannot hold a date
-    /// picker and a whole window for one time of day is a window too many.
-    private static func askForTime() {
-        let alert = NSAlert()
-        alert.messageText = "Keep this Mac awake until"
-        alert.informativeText = "A time that has already gone today is taken as tomorrow."
-        alert.addButton(withTitle: "Keep Awake")
-        alert.addButton(withTitle: "Cancel")
-
-        let picker = NSDatePicker(frame: NSRect(x: 0, y: 0, width: 120, height: 24))
-        picker.datePickerStyle = .textFieldAndStepper
-        picker.datePickerElements = [.hourMinute]
-        picker.dateValue = Date().addingTimeInterval(3600)
-        alert.accessoryView = picker
-
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        KeepAwakeModel.shared.start(until: KeepAwake.nextOccurrence(of: picker.dateValue, after: Date()))
     }
 
     // MARK: The limits

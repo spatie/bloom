@@ -131,18 +131,6 @@ public enum KeepAwake {
     public static func label(minutes: Int) -> String { Counted.of(minutes, "minute") }
     public static func label(hours: Int) -> String { Counted.of(hours, "hour") }
 
-    /// A time of day picked without a date, as the next moment it comes round: 17:30 picked at
-    /// 16:00 is today, picked at 18:00 is tomorrow. Nobody asking to stay awake "until half past
-    /// five" means a time already gone.
-    public static func nextOccurrence(of time: Date, after now: Date, calendar: Calendar = .current) -> Date {
-        let parts = calendar.dateComponents([.hour, .minute], from: time)
-        return calendar.nextDate(
-            after: now,
-            matching: DateComponents(hour: parts.hour, minute: parts.minute, second: 0),
-            matchingPolicy: .nextTime
-        ) ?? now
-    }
-
     public static func load(from defaults: UserDefaults = .standard, at now: Date = Date()) -> KeepAwakeSession? {
         guard let data = defaults.data(forKey: sessionKey),
               let session = try? JSONDecoder().decode(KeepAwakeSession.self, from: data),

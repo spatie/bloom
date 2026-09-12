@@ -68,10 +68,6 @@ struct MenuBarSettingsView: View {
                 .scrollDisabled(true)
                 .frame(height: Self.rowHeight * CGFloat(model.layout.orderedProviders().count))
                 .listRowInsets(EdgeInsets())
-
-                Text("Drag to reorder.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
             .disabled(!showsItem || !model.showsUsage)
 
@@ -135,15 +131,34 @@ struct MenuBarSettingsView: View {
                         .foregroundStyle(.white.opacity(0.5))
                 }
             }
+            // The figures are one rendered image, so a change is a new image rather than a moved
+            // label: crossfade it, or the preview jumps while the switch under it slides.
+            .id(previewIdentity)
+            .transition(.opacity)
             .padding(.horizontal, 14)
             .frame(height: 28)
+            .frame(minWidth: 120)
             .background(Color.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .animation(.spring(response: 0.32, dampingFraction: 0.86), value: previewIdentity)
 
             Text("What the menu bar shows right now")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 6)
+    }
+
+    /// Everything the drawn item depends on, in one value, so the preview knows when it changed.
+    private var previewIdentity: String {
+        let strip = MenuBarUsageStrip.make(layout: model.layout, metrics: metrics, options: model.options)
+        return [
+            showsItem ? "on" : "off",
+            model.showsUsage ? "figures" : "mark",
+            model.iconStyle.rawValue,
+            model.showsCup ? "cup" : "nocup",
+            keepAwake.isActive ? "awake" : "asleep",
+            strip.spoken,
+        ].joined(separator: "|")
     }
 
     private var stripImage: NSImage? {
@@ -159,6 +174,12 @@ struct MenuBarSettingsView: View {
         let available = metrics[provider] ?? []
         let starred = model.layout.orderedMetrics(available).filter { model.layout.isPinned($0.id) }
         return HStack(spacing: 10) {
+            // The grip is the convention, and it is the only thing on a Mac that says a row can be
+            // dragged before somebody tries it. It is decoration: the whole row is the handle.
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
             ProviderMarkView(provider: provider)
                 .foregroundStyle(.secondary)
                 .frame(width: 16, height: 16)
@@ -182,6 +203,8 @@ struct MenuBarSettingsView: View {
                 set: { value in model.update { $0.setEnabled(value, for: provider) } }
             ))
             .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
         }
         .opacity(model.layout.isEnabled(provider) ? 1 : 0.55)
     }

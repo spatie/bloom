@@ -531,16 +531,6 @@ struct KeepAwakeTests {
         #expect(status(nil, false).detail == "Nothing keeps this Mac awake")
     }
 
-    @Test("a time of day picked without a date is its next occurrence")
-    func nextOccurrence() throws {
-        let later = try #require(utc.date(from: DateComponents(year: 2000, month: 1, day: 1, hour: 17, minute: 30)))
-        let earlier = try #require(utc.date(from: DateComponents(year: 2000, month: 1, day: 1, hour: 9, minute: 0)))
-        #expect(KeepAwake.nextOccurrence(of: later, after: now, calendar: utc)
-            == utc.date(from: DateComponents(year: 2026, month: 8, day: 23, hour: 17, minute: 30)))
-        #expect(KeepAwake.nextOccurrence(of: earlier, after: now, calendar: utc)
-            == utc.date(from: DateComponents(year: 2026, month: 8, day: 24, hour: 9, minute: 0)))
-    }
-
     @Test("a session is saved, read back, and forgotten once it has run out")
     func storage() throws {
         let defaults = try #require(UserDefaults(suiteName: "bloom.keepawake.\(UUID().uuidString)"))

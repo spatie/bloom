@@ -40,11 +40,6 @@ final class KeepAwakeModel {
         apply()
     }
 
-    func start(until date: Date) {
-        session = KeepAwakeSession(startedAt: Date(), until: date)
-        apply()
-    }
-
     func stop() {
         session = nil
         apply()
