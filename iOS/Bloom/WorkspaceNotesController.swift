@@ -145,6 +145,8 @@ final class WorkspaceNotesController: UIViewController, UITextViewDelegate {
         statusDetail = session.draftError ?? session.saveError ?? session.loadError
         statusInfo.isHidden = statusDetail == nil
         placeholder.isHidden = !session.canEdit || !session.text.isEmpty
+        editor.bringSubviewToFront(placeholder)
+        view.setNeedsLayout()
         if session.draftError != nil { status.text = "Draft couldn’t save"
         } else if session.isSaving { status.text = "Saving…"
         } else if session.saveError != nil { status.text = "Saved on this device"

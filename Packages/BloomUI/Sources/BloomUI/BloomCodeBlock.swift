@@ -11,15 +11,17 @@ public struct BloomCodeBlock: View {
     private let code: String
     private let language: Language
     private let isStreaming: Bool
+    private let textStyle: Font.TextStyle
     private static let lineCap = 2_000
     @State private var expanded = false
     @State private var copied = false
     @Environment(\.colorScheme) private var scheme
 
-    public init(code: String, language: Language, isStreaming: Bool = false) {
+    public init(code: String, language: Language, isStreaming: Bool = false, textStyle: Font.TextStyle = .callout) {
         self.code = code
         self.language = language
         self.isStreaming = isStreaming
+        self.textStyle = textStyle
     }
 
     public var body: some View {
@@ -50,7 +52,7 @@ public struct BloomCodeBlock: View {
             }
         } content: {
             Text(prepared.text)
-                .font(.callout.monospaced())
+                .font(.system(textStyle, design: .monospaced))
                 .textSelection(.enabled)
                 .fixedSize(horizontal: true, vertical: false)
         } fold: {

@@ -9,6 +9,8 @@ final class WorkspaceCheckoutPickerController: UITableViewController, UISearchRe
     private var options: WorkspaceCheckoutOptions?
     private var work: Task<Void, Never>?
     private var isLoading = false
+    private var isResolving = false
+    private var generation = 0
     private var loadFailure: String?
     private var query: String { search.searchBar.text?.lowercased() ?? "" }
     private var requests: [PullRequestListing] { options?.pullRequests.filter { query.isEmpty || "#\($0.number) \($0.title) \($0.headRefName)".lowercased().contains(query) } ?? [] }
@@ -28,8 +30,7 @@ final class WorkspaceCheckoutPickerController: UITableViewController, UISearchRe
         search.searchResultsUpdater = self; search.searchBar.placeholder = "Find a branch or pull request"
         navigationItem.searchController = search
         navigationItem.hidesSearchBarWhenScrolling = false
-        navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "link"), primaryAction: UIAction { [weak self] _ in self?.reference() })
-        navigationItem.rightBarButtonItem?.accessibilityLabel = "Open pull request by number or link"
+        updateLookupControls()
         refreshControl = UIRefreshControl()
         refreshControl?.addAction(UIAction { [weak self] _ in self?.load() }, for: .valueChanged)
         tableView.rowHeight = UITableView.automaticDimension
@@ -37,18 +38,20 @@ final class WorkspaceCheckoutPickerController: UITableViewController, UISearchRe
     }
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        if isMovingFromParent || navigationController?.isBeingDismissed == true { work?.cancel() }
+        if isMovingFromParent || navigationController?.isBeingDismissed == true { cancelWork() }
     }
     func updateSearchResults(for searchController: UISearchController) { tableView.reloadData() }
     private func load() {
-        work?.cancel(); isLoading = true; loadFailure = nil; tableView.reloadData()
+        guard !isResolving else { refreshControl?.endRefreshing(); return }
+        cancelWork(); isLoading = true; loadFailure = nil; tableView.reloadData()
+        let generation = generation
         work = Task { [weak self, service, project] in
             do {
                 let result = try await service.checkoutOptions(projectID: project.id)
-                guard let self, !Task.isCancelled else { return }
+                guard let self, !Task.isCancelled, generation == self.generation else { return }
                 self.options = result; self.isLoading = false; self.refreshControl?.endRefreshing(); self.tableView.reloadData()
             } catch {
-                guard let self, !Task.isCancelled else { return }
+                guard let self, !Task.isCancelled, generation == self.generation else { return }
                 self.isLoading = false; self.loadFailure = error.localizedDescription
                 self.refreshControl?.endRefreshing(); self.tableView.reloadData()
             }
@@ -104,6 +107,7 @@ final class WorkspaceCheckoutPickerController: UITableViewController, UISearchRe
     }
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
+        guard !isResolving else { return }
         if indexPath.section != 0, indexPath.section == 1 ? requests.isEmpty : branches.isEmpty {
             if loadFailure != nil { load() }
             return
@@ -119,22 +123,61 @@ final class WorkspaceCheckoutPickerController: UITableViewController, UISearchRe
     private func holder(_ request: PullRequestListing) -> BranchHolder? {
         request.isCrossRepository ? nil : options?.holders[request.headRefName]
     }
-    private func finish(_ value: WorkspaceCheckout?) { selected(value); navigationController?.popViewController(animated: true) }
+    private func finish(_ value: WorkspaceCheckout?) {
+        cancelWork()
+        selected(value); navigationController?.popViewController(animated: true)
+    }
+
+    private func cancelWork() {
+        generation += 1; work?.cancel(); work = nil
+        isLoading = false; isResolving = false
+        refreshControl?.endRefreshing()
+        updateLookupControls()
+    }
+
+    private func updateLookupControls() {
+        tableView.isUserInteractionEnabled = !isResolving
+        search.searchBar.isUserInteractionEnabled = !isResolving
+        if isResolving {
+            let progress = UIActivityIndicatorView(style: .medium); progress.startAnimating()
+            progress.accessibilityLabel = "Finding pull request"
+            let stop = UIBarButtonItem(systemItem: .stop, primaryAction: UIAction { [weak self] _ in
+                guard let self else { return }
+                cancelWork()
+                if options == nil { load() } else { tableView.reloadData() }
+            })
+            stop.accessibilityLabel = "Cancel pull request lookup"
+            navigationItem.rightBarButtonItems = [stop, UIBarButtonItem(customView: progress)]
+        } else {
+            let link = UIBarButtonItem(image: UIImage(systemName: "link"), primaryAction: UIAction { [weak self] _ in self?.reference() })
+            link.accessibilityLabel = "Open pull request by number or link"
+            navigationItem.rightBarButtonItems = [link]
+        }
+    }
     private func reference() {
+        guard !isResolving else { return }
         let alert = UIAlertController(title: "Open pull request", message: "Enter a pull request number or its GitHub URL.", preferredStyle: .alert)
         alert.addTextField { $0.placeholder = "#123 or GitHub URL"; $0.autocapitalizationType = .none; $0.autocorrectionType = .no; $0.keyboardType = .URL }
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Open", style: .default) { [weak self] _ in
             guard let self, let reference = alert.textFields?.first?.text else { return }
+            cancelWork(); isResolving = true; updateLookupControls(); tableView.reloadData()
+            let generation = generation
             work = Task { [weak self, service, project] in
+                defer {
+                    if let self, generation == self.generation { isResolving = false; updateLookupControls() }
+                }
                 do {
                     let result = try await service.resolveReference(reference, projectID: project.id)
-                    guard let self, !Task.isCancelled else { return }
+                    guard let self, !Task.isCancelled, generation == self.generation else { return }
                     switch result {
                     case .checkout(let choice): self.finish(choice)
                     case .failure(let message): self.show(ConnectionRefusal(message))
                     }
-                } catch { if !Task.isCancelled { self?.show(error) } }
+                } catch {
+                    guard let self, !Task.isCancelled, generation == self.generation else { return }
+                    self.show(error)
+                }
             }
         })
         present(alert, animated: true)

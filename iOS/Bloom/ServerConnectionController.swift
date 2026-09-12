@@ -10,8 +10,15 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
     private let content = UIStackView()
     private let introduction = UIStackView()
+    private let introductionIcon = UIImageView()
+    private let introductionHeading = BloomTheme.label("", style: .title1)
+    private let introductionDetail = BloomTheme.label("", style: .body, secondary: true)
+    private let setupGuide = UIButton(type: .system)
     private let connectionStatus = UILabel()
+    private var connectionObserver: UUID?
+    private var hasExistingServer = false
     private var introductionWidth: NSLayoutConstraint?
+    private var maximumContentWidth: NSLayoutConstraint?
     private var tableHeight: NSLayoutConstraint?
     private var usesColumns = false
     private var showsAdvanced = false
@@ -24,6 +31,7 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
     private let directory = UITextField()
     private let https = UITextField()
     private var connecting = false
+    private var connectionFailure: String?
     private var task: Task<Void, Never>?
 
     init(model: MobileConnection) { self.model = model; super.init(nibName: nil, bundle: nil) }
@@ -31,7 +39,7 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Connect to Server"
+        hasExistingServer = model.canSend || model.catalogue != nil
         navigationItem.largeTitleDisplayMode = .never
         configureLayout()
         navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .cancel, primaryAction: UIAction { [weak self] _ in
@@ -63,8 +71,12 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
         https.text = model.address.hasPrefix("https:") ? model.address : nil
         https.placeholder = "https://bloom.example.com"; https.keyboardType = .URL
         transport.selectedSegmentIndex = model.address.hasPrefix("https:") ? 1 : 0
+        transport.accessibilityLabel = "Connection method"
         transport.addAction(UIAction { [weak self] _ in
-            self?.tableView.reloadData(); self?.updateConnectButton()
+            guard let self else { return }
+            view.endEditing(true)
+            connectionFailure = nil
+            tableView.reloadData(); updateConnectButton()
         }, for: .valueChanged)
         for field in [host, username, port, executable, directory, https] {
             field.autocapitalizationType = .none; field.autocorrectionType = .no
@@ -85,6 +97,10 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        if connectionObserver == nil {
+            connectionObserver = model.observe { [weak self] in self?.updateConnectButton() }
+        }
+        updateConnectButton()
         guard !hasFocusedAddress else { return }
         hasFocusedAddress = true
         let field = transport.selectedSegmentIndex == 0 ? host : https
@@ -95,9 +111,15 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
         }
     }
 
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if let connectionObserver { model.removeObserver(connectionObserver) }
+        connectionObserver = nil
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        let wide = view.bounds.width >= 1000 && !traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+        let wide = !hasExistingServer && view.bounds.width >= 1000 && !traitCollection.preferredContentSizeCategory.isAccessibilityCategory
         if wide != usesColumns {
             usesColumns = wide
             if wide {
@@ -139,19 +161,32 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
     private func configureLayout() {
         view.backgroundColor = .systemGroupedBackground
         view.tintColor = BloomTheme.accent
-        let icon = UIImageView(image: UIImage(systemName: "server.rack",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 36, weight: .regular)))
-        icon.tintColor = BloomTheme.accent; icon.contentMode = .left
-        icon.accessibilityElementsHidden = true
-        let heading = BloomTheme.label("Pick up where you left off.", style: .title1)
-        let detail = BloomTheme.label("Your projects and conversations, together on your server. Agents keep working while you’re away.", style: .body, secondary: true)
+        introductionIcon.image = UIImage(systemName: "server.rack",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 36, weight: .regular))
+        introductionIcon.tintColor = BloomTheme.accent; introductionIcon.contentMode = .left
+        introductionIcon.accessibilityElementsHidden = true
+        var guideStyle = UIButton.Configuration.plain()
+        guideStyle.title = "Need a Server?"
+        guideStyle.image = UIImage(systemName: "questionmark.circle")
+        guideStyle.imagePadding = 8
+        guideStyle.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)
+        setupGuide.configuration = guideStyle
+        setupGuide.contentHorizontalAlignment = .leading
+        let guideHeight = setupGuide.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
+        guideHeight.priority = .defaultHigh
+        guideHeight.isActive = true
+        setupGuide.accessibilityHint = "Learn how to set up Bloom Server using your Mac."
+        setupGuide.addAction(UIAction { [weak self] _ in
+            self?.view.endEditing(true)
+            self?.navigationController?.pushViewController(ServerSetupGuideController(), animated: true)
+        }, for: .touchUpInside)
         connectionStatus.font = .preferredFont(forTextStyle: .subheadline)
         connectionStatus.adjustsFontForContentSizeCategory = true
         connectionStatus.textColor = BloomTheme.accent
         connectionStatus.numberOfLines = 0
         connectionStatus.isHidden = true
         introduction.axis = .vertical; introduction.alignment = .fill; introduction.spacing = 12
-        [icon, heading, detail, connectionStatus].forEach { introduction.addArrangedSubview($0) }
+        [introductionIcon, introductionHeading, introductionDetail, setupGuide, connectionStatus].forEach { introduction.addArrangedSubview($0) }
         introduction.setContentHuggingPriority(.required, for: .vertical)
         introductionWidth = introduction.widthAnchor.constraint(equalToConstant: 300)
         tableView.dataSource = self; tableView.delegate = self
@@ -167,9 +202,10 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
         tableHeight = tableView.heightAnchor.constraint(equalTo: content.heightAnchor)
         content.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(content)
+        maximumContentWidth = content.widthAnchor.constraint(lessThanOrEqualToConstant: hasExistingServer ? 700 : 1040)
         NSLayoutConstraint.activate([
             content.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
-            content.widthAnchor.constraint(lessThanOrEqualToConstant: 1040),
+            maximumContentWidth!,
             content.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
             content.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
             content.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
@@ -180,10 +216,42 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
     }
 
     private func updateConnectButton() {
+        updateIntroduction()
+        navigationItem.rightBarButtonItem?.title = connecting ? "Connecting…" : matchesCurrentServer ? "Reconnect" : "Connect"
         let address = transport.selectedSegmentIndex == 0 ? host.text : https.text
         navigationItem.rightBarButtonItem?.isEnabled = !connecting
             && !(address ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && (transport.selectedSegmentIndex == 1 || !(username.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    private var matchesCurrentServer: Bool {
+        guard model.recovery.hasConnected || model.catalogue != nil else { return false }
+        if transport.selectedSegmentIndex == 1 {
+            return (try? HTTPSConnection.origin(https.text ?? "").absoluteString) == model.address
+        }
+        guard let port = Int(port.text ?? ""),
+              let configuration = try? SSHConfiguration(host: host.text ?? "", port: port, username: username.text ?? "",
+                  executable: executable.text ?? "", dataDirectory: directory.text ?? "") else { return false }
+        return configuration.identity == model.address
+    }
+
+    private func updateIntroduction() {
+        hasExistingServer = hasExistingServer || model.canSend || model.catalogue != nil
+        title = hasExistingServer ? "Server Connection" : "Connect to Server"
+        let heading = hasExistingServer ? URL(string: model.address)?.host ?? model.address : "Your work, wherever you are"
+        let detail = hasExistingServer ? model.recovery.title
+            : "Connect to Bloom Server to chat with your agents, review changes and preview your app. Your work keeps running when you leave."
+        let changed = introductionHeading.text != heading || introductionDetail.text != detail
+        introductionHeading.text = heading
+        introductionHeading.font = .preferredFont(forTextStyle: hasExistingServer ? .headline : .title1)
+        introductionDetail.text = detail
+        introductionDetail.font = .preferredFont(forTextStyle: hasExistingServer ? .subheadline : .body)
+        introductionDetail.textColor = hasExistingServer && model.canSend ? BloomTheme.accent : .secondaryLabel
+        introductionIcon.isHidden = hasExistingServer
+        setupGuide.isHidden = hasExistingServer
+        introduction.spacing = hasExistingServer ? 4 : 12
+        maximumContentWidth?.constant = hasExistingServer ? 700 : 1040
+        if changed { view.setNeedsLayout() }
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
@@ -193,6 +261,7 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
 
     func numberOfSections(in tableView: UITableView) -> Int { transport.selectedSegmentIndex == 0 ? 4 : 2 }
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        if section == 0 { return connectionFailure == nil ? 1 : 2 }
         if transport.selectedSegmentIndex == 1 { return 1 }
         return [1, 2, 1, showsAdvanced ? 6 : 1][section]
     }
@@ -202,22 +271,25 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
     }
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         if transport.selectedSegmentIndex == 1 {
-            return section == 1 ? "Use your Bloom Gateway HTTPS address. You will sign in through your browser." : nil
+            return section == 1 ? "Use the HTTPS address configured for your Bloom Server. You’ll sign in through your browser. If you only have an IP address, use SSH." : nil
         }
-        if section == 1 { return "Connect directly to your existing SSH server. No domain, VPN or gateway is required." }
-        if section == 2 { return "Use a key generated on this device. If it is already authorised on your server, you can connect now." }
+        if section == 1 { return hasExistingServer ? nil : "Bloom Server must already be installed. Use the account from setup, usually bloom." }
+        if section == 2 { return hasExistingServer ? nil : "First time on this device? Add its public key to the server account before connecting." }
         if section == 3, showsAdvanced { return "These defaults match Bloom’s installer. Keep them unless your server uses a custom installation." }
         return nil
     }
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
         cell.selectionStyle = .none
-        if indexPath.section == 0 { attach(transport, to: cell); return cell }
-        if transport.selectedSegmentIndex == 1 { attach(https, to: cell); return cell }
+        if indexPath.section == 0 {
+            if indexPath.row == 0 { attach(transport, to: cell) } else { configureFailure(cell) }
+            return cell
+        }
+        if transport.selectedSegmentIndex == 1 { attach(fieldRow(https, label: "Server URL"), to: cell); return cell }
         if indexPath.section == 2 {
             var configuration = cell.defaultContentConfiguration()
             configuration.text = "Authorise This Device"
-            configuration.secondaryText = "Share its public key with your server."
+            configuration.secondaryText = "Get the public key and instructions."
             configuration.textProperties.numberOfLines = 0
             configuration.secondaryTextProperties.numberOfLines = 0
             configuration.secondaryTextProperties.font = .preferredFont(forTextStyle: .subheadline)
@@ -249,12 +321,32 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
         let fields = indexPath.section == 1 ? [host, username] : [port, executable, directory]
         let labels = indexPath.section == 1 ? ["Address", "Username"] : ["Port", "Executable", "Data directory"]
         let fieldIndex = indexPath.section == 3 ? indexPath.row - 1 : indexPath.row
-        let label = UILabel(); label.text = labels[fieldIndex]; label.font = .preferredFont(forTextStyle: .caption1)
-        label.textColor = .secondaryLabel; label.adjustsFontForContentSizeCategory = true
-        let stack = UIStackView(arrangedSubviews: [label, fields[fieldIndex]])
-        stack.axis = .vertical; stack.spacing = 4
-        attach(stack, to: cell)
+        attach(fieldRow(fields[fieldIndex], label: labels[fieldIndex]), to: cell)
         return cell
+    }
+
+    private func fieldRow(_ field: UITextField, label title: String) -> UIStackView {
+        let label = UILabel(); label.text = title; label.font = .preferredFont(forTextStyle: .caption1)
+        label.textColor = .secondaryLabel; label.adjustsFontForContentSizeCategory = true
+        let stack = UIStackView(arrangedSubviews: [label, field])
+        stack.axis = .vertical; stack.spacing = 4
+        return stack
+    }
+
+    private func configureFailure(_ cell: UITableViewCell) {
+        let title = BloomTheme.label("Couldn’t connect", style: .headline)
+        let detail = BloomTheme.label(connectionFailure ?? "", style: .subheadline, secondary: true)
+        let copy = UIButton(type: .system)
+        copy.setTitle("Copy Error", for: .normal)
+        copy.contentHorizontalAlignment = .leading
+        copy.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        copy.addAction(UIAction { [weak self] _ in
+            UIPasteboard.general.string = self?.connectionFailure
+            UIAccessibility.post(notification: .announcement, argument: "Connection error copied")
+        }, for: .touchUpInside)
+        let stack = UIStackView(arrangedSubviews: [title, detail, copy])
+        stack.axis = .vertical; stack.spacing = 8
+        attach(stack, to: cell)
     }
     private func attach(_ view: UIView, to cell: UITableViewCell) {
         view.translatesAutoresizingMaskIntoConstraints = false; cell.contentView.addSubview(view)
@@ -300,14 +392,19 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
     private func connect() {
         guard !connecting else { return }
         view.endEditing(true)
+        connecting = true
+        connectionFailure = nil
+        tableView.reloadSections(IndexSet(integer: 0), with: .none)
+        updateConnectButton()
         task = Task {
-            connecting = true; isModalInPresentation = true; tableView.isUserInteractionEnabled = false
+            isModalInPresentation = true; tableView.isUserInteractionEnabled = false
             connectionStatus.text = "Connecting securely to your server…"; connectionStatus.isHidden = false
             navigationItem.rightBarButtonItem?.title = "Connecting…"; updateConnectButton()
             defer {
                 connecting = false; isModalInPresentation = false; tableView.isUserInteractionEnabled = true
-                connectionStatus.isHidden = true; navigationItem.rightBarButtonItem?.title = "Connect"; updateConnectButton()
+                connectionStatus.isHidden = true; updateConnectButton()
             }
+            guard !Task.isCancelled else { return }
             do {
                 if transport.selectedSegmentIndex == 1 {
                     let address = https.text ?? ""
@@ -321,7 +418,13 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
                 }
                 guard !Task.isCancelled else { return }
                 dismiss(animated: true)
-            } catch is CancellationError {} catch { if !Task.isCancelled { show(error) } }
+            } catch is CancellationError {} catch {
+                guard !Task.isCancelled else { return }
+                connectionFailure = error.localizedDescription
+                tableView.reloadSections(IndexSet(integer: 0), with: .none)
+                tableView.scrollToRow(at: IndexPath(row: 1, section: 0), at: .top, animated: true)
+                UIAccessibility.post(notification: .announcement, argument: "Couldn’t connect. " + error.localizedDescription)
+            }
         }
     }
     private func confirm(_ trust: SSHHostTrustRequired, configuration: SSHConfiguration) {

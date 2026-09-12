@@ -5,23 +5,25 @@ import BloomClient
 public struct BloomMarkdown: View {
     private let text: String
     private let isStreaming: Bool
+    private let textStyle: Font.TextStyle
     @Environment(\.colorScheme) private var scheme
     @ScaledMetric(relativeTo: .body) private var markerWidth = 24.0
     @ScaledMetric(relativeTo: .callout) private var tableColumnWidth = 144.0
 
-    public init(text: String, isStreaming: Bool = false) {
+    public init(text: String, isStreaming: Bool = false, textStyle: Font.TextStyle = .body) {
         self.text = text
         self.isStreaming = isStreaming
+        self.textStyle = textStyle
     }
 
     public var body: some View {
         BloomMarkdownBlocks(blocks: BloomMarkdownCache.blocks(text, streaming: isStreaming), style: style) { text, role, colour, spacing in
-            Text(BloomInlineText.render(text, role: role, colour: colour, scheme: scheme))
+            Text(BloomInlineText.render(text, role: role, colour: colour, scheme: scheme, textStyle: textStyle))
                 .textSelection(.enabled)
                 .lineSpacing(spacing ?? 3)
                 .fixedSize(horizontal: false, vertical: true)
         } code: { text, language in
-            BloomCodeBlock(code: text, language: language, isStreaming: isStreaming)
+            BloomCodeBlock(code: text, language: language, isStreaming: isStreaming, textStyle: textStyle == .body ? .callout : textStyle)
         }
     }
 

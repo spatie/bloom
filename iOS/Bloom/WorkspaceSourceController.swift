@@ -10,6 +10,8 @@ final class WorkspaceSourceController: UIViewController {
     private var loading: Task<Void, Never>?
     private var content: UIViewController?
     private let scroll = UIScrollView()
+    private let actions = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"), menu: UIMenu(children: []))
+    private var sourceText: String?
 
     init(review: MobileWorkspaceReview, path: String) {
         self.review = review
@@ -29,7 +31,12 @@ final class WorkspaceSourceController: UIViewController {
         scroll.backgroundColor = BloomTheme.background
         scroll.alwaysBounceVertical = true
         scroll.accessibilityIdentifier = "workspace-source"
+        actions.accessibilityLabel = "File actions"
+        navigationItem.rightBarButtonItems = [actions]
         view.addSubview(scroll)
+        scroll.refreshControl = UIRefreshControl()
+        scroll.refreshControl?.addAction(UIAction { [weak self] _ in self?.loadFile() }, for: .valueChanged)
+        updateActions()
         NSLayoutConstraint.activate([
             scroll.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -58,6 +65,7 @@ final class WorkspaceSourceController: UIViewController {
         let review = review
         let path = path
         loading = Task { [weak self] in
+            defer { self?.scroll.refreshControl?.endRefreshing() }
             do {
                 let file = try await review.readFile(path: path)
                 guard !Task.isCancelled else { return }
@@ -76,20 +84,14 @@ final class WorkspaceSourceController: UIViewController {
 
     private func showFile(_ text: String) {
         contentUnavailableConfiguration = nil
+        sourceText = text
+        updateActions()
         content?.willMove(toParent: nil)
         content?.view.removeFromSuperview()
         content?.removeFromParent()
         let path = path
-        let host = UIHostingController(rootView: VStack(alignment: .leading, spacing: 8) {
-            Text(verbatim: path)
-                .font(.caption2)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            BloomCodeBlock(code: text, language: Language.detect(path: path))
-        }.padding(12))
+        let host = UIHostingController(rootView:
+            BloomCodeBlock(code: text, language: Language.detect(path: path)).padding(12))
         host.sizingOptions = .intrinsicContentSize
         host.view.backgroundColor = .clear
         host.view.translatesAutoresizingMaskIntoConstraints = false
@@ -104,6 +106,20 @@ final class WorkspaceSourceController: UIViewController {
         ])
         host.didMove(toParent: self)
         content = host
+    }
+
+    private func updateActions() {
+        actions.menu = UIMenu(title: path, children: [
+            UIAction(title: "Copy Path", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+                UIPasteboard.general.string = self?.path
+            },
+            UIAction(title: "Copy File Contents", image: UIImage(systemName: "doc.text"),
+                     attributes: sourceText == nil ? .disabled : []) { [weak self] _ in
+                guard let text = self?.sourceText else { return }
+                UIPasteboard.general.string = text
+            },
+            UIAction(title: "Reload File", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in self?.loadFile() }
+        ])
     }
 
     private func showFailure(_ message: String) {

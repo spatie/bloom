@@ -40,7 +40,7 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
     private var treeChildren: [String: [FileTreeNode]] = [:]
     private var needle = ""
     private var refreshing: Task<Void, Never>?
-    private var minimumRowHeight: CGFloat { traitCollection.userInterfaceIdiom == .pad ? 40 : 44 }
+    private var minimumRowHeight: CGFloat { 44 }
 
     init(review: MobileWorkspaceReview) {
         self.review = review
@@ -111,7 +111,7 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
         summary.font = .preferredFont(forTextStyle: .caption1)
         summary.adjustsFontForContentSizeCategory = true
         summary.textColor = .secondaryLabel
-        summary.numberOfLines = 1
+        summary.numberOfLines = 0
         var configuration = UIButton.Configuration.plain()
         configuration.title = "Review All"
         configuration.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 0)
@@ -121,7 +121,7 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
             return attributes
         }
         reviewButton.configuration = configuration
-        reviewButton.heightAnchor.constraint(greaterThanOrEqualToConstant: traitCollection.userInterfaceIdiom == .pad ? 32 : 44).isActive = true
+        reviewButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         reviewButton.accessibilityLabel = "Review all changes"
         reviewButton.setContentHuggingPriority(.required, for: .horizontal)
         reviewButton.addAction(UIAction { [weak self] _ in self?.onReviewAll?() }, for: .touchUpInside)

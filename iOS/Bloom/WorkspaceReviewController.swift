@@ -9,6 +9,7 @@ final class WorkspaceReviewController: UIViewController, UITableViewDataSource, 
     private let table = UITableView(frame: .zero, style: .plain)
     private let mode = UISegmentedControl(items: ["All files", "Selected file"])
     private let summary = UILabel()
+    private let summaryContainer = UIStackView()
     private let retry = UIButton(type: .system)
     private var displayed: [ChangedFile] = []
     private var renderedDiffs: [String: FileDiff] = [:]
@@ -52,7 +53,8 @@ final class WorkspaceReviewController: UIViewController, UITableViewDataSource, 
         retry.setContentHuggingPriority(.required, for: .horizontal)
         retry.addAction(UIAction { [weak self] _ in Task { await self?.review.refresh() } }, for: .touchUpInside)
         retry.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-        let summaryContainer = UIStackView(arrangedSubviews: [summary, retry])
+        summaryContainer.addArrangedSubview(summary)
+        summaryContainer.addArrangedSubview(retry)
         summaryContainer.spacing = 12
         summaryContainer.alignment = .center
         summaryContainer.isLayoutMarginsRelativeArrangement = true
@@ -94,14 +96,18 @@ final class WorkspaceReviewController: UIViewController, UITableViewDataSource, 
         totals.append(NSAttributedString(string: "  −\(deletions)", attributes: [.foregroundColor: BloomTheme.colour(PaletteInk.negative)]))
         summary.attributedText = totals
         summary.accessibilityLabel = "\(count) changed files, \(additions) additions, \(deletions) deletions"
+        summaryContainer.isHidden = displayed.isEmpty
+        mode.isEnabled = !review.changes.isEmpty
         retry.isHidden = review.error == nil
         if let error = review.error {
             summary.text = "Could not refresh. " + error
             summary.accessibilityLabel = summary.text
         }
         if displayed.isEmpty {
-            var empty = UIContentUnavailableConfiguration.empty()
-            empty.image = UIImage(systemName: review.error == nil ? "checkmark.circle" : "wifi.exclamationmark")
+            var empty = !review.hasLoaded && review.error == nil ? UIContentUnavailableConfiguration.loading() : .empty()
+            if review.hasLoaded || review.error != nil {
+                empty.image = UIImage(systemName: review.error == nil ? "checkmark.circle" : "wifi.exclamationmark")
+            }
             empty.text = review.error == nil ? (review.hasLoaded ? "No changes yet" : "Loading changes") : "Could not load changes"
             empty.secondaryText = review.error ?? "Changes made in this workspace appear here."
             if review.error != nil {
@@ -149,7 +155,7 @@ final class WorkspaceReviewController: UIViewController, UITableViewDataSource, 
             cell.contentConfiguration = UIHostingConfiguration {
                 VStack(alignment: .leading, spacing: 12) {
                     BloomFileRow(file: file)
-                    Text(error).font(.callout).foregroundStyle(.secondary)
+                    Text(error).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
                     Button("Retry") { [weak review] in review?.retry(path: file.path) }
                         .buttonStyle(.bordered)
                 }.padding(16)

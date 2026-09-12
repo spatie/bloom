@@ -17,12 +17,10 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     private let placeholder = BloomTheme.label("Message your agent", secondary: true)
     private var composerHeight: NSLayoutConstraint?
     private var normalSendWidth: NSLayoutConstraint?
-    private var compactOptionsWidth: NSLayoutConstraint?
-    private var showsCompactModelLabel = false
     private let composerPanel = UIView()
-    private var compactComposerConstraints: [NSLayoutConstraint] = []
-    private var expandedComposerConstraints: [NSLayoutConstraint] = []
-    private var isComposerExpanded = false
+    private let composerRow = UIView()
+    private var bodyTextStyle: UIFont.TextStyle { traitCollection.userInterfaceIdiom == .pad ? .subheadline : .body }
+    private var conversationMaximumWidth: CGFloat { traitCollection.userInterfaceIdiom == .pad ? 1040 : 920 }
     #if DEBUG
     private var fixture: RemoteTranscript?
     #endif
@@ -34,6 +32,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     private var connectionObserver: UUID?
     private var pollingGeneration: Int?
     private var transcriptProblem: String?
+    private var hasLoadedTranscript = false
     private var isRefreshing = false
     private var needsRefresh = false
     private var isSending = false
@@ -76,7 +75,8 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         table.rowHeight = UITableView.automaticDimension
         table.accessibilityLabel = "Conversation"
         table.contentInset = UIEdgeInsets(top: 4, left: 0, bottom: 8, right: 0)
-        composer.font = .preferredFont(forTextStyle: .body)
+        composer.font = .preferredFont(forTextStyle: bodyTextStyle)
+        placeholder.font = .preferredFont(forTextStyle: bodyTextStyle)
         composer.adjustsFontForContentSizeCategory = true
         composer.backgroundColor = .clear
         composer.textContainerInset = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
@@ -94,6 +94,8 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         sendConfiguration.baseBackgroundColor = BloomTheme.colour(PaletteInk.accentFill)
         sendConfiguration.baseForegroundColor = .white
         sendConfiguration.cornerStyle = .capsule
+        sendConfiguration.background.backgroundInsets = NSDirectionalEdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6)
+        sendConfiguration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
         send.configuration = sendConfiguration
         send.accessibilityLabel = "Send message"
         send.accessibilityHint = "You can also press Command Return."
@@ -118,14 +120,14 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         review.addAction(UIAction { [weak self] _ in self?.reviewRequest() }, for: .touchUpInside)
         configureOptionsButton()
         configureComposerLayout()
-        let stack = UIStackView(arrangedSubviews: [table, review, status, composerPanel])
+        let stack = UIStackView(arrangedSubviews: [table, review, status, composerRow])
         stack.axis = .vertical; stack.spacing = 8; stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
         let width = stack.widthAnchor.constraint(equalTo: view.safeAreaLayoutGuide.widthAnchor, constant: -32)
         width.priority = UILayoutPriority(999)
         NSLayoutConstraint.activate([
             stack.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
-            stack.widthAnchor.constraint(lessThanOrEqualToConstant: 920), width,
+            stack.widthAnchor.constraint(lessThanOrEqualToConstant: conversationMaximumWidth), width,
             stack.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
             stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -133,6 +135,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         ])
         #if DEBUG
         if let fixture {
+            hasLoadedTranscript = true
             buffer.apply(fixture)
             rows = RemoteTranscriptProjection.rows(messages: buffer.messages)
             queuedRows = buffer.queuedPrompts
@@ -140,78 +143,74 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
             updateStatus()
         }
         #endif
-        updateComposer()
+        updateStatus()
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         updateComposer()
+        updateComposerOutline()
     }
+
+    private func updateComposerOutline() {
+        let colour = composer.isFirstResponder ? BloomTheme.accent : BloomTheme.border
+        composerPanel.layer.borderColor = colour.resolvedColor(with: traitCollection).cgColor
+        composerPanel.layer.borderWidth = 1
+    }
+
+    func textViewDidBeginEditing(_ textView: UITextView) { updateComposerOutline() }
+    func textViewDidEndEditing(_ textView: UITextView) { updateComposerOutline() }
 
     private func configureComposerLayout() {
         composerPanel.backgroundColor = BloomTheme.panel
         composerPanel.layer.cornerRadius = 22
         composerPanel.layer.cornerCurve = .continuous
-        for control in [composer, options, send] {
+        for control in [options, composerPanel] {
+            control.translatesAutoresizingMaskIntoConstraints = false
+            composerRow.addSubview(control)
+        }
+        for control in [composer, send] {
             control.translatesAutoresizingMaskIntoConstraints = false
             composerPanel.addSubview(control)
         }
         composerHeight = composer.heightAnchor.constraint(equalToConstant: 44)
         normalSendWidth = send.widthAnchor.constraint(equalToConstant: 44)
         normalSendWidth?.isActive = true
-        compactOptionsWidth = options.widthAnchor.constraint(equalToConstant: 44)
         NSLayoutConstraint.activate([
-            composer.topAnchor.constraint(equalTo: composerPanel.topAnchor, constant: 6),
-            options.leadingAnchor.constraint(equalTo: composerPanel.leadingAnchor, constant: 6),
-            options.bottomAnchor.constraint(equalTo: composerPanel.bottomAnchor, constant: -6),
-            options.trailingAnchor.constraint(lessThanOrEqualTo: send.leadingAnchor, constant: -8),
-            send.trailingAnchor.constraint(equalTo: composerPanel.trailingAnchor, constant: -6),
-            send.bottomAnchor.constraint(equalTo: composerPanel.bottomAnchor, constant: -6),
+            options.leadingAnchor.constraint(equalTo: composerRow.leadingAnchor),
+            options.bottomAnchor.constraint(equalTo: composerRow.bottomAnchor, constant: -4),
+            options.widthAnchor.constraint(equalToConstant: 44),
+            options.heightAnchor.constraint(equalToConstant: 44),
+            composerPanel.leadingAnchor.constraint(equalTo: options.trailingAnchor, constant: 8),
+            composerPanel.trailingAnchor.constraint(equalTo: composerRow.trailingAnchor),
+            composerPanel.topAnchor.constraint(equalTo: composerRow.topAnchor),
+            composerPanel.bottomAnchor.constraint(equalTo: composerRow.bottomAnchor),
+            composer.topAnchor.constraint(equalTo: composerPanel.topAnchor, constant: 4),
+            composer.leadingAnchor.constraint(equalTo: composerPanel.leadingAnchor, constant: 2),
+            composer.trailingAnchor.constraint(equalTo: send.leadingAnchor, constant: -2),
+            composer.bottomAnchor.constraint(equalTo: composerPanel.bottomAnchor, constant: -4),
+            send.trailingAnchor.constraint(equalTo: composerPanel.trailingAnchor, constant: -4),
+            send.bottomAnchor.constraint(equalTo: composerPanel.bottomAnchor, constant: -4),
+            send.topAnchor.constraint(greaterThanOrEqualTo: composerPanel.topAnchor, constant: 4),
             send.widthAnchor.constraint(greaterThanOrEqualToConstant: 44),
             send.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
             composerHeight!,
         ])
-        compactComposerConstraints = [
-            compactOptionsWidth!,
-            composer.leadingAnchor.constraint(equalTo: options.trailingAnchor, constant: 2),
-            composer.trailingAnchor.constraint(equalTo: send.leadingAnchor, constant: -2),
-            composer.bottomAnchor.constraint(equalTo: composerPanel.bottomAnchor, constant: -6),
-        ]
-        expandedComposerConstraints = [
-            composer.leadingAnchor.constraint(equalTo: composerPanel.leadingAnchor, constant: 6),
-            composer.trailingAnchor.constraint(equalTo: composerPanel.trailingAnchor, constant: -6),
-            composer.bottomAnchor.constraint(equalTo: options.topAnchor, constant: -2),
-            send.topAnchor.constraint(greaterThanOrEqualTo: composer.bottomAnchor, constant: 2),
-        ]
-        NSLayoutConstraint.activate(compactComposerConstraints)
         updateOptionsLabel()
     }
 
     private func updateComposer() {
         placeholder.isHidden = !composer.text.isEmpty
         let text = composer.text.isEmpty ? " " : composer.text + (composer.text.hasSuffix("\n") ? " " : "")
-        let font = composer.font ?? .preferredFont(forTextStyle: .body)
-        let panelWidth = composerPanel.bounds.width > 0 ? composerPanel.bounds.width : min(920, view.safeAreaLayoutGuide.layoutFrame.width - 32)
-        let showsModel = panelWidth >= 640
-        let modelWidth = (composerModelLabel as NSString).size(withAttributes: [.font: UIFont.preferredFont(forTextStyle: .footnote)]).width
-        let optionsWidth = showsModel ? min(220, max(80, ceil(modelWidth) + 40)) : 44
-        if compactOptionsWidth?.constant != optionsWidth { compactOptionsWidth?.constant = optionsWidth }
-        if showsCompactModelLabel != showsModel {
-            showsCompactModelLabel = showsModel
-            updateOptionsLabel()
-        }
-        // Measure against the compact width in either layout, so wrapping cannot toggle it back and forth.
+        let font = composer.font ?? .preferredFont(forTextStyle: bodyTextStyle)
+        send.configuration?.image = UIImage(systemName: hasPendingSubmission ? "arrow.clockwise" : "arrow.up")
+        send.configuration?.title = hasPendingSubmission ? "Retry" : nil
+        normalSendWidth?.isActive = !hasPendingSubmission
+        let panelWidth = composerPanel.bounds.width > 0 ? composerPanel.bounds.width
+            : min(conversationMaximumWidth, view.safeAreaLayoutGuide.layoutFrame.width - 32) - 52
+        let sendWidth = hasPendingSubmission ? max(44, send.sizeThatFits(CGSize(width: panelWidth, height: 44)).width) : 44
         let textInsets = composer.textContainerInset.left + composer.textContainerInset.right + composer.textContainer.lineFragmentPadding * 2
-        let compactTextWidth = max(60, panelWidth - 12 - optionsWidth - 44 - 4 - textInsets)
-        let expands = hasPendingSubmission || traitCollection.preferredContentSizeCategory.isAccessibilityCategory
-            || text.contains("\n") || (text as NSString).size(withAttributes: [.font: font]).width > compactTextWidth
-        if expands != isComposerExpanded {
-            NSLayoutConstraint.deactivate(isComposerExpanded ? expandedComposerConstraints : compactComposerConstraints)
-            isComposerExpanded = expands
-            NSLayoutConstraint.activate(expands ? expandedComposerConstraints : compactComposerConstraints)
-            updateOptionsLabel()
-        }
-        let textWidth = isComposerExpanded ? max(60, panelWidth - 42) : compactTextWidth
+        let textWidth = max(60, panelWidth - 8 - sendWidth - textInsets)
         let measured = (text as NSString).boundingRect(
             with: CGSize(width: textWidth, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: font], context: nil)
@@ -221,9 +220,6 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         composerHeight?.constant = min(maximum, max(44, height, hintHeight))
         composer.isScrollEnabled = max(height, hintHeight) > maximum
         send.isEnabled = model.canSend && model.address == origin && !isSending && (hasPendingSubmission || !composer.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        send.configuration?.image = UIImage(systemName: hasPendingSubmission ? "arrow.clockwise" : "arrow.up")
-        send.configuration?.title = hasPendingSubmission ? "Retry Message" : nil
-        normalSendWidth?.isActive = !hasPendingSubmission
         send.accessibilityLabel = hasPendingSubmission ? "Retry message" : "Send message"
         options.isHidden = hasPendingSubmission
         options.isEnabled = model.canSend && model.address == origin && !isSending && !hasPendingSubmission
@@ -269,8 +265,10 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     }
 
     private func configureOptionsButton() {
-        var configuration = UIButton.Configuration.plain()
-        configuration.title = ModelLabel.readable(session.model)
+        var configuration = UIButton.Configuration.gray()
+        configuration.baseForegroundColor = BloomTheme.accent
+        configuration.cornerStyle = .capsule
+        configuration.background.backgroundInsets = NSDirectionalEdgeInsets(top: 4, leading: 4, bottom: 4, trailing: 4)
         configuration.image = UIImage(systemName: "slider.horizontal.3")
         configuration.imagePadding = 7
         configuration.titleLineBreakMode = .byTruncatingTail
@@ -307,7 +305,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
 
     private func updateOptionsLabel() {
         let label = composerModelLabel
-        options.configuration?.title = isComposerExpanded || showsCompactModelLabel ? label : nil
+        options.configuration?.title = nil
         options.accessibilityValue = label
         view.setNeedsLayout()
     }
@@ -365,6 +363,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     }
 
     private func applyTranscript(_ transcript: RemoteTranscript) {
+        hasLoadedTranscript = true
         let previousRows = rows
         let previousQueue = queuedRows
         let previousStreamingText = buffer.streamingText
@@ -385,6 +384,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         }
         updateStatus()
         review.isHidden = buffer.pendingQuestions.isEmpty
+        navigationItem.rightBarButtonItem?.isHidden = !buffer.isBusy && buffer.pendingQuestions.isEmpty
         navigationItem.rightBarButtonItem?.isEnabled = model.canSend && (buffer.isBusy || !buffer.pendingQuestions.isEmpty)
     }
 
@@ -541,14 +541,9 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     private func updateStatus() {
         updateComposer()
         send.configuration?.showsActivityIndicator = isSending
-        if rows.isEmpty && buffer.streamingText.isEmpty && buffer.queuedPrompts.isEmpty {
-            var empty = UIContentUnavailableConfiguration.empty()
-            empty.image = UIImage(systemName: "bubble.left.and.text.bubble.right")
-            empty.text = "What shall we work on?"
-            empty.secondaryText = "Describe a change, ask a question, or share an idea."
-            table.backgroundView = UIContentUnavailableView(configuration: empty)
-        } else { table.backgroundView = nil }
+        updateTranscriptBackground()
 
+        navigationItem.rightBarButtonItem?.isHidden = !buffer.isBusy && buffer.pendingQuestions.isEmpty
         navigationItem.rightBarButtonItem?.isEnabled = model.canSend && (buffer.isBusy || !buffer.pendingQuestions.isEmpty)
         review.isEnabled = model.canSend && model.address == origin
         review.isHidden = buffer.pendingQuestions.isEmpty
@@ -564,6 +559,33 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
             status.text = buffer.queueError ?? (buffer.isBusy ? "Working on your request…" : nil)
         }
         status.isHidden = status.text?.isEmpty != false
+    }
+
+    private func updateTranscriptBackground() {
+        guard rows.isEmpty, buffer.streamingText.isEmpty, buffer.queuedPrompts.isEmpty else {
+            table.backgroundView = nil
+            return
+        }
+        var configuration = UIContentUnavailableConfiguration.empty()
+        if !hasLoadedTranscript {
+            if !model.canSend || model.address != origin {
+                configuration.image = UIImage(systemName: "network")
+                configuration.text = "Waiting for connection"
+                configuration.secondaryText = "Your conversation will appear when the server reconnects."
+            } else if transcriptProblem != nil {
+                configuration.image = UIImage(systemName: "exclamationmark.bubble")
+                configuration.text = "Conversation couldn’t load"
+                configuration.secondaryText = "Bloom will try again automatically."
+            } else {
+                configuration = .loading()
+                configuration.text = "Loading conversation"
+            }
+        } else {
+            configuration.image = UIImage(systemName: "bubble.left.and.text.bubble.right")
+            configuration.text = "What shall we work on?"
+            configuration.secondaryText = "Describe a change, ask a question, or share an idea."
+        }
+        table.backgroundView = UIContentUnavailableView(configuration: configuration)
     }
 
     private func reviewRequest() {

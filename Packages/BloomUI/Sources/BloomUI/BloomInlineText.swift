@@ -4,19 +4,19 @@ import BloomClient
 /// The small SwiftUI inline adapter. Desktop keeps its cached native link and chip renderer.
 enum BloomInlineText {
     static func render(
-        _ inline: [MarkdownInline], role: BloomMarkdownInlineRole, colour: Color, scheme: ColorScheme
+        _ inline: [MarkdownInline], role: BloomMarkdownInlineRole, colour: Color, scheme: ColorScheme, textStyle: Font.TextStyle = .body
     ) -> AttributedString {
-        render(inline, font: font(role), colour: colour, scheme: scheme, intents: [])
+        render(inline, font: font(role, textStyle: textStyle), colour: colour, scheme: scheme, intents: [])
     }
 
-    private static func font(_ role: BloomMarkdownInlineRole) -> Font {
+    private static func font(_ role: BloomMarkdownInlineRole, textStyle: Font.TextStyle) -> Font {
         switch role {
-        case .body: .body
+        case .body: .system(textStyle)
         case .heading(1): .title2.bold()
         case .heading(2): .title3.bold()
-        case .heading: .body.bold()
-        case .tableHeader: .callout.bold()
-        case .tableCell: .callout
+        case .heading: .system(textStyle).bold()
+        case .tableHeader: .system(textStyle == .body ? .callout : textStyle).bold()
+        case .tableCell: .system(textStyle == .body ? .callout : textStyle)
         }
     }
 

@@ -24,7 +24,7 @@ final class SSHDeviceAccessController: UITableViewController {
     }
 
     override func numberOfSections(in tableView: UITableView) -> Int { 3 }
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { [2, 3, 1][section] }
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { [2, 3, 2][section] }
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         ["1. Your device key", "2. Add it to your server", "You stay in control"][section]
     }
@@ -45,15 +45,15 @@ final class SSHDeviceAccessController: UITableViewController {
         switch (indexPath.section, indexPath.row) {
         case (0, 0):
             content.text = "A key of your own"
-            content.secondaryText = "Bloom generated this device’s key. Your Mac’s private key is not needed."
+            content.secondaryText = "Bloom generated a key for this device. Add its public part to the server to allow this device to connect."
             content.image = UIImage(systemName: "key")
         case (0, 1):
             content.text = "The private key stays here"
             content.secondaryText = "The private key stays in this device’s Keychain, available while unlocked. It does not sync to iCloud. Only the public key is shared."
             content.image = UIImage(systemName: "lock.shield")
         case (1, 0):
-            content.text = "Use an existing trusted connection"
-            content.secondaryText = "From your Mac or server console, add the public key to ~/.ssh/authorized_keys for the \(username.isEmpty ? "selected" : username) account. This gives this device access to that account."
+            content.text = "Add the key from your Mac"
+            content.secondaryText = "Connect to the server from your Mac or its console. Add this public key as a new line in ~/.ssh/authorized_keys for the \(username.isEmpty ? "selected" : username) account. Keep any existing keys."
         case (1, 1):
             content.text = copied ? "Public Key Copied" : "Copy Public Key"
             content.image = UIImage(systemName: copied ? "checkmark" : "doc.on.doc")
@@ -65,9 +65,15 @@ final class SSHDeviceAccessController: UITableViewController {
             content.image = UIImage(systemName: "square.and.arrow.up")
             content.textProperties.color = BloomTheme.accent
             cell.selectionStyle = .default; cell.accessibilityTraits.insert(.button)
-        default:
+        case (2, 0):
             content.text = "Remove its public key from the server"
             content.secondaryText = "That prevents new SSH connections from this device. Existing connections must be closed separately. Other devices keep their own keys."
+        default:
+            content.text = "Return to Connection"
+            content.secondaryText = "Once the public key is added, choose Connect."
+            content.image = UIImage(systemName: "arrow.left.circle")
+            content.textProperties.color = BloomTheme.accent
+            cell.selectionStyle = .default; cell.accessibilityTraits.insert(.button)
         }
         cell.contentConfiguration = content
         return cell
@@ -75,6 +81,10 @@ final class SSHDeviceAccessController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
+        if indexPath.section == 2, indexPath.row == 1 {
+            navigationController?.popViewController(animated: true)
+            return
+        }
         guard indexPath.section == 1 else { return }
         if indexPath.row == 1 {
             UIPasteboard.general.string = publicKey

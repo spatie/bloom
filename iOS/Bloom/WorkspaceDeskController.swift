@@ -14,8 +14,10 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     private let compactTabs = UITabBar()
     private var compactTabsHeight: NSLayoutConstraint?
     private var usesCompactTabs = false
+    private var compactToolID: String?
     private var browser: PreviewController?
     private var previewTask: Task<Void, Never>?
+    private var previewPreparations: Set<UUID> = []
     private var previewNavigationRequests: [String: UUID] = [:]
     private let conversationHost = UIView()
     private let toolHost = UIView()
@@ -170,8 +172,12 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     }
 
     private func updateToolbar() {
-        let preview = UIBarButtonItem(title: "Preview", primaryAction: UIAction { [weak self] _ in self?.openPreview() })
-        preview.accessibilityLabel = "Open browser preview"
+        let openingPreview = !previewPreparations.isEmpty
+        let preview = UIBarButtonItem(title: openingPreview ? "Opening…" : "Preview", primaryAction: UIAction { [weak self] _ in self?.openPreview() })
+        preview.accessibilityLabel = openingPreview ? "Opening browser preview" : "Open browser preview"
+        preview.isEnabled = !openingPreview
+        compactTabs.items?[1].title = openingPreview ? "Opening…" : "Preview"
+        compactTabs.items?[1].isEnabled = !openingPreview
         let inspector = UIBarButtonItem(title: "Files", primaryAction: UIAction { [weak self] _ in self?.toggleFiles() })
         inspector.accessibilityLabel = "Show files and changes"
         filesButton = inspector
@@ -200,7 +206,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         let layout = UIBarButtonItem(title: "View", menu: viewMenu)
         layout.accessibilityLabel = "Workspace layout"
         let menu = UIMenu(children: [
-            deck.paneActionsMenu,
+            UIMenu(title: "Tabs and panes", children: deck.paneActionsMenu.children),
             UIMenu(title: "Open tabs", children: (tabsJSON()["tabs"]?.arrayValue ?? []).compactMap { tab -> UIAction? in
                 guard let number = tab["tab"]?.intValue, let title = tab["title"]?.stringValue else { return nil }
                 return UIAction(title: title, state: tab["active"]?.boolValue == true ? .on : .off) { [weak self] _ in
@@ -336,8 +342,16 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         present(alert, animated: true)
     }
 
+    private func preparePreview(address: String) async throws -> MobilePreviewLease {
+        let preparation = UUID()
+        previewPreparations.insert(preparation)
+        updateToolbar()
+        defer { previewPreparations.remove(preparation); updateToolbar() }
+        return try await connection.preparePreview(address: address)
+    }
+
     private func openPreview(address: String) async throws {
-        let preview = try await connection.preparePreview(address: address)
+        let preview = try await preparePreview(address: address)
         guard !Task.isCancelled else { preview.close(); throw CancellationError() }
         showBrowser(PreviewController(preview: preview))
     }
@@ -393,8 +407,6 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
             tool = deck
             install(deck, in: toolHost)
         }
-        let kind = deck.selectedPane?.kind
-        compactTabs.selectedItem = compactTabs.items?[kind == "browser" ? 1 : kind == "review" ? 2 : 3]
         layoutPanes()
     }
 
@@ -461,8 +473,6 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         navigation.setViewControllers([], animated: false)
         files.navigationItem.rightBarButtonItem = nil
         install(files, in: filesHost)
-        let index = tool == nil || focusesConversation ? 0 : deck.selectedPane?.kind == "browser" ? 1 : deck.selectedPane?.kind == "review" ? 2 : 3
-        compactTabs.selectedItem = compactTabs.items?[index]
         layoutPanes()
     }
 
@@ -471,6 +481,10 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         case 0: focusConversation()
         case 1: openPreview()
         case 2: openReview(all: true)
+        case 4:
+            guard let pane = deck.allPanes.first(where: { $0.id == compactToolID }) else { return }
+            focusesConversation = false
+            deck.selectPane(pane); showDeck()
         default: toggleFiles()
         }
     }
@@ -503,6 +517,40 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
             conversationActions = actions
             updateToolbar()
         }
+        updateCompactSelection()
+    }
+
+    private func compactToolLabel(_ pane: WorkspaceToolPane) -> (title: String, symbol: String)? {
+        if pane.content is WorkspaceNotesController { return ("Notes", PaneGlyph.notes) }
+        if pane.content is WorkspaceTerminalController { return ("Terminal", PaneGlyph.terminal) }
+        if pane.content is WorkspaceMediaController { return ("Media", "photo") }
+        return nil
+    }
+
+    private func updateCompactSelection() {
+        if let selected = deck.selectedPane, compactToolLabel(selected) != nil { compactToolID = selected.id }
+        let extra = deck.allPanes.first { $0.id == compactToolID && compactToolLabel($0) != nil }
+            ?? deck.allPanes.last { compactToolLabel($0) != nil }
+        compactToolID = extra?.id
+        var items = compactTabs.items?.filter { $0.tag != 4 } ?? []
+        if let extra, let label = compactToolLabel(extra) {
+            let item = compactTabs.items?.first { $0.tag == 4 }
+                ?? UITabBarItem(title: label.title, image: UIImage(systemName: label.symbol), tag: 4)
+            item.title = label.title; item.image = UIImage(systemName: label.symbol)
+            item.accessibilityLabel = "Show " + label.title.lowercased()
+            items.append(item)
+        }
+        if compactTabs.items?.map(\.tag) != items.map(\.tag) { compactTabs.setItems(items, animated: false) }
+        let selected: Int
+        if filesNavigation != nil { selected = 3 } else if tool == nil || focusesConversation { selected = 0 } else if deck.selectedPane?.id == extra?.id, extra != nil { selected = 4 } else {
+            switch deck.selectedPane?.kind {
+            case "chat": selected = 0
+            case "browser": selected = 1
+            case "review": selected = 2
+            default: selected = 3
+            }
+        }
+        compactTabs.selectedItem = compactTabs.items?.first { $0.tag == selected }
     }
 
     private func install(_ child: UIViewController, in host: UIView) {
@@ -621,7 +669,7 @@ extension WorkspaceDeskController {
         var session: RemoteSession?
         switch kind {
         case .browser:
-            if let address, !address.isEmpty { content = PreviewController(preview: try await connection.preparePreview(address: address)) } else { content = PreviewController() }
+            if let address, !address.isEmpty { content = PreviewController(preview: try await preparePreview(address: address)) } else { content = PreviewController() }
         case .terminal:
             let name = "terminal-" + UUID().uuidString
             let model = connection, workspaceID = workspace.id
@@ -709,7 +757,7 @@ extension WorkspaceDeskController {
         defer {
             if previewNavigationRequests[pane.id] == requestID { previewNavigationRequests[pane.id] = nil }
         }
-        let lease = try await connection.preparePreview(address: address)
+        let lease = try await preparePreview(address: address)
         guard !Task.isCancelled, previewNavigationRequests[pane.id] == requestID,
               deck.allPanes.contains(where: { $0 === pane }) else { lease.close(); throw CancellationError() }
         let preview = PreviewController(preview: lease)

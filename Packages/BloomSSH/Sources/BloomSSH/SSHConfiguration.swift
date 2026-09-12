@@ -15,11 +15,21 @@ public struct SSHConfiguration: Codable, Sendable, Equatable {
     public init(host: String, port: Int = 22, username: String, executable: String = Self.defaultExecutable, dataDirectory: String = Self.defaultDataDirectory) throws {
         let host = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !host.isEmpty, !host.contains(where: { $0.isWhitespace }), !host.contains("/"),
-              (1...65535).contains(port), !username.isEmpty,
-              !username.contains(where: { $0.isWhitespace }), !username.contains("@"),
-              !executable.isEmpty, dataDirectory.hasPrefix("/"),
-              ![host, username, executable, dataDirectory].contains(where: { $0.contains("\0") || $0.contains("\n") || $0.contains("\r") }) else {
-            throw ConnectionFailure("Enter a server IP address or hostname, SSH username, and an absolute server data directory.")
+              !Self.hasLineBreakOrNull(host) else {
+            throw ConnectionFailure("Enter a server IP address or hostname without spaces or a URL path.")
+        }
+        guard (1...65535).contains(port) else {
+            throw ConnectionFailure("Enter an SSH port from 1 to 65535.")
+        }
+        guard !username.isEmpty, !username.contains(where: { $0.isWhitespace }), !username.contains("@"),
+              !Self.hasLineBreakOrNull(username) else {
+            throw ConnectionFailure("Enter an SSH username without spaces or @, usually bloom.")
+        }
+        guard !executable.isEmpty, !Self.hasLineBreakOrNull(executable) else {
+            throw ConnectionFailure("Enter the Bloom Server executable path on one line.")
+        }
+        guard dataDirectory.hasPrefix("/"), !Self.hasLineBreakOrNull(dataDirectory) else {
+            throw ConnectionFailure("Enter an absolute server data directory beginning with /, such as /home/bloom/bloom/data.")
         }
         self.host = host; self.port = port; self.username = username
         self.executable = executable; self.dataDirectory = dataDirectory
@@ -34,6 +44,9 @@ public struct SSHConfiguration: Codable, Sendable, Equatable {
     }
     public var hostIdentity: String { "[\(host)]:\(port)" }
     public var command: String { "\(Self.quote(executable)) connect --data-dir \(Self.quote(dataDirectory))" }
+    private static func hasLineBreakOrNull(_ text: String) -> Bool {
+        text.contains("\0") || text.contains("\n") || text.contains("\r")
+    }
     private static func quote(_ text: String) -> String { "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 }
 

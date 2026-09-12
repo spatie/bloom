@@ -15,7 +15,29 @@ final class ServerMaintenanceController: UITableViewController {
     private var connectionFailure: String?
     private var serverName: String { URLComponents(string: origin)?.host ?? "your server" }
     private var session: ServerMaintenanceSession? { access?.session }
+    private var showsUnsupported: Bool {
+        session?.unsupported == true && session?.jobs.isEmpty != false && session?.pendingMutationID == nil
+            && connectionFailure == nil && access?.credentialFailure == nil
+            && (session?.failure == nil || session?.failure?.code == "unsupported")
+    }
     private var isCurrent: Bool { model.address == origin && generation == model.generation && model.canSend }
+
+    private var canOpenAccess: Bool {
+        isCurrent && session?.unsupported == false && session?.activity == .idle
+    }
+    private var canRetryRequest: Bool {
+        isCurrent && session?.authorized == true && session?.activity == .idle && session?.pendingMutationID != nil
+    }
+    private func canReview(_ component: ServerMaintenanceComponent) -> Bool {
+        guard let session else { return false }
+        return isCurrent && component.canUpdate && session.authorized && session.activity == .idle
+            && session.pendingMutationID == nil && !session.hasActiveJobs
+    }
+    private func setActionEnabled(_ enabled: Bool, on cell: UITableViewCell) {
+        cell.isUserInteractionEnabled = enabled
+        cell.selectionStyle = enabled ? .default : .none
+        if !enabled { cell.accessibilityTraits.insert(.notEnabled) }
+    }
 
     init(model: MobileConnection) {
         self.model = model; origin = model.address
@@ -73,7 +95,7 @@ final class ServerMaintenanceController: UITableViewController {
             return
         }
         connectionFailure = nil
-        if generation != model.generation || access == nil {
+        if generation != model.generation || access == nil || showsUnsupported {
             if let observation { session?.removeObserver(observation) }
             access = ServerMaintenanceAccess(serverID: (try? RemoteOrigin.canonical(origin)) ?? origin, client: service.client)
             generation = model.generation; observation = nil
@@ -85,6 +107,16 @@ final class ServerMaintenanceController: UITableViewController {
     }
 
     private func updateUI() {
+        if showsUnsupported {
+            var empty = UIContentUnavailableConfiguration.empty()
+            empty.image = UIImage(systemName: "arrow.down.circle")
+            empty.imageProperties.tintColor = BloomTheme.accent
+            empty.text = "Update Bloom Server to manage tools here"
+            empty.secondaryText = "Use server setup in Bloom on your Mac to install the maintenance service."
+            empty.button.title = "Retry"
+            empty.buttonProperties.primaryAction = UIAction { [weak self] _ in Task { await self?.refresh() } }
+            tableView.backgroundView = UIContentUnavailableView(configuration: empty)
+        } else { tableView.backgroundView = nil }
         tableView.reloadData()
         if session?.isPreparing == true || session?.isSubmitting == true {
             let progress = UIActivityIndicatorView(style: .medium)
@@ -94,7 +126,7 @@ final class ServerMaintenanceController: UITableViewController {
         toolbarItems?.last?.isEnabled = isCurrent && session?.activity == .idle
     }
 
-    override func numberOfSections(in tableView: UITableView) -> Int { 4 }
+    override func numberOfSections(in tableView: UITableView) -> Int { showsUnsupported ? 0 : 4 }
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch section {
         case 0: 1
@@ -114,20 +146,25 @@ final class ServerMaintenanceController: UITableViewController {
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         if indexPath.section == 0 {
             let supported = session?.unsupported != true
-            return BloomTheme.cell(title: session?.authorized == true ? "Manage Maintenance Access" : "Add Maintenance Access",
+            let cell = BloomTheme.cell(title: session?.authorized == true ? "Manage Maintenance Access" : "Add Maintenance Access",
                 detail: supported ? "Stored only in this device’s Keychain." : "Install Bloom’s maintenance service from server setup on your Mac first.",
-                symbol: "lock.shield", disclosure: supported)
+                symbol: "lock.shield", disclosure: canOpenAccess)
+            setActionEnabled(canOpenAccess, on: cell)
+            return cell
         }
         if indexPath.section == 1 {
             let message = connectionFailure ?? access?.credentialFailure ?? session?.failure?.message ?? ""
             let detail = session?.pendingMutationID != nil ? "Tap to retry the same request safely." : session?.failure?.recovery
-            return BloomTheme.cell(title: message, detail: detail, symbol: "exclamationmark.circle", disclosure: session?.pendingMutationID != nil)
+            let cell = BloomTheme.cell(title: message, detail: detail, symbol: "exclamationmark.circle", disclosure: canRetryRequest)
+            setActionEnabled(canRetryRequest, on: cell)
+            return cell
         }
         if indexPath.section == 2, let component = session?.components.dropFirst(indexPath.row).first {
             let versions = "Installed: " + (component.installedVersion ?? "Unavailable")
                 + (component.availableVersion.map { "\nAvailable: " + $0 } ?? "")
             let cell = BloomTheme.cell(title: component.title, detail: versions + (component.detail.isEmpty ? "" : "\n" + component.detail),
-                                      symbol: "shippingbox", disclosure: component.canUpdate)
+                                      symbol: "shippingbox", disclosure: canReview(component))
+            setActionEnabled(canReview(component), on: cell)
             if var content = cell.contentConfiguration as? UIListContentConfiguration {
                 content.secondaryTextProperties.numberOfLines = 0; cell.contentConfiguration = content
             }
@@ -136,12 +173,13 @@ final class ServerMaintenanceController: UITableViewController {
         if indexPath.section == 3, let job = session?.jobs.dropFirst(indexPath.row).first {
             let cell = BloomTheme.cell(title: job.component.title + " " + job.targetVersion,
                 detail: job.phase.title + " · " + ServerMaintenancePresentation.date(job.updatedAt),
-                symbol: job.phase.needsAttention ? "exclamationmark.circle" : "clock")
+                symbol: job.phase.needsAttention ? "exclamationmark.circle" : "clock", disclosure: isCurrent)
+            setActionEnabled(isCurrent, on: cell)
             if job.isActive { let progress = UIActivityIndicatorView(style: .medium); progress.startAnimating(); cell.accessoryView = progress }
             return cell
         }
-        let checking = session == nil || session?.isLoading == true
-        let text = checking ? "Checking your server…" : session?.unsupported == true ? "Managed updates aren’t available yet"
+        let checking = connectionFailure == nil && (session == nil || session?.isLoading == true)
+        let text = connectionFailure != nil ? "Reconnect to see server updates" : checking ? "Checking your server…" : session?.unsupported == true ? "Managed updates aren’t available yet"
             : session?.authorized != true ? "Add maintenance access to continue" : indexPath.section == 2 ? "No components available" : "No updates yet"
         let cell = BloomTheme.cell(title: text, symbol: checking ? "arrow.triangle.2.circlepath" : "shippingbox", disclosure: false)
         cell.selectionStyle = .none
@@ -151,9 +189,9 @@ final class ServerMaintenanceController: UITableViewController {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         guard isCurrent, let access, let session else { return }
-        if indexPath.section == 0, !session.unsupported {
+        if indexPath.section == 0, canOpenAccess {
             navigationController?.pushViewController(ServerMaintenanceAccessController(access: access), animated: true)
-        } else if indexPath.section == 1, session.pendingMutationID != nil {
+        } else if indexPath.section == 1, canRetryRequest {
             let alert = UIAlertController(title: "Retry maintenance request?", message: "The server may already have started it. Bloom will retry the same request to confirm what happened.", preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
             alert.addAction(UIAlertAction(title: "Retry Request", style: .default) { [weak self] _ in
@@ -161,8 +199,7 @@ final class ServerMaintenanceController: UITableViewController {
                 Task { await session.retryPendingMutation() }
             })
             present(alert, animated: true)
-        } else if indexPath.section == 2, let component = session.components.dropFirst(indexPath.row).first, component.canUpdate,
-                  session.activity == .idle, session.authorized, session.pendingMutationID == nil, !session.hasActiveJobs {
+        } else if indexPath.section == 2, let component = session.components.dropFirst(indexPath.row).first, canReview(component) {
             Task { [weak self] in
                 await session.prepare(component: component.id)
                 guard let self, isCurrent, let plan = session.plan, viewIfLoaded?.window != nil else { return }

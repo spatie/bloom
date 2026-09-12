@@ -432,7 +432,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     private func updateToolbar() {
         backItem.isEnabled = browser.canGoBack
         forwardItem.isEnabled = browser.canGoForward
-        reloadItem.image = UIImage(systemName: isLoading ? "xmark" : "arrow.clockwise")
+        reloadItem.image = UIImage(systemName: isLoading ? "stop.fill" : "arrow.clockwise")
         reloadItem.accessibilityLabel = isLoading ? "Stop loading" : "Reload preview"
         let actual = browser.url.flatMap { allows($0) ? $0 : nil } ?? url
         let current = previewLease?.reportedURL(actual) ?? actual
