@@ -2,18 +2,22 @@ import Foundation
 
 /// Picker decisions shared by local Mac sessions and every remote client.
 public struct ComposerModelChoices: Sendable {
-    public var codexModels: [CodexModel]
+    public var models: [AgentKind: [AgentModel]]
     public var availableAgents: [AgentKind]?
 
     public init(codexModels: [CodexModel] = [], availableAgents: [AgentKind]? = nil) {
-        self.codexModels = codexModels; self.availableAgents = availableAgents
+        self.models = [.codex: codexModels.map(\.agentModel)]; self.availableAgents = availableAgents
+    }
+
+    public init(models: [AgentKind: [AgentModel]], availableAgents: [AgentKind]? = nil) {
+        self.models = models; self.availableAgents = availableAgents
     }
 
     public func offers(_ kind: AgentKind) -> Bool { availableAgents?.contains(kind) ?? true }
 
     public func selecting(_ model: String, in controls: ComposerControls) -> ComposerControls {
         var selected = controls
-        let identity = ModelIdentifier.resolve(model, codexModels: codexModels)
+        let identity = ModelIdentifier.resolve(model, models: models)
         selected.model = identity.model
         selected.agentKind = identity.kind ?? controls.agentKind
         selected.effort = resolvedEffort(controls.effort, for: selected.agentKind, model: selected.model)
@@ -49,11 +53,9 @@ public struct ComposerModelChoices: Sendable {
     }
 
     public func options(for kind: AgentKind) -> [ComposerOption] {
-        switch kind {
-        case .claudeCode: ComposerOption.models
-        case .codex: codexModels.map { ComposerOption(id: $0.id, label: $0.displayName) }
-        case .cursor, .openCode: []
-        }
+        if kind == .claudeCode { return ComposerOption.models }
+        return (models[kind] ?? []).filter { !$0.hidden }
+            .map { ComposerOption(id: $0.id, label: $0.displayName) }
     }
 
     /// Which backend a model id belongs to, so choosing one out of another section is understood
@@ -64,7 +66,7 @@ public struct ComposerModelChoices: Sendable {
     /// drift this file exists to avoid. An id nothing recognises belongs to whoever is running
     /// now, which is what keeps a pinned id from silently moving a chat to the other backend.
     public func backend(ofModel id: String, current: AgentKind) -> AgentKind {
-        DefaultBackend.kind(ofModel: id, running: current, codexModels: codexModels)
+        DefaultBackend.kind(ofModel: id, running: current, models: models)
     }
 
     /// The efforts one model takes.
@@ -73,22 +75,16 @@ public struct ComposerModelChoices: Sendable {
     /// the chosen model does not take is not on the list: offering `max` on `gpt-5.5`, which stops
     /// at `xhigh`, is offering something the server will refuse.
     public func efforts(for kind: AgentKind, model: String) -> [ComposerOption] {
-        switch kind {
-        case .codex:
-            guard let found = codexModels.first(where: { $0.id == model }) else {
-                // Not yet fetched, or a pinned id. The flat list is the honest fallback: it is
-                // what every one of these models has in common.
-                return ComposerOption.efforts
-            }
-            return found.supportedEfforts.map { ComposerOption(id: $0.id, label: $0.label) }
-        case .claudeCode, .cursor, .openCode:
-            return ComposerOption.efforts
+        if kind == .claudeCode { return ComposerOption.efforts }
+        guard let found = models[kind]?.first(where: { $0.id == model }) else {
+            return kind == .codex ? ComposerOption.efforts : []
         }
+        return found.supportedEfforts.map { ComposerOption(id: $0.id, label: $0.label) }
     }
 
     /// The effort to keep when the model changes underneath it, which is the model's own default
     /// rather than Bloom's `high`: `gpt-5.6-sol` defaults to `low` and `gpt-5.5` to `medium`.
     public func resolvedEffort(_ wanted: String, for kind: AgentKind, model: String) -> String {
-        DefaultBackend.effort(wanted, on: kind, model: model, codexModels: codexModels)
+        DefaultBackend.effort(wanted, on: kind, model: model, models: models)
     }
 }

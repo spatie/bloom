@@ -33,8 +33,10 @@ struct SourceEditor: NSViewRepresentable {
     /// otherwise an unexplained empty box.
     var placeholder = ""
     var editorState: SourceEditorState?
-    var onOpenReference: ((String) -> Void)?
+    var onOpenReference: ((String, Int, Bool) -> Void)?
     var onDefinition: ((Int) -> Void)?
+    var onReferences: ((Int) -> Void)?
+    var onNavigateSymbol: ((Int, Bool) -> Void)?
     var onAsk: (() -> Void)?
 
     /// Past this the colour pass costs more than it is worth on every keystroke, and a file this
@@ -162,6 +164,8 @@ struct SourceEditor: NSViewRepresentable {
         view.codeLanguage = language
         view.onOpenReference = onOpenReference
         view.onDefinition = onDefinition
+        view.onReferences = onReferences
+        view.onNavigateSymbol = onNavigateSymbol
         view.onAsk = onAsk
         let wraps = editorState?.wraps ?? false
         view.isHorizontallyResizable = !wraps
@@ -221,6 +225,7 @@ struct SourceEditor: NSViewRepresentable {
                 state.scrollOrigin = view.enclosingScrollView?.contentView.bounds.origin ?? .zero
                 if state.textView === view { state.textView = nil }
             }
+            (textView as? CodeTextView)?.updateNavigationHint(command: false)
             (textView as? CodeTextView)?.bracketTask?.cancel()
             highlightTask?.cancel()
         }
@@ -254,6 +259,7 @@ struct SourceEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView else { return }
+            (textView as? CodeTextView)?.updateNavigationHint(command: false)
             text.wrappedValue = textView.string
             ruler?.refresh()
             highlight(immediately: false)
@@ -314,6 +320,8 @@ struct SourceEditor: NSViewRepresentable {
         }
 
         private func applyPlain() {
+            (textView as? CodeTextView)?.navigationSource = nil
+            (textView as? CodeTextView)?.navigationTokens = []
             guard let storage = textView?.textStorage else { return }
             storage.beginEditing()
             storage.setAttributes(Self.base, range: NSRange(location: 0, length: storage.length))
@@ -323,6 +331,8 @@ struct SourceEditor: NSViewRepresentable {
         private func apply(_ runs: [ColorRun], matching source: String) {
             guard let storage = textView?.textStorage, storage.string == source else { return }
 
+            (textView as? CodeTextView)?.navigationSource = source
+            (textView as? CodeTextView)?.navigationTokens = runs
             var colors: [TokenKind: NSColor] = [:]
             for kind in TokenKind.allCases { colors[kind] = NSColor(CodeText.color(for: kind)) }
 
@@ -378,12 +388,19 @@ struct SourceEditor: NSViewRepresentable {
 /// `lineFragmentPadding` is the five points the container then takes off the front of every line.
 /// The prompt was drawn from the inset alone and sat five points to the left of the text it was
 /// standing in for, which is small enough to read as a rendering quirk and is not one.
-final class CodeTextView: NSTextView {
+class CodeTextView: NSTextView {
     weak var editorState: SourceEditorState?
     var codeLanguage: Language = .plainText
-    var onOpenReference: ((String) -> Void)?
+    var onOpenReference: ((String, Int, Bool) -> Void)?
     var onDefinition: ((Int) -> Void)?
+    var onReferences: ((Int) -> Void)?
+    var onNavigateSymbol: ((Int, Bool) -> Void)?
     var onAsk: (() -> Void)?
+    var navigationRange: NSRange?
+    var navigationTokens: [SourceEditor.ColorRun] = []
+    var navigationSource: String?
+    var definitionChoice: ((CodeLocation) -> Void)?
+    var contextOffset = 0
     var bracketRange: NSRange?
     var bracketTask: Task<Void, Never>?
 

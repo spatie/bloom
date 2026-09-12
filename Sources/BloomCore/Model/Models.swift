@@ -382,21 +382,26 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     /// Every row that existed before this column defaults to Claude Code, because that is what
     /// every one of them was.
     public var agentKind: AgentKind {
-        didSet { permissionMode = permissionMode.nearest(on: agentKind) }
+        didSet {
+            permissionMode = permissionMode.nearest(on: agentKind)
+            interactionMode = interactionMode.nearest(on: agentKind)
+        }
     }
     /// How much this chat may do without asking.
     ///
     /// **It can only ever be a mode `agentKind` has a row for**, and the initialiser below is what
     /// makes that true of every value of this type, including the one `Store` builds from a row
-    /// it has just read. A synthesised `init(from:)` is the one door that would go round this, and
-    /// nothing in the app or the suite decodes a `Session`. Codex
-    /// has no Plan and Claude Code has no Approve for me; a row written before this rule existed,
+    /// it has just read. Decoded server replies pass through the same initialiser. Codex
+    /// has no Plan permission and Claude Code has no Approve for me; a row written before this rule existed,
     /// or by a version that had a different one, would otherwise be drawn with no tick on any row
     /// of the picker while the wire carried something else again. See `PermissionMode.nearest(on:)`.
     ///
     /// The two observers hold the pair legal whichever of them is written, and in whichever order,
     /// so `sessionEditor.apply` setting a backend and a mode in one block cannot land a
     /// combination that does not exist. Writing inside a `didSet` does not run the observer again.
+    public var interactionMode: InteractionMode {
+        didSet { interactionMode = interactionMode.nearest(on: agentKind) }
+    }
     public var permissionMode: PermissionMode {
         didSet { permissionMode = permissionMode.nearest(on: agentKind) }
     }
@@ -414,6 +419,41 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     public var costUSD: Double
     public var contextTokens: Int
 
+    private enum CodingKeys: String, CodingKey {
+        case id, workspaceID, parentSessionID, sideConversationParentID, title, agentSessionID
+        case model, effort, agentKind, permissionMode, interactionMode, state, sortOrder
+        case createdAt, updatedAt, archivedAt, lastReadSeq, inputTokens, outputTokens, costUSD, contextTokens
+    }
+
+    /// Cached protocol replies outlive the runtime that wrote them. Older replies have no
+    /// interaction mode, so adding planning must not make an accepted command unreadable.
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try values.decode(SessionID.self, forKey: .id),
+            workspaceID: try values.decodeIfPresent(WorkspaceID.self, forKey: .workspaceID),
+            parentSessionID: try values.decodeIfPresent(SessionID.self, forKey: .parentSessionID),
+            sideConversationParentID: try values.decodeIfPresent(SessionID.self, forKey: .sideConversationParentID),
+            title: try values.decode(String.self, forKey: .title),
+            agentSessionID: try values.decodeIfPresent(String.self, forKey: .agentSessionID),
+            model: try values.decode(String.self, forKey: .model),
+            effort: try values.decode(String.self, forKey: .effort),
+            agentKind: try values.decode(AgentKind.self, forKey: .agentKind),
+            permissionMode: try values.decode(PermissionMode.self, forKey: .permissionMode),
+            interactionMode: try values.decodeIfPresent(InteractionMode.self, forKey: .interactionMode) ?? .build,
+            state: try values.decode(SessionState.self, forKey: .state),
+            sortOrder: try values.decode(Int.self, forKey: .sortOrder),
+            createdAt: try values.decode(Date.self, forKey: .createdAt),
+            updatedAt: try values.decode(Date.self, forKey: .updatedAt),
+            archivedAt: try values.decodeIfPresent(Date.self, forKey: .archivedAt),
+            lastReadSeq: try values.decode(Int.self, forKey: .lastReadSeq),
+            inputTokens: try values.decode(Int.self, forKey: .inputTokens),
+            outputTokens: try values.decode(Int.self, forKey: .outputTokens),
+            costUSD: try values.decode(Double.self, forKey: .costUSD),
+            contextTokens: try values.decode(Int.self, forKey: .contextTokens)
+        )
+    }
+
     /// A chat as it is at rest, `state` spelled out. **Internal for the same reason
     /// `Workspace`'s is**, and read that one: `internal(set)` on the property stopped assignment
     /// and stopped nothing else, because a fresh value carrying an existing id and any state at
@@ -429,6 +469,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         effort: String = AppDefaults.fallbackEffort,
         agentKind: AgentKind = .claudeCode,
         permissionMode: PermissionMode = AppDefaults.fallbackPermissionMode,
+        interactionMode: InteractionMode = .build,
         state: SessionState = .idle,
         sortOrder: Int = 0,
         createdAt: Date = Date(),
@@ -452,6 +493,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         // Through the rule rather than straight in. See the property's own note: this is the one
         // door every `Session` comes through, the ones `Store` builds from a row included.
         self.permissionMode = permissionMode.nearest(on: agentKind)
+        self.interactionMode = interactionMode.nearest(on: agentKind)
         self.state = state
         self.sortOrder = sortOrder
         self.createdAt = createdAt
@@ -477,6 +519,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         effort: String = AppDefaults.fallbackEffort,
         agentKind: AgentKind = .claudeCode,
         permissionMode: PermissionMode = AppDefaults.fallbackPermissionMode,
+        interactionMode: InteractionMode = .build,
         sortOrder: Int = 0,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
@@ -497,6 +540,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
             effort: effort,
             agentKind: agentKind,
             permissionMode: permissionMode,
+            interactionMode: interactionMode,
             state: .idle,
             sortOrder: sortOrder,
             createdAt: createdAt,

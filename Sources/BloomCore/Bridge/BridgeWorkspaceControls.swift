@@ -5,7 +5,8 @@ import BloomClient
 public enum BridgeWorkspaceControls {
     public static func resolve(
         for order: AgentWorkspaceOrder,
-        inheriting inherited: ComposerControls
+        inheriting inherited: ComposerControls,
+        store: Store? = nil
     ) async throws -> ComposerControls {
         var controls = inherited
         let inheritedAgent = controls.agentKind
@@ -18,7 +19,7 @@ public enum BridgeWorkspaceControls {
         // stays on the backend that was inherited. See `DefaultBackend`.
         let agent = order.agent
             ?? order.model.map {
-                DefaultBackend.kind(ofModel: $0, running: inheritedAgent, codexModels: [])
+                DefaultBackend.kind(ofModel: $0, running: inheritedAgent)
             }
             ?? inheritedAgent
         controls.agentKind = agent
@@ -38,24 +39,17 @@ public enum BridgeWorkspaceControls {
             } else if agent != inheritedAgent {
                 controls.model = AppDefaults.fallbackModel
             }
-        case .codex:
+        case .codex, .grok:
             if order.model == nil, agent == inheritedAgent { return controls }
-
-            let models = try await CodexModelCatalog.live().pickerModels()
-            let chosen: CodexModel?
-            if let requested = order.model {
-                chosen = models.first { $0.id == requested }
-                guard chosen != nil else {
-                    throw BridgeWorkspaceModelFailure.invalid(
-                        model: requested,
-                        agent: agent,
-                        available: models.map(\.id)
-                    )
-                }
-            } else {
-                chosen = models.first { $0.isDefault } ?? models.first
+            guard let source = AgentModelSource.live(store: store)[agent] else {
+                throw BridgeWorkspaceModelFailure.noneAvailable(agent)
             }
-            guard let chosen else {
+            let models = try await source.models()
+            guard let chosen = AgentModel.selection(requested: order.model, from: models) else {
+                if let requested = order.model {
+                    throw BridgeWorkspaceModelFailure.invalid(model: requested, agent: agent,
+                        available: models.filter { !$0.hidden }.map(\.id))
+                }
                 throw BridgeWorkspaceModelFailure.noneAvailable(agent)
             }
             controls.model = chosen.id

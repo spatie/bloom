@@ -14,6 +14,14 @@ import Testing
         }
     }
 
+    @Test func backgroundWakeRemainsVisibleInRemoteProjection() throws {
+        let payload = #"{"type":"system","subtype":"task_notification","summary":"Background command finished"}"#
+        let row = try message(1, kind: "system", payload: payload)
+        #expect(TranscriptVisibility.isBackgroundWake(kind: "system", payload: Data(payload.utf8)))
+        #expect(RemoteTranscriptProjection.rows(messages: [row]).map(\.id) == [1])
+        #expect(!TranscriptVisibility.isVisible(kind: "system", payload: Data(#"{"subtype":"task_updated"}"#.utf8)))
+    }
+
     @Test func resultSettlesCallWithoutReplacingItsIdentityOrChangingEventBuffer() throws {
         let call = try message(2, kind: "toolUse", ref: "call", payload: callPayload)
         let events = [try message(1, kind: "notice"), call, try message(3, kind: "assistantText")]

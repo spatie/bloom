@@ -8,6 +8,7 @@ public enum PromptID: String, Sendable, Hashable, CaseIterable, Codable {
     case createPullRequest
     case pushLocalWork
     case mergePullRequest
+    case markReadyForReview
     case fixConflicts
     case continueAfterMerge
     case carryOnArchived
@@ -62,7 +63,7 @@ public struct PromptDefinition: Sendable, Hashable, Identifiable {
 /// none of that and can only fail.
 public enum PromptRegistry {
     public static let all: [PromptDefinition] = [
-        createPullRequest, pushLocalWork, mergePullRequest, fixConflicts, continueAfterMerge,
+        createPullRequest, pushLocalWork, mergePullRequest, markReadyForReview, fixConflicts, continueAfterMerge,
         carryOnArchived, review, nameWorkspace,
     ]
 
@@ -88,6 +89,24 @@ public enum PromptRegistry {
         public static let baseBranch = "base_branch"
         public static let changes = "changes"
     }
+
+    public enum MarkReadyForReview {
+        public static let url = "url"
+    }
+
+    static let markReadyForReview = PromptDefinition(
+        id: .markReadyForReview,
+        title: "Mark ready for review",
+        summary: "Sent when you press Mark ready for review on a draft pull request.",
+        variables: [
+            PromptVariable(name: MarkReadyForReview.url, summary: "The pull request's URL."),
+        ],
+        defaultTemplate: """
+        Mark pull request {{url}} ready for review on GitHub using `gh pr ready`, then verify its \
+        draft status is cleared. If GitHub refuses, explain why. Do not merge the pull request, \
+        commit or push changes, or start any other work.
+        """
+    )
 
     /// The names the merge prompt may use.
     public enum MergePullRequest {

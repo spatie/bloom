@@ -773,7 +773,7 @@ extension ServerRuntime {
         if let id = identity.sessionID, let session = try await store.session(id: id) {
             inherited = try await ServerComposer.controls(session: session, store: store)
         }
-        let controls = try await BridgeWorkspaceControls.resolve(for: order, inheriting: inherited)
+        let controls = try await BridgeWorkspaceControls.resolve(for: order, inheriting: inherited, store: store)
         var request = ServerWorkspaceRequest(repositoryPath: project.path, name: order.name ?? order.prompt)
         request.prompt = order.prompt; request.controls = controls
         request.baseBranch = order.source.baseBranch; request.checkout = order.source.checkout

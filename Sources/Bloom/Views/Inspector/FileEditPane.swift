@@ -76,25 +76,7 @@ struct FileEditPane<Model: WorkspacePaneModel>: View {
                 await session.refresh(path: absolutePath)
             }
         }
-        .sheet(isPresented: Binding(
-            get: { comparing || !state.definitions.isEmpty },
-            set: { if !$0 { comparing = false; state.definitions = [] } }
-        )) {
-            if comparing { comparison } else { definitionChoices }
-        }
-    }
-
-    private var definitionChoices: some View {
-        VStack(alignment: .leading, spacing: Metrics.spacing) {
-            Text("Choose a definition").font(Typo.bodyEmphasis)
-            ForEach(state.definitions, id: \.self) { location in
-                Button("\(location.path):\(location.line)") {
-                    state.definitions = []
-                    FileReview.open(location: location, in: model)
-                }
-            }
-            Button("Cancel") { state.definitions = [] }.keyboardShortcut(.cancelAction)
-        }.padding(Metrics.inset)
+        .sheet(isPresented: $comparing) { comparison }
     }
 
     @ViewBuilder
@@ -111,6 +93,8 @@ struct FileEditPane<Model: WorkspacePaneModel>: View {
                     editorState: state,
                     onOpenReference: openReference,
                     onDefinition: findDefinition,
+                    onReferences: findReferences,
+                    onNavigateSymbol: navigateSymbol,
                     onAsk: askAboutSelection
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -140,14 +124,24 @@ struct FileEditPane<Model: WorkspacePaneModel>: View {
         }
     }
 
-    private var openReference: ((String) -> Void)? {
+    private var openReference: ((String, Int, Bool) -> Void)? {
         guard let local = model.localWorkspaceModel else { return nil }
-        return { SourceActions.open($0, path: path, model: local, state: state) }
+        return { SourceActions.open($0, at: $1, path: path, model: local, state: state, newTab: $2) }
     }
 
     private var findDefinition: ((Int) -> Void)? {
         guard let local = model.localWorkspaceModel else { return nil }
         return { SourceActions.definition(at: $0, path: path, model: local, state: state) }
+    }
+
+    private var findReferences: ((Int) -> Void)? {
+        guard let local = model.localWorkspaceModel else { return nil }
+        return { SourceActions.references(at: $0, path: path, model: local, state: state) }
+    }
+
+    private var navigateSymbol: ((Int, Bool) -> Void)? {
+        guard let local = model.localWorkspaceModel else { return nil }
+        return { SourceActions.navigate(at: $0, path: path, model: local, state: state, newTab: $1) }
     }
 
     private var askAboutSelection: (() -> Void)? {

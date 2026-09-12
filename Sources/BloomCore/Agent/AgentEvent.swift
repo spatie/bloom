@@ -7,7 +7,7 @@ public typealias JSONValue = BloomClient.JSONValue
 
 /// Everything the first line of a session binds: the id to resume with, the model that answered,
 /// and what it was allowed to do.
-public struct AgentInit: Sendable, Hashable {
+public struct AgentInit: Sendable, Hashable, Codable {
     public let sessionID: String
     public let cwd: String
     public let model: String
@@ -141,7 +141,7 @@ public struct AgentHook: Sendable, Hashable {
 }
 
 /// The last line of a turn, and the only place a real cost and context window show up.
-public struct AgentResult: Sendable, Hashable {
+public struct AgentResult: Sendable, Hashable, Codable {
     public let usage: AgentUsage
     public let summary: String
     public let isError: Bool
@@ -198,7 +198,7 @@ public struct AgentResult: Sendable, Hashable {
 
 /// Not a CLI event type. The runner synthesises one when the process dies without ever saying
 /// how it went, so the transcript never just stops mid sentence.
-public struct AgentError: Sendable, Hashable {
+public struct AgentError: Sendable, Hashable, Codable {
     public let message: String
     public let raw: Data
 
@@ -251,7 +251,7 @@ extension AgentError {
 
 /// Token accounting, filled from either the thin `assistant` usage object or the richer one on
 /// `result`. Cost and the context window only ever arrive on `result`.
-public struct AgentUsage: Sendable, Hashable {
+public struct AgentUsage: Sendable, Hashable, Codable {
     public var inputTokens: Int
     public var outputTokens: Int
     public var cacheReadTokens: Int

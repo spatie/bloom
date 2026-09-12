@@ -28,6 +28,7 @@ public struct ComposerDefaults: Equatable {
     /// beside it, because a model id already names its backend: see `DefaultBackend` for the three
     /// questions and for why the one Settings recorded is asked first.
     public var backend: AgentKind = .claudeCode
+    public var interactionMode: InteractionMode = .build
 
     /// Pure, so the rules above can be checked without a store, a repository or a view.
     ///
@@ -51,7 +52,7 @@ public struct ComposerDefaults: Equatable {
     ///   is picked, and a Codex chat opened under it was being written a mode Codex cannot be
     ///   sent. `WorkspaceStart` runs its own answer through the same rule; this is the other route
     ///   a session's opening values arrive by.
-    /// - Parameter codexModels: what `model/list` last answered, empty when it has not answered
+    /// - Parameter models: what model discovery last answered, empty when it has not answered
     ///   yet, which is every caller that has never opened a model menu. It only ever adds
     ///   precision: the backend Settings recorded is read without it.
     public static func resolve(
@@ -59,7 +60,7 @@ public struct ComposerDefaults: Equatable {
         app: AppDefaults,
         hasWorktree: Bool = true,
         running: AgentKind = .claudeCode,
-        codexModels: [CodexModel] = []
+        models: [AgentKind: [AgentModel]] = [:]
     ) -> ComposerDefaults {
         // Repo file, then what the user chose in Settings, then a machine-wide settings file, then
         // the built-in. The home file sits below the Settings screen deliberately: a global
@@ -84,7 +85,7 @@ public struct ComposerDefaults: Equatable {
             ),
             app: app,
             running: running,
-            codexModels: codexModels
+            models: models
         )
         return ComposerDefaults(
             // `resolved.model` rather than the string the file held. A settings file has to name a
@@ -99,9 +100,10 @@ public struct ComposerDefaults: Equatable {
             // is the whole point of settling the two together: Plan plus a Codex default used to
             // depend on the caller passing the right backend in, and the create window passed none.
             permissionMode: (hasWorktree
-                ? (app.planMode ? .plan : app.permissionMode)
+                ? (app.planMode && resolved.kind != .codex ? .plan : app.permissionMode)
                 : AskConversation.permissionMode).nearest(on: resolved.kind),
-            backend: resolved.kind
+            backend: resolved.kind,
+            interactionMode: hasWorktree && app.planMode && resolved.kind == .codex ? .plan : .build
         )
     }
 

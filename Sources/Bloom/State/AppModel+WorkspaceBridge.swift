@@ -297,7 +297,7 @@ extension AppModel {
     /// Keeps the backend and model one valid choice. Changing only the backend used to carry the
     /// caller's model across with it, which is how a Codex workspace was started with `opus`.
     private func workspaceControls(for order: AgentWorkspaceOrder, inheriting controls: ComposerControls) async throws -> ComposerControls {
-        try await BridgeWorkspaceControls.resolve(for: order, inheriting: controls)
+        try await BridgeWorkspaceControls.resolve(for: order, inheriting: controls, store: store)
     }
 
     // MARK: - Crew

@@ -32,6 +32,7 @@ enum ReviewRunProbe {
             await ReviewNavigationProbe.run(directory: directory, check: check)
         }
         if CommandLine.arguments.contains("--review-navigation-only") {
+            await ReviewWrappingProbe.run(check: check, save: { _, _ in })
             let result: JSONValue = .object([
                 "checks": .integer(checks), "passed": .bool(failures.isEmpty), "failures": .strings(failures),
             ])

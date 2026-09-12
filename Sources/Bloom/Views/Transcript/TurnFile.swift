@@ -1,10 +1,9 @@
 import Foundation
 import BloomCore
 
-/// A file a turn touched, with the line counts taken from the tool calls themselves.
+/// A file changed during a turn. Recorded snapshots supply net counts; old turns use tool calls.
 struct TurnFile: Identifiable, Hashable, Sendable {
-    /// Absolute, because that is what the agent wrote: Claude Code requires an absolute
-    /// `file_path` on every call. Nothing shows this to a reader; see `display(in:)`.
+    /// Snapshot paths are repository-relative; older tool events can carry absolute paths.
     var path: String
     var additions: Int
     var deletions: Int

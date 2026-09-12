@@ -23,10 +23,8 @@ import Synchronization
 ///
 /// # What it reports, and what it deliberately does not
 ///
-/// The root that changed, and nothing else. Not the file, not the kind of change: everything the
-/// app does with this is "ask git about that worktree", and git is the only thing here that can
-/// say what a change means. Reporting less is also what makes the coalescing safe, because two
-/// hundred writes inside one directory are one answer.
+/// By default, reports only the changed roots for git refreshes. Language-server clients can
+/// also request individual file events with `onFilesChanged`.
 ///
 /// `.git` is deliberately NOT excluded. A commit, a checkout, a stash and an index update all move
 /// what `git diff` says and all of them land in there, and a watcher that ignored it would leave
@@ -41,6 +39,7 @@ import Synchronization
 public final class WorktreeWatcher: Sendable {
     /// What a batch of file system events becomes: the worktree roots that changed.
     private let onChange: @Sendable (Set<String>) -> Void
+    private let onFilesChanged: (@Sendable ([(path: String, type: Int)]) -> Void)?
 
     /// How long FSEvents holds events back to coalesce them.
     ///
@@ -61,13 +60,16 @@ public final class WorktreeWatcher: Sendable {
         var matching: [String] = []
         /// Real path back to the spelling the caller uses.
         var origins: [String: String] = [:]
+        var metadata: [String: Set<String>] = [:]
     }
 
     private let watched = Mutex(Watched())
     private let queue = DispatchQueue(label: "be.spatie.bloom.worktree-watcher", qos: .utility)
 
-    public init(onChange: @escaping @Sendable (Set<String>) -> Void) {
+    public init(onFilesChanged: (@Sendable ([(path: String, type: Int)]) -> Void)? = nil,
+                onChange: @escaping @Sendable (Set<String>) -> Void) {
         self.onChange = onChange
+        self.onFilesChanged = onFilesChanged
     }
 
     deinit {
@@ -95,7 +97,8 @@ public final class WorktreeWatcher: Sendable {
             for root in wanted { origins[Self.resolve(root)] = root }
             state.origins = origins
             state.matching = Self.ordered(Array(origins.keys))
-            state.stream = wanted.isEmpty ? nil : makeStream(for: wanted)
+            state.metadata = Self.metadataRoots(for: wanted)
+            state.stream = wanted.isEmpty ? nil : makeStream(for: Array(Set(wanted + Array(state.metadata.keys))))
         }
     }
 
@@ -108,6 +111,7 @@ public final class WorktreeWatcher: Sendable {
             state.given = []
             state.matching = []
             state.origins = [:]
+            state.metadata = [:]
         }
     }
 
@@ -122,8 +126,7 @@ public final class WorktreeWatcher: Sendable {
             copyDescription: nil
         )
 
-        // `.fileEvents` is deliberately absent. Directory level events are what this reports
-        // anyway, and per-file events would be thousands of callbacks for one `npm install`.
+        // Only language-server watchers need individual files; diff refreshes use directories.
         // `.noDefer` makes the first event of a burst arrive at the start of the latency window
         // rather than the end, so a single save is seen a second sooner than a storm is.
         let flags = UInt32(
@@ -132,19 +135,21 @@ public final class WorktreeWatcher: Sendable {
                 | kFSEventStreamCreateFlagWatchRoot
         )
 
+        let fileFlags = onFilesChanged == nil ? UInt32(0) : UInt32(kFSEventStreamCreateFlagFileEvents)
         guard let stream = FSEventStreamCreate(
             kCFAllocatorDefault,
-            { _, info, count, paths, _, _ in
+            { _, info, count, paths, eventFlags, _ in
                 guard let info, count > 0 else { return }
                 let watcher = Unmanaged<WorktreeWatcher>.fromOpaque(info).takeUnretainedValue()
                 let changed = unsafeBitCast(paths, to: NSArray.self) as? [String] ?? []
                 watcher.report(changed)
+                watcher.reportFiles(changed, flags: Array(UnsafeBufferPointer(start: eventFlags, count: count)))
             },
             &context,
             roots as CFArray,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
             Self.latency,
-            flags
+            flags | fileFlags
         ) else { return nil }
 
         FSEventStreamSetDispatchQueue(stream, queue)
@@ -169,13 +174,81 @@ public final class WorktreeWatcher: Sendable {
     /// directory it watched when a root itself is moved or deleted, and a caller told about a
     /// worktree it does not have would ask git about a path that is not there.
     private func report(_ paths: [String]) {
-        let (matching, origins) = watched.withLock { ($0.matching, $0.origins) }
-        let changed = Self.roots(of: paths, in: matching).compactMap { origins[$0] }
+        let (matching, origins, metadata) = watched.withLock { ($0.matching, $0.origins, $0.metadata) }
+        // The main checkout's metadata is also inside a watched file root. Route those events
+        // only through the metadata filter, or ignored object writes would still wake it.
+        let files = paths.filter { path in
+            !metadata.keys.contains { path == $0 || path.hasPrefix($0 + "/") }
+        }
+        var changed = Set(Self.roots(of: files, in: matching).compactMap { origins[$0] })
+        changed.formUnion(Self.metadataWorktrees(changed: paths, metadata: metadata))
         guard !changed.isEmpty else { return }
-        onChange(Set(changed))
+        onChange(changed)
+    }
+
+    private func reportFiles(_ paths: [String], flags: [FSEventStreamEventFlags]) {
+        guard let onFilesChanged else { return }
+        let (matching, origins) = watched.withLock { ($0.matching, $0.origins) }
+        let changes = zip(paths, flags).compactMap { path, flags -> (path: String, type: Int)? in
+            let actual = Self.standardise(path)
+            guard let root = matching.first(where: { actual.hasPrefix($0 + "/") }), let origin = origins[root] else { return nil }
+            let given = origin + actual.dropFirst(root.count)
+            let exists = FileManager.default.fileExists(atPath: given)
+            let created = flags & UInt32(kFSEventStreamEventFlagItemCreated) != 0
+            return (given, exists ? (created ? 1 : 2) : 3)
+        }
+        if !changes.isEmpty { onFilesChanged(changes) }
     }
 
     // MARK: - The arithmetic, which is the part worth testing
+
+    static func metadataRoots(for roots: [String]) -> [String: Set<String>] {
+        var result: [String: Set<String>] = [:]
+        for root in roots {
+            guard let paths = Git.repositoryPaths(in: root) else { continue }
+            result[resolve(paths.gitDirectory), default: []].insert(root)
+            // A shared subscription covers packed refs and config as well as loose refs.
+            // The routing filter excludes object writes and hidden snapshot refs.
+            result[resolve(paths.commonDirectory), default: []].insert(root)
+        }
+        return result
+    }
+
+    static func metadataWorktrees(changed paths: [String], metadata: [String: Set<String>]) -> Set<String> {
+        var worktrees: Set<String> = []
+        let ordered = Self.ordered(Array(metadata.keys))
+        for path in paths {
+            // A per-worktree index is beneath the common directory. The most specific match
+            // belongs only to that worktree; common refs deliberately reach every sibling.
+            if let root = ordered.first(where: { path == $0 || path.hasPrefix($0 + "/") }) {
+                let relative = path == root ? "" : String(path.dropFirst(root.count + 1))
+                guard metadataAffectsWorktree(relative) else { continue }
+                worktrees.formUnion(metadata[root] ?? [])
+            }
+        }
+        return worktrees
+    }
+
+    private static func metadataAffectsWorktree(_ relative: String) -> Bool {
+        // Directory-level FSEvents can coalesce to an ancestor. An exact metadata root or
+        // refs parent cannot tell us which child changed, so invalidate conservatively.
+        let parts = relative.split(separator: "/").map(String.init)
+        guard let first = parts.first else { return true }
+        if first == "refs" {
+            guard parts.count > 1 else { return true }
+            return ["heads", "remotes", "tags"].contains(parts[1])
+        }
+        if first == "logs" {
+            guard parts.count > 1 else { return true }
+            return metadataAffectsWorktree(parts.dropFirst().joined(separator: "/"))
+        }
+        if first == "worktrees" { return parts.count == 1 }
+        return [
+            "HEAD", "index", "index.lock", "packed-refs", "packed-refs.lock", "config",
+            "config.worktree", "commondir", "gitdir", "shallow", "MERGE_HEAD", "REBASE_HEAD",
+            "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "rebase-apply", "rebase-merge", "sequencer",
+        ].contains(first)
+    }
 
     /// The roots a batch of changed paths belong to.
     ///

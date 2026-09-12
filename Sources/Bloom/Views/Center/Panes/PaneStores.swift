@@ -9,6 +9,7 @@ final class PaneStores {
     private var sourceFiles: [String: SourceEditorState] = [:]
 
     func sourceFile(_ path: String) -> SourceEditorState {
+        let path = URL(fileURLWithPath: path).standardizedFileURL.path
         if let state = sourceFiles[path] { return state }
         let state = SourceEditorState()
         sourceFiles[path] = state

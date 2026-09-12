@@ -193,16 +193,8 @@ public enum MenuBarSummary {
             ))
         }
 
-        let running = workspaces.filter { isRunning($0) && !isAwaitingPermission($0) }
-        if !running.isEmpty {
-            sections.append(Section(
-                heading: runningHeading,
-                symbolName: runningSymbol,
-                label: "Agent running",
-                workspaces: running
-            ))
-        }
-
+        // Finished before Running, which is the owner's order and the useful one: a finished
+        // workspace is a thing to go and read, and a running one is a thing to leave alone.
         let unread = workspaces.filter { DockBadge.hasUnreadResult($0, isRunning: isRunning) }
         if !unread.isEmpty {
             sections.append(Section(
@@ -210,6 +202,16 @@ public enum MenuBarSummary {
                 symbolName: unreadSymbol,
                 label: "Unread",
                 workspaces: unread
+            ))
+        }
+
+        let running = workspaces.filter { isRunning($0) && !isAwaitingPermission($0) }
+        if !running.isEmpty {
+            sections.append(Section(
+                heading: runningHeading,
+                symbolName: runningSymbol,
+                label: "Agent running",
+                workspaces: running
             ))
         }
 

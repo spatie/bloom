@@ -21,7 +21,8 @@ extension ComposerControls {
             codexContextWindow: codexContextWindow,
             // Read off the row rather than passed in, so the one caller that has a chat with no
             // worktree cannot forget to say so.
-            hasWorktree: session.workspaceID != nil
+            hasWorktree: session.workspaceID != nil,
+            interactionMode: session.interactionMode
         )
     }
 
@@ -43,7 +44,8 @@ extension ComposerControls {
             permissionMode: defaults.permissionMode,
             isFastMode: isFastMode,
             outputStyle: outputStyle,
-            codexContextWindow: codexContextWindow
+            codexContextWindow: codexContextWindow,
+            interactionMode: defaults.interactionMode
         )
     }
 

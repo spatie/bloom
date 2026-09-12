@@ -282,6 +282,57 @@ struct WorkspaceSourceTests {
         #expect(offered.search(query: "").settled(after: held, in: .newBranch)?.name == "main")
     }
 
+    // MARK: - Cutting from a branch that could have been opened
+
+    @Test("Cutting from a free branch offers to open that branch instead")
+    func offersToOpenAFreeBranch() {
+        let branch = ExistingBranch(name: "wip", isLocal: true)
+        let offer = offering(branches: [branch], baseBranches: ["main", "wip"]).carryOn(from: "wip")
+        #expect(offer?.source == .existingBranch(branch))
+        #expect(offer?.action == "Open wip instead")
+        #expect(offer?.sentence == "This cuts a new branch from wip.")
+    }
+
+    @Test("Cutting from the default branch, or from one nobody can open, offers nothing")
+    func offersNothingForTheOrdinaryCase() {
+        let offered = offering(
+            branches: [
+                ExistingBranch(name: "mine", isLocal: true, inUseBy: .projectCheckout(path: "/p")),
+                ExistingBranch(name: "theirs", isLocal: true, inUseBy: .otherWorktree(path: "/c")),
+            ],
+            baseBranches: ["main", "mine", "theirs"]
+        )
+        // `branches` never holds the default branch, so cutting from it is never second-guessed.
+        #expect(offered.carryOn(from: "main") == nil)
+        #expect(offered.carryOn(from: "") == nil)
+        // Git would refuse both, so offering them would be offering a refusal.
+        #expect(offered.carryOn(from: "mine") == nil)
+        #expect(offered.carryOn(from: "theirs") == nil)
+    }
+
+    @Test("A branch one of Bloom's workspaces holds offers to go there")
+    func offersTheWorkspaceHoldingTheBranch() {
+        let branch = ExistingBranch(name: "wip", isLocal: true, inUseBy: .workspace("Quiet Harbour"))
+        let offer = offering(branches: [branch], baseBranches: ["wip"]).carryOn(from: "wip")
+        #expect(offer?.source == .existingBranch(branch))
+        #expect(offer?.action == "Go to Quiet Harbour")
+    }
+
+    @Test("A pull request on the branch answers before the bare branch, and forks do not count")
+    func prefersThePullRequestOnTheBranch() {
+        let request = listing(number: 5, head: "fix-parser")
+        let offered = offering(pullRequests: [request], baseBranches: ["fix-parser"])
+        #expect(offered.carryOn(from: "fix-parser")?.source == .pullRequest(.listed(request)))
+        let checkedOut: [String: BranchHolder] = ["fix-parser": .projectCheckout(path: "/p")]
+        #expect(offered.carryOn(from: "fix-parser", holders: checkedOut) == nil)
+
+        let fork = PullRequestListing(
+            number: 6, title: "Patch", headRefName: "patch-1", baseRefName: "main",
+            isCrossRepository: true, headRepositoryOwner: "stranger"
+        )
+        #expect(offering(pullRequests: [fork], baseBranches: ["patch-1"]).carryOn(from: "patch-1") == nil)
+    }
+
     // MARK: - What the button says
 
     @Test("The button says 'on' for a checkout and 'from' for a new branch")

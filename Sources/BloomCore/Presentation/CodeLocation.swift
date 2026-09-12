@@ -12,6 +12,49 @@ public struct CodeLocation: Sendable, Hashable {
         self.column = max(1, column)
     }
 
+    public func displayPath(relativeTo root: String) -> String {
+        let prefix = URL(fileURLWithPath: root).standardizedFileURL.path + "/"
+        let normalised = (path as NSString).isAbsolutePath
+            ? URL(fileURLWithPath: path).standardizedFileURL.path : path
+        return normalised.hasPrefix(prefix) ? String(normalised.dropFirst(prefix.count)) : normalised
+    }
+
+    public static func suggestions(_ locations: [CodeLocation], root: String, ignored: Set<String>) -> [CodeLocation] {
+        var seen: Set<CodeLocation> = []
+        let unique = locations.filter { seen.insert($0).inserted }
+        func priority(_ location: CodeLocation) -> Int {
+            let path = location.displayPath(relativeTo: root)
+            let components = path.split(separator: "/")
+            if zip(components, components.dropFirst()).contains(where: { $0 == "vendor" && $1 == "_laravel_idea" }) { return 2 }
+            return ignored.contains(path) ? 1 : 0
+        }
+        return unique.enumerated().sorted {
+            let lhs = priority($0.element)
+            let rhs = priority($1.element)
+            return lhs == rhs ? $0.offset < $1.offset : lhs < rhs
+        }.map(\.element)
+    }
+
+    public static func suggestions(_ locations: [CodeLocation], root: String) async -> [CodeLocation] {
+        let paths = locations.map { $0.displayPath(relativeTo: root) }.filter { !($0 as NSString).isAbsolutePath }
+        let ignored = await Git.ignoredPaths(among: paths, in: root)
+        return suggestions(locations, root: root, ignored: ignored)
+    }
+
+    public func matchesSymbol(path: String, root: String, text: String, offset: Int) -> Bool {
+        guard displayPath(relativeTo: root) == CodeLocation(path: path).displayPath(relativeTo: root) else { return false }
+        let source = text as NSString
+        guard offset >= 0, offset < source.length else { return false }
+        let position = Self.position(in: text, offset: offset)
+        guard position.line == line else { return false }
+        let lineRange = source.lineRange(for: NSRange(location: offset, length: 0))
+        guard let regex = try? NSRegularExpression(pattern: #"[$\p{L}_][\p{L}\p{N}_]*"#) else { return false }
+        return regex.matches(in: text, range: lineRange).contains { match in
+            NSLocationInRange(offset, match.range)
+                && NSLocationInRange(lineRange.location + column - 1, match.range)
+        }
+    }
+
     public static func parse(_ reference: String) -> CodeLocation {
         let value = reference.trimmingCharacters(in: .whitespacesAndNewlines)
         let pattern = #"^(.*?)(?::(\d+)(?::(\d+))?|#L(\d+)(?:C(\d+))?(?:-L?\d+)?)$"#

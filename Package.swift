@@ -4,6 +4,9 @@ import PackageDescription
 import Foundation
 
 let serverTests = [
+    "SessionWireCompatibilityTests.swift",
+    "ShellCaptureTests.swift",
+    "ShellTests.swift",
     "AtomicCrewStartTests.swift",
     "BridgeDrainTests.swift",
     "CodexMcpResultTests.swift",
@@ -92,6 +95,7 @@ let package = Package(
         .executable(name: "Bloom", targets: ["Bloom"]),
         .executable(name: "bloom-bridge", targets: ["bloom-bridge"]),
         .executable(name: "bloom-server", targets: ["bloom-server"]),
+        .executable(name: "bloom-sleep-helper", targets: ["bloom-sleep-helper"]),
         .library(name: "BloomCore", targets: ["BloomCore"]),
     ],
     dependencies: [
@@ -146,6 +150,14 @@ let package = Package(
         .executableTarget(
             name: "bloom-server",
             dependencies: ["BloomCore"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        // The privileged daemon that turns the system sleep switch off for a Keep Awake session,
+        // which is the only way to hold a Mac open with the lid shut. No dependencies on purpose:
+        // it runs as root, so the less of Bloom is inside it the better. See its own file.
+        .executableTarget(
+            name: "bloom-sleep-helper",
+            path: "Sources/bloom-sleep-helper",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(

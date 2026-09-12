@@ -43,6 +43,12 @@ extension Identifier {
     public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 }
 
+/// A provider usage metric, stored as a stable provider/key layout identifier.
+public struct UsageMetricID: Identifier {
+    public let rawValue: String
+    public init(_ rawValue: String) { self.rawValue = rawValue }
+}
+
 /// A project in the sidebar. Also `permission_grants.repo_id`, which is why a grant made for one
 /// project cannot be read back for another.
 public struct RepoID: Identifier {

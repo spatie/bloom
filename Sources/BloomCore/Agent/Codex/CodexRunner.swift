@@ -25,6 +25,8 @@ public actor CodexRunner: SessionRunner {
     private var pumpTask: Task<Void, Never>?
     private var translation: CodexTranslation
     private var threadID: String?
+    private var isRewinding = false
+    private var planningRescanToken: String?
 
     /// What this project has already approved. One type for both backends: see `SessionGrants`.
     private let grants: SessionGrants
@@ -60,7 +62,9 @@ public actor CodexRunner: SessionRunner {
 
     private let pending = PendingAsks()
     private let handle = CodexTurnHandle()
-    private let sink = EventFanout<AgentEvent>()
+    private let sink = AgentPresentationFeed()
+    private var sendsInFlight = 0
+    private var wasEvicted = false
 
     /// Whether this run has already been stopped because its transcript was deleted underneath
     /// it. See `stopBecauseTheTranscriptWentAway`.
@@ -102,6 +106,7 @@ public actor CodexRunner: SessionRunner {
     // MARK: - SessionRunner
 
     public nonisolated var events: AsyncStream<AgentEvent> { sink.stream() }
+    public nonisolated var presentationFeed: AgentPresentationFeed? { sink }
 
     /// Whether the server process is still there, which on this backend is **not** whether a turn
     /// is running.
@@ -134,11 +139,49 @@ public actor CodexRunner: SessionRunner {
     /// sentence. See `AgentKind.acceptsMidTurnMessage` for why a message reaches here mid turn at
     /// all, and `steer(_:threadID:turnID:on:)` for the fall back when the turn has just ended.
     public func send(_ text: String, recording: Data? = nil) async throws {
+        try await send(text, recording: recording, deliveryID: nil, interactionMode: nil)
+    }
+
+    public func evictIfIdle(for duration: Duration) async -> Bool {
+        guard !wasEvicted, !isRewinding, sendsInFlight == 0, !session.state.isMidTurn,
+              session.agentSessionID != nil, pending.isEmpty, !sink.hasBackgroundWork else { return false }
+        let lastActivity = sink.lastActivity
+        guard lastActivity.duration(to: .now) >= duration,
+              let waiting = try? await store.pendingDeliveries(sessionID: session.id), waiting.isEmpty else { return false }
+        // Recheck after the store hop. A send or a native background event invalidates the lease.
+        guard sendsInFlight == 0, !session.state.isMidTurn, pending.isEmpty,
+              !sink.hasBackgroundWork, sink.lastActivity == lastActivity else { return false }
+        wasEvicted = true
+        terminateNow()
+        return true
+    }
+
+    public func sendDelivery(_ delivery: Delivery) async throws {
+        var mode = delivery.interactionMode
+        if mode == nil { mode = try await store.session(id: sessionID)?.interactionMode }
+        try await send(delivery.sent, recording: delivery.crewPayload,
+                       deliveryID: delivery.id, interactionMode: mode)
+    }
+
+    private func send(_ text: String, recording: Data?, deliveryID: DeliveryID?,
+                      interactionMode: InteractionMode?) async throws {
+        guard !wasEvicted else { throw ProviderIdleError.retired }
+        guard !isRewinding else { throw ConversationRewindError.busy }
+        sendsInFlight += 1
+        sink.noteActivity()
+        defer { sendsInFlight -= 1 }
         let generation = handle.generation
         let replacement = handle.prepareReplacement()
         defer { handle.finishReplacement(replacement) }
         let prompt = try await store.sideConversationTurn(text, sessionID: sessionID)
         await applyContextWindowChange()
+        let token = try await store.setting(CodexPlanningCapability.rescanKey)
+        if token != planningRescanToken, handle.turnID == nil {
+            // After updating the CLI, discovery must use the new executable rather than the
+            // old app-server process that intentionally survives between turns.
+            await dropConnection()
+            planningRescanToken = token
+        }
         try handle.check(generation)
         let client = try await connected()
         try handle.check(generation)
@@ -146,10 +189,8 @@ public actor CodexRunner: SessionRunner {
         try handle.check(generation)
         // One row, whichever it is, for the reason `AgentRunner.send` gives: the crew payload
         // already holds both renderings, and a user row beside it is the envelope back on screen.
-        if let recording {
-            await persist(kind: .crew, payload: recording)
-        } else {
-            await persist(kind: .user, payload: Self.userPayload(text))
+        if deliveryID == nil {
+            if let recording { await persist(kind: .crew, payload: recording) } else { await persist(kind: .user, payload: Self.userPayload(text)) }
         }
         try handle.check(generation)
 
@@ -160,21 +201,39 @@ public actor CodexRunner: SessionRunner {
         // Asked rather than left to the steer failing, because a state has to be guarded by asking:
         // a turn the server has been told to abandon is not a turn a message belongs in, whatever
         // the server answers about it.
+        if let deliveryID { try await store.beginDeliveryDispatch(id: deliveryID) }
         if let turnID = handle.steerableTurnID,
-           await steer(prompt, threadID: threadID, turnID: turnID, on: client) {
+           try await steer(prompt, threadID: threadID, turnID: turnID, on: client) {
+            if let deliveryID { try await store.acceptDelivery(id: deliveryID, providerTurnID: turnID) }
             return
         }
         try handle.check(generation)
 
-        let turn = try await client.startTurn(
-            threadID: threadID,
-            input: [.text(prompt)],
-            model: wireModel,
-            effort: session.effort,
-            approvalPolicy: Self.approvalPolicy(for: session.permissionMode),
-            sandboxPolicy: Self.sandboxPolicy(for: session.permissionMode, writableRoot: workspacePath),
-            approvalsReviewer: Self.approvalsReviewer(for: session.permissionMode)
-        )
+        let turn: CodexTurn
+        do {
+            turn = try await client.startTurn(
+                threadID: threadID,
+                input: [.text(prompt)],
+                model: wireModel,
+                effort: session.effort,
+                approvalPolicy: Self.approvalPolicy(for: session.permissionMode),
+                sandboxPolicy: Self.sandboxPolicy(for: session.permissionMode, writableRoot: workspacePath),
+                approvalsReviewer: Self.approvalsReviewer(for: session.permissionMode),
+                interactionMode: interactionMode ?? session.interactionMode
+            )
+        } catch {
+            if await client.planningIsSupported == false {
+                try? await store.setSetting(CodexPlanningCapability.unavailableKey, "1")
+            }
+            if let deliveryID, InteractionModeFailure.isDefinitiveTurnRejection(error) {
+                try await store.restoreDelivery(id: deliveryID)
+            }
+            throw error
+        }
+        if await client.planningIsSupported == false {
+            try? await store.setSetting(CodexPlanningCapability.unavailableKey, "1")
+        }
+        if let deliveryID { try await store.acceptDelivery(id: deliveryID, providerTurnID: turn.id) }
         guard handle.begin(turnID: turn.id, generation: generation) else {
             // Stop can arrive while turn/start is in flight, before there is an id to interrupt.
             // Do not resurrect that turn when the reply finally supplies its id.
@@ -205,7 +264,8 @@ public actor CodexRunner: SessionRunner {
     /// is expected to survive.
     public nonisolated func cancelNow() {
         let stopped = handle.markCancelled()
-        Task { await self.stopTurn(stopped) }
+        let children = childTurns.snapshot
+        Task { await self.stopTurn(stopped, children: children) }
     }
 
     /// Stop, as the button means it: file the questions and then interrupt the turn.
@@ -220,11 +280,16 @@ public actor CodexRunner: SessionRunner {
     /// Answered before the interrupt rather than after, for the reason `AgentRunner.cancelNow`
     /// gives: an answer written after the thing that closes the turn is an answer the model never
     /// receives.
-    private func stopTurn(_ stopped: CodexTurnHandle.Stopped) async {
+    private func stopTurn(_ stopped: CodexTurnHandle.Stopped, children: [String: String]) async {
+        let connection = client
+        async let family: Void = CodexFamilyStop.interrupt(children) { thread, turn, timeout in
+            try? await connection?.interruptTurn(threadID: thread, turnID: turn, timeout: timeout)
+        }
         if handle.generation == stopped.generation, handle.wasCancelled {
             await filePendingAsks()
         }
         await interrupt(stopped)
+        await family
     }
 
     /// Answers every question this turn can no longer answer, and files it as stopped.
@@ -273,7 +338,7 @@ public actor CodexRunner: SessionRunner {
         if handle.generation == stopped.generation, handle.wasCancelled,
            session.apply(.cancelled).moves { await save(session) }
         guard let client, let threadID, let target else { return }
-        try? await client.interruptTurn(threadID: threadID, turnID: target)
+        do { try await client.interruptTurn(threadID: threadID, turnID: target, timeout: .seconds(3)) } catch { client.terminateNow() }
     }
 
     /// Answer one question, as a person. The turn resumes on the other side of this line.
@@ -336,6 +401,9 @@ public actor CodexRunner: SessionRunner {
         // stored id on the session row makes that message a `thread/resume`, which is the whole
         // reason the id is on the row.
         threadID = nil
+        subagents = CodexSubagents()
+        childTurns.replace([:])
+        sink.noteProcessEnded()
         items.removeAll()
         pumpTask?.cancel()
         pumpTask = nil
@@ -522,6 +590,27 @@ public actor CodexRunner: SessionRunner {
     // MARK: - Events
 
     private var subagents = CodexSubagents()
+    private nonisolated let childTurns = CodexChildTurns()
+
+    public nonisolated var supportsConversationRewind: Bool { true }
+
+    public func rewind(beforeTurnID: String) async throws {
+        guard !isRewinding, sendsInFlight == 0, handle.turnID == nil,
+              pending.isEmpty, !sink.hasBackgroundWork else { throw ConversationRewindError.busy }
+        isRewinding = true
+        defer { isRewinding = false }
+        let connection = try await connected()
+        let thread = try await openThread(on: connection)
+        try await connection.rewindThread(threadID: thread, beforeTurnID: beforeTurnID)
+        items.removeAll()
+    }
+
+    public func containsTurn(_ turnID: String) async throws -> Bool {
+        guard sendsInFlight == 0, handle.turnID == nil, pending.isEmpty else { throw ConversationRewindError.busy }
+        let connection = try await connected()
+        let thread = try await openThread(on: connection)
+        return try await connection.threadContainsTurn(threadID: thread, turnID: turnID)
+    }
 
     public func subagentTranscript(for id: SubagentID) async -> SubagentTranscript? {
         guard let child = subagents.threadID(for: id), let client,
@@ -534,9 +623,27 @@ public actor CodexRunner: SessionRunner {
 
     private func handle(_ event: CodexEvent, connectionID: UUID) async {
         guard connectionID == self.connectionID else { return }
+        if case .itemCompleted(let item) = event, case .plan(let plan) = item.item,
+           item.threadID == threadID {
+            _ = try? await store.recordPlan(sessionID: session.id, sourceID: plan.id, markdown: plan.text)
+            // Saving a plan can suspend while a replacement connection takes over.
+            guard connectionID == self.connectionID else { return }
+        }
         if let threadID {
+            let previousChildTurns = subagents.liveTurns
             for signal in subagents.receive(event, parentThreadID: threadID) {
                 sink.yield(.subagent(signal))
+            }
+            childTurns.replace(subagents.liveTurns)
+            if handle.wasCancelled, let client {
+                let arrived = subagents.liveTurns.filter { previousChildTurns[$0.key] != $0.value }
+                if !arrived.isEmpty {
+                    Task {
+                        await CodexFamilyStop.interrupt(arrived) { child, turn, timeout in
+                            try? await client.interruptTurn(threadID: child, turnID: turn, timeout: timeout)
+                        }
+                    }
+                }
             }
             if let source = event.threadID, source != threadID {
                 // Child approvals still need an answer, but their prose, usage and completion
@@ -612,8 +719,9 @@ public actor CodexRunner: SessionRunner {
 
     private func emit(_ event: AgentEvent, endingTurn: String? = nil) async {
         let intent = handle.intent
+        var storedMessage: Message?
         if event.isTranscriptRow {
-            await persist(
+            storedMessage = await persist(
                 kind: event.kind,
                 payload: event.raw.isEmpty ? Data("{}".utf8) : event.raw,
                 refID: event.refID
@@ -647,7 +755,7 @@ public actor CodexRunner: SessionRunner {
         }
 
         if let endingTurn, !handle.acceptsTerminal(turnID: endingTurn, intent: intent) { return }
-        sink.yield(event)
+        sink.yield(event, messageSeq: storedMessage?.seq)
     }
 
     // MARK: - Asking
@@ -699,11 +807,12 @@ public actor CodexRunner: SessionRunner {
     /// this is reached.
     private func steer(
         _ text: String, threadID: String, turnID: String, on client: CodexClient
-    ) async -> Bool {
+    ) async throws -> Bool {
         do {
             _ = try await client.steerTurn(threadID: threadID, turnID: turnID, input: [.text(text)])
             return true
         } catch {
+            guard CodexSendRecovery.permitsNewTurn(after: error) else { throw error }
             Self.log.info("a message missed the turn it was steered into, so it starts one")
             return false
         }
@@ -784,9 +893,10 @@ public actor CodexRunner: SessionRunner {
         return Data(json.compactJSON.utf8)
     }
 
-    private func persist(kind: MessageKind, payload: Data, refID: String? = nil) async {
+    @discardableResult
+    private func persist(kind: MessageKind, payload: Data, refID: String? = nil) async -> Message? {
         do {
-            try await store.appendNext(
+            return try await store.appendNext(
                 sessionID: session.id,
                 kind: kind,
                 payload: payload,
@@ -794,6 +904,7 @@ public actor CodexRunner: SessionRunner {
             )
         } catch {
             await report("could not store a \(kind.rawValue) row", error)
+            return nil
         }
     }
 

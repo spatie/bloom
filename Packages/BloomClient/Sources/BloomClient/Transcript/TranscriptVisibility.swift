@@ -6,6 +6,12 @@ public enum TranscriptVisibility {
     private static let hookMarker = Data("\"hook_".utf8)
     private static let initMarker = Data("\"subtype\":\"init".utf8)
 
+    private static let backgroundWakeMarker = Data("\"subtype\":\"task_notification\"".utf8)
+
+    public static func isBackgroundWake(kind: String, payload: Data) -> Bool {
+        kind == "system" && payload.prefix(probeLength).range(of: backgroundWakeMarker) != nil
+    }
+
     public static func hidesNoise(kind: String, payload: Data) -> Bool {
         if kind == "notice" { return true }
         guard kind == "system" else { return false }
@@ -16,6 +22,7 @@ public enum TranscriptVisibility {
     public static func systemDrawsNothing(kind: String, payload: Data) -> Bool {
         guard kind == "system" else { return false }
         return payload.prefix(probeLength).range(of: initMarker) == nil
+            && !isBackgroundWake(kind: kind, payload: payload)
     }
 
     public static func isVisible(kind: String, payload: Data) -> Bool {

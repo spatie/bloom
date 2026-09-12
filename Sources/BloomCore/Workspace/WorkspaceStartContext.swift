@@ -78,8 +78,10 @@ extension WorkspaceCheckoutOptions {
         async let localListing = Git.branches(of: repoPath)
         async let remoteListing = Git.remoteBranches(of: repoPath)
         async let worktreeListing = Git.worktrees(of: repoPath)
+        async let remoteNamesRead = Git.remoteNames(of: repoPath)
         let local = (try? await localListing) ?? []
         let remote = (try? await remoteListing) ?? []
+        let remoteNames = (try? await remoteNamesRead) ?? []
         let branchesInUse = BranchHolder.byBranch(
             worktrees: (try? await worktreeListing) ?? [],
             projectPath: repoPath,
@@ -98,7 +100,8 @@ extension WorkspaceCheckoutOptions {
                     remote: remote,
                     defaultBranch: defaultBranch,
                     inUse: branchesInUse,
-                    pullRequestHeads: WorkspaceCheckoutPlan.heads(of: pullRequests)
+                    pullRequestHeads: WorkspaceCheckoutPlan.heads(of: pullRequests),
+                    remoteNames: remoteNames
                 ),
                 access: access,
                 failure: failure,

@@ -9,7 +9,7 @@ public enum WorkspaceRestoreRefusal: Error, CustomStringConvertible, Sendable {
     public var description: String {
         switch self {
         case .branchGone(let branch):
-            "the branch \(branch) no longer exists here or on \(Git.remote)"
+            "the branch \(branch) no longer exists here or on its configured remote"
         }
     }
 }
@@ -185,8 +185,10 @@ public extension WorkspaceManager {
     func restoreSource(workspace: Workspace, repo: Repo) async -> RestoreSource {
         if await Git.branchExists(workspace.branch, in: repo.path) { return .localBranch }
 
-        _ = await Git.fetch(workspace.branch, in: repo.path)
-        let ref = "refs/remotes/\(Git.remote)/\(workspace.branch)"
+        guard let context = try? await Git.repositoryContext(
+            in: repo.path, baseBranch: workspace.baseBranch, branch: workspace.branch
+        ), let remote = context.publishRemote, let ref = context.publishTrackingRef else { return .gone }
+        _ = await Git.fetch(workspace.branch, in: repo.path, remote: remote)
         let remoteRef = await Git.revision(of: ref, in: repo.path) == nil ? nil : ref
         return RestoreSource.of(hasLocalBranch: false, remoteRef: remoteRef)
     }
@@ -215,6 +217,16 @@ public extension WorkspaceManager {
     func restore(
         workspace: Workspace, repo: Repo, from source: RestoreSource
     ) async throws -> RestoreOutcome {
+        let repositoryKey = Git.repositoryPaths(in: repo.path)?.commonDirectory
+            ?? URL(fileURLWithPath: repo.path).resolvingSymlinksInPath().standardized.path
+        return try await WorktreeCutQueue.shared.cut(in: repositoryKey) {
+            try await rebuild(workspace: workspace, repo: repo, from: source)
+        }
+    }
+
+    private func rebuild(
+        workspace: Workspace, repo: Repo, from source: RestoreSource
+    ) async throws -> RestoreOutcome {
         guard source.canRebuild else {
             throw WorkspaceRestoreRefusal.branchGone(branch: workspace.branch)
         }
@@ -241,6 +253,7 @@ public extension WorkspaceManager {
 
         let settings = SettingsLoader.load(workspace: path, repo: repo.path)
         try copyFiles(settings.filesToCopy, from: repo.path, to: path)
+        let needsSetup = settings.setupScript != nil || Git.hasSubmodules(in: path)
 
         // Nothing is installed in this worktree, and the row has to say so.
         //
@@ -260,7 +273,7 @@ public extension WorkspaceManager {
         // for a turn to finish or a diff stat pass to land, and a restore that put the whole value
         // back would undo whatever they wrote.
         let updated = try await store.update(workspaceID: workspace.id) {
-            $0.restore(to: path, hasSetupScript: settings.setupScript != nil)
+            $0.restore(to: path, hasSetupScript: needsSetup)
         }
         guard let restored = updated else { throw WorkspaceError.workspaceGone(workspace.name) }
 

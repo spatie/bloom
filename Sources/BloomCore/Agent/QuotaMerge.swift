@@ -105,10 +105,11 @@ public enum QuotaFreshness: Sendable, Hashable {
 
     /// An age past which the panel starts saying how old a figure is.
     ///
-    /// Two poll intervals. One would flag every reading in the moments before its own refresh,
-    /// which is the panel calling normal operation stale; two means a figure is only ever marked
-    /// once a poll has actually been missed.
-    public static let threshold = QuotaPollSchedule.interval * 2
+    /// Three poll intervals, and never less than five minutes. One would flag every reading in the
+    /// moments before its own refresh, which is the panel calling normal operation stale. The
+    /// floor is what keeps that true at a one minute poll: a card is not "Outdated" because two
+    /// asks in a row were slow, it is outdated because nothing has answered for a while.
+    public static let threshold = max(300, QuotaPollSchedule.interval * 3)
 
     public static func of(_ observedAt: Date, at now: Date = Date()) -> QuotaFreshness {
         let age = now.timeIntervalSince(observedAt)

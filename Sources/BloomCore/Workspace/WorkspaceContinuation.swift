@@ -425,7 +425,9 @@ public extension WorkspaceManager {
             branch: workspace.baseBranch, in: workspace.path
         )
 
+        let context = try await Git.repositoryContext(in: workspace.path, baseBranch: workspace.baseBranch)
         try await Git.checkoutNewBranch(branch, at: resolved.revision, in: workspace.path)
+        try await Git.recordBase(context, for: branch, in: workspace.path)
 
         // The branch and the pull request it belonged to, and nothing else: `git checkout -b` ran
         // between the read and here.

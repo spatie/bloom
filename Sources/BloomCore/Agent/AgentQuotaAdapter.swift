@@ -7,7 +7,7 @@ import Foundation
 /// the type to `AgentQuotaAdapters.all`. Nothing else in Bloom changes: the store is keyed by
 /// provider and window key, the board groups by `AgentKind`, and the panel draws whatever it is
 /// given. A provider that publishes no allowance at all needs no adapter and is not an error; two
-/// of the four CLIs Bloom detects are exactly that, and they contribute nothing rather than
+/// of the CLIs Bloom detects are exactly that, and they contribute nothing rather than
 /// contributing a row that says "unknown".
 public protocol AgentQuotaAdapter: Sendable {
     static var provider: AgentKind { get }
@@ -107,9 +107,8 @@ public enum ClaudeCodeQuotaAdapter: AgentQuotaAdapter {
 /// duration. `secondary` is null on this account, which is why one window shows rather than two;
 /// a null slot is skipped rather than stored as an empty one.
 ///
-/// `credits`, `planType` and `spendControlReached` are read and deliberately dropped. Credits are
-/// a balance rather than a window, they have no reset time, and a panel about how close you are to
-/// a wall is the wrong place for a wallet.
+/// `credits` and `planType` are not windows, so they are not read here: they have no reset time
+/// and nothing to fill a meter against. `AgentAccountReader` reads them from the same bytes.
 public enum CodexQuotaAdapter: AgentQuotaAdapter {
     public static let provider = AgentKind.codex
 
@@ -118,8 +117,33 @@ public enum CodexQuotaAdapter: AgentQuotaAdapter {
         // the wire and under neither key once `CodexTranslation` has unwrapped it. Both spellings
         // are read because the fixtures carry the first and the runner produces the second.
         let codex = line["codex"] ?? line
-        guard let limits = codex["params"]?["rateLimits"] ?? codex["rateLimits"] else { return [] }
-        return ["primary", "secondary"].compactMap { slot in
+        let body = codex["params"] ?? codex["result"] ?? codex
+        guard let limits = body["rateLimits"] else { return [] }
+        return windows(in: limits, keyPrefix: "", nameSuffix: nil, at: now)
+            + extraLimits(in: body, besides: limits["limitId"]?.stringValue ?? "codex", at: now)
+    }
+
+    /// The limits Codex lists beside its own, which is where a model with an allowance of its own
+    /// sits: `rateLimitsByLimitId.codex_bengalfox`, named "GPT-5.3-Codex-Spark", with a five hour
+    /// and a weekly window of its own. They were read and dropped along with the rest of the
+    /// answer's extras; OpenUsage shows them as "Spark" and "Spark Weekly", behind the caret.
+    ///
+    /// Keyed `<limit id>.<slot>` so they cannot collide with the account's own `primary`, and so
+    /// `UsageCatalogue` can tell which limit a row belongs to. The limit's own entry in the map is
+    /// the snapshot already read above and is skipped.
+    static func extraLimits(in body: JSONValue, besides ownID: String, at now: Date) -> [AgentQuota] {
+        let extras = body["rateLimitsByLimitId"]?.objectValue ?? [:]
+        return extras.keys.sorted().filter { $0 != ownID }.flatMap { limitID -> [AgentQuota] in
+            guard let snapshot = extras[limitID], !snapshot.isNull else { return [] }
+            let name = snapshot["limitName"]?.stringValue
+                .flatMap { $0.split(separator: "-").last.map(String.init) }
+                ?? QuotaWindow.humanised(limitID)
+            return windows(in: snapshot, keyPrefix: "\(limitID).", nameSuffix: name, at: now)
+        }
+    }
+
+    static func windows(in limits: JSONValue, keyPrefix: String, nameSuffix: String?, at now: Date) -> [AgentQuota] {
+        ["primary", "secondary"].compactMap { slot in
             guard let window = limits[slot] else { return nil }
             // Only `usedPercent` is required on Codex's own `RateLimitWindow`. A rolling update
             // carrying a percentage and neither a length nor a reset time used to be declined
@@ -130,10 +154,12 @@ public enum CodexQuotaAdapter: AgentQuotaAdapter {
             let minutes = window["windowDurationMins"]?.doubleValue.flatMap { $0 > 0 ? $0 : nil }
             let measure: QuotaMeasure = window["usedPercent"]?.doubleValue
                 .map { .fraction($0 / 100) } ?? .unknown
+            var shape = minutes.map { QuotaWindow.lasting($0 * 60, key: keyPrefix + slot) }
+                ?? QuotaWindow(key: keyPrefix + slot, label: QuotaWindow.humanised(slot))
+            if let nameSuffix { shape.label += " (\(nameSuffix))" }
             return AgentQuota(
                 provider: provider,
-                window: minutes.map { QuotaWindow.lasting($0 * 60, key: slot) }
-                    ?? QuotaWindow(key: slot, label: QuotaWindow.humanised(slot)),
+                window: shape,
                 measure: measure,
                 resetsAt: window["resetsAt"]?.doubleValue.map { Date(timeIntervalSince1970: $0) },
                 observedAt: now
@@ -280,13 +306,18 @@ public enum ClaudeCodeUsageAdapter: AgentQuotaAdapter {
     /// against a monthly ceiling and the provider states neither a turnover instant nor a window.
     /// `QuotaBoard` sorts a window of unknown length last and `QuotaPace` declines to pace it, both
     /// of which are the right answers for a row that is money.
+    ///
+    /// **Both amounts arrive in minor units.** The CLI's own names for them are `usedCents` and
+    /// `spendLimitCents`, and they were read as whole pounds until a user on a £20.00 ceiling who
+    /// had spent £18.56 was told "£1,856.00 of £2,000.00". `utilization` agreed either way, which is
+    /// why the fraction looked right and nothing caught it.
     static func extraUsage(in limits: JSONValue, at now: Date) -> [AgentQuota] {
         guard let extra = limits["extra_usage"], extra["is_enabled"]?.boolValue == true else {
             return []
         }
-        let used = extra["used_credits"]?.doubleValue
-        let limit = extra["monthly_limit"]?.doubleValue
-        let currency = extra["currency"]?.stringValue ?? "USD"
+        let currency = (extra["currency"]?.stringValue ?? "USD").uppercased()
+        let used = extra["used_credits"]?.doubleValue.map { majorUnits($0, currency: currency) }
+        let limit = extra["monthly_limit"]?.doubleValue.map { majorUnits($0, currency: currency) }
         let measure: QuotaMeasure
         if let used {
             // The amounts when they are there, because "$17.20 of $50.00" is a thing somebody can
@@ -304,6 +335,15 @@ public enum ClaudeCodeUsageAdapter: AgentQuotaAdapter {
             resetsAt: nil,
             observedAt: now
         )]
+    }
+
+    /// The currencies the CLI prints without dividing, because they have no minor unit. The list
+    /// is the CLI's own rather than `NumberFormatter`'s fraction digits, so Bloom and `/usage`
+    /// cannot disagree about one amount.
+    static let zeroDecimalCurrencies: Set<String> = ["JPY", "KRW", "VND"]
+
+    static func majorUnits(_ minor: Double, currency: String) -> Double {
+        zeroDecimalCurrencies.contains(currency) ? minor : minor / 100
     }
 
     /// ISO 8601, with and without fractional seconds, because a timestamp that gains milliseconds

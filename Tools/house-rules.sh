@@ -292,6 +292,9 @@ id_type_allowed_files=(
   'Sources/BloomCore/Agent/Codex/CodexEvent.swift'   # the Codex app-server protocol
   'Sources/BloomCore/Agent/Codex/CodexTurnHandle.swift' # turn ids assigned by that server
   'Sources/BloomCore/Agent/Codex/CodexClient.swift'  # the same protocol's request envelopes
+  'Sources/BloomCore/Agent/Grok/GrokEvent.swift'     # Grok's ACP session and tool-call ids
+  'Sources/BloomCore/Agent/Grok/GrokClient.swift'    # the same protocol's request envelopes
+  'Sources/BloomCore/Agent/Grok/GrokRunner.swift'    # Grok session ids assigned by that server
   'Sources/BloomCore/Agent/AgentRetry.swift'   # the same stream-json, one line of it
 )
 # Names that are never a Bloom row, wherever they appear. This list should only
@@ -320,6 +323,8 @@ id_type_allowed_lines=(
   'Sources/BloomCore/Presentation/ChatFontCatalogue.swift'          # a font family, which macOS names
   'Sources/BloomCore/Persistence/Settings.swift'                  # a run script named in settings
   'Sources/BloomCore/Agent/Codex/CodexModelCatalog.swift'         # a model name the CLI offers
+  'Sources/BloomCore/Agent/Grok/GrokModelCatalog.swift'           # a model name the CLI offers
+  'Sources/BloomCore/Agent/AgentModel.swift'                      # model and effort names the CLIs offer
   'Sources/BloomCore/System/EditorCatalog.swift'             # an application, by bundle id
   'Sources/Bloom/Views/Center/Composer/ComposerOption.swift'   # a picker entry, "opus" and friends
   'Sources/Bloom/Views/Center/Panes/CenterTab.swift'       # a tab: a terminal row, a browser or the review pane
@@ -328,6 +333,13 @@ id_type_allowed_lines=(
   'Sources/Bloom/State/TranscriptModel.swift'         # payload ids, read straight off an event
   'Sources/BloomCore/GitHub/CheckFailureHandoff.swift'       # a GitHub Actions run and job, read out of a URL gh gave us
   'Sources/BloomCore/Presentation/SearchPanelListing.swift'  # a section heading key, not a row
+)
+# External tokens carried beside typed Bloom ids. Limit each exemption to its
+# property so adding another bare internal id in the same file still fails.
+id_type_allowed_properties=(
+  'Sources/BloomCore/Agent/Delivery.swift:providerTurnID'             # the provider's accepted turn, used for recovery
+  'Sources/BloomCore/Transcript/TurnCheckpoint.swift:providerTurnID' # the same provider turn correlated with a snapshot
+  'Sources/BloomCore/Agent/PlanArtefact.swift:sourceID'               # the provider's plan item or tool-use token
 )
 # A stored property whose name ends in ID or Ids and whose type is a bare
 # String. Trailing `{` is excluded by the `$` anchor, which is what leaves
@@ -342,6 +354,11 @@ while IFS= read -r hit; do
     [ "$file" = "$path" ] && allowed=1
   done
   for name in "${id_type_allowed_names[@]}"; do
+    case "$hit" in *" $name:"*|*" $name "*) allowed=1 ;; esac
+  done
+  for property in "${id_type_allowed_properties[@]}"; do
+    [ "$file" = "${property%:*}" ] || continue
+    name="${property##*:}"
     case "$hit" in *" $name:"*|*" $name "*) allowed=1 ;; esac
   done
   if [ "$allowed" -eq 0 ]; then

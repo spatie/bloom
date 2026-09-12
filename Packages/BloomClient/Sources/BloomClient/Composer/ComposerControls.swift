@@ -32,7 +32,10 @@ public struct ComposerControls: Equatable, Sendable, Codable {
     /// workspace start, and the app-wide "start in plan mode" default, which is chosen in Settings
     /// long before any backend is. See `PermissionMode.nearest(on:)` for where each one lands.
     public var agentKind: AgentKind {
-        didSet { permissionMode = permissionMode.nearest(on: agentKind) }
+        didSet {
+            permissionMode = permissionMode.nearest(on: agentKind)
+            interactionMode = interactionMode.nearest(on: agentKind)
+        }
     }
     /// The mode, which can never be one this backend does not have. Assigning one this backend
     /// has no row for lands it on the nearest mode that backend does have, by the same rule the
@@ -41,6 +44,8 @@ public struct ComposerControls: Equatable, Sendable, Codable {
     public var permissionMode: PermissionMode {
         didSet { permissionMode = permissionMode.nearest(on: agentKind) }
     }
+    public var interactionMode: InteractionMode
+    public var offersInteractionMode: Bool { InteractionMode.supports(agentKind) }
     public var isFastMode: Bool
     /// How the agent is asked to write, by name. `OutputStyle.defaultName` for "leave it alone",
     /// which is what a session is until somebody picks something else.
@@ -62,7 +67,8 @@ public struct ComposerControls: Equatable, Sendable, Codable {
         isFastMode: Bool = false,
         outputStyle: String = OutputStyle.defaultName,
         codexContextWindow: Int = CodexContextWindow.modelDefault,
-        hasWorktree: Bool = true
+        hasWorktree: Bool = true,
+        interactionMode: InteractionMode = .build
     ) {
         self.model = model
         self.effort = effort
@@ -75,10 +81,11 @@ public struct ComposerControls: Equatable, Sendable, Codable {
         self.outputStyle = outputStyle
         self.codexContextWindow = codexContextWindow
         self.hasWorktree = hasWorktree
+        self.interactionMode = interactionMode.nearest(on: agentKind)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case model, effort, agentKind, permissionMode, isFastMode, outputStyle, codexContextWindow, hasWorktree
+        case model, effort, agentKind, permissionMode, isFastMode, outputStyle, codexContextWindow, hasWorktree, interactionMode
     }
 
     /// Decoding must pass through the same permission invariant as local picker changes.
@@ -92,15 +99,15 @@ public struct ComposerControls: Equatable, Sendable, Codable {
             isFastMode: try values.decode(Bool.self, forKey: .isFastMode),
             outputStyle: try values.decode(String.self, forKey: .outputStyle),
             codexContextWindow: try values.decode(Int.self, forKey: .codexContextWindow),
-            hasWorktree: try values.decode(Bool.self, forKey: .hasWorktree)
+            hasWorktree: try values.decode(Bool.self, forKey: .hasWorktree),
+            interactionMode: try values.decodeIfPresent(InteractionMode.self, forKey: .interactionMode) ?? .build
         )
     }
 
     /// The modes this backend actually has.
     ///
-    /// Codex has no Plan. Its permission story is an approval policy crossed with a sandbox, and
-    /// there is nothing in that grid that means "work it out and do not touch anything". Offering
-    /// the mode anyway would be a control that silently does nothing.
+    /// Codex planning is a separate interaction mode, so its permission picker excludes the
+    /// legacy Plan permission used by the other providers.
     ///
     /// Claude Code has no Approve for me, and loses nothing by it: its own Auto mode is that mode
     /// under another name, so a second row would be two names for one `--permission-mode auto`.
@@ -108,7 +115,7 @@ public struct ComposerControls: Equatable, Sendable, Codable {
     public var availablePermissionModes: [PermissionMode] {
         switch agentKind {
         case .codex: PermissionMode.allCases.filter { $0 != .plan }
-        case .claudeCode, .cursor, .openCode: PermissionMode.allCases.filter { $0 != .autoReview }
+        case .claudeCode, .grok, .cursor, .openCode: PermissionMode.allCases.filter { $0 != .autoReview }
         }
     }
 

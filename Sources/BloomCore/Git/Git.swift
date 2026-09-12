@@ -62,70 +62,14 @@ public enum Git {
 
     /// Same contract as `run`, but stdout is not decoded. Used for the `-z` parsers.
     static func runRaw(_ arguments: [String], in directory: String) async throws -> GitOutput {
-        // The same gate `Shell.run` opens with, for the same caller: the refresh loop's deadline
-        // cancels a queue of these at once, and spawning git for a caller that has already given
-        // up would fork it and terminate it in the same breath.
-        try Task.checkCancellation()
-
-        guard let executable = Shell.which("git") else {
-            throw ShellError(command: "git", status: 127, stderr: "git not found on PATH")
-        }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        process.environment = Shell.environment(extra: [
+        let result = try await Shell.runBytes("git", arguments, cwd: directory, env: [
             "GIT_TERMINAL_PROMPT": "0",
             "GIT_OPTIONAL_LOCKS": "0",
         ])
-        process.currentDirectoryURL = URL(fileURLWithPath: directory)
-
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = errPipe
-
-        let collector = PipeCollector()
-        // Both pipes have to be drained while the process runs, or a large diff fills the buffer
-        // and git blocks forever on write. A reader thread per pipe rather than a
-        // `readabilityHandler`, because clearing the handler once the process exits can discard
-        // what the dispatch source had already buffered. That showed up as `git diff` returning
-        // nothing at all, which `changedFiles` would have reported as a clean worktree.
-        let out = try ProcessPipeReader(outPipe.fileHandleForReading)
-        let err = try ProcessPipeReader(errPipe.fileHandleForReading)
-        let outReader = Thread { collector.read(out, stdout: true) }
-        let errReader = Thread { collector.read(err, stdout: false) }
-        outReader.stackSize = 512 * 1_024
-        errReader.stackSize = 512 * 1_024
-
-        // Installed before `run()`, never after. See `ProcessExitGate`: a git call that finishes
-        // before the handler exists never calls it, and this wait would never end. Most git calls
-        // here pass no timeout, so nothing would break the hang afterwards either.
-        let exit = ProcessExitGate()
-        process.terminationHandler = { _ in exit.signal() }
-
-        try ProcessLaunch.run(process)
-        Shell.countSpawn()
-
-        outReader.start()
-        errReader.start()
-
-        await withTaskCancellationHandler {
-            await exit.wait()
-        } onCancel: {
-            if process.isRunning { process.terminate() }
-        }
-
-        // Exit does not mean the output is complete. Both pipes have to reach EOF first.
-        await collector.waitForEOF()
-        try? outPipe.fileHandleForReading.close()
-        try? errPipe.fileHandleForReading.close()
-        try collector.checkReadErrors()
-
         return GitOutput(
-            status: process.terminationStatus,
-            stdout: collector.out,
-            stderr: String(decoding: collector.err, as: UTF8.self)
+            status: result.status,
+            stdout: result.stdout,
+            stderr: String(decoding: result.stderr, as: UTF8.self)
         )
     }
 
@@ -209,15 +153,9 @@ public enum Git {
     /// The branch a new workspace should be cut from. Prefers what origin points HEAD at, then
     /// the conventional names, then whatever is checked out.
     public static func defaultBranch(of repo: String) async throws -> String {
-        let remote = try await run(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], in: repo)
-        if remote.ok, case let value = remote.trimmed, value.hasPrefix("origin/") {
-            return String(value.dropFirst("origin/".count))
-        }
-        for candidate in ["main", "master", "develop"] {
-            let exists = try await run(["show-ref", "--verify", "--quiet", "refs/heads/\(candidate)"], in: repo)
-            if exists.ok { return candidate }
-        }
-        return try await currentBranch(of: repo) ?? "main"
+        let config = try await repositoryConfiguration(in: repo)
+        let branch = try await currentBranch(of: repo) ?? "HEAD"
+        return try await defaultBase(config: config, current: branch, in: repo)
     }
 
     public static func currentBranch(of path: String) async throws -> String? {
@@ -302,32 +240,35 @@ public enum Git {
     public static func baseline(_ base: String, in worktree: String) async throws -> String {
         try validate(ref: base, label: "base branch")
 
+        let context = try await repositoryContext(in: worktree, baseBranch: base)
         // No fingerprint means git could not be asked, so there is nothing to remember it under
         // and nothing to join: every such call resolves on its own.
-        guard let refs = await refPositions(base, in: worktree) else {
-            return try await resolveBaseline(base, in: worktree)
+        guard let refs = await refPositions(context, in: worktree) else {
+            return try await resolveBaseline(context, in: worktree)
         }
 
         return try await BaselineCache.shared.baseline(
             worktree: worktree, base: base, fingerprint: refs
         ) {
-            try await resolveBaseline(base, in: worktree)
+            try await resolveBaseline(context, in: worktree)
         }
     }
 
     /// Where the three refs are now, as one string. Nil when git could not be asked at all, which
     /// makes every call a miss rather than letting a broken repository share an entry with another.
-    private static func refPositions(_ base: String, in worktree: String) async -> String? {
-        let arguments = BaselineFingerprint.arguments(base: base, remote: remote)
+    private static func refPositions(_ context: GitRepositoryContext, in worktree: String) async -> String? {
+        let arguments = ["rev-parse", "--revs-only", "HEAD", context.baseBranch]
+            + [context.baseTrackingRef].compactMap { $0 }
         guard let result = try? await run(arguments, in: worktree), result.ok else { return nil }
         return BaselineFingerprint.make(result.stdout)
     }
 
-    private static func resolveBaseline(_ base: String, in worktree: String) async throws -> String {
+    private static func resolveBaseline(_ context: GitRepositoryContext, in worktree: String) async throws -> String {
+        let base = context.baseBranch
         let local = try? await mergeBase(base, in: worktree)
 
-        let tracking = "refs/remotes/\(remote)/\(base)"
-        guard await revision(of: tracking, in: worktree) != nil,
+        guard let tracking = context.baseTrackingRef,
+              await revision(of: tracking, in: worktree) != nil,
               let remoteSide = try? await mergeBase(tracking, in: worktree)
         else {
             // No remote-tracking copy, so the local answer is the only answer. Asking for it

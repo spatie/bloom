@@ -17,7 +17,9 @@ final class ComposerOptionsController: UITableViewController {
         guard let controls else { return [] }
         let preferences: [Row] = (controls.offersContextWindow ? [.context] : [])
             + (controls.offersFastMode ? [.fast] : []) + (controls.offersOutputStyle ? [.style] : [])
-        return [("Agent", [.model, .effort]), ("Access", [.permissions])]
+        let efforts = state?.choices.efforts(for: controls.agentKind, model: controls.model) ?? []
+        let agentRows: [Row] = [.model] + (efforts.isEmpty ? [] : [.effort])
+        return [("Agent", agentRows), ("Access", [.permissions])]
             + (preferences.isEmpty ? [] : [("Preferences", preferences)])
             + (hasPendingSave ? [("Unconfirmed changes", [.discard])] : [])
     }

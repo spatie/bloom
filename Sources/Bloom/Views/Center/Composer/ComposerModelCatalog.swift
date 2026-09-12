@@ -4,58 +4,67 @@ import BloomClient
 
 typealias ComposerModelSection = BloomClient.ComposerModelSection
 
-/// What the composer's model and effort menus offer, per backend.
-///
-/// Claude Code's four are a list in the source, because the CLI has nothing to ask. **Codex's are
-/// fetched**, because `model/list` is a real call that answers without an account, because each
-/// model brings its own set of reasoning efforts (six for `gpt-5.6-sol`, four for `gpt-5.5`), and
-/// because a list written down goes stale between releases: Conductor's hardcoded one still names
-/// `gpt-5.4`, which no longer exists, and has none of the three current models.
-///
-/// A shared object rather than state on the footer, because `ViewThatFits` builds that row three
-/// times and three copies would be three fetches. It starts empty and fills in, so a menu opened
-/// in the first second shows Claude Code's section alone rather than nothing, and the Codex
-/// section arrives without anything having to be reopened.
+/// The composer and Settings share one discovery state. Backend sources supply common model
+/// descriptions, so another fetched agent does not need its own array or loading branch here.
 @MainActor
 @Observable
 final class ComposerModelCatalog {
     static let shared = ComposerModelCatalog()
 
     private(set) var availableAgents: [AgentKind]?
-    private(set) var codexModels: [CodexModel] = []
+    private(set) var models: [AgentKind: [AgentModel]] = [:]
     private(set) var isLoading = false
-    /// Set when a fetch failed, so a menu can say why its section is short rather than pretending
-    /// the account has one model.
     private(set) var lastFailure: String?
 
-    private let catalog: CodexModelCatalog
+    private var sources: [AgentKind: AgentModelSource]
     private var loadTask: Task<Void, Never>?
+    private var loadGeneration = UUID()
 
-    init(catalog: CodexModelCatalog = CodexModelCatalog.live()) {
-        self.catalog = catalog
+    init(sources: [AgentKind: AgentModelSource] = AgentModelSource.live()) {
+        self.sources = sources
+    }
+
+    func configure(store: Store) {
+        Task { await ComposerPlanningSupport.shared.refresh(from: store) }
+        sources = AgentModelSource.live(store: store)
+        refresh()
     }
 
     func receive(_ models: [CodexModel], availableAgents: [AgentKind]? = nil) {
-        codexModels = models; self.availableAgents = availableAgents; lastFailure = nil
+        // Remote discovery is authoritative. An earlier local fetch must not replace it.
+        loadTask?.cancel()
+        loadTask = nil
+        loadGeneration = UUID()
+        sources = [:]
+        self.models = [.codex: models.map(\.agentModel)]
+        self.availableAgents = availableAgents
+        isLoading = false
+        lastFailure = nil
     }
 
     func offers(_ kind: AgentKind) -> Bool { availableAgents?.contains(kind) ?? true }
 
-    /// Fetches once, and again only after `refresh()`. Cheap to call on every menu appearance,
-    /// which is exactly how the footer calls it.
     func load() {
-        guard loadTask == nil, codexModels.isEmpty else { return }
+        guard loadTask == nil else { return }
+        let needed = AgentKind.runnable.filter { sources[$0] != nil && (models[$0] ?? []).isEmpty }
+        guard !needed.isEmpty else { return }
         isLoading = true
-        loadTask = Task { [catalog] in
-            do {
-                let models = try await catalog.pickerModels()
-                self.codexModels = models
-                self.lastFailure = nil
-            } catch {
-                // Not an alert. A model menu that cannot reach the CLI is a menu with one section
-                // in it, and the section that is there still works.
-                self.lastFailure = error.readableMessage
+        let generation = loadGeneration
+        loadTask = Task { [sources] in
+            var failure: String?
+            for kind in needed {
+                guard generation == self.loadGeneration else { return }
+                guard let source = sources[kind] else { continue }
+                do {
+                    let fetched = try await source.models()
+                    guard generation == self.loadGeneration else { return }
+                    self.models[kind] = fetched
+                } catch {
+                    if failure == nil { failure = error.readableMessage }
+                }
             }
+            guard generation == self.loadGeneration else { return }
+            self.lastFailure = failure
             self.isLoading = false
             self.loadTask = nil
         }
@@ -63,13 +72,21 @@ final class ComposerModelCatalog {
 
     func refresh() {
         loadTask?.cancel()
-        loadTask = nil
-        codexModels = []
-        Task { await catalog.invalidate(); load() }
+        loadGeneration = UUID()
+        let generation = loadGeneration
+        models = [:]
+        isLoading = true
+        loadTask = Task { [sources] in
+            for source in sources.values { await source.invalidate() }
+            guard generation == self.loadGeneration else { return }
+            self.loadTask = nil
+            self.isLoading = false
+            load()
+        }
     }
 
     private var choices: ComposerModelChoices {
-        ComposerModelChoices(codexModels: codexModels, availableAgents: availableAgents)
+        ComposerModelChoices(models: models, availableAgents: availableAgents)
     }
 
     func sections(includingCurrent current: String, on kind: AgentKind) -> [ComposerModelSection] {

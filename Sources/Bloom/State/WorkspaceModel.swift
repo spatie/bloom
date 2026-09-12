@@ -154,6 +154,10 @@ final class WorkspaceModel {
         set { WorkspacePullRequests.shared.set(newValue, for: workspace.id) }
     }
 
+    var pullRequestRefreshFailure: GitHubReadFailure? {
+        WorkspacePullRequests.shared.failure(for: workspace.id)
+    }
+
     var isLoadingPullRequest = false
     /// Whether any refresh has come back for this workspace this launch, whatever it said.
     ///
@@ -322,7 +326,7 @@ final class WorkspaceModel {
     private var arrivalTask: Task<Void, Never>?
 
     private var changesTask: Task<Result<ChangesAnswer, GitFailure>, Never>?
-    private var pullRequestTask: Task<PullRequest?, Never>?
+    private var pullRequestTask: Task<PullRequestRead, Never>?
     /// One repository settings read at a time. A request that arrives during a read is remembered,
     /// so the burst ends with one fresh read rather than silently keeping the older answer.
     @ObservationIgnored private var settingsRefresh = RefreshDemand()
@@ -330,6 +334,12 @@ final class WorkspaceModel {
     /// A setup script can run for minutes (`composer install`, `npm ci`). Without a handle,
     /// archiving mid-setup cannot stop it and it outlives the app.
     private var setupTask: Task<Void, Never>?
+    /// The script alone, where `setupTask` is the script and whatever follows it. Stop cancels
+    /// this one, so the queue behind the run still drains; archiving and quitting cancel the
+    /// outer task, which reaches this through `stream`'s cancellation handler.
+    @ObservationIgnored private var setupRunTask: Task<Bool, Never>?
+    /// Set by `stopSetup`, so a run the reader stopped is not announced as a failed setup.
+    @ObservationIgnored private var setupWasStopped = false
 
     init(workspace: Workspace, app: AppModel) {
         self.workspace = workspace
@@ -446,6 +456,7 @@ final class WorkspaceModel {
             session.effort = controls.effort
             session.agentKind = controls.agentKind
             session.permissionMode = controls.permissionMode
+            session.interactionMode = controls.interactionMode
         }
         guard let stored = try? await store.upsert(session) else { return nil }
         if let controls { await controls.store(sessionID: stored.id, in: store) }
@@ -500,6 +511,10 @@ final class WorkspaceModel {
     /// Persist the replacement before stopping the old agent so a failed write leaves it usable.
     func replaceSession(_ session: Session, controls: ComposerControls) async -> Session? {
         guard !app.isArchiving(workspace.id), let store else { return nil }
+        guard !HistoryWorkspaceGate.shared.holds(workspace.id) else {
+            app.notice = BloomNotice(message: "Resolve the workspace's interrupted rewind before replacing a conversation.")
+            return nil
+        }
         do {
             let next = try await store.replaceWorkspaceConversation(id: session.id, controls: controls)
             transcripts.removeValue(forKey: session.id)?.teardown()
@@ -515,12 +530,21 @@ final class WorkspaceModel {
 
     func closeSession(_ session: Session) async {
         guard let store else { return }
+        guard !HistoryWorkspaceGate.shared.holds(workspace.id) else {
+            app.notice = BloomNotice(message: "Resolve the workspace's interrupted rewind before closing a conversation.")
+            return
+        }
+        do {
+            _ = try await store.update(sessionID: session.id) { $0.archivedAt = Date() }
+        } catch {
+            app.notice = BloomNotice(message: "Could not close the conversation: \(error.readableMessage)")
+            return
+        }
         transcripts[session.id]?.teardown()
         transcripts[session.id] = nil
         // Closing is one column. The strip's copy of this row can be a whole turn old, and the
         // runner has been writing the state, the counters and the agent session id into it all
         // the while.
-        _ = try? await store.update(sessionID: session.id) { $0.archivedAt = Date() }
         // The chat is over, so its bridge token is a token nothing may use again and the config
         // file carrying it is a dead letter. Nothing used to remove either, and the files are one
         // per session rather than one per instance, so they only ever grew.
@@ -985,14 +1009,14 @@ final class WorkspaceModel {
             SettingsLoader.load(workspace: workspacePath, repo: repoPath)
         }.value
 
-        if workspace.setupState == .pending, settings.setupScript != nil {
+        if workspace.setupState == .pending, settings.setupScript != nil || Git.hasSubmodules(in: workspace.path) {
             let succeeded = await stream(setupIn: repo, through: manager)
 
             // Archiving or quitting cancels this task. Starting an agent in a worktree that is on
             // its way out is the one thing that must not happen here.
             guard !Task.isCancelled else { return }
 
-            if !succeeded {
+            if !succeeded, !setupWasStopped {
                 // The one sentence every route says about a failed setup, rather than a second
                 // one written here that would drift from it. It names no tab, which is what makes
                 // it survive the tab it used to name. See `SetupFailure`.
@@ -1088,8 +1112,30 @@ final class WorkspaceModel {
     /// Setup tab, and the two had already drifted: only one of them cleared the exit status, so a
     /// re-run after a failure drew a red cross over a log that was still being written.
     @discardableResult
-    private func stream(setupIn repo: Repo, through manager: WorkspaceManager) async -> Bool {
+    private func stream(
+        setupIn repo: Repo, through manager: WorkspaceManager, operationLease: WorkspaceOperationLease? = nil
+    ) async -> Bool {
+        guard !HistoryWorkspaceGate.shared.holds(workspace.id),
+              let lease = operationLease ?? WorkspaceOperationLease.acquire(in: workspace.path, operation: .setup),
+              lease.isValid(in: workspace.path, operation: .setup) else {
+            operationLease?.release()
+            if operationLease != nil { isRunningSetup = false }
+            app.notice = BloomNotice(message: "Resolve the workspace's rewind before running setup.")
+            return false
+        }
         isRunningSetup = true
+        defer { isRunningSetup = false; lease.release() }
+        do {
+            guard let store = app.store,
+                  try await store.pendingCheckpointRewind(workspaceID: workspace.id) == nil else {
+                app.notice = BloomNotice(message: "Resolve the interrupted rewind before running setup.")
+                return false
+            }
+        } catch {
+            if !Task.isCancelled { app.notice = BloomNotice(message: "Bloom could not check this workspace's rewind state. Setup did not start.") }
+            return false
+        }
+        setupWasStopped = false
         setupStartedAt = .now
         setupDurationMS = nil
         setupExitStatus = nil
@@ -1112,14 +1158,25 @@ final class WorkspaceModel {
             }
         }
 
-        let succeeded = await manager.runSetup(
-            workspace: workspace, repo: repo, port: port,
-            onExit: { [weak self] status in
-                Task { @MainActor in self?.setupExitStatus = status }
+        let workspace = workspace
+        let port = port
+        let run = Task {
+            await manager.runSetup(
+                workspace: workspace, repo: repo, port: port, operationLease: lease,
+                onExit: { [weak self] status in
+                    Task { @MainActor in self?.setupExitStatus = status }
+                }
+            ) { line in
+                buffer.append(line)
             }
-        ) { line in
-            buffer.append(line)
         }
+        setupRunTask = run
+        let succeeded = await withTaskCancellationHandler {
+            await run.value
+        } onCancel: {
+            run.cancel()
+        }
+        if setupRunTask == run { setupRunTask = nil }
 
         flusher.cancel()
         appendSetupOutput(buffer.drain())
@@ -1140,7 +1197,7 @@ final class WorkspaceModel {
     /// that there is no script here to run.
     var setupRunOffer: SetupRunOffer? {
         SetupRunOffer.offer(
-            hasSetupScript: repo != nil && settings.setupScript != nil,
+            hasSetupScript: repo != nil && (settings.setupScript != nil || Git.hasSubmodules(in: workspace.path)),
             hasRunSetup: hasRunSetup,
             isRunning: isRunningSetup
         )
@@ -1176,15 +1233,33 @@ final class WorkspaceModel {
     /// Through the same `setupTask` the first run uses, so archiving or quitting stops a
     /// `composer install` started from here exactly as it stops one started at creation.
     func runSetupAgain() {
-        guard !app.isArchiving(workspace.id), canRunSetup, let repo, let manager = app.manager else { return }
+        guard !app.isArchiving(workspace.id), !HistoryWorkspaceGate.shared.holds(workspace.id),
+              canRunSetup, let repo, let manager = app.manager,
+              let lease = WorkspaceOperationLease.acquire(in: workspace.path, operation: .setup) else { return }
+        // The scheduled task has not run yet. Reserve now so a rewind cannot pass its idle
+        // check in the interval between this button action and the task's first instruction.
+        isRunningSetup = true
         setupTask?.cancel()
         setupGeneration += 1
         let generation = setupGeneration
         setupTask = Task { [weak self] in
-            await self?.stream(setupIn: repo, through: manager)
-            guard let self, self.setupGeneration == generation else { return }
+            guard let self else { lease.release(); return }
+            await self.stream(setupIn: repo, through: manager, operationLease: lease)
+            guard self.setupGeneration == generation else { return }
             self.setupTask = nil
         }
+    }
+
+    /// Stops the setup script that is running in this worktree.
+    ///
+    /// Only the script: whatever was waiting for setup to finish goes on as it would after a
+    /// failure, so a prompt queued behind a seeder that hangs reaches the agent rather than
+    /// sitting there until the workspace is archived. The run is filed as failed, which is what
+    /// puts "Run setup again" on its row. See `WorkspaceManager.setupStoppedNote`.
+    func stopSetup() {
+        guard isRunningSetup, let run = setupRunTask else { return }
+        setupWasStopped = true
+        run.cancel()
     }
 
     /// Re-reads what setup ended up as.
@@ -1840,7 +1915,7 @@ final class WorkspaceModel {
         let asked = workspace
 
         let task = Task.detached(priority: .utility) {
-            await GitHubBridge.pullRequest(for: asked, maxAge: maxAge)
+            await GitHubBridge.readPullRequest(for: asked, maxAge: maxAge)
         }
         pullRequestTask = task
         // Only before there has been any answer at all, for the same reason the changed file list
@@ -1852,7 +1927,7 @@ final class WorkspaceModel {
             isLoadingPullRequest = true
         }
 
-        let fresh = await task.value
+        let read = await task.value
 
         guard pullRequestTask == task, !task.isCancelled else { return }
         pullRequestTask = nil
@@ -1860,16 +1935,14 @@ final class WorkspaceModel {
         // workspace having been looked at, and the next refresh has an answer on screen to leave
         // alone. Only a superseded or cancelled refresh, which returns above, says nothing.
         hasReadPullRequest = true
-        // A nil is not written, and that is the rule the shared cache has always had: nil is "gh
-        // could not answer" at least as often as it is "there is no pull request", so a slow
-        // network or a rate limit would otherwise drop the mark back to a plain branch.
-        //
-        // It matters more now than it did. This used to write into a copy only the inspector
-        // read; it writes into the one cache the sidebar glyph, the Home rail and the title bar
-        // strip all read, so a nil from this poll would clear the mark in four places at once.
-        // The deliberate clear is `WorkspacePullRequests.forget`, which `adopt` calls when a
-        // merge moves the worktree to a fresh branch.
-        if let fresh, pullRequest != fresh { pullRequest = fresh }
+        // Failed refreshes retain the last good content. An explicit no-PR answer can now
+        // clear it, because the read result distinguishes absence from an unavailable service.
+        WorkspacePullRequests.shared.record(read, for: workspace.id)
+        guard case .current(let current) = read else {
+            isLoadingPullRequest = false
+            return
+        }
+        let fresh = current
         // The number, written where a deleted branch cannot take it. This is the path the band
         // polls on, so it is the one that fills the column in for a workspace whose pull request
         // an agent opened rather than the create sheet. See `Workspace.pullRequestNumber`.
@@ -1966,6 +2039,27 @@ final class WorkspaceModel {
         activeSessionID = session.id
         // No attachment. The pull request instructions are about opening a pull request, and
         // there is already one open by the time this button exists.
+        await transcript(for: session).submit(render.text)
+        return nil
+    }
+
+    /// Uses the same transcript and permission mode as the other pull request actions.
+    func requestMarkReadyForReview(
+        _ pullRequest: PullRequest,
+        overrides: PromptOverrides = PromptOverrides()
+    ) async -> String? {
+        guard pullRequest.isOpen, pullRequest.isDraft else {
+            return "This pull request is no longer an open draft."
+        }
+        guard let session = await sessionForPullRequest(titledIfNew: "Mark ready for review") else {
+            return "Could not open a session in \(workspace.name) to send the request to."
+        }
+
+        let render = PromptTemplate.render(
+            overrides.template(for: .markReadyForReview),
+            values: [PromptRegistry.MarkReadyForReview.url: pullRequest.url]
+        )
+        activeSessionID = session.id
         await transcript(for: session).submit(render.text)
         return nil
     }

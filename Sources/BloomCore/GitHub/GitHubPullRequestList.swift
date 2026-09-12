@@ -25,7 +25,7 @@ public extension GitHub {
     /// sentence.
     static func openPullRequests(repoPath: String, limit: Int = 30) async throws -> [PullRequestListing] {
         guard await isAvailable() else { return [] }
-        let result = try await Shell.run(
+        let result = try await run(
             "gh",
             ["pr", "list", "--state", "open", "--limit", String(limit), "--json", summaryFields],
             cwd: repoPath,
@@ -44,7 +44,7 @@ public extension GitHub {
     /// number reaches pull requests the list deliberately does not offer.
     static func pullRequestSummary(number: Int, repoPath: String) async throws -> PullRequestListing {
         guard number > 0 else { throw GitHubError("\(number) is not a pull request number") }
-        let result = try await Shell.run(
+        let result = try await run(
             "gh", ["pr", "view", String(number), "--json", summaryFields],
             cwd: repoPath,
             timeout: .seconds(20)
@@ -61,7 +61,11 @@ public extension GitHub {
 
     /// `owner/name` for the repository at `path`, or nil when it is not on GitHub.
     static func repositorySlug(repoPath: String) async -> String? {
-        guard let result = try? await Shell.run(
+        if let context = try? await Git.repositoryContext(in: repoPath),
+           let repository = repositorySpecifier(context.baseRemoteURL) {
+            return repository.split(separator: "/").dropFirst().joined(separator: "/")
+        }
+        guard let result = try? await run(
             "gh", ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
             cwd: repoPath,
             timeout: .seconds(20)
@@ -89,7 +93,7 @@ public extension GitHub {
         guard Git.isValidBranchName(localBranch) else {
             throw GitHubError("'\(localBranch)' is not a valid branch name")
         }
-        let result = try await Shell.run(
+        let result = try await run(
             "gh", ["pr", "checkout", String(number), "--branch", localBranch],
             cwd: worktree,
             // Longer than the twenty seconds every other gh call gets, because this one fetches

@@ -62,9 +62,9 @@ public struct DefaultBackend: Equatable, Sendable {
     public static func kind(
         ofModel model: String,
         running: AgentKind,
-        codexModels: [CodexModel]
+        models: [AgentKind: [AgentModel]] = [:]
     ) -> AgentKind {
-        ModelIdentifier.resolve(model, codexModels: codexModels).kind ?? running
+        ModelIdentifier.resolve(model, models: models).kind ?? running
     }
 
     /// The effort a model actually takes, which on Codex is the model's business and not ours.
@@ -77,11 +77,18 @@ public struct DefaultBackend: Equatable, Sendable {
         _ wanted: String,
         on kind: AgentKind,
         model: String,
-        codexModels: [CodexModel]
+        models: [AgentKind: [AgentModel]] = [:]
     ) -> String {
-        guard kind == .codex, let found = codexModels.first(where: { $0.id == model }) else {
-            return wanted
-        }
-        return found.resolvedEffort(preferring: wanted)
+        models[kind]?.first { $0.id == model }?.resolvedEffort(preferring: wanted) ?? wanted
+    }
+}
+
+public extension DefaultBackend {
+    static func kind(ofModel model: String, running: AgentKind, codexModels: [CodexModel]) -> AgentKind {
+        kind(ofModel: model, running: running, models: [.codex: codexModels.map(\.agentModel)])
+    }
+
+    static func effort(_ wanted: String, on kind: AgentKind, model: String, codexModels: [CodexModel]) -> String {
+        effort(wanted, on: kind, model: model, models: [.codex: codexModels.map(\.agentModel)])
     }
 }

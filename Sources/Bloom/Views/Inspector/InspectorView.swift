@@ -31,6 +31,25 @@ struct InspectorView: View {
                 InspectorNotice(notice: notice) { model.pullRequestNotice = nil }
                 Hairline()
             }
+            if let failure = model.pullRequestRefreshFailure {
+                VStack(alignment: .leading, spacing: InspectorLayout.tight) {
+                    Text(model.pullRequest == nil ? "GitHub could not refresh" : "Showing the last GitHub update")
+                        .font(Typo.captionEmphasis)
+                        .foregroundStyle(Palette.textPrimary)
+                    Text(failure.message).font(Typo.micro).foregroundStyle(Palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    if let retryAt = failure.retryAt {
+                        Text("Next refresh after \(retryAt.formatted(date: .omitted, time: .shortened))")
+                            .font(Typo.micro).foregroundStyle(Palette.textSecondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, InspectorLayout.inset)
+                .padding(.vertical, Metrics.spacing)
+                .accessibilityElement(children: .contain)
+                Hairline()
+            }
 
             // The tab row, and the boundary between it and the pane, as one band.
             //

@@ -70,12 +70,14 @@ public struct CodexModel: Sendable, Hashable, Identifiable, Codable {
 
     public var effortIDs: [String] { supportedEfforts.map(\.id) }
 
-    /// The effort to use when a session has one that this model does not take. Falls back to the
-    /// model's own default, which is why the default is carried rather than assumed to be "high".
+    public var agentModel: AgentModel {
+        AgentModel(id: id, displayName: displayName, isDefault: isDefault, hidden: hidden,
+                   supportedEfforts: supportedEfforts.map { AgentModelEffort(id: $0.id, label: $0.label) },
+                   defaultEffort: defaultEffort)
+    }
+
     public func resolvedEffort(preferring wanted: String) -> String {
-        if effortIDs.contains(wanted) { return wanted }
-        if !defaultEffort.isEmpty { return defaultEffort }
-        return effortIDs.first ?? ""
+        agentModel.resolvedEffort(preferring: wanted)
     }
 
     public static func decode(_ json: JSONValue) -> CodexModel? {

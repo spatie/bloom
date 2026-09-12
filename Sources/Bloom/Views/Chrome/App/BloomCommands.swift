@@ -361,6 +361,18 @@ struct BloomCommands: Commands {
             // hidden button and on a menu item is not a tie, the button wins and the item never
             // fires, so it has to be one or the other. Here it is the menu, which greys itself out
             // when there is nothing to step through and says the keys out loud.
+            MenuCommand(.fileBack) {
+                guard let workspace = model.selectedPaneModel else { return }
+                workspace.paneStores.sourceNavigation.move(-1, in: workspace)
+            }
+            .disabled(fileHistory?.canGoBack != true)
+
+            MenuCommand(.fileForward) {
+                guard let workspace = model.selectedPaneModel else { return }
+                workspace.paneStores.sourceNavigation.move(1, in: workspace)
+            }
+            .disabled(fileHistory?.canGoForward != true)
+
             MenuCommand(.nextChangedFile) { stepChangedFile(1) }
                 .disabled(!canStepChangedFiles)
 
@@ -925,6 +937,16 @@ struct BloomCommands: Commands {
     }
 
     // MARK: - Walking a review
+
+    private var fileHistory: SourceHistory? {
+        guard let workspace = model.selectedPaneModel,
+              let tab = workspace.paneStores.tabs.selectedTab(in: workspace),
+              case let .tool(id) = workspace.paneStores.tabs.content(
+                of: workspace.paneStores.tabs.focusedPane(of: tab), in: tab),
+              workspace.paneStores.center.tabs(for: workspace.workspace.id).contains(where: { $0.id == id && $0.kind == .review })
+        else { return nil }
+        return workspace.paneStores.sourceNavigation.histories[workspace.workspace.id]
+    }
 
     /// Greyed when there is no review open or nothing changed in the worktree, which is the state
     /// the two hidden buttons expressed by not existing.

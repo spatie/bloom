@@ -31,11 +31,26 @@ struct TurnFooterView: View {
     /// A turn that failed carries none of this. See `TranscriptModel.abandonRetryRun`.
     var recovered: RetryRun?
     var isRemote = false
+    /// What the agent left running in the background, named, or nothing.
+    ///
+    /// Only ever handed to the footer that closes the transcript. A turn that ends while a
+    /// backgrounded command is still going is not the agent being finished, and "Completed" on its
+    /// own, under a tab that is still breathing, is what made that look like a stuck turn. See
+    /// `BackgroundWork`.
+    var stillRunning: String?
+    var transcript: TranscriptModel?
 
     /// More chips than this and the footer stops being a footer.
     private static let visibleFileLimit = 6
 
     @State private var files: [TurnFile] = []
+    @State private var snapshotFailure: String?
+    @State private var historicalFile: TurnFile?
+
+    private var checkpoint: TurnCheckpoint? {
+        guard !isRemote else { return nil }
+        return transcript?.history.checkpoints.first { $0.endSeq == row.seq && $0.after != nil }
+    }
 
     var body: some View {
         // Read once for the pass, and handed down.
@@ -137,6 +152,7 @@ struct TurnFooterView: View {
                     Color.clear.frame(width: 0, height: 0)
                 }
 
+                if let transcript { TurnHistoryActions(transcript: transcript, endingAt: row.seq) }
                 CopyButton(text: answerText, title: "Copy this answer")
                     .disabled(answerText.isEmpty)
             }
@@ -178,6 +194,26 @@ struct TurnFooterView: View {
                 .padding(.bottom, TranscriptLayout.inset)
             }
 
+            if let snapshotFailure {
+                Text("Saved file summary unavailable")
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textSecondary)
+                    .help(snapshotFailure)
+                    .padding(.horizontal, TranscriptLayout.inset)
+                    .padding(.bottom, TranscriptLayout.inset)
+            }
+
+            // Secondary rather than tertiary: unlike the retry note below, this is news now, and it
+            // is the answer to why the tab is still busy.
+            if let stillRunning {
+                Text(stillRunning)
+                    .font(Typo.caption)
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, TranscriptLayout.inset)
+                    .padding(.bottom, TranscriptLayout.inset)
+            }
+
             // Tertiary rather than secondary, and under everything else: it explains a duration
             // somebody may go looking for, and it is not news the moment the turn lands.
             if let recovered {
@@ -189,7 +225,12 @@ struct TurnFooterView: View {
                     .padding(.bottom, TranscriptLayout.inset)
             }
         }
-        .task(id: row.seq) { await scanFiles() }
+        .task(id: "\(row.seq):\(checkpoint?.after?.id.rawValue ?? "legacy")") { await scanFiles() }
+        .sheet(item: $historicalFile) { file in
+            if let transcript, let checkpoint {
+                TurnSnapshotView(transcript: transcript, checkpoint: checkpoint, initialPath: file.path)
+            }
+        }
     }
 
     private static func durationLabel(outcome: TurnEnding, milliseconds: Int) -> String {
@@ -251,6 +292,24 @@ struct TurnFooterView: View {
     /// was a walk back over up to four hundred rows, decoding every one of them. See
     /// `TurnScanCache` for why the answer can be kept.
     private func scanFiles() async {
+        snapshotFailure = nil
+        if let transcript, let checkpoint, let snapshotID = checkpoint.after?.id {
+            if let known = TurnScanCache.files(snapshotID: snapshotID) {
+                files = known
+                return
+            }
+            do {
+                let changed = try await transcript.history.files(checkpoint, cwd: worktree)
+                guard !Task.isCancelled else { return }
+                files = changed.map { TurnFile(path: $0.path, additions: $0.additions, deletions: $0.deletions) }
+                TurnScanCache.remember(files, snapshotID: snapshotID)
+            } catch {
+                guard !Task.isCancelled else { return }
+                files = []
+                snapshotFailure = "Could not load the saved file summary: \(error)"
+            }
+            return
+        }
         if let known = TurnScanCache.files(rowID: row.id) {
             files = known
             return
@@ -258,6 +317,7 @@ struct TurnFooterView: View {
         let scanned = await Task.detached(priority: .utility) { [rows, seq = row.seq] in
             TurnScan.files(rows: rows, endingAt: seq)
         }.value
+        guard !Task.isCancelled else { return }
         TurnScanCache.remember(scanned, rowID: row.id)
         files = scanned
     }
@@ -267,7 +327,14 @@ struct TurnFooterView: View {
     private func fileChips(limit: Int) -> some View {
         HStack(spacing: TranscriptLayout.block) {
             ForEach(files.prefix(limit)) { file in
-                TurnFileChip(file: file, worktree: worktree, allowsLocalPreview: !isRemote)
+                if checkpoint != nil {
+                    Button { historicalFile = file } label: {
+                        TurnFileChip(file: file, worktree: worktree, previewsCurrentFile: false)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    TurnFileChip(file: file, worktree: worktree, previewsCurrentFile: !isRemote)
+                }
             }
             if files.count > limit {
                 Chip(text: "+\(files.count - limit) more")

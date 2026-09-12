@@ -150,6 +150,21 @@ public enum BridgeRegistration {
             + shellQuoted(attachment.shimPath)
     }
 
+    /// The same owner connection registered in Grok's user configuration.
+    ///
+    /// Measured against grok 1.0.24: `grok mcp add --scope user` writes `~/.grok/config.toml`,
+    /// `-e KEY=value` is repeatable, and everything after `--` is the server command. `--scope
+    /// user` is the load-bearing flag for the same reason Claude Code's is: `--scope project`
+    /// writes `./.grok/config.toml`, which is meant to be committed.
+    public static func ownerGrokAddCommand(_ attachment: BridgeAttachment) -> String {
+        let environment = attachment.environment
+            .sorted { $0.key < $1.key }
+            .map { "-e \(shellQuoted("\($0.key)=\($0.value)"))" }
+            .joined(separator: " ")
+        return "grok mcp add --scope user \(ownerServerName) \(environment) -- "
+            + shellQuoted(attachment.shimPath)
+    }
+
     /// A POSIX single quoted word. The one character that cannot appear inside single quotes is a
     /// single quote, which is closed, escaped and reopened in the usual way.
     static func shellQuoted(_ value: String) -> String {
@@ -238,6 +253,28 @@ public enum BridgeRegistration {
             "-c", "mcp_servers.\(serverName).args=[]",
             "-c", "mcp_servers.\(serverName).env={\(environment)}",
         ]
+    }
+
+    // MARK: Grok
+
+    /// What goes into ACP `session/new` / `session/resume` as `mcpServers`.
+    ///
+    /// ACP stdio servers take `env` as an array of `{name, value}` objects, not a map. Measured
+    /// against grok 1.0.24 `session/new`: an empty `mcpServers` still loads the user's own
+    /// servers from `~/.grok/config.toml`, so this list is additive the same way Claude Code's
+    /// `--mcp-config` file is. Nil attachment means no Bloom bridge, which is every test that
+    /// did not ask for one.
+    public static func grokServers(_ attachment: BridgeAttachment?) -> [JSONValue] {
+        guard let attachment else { return [] }
+        let environment = attachment.environment
+            .sorted { $0.key < $1.key }
+            .map { JSONValue.object(["name": .string($0.key), "value": .string($0.value)]) }
+        return [.object([
+            "name": .string(serverName),
+            "command": .string(attachment.shimPath),
+            "args": .array([]),
+            "env": .array(environment),
+        ])]
     }
 
     /// A TOML basic string. Every value here is a path or a hex token today, so nothing needs

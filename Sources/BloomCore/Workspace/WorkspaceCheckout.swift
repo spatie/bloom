@@ -131,19 +131,23 @@ public enum WorkspaceCheckoutPlan {
         remote: [String],
         defaultBranch: String,
         inUse: [String: BranchHolder] = [:],
-        pullRequestHeads: Set<String> = []
+        pullRequestHeads: Set<String> = [],
+        remoteNames: [String] = ["origin"]
     ) -> [ExistingBranch] {
         var byName: [String: Bool] = [:]
+        var remoteByName: [String: String] = [:]
         for name in local where !name.isEmpty { byName[name] = true }
         for reference in remote {
-            let name = remoteBranchName(reference)
+            let remote = remoteNames.sorted { $0.count > $1.count }.first { reference.hasPrefix($0 + "/") }
+            let name = remote.flatMap { remoteBranchName(reference, remote: $0) }
             guard let name, byName[name] == nil else { continue }
             byName[name] = false
+            remoteByName[name] = remote
         }
         byName[defaultBranch] = nil
         for name in pullRequestHeads { byName[name] = nil }
         return byName
-            .map { ExistingBranch(name: $0.key, isLocal: $0.value, inUseBy: inUse[$0.key]) }
+            .map { ExistingBranch(name: $0.key, isLocal: $0.value, inUseBy: inUse[$0.key], remoteName: remoteByName[$0.key]) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
@@ -162,11 +166,11 @@ public enum WorkspaceCheckoutPlan {
     /// Pull request heads are not dropped either, for the same reason: there is no pull request
     /// row here to offer instead.
     public static func everyBranch(
-        local: [String], remote: [String], inUse: [String: BranchHolder] = [:]
+        local: [String], remote: [String], inUse: [String: BranchHolder] = [:], remoteNames: [String] = ["origin"]
     ) -> [ExistingBranch] {
         // The empty string excludes nothing: `offeredBranches` drops the branch it is given as the
         // default, and no branch is called "". One merge rule, asked for twice.
-        offeredBranches(local: local, remote: remote, defaultBranch: "", inUse: inUse)
+        offeredBranches(local: local, remote: remote, defaultBranch: "", inUse: inUse, remoteNames: remoteNames)
     }
 
     /// The branches the offered pull requests are already speaking for.

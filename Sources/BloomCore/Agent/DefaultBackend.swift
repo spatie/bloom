@@ -10,15 +10,15 @@ extension DefaultBackend {
     ///   - model: the model actually in force, which is not always `app.model`: a repository's
     ///     settings file outranks the Models screen. See `ComposerDefaults.resolve`.
     ///   - running: the backend to keep when nothing recognises the model, which is question 3.
-    ///   - codexModels: what `model/list` last answered, empty when it has not answered yet.
+    ///   - models: the last fetched lists, empty when discovery has not answered yet.
     public static func resolve(
         model: String,
         effort: String,
         app: AppDefaults,
         running: AgentKind = .claudeCode,
-        codexModels: [CodexModel] = []
+        models: [AgentKind: [AgentModel]] = [:]
     ) -> DefaultBackend {
-        let identity = ModelIdentifier.resolve(model, codexModels: codexModels)
+        let identity = ModelIdentifier.resolve(model, models: models)
         let kind: AgentKind
         if identity.namesBackend, let named = identity.kind {
             kind = named
@@ -30,8 +30,17 @@ extension DefaultBackend {
         return DefaultBackend(
             kind: kind,
             model: identity.model,
-            effort: self.effort(effort, on: kind, model: identity.model, codexModels: codexModels)
+            effort: self.effort(
+                effort,
+                on: kind,
+                model: identity.model,
+                models: models
+            )
         )
     }
 
+    public static func resolve(model: String, effort: String, app: AppDefaults,
+                               running: AgentKind = .claudeCode, codexModels: [CodexModel]) -> DefaultBackend {
+        resolve(model: model, effort: effort, app: app, running: running, models: [.codex: codexModels.map(\.agentModel)])
+    }
 }

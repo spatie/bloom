@@ -72,6 +72,7 @@ public struct ExistingBranch: Sendable, Hashable, Identifiable, Codable {
     /// Whether there is a local `refs/heads` copy. False means the branch is only on the remote,
     /// which needs a tracking branch made for it rather than a plain checkout.
     public let isLocal: Bool
+    public let remoteName: String?
     /// What is already sitting on this branch, or nil when it is free.
     ///
     /// Carried on the branch rather than worked out by the picker, because the picker used to be
@@ -88,9 +89,10 @@ public struct ExistingBranch: Sendable, Hashable, Identifiable, Codable {
 
     public var id: String { name }
 
-    public init(name: String, isLocal: Bool, inUseBy: BranchHolder? = nil) {
+    public init(name: String, isLocal: Bool, inUseBy: BranchHolder? = nil, remoteName: String? = nil) {
         self.name = name
         self.isLocal = isLocal
+        self.remoteName = remoteName
         self.inUseBy = inUseBy
     }
 }

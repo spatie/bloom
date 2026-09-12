@@ -232,7 +232,7 @@ public final class BridgeServer: Sendable {
                 note("could not write the bridge config for \(session.id): \(error.readableMessage)")
                 return nil
             }
-        case .codex:
+        case .codex, .grok:
             return BridgeHandle(attachment: attachment, mcpConfigPath: nil)
         }
     }

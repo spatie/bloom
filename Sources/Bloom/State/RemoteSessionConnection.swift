@@ -11,7 +11,7 @@ final class RemoteSessionConnection {
     let sessionID: SessionID
     let workspace: Workspace
     var controls: ComposerControls
-    let models = ComposerModelCatalog()
+    let models = ComposerModelCatalog(sources: [:])
     let commands = SlashCommandCatalog()
     let styles = ComposerOutputStyleCatalog()
     private(set) var isPreparing = false

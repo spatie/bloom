@@ -13,12 +13,13 @@ final class SourceEditorState {
     var wraps = false
     var diffRow: String?
     var diffLine = 1
+    var diffRequest: CodeLocation?
+    var diffRevision = 0
     var line = 1
     var column = 1
     var request: CodeLocation?
     var revision = 0
     @ObservationIgnored var navigationTask: Task<Void, Never>?
-    var definitions: [CodeLocation] = []
     var message: String?
     var prefersEditing = false
     @ObservationIgnored weak var textView: CodeTextView?

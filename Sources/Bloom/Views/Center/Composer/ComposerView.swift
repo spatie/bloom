@@ -97,6 +97,8 @@ struct ComposerView: View {
             )
             .help("Drag to resize. Double-click to fit the text.")
 
+            TurnHistoryNotice(transcript: transcript)
+            ComposerPlansView(transcript: transcript, model: model, controls: controls)
             composer
         }
         // The chrome is whatever is left once the editor's share is taken off, so this settles on
@@ -169,6 +171,9 @@ struct ComposerView: View {
         .task(id: app.remoteServer.agentAuthenticationRevision) {
             guard app.remoteServer.agentAuthenticationRevision > 0 else { return }
             await transcript.remote?.refreshAuthentication()
+        }
+        .task(id: "planning:\(transcript.session.id):\(transcript.rows.last?.seq ?? -1)") {
+            if transcript.remote == nil, let store = app.store { await ComposerPlanningSupport.shared.refresh(from: store) }
         }
         .onChange(of: transcript.draft) { _, _ in scheduleDraftSave() }
         // Something put words in the box for the owner to carry on writing, which today is Edit on
@@ -335,6 +340,7 @@ struct ComposerView: View {
             || new.effort != session.effort
             || new.agentKind != session.agentKind
             || new.permissionMode != session.permissionMode
+            || new.interactionMode != session.interactionMode
         else { return }
 
         sessionEditor.apply {
@@ -342,6 +348,7 @@ struct ComposerView: View {
             $0.effort = new.effort
             $0.agentKind = new.agentKind
             $0.permissionMode = new.permissionMode
+            $0.interactionMode = new.interactionMode
         }
     }
 
@@ -707,7 +714,7 @@ struct ComposerView: View {
             model: session.model,
             on: session.agentKind,
             hasSpoken: hasSpoken,
-            codexModels: ComposerModelCatalog.shared.codexModels
+            models: ComposerModelCatalog.shared.models
         ) else { return }
 
         sessionEditor.apply {
@@ -796,7 +803,7 @@ struct ComposerView: View {
             // Everything else is decided by the model, including the permission mode, so "start in
             // plan mode" still cannot write Plan onto a Codex row.
             running: transcript.session.agentKind,
-            codexModels: ComposerModelCatalog.shared.codexModels
+            models: ComposerModelCatalog.shared.models
         )
 
         if appDefaults.fastMode != isFastMode {
@@ -838,7 +845,8 @@ struct ComposerView: View {
         if session.model != resolved.model
             || session.effort != resolved.effort
             || session.agentKind != resolved.backend
-            || session.permissionMode != resolved.permissionMode {
+            || session.permissionMode != resolved.permissionMode
+            || session.interactionMode != resolved.interactionMode {
             // The backend moves with the model, and it can only move here: this runs once, before
             // the chat has said anything, so there is no transcript in the old backend's
             // vocabulary and no thread on its server to strand. A chat that has spoken forks
@@ -848,6 +856,7 @@ struct ComposerView: View {
                 $0.effort = resolved.effort
                 $0.agentKind = resolved.backend
                 $0.permissionMode = resolved.permissionMode
+                $0.interactionMode = resolved.interactionMode
             }
         }
 

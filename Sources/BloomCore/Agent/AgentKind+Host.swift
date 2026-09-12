@@ -11,6 +11,7 @@ public extension AgentKind {
         switch self {
         case .claudeCode: return "\(home)/.claude/settings.json"
         case .codex: return "\(home)/.codex/config.toml"
+        case .grok: return "\(home)/.grok/config.toml"
         case .cursor: return "\(home)/.cursor"
         case .openCode: return "\(home)/.opencode"
         }
