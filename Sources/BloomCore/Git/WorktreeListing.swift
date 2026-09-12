@@ -63,6 +63,14 @@ public struct WorktreeEntry: Sendable, Hashable {
 }
 
 public enum WorktreeListing {
+    /// Git's NUL records preserve newlines in worktree paths and lock reasons. Keep the
+    /// textual entry point for older stored fixtures, but live listings always use bytes.
+    public static func parse(_ porcelain: Data) -> [WorktreeEntry] {
+        parseFields(porcelain.split(separator: 0, omittingEmptySubsequences: false).map {
+            String(decoding: $0, as: UTF8.self)
+        })
+    }
+
     /// Every worktree git listed, in the order it listed them, the main checkout first.
     ///
     /// Records are separated by a blank line, and a record is flushed on the next `worktree` line
@@ -75,6 +83,12 @@ public enum WorktreeListing {
     /// worktree under a folder with spaces in its name survives. Git does not quote paths in this
     /// format, which is why `-z` exists; nothing here can do better than git can.
     public static func parse(_ porcelain: String) -> [WorktreeEntry] {
+        parseFields(porcelain.components(separatedBy: "\n").map {
+            $0.hasSuffix("\r") ? String($0.dropLast()) : $0
+        })
+    }
+
+    private static func parseFields(_ fields: [String]) -> [WorktreeEntry] {
         var entries: [WorktreeEntry] = []
         var current: WorktreeEntry?
 
@@ -83,8 +97,7 @@ public enum WorktreeListing {
             current = nil
         }
 
-        for line in porcelain.components(separatedBy: "\n") {
-            let line = line.hasSuffix("\r") ? String(line.dropLast()) : line
+        for line in fields {
             if line.isEmpty {
                 flush()
             } else if let path = value(of: "worktree", in: line) {

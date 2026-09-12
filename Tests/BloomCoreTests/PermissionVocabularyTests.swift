@@ -161,7 +161,7 @@ struct PermissionVocabularyTests {
     /// Which backend that session is on used to be handed in by the caller. It is read off the
     /// default model now, which is the same question asked where it can actually be answered: see
     /// `DefaultBackend`, and `DefaultBackendTests` for the rest of that rule.
-    @Test("the app-wide plan default does not reach a Codex chat")
+    @Test("the app-wide plan default does not replace Codex permissions")
     func theDefaultLandsOnAModeTheBackendHas() {
         var claude = AppDefaults()
         claude.planMode = true
@@ -169,7 +169,9 @@ struct PermissionVocabularyTests {
 
         var codex = AppDefaults(model: "gpt-5.6-sol", backend: .codex)
         codex.planMode = true
-        #expect(ComposerDefaults.resolve(repo: RepoSettings(), app: codex).permissionMode == .auto)
+        let resolved = ComposerDefaults.resolve(repo: RepoSettings(), app: codex)
+        #expect(resolved.permissionMode == codex.permissionMode)
+        #expect(resolved.interactionMode == .plan)
     }
 
     /// The wire slugs are older than the labels over them and are grouped by on a chart, so the

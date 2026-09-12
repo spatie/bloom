@@ -29,6 +29,7 @@ struct AgentsSettingsView: View {
 
     var body: some View {
         Form {
+            ProviderIdleSettingsSection()
             Section {
                 // Plain labels. A segmented control paints its own text colour and takes either a
                 // title or an image per segment, so a coloured state dot cannot ride along inside

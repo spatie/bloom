@@ -223,7 +223,8 @@ extension WorkspaceManager {
                 // opened in this worktree afterwards picks its own, and two chats in one worktree
                 // can be on different ones.
                 agentKind: backend,
-                permissionMode: mode
+                permissionMode: mode,
+                interactionMode: controls?.interactionMode ?? .build
             ))
             // Fast mode and the output style have no column. Writing them here also marks the
             // session settled, which is what stops the composer's first-open defaults from

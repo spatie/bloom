@@ -243,16 +243,28 @@ extension Git {
     ) async throws -> String {
         if file.change == .untracked {
             let result = try await run(
-                ["diff", "--no-index", "--no-color", "--", "/dev/null", file.path], in: worktree
+                ["diff", "--no-index"] + patchOptions + ["--", "/dev/null", file.path], in: worktree
             )
             // --no-index exits 1 whenever there is a difference, which is the normal case here.
+            // Some Git versions also use exit 1 for a missing input. A real difference has
+            // patch output; an empty stdout accompanied by diagnostics is not an empty file.
+            guard result.status == 0 || result.status == 1,
+                  !(result.status == 1 && result.stdout.isEmpty && !result.stderr.isEmpty) else {
+                throw error(["diff", "--no-index"], result.status, result.stderr, result.stdout)
+            }
             return result.stdout
         }
         let mergeBase = try await revision(for: scope, base: base, in: worktree)
         return try await check(
-            ["diff", "--no-color", "-M", mergeBase, "--", file.path], in: worktree
+            literalPaths(["diff"] + patchOptions + ["-M", mergeBase, "--", file.path]), in: worktree
         ).stdout
     }
+
+    /// A patch is a data format here. Personal diff tools and text converters can replace it
+    /// with arbitrary output, while mnemonic prefixes change the paths the parser reads.
+    private static let patchOptions = [
+        "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/",
+    ]
 
     /// What a scope diffs against, resolved against this worktree.
     ///

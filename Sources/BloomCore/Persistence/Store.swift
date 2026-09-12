@@ -1064,6 +1064,22 @@ public actor Store {
                 END;
                 """)
             },
+            { db in
+                for (table, column, definition) in [
+                    ("sessions", "interaction_mode", "TEXT NOT NULL DEFAULT 'build'"),
+                    ("deliveries", "interaction_mode", "TEXT"),
+                    ("deliveries", "delivery_state", "TEXT NOT NULL DEFAULT 'pending'"),
+                    ("deliveries", "provider_turn_id", "TEXT"),
+                ] {
+                    let columns = Set(try db.query("PRAGMA table_info(\(table));").compactMap { $0.string("name") })
+                    if !columns.contains(column) {
+                        try db.execute("ALTER TABLE \(table) ADD COLUMN \(column) \(definition);")
+                        if column == "delivery_state" {
+                            try db.execute("UPDATE deliveries SET delivery_state = 'accepted' WHERE delivered_at IS NOT NULL;")
+                        }
+                    }
+                }
+            },
         ]
 
         let current = Int(try db.readUserVersion())
@@ -1211,7 +1227,18 @@ public actor Store {
     }
 
     public func deleteRepo(id: RepoID) throws {
+        try requireRepoCanBeRemoved(id: id)
         try db.run("DELETE FROM repos WHERE id = ?", [.text(id)])
+    }
+
+    public func requireRepoCanBeRemoved(id: RepoID) throws {
+        for workspace in try workspaces(repoID: id, includeArchived: true) {
+            try requireWorkspaceCanBeRemoved(id: workspace.id)
+        }
+    }
+
+    public func requireWorkspaceCanBeRemoved(id: WorkspaceID) throws {
+        guard try pendingCheckpointRewind(workspaceID: id) == nil else { throw WorkspaceError.recoveryPending }
     }
 
     // MARK: - Workspaces
@@ -1364,6 +1391,7 @@ public actor Store {
     }
 
     public func deleteWorkspace(id: WorkspaceID) throws {
+        try requireWorkspaceCanBeRemoved(id: id)
         try db.run("DELETE FROM workspaces WHERE id = ?", [.text(id)])
     }
 
@@ -1470,6 +1498,7 @@ public actor Store {
                     "SELECT 1 AS ok FROM workspaces WHERE id = ? AND state = 'archived'", [.text(id)]
                 ).first != nil
                 guard isArchived else { continue }
+                try requireWorkspaceCanBeRemoved(id: id)
 
                 try db.run(
                     "DELETE FROM drafts WHERE session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)",
@@ -1932,14 +1961,15 @@ public actor Store {
     /// before the agent answered takes resume with it.
     @discardableResult
     public func upsert(_ session: Session) throws -> Session {
+        if session.archivedAt != nil { try requireSessionCanClose(id: session.id) }
         try rememberImplementationMode(for: session)
         try db.run(
             """
             INSERT INTO sessions (
                 id, workspace_id, parent_session_id, side_conversation_parent_id, title, agent_session_id, model, effort,
-                agent_kind, permission_mode, state, sort_order, created_at, updated_at,
+                agent_kind, permission_mode, interaction_mode, state, sort_order, created_at, updated_at,
                 archived_at, last_read_seq, input_tokens, output_tokens, cost_usd, context_tokens
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 side_conversation_parent_id = excluded.side_conversation_parent_id,
                 title = excluded.title,
@@ -1948,6 +1978,7 @@ public actor Store {
                 effort = excluded.effort,
                 agent_kind = excluded.agent_kind,
                 permission_mode = excluded.permission_mode,
+                interaction_mode = excluded.interaction_mode,
                 state = excluded.state,
                 sort_order = excluded.sort_order,
                 updated_at = excluded.updated_at,
@@ -1965,7 +1996,7 @@ public actor Store {
                 .text(session.title),
                 session.agentSessionID.map { .text($0) } ?? .null,
                 .text(session.model), .text(session.effort), .text(session.agentKind.rawValue),
-                .text(session.permissionMode.rawValue),
+                .text(session.permissionMode.rawValue), .text(session.interactionMode.rawValue),
                 .text(session.state.rawValue), .int(Int64(session.sortOrder)),
                 .double(session.createdAt.timeIntervalSince1970),
                 .double(session.updatedAt.timeIntervalSince1970),
@@ -2021,6 +2052,7 @@ public actor Store {
         model: String? = nil,
         effort: String? = nil,
         permissionMode: PermissionMode? = nil,
+        interactionMode: InteractionMode? = nil,
         implementationMode: PermissionMode? = nil,
         /// Only ever set on a chat that has not spoken yet. Changing the backend of a chat that
         /// already has a message strands its transcript half in one vocabulary and half in the
@@ -2044,6 +2076,7 @@ public actor Store {
                 model = COALESCE(?, model),
                 effort = COALESCE(?, effort),
                 permission_mode = COALESCE(?, permission_mode),
+                interaction_mode = COALESCE(?, interaction_mode),
                 agent_kind = COALESCE(?, agent_kind),
                 updated_at = ?
             WHERE id = ?
@@ -2053,6 +2086,7 @@ public actor Store {
                 model.map { .text($0) } ?? .null,
                 effort.map { .text($0) } ?? .null,
                 permissionMode.map { .text($0.rawValue) } ?? .null,
+                interactionMode.map { .text($0.rawValue) } ?? .null,
                 agentKind.map { .text($0.rawValue) } ?? .null,
                 .double(Date().timeIntervalSince1970),
                 .text(id),
@@ -2086,7 +2120,14 @@ public actor Store {
     }
 
     public func deleteSession(id: SessionID) throws {
+        try requireSessionCanClose(id: id)
         try db.run("DELETE FROM sessions WHERE id = ?", [.text(id)])
+    }
+
+    public func requireSessionCanClose(id: SessionID) throws {
+        if let journal = try checkpointRewind(sessionID: id), journal.stage != .complete {
+            throw SnapshotFailure("Resolve this conversation's interrupted rewind before closing it.")
+        }
     }
 
     /// Any session left `running` or `waiting` when the app died is doing neither now.
@@ -2175,6 +2216,84 @@ public actor Store {
     }
 
     // MARK: - Messages
+
+    public func pendingCheckpointRewind(workspaceID: WorkspaceID) throws -> CheckpointRewind? {
+        for row in try db.query("SELECT id FROM sessions WHERE workspace_id = ?", [.text(workspaceID)]) {
+            guard let id = row.string("id"), let journal = try checkpointRewind(sessionID: SessionID(id)),
+                  journal.stage != .complete else { continue }
+            return journal
+        }
+        return nil
+    }
+
+    /// Persist the original transcript before either files or provider history can change.
+    /// No partial backup is accepted: a very large rewind fails before its destructive steps.
+    public func prepareTranscriptRewind(_ checkpoint: TurnCheckpoint) throws -> TranscriptRewindBackup {
+        let removed = try db.query(
+            "SELECT * FROM messages WHERE session_id = ? AND seq >= ? ORDER BY seq",
+            [.text(checkpoint.sessionID), .int(Int64(checkpoint.startSeq))]
+        ).map(Self.message(from:))
+        guard let first = removed.first, first.seq == checkpoint.startSeq, first.kind == .user else {
+            throw SnapshotFailure("The original user message is unavailable for this rewind.")
+        }
+        let backup = TranscriptRewindBackup(
+            checkpointID: checkpoint.id, messages: removed, prompt: UserTurnPrompt.text(in: first.payload),
+            originalDraft: try draft(sessionID: checkpoint.sessionID)
+        )
+        let encoded = try JSONEncoder().encode(backup)
+        guard encoded.count <= 50 * 1_024 * 1_024 else {
+            throw SnapshotFailure("This rewind exceeds the transcript backup limit. Choose a more recent message.")
+        }
+        try setSetting(TranscriptRewindBackup.key(sessionID: checkpoint.sessionID), String(decoding: encoded, as: UTF8.self))
+        return backup
+    }
+
+    public func transcriptRewindBackup(sessionID: SessionID) throws -> TranscriptRewindBackup? {
+        guard let value = try setting(TranscriptRewindBackup.key(sessionID: sessionID)) else { return nil }
+        return try JSONDecoder().decode(TranscriptRewindBackup.self, from: Data(value.utf8))
+    }
+
+    /// Provider confirmation is required. Transcript deletion, restored draft and the completed
+    /// journal commit together, so recovery never repeats the prompt or erases unconfirmed history.
+    @discardableResult
+    public func completeTranscriptRewind(sessionID: SessionID) throws -> String {
+        try db.transaction {
+            guard var journal = try checkpointRewind(sessionID: sessionID) else {
+                throw SnapshotFailure("The rewind recovery record is unavailable.")
+            }
+            if journal.stage == .complete { return try draft(sessionID: sessionID) }
+            guard journal.stage == .providerReverted,
+                  let backup = try transcriptRewindBackup(sessionID: sessionID),
+                  backup.checkpointID == journal.checkpoint.id else {
+                throw SnapshotFailure("The agent has not confirmed this rewind.")
+            }
+            let seq = journal.checkpoint.startSeq
+            for message in backup.messages where message.kind == .permissionAsk {
+                if let ask = PermissionAsk.decode(payload: message.payload) {
+                    try db.run("DELETE FROM permission_asks WHERE id = ? AND session_id = ?", [.text(ask.requestID), .text(sessionID)])
+                }
+            }
+            try db.run("DELETE FROM messages WHERE session_id = ? AND seq >= ?", [.text(sessionID), .int(Int64(seq))])
+            // These deliveries were sent. Detach deleted row references, never make them pending.
+            try db.run("UPDATE deliveries SET delivered_seq = NULL WHERE target_session_id = ? AND delivered_seq >= ?", [
+                .text(sessionID), .int(Int64(seq)),
+            ])
+            let current = try draft(sessionID: sessionID)
+            let restored = current.isEmpty ? backup.prompt : current + "\n\n" + backup.prompt
+            try saveDraft(sessionID: sessionID, body: restored)
+            try db.run("UPDATE sessions SET last_read_seq = MIN(last_read_seq, ?), context_tokens = 0 WHERE id = ?", [
+                .int(Int64(seq - 1)), .text(sessionID),
+            ])
+            // Retire row associations in this same transaction: after a crash, reused message
+            // sequence numbers must never inherit a diff belonging to the removed conversation.
+            let retired = try removeTurnCheckpoints(sessionID: sessionID, fromSeq: seq)
+            try queueRetiredCheckpoints(retired, sessionID: sessionID)
+            journal.stage = .complete
+            journal.failure = nil
+            try saveCheckpointRewind(journal)
+            return restored
+        }
+    }
 
     public func messages(sessionID: SessionID, afterSeq: Int = -1, limit: Int = 100_000) throws -> [Message] {
         try db.query(
@@ -2651,9 +2770,12 @@ public actor Store {
     /// Queue acceptance and draft removal either both commit or neither does. A newer saved
     /// draft belongs to the next message and must survive an earlier submission completing.
     @discardableResult
-    public func enqueueDelivery(_ delivery: Delivery, clearingDraftMatching draft: String?) throws -> Delivery {
+    public func enqueueDelivery(
+        _ delivery: Delivery, clearingDraftMatching draft: String?, sourcePlan: PlanArtefact? = nil
+    ) throws -> Delivery {
         try db.transaction {
             let queued = try enqueueDelivery(delivery)
+            if let sourcePlan { try queuePlanSource(sourcePlan, delivery: queued) }
             if let draft, try self.draft(sessionID: delivery.targetSessionID) == draft {
                 try saveDraft(sessionID: delivery.targetSessionID, body: "")
             }
@@ -2670,7 +2792,7 @@ public actor Store {
         try db.query(
             """
             SELECT * FROM deliveries
-            WHERE target_session_id = ? AND delivered_at IS NULL
+            WHERE target_session_id = ? AND delivery_state IN ('pending', 'uncertain')
             ORDER BY created_at, rowid
             """,
             [.text(sessionID)]
@@ -2683,12 +2805,16 @@ public actor Store {
     /// the ones on disk. Callers hold that id to cancel the row again.
     @discardableResult
     public func enqueueDelivery(_ delivery: Delivery) throws -> Delivery {
+        var delivery = delivery
+        if delivery.kind == .owner, delivery.interactionMode == nil {
+            delivery.interactionMode = try session(id: delivery.targetSessionID)?.interactionMode
+        }
         try db.run(
             """
             INSERT INTO deliveries
                 (id, target_session_id, source_workspace_id, kind, verdict, body, crew_payload,
-                 created_at, delivered_at, delivered_seq)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 created_at, delivered_at, delivered_seq, delivery_state, interaction_mode, provider_turn_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 .text(delivery.id),
@@ -2701,9 +2827,70 @@ public actor Store {
                 .double(delivery.createdAt.timeIntervalSince1970),
                 delivery.deliveredAt.map { .double($0.timeIntervalSince1970) } ?? .null,
                 delivery.deliveredSeq.map { .int(Int64($0)) } ?? .null,
+                .text(delivery.state.rawValue),
+                delivery.interactionMode.map { .text($0.rawValue) } ?? .null,
+                delivery.providerTurnID.map { .text($0) } ?? .null,
             ]
         )
         return delivery
+    }
+
+    /// Claim and transcript insertion share a transaction. Retrying the same delivery reuses
+    /// its message, so a crash or a lost acknowledgement cannot duplicate the user's words.
+    public func claimDelivery(id: DeliveryID) throws -> Bool {
+        try db.transaction {
+            guard let row = try db.query("SELECT * FROM deliveries WHERE id = ?", [.text(id)]).first,
+                  row.string("delivery_state") == "pending" else { return false }
+            let delivery = Self.delivery(from: row)
+            var seq = delivery.deliveredSeq
+            if seq == nil {
+                let payload = delivery.crewPayload ?? Data(JSONValue.object([
+                    "type": .string("user"),
+                    "message": .object(["role": .string("user"), "content": .array([
+                        .object(["type": .string("text"), "text": .string(delivery.body)]),
+                    ])]),
+                ]).compactJSON.utf8)
+                let next = try nextSeqLocked(sessionID: delivery.targetSessionID)
+                _ = try insert(Message(sessionID: delivery.targetSessionID, seq: next,
+                    kind: delivery.crewPayload == nil ? .user : .crew, payload: payload,
+                    createdAt: delivery.createdAt))
+                seq = next
+            }
+            try db.run("UPDATE deliveries SET delivery_state = 'claimed', delivered_seq = ? WHERE id = ?", [
+                seq.map { .int(Int64($0)) } ?? .null, .text(id),
+            ])
+            return true
+        }
+    }
+
+    /// Written before touching the provider. A crash from here on has an unknown outcome;
+    /// neither a timeout nor a restart is evidence that it is safe to send again.
+    public func beginDeliveryDispatch(id: DeliveryID) throws {
+        try db.run("UPDATE deliveries SET delivery_state = 'uncertain' WHERE id = ? AND delivery_state = 'claimed'", [.text(id)])
+        guard db.changedRowCount == 1 else { throw DeliveryDispatchError.notClaimed }
+    }
+
+    public func acceptDelivery(id: DeliveryID, providerTurnID: String? = nil) throws {
+        try db.transaction {
+            try db.run("UPDATE deliveries SET delivery_state = 'accepted', delivered_at = ?, provider_turn_id = ? WHERE id = ? AND delivery_state = 'uncertain'", [
+                .double(Date().timeIntervalSince1970), providerTurnID.map { .text($0) } ?? .null, .text(id),
+            ])
+            if db.changedRowCount == 1, let accepted = try delivery(id: id) { try acceptPlanSource(delivery: accepted) }
+        }
+    }
+
+    public func delivery(id: DeliveryID) throws -> Delivery? {
+        try db.query("SELECT * FROM deliveries WHERE id = ?", [.text(id)]).first.map(Self.delivery(from:))
+    }
+
+    /// Only claims known not to have reached dispatch are automatically made pending again.
+    /// Uncertain attempts remain visible and require an explicit resend.
+    public func recoverDeliveryClaims() throws {
+        try db.run("UPDATE deliveries SET delivery_state = 'pending' WHERE delivery_state = 'claimed'")
+    }
+
+    public func releaseDeliveryClaim(id: DeliveryID) throws {
+        try db.run("UPDATE deliveries SET delivery_state = 'pending' WHERE id = ? AND delivery_state = 'claimed'", [.text(id)])
     }
 
     /// Marks one as gone.
@@ -2718,7 +2905,7 @@ public actor Store {
     @discardableResult
     public func markDelivered(id: DeliveryID, seq: Int? = nil, at date: Date = Date()) throws -> Bool {
         try db.run(
-            "UPDATE deliveries SET delivered_at = ?, delivered_seq = ? WHERE id = ? AND delivered_at IS NULL",
+            "UPDATE deliveries SET delivered_at = ?, delivered_seq = ?, delivery_state = 'accepted' WHERE id = ? AND delivery_state = 'pending'",
             [.double(date.timeIntervalSince1970), seq.map { .int(Int64($0)) } ?? .null, .text(id)]
         )
         return db.changedRowCount == 1
@@ -2740,7 +2927,7 @@ public actor Store {
     /// in the gap, because there is no gap.
     @discardableResult
     public func cancelDelivery(id: DeliveryID) throws -> Bool {
-        try db.run("DELETE FROM deliveries WHERE id = ? AND delivered_at IS NULL", [.text(id)])
+        try db.run("DELETE FROM deliveries WHERE id = ? AND delivery_state IN ('pending', 'uncertain')", [.text(id)])
         return db.changedRowCount == 1
     }
 
@@ -2752,7 +2939,7 @@ public actor Store {
     /// than reading as sent.
     public func restoreDelivery(id: DeliveryID) throws {
         try db.run(
-            "UPDATE deliveries SET delivered_at = NULL, delivered_seq = NULL WHERE id = ?",
+            "UPDATE deliveries SET delivered_at = NULL, delivery_state = 'pending', provider_turn_id = NULL WHERE id = ?",
             [.text(id)]
         )
     }
@@ -3204,6 +3391,7 @@ public actor Store {
             next.effort = controls.effort
             next.agentKind = controls.agentKind
             next.permissionMode = controls.permissionMode
+            next.interactionMode = controls.interactionMode
             try upsert(next)
             for (key, value) in controls.settings(sessionID: next.id) {
                 try setSetting(key, value)
@@ -3227,6 +3415,7 @@ public actor Store {
             next.effort = controls.effort
             next.agentKind = controls.agentKind
             next.permissionMode = controls.permissionMode
+            next.interactionMode = controls.interactionMode
             try upsert(next)
             for (key, value) in controls.settings(sessionID: next.id) {
                 try setSetting(key, value)
@@ -3253,6 +3442,7 @@ public actor Store {
                 next.effort = controls.effort
                 next.agentKind = controls.agentKind
                 next.permissionMode = controls.permissionMode
+            next.interactionMode = controls.interactionMode
             }
             try upsert(next)
             if let controls {
@@ -3419,7 +3609,10 @@ public actor Store {
             crewPayload: row.data("crew_payload"),
             createdAt: row.date("created_at") ?? Date(),
             deliveredAt: row.date("delivered_at"),
-            deliveredSeq: row.int("delivered_seq").map(Int.init)
+            deliveredSeq: row.int("delivered_seq").map(Int.init),
+            state: Delivery.State(rawValue: row.string("delivery_state") ?? ""),
+            interactionMode: row.string("interaction_mode").flatMap(InteractionMode.init(rawValue:)),
+            providerTurnID: row.string("provider_turn_id")
         )
     }
 
@@ -3472,6 +3665,7 @@ public actor Store {
             // A row written before the column existed reads as Claude Code, which is what it was.
             agentKind: AgentKind(rawValue: row.string("agent_kind") ?? "") ?? .claudeCode,
             permissionMode: PermissionMode(rawValue: row.string("permission_mode") ?? "") ?? .acceptEdits,
+            interactionMode: InteractionMode(rawValue: row.string("interaction_mode") ?? "") ?? .build,
             state: SessionState(rawValue: row.string("state") ?? "idle") ?? .idle,
             sortOrder: Int(row.int("sort_order") ?? 0),
             createdAt: row.date("created_at") ?? Date(),

@@ -32,6 +32,30 @@ also what Conductor drives. The reasoning is repeated in the doc comment at the 
 
 ### The protocol describes itself
 
+Schema verification on 2026-09-12 used installed `codex-cli 0.153.4`, without sending a model
+turn. Its stable schema omits `turn/start.collaborationMode`; generating with `--experimental`
+includes `{ mode: "default" | "plan", settings: { model, reasoning_effort,
+developer_instructions } }`. Bloom now declares `experimentalApi: true` at initialise so the
+Plan/Build control can use this field. Planning is independent of approval policy and sandbox.
+Null developer instructions retain Codex's defaults. Build explicitly resets the collaboration
+mode to `default` after planning.
+
+For an older server, only an explicit invalid-parameters response naming `collaborationMode`
+permits one Build retry without that field. Plan instead reports that Codex must be updated or
+the mode switched to Build. A timeout, disconnect or internal error never takes this fallback.
+Learned lack of support is persisted and disables Plan in the composer and agent settings, with
+an explanation. Check Again resets discovery without sending a turn. The next idle send starts
+a fresh app-server process so it can use an updated executable instead of the older running copy.
+Fake-peer regressions cover the handshake, payload, field rejection and retained permissions;
+no paid end-to-end Plan turn was run for this change.
+
+The same installed version supports two conversation-history contracts. Bloom reads
+`thread.historyMode` first. Paginated threads use `thread/revert` with an exact `beforeTurnId`;
+legacy threads use the deprecated `thread/rollback` after locating that exact ID in their full
+turn list. Rewind status queries treat a failed or malformed read as unavailable, never as
+evidence that a turn disappeared. These history methods affect conversation context only.
+Bloom owns the independent file/index snapshots and recovery journal.
+
 ```
 codex app-server generate-json-schema --out <dir>
 ```

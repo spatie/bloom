@@ -343,7 +343,7 @@ final class AppModel {
     ///
     /// Outside observation for the same reason `lastDiffRefresh` is: nothing draws from it, and it
     /// is written by a background queue's hop onto this actor whenever an agent touches a file.
-    @ObservationIgnored private var changedWorkspaceIDs: Set<WorkspaceID> = []
+    @ObservationIgnored private var diffInvalidations = DiffRefreshInvalidations()
 
     /// The one watcher, over every active worktree. Built lazily so that a model made by a test or
     /// a probe with no workspaces at all never subscribes to anything.
@@ -396,6 +396,7 @@ final class AppModel {
             ComposerModelCatalog.shared.configure(store: store)
             self.manager = WorkspaceManager(store: store)
             try await store.resetRunningSessions()
+            try await store.recoverDeliveryClaims()
             // The questions those sessions were blocked on. A pending ask whose agent is gone is
             // not a question, it is a row with four live buttons that answer nothing, so they are
             // closed here and the rows that asked them say what happened instead. Bloom denies
@@ -874,7 +875,7 @@ final class AppModel {
     private func noteWorktreesChanged(_ paths: Set<String>) {
         let changed = workspaces.filter { paths.contains($0.path) }.map(\.id)
         guard !changed.isEmpty else { return }
-        changedWorkspaceIDs.formUnion(changed)
+        diffInvalidations.record(Set(changed))
     }
 
     /// - Returns: the workspaces this pass actually asked git about.
@@ -890,7 +891,7 @@ final class AppModel {
         // the backstop rotation comes round, which is what lets that rotation be slow. See
         // `WorktreeWatcher`.
         var busy = runningWorkspaceIDs
-        busy.formUnion(changedWorkspaceIDs)
+        busy.formUnion(diffInvalidations.pending)
         let due = Set(DiffRefreshSchedule.due(
             workspaces: workspaces.map(\.id),
             busy: busy,
@@ -907,6 +908,7 @@ final class AppModel {
         // remembered rather than pinning a path that no longer exists.
         let present = Set(workspaces.map(\.id))
         lastDiffRefresh = lastDiffRefresh.filter { present.contains($0.key) }
+        diffInvalidations.retain(present)
 
         let pending = workspaces.filter {
             // A worktree that has been removed outside Bloom would make git walk up to the parent
@@ -915,33 +917,33 @@ final class AppModel {
         }
 
         var refreshed: Set<WorkspaceID> = []
-        await withTaskGroup(of: WorkspaceID.self) { group in
+        await withTaskGroup(of: (WorkspaceID, UInt64, Bool).self) { group in
             var next = pending.startIndex
             var running = 0
             while next < pending.endIndex || running > 0 {
                 while running < DiffRefreshSchedule.width, next < pending.endIndex {
                     let workspace = pending[next]
+                    let generation = diffInvalidations.generation(for: workspace.id)
                     next = pending.index(after: next)
                     running += 1
                     // The deadline stays around each worktree rather than around the group, so one
                     // git blocked on an `index.lock` costs its own slot and nobody else's.
                     group.addTask {
-                        await Self.withTimeLimit(.seconds(5)) {
+                        let succeeded = await Self.withTimeLimit(.seconds(5)) {
                             await manager.refreshDiffStat(workspace: workspace)
                         }
-                        return workspace.id
+                        return (workspace.id, generation, succeeded)
                     }
                 }
-                guard let id = await group.next() else { break }
+                guard let (id, generation, succeeded) = await group.next() else { break }
                 running -= 1
+                diffInvalidations.finish(id, generation: generation, succeeded: succeeded)
                 // After the pass rather than before it, so a workspace whose git call took four
                 // seconds is not immediately due again on the next tick.
-                lastDiffRefresh[id] = Date()
-                // And it has now been asked about, so the watcher's report is spent. Anything that
-                // happened WHILE the pass ran is a fresh event and lands back in here behind us,
-                // which is the right answer: the numbers this pass read are already a moment old.
-                changedWorkspaceIDs.remove(id)
-                refreshed.insert(id)
+                if succeeded {
+                    lastDiffRefresh[id] = Date()
+                    refreshed.insert(id)
+                }
                 if Task.isCancelled {
                     group.cancelAll()
                     break
@@ -965,13 +967,14 @@ final class AppModel {
     /// actor it would hop back for the group's own bookkeeping, once per worktree, for nothing.
     private nonisolated static func withTimeLimit(
         _ limit: Duration,
-        _ work: @escaping @Sendable () async -> Void
-    ) async {
-        await withTaskGroup(of: Void.self) { group in
+        _ work: @escaping @Sendable () async -> Bool
+    ) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
             group.addTask { await work() }
-            group.addTask { try? await Task.sleep(for: limit) }
-            await group.next()
+            group.addTask { try? await Task.sleep(for: limit); return false }
+            let succeeded = await group.next() ?? false
             group.cancelAll()
+            return succeeded
         }
     }
 

@@ -27,6 +27,7 @@ public struct ComposerDefaults: Equatable {
     /// beside it, because a model id already names its backend: see `DefaultBackend` for the three
     /// questions and for why the one Settings recorded is asked first.
     public var backend: AgentKind = .claudeCode
+    public var interactionMode: InteractionMode = .build
 
     /// Pure, so the rules above can be checked without a store, a repository or a view.
     ///
@@ -98,9 +99,10 @@ public struct ComposerDefaults: Equatable {
             // is the whole point of settling the two together: Plan plus a Codex default used to
             // depend on the caller passing the right backend in, and the create window passed none.
             permissionMode: (hasWorktree
-                ? (app.planMode ? .plan : app.permissionMode)
+                ? (app.planMode && resolved.kind != .codex ? .plan : app.permissionMode)
                 : AskConversation.permissionMode).nearest(on: resolved.kind),
-            backend: resolved.kind
+            backend: resolved.kind,
+            interactionMode: hasWorktree && app.planMode && resolved.kind == .codex ? .plan : .build
         )
     }
 
