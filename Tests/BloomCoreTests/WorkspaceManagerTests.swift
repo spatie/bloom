@@ -329,7 +329,7 @@ struct WorkspaceManagerTests {
         #expect(stored.setupState == .failed)
         #expect(stored.setupLog.contains("seeding"))
         #expect(stored.setupLog.contains(WorkspaceManager.setupStoppedNote))
-        #expect(!TempRepo(existing: workspace.path).exists("finished.txt"))
+        #expect(!TempRepo(existing: workspace.path).exists("finished.txt"), Comment(rawValue: stored.setupLog))
     }
 
     @Test("a cancelled setup with a successful TERM handler is still filed as stopped", .tags(.subprocess), .timeLimit(.minutes(1)))

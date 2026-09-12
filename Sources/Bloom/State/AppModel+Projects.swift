@@ -121,6 +121,12 @@ extension AppModel {
     /// workspace whose row no longer exists is a second writer with nothing to write to.
     func removeRepository(_ repo: Repo) async {
         guard let store else { return }
+        do {
+            try await store.requireRepoCanBeRemoved(id: repo.id)
+        } catch {
+            alert = BloomAlert(title: "Could not remove the project", message: error.readableMessage)
+            return
+        }
 
         // Every model this project has, not only the rows the sidebar is drawing: `workspaces`
         // holds active ones, and an archived workspace that is still open in a tab has a model too.

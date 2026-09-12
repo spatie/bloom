@@ -414,7 +414,10 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     /// Every row that existed before this column defaults to Claude Code, because that is what
     /// every one of them was.
     public var agentKind: AgentKind {
-        didSet { permissionMode = permissionMode.nearest(on: agentKind) }
+        didSet {
+            permissionMode = permissionMode.nearest(on: agentKind)
+            interactionMode = interactionMode.nearest(on: agentKind)
+        }
     }
     /// How much this chat may do without asking.
     ///
@@ -429,6 +432,9 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     /// The two observers hold the pair legal whichever of them is written, and in whichever order,
     /// so `sessionEditor.apply` setting a backend and a mode in one block cannot land a
     /// combination that does not exist. Writing inside a `didSet` does not run the observer again.
+    public var interactionMode: InteractionMode {
+        didSet { interactionMode = interactionMode.nearest(on: agentKind) }
+    }
     public var permissionMode: PermissionMode {
         didSet { permissionMode = permissionMode.nearest(on: agentKind) }
     }
@@ -461,6 +467,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         effort: String = AppDefaults.fallbackEffort,
         agentKind: AgentKind = .claudeCode,
         permissionMode: PermissionMode = AppDefaults.fallbackPermissionMode,
+        interactionMode: InteractionMode = .build,
         state: SessionState = .idle,
         sortOrder: Int = 0,
         createdAt: Date = Date(),
@@ -484,6 +491,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         // Through the rule rather than straight in. See the property's own note: this is the one
         // door every `Session` comes through, the ones `Store` builds from a row included.
         self.permissionMode = permissionMode.nearest(on: agentKind)
+        self.interactionMode = interactionMode.nearest(on: agentKind)
         self.state = state
         self.sortOrder = sortOrder
         self.createdAt = createdAt
@@ -509,6 +517,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
         effort: String = AppDefaults.fallbackEffort,
         agentKind: AgentKind = .claudeCode,
         permissionMode: PermissionMode = AppDefaults.fallbackPermissionMode,
+        interactionMode: InteractionMode = .build,
         sortOrder: Int = 0,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
@@ -529,6 +538,7 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
             effort: effort,
             agentKind: agentKind,
             permissionMode: permissionMode,
+            interactionMode: interactionMode,
             state: .idle,
             sortOrder: sortOrder,
             createdAt: createdAt,

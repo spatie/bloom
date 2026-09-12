@@ -26,6 +26,7 @@ public protocol SessionRunner: Actor {
     /// stream each time because one shared stream lets the first consumer to walk away finish it
     /// for everybody.
     nonisolated var events: AsyncStream<AgentEvent> { get }
+    nonisolated var presentationFeed: AgentPresentationFeed? { get }
 
     /// Whether the backend process is still there.
     ///
@@ -36,6 +37,7 @@ public protocol SessionRunner: Actor {
     /// is open", so quit interrupted the turn, watched it close and concluded the process was gone
     /// while it was still running. One name, two facts, and the wrong one was being polled.
     var isProcessAlive: Bool { get }
+    func evictIfIdle(for duration: Duration) async -> Bool
 
     /// Write one turn. Starts whatever has to be started, on first use.
     ///
@@ -49,6 +51,10 @@ public protocol SessionRunner: Actor {
     /// record, once, and the runner writes one row either way. Never two: a turn is one message
     /// in the transcript whoever asked for it.
     func send(_ text: String, recording: Data?) async throws
+    func sendDelivery(_ delivery: Delivery) async throws
+    nonisolated var supportsConversationRewind: Bool { get }
+    func rewind(beforeTurnID: String) async throws
+    func containsTurn(_ turnID: String) async throws -> Bool
 
     /// Stop the turn now, from synchronous code that cannot wait for a turn on the actor. Which is
     /// exactly when the actor is least available, because it is busy running the thing being
@@ -74,6 +80,15 @@ public protocol SessionRunner: Actor {
 }
 
 extension SessionRunner {
+    public nonisolated var supportsConversationRewind: Bool { false }
+    public func rewind(beforeTurnID: String) async throws { throw ConversationRewindError.unsupported }
+    public func containsTurn(_ turnID: String) async throws -> Bool { throw ConversationRewindError.unsupported }
+    public func evictIfIdle(for duration: Duration) async -> Bool { false }
+    public nonisolated var presentationFeed: AgentPresentationFeed? { nil }
+    public func sendDelivery(_ delivery: Delivery) async throws {
+        try await send(delivery.sent, recording: delivery.crewPayload)
+    }
+
     /// The owner's own turn: what goes out is what is written down.
     ///
     /// An extension rather than a default argument on the requirement, because Swift does not

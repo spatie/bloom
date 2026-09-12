@@ -25,11 +25,11 @@ struct SetupRunConfirmationTests {
     func theTitleFollowsTheItem() {
         #expect(
             SetupRunConfirmation.question(hasRunSetup: true, isAgentRunning: false).title
-                == "Run the setup script again?"
+                == "Run setup again?"
         )
         #expect(
             SetupRunConfirmation.question(hasRunSetup: false, isAgentRunning: false).title
-                == "Run the setup script?"
+                == "Run setup?"
         )
     }
 

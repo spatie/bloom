@@ -119,6 +119,9 @@ public actor CodexClient {
     private var nextRequestID = 1
     private var pending: [CodexRequestID: CheckedContinuation<JSONValue, Error>] = [:]
     private var handshakeCompleted = false
+    private var collaborationModeSupported: Bool?
+    public var planningIsSupported: Bool? { collaborationModeSupported }
+    public func resetPlanningSupport() { collaborationModeSupported = nil }
     private var closedReason: String?
 
     /// stderr, kept short. It only ever surfaces when the process dies without answering, which is
@@ -200,9 +203,9 @@ public actor CodexClient {
                     "name": .string(configuration.clientName),
                     "version": .string(configuration.clientVersion),
                 ]),
-                // Experimental methods are not opted into: everything Bloom needs is in the stable
-                // surface, and opting in would mean fields that can change without notice.
-                "capabilities": .object(["experimentalApi": .bool(false)]),
+                // codex-cli 0.153.4 exposes collaborationMode only in its experimental schema.
+                // Opting in is required for the independent Plan/Build control to reach the wire.
+                "capabilities": .object(["experimentalApi": .bool(true)]),
             ])
         )
         notify("initialized", params: nil)
@@ -390,9 +393,14 @@ public actor CodexClient {
         effort: String? = nil,
         approvalPolicy: CodexApprovalPolicy? = nil,
         sandboxPolicy: JSONValue? = nil,
-        approvalsReviewer: CodexApprovalsReviewer? = nil
+        approvalsReviewer: CodexApprovalsReviewer? = nil,
+        interactionMode: InteractionMode? = nil
     ) async throws -> CodexTurn {
-        let result = try await send("turn/start", params: .object(omittingNil: [
+        if interactionMode == .plan, collaborationModeSupported == false {
+            throw InteractionModeFailure.unsupported
+        }
+        if interactionMode != nil, model?.isEmpty != false { throw InteractionModeFailure.missingModel }
+        var params = JSONValue.object(omittingNil: [
             "threadId": .string(threadID),
             "input": .array(input.map(\.json)),
             "model": model.map(JSONValue.string),
@@ -400,7 +408,23 @@ public actor CodexClient {
             "approvalPolicy": approvalPolicy.map { .string($0.rawValue) },
             "sandboxPolicy": sandboxPolicy,
             "approvalsReviewer": approvalsReviewer.map { .string($0.rawValue) },
-        ]))
+            "collaborationMode": collaborationModeSupported == false ? nil : interactionMode.flatMap { mode in
+                model.map { mode.codexSettings(model: $0, effort: effort) }
+            },
+        ])
+        let result: JSONValue
+        do {
+            result = try await send("turn/start", params: params)
+        } catch let rejection as CodexRPCError where CodexPlanningCapability.isUnsupportedField(rejection) {
+            // Invalid parameters are an explicit rejection before acceptance. No timeout,
+            // disconnect, internal error or accepted turn can enter this retry path.
+            collaborationModeSupported = false
+            guard interactionMode == .build else { throw InteractionModeFailure.unsupported }
+            var fields = params.objectValue ?? [:]
+            fields.removeValue(forKey: "collaborationMode")
+            params = .object(fields)
+            result = try await send("turn/start", params: params)
+        }
         return CodexTurn.decode(result["turn"] ?? .null, threadID: threadID, raw: Data())
     }
 
@@ -427,11 +451,92 @@ public actor CodexClient {
 
     /// Stops a running turn. Both ids are required: `turn/interrupt` with only a thread id is
     /// refused with "missing field `turnId`".
-    public func interruptTurn(threadID: String, turnID: String) async throws {
+    public func interruptTurn(
+        threadID: String, turnID: String, timeout: Duration = CodexClient.requestTimeout
+    ) async throws {
         _ = try await send("turn/interrupt", params: .object([
             "threadId": .string(threadID),
             "turnId": .string(turnID),
+        ]), timeout: timeout)
+    }
+
+    /// Both history contracts occur in installed codex-cli 0.153.4. A provider turn ID is an
+    /// exact boundary; counting Bloom rows would also count steering messages and retries.
+    public func rewindThread(threadID: String, beforeTurnID: String) async throws {
+        let metadata = try await send("thread/read", params: .object([
+            "threadId": .string(threadID), "includeTurns": .bool(false),
         ]))
+        guard metadata["thread"]?["id"]?.stringValue == threadID else {
+            throw ConversationRewindError.invalidHistory
+        }
+        let historyMode = metadata["thread"]?["historyMode"]?.stringValue
+        guard historyMode == nil || historyMode == "legacy" || historyMode == "paginated" else {
+            throw ConversationRewindError.invalidHistory
+        }
+        if historyMode == "paginated" {
+            _ = try await send("thread/revert", params: .object([
+                "threadId": .string(threadID), "beforeTurnId": .string(beforeTurnID),
+            ]))
+            return
+        }
+        let history = try await send("thread/read", params: .object([
+            "threadId": .string(threadID), "includeTurns": .bool(true),
+        ]))
+        guard history["thread"]?["id"]?.stringValue == threadID,
+              let turns = history["thread"]?["turns"]?.arrayValue,
+              turns.allSatisfy({ $0["id"]?.stringValue != nil }) else {
+            throw ConversationRewindError.invalidHistory
+        }
+        guard let index = turns.firstIndex(where: { $0["id"]?.stringValue == beforeTurnID }) else {
+            throw ConversationRewindError.missingTurn
+        }
+        _ = try await send("thread/rollback", params: .object([
+            "threadId": .string(threadID), "numTurns": .integer(turns.count - index),
+        ]))
+    }
+
+    public func threadContainsTurn(threadID: String, turnID: String) async throws -> Bool {
+        let metadata = try await send("thread/read", params: .object([
+            "threadId": .string(threadID), "includeTurns": .bool(false),
+        ]))
+        guard metadata["thread"]?["id"]?.stringValue == threadID else {
+            throw ConversationRewindError.invalidHistory
+        }
+        let historyMode = metadata["thread"]?["historyMode"]?.stringValue
+        guard historyMode == nil || historyMode == "legacy" || historyMode == "paginated" else {
+            throw ConversationRewindError.invalidHistory
+        }
+        if historyMode != "paginated" {
+            let history = try await send("thread/read", params: .object([
+                "threadId": .string(threadID), "includeTurns": .bool(true),
+            ]))
+            guard history["thread"]?["id"]?.stringValue == threadID,
+                  let turns = history["thread"]?["turns"]?.arrayValue,
+                  turns.allSatisfy({ $0["id"]?.stringValue != nil }) else {
+                throw ConversationRewindError.invalidHistory
+            }
+            return turns.contains { $0["id"]?.stringValue == turnID }
+        }
+        var cursor: String?
+        var seen = Set<String>()
+        for _ in 0..<1_000 {
+            let page = try await send("thread/turns/list", params: .object([
+                "threadId": .string(threadID), "limit": .integer(100),
+                "sortDirection": .string("asc"), "itemsView": .string("summary"),
+                "cursor": cursor.map(JSONValue.string) ?? .null,
+            ]))
+            guard let turns = page["data"]?.arrayValue,
+                  turns.allSatisfy({ $0["id"]?.stringValue != nil }), let next = page.objectValue?["nextCursor"] else {
+                throw ConversationRewindError.invalidHistory
+            }
+            if turns.contains(where: { $0["id"]?.stringValue == turnID }) { return true }
+            if next == .null { return false }
+            guard let value = next.stringValue, seen.insert(value).inserted else {
+                throw ConversationRewindError.invalidHistory
+            }
+            cursor = value
+        }
+        throw ConversationRewindError.invalidHistory
     }
 
     /// The models this account may use, with each one's own reasoning efforts.

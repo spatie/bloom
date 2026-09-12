@@ -10,7 +10,9 @@ public enum UserTurnPrompt {
     public static let summaryLimit = 180
 
     public static func text(in payload: Data) -> String {
-        guard let blocks = JSONValue.parse(payload)?["message"]?["content"]?.arrayValue else {
+        let content = JSONValue.parse(payload)?["message"]?["content"]
+        if let text = content?.stringValue { return text }
+        guard let blocks = content?.arrayValue else {
             return ""
         }
         return blocks.compactMap { $0["text"]?.stringValue }.joined(separator: "\n")

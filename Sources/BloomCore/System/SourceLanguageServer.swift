@@ -196,7 +196,7 @@ public actor SourceLanguageServer {
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
         // A crashed server must fail the request, never send SIGPIPE to the app.
-        _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        SystemCalls.configurePipeWrites(input.fileHandleForWriting.fileDescriptor)
         Shell.countSpawn()
         do { try process.run() } catch { stop(); throw error }
         reader = Task { [weak self] in

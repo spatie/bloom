@@ -90,6 +90,17 @@ public enum PendingMessageDiscard {
     /// which of the two it is decides the answer: handing the sentence back to the composer is a
     /// tidy-up, and losing minutes of thought is not, and a dialog that read the same either way
     /// would be teaching the owner to click through it.
+    public static func question(for delivery: Delivery, composerDraft: String) -> Question {
+        guard delivery.deliveredSeq != nil else {
+            return question(for: recovery(of: delivery, composerDraft: composerDraft))
+        }
+        return Question(
+            title: "Remove this retry reminder?",
+            message: "The message stays in the conversation. Removing this reminder does not stop any work the agent may already have started.",
+            confirmLabel: "Remove Reminder", cancelLabel: "Keep"
+        )
+    }
+
     public static func question(for recovery: Recovery) -> Question {
         let message =
             switch recovery {

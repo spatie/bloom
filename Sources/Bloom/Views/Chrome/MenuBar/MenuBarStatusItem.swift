@@ -319,75 +319,109 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
 
     // MARK: Keep Awake
 
+    /// Keep Awake, in the shape Amphetamine's menu has and the owner asked for: what is happening
+    /// now as a dimmed line nobody can click, then only the actions that apply to it, then the two
+    /// preferences behind their own submenu.
+    ///
+    /// **The checkmark row it replaces was three things at once.** "Keep Awake ✓ 29m left" was a
+    /// state, a setting and a command in one row, sitting in a flat list with two preferences, and
+    /// it read as four settings. Nothing here is two things: the line above says, the commands do,
+    /// and the submenu configures.
     private func keepAwakeItems() -> [NSMenuItem] {
         let keepAwake = KeepAwakeModel.shared
         let session = keepAwake.session
-        let remaining = session?.until.map { UsageFormat.compactDuration($0.timeIntervalSinceNow) }
-
-        let toggle = ClosureMenuItem(remaining.map { "Keep Awake (\($0) left)" } ?? KeepAwake.title) {
-            if keepAwake.isActive { keepAwake.stop() } else { keepAwake.start(for: nil) }
-        }
-        toggle.state = keepAwake.isActive ? .on : .off
-        toggle.toolTip = SleepPrevention.caveat
-
-        let durations = NSMenu()
-        durations.addItem(ClosureMenuItem("Indefinitely") { keepAwake.start(for: nil) })
-        durations.addItem(Self.submenu("Minutes", KeepAwake.minuteChoices.map { count in
-            ClosureMenuItem(KeepAwake.label(minutes: count)) { keepAwake.start(for: TimeInterval(count * 60)) }
-        }))
-        durations.addItem(Self.submenu("Hours", KeepAwake.hourChoices.map { count in
-            ClosureMenuItem(KeepAwake.label(hours: count)) { keepAwake.start(for: TimeInterval(count * 3600)) }
-        }))
-        durations.addItem(.separator())
-        durations.addItem(ClosureMenuItem("Until a Time\u{2026}") { Self.askForTime() })
-        let durationsItem = NSMenuItem(title: "Keep Awake For", action: nil, keyEquivalent: "")
-        durationsItem.submenu = durations
-
+        let isRunning = keepAwake.isActive
         let defaults = UserDefaults.standard
-        let whileRunning = ClosureMenuItem(SleepPrevention.menuItemTitle) {
+        let now = Date()
+
+        var items: [NSMenuItem] = []
+        // Nothing is said about a Mac that is free to sleep: the rows below speak for themselves.
+        if let state = KeepAwake.menuState(
+            session: session,
+            whileAgentsRun: defaults.bool(forKey: SleepPrevention.settingKey),
+            runningCount: app?.runningAgentCount ?? 0,
+            at: now
+        ) {
+            items.append(disabled(state))
+        }
+
+        if isRunning {
+            // Only a session with an end has an end to push back.
+            if session?.until != nil {
+                var lengths: [NSMenuItem] = KeepAwake.extensionMinuteChoices.map { count in
+                    ClosureMenuItem(KeepAwake.label(minutes: count)) {
+                        keepAwake.extend(by: TimeInterval(count * 60))
+                    }
+                }
+                lengths.append(.separator())
+                lengths += KeepAwake.extensionHourChoices.map { count in
+                    ClosureMenuItem(KeepAwake.label(hours: count)) {
+                        keepAwake.extend(by: TimeInterval(count * 3600))
+                    }
+                }
+                items.append(Self.submenu("Extend", lengths))
+            }
+            items.append(ClosureMenuItem("End Keep Awake") { keepAwake.stop() })
+        } else {
+            // Minutes and hours first, because a session with an end is the ordinary ask;
+            // indefinitely is the one somebody has to remember to come back and stop.
+            let durations: [NSMenuItem] = [
+                Self.submenu("Minutes", KeepAwake.minuteChoices.map { count in
+                    ClosureMenuItem(KeepAwake.label(minutes: count)) { keepAwake.start(for: TimeInterval(count * 60)) }
+                }),
+                Self.submenu("Hours", KeepAwake.hourChoices.map { count in
+                    ClosureMenuItem(KeepAwake.label(hours: count)) { keepAwake.start(for: TimeInterval(count * 3600)) }
+                }),
+                .separator(),
+                ClosureMenuItem("Indefinitely") { keepAwake.start(for: nil) },
+            ]
+            items.append(Self.submenu("Keep Awake For", durations))
+        }
+
+        items.append(Self.submenu("Keep Awake Settings", [
+            agentsItem(defaults: defaults),
+            lidItem(keepAwake: keepAwake),
+        ]))
+        return items
+    }
+
+    private func agentsItem(defaults: UserDefaults) -> NSMenuItem {
+        let item = ClosureMenuItem(SleepPrevention.menuItemTitle) {
             // Written, not just registered, so the choice survives a relaunch.
             // `AgentActivityReporter` watches the same key and retakes or drops the assertion.
             defaults.set(!defaults.bool(forKey: SleepPrevention.settingKey), forKey: SleepPrevention.settingKey)
         }
-        whileRunning.state = defaults.bool(forKey: SleepPrevention.settingKey) ? .on : .off
-        whileRunning.toolTip = SleepPrevention.caveat
-
-        let lid = ClosureMenuItem("Keep Awake With the Lid Closed") {
-            keepAwake.keepsLidClosed.toggle()
-        }
-        lid.state = keepAwake.keepsLidClosed ? .on : .off
-        lid.toolTip = "A closing lid sleeps the Mac whatever an app asks for. This turns the system "
-            + "sleep switch off for the length of a session, which needs Bloom's helper."
-
-        return [toggle, durationsItem, whileRunning, lid]
+        item.state = defaults.bool(forKey: SleepPrevention.settingKey) ? .on : .off
+        item.toolTip = SleepPrevention.caveat
+        return item
     }
 
+    /// The lid, which needs a helper somebody has to allow. An ellipsis when it is not approved
+    /// yet, because choosing it opens System Settings rather than switching anything on.
+    private func lidItem(keepAwake: KeepAwakeModel) -> NSMenuItem {
+        let isApproved = SleepSwitch.shared.standing == .ready
+        let title = "Keep Awake With the Lid Closed"
+        let item = ClosureMenuItem(isApproved ? title : title + "\u{2026}") {
+            keepAwake.keepsLidClosed.toggle()
+            if keepAwake.keepsLidClosed, SleepSwitch.shared.standing == .needsApproval {
+                SleepSwitch.shared.openApprovalSettings()
+            }
+        }
+        item.state = keepAwake.keepsLidClosed && isApproved ? .on : .off
+        item.toolTip = isApproved
+            ? "A closing lid sleeps the Mac whatever an app asks for. This holds it open for the "
+                + "length of a session."
+            : "Needs Bloom's helper, which macOS asks you to allow once in System Settings."
+        return item
+    }
+
+    /// One row with a menu behind it. Separators are ordinary items, so a caller can pass one.
     private static func submenu(_ title: String, _ items: [NSMenuItem]) -> NSMenuItem {
         let menu = NSMenu()
         for item in items { menu.addItem(item) }
         let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         parent.submenu = menu
         return parent
-    }
-
-    /// "Until a Time…", as a sheetless alert with a clock in it, because a menu cannot hold a date
-    /// picker and a whole window for one time of day is a window too many.
-    private static func askForTime() {
-        let alert = NSAlert()
-        alert.messageText = "Keep this Mac awake until"
-        alert.informativeText = "A time that has already gone today is taken as tomorrow."
-        alert.addButton(withTitle: "Keep Awake")
-        alert.addButton(withTitle: "Cancel")
-
-        let picker = NSDatePicker(frame: NSRect(x: 0, y: 0, width: 120, height: 24))
-        picker.datePickerStyle = .textFieldAndStepper
-        picker.datePickerElements = [.hourMinute]
-        picker.dateValue = Date().addingTimeInterval(3600)
-        alert.accessoryView = picker
-
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        KeepAwakeModel.shared.start(until: KeepAwake.nextOccurrence(of: picker.dateValue, after: Date()))
     }
 
     // MARK: The limits

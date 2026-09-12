@@ -31,6 +31,7 @@ final class ComposerModelCatalog {
     }
 
     func configure(store: Store) {
+        Task { await ComposerPlanningSupport.shared.refresh(from: store) }
         sources = AgentModelSource.live(store: store)
         refresh()
     }

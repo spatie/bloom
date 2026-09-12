@@ -3,6 +3,7 @@
 
 import json
 import pathlib
+import re
 import selectors
 import subprocess
 import sys
@@ -16,6 +17,16 @@ def read_line(stream, timeout=10):
         if not selector.select(timeout):
             raise TimeoutError("The server did not respond")
         return stream.readline()
+
+
+def protocol_version():
+    root = pathlib.Path(__file__).resolve().parent.parent
+    shared = root / "Packages/BloomClient/Sources/BloomClient/RemoteCommand.swift"
+    source = shared if shared.exists() else root / "Sources/BloomCore/Server/ServerProtocol.swift"
+    match = re.search(r"public static let (?:protocolVersion|version) = (\d+)", source.read_text())
+    if match is None:
+        raise RuntimeError("The checkout does not declare its wire protocol version")
+    return int(match[1])
 
 
 def check(binary):
@@ -34,7 +45,7 @@ def check(binary):
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                 )
                 clients.append(client)
-                request = {"version": 12, "id": str(uuid.uuid4()), "operation": {"hello": {}}}
+                request = {"version": protocol_version(), "id": str(uuid.uuid4()), "operation": {"hello": {}}}
                 client.stdin.write(json.dumps(request) + "\n")
                 client.stdin.flush()
                 reply = json.loads(read_line(client.stdout))
