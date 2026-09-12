@@ -37,7 +37,7 @@ public struct ModelIdentifier: Equatable, Sendable {
     /// The id a CLI can be handed, with any backend name taken off the front.
     public var model: String
     /// Whose model it is, or nil when nothing here recognises it and the caller's own answer
-    /// stands. See `DefaultBackend.kind(ofModel:running:codexModels:)`.
+    /// stands. See `DefaultBackend.kind(ofModel:running:models:)`.
     public var kind: AgentKind?
     /// Whether the string named its backend itself.
     ///
@@ -54,20 +54,26 @@ public struct ModelIdentifier: Equatable, Sendable {
 
     /// Reads a stored string for everything it says about itself.
     ///
-    /// - Parameter codexModels: what `model/list` last answered, empty when it has not answered
+    /// - Parameter models: what model discovery last answered, empty when it has not answered
     ///   yet. Empty costs only the label reading and the Codex half of the recognition; a string
     ///   that names its own backend is read without any list at all, which is the whole reason
     ///   the namespace is trusted over a lookup.
-    public static func resolve(_ raw: String, codexModels: [CodexModel] = []) -> ModelIdentifier {
+    public static func resolve(
+        _ raw: String,
+        models: [AgentKind: [AgentModel]] = [:]
+    ) -> ModelIdentifier {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return ModelIdentifier(model: raw) }
 
         guard let (named, rest) = namespaced(trimmed) else {
-            // Nothing named, so the lists answer, in the order `DefaultBackend` has always asked
-            // them in: Codex's fetched list is authoritative for its own ids, and
-            // `ClaudeModelRank` knows the four families.
-            if let match = codexModel(named: trimmed, in: codexModels) {
-                return ModelIdentifier(model: match, kind: .codex)
+            // Stable backend order preserves the precedence when two CLIs advertise the same id.
+            for kind in AgentKind.runnable where kind != .claudeCode {
+                if let match = model(named: trimmed, in: models[kind] ?? []) {
+                    return ModelIdentifier(model: match, kind: kind)
+                }
+            }
+            if GrokModelRank.recognises(trimmed) {
+                return ModelIdentifier(model: trimmed, kind: .grok)
             }
             if ClaudeModelRank.recognises(trimmed) {
                 return ModelIdentifier(model: trimmed, kind: .claudeCode)
@@ -75,10 +81,8 @@ public struct ModelIdentifier: Equatable, Sendable {
             return ModelIdentifier(model: trimmed)
         }
 
-        // The backend is settled; only the id still has to be read, and only Codex has a list to
-        // read it against. A Claude Code id is left exactly as it was, because `ModelAlias` is
-        // what translates those and it is the only thing that should.
-        let model = named == .codex ? codexModel(named: rest, in: codexModels) ?? rest : rest
+        // Claude aliases belong to `ModelAlias`. Fetched backends can also resolve display names.
+        let model = named == .claudeCode ? rest : model(named: rest, in: models[named] ?? []) ?? rest
         return ModelIdentifier(model: model, kind: named, namesBackend: true)
     }
 
@@ -98,9 +102,9 @@ public struct ModelIdentifier: Equatable, Sendable {
         model raw: String,
         on kind: AgentKind,
         hasSpoken: Bool,
-        codexModels: [CodexModel] = []
+        models: [AgentKind: [AgentModel]] = [:]
     ) -> ModelIdentifier? {
-        let resolved = resolve(raw, codexModels: codexModels)
+        let resolved = resolve(raw, models: models)
         let moved = !hasSpoken && resolved.namesBackend ? resolved.kind : nil
         let settled = moved ?? kind
         guard resolved.model != raw || settled != kind else { return nil }
@@ -135,7 +139,7 @@ public struct ModelIdentifier: Equatable, Sendable {
 
     /// A fetched model whose id or display name is this value once both are stripped to letters
     /// and digits, which is what reads a label back as the id it was rendered from.
-    private static func codexModel(named value: String, in models: [CodexModel]) -> String? {
+    private static func model(named value: String, in models: [AgentModel]) -> String? {
         let wanted = normalised(value)
         guard !wanted.isEmpty else { return nil }
         if let exact = models.first(where: { normalised($0.id) == wanted }) { return exact.id }

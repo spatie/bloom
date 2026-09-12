@@ -2050,6 +2050,27 @@ final class WorkspaceModel {
         return nil
     }
 
+    /// Uses the same transcript and permission mode as the other pull request actions.
+    func requestMarkReadyForReview(
+        _ pullRequest: PullRequest,
+        overrides: PromptOverrides = PromptOverrides()
+    ) async -> String? {
+        guard pullRequest.isOpen, pullRequest.isDraft else {
+            return "This pull request is no longer an open draft."
+        }
+        guard let session = await sessionForPullRequest(titledIfNew: "Mark ready for review") else {
+            return "Could not open a session in \(workspace.name) to send the request to."
+        }
+
+        let render = PromptTemplate.render(
+            overrides.template(for: .markReadyForReview),
+            values: [PromptRegistry.MarkReadyForReview.url: pullRequest.url]
+        )
+        activeSessionID = session.id
+        await transcript(for: session).submit(render.text)
+        return nil
+    }
+
     /// Asks the workspace's agent to merge the pull request, instead of running `gh` from here.
     ///
     /// The last of the three buttons in the strip to move, and the one with the most riding on it.

@@ -952,7 +952,7 @@ struct CreateWorkspaceView: View {
             defaults: ComposerDefaults.resolve(
                 repo: context.settings,
                 app: appDefaults,
-                codexModels: ComposerModelCatalog.shared.codexModels
+                models: ComposerModelCatalog.shared.models
             ),
             isFastMode: appDefaults.fastMode,
             outputStyle: appDefaults.outputStyle,

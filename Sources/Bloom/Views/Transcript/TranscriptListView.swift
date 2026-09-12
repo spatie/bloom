@@ -436,6 +436,9 @@ struct TranscriptListView: View {
         let agentKind = transcript.session.agentKind
         let recoveredRuns = transcript.recoveredRuns
         let stoppedTurnSeq = transcript.stoppedTurnSeq
+        // Only while nothing is running: a turn the CLI started for itself has its own footer
+        // coming, and the sentence belongs under whichever turn ended last.
+        let backgroundWork = transcript.isRunning ? nil : transcript.backgroundWork
         let paneHeight = geometry.paneHeight
         let arrivals = self.arrivals
         // The fold's three inputs, read once for the pass for the reason the eight above are: each
@@ -548,6 +551,7 @@ struct TranscriptListView: View {
             let wasStopped = row.seq == stoppedTurnSeq
             let recovered = recoveredRuns[row.seq]
             let closesTranscript = row.kind == .result && row.seq == lastVisibleSeq
+            let stillRunning = closesTranscript ? backgroundWork : nil
             // The same fields `TranscriptRowView.==` compared, and for the same reason: the
             // payload is never read, because comparing it is 1.6MB of `Data` per pass.
             //
@@ -569,6 +573,7 @@ struct TranscriptListView: View {
                 $0.combine(wasStopped)
                 $0.combine(recovered != nil)
                 $0.combine(closesTranscript)
+                $0.combine(stillRunning)
             }
             // Free, and no for the two kinds that make up most of a long session, so it is asked
             // here rather than inside the closure that runs per cell.
@@ -597,7 +602,8 @@ struct TranscriptListView: View {
                                 permissionMode: permissionMode,
                                 agentKind: agentKind,
                                 wasStopped: wasStopped,
-                                recovered: recovered
+                                recovered: recovered,
+                                stillRunning: stillRunning
                             )
                             .arrivingRow(settles && arrivals.isArriving(row.seq))
                             .padding(.horizontal, TranscriptLayout.inset)

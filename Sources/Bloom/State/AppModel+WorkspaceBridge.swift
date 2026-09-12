@@ -299,13 +299,12 @@ extension AppModel {
         // stays on the backend that was inherited. See `DefaultBackend`.
         let agent = order.agent
             ?? order.model.map {
-                DefaultBackend.kind(ofModel: $0, running: inheritedAgent, codexModels: [])
+                DefaultBackend.kind(ofModel: $0, running: inheritedAgent, models: [:])
             }
             ?? inheritedAgent
         controls.agentKind = agent
 
-        switch agent {
-        case .claudeCode:
+        if agent == .claudeCode {
             let models = Set(ComposerOption.models.map(\.id))
             if let model = order.model {
                 guard models.contains(model) else {
@@ -319,30 +318,25 @@ extension AppModel {
             } else if agent != inheritedAgent {
                 controls.model = AppDefaults.fallbackModel
             }
-        case .codex:
+        } else {
+            guard let source = AgentModelSource.live(store: store)[agent] else {
+                throw BridgeWorkspaceModelFailure.noneAvailable(agent)
+            }
             if order.model == nil, agent == inheritedAgent { return controls }
 
-            let models = try await CodexModelCatalog.live().pickerModels()
-            let chosen: CodexModel?
-            if let requested = order.model {
-                chosen = models.first { $0.id == requested }
-                guard chosen != nil else {
+            let models = try await source.models()
+            guard let chosen = AgentModel.selection(requested: order.model, from: models) else {
+                if let requested = order.model {
                     throw BridgeWorkspaceModelFailure.invalid(
                         model: requested,
                         agent: agent,
-                        available: models.map(\.id)
+                        available: models.filter { !$0.hidden }.map(\.id)
                     )
                 }
-            } else {
-                chosen = models.first { $0.isDefault } ?? models.first
-            }
-            guard let chosen else {
                 throw BridgeWorkspaceModelFailure.noneAvailable(agent)
             }
             controls.model = chosen.id
             controls.effort = chosen.resolvedEffort(preferring: controls.effort)
-        case .cursor, .openCode:
-            throw BridgeWorkspaceModelFailure.noneAvailable(agent)
         }
 
         return controls

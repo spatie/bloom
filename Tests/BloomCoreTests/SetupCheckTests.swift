@@ -8,12 +8,14 @@ private func report(
     git: SetupOutcome = .ready(detail: "2.51.0"),
     claude: SetupOutcome = .ready(detail: "freek@spatie.be"),
     codex: SetupOutcome = .ready(detail: "freek@spatie.be"),
+    grok: SetupOutcome = .ready(detail: "ada@example.com"),
     gitHub: SetupOutcome = .ready(detail: "Signed in")
 ) -> SetupReport {
     SetupReport(checks: [
         SetupCheck(tool: .git, outcome: git),
         SetupCheck(tool: .claudeCode, outcome: claude),
         SetupCheck(tool: .codex, outcome: codex),
+        SetupCheck(tool: .grok, outcome: grok),
         SetupCheck(tool: .gitHub, outcome: gitHub),
     ])
 }
@@ -51,15 +53,19 @@ struct SetupVerdictTests {
 
     @Test("neither agent is the one thing that blocks a machine that has git")
     func noAgent() {
-        let blocked = report(claude: .missing, codex: .missing)
+        let blocked = report(claude: .missing, codex: .missing, grok: .missing)
         #expect(!blocked.hasRunnableAgent)
         #expect(blocked.verdict == .blocked)
-        #expect(blocked.blocking.map(\.tool) == [.claudeCode, .codex])
+        #expect(blocked.blocking.map(\.tool) == [.claudeCode, .codex, .grok])
     }
 
     @Test("an agent that is installed and signed out does not count as runnable")
     func signedOutAgent() {
-        let blocked = report(claude: .needsSignIn(detail: "2.1.234"), codex: .missing)
+        let blocked = report(
+            claude: .needsSignIn(detail: "2.1.234"),
+            codex: .missing,
+            grok: .missing
+        )
         #expect(blocked.verdict == .blocked)
     }
 
@@ -95,9 +101,10 @@ struct SetupSeverityTests {
 
     @Test("a missing agent is a problem only when it was the last one")
     func loudWhenAlone() {
-        let blocked = report(claude: .missing, codex: .missing)
+        let blocked = report(claude: .missing, codex: .missing, grok: .missing)
         #expect(blocked.severity(for: .claudeCode) == .problem)
         #expect(blocked.severity(for: .codex) == .problem)
+        #expect(blocked.severity(for: .grok) == .problem)
     }
 
     @Test("everything that is ready is quiet")
@@ -151,14 +158,14 @@ struct SetupCopyTests {
 
     @Test("a blocked machine is offered another look rather than a closed door")
     func blockedCopy() {
-        let blocked = report(claude: .missing, codex: .missing)
+        let blocked = report(claude: .missing, codex: .missing, grok: .missing)
         #expect(blocked.headline == "Nearly there")
         #expect(blocked.verdict.primaryButtonTitle == "Check again")
     }
 
     @Test("no git and no agent says both, not one")
     func blockedOnBoth() {
-        let blocked = report(git: .missing, claude: .missing, codex: .missing)
+        let blocked = report(git: .missing, claude: .missing, codex: .missing, grok: .missing)
         #expect(blocked.sentence.contains("git and an agent"))
     }
 
@@ -169,7 +176,7 @@ struct SetupCopyTests {
             report(gitHub: .missing),
             report(claude: .missing),
             report(git: .missing),
-            report(claude: .missing, codex: .missing),
+            report(claude: .missing, codex: .missing, grok: .missing),
             SetupReport.pending,
         ]
         for one in cases {
@@ -252,6 +259,7 @@ struct SetupToolTests {
     func agentsAreRunnable() {
         #expect(SetupTool.claudeCode.agentKind?.canRunWorkspaces == true)
         #expect(SetupTool.codex.agentKind?.canRunWorkspaces == true)
+        #expect(SetupTool.grok.agentKind?.canRunWorkspaces == true)
         #expect(SetupTool.git.agentKind == nil)
         #expect(SetupTool.gitHub.agentKind == nil)
     }
@@ -274,6 +282,7 @@ struct SetupToolTests {
         #expect(SetupTool.gitHub.executableName == "gh")
         #expect(SetupTool.claudeCode.executableName == AgentKind.claudeCode.executableName)
         #expect(SetupTool.codex.executableName == AgentKind.codex.executableName)
+        #expect(SetupTool.grok.executableName == AgentKind.grok.executableName)
     }
 }
 

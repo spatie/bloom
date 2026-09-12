@@ -10,51 +10,51 @@ struct ComposerModelSection: Identifiable, Equatable {
     var title: String { kind.label }
 }
 
-/// What the composer's model and effort menus offer, per backend.
-///
-/// Claude Code's four are a list in the source, because the CLI has nothing to ask. **Codex's are
-/// fetched**, because `model/list` is a real call that answers without an account, because each
-/// model brings its own set of reasoning efforts (six for `gpt-5.6-sol`, four for `gpt-5.5`), and
-/// because a list written down goes stale between releases: Conductor's hardcoded one still names
-/// `gpt-5.4`, which no longer exists, and has none of the three current models.
-///
-/// A shared object rather than state on the footer, because `ViewThatFits` builds that row three
-/// times and three copies would be three fetches. It starts empty and fills in, so a menu opened
-/// in the first second shows Claude Code's section alone rather than nothing, and the Codex
-/// section arrives without anything having to be reopened.
+/// The composer and Settings share one discovery state. Backend sources supply common model
+/// descriptions, so another fetched agent does not need its own array or loading branch here.
 @MainActor
 @Observable
 final class ComposerModelCatalog {
     static let shared = ComposerModelCatalog()
 
-    private(set) var codexModels: [CodexModel] = []
+    private(set) var models: [AgentKind: [AgentModel]] = [:]
     private(set) var isLoading = false
-    /// Set when a fetch failed, so a menu can say why its section is short rather than pretending
-    /// the account has one model.
     private(set) var lastFailure: String?
 
-    private let catalog: CodexModelCatalog
+    private var sources: [AgentKind: AgentModelSource]
     private var loadTask: Task<Void, Never>?
+    private var loadGeneration = UUID()
 
-    init(catalog: CodexModelCatalog = CodexModelCatalog.live()) {
-        self.catalog = catalog
+    init(sources: [AgentKind: AgentModelSource] = AgentModelSource.live()) {
+        self.sources = sources
     }
 
-    /// Fetches once, and again only after `refresh()`. Cheap to call on every menu appearance,
-    /// which is exactly how the footer calls it.
+    func configure(store: Store) {
+        sources = AgentModelSource.live(store: store)
+        refresh()
+    }
+
     func load() {
-        guard loadTask == nil, codexModels.isEmpty else { return }
+        guard loadTask == nil else { return }
+        let needed = AgentKind.runnable.filter { sources[$0] != nil && (models[$0] ?? []).isEmpty }
+        guard !needed.isEmpty else { return }
         isLoading = true
-        loadTask = Task { [catalog] in
-            do {
-                let models = try await catalog.pickerModels()
-                self.codexModels = models
-                self.lastFailure = nil
-            } catch {
-                // Not an alert. A model menu that cannot reach the CLI is a menu with one section
-                // in it, and the section that is there still works.
-                self.lastFailure = error.readableMessage
+        let generation = loadGeneration
+        loadTask = Task { [sources] in
+            var failure: String?
+            for kind in needed {
+                guard generation == self.loadGeneration else { return }
+                guard let source = sources[kind] else { continue }
+                do {
+                    let fetched = try await source.models()
+                    guard generation == self.loadGeneration else { return }
+                    self.models[kind] = fetched
+                } catch {
+                    if failure == nil { failure = error.readableMessage }
+                }
             }
+            guard generation == self.loadGeneration else { return }
+            self.lastFailure = failure
             self.isLoading = false
             self.loadTask = nil
         }
@@ -62,9 +62,17 @@ final class ComposerModelCatalog {
 
     func refresh() {
         loadTask?.cancel()
-        loadTask = nil
-        codexModels = []
-        Task { await catalog.invalidate(); load() }
+        loadGeneration = UUID()
+        let generation = loadGeneration
+        models = [:]
+        isLoading = true
+        loadTask = Task { [sources] in
+            for source in sources.values { await source.invalidate() }
+            guard generation == self.loadGeneration else { return }
+            self.loadTask = nil
+            self.isLoading = false
+            load()
+        }
     }
 
     // MARK: - The menus
@@ -96,11 +104,9 @@ final class ComposerModelCatalog {
     }
 
     func options(for kind: AgentKind) -> [ComposerOption] {
-        switch kind {
-        case .claudeCode: ComposerOption.models
-        case .codex: codexModels.map { ComposerOption(id: $0.id, label: $0.displayName) }
-        case .cursor, .openCode: []
-        }
+        if kind == .claudeCode { return ComposerOption.models }
+        return (models[kind] ?? []).filter { !$0.hidden }
+            .map { ComposerOption(id: $0.id, label: $0.displayName) }
     }
 
     /// Which backend a model id belongs to, so choosing one out of another section is understood
@@ -111,7 +117,11 @@ final class ComposerModelCatalog {
     /// drift this file exists to avoid. An id nothing recognises belongs to whoever is running
     /// now, which is what keeps a pinned id from silently moving a chat to the other backend.
     func backend(ofModel id: String, current: AgentKind) -> AgentKind {
-        DefaultBackend.kind(ofModel: id, running: current, codexModels: codexModels)
+        DefaultBackend.kind(
+            ofModel: id,
+            running: current,
+            models: models
+        )
     }
 
     /// The efforts one model takes.
@@ -120,22 +130,20 @@ final class ComposerModelCatalog {
     /// the chosen model does not take is not on the list: offering `max` on `gpt-5.5`, which stops
     /// at `xhigh`, is offering something the server will refuse.
     func efforts(for kind: AgentKind, model: String) -> [ComposerOption] {
-        switch kind {
-        case .codex:
-            guard let found = codexModels.first(where: { $0.id == model }) else {
-                // Not yet fetched, or a pinned id. The flat list is the honest fallback: it is
-                // what every one of these models has in common.
-                return ComposerOption.efforts
-            }
-            return found.supportedEfforts.map { ComposerOption(id: $0.id, label: $0.label) }
-        case .claudeCode, .cursor, .openCode:
+        guard kind != .claudeCode, let found = models[kind]?.first(where: { $0.id == model }) else {
             return ComposerOption.efforts
         }
+        return found.supportedEfforts.map { ComposerOption(id: $0.id, label: $0.label) }
     }
 
     /// The effort to keep when the model changes underneath it, which is the model's own default
     /// rather than Bloom's `high`: `gpt-5.6-sol` defaults to `low` and `gpt-5.5` to `medium`.
     func resolvedEffort(_ wanted: String, for kind: AgentKind, model: String) -> String {
-        DefaultBackend.effort(wanted, on: kind, model: model, codexModels: codexModels)
+        DefaultBackend.effort(
+            wanted,
+            on: kind,
+            model: model,
+            models: models
+        )
     }
 }

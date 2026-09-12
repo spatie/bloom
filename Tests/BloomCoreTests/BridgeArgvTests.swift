@@ -56,4 +56,35 @@ struct BridgeArgvTests {
         let launch = CodexClient.launch(CodexClient.Configuration(cwd: "/tmp/w", environment: [:]))
         #expect(launch.arguments == CodexClient.arguments)
     }
+
+    @Test("Grok is launched as ACP stdio without attaching to the user's leader")
+    func grokArgv() {
+        let attachment = BridgeAttachment(
+            shimPath: "/tmp/bloom-bridge",
+            socketPath: "/tmp/s.sock",
+            token: "t",
+            role: .parent
+        )
+        let launch = GrokClient.launch(GrokClient.Configuration(
+            cwd: "/tmp/w",
+            environment: [:],
+            model: "grok-4.6",
+            effort: "high"
+        ))
+        #expect(launch.arguments.contains("agent"))
+        #expect(launch.arguments.contains("--no-leader"))
+        #expect(launch.arguments.contains("stdio"))
+        #expect(launch.arguments.contains("--model"))
+        #expect(launch.arguments.contains("grok-4.6"))
+        #expect(launch.environment["GROK_DISABLE_AUTOUPDATER"] == "1")
+        let servers = BridgeRegistration.grokServers(attachment)
+        #expect(servers.count == 1)
+        #expect(servers[0]["name"]?.stringValue == BridgeRegistration.serverName)
+        #expect(servers[0]["command"]?.stringValue == "/tmp/bloom-bridge")
+    }
+
+    @Test("no Grok attachment, no MCP servers")
+    func grokArgvWithoutABridge() {
+        #expect(BridgeRegistration.grokServers(nil).isEmpty)
+    }
 }
