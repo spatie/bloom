@@ -1,4 +1,7 @@
+import Foundation
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 /// How wide a hover card may be, and how wide it should be for what is on it.
 ///

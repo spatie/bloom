@@ -74,7 +74,7 @@ final class CenterTabStore {
     /// inconsistency, because `workspace_tab_select` takes back the title it handed out, so a tab
     /// reported as "Chat" that the person is looking at under "Untitled" is a name neither of them
     /// can use.
-    func title(of content: PaneContent, in model: WorkspaceModel) -> String {
+    func title(of content: PaneContent, in model: any WorkspacePaneModel) -> String {
         switch content {
         case .chat(let sessionID):
             let title = model.sessions.first { $0.id == sessionID }?.title ?? ""
@@ -91,7 +91,7 @@ final class CenterTabStore {
     /// what they are: a strip of three tabs all called "Review" tells the reader nothing about
     /// which is which. A review takes the name of the file under the cursor, a browser the name of
     /// the page, and the chain behind the latter is `BrowserTabTitle`.
-    func displayTitle(of tab: CenterTab, in model: WorkspaceModel) -> String {
+    func displayTitle(of tab: CenterTab, in model: any WorkspacePaneModel) -> String {
         switch tab.kind {
         case .browser:
             return BrowserTabTitle.title(
@@ -360,6 +360,28 @@ final class CenterTabStore {
         return tab
     }
 
+    func awaitPreviewAfterSetup(for tab: CenterTab) {
+        update(tab) { $0.opensPreviewAfterSetup = true }
+    }
+
+    func cancelOpeningPreview(for tab: CenterTab) {
+        guard tabs(for: tab.workspaceID).contains(where: { $0.id == tab.id && $0.opensPreviewAfterSetup }) else { return }
+        update(tab) { $0.opensPreviewAfterSetup = false }
+    }
+
+    /// Claim before navigation, so redraws, reconnects and relaunches cannot repeat it.
+    func claimOpeningPreview(for tab: CenterTab, setup: SetupState, port: Int, address: String, hasNavigated: Bool) -> String? {
+        guard let current = tabs(for: tab.workspaceID).first(where: { $0.id == tab.id }) else { return nil }
+        let decision = WorkspacePreview.opening(
+            pending: current.opensPreviewAfterSetup, setup: setup, port: port,
+            address: address, storedAddress: current.url, hasNavigated: hasNavigated
+        )
+        if decision != .wait { cancelOpeningPreview(for: current) }
+        guard case .open(let url) = decision else { return nil }
+        setURL(url, for: current)
+        return url
+    }
+
     /// Called as the page navigates, so the tab remembers where it got to.
     ///
     /// **The only thing that ever clears a page title.** A navigation within one host keeps the
@@ -388,7 +410,15 @@ final class CenterTabStore {
 
     /// Closes a tab and stops whatever it was running. Any pane showing it goes with it, and the
     /// tab it was a pane of settles around the gap. See `TabSurgery`.
+    @ObservationIgnored private var closeHandlers: [String: @MainActor () async -> Bool] = [:]
+
+    func onClose(_ tab: CenterTab, perform: @escaping @MainActor () async -> Bool) {
+        closeHandlers[tab.id] = perform
+    }
+
     func close(_ tab: CenterTab) async {
+        if let close = closeHandlers[tab.id], !(await close()) { return }
+        closeHandlers[tab.id] = nil
         apply(tabs(for: tab.workspaceID).filter { $0.id != tab.id }, to: tab.workspaceID)
         WorkspaceTabsStore.shared.forget(.tool(tab.id), workspaceID: tab.workspaceID)
 
@@ -419,9 +449,9 @@ final class CenterTabStore {
     /// the tab's address is a `file://` one, which is a page out of that worktree opened from a
     /// file row: see `LocalPage.fileURL`. Empty means no local page will load, which is right for
     /// a caller with no workspace to name.
-    func browser(for tab: CenterTab, root: String = "") -> BrowserSession {
+    func browser(for tab: CenterTab, root: String = "", resolve: (@MainActor (String) async throws -> String)? = nil) -> BrowserSession {
         if let existing = browsers[tab.id] { return existing }
-        let session = BrowserSession(url: tab.url, root: root)
+        let session = BrowserSession(url: tab.url, root: root, resolve: resolve)
         browsers[tab.id] = session
         return session
     }

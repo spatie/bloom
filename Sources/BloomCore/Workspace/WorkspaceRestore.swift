@@ -251,7 +251,7 @@ public extension WorkspaceManager {
             replacingPrunableWorktreeAt: workspace.path
         )
 
-        let settings = SettingsLoader.load(repo: repo.path)
+        let settings = SettingsLoader.load(workspace: path, repo: repo.path)
         try copyFiles(settings.filesToCopy, from: repo.path, to: path)
         let needsSetup = settings.setupScript != nil || Git.hasSubmodules(in: path)
 

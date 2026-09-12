@@ -11,8 +11,8 @@ import BloomCore
 /// The strip used to disappear while a workspace had a single session, on the grounds that a lone
 /// tab repeats the workspace name already in the toolbar. It cannot any more: the `+` that opens a
 /// terminal or a browser is part of the strip, and a control nobody can reach is not a control.
-struct SessionTabsView: View {
-    @Bindable var model: WorkspaceModel
+struct SessionTabsView<Model: WorkspacePaneModel>: View {
+    @Bindable var model: Model
 
     @Environment(AppModel.self) private var app
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -55,7 +55,7 @@ struct SessionTabsView: View {
 
     /// The space the tabs are measured in and the pointer is reported in. It is the row of tabs
     /// itself, so it scrolls with them and the two sets of numbers cannot drift apart.
-    private static let stripSpace = "bloom.tabStrip"
+    private static var stripSpace: String { "bloom.tabStrip" }
 
     private var tabs: CenterTabStore { .shared }
 
@@ -207,7 +207,7 @@ struct SessionTabsView: View {
     /// The centre column opens onto the reading ground, which settles both what a selected tab is
     /// filled with and how far the track under it is sunk. See `TabPane`, which carries the
     /// measurements that used to live here.
-    private static let pane = TabPane.content
+    private static var pane: TabPane { TabPane.content }
 
     /// The conversation or the tool tab one entry of the strip stands for, and nil for an entry
     /// whose content has gone between the strip being derived and this being asked.
@@ -350,6 +350,8 @@ struct SessionTabsView: View {
                 .keyboardShortcut("t", modifiers: .command)
             Button(PaneKind.terminal.title, systemImage: PaneKind.terminal.symbol, action: newTerminal)
                 .keyboardShortcut("t", modifiers: [.command, .shift])
+            Button("Open Preview", systemImage: "play.rectangle") { BrowserTab.openPreview(in: model) }
+                .disabled(model.isRunningSetup)
             Button(PaneKind.browser.title, systemImage: PaneKind.browser.symbol, action: newBrowser)
                 .keyboardShortcut("b", modifiers: [.command, .shift])
             Divider()
@@ -588,18 +590,7 @@ struct SessionTabsView: View {
     private func commitRename(_ session: Session, to newTitle: String) {
         let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         renamingID = nil
-        guard !title.isEmpty, title != session.title, let store = app.store else { return }
-
-        let updated = session.with { $0.title = title }
-        if let index = model.sessions.firstIndex(where: { $0.id == session.id }) {
-            model.sessions[index] = updated
-        }
-        Task {
-            // The title alone. This value was read when the strip was drawn, and a running agent
-            // has been writing its own columns into that row since, one of which is the id
-            // `--resume` needs.
-            try? await store.updateSessionPreferences(id: session.id, title: title)
-            await model.reloadSessions()
-        }
+        guard !title.isEmpty, title != session.title else { return }
+        Task { await model.renameSession(session, title: title) }
     }
 }

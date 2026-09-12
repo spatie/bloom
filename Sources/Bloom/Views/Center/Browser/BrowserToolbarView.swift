@@ -56,6 +56,7 @@ struct BrowserToolbarView: View {
     /// Whether the ring should be drawn at all: focused, and in the window the keys are going to.
     var isRingVisible: Bool
     /// The pages behind and ahead of this one, nearest first, named by `BrowserToolbar`.
+    var remoteServer: String?
     var backHistory: [BrowserToolbar.HistoryEntry] = []
     var forwardHistory: [BrowserToolbar.HistoryEntry] = []
 
@@ -81,7 +82,7 @@ struct BrowserToolbarView: View {
     /// How the address is drawn when nobody is typing into it. The rule is in the core, because
     /// which run of the string is the host is the one thing here that can be got dangerously
     /// wrong. See `BrowserAddressDisplay`.
-    private var display: BrowserAddressDisplay { .of(address) }
+    private var display: BrowserAddressDisplay { .of(address, remoteServer: remoteServer) }
 
     var body: some View {
         // One sampling pass for the two shapes rather than two, which is what the container is

@@ -25,6 +25,12 @@ final class SlashCommandCatalog {
     /// it indexes, because the chip's description is drawn from it and has to arrive when the scan
     /// does.
     private var byName: [String: SlashCommand] = [:]
+
+    func receive(_ value: [SlashCommand]) {
+        commands = value
+        byName = Dictionary(value.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+        isLoaded = true
+    }
     /// The scan that is already running, and the checkout it is running for, so a second caller
     /// joins it rather than starting a duplicate walk of the same directories.
     private var running: Task<[SlashCommand], Never>?

@@ -1,0 +1,70 @@
+name: Server
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bloom-server-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    container: swift:6.3.3-noble
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends libsqlite3-dev pkg-config git python3 patchelf tmux
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global user.name "Bloom tests"
+          git config --global user.email "tests@runbloom.app"
+      - name: Build the standalone server
+        run: swift build --product bloom-server -j 4 -Xswiftc -warnings-as-errors
+      - name: Run the server tests
+        run: swift test -j 4 -Xswiftc -warnings-as-errors
+      - name: Check sustained subprocess descriptor usage
+        run: BLOOM_FD_STRESS=1 swift test --skip-build --filter processDescriptorsStayBounded
+      - name: Exercise the server executable
+        run: python3 Tools/server-smoke.py .build/debug/bloom-server
+      - name: Check service packaging
+        run: |
+          python3 Tools/test-install-bloom-server.py
+          python3 Tools/test-embed-server-setup.py
+          python3 Tools/test-server-packaging.py
+          python3 Tools/test-remote-packaging.py
+      - name: Package the server and its runtime
+        run: python3 Tools/package-linux-server.py .build/debug/bloom-server .build/bloom-server-linux-x86_64.tar.gz
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bloom-server-linux-x86_64
+          path: .build/bloom-server-linux-x86_64.tar.gz
+          retention-days: 7
+
+  packaged-runtime:
+    needs: linux
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ubuntu: ["24.04", "26.04"]
+    container: ubuntu:${{ matrix.ubuntu }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: bloom-server-linux-x86_64
+          path: package
+      - name: Run on Ubuntu without a Swift installation
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3 git
+          if command -v swift >/dev/null; then exit 1; fi
+          tar -xzf package/bloom-server-linux-x86_64.tar.gz -C package
+          python3 Tools/server-smoke.py package/bloom-server-linux-x86_64/bin/bloom-server

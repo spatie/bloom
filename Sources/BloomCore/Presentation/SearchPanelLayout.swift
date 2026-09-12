@@ -1,4 +1,7 @@
+import Foundation
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 /// How wide the search panel is drawn, where it hangs, and how far the window behind it is taken
 /// down.

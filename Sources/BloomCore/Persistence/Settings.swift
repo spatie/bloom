@@ -1,7 +1,7 @@
 import Foundation
 import Synchronization
 
-public struct RunScript: Identifiable, Sendable, Hashable {
+public struct RunScript: Identifiable, Sendable, Hashable, Codable {
     public var id: String
     public var name: String
     public var command: String
@@ -19,7 +19,7 @@ public struct RunScript: Identifiable, Sendable, Hashable {
 /// The raw value is the TOML key path the writer uses. `runScripts` is the exception: the run
 /// scripts are a table of tables, so the writer addresses each script under `scripts.run` by id
 /// rather than writing this path directly.
-public enum SettingsKey: String, Sendable, Hashable, CaseIterable {
+public enum SettingsKey: String, Codable, Sendable, Hashable, CaseIterable {
     case setupScript = "scripts.setup"
     case archiveScript = "scripts.archive"
     case runScripts = "scripts.run"
@@ -37,7 +37,7 @@ public enum SettingsKey: String, Sendable, Hashable, CaseIterable {
 
 /// Which script a `ScriptFile` belongs to. Run scripts are named by their table under
 /// `scripts.run`, which is the same id a `RunScript` carries.
-public enum ScriptLocation: Sendable, Hashable {
+public enum ScriptLocation: Codable, Sendable, Hashable {
     case setup
     case archive
     case run(String)
@@ -50,7 +50,7 @@ public enum ScriptLocation: Sendable, Hashable {
 /// settings file, where the container's own escaping rules start applying to the user's shell
 /// quoting. So `scripts.setup_file` names a real executable file and `scripts.setup` is what is
 /// still read from settings written before that, and from Conductor's.
-public struct ScriptFile: Sendable, Hashable {
+public struct ScriptFile: Codable, Sendable, Hashable {
     /// As the settings file states it, which is relative to the repository unless it is absolute.
     public var path: String
     /// The settings file names this path and nothing is there. The script does not run, and the
@@ -65,7 +65,9 @@ public struct ScriptFile: Sendable, Hashable {
 
 /// The effective configuration for one repository, after layering every settings file that
 /// applies. Conductor's own files are read as-is so an existing repo needs no new config.
-public struct RepoSettings: Sendable, Hashable {
+public struct RepoSettings: Codable, Sendable, Hashable {
+    public var executionCommand: [String]?
+    public var executionName: String?
     public var setupScript: String?
     public var archiveScript: String?
     public var runScripts: [RunScript] = []
@@ -147,12 +149,18 @@ public enum SettingsLoader {
     }
 
     public static func load(repo: String) -> RepoSettings {
+        load(workspace: repo, repo: repo)
+    }
+
+    /// Shared settings follow the checked-out branch. Machine-local project overrides still
+    /// apply to every worktree, with a workspace-local override taking final precedence.
+    public static func load(workspace: String, repo: String) -> RepoSettings {
         var settings = RepoSettings()
 
         for path in homePaths() {
             guard let toml = try? TOML.parse(contentsOf: path) else { continue }
             settings.sources.append(path)
-            apply(toml, from: path, to: &settings, repo: repo)
+            apply(toml, from: path, to: &settings, repo: workspace)
         }
 
         // Everything a home file said about the model belongs to the home layer. Moving it aside
@@ -162,10 +170,19 @@ public enum SettingsLoader {
         settings.defaultModel = nil
         settings.defaultEffort = nil
 
-        for path in repoPaths(repo: repo) {
+        var paths: [String] = []
+        for folder in [".conductor", ".bloom"] {
+            let branchPath = "\(workspace)/\(folder)/settings.toml"
+            paths.append(FileManager.default.fileExists(atPath: branchPath) ? branchPath : "\(repo)/\(folder)/settings.toml")
+        }
+        paths += ["\(repo)/.conductor/settings.local.toml", "\(repo)/.bloom/settings.local.toml"]
+        if workspace != repo {
+            paths += ["\(workspace)/.conductor/settings.local.toml", "\(workspace)/.bloom/settings.local.toml"]
+        }
+        for path in paths {
             guard let toml = try? TOML.parse(contentsOf: path) else { continue }
             settings.sources.append(path)
-            apply(toml, from: path, to: &settings, repo: repo)
+            apply(toml, from: path, to: &settings, repo: workspace)
         }
 
         return settings
@@ -207,6 +224,13 @@ public enum SettingsLoader {
     ) {
         /// Records which file had the last word about a key, so an edit can be written back to it.
         func note(_ key: SettingsKey) { settings.origins[key] = source }
+
+        if let command = toml["execution.command"]?.stringArray {
+            settings.executionCommand = command.isEmpty ? nil : command
+        }
+        if let name = toml["execution.name"]?.stringValue {
+            settings.executionName = name.isEmpty ? nil : name
+        }
 
         // An empty string is a statement, not an absent value: it is the only way a file can say
         // "this repository has no setup script" loudly enough to beat one that a file below it

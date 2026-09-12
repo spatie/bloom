@@ -294,8 +294,10 @@ private func translated(
     /// The server numbers its requests from zero and starts again on every connection, while the
     /// asks table outlives the connection.
     @Test func aQuestionsIDCannotCollideWithTheNextConnections() {
-        let first = CodexPermission.requestID(.number(0), threadID: "thread-a")
-        let second = CodexPermission.requestID(.number(0), threadID: "thread-b")
+        let connection = UUID()
+        let first = CodexPermission.requestID(.number(0), threadID: "same-resumed-thread", connectionID: connection)
+        let second = CodexPermission.requestID(.number(0), threadID: "same-resumed-thread", connectionID: UUID())
+        #expect(first == CodexPermission.requestID(.number(0), threadID: "same-resumed-thread", connectionID: connection))
         #expect(first != second)
         #expect(first.hasPrefix("codex:"))
     }

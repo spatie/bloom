@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 public enum WorkspaceError: Error, CustomStringConvertible {
     case projectFolderMissing
@@ -138,7 +137,7 @@ public struct WorkspaceManager: Sendable {
     }
 
     /// Where a project coming back into the sidebar says so. See `bringProjectBack`.
-    private static let log = Logger(
+    private static let log = CoreLogger(
         subsystem: Bundle.main.bundleIdentifier ?? "be.spatie.bloom",
         category: "workspace"
     )
@@ -235,7 +234,7 @@ public struct WorkspaceManager: Sendable {
         )
         try await Git.recordBase(repository, for: finalBranch, in: worktreePath)
 
-        try copyFiles(settings.filesToCopy, from: repo.path, to: worktreePath)
+        try copyFiles(SettingsLoader.load(workspace: worktreePath, repo: repo.path).filesToCopy, from: repo.path, to: worktreePath)
 
         // Naming `setupState` reaches the initialiser that is internal to the module, which is
         // why this can say it and nothing in `Sources/Bloom` can. A workspace with no setup script
@@ -248,7 +247,7 @@ public struct WorkspaceManager: Sendable {
             branch: finalBranch,
             path: worktreePath,
             baseBranch: base,
-            setupState: setupPolicy.initialState(script: settings.setupScript, hasSubmodules: Git.hasSubmodules(in: worktreePath)),
+            setupState: setupPolicy.initialState(script: SettingsLoader.load(workspace: worktreePath, repo: repo.path).setupScript, hasSubmodules: Git.hasSubmodules(in: worktreePath)),
             sortOrder: try await store.nextWorkspaceSortOrder(repoID: repo.id),
             origin: origin
         )
@@ -279,7 +278,6 @@ public struct WorkspaceManager: Sendable {
         origin: WorkspaceOrigin,
         setupPolicy: WorkspaceSetupPolicy
     ) async throws -> Workspace {
-        let settings = SettingsLoader.load(repo: repo.path)
         let existingBranches = Set(try await Git.branches(of: repo.path))
         let branch = WorkspaceCheckoutPlan.localBranch(for: checkout, taken: existingBranches)
 
@@ -343,7 +341,7 @@ public struct WorkspaceManager: Sendable {
             }
         }
 
-        try copyFiles(settings.filesToCopy, from: repo.path, to: worktreePath)
+        try copyFiles(SettingsLoader.load(workspace: worktreePath, repo: repo.path).filesToCopy, from: repo.path, to: worktreePath)
 
         let workspace = Workspace(
             id: id,
@@ -352,7 +350,7 @@ public struct WorkspaceManager: Sendable {
             branch: branch,
             path: worktreePath,
             baseBranch: checkout.baseBranch(default: repo.defaultBranch),
-            setupState: setupPolicy.initialState(script: settings.setupScript, hasSubmodules: Git.hasSubmodules(in: worktreePath)),
+            setupState: setupPolicy.initialState(script: SettingsLoader.load(workspace: worktreePath, repo: repo.path).setupScript, hasSubmodules: Git.hasSubmodules(in: worktreePath)),
             sortOrder: try await store.nextWorkspaceSortOrder(repoID: repo.id),
             origin: origin,
             // Written now rather than waited for. A review workspace knows its pull request before
@@ -504,9 +502,9 @@ public struct WorkspaceManager: Sendable {
             onOutput("Bloom could not check this workspace's rewind state. Nothing was started.")
             return false
         }
-        let settings = SettingsLoader.load(repo: repo.path)
+        let settings = SettingsLoader.load(workspace: workspace.path, repo: repo.path)
         let launch = ScriptLaunch.resolve(
-            text: settings.setupScript, file: settings.scriptFiles[.setup], repo: repo.path
+            text: settings.setupScript, file: settings.scriptFiles[.setup], repo: workspace.path
         )
 
         let hasSubmodules = Git.hasSubmodules(in: workspace.path)
@@ -561,7 +559,16 @@ public struct WorkspaceManager: Sendable {
             break
         }
 
-        _ = try? await store.update(workspaceID: workspace.id) { $0.apply(.runStarted) }
+        let attempt = try? await store.beginSetupAttempt(workspaceID: workspace.id)
+        let output = SetupOutputBuffer(store: store, workspaceID: workspace.id, attempt: attempt)
+        if !preparationLog.isEmpty { await output.append(preparationLog.trimmingCharacters(in: .newlines)) }
+        let persistence = Task {
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { break }
+                await output.flush()
+            }
+        }
+        defer { persistence.cancel() }
 
         let env = environment(for: workspace, repo: repo, port: port)
         let runner = StreamingProcess(
@@ -571,7 +578,6 @@ public struct WorkspaceManager: Sendable {
             environment: Shell.environment(extra: env)
         )
 
-        var log = preparationLog
         var didStart = false
         await withTaskCancellationHandler {
             do {
@@ -584,12 +590,12 @@ public struct WorkspaceManager: Sendable {
                 try Task.checkCancellation()
                 for try await line in lines {
                     try Task.checkCancellation()
-                    log += line + "\n"
+                    await output.append(line)
                     onOutput(line)
                 }
             } catch {
                 if Task.isCancelled { runner.terminate() }
-                log += "\n\(error)\n"
+                await output.append("\(error)")
                 onOutput("\(error)")
             }
         } onCancel: {
@@ -606,20 +612,21 @@ public struct WorkspaceManager: Sendable {
         // `exitStatus` for ever and leave the row `running`, so it gets SIGKILL after a grace
         // period. The line in the log is what tells a reader later that nobody's script failed.
         if Task.isCancelled {
-            log += Self.setupStoppedNote + "\n"
+            await output.append(Self.setupStoppedNote)
             onOutput(Self.setupStoppedNote)
         }
 
         let status: Int32? = didStart ? await runner.exitStatus : nil
         if let status { onExit?(Int(status)) }
         let succeeded = status == 0 && !Task.isCancelled
-        let printed = log
+        let printed = await output.snapshot()
         // The whole `workspace` value here is as old as the run, and a run can take minutes, so
         // upserting it would clobber every other write to the row made in the meantime. `update`
         // re-reads inside the actor; `apply` writes the state and the log in one statement and
         // caps the log, so there is no shape of this that files an outcome without its output.
-        _ = try? await store.update(workspaceID: workspace.id) {
-            $0.apply(.runFinished(succeeded: succeeded, log: printed))
+        if let attempt {
+            try? await store.finishSetupAttempt(workspaceID: workspace.id, attempt: attempt,
+                                               succeeded: succeeded, log: printed)
         }
         return succeeded
     }
@@ -748,7 +755,7 @@ public struct WorkspaceManager: Sendable {
         // See the branch delete near the end of this method for what it guards.
         let worktreeWasOnDisk = FileManager.default.fileExists(atPath: workspace.path)
 
-        let settings = SettingsLoader.load(repo: repo.path)
+        let settings = SettingsLoader.load(workspace: workspace.path, repo: repo.path)
         let shouldDeleteBranch = deleteBranch ?? settings.deleteBranchOnArchive
 
         let report: WorkspaceSafetyReport?
@@ -778,7 +785,7 @@ public struct WorkspaceManager: Sendable {
         // running, a database still there. Deleting the worktree anyway leaves that mess with
         // nothing left to clean it up from.
         let archiveLaunch = ScriptLaunch.resolve(
-            text: settings.archiveScript, file: settings.scriptFiles[.archive], repo: repo.path
+            text: settings.archiveScript, file: settings.scriptFiles[.archive], repo: workspace.path
         )
         // A `.missing` archive script is not run and does not stop the archive, for the same
         // reason a missing setup script does not stop a workspace being created.
@@ -943,7 +950,7 @@ public enum PortAllocator {
     }
 
     static func isFree(_ port: Int) -> Bool {
-        let handle = socket(AF_INET, SOCK_STREAM, 0)
+        let handle = socket(AF_INET, SystemCalls.streamSocketType, 0)
         guard handle >= 0 else { return true }
         defer { close(handle) }
 

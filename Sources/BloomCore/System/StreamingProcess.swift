@@ -1,4 +1,7 @@
 import Foundation
+#if os(Linux)
+import Glibc
+#endif
 import Synchronization
 
 /// A long-lived subprocess whose output is consumed line by line while it runs, and whose stdin
@@ -111,23 +114,9 @@ public final class StreamingProcess: Sendable {
             if case .cancelled = reason { self?.terminate() }
         }
 
-        // SIGPIPE, whose default disposition kills the process, and Bloom does not turn it off.
-        //
-        // Nothing in this tree sets the disposition process wide, which was checked rather than
-        // assumed, and `UnixSocketConnection` says the same thing in the other direction: it sets
-        // `SO_NOSIGPIPE` on every socket it owns and its comment is that without it Bloom would be
-        // taken down by an agent CLI exiting mid-call. A pipe to a child is the same hazard and
-        // was never given the same treatment, so `write(_:)` below could be killed rather than
-        // told, and the comment on it claiming a dead child turns a write into an exception was
-        // only ever true of a process that ignores the signal. It is now, for this descriptor:
-        // `F_SETNOSIGPIPE` makes a write to a pipe nobody is reading return EPIPE, which is what
-        // "the child went away" should look like.
-        //
-        // Per descriptor rather than a process wide `signal()` call, for the reason the socket
-        // took the same route: the policy belongs to the pipe this type owns, and a library that
-        // changes a signal disposition changes it for whoever linked it, including the test
-        // binary and the bridge shim.
-        _ = fcntl(stdinPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        // Darwin suppresses SIGPIPE on this descriptor. Linux has no equivalent for pipes,
+        // so the shared helper ignores that signal there and writes report EPIPE instead.
+        SystemCalls.configurePipeWrites(stdinPipe.fileHandleForWriting.fileDescriptor)
     }
 
     public var isRunning: Bool {
@@ -177,6 +166,7 @@ public final class StreamingProcess: Sendable {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
+        #if !os(Linux)
         stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             guard let self else { return }
             let data = handle.availableData
@@ -209,17 +199,64 @@ public final class StreamingProcess: Sendable {
             }
         }
 
+        #endif
+
         process.terminationHandler = { [weak self] process in
             self?.settle(status: process.terminationStatus, deadline: nil)
         }
 
         do {
             try process.run()
+            #if os(Linux)
+            try startPipeReader(stdoutPipe.fileHandleForReading, stdout: true)
+            try startPipeReader(stderrPipe.fileHandleForReading, stdout: false)
+            #endif
         } catch {
+            if process.isRunning { process.terminate() }
             finish(status: -1, error: error)
             throw error
         }
     }
+
+    #if os(Linux)
+    /// Foundation's readability-handler teardown can race descriptor reuse in libdispatch on
+    /// Linux. Dedicated blocking readers keep each FileHandle alive through EOF and never create
+    /// those sources. The thread does not retain this process while it waits for another byte.
+    private func startPipeReader(_ handle: FileHandle, stdout: Bool) throws {
+        let pipe = try ProcessPipeReader(handle)
+        let reader = Thread { [weak self] in
+            defer { pipe.close() }
+            do {
+            while self?.isRunning == true {
+                guard let data = try pipe.next(timeoutMilliseconds: 200) else { continue }
+                if data.isEmpty {
+                    self?.finishPipe(stdout: stdout)
+                    return
+                }
+                self?.receivePipe(data, stdout: stdout)
+            }
+            } catch {
+                self?.terminate()
+                self?.finish(status: -1, error: error)
+            }
+        }
+        reader.stackSize = 512 * 1_024
+        reader.start()
+    }
+
+    private func receivePipe(_ data: Data, stdout: Bool) {
+        state.withLock { state in
+            if stdout { state.stdoutBuffer.append(data) } else { state.stderrBuffer.append(data) }
+            state.lastOutputAt = DispatchTime.now()
+        }
+        if stdout { drainStdout(final: false) } else { drainStderr(final: false) }
+    }
+
+    private func finishPipe(stdout: Bool) {
+        if stdout { drainStdout(final: true) } else { drainStderr(final: true) }
+        markEOF(stdout: stdout)
+    }
+    #endif
 
     /// Writes to the child's stdin, and does nothing at all when there is no child to write to.
     ///
@@ -317,7 +354,7 @@ public final class StreamingProcess: Sendable {
         let group = getpgid(pid)
         if group > 0, group != getpgrp(), killpg(group, signal) == 0 { return }
 
-        Foundation.kill(pid, signal)
+        SystemCalls.kill(pid, signal)
     }
 
     public var exitStatus: Int32 {
@@ -475,11 +512,16 @@ public final class StreamingProcess: Sendable {
             return waiters
         }
         guard let waiters else { return }
+        closeStdin()
 
         // Nothing will be read from these again, and a live dispatch source on a pipe nobody
         // drains is a slow leak for the rest of the launch.
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
         stderrPipe.fileHandleForReading.readabilityHandler = nil
+        #if os(Linux)
+        try? stdoutPipe.fileHandleForReading.close()
+        try? stderrPipe.fileHandleForReading.close()
+        #endif
 
         linesContinuation.finish(throwing: error)
         errorContinuation.finish()

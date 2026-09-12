@@ -15,17 +15,6 @@ import BloomCore
 /// and what it is called: all of them are pure functions with tests, because this is the one
 /// place in the app where a wrong answer writes to somebody's disk.
 ///
-/// **No GitHub half.** `ProjectSetupSheet` offers to publish a folder it has just turned into a
-/// repository, and this does not, in either of the two cases where it makes one. For a brand
-/// new project the argument is the one the sheet this replaced was built on: publishing an empty
-/// repository claims a name in somebody's account for a thing that may not exist next week, and
-/// `RepositoryStarter.abandon` will not delete one once it does. **For Start Tracking that
-/// argument does not hold**, a folder with sixty files in it is exactly the sort of thing somebody
-/// might want published, and it is deliberately left out all the same: a publish flow here is its
-/// own piece of work, with an owner picker, an availability check and a sign in sheet, and it does
-/// not belong in the change that removed a menu. Publishing an existing project is still
-/// `ProjectSetupSheet`'s, reached from the file panel.
-///
 /// A plain `View` with a `dismiss` in it, which is what let it move out of a sheet for almost
 /// nothing: `DismissAction` closes the window it is in exactly as it dismissed the sheet it was
 /// in, so every route that ended the sheet ends the window. What it no longer needs is the
@@ -44,6 +33,13 @@ struct StartProjectView: View {
     }
 
     /// The line, exactly as typed. A name, or a path, and Bloom reads which.
+    @State private var isRemote = false
+    @State private var showsGitHub = false
+    @State private var remoteHome = ""
+    @State private var inspectedText = ""
+    @State private var inspectionProblem: String?
+    private var backend: ProjectCreationBackend { ProjectCreationBackend(app: app, isRemote: isRemote) }
+    private var destinationKey: String { "\(isRemote)-\(String(describing: app.remoteServer.endpoint))" }
     @State private var typed = ""
     @State private var facts = NewProjectFacts()
     /// What the folder holds, once the walk that counts it has come back. Only ever asked of a
@@ -93,7 +89,7 @@ struct StartProjectView: View {
     /// window. The same cap `ProjectSetupSheet` uses.
     private static let excludedShown = 8
 
-    private var home: String { FileManager.default.homeDirectoryForCurrentUser.path }
+    private var home: String { isRemote ? remoteHome : FileManager.default.homeDirectoryForCurrentUser.path }
 
     private var verdict: ProjectTargetVerdict { ProjectTargetVerdict.of(facts) }
 
@@ -140,7 +136,28 @@ struct StartProjectView: View {
         // worth saying once, which is why it moves rather than goes: "Setting up bloom" is what
         // the window is doing, and a failure's title is what went wrong.
         .navigationTitle(title)
-        .task {
+        .onAppear {
+            isRemote = StartProjectOpening.shared.isRemote ?? app.selection.isRemote
+            StartProjectOpening.shared.isRemote = nil
+        }
+        .sheet(isPresented: $showsGitHub) {
+            GitHubProjectPicker(isRemote: isRemote) { repo in finishRegistered(repo, opensWorkspace: true) }
+                .environment(app)
+        }
+        .onChange(of: isRemote) { _, _ in
+            facts = NewProjectFacts(); contents = nil; completions = []; inspectedText = ""
+            isLocationLoaded = false; phase = .naming; inspectionProblem = nil
+        }
+        .task(id: destinationKey) {
+            if isRemote {
+                do {
+                    guard case .projectContext(let context) = try await backend.request(.projectContext), !Task.isCancelled else { return }
+                    remoteHome = context.home; defaultLocation = context.location; branch = context.branch
+                    projectsThere = NewProjectPlan.projectsIn(defaultLocation, projectPaths: context.projectPaths)
+                    identityProblem = context.identityProblem; isLocationLoaded = true; isFieldFocused = true
+                } catch { if !Task.isCancelled { inspectionProblem = error.localizedDescription } }
+                return
+            }
             let preferences: DirectoryPreferences
             if let store = app.store { preferences = await DirectoryPreferences.load(from: store) } else {
                 preferences = DirectoryPreferences()
@@ -157,9 +174,19 @@ struct StartProjectView: View {
         // Re-asked after a pause rather than on every keystroke: this walks up the tree looking
         // for a `.git`, reads a directory and, for a folder with something in it, asks the same
         // question of every child. Cheap once and rude sixty times.
-        .task(id: Draft(typed: typed, location: defaultLocation)) {
+        .task(id: Draft(typed: typed, location: destinationKey + defaultLocation)) {
             try? await Task.sleep(for: Self.inspectionDelay)
             guard !Task.isCancelled else { return }
+            guard isLocationLoaded else { return }
+            if isRemote {
+                do {
+                    guard case .inspection(let result) = try await backend.request(.inspectProject(typed)), !Task.isCancelled else { return }
+                    facts = result.facts; contents = result.contents; inspectedText = typed
+                    completions = typed == acceptedCompletion ? [] : result.completions
+                    inspectionProblem = nil
+                } catch { if !Task.isCancelled { inspectionProblem = error.localizedDescription; inspectedText = "" } }
+                return
+            }
             let line = typed
             let location = defaultLocation
             let found = await Task.detached {
@@ -169,6 +196,7 @@ struct StartProjectView: View {
             facts = found
         }
         .task(id: typed + searchLocations.joined(separator: "\n")) {
+            guard !isRemote else { return }
             completions = []
             selectedCompletion = nil
             guard typed != acceptedCompletion else { return }
@@ -187,6 +215,7 @@ struct StartProjectView: View {
         // are asked only once the target has settled on one. Keyed on the path rather than on the
         // line, so correcting a typo further up the path does not walk `node_modules` twice.
         .task(id: pathToScan) {
+            guard !isRemote else { return }
             contents = nil
             guard let path = pathToScan else { return }
             let found = await Task.detached { RepositoryStarter.scan(path) }.value
@@ -199,6 +228,7 @@ struct StartProjectView: View {
             // closing it in the middle of a run is now a thing a person can do, and what is left
             // behind if nothing answers for it is a half made repository on their disk. This is
             // `stop` without the part that ends a sheet that is already gone.
+            guard !isRemote else { return }
             createTask?.cancel()
             createTask = nil
             guard !isFinishing, case .working = phase else { return }
@@ -229,6 +259,7 @@ struct StartProjectView: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: Metrics.spacingWide) {
+            CreationDestinationPicker(isRemote: $isRemote).disabled(isWorking)
             Image(systemName: "folder.badge.plus")
                 .font(Typo.bodyEmphasis)
                 .foregroundStyle(Palette.accent)
@@ -237,7 +268,7 @@ struct StartProjectView: View {
             // The line that was under the title, now the only thing in the band. The title itself
             // is the window's, which is where a window's title goes, and the same words in bold
             // fifteen points four points below it were the second drawing of it.
-            Text("Create a folder on this Mac and add it to the sidebar.")
+            Text("Create a folder or add an existing project.")
                 .font(Typo.caption)
                 .foregroundStyle(Palette.textSecondary)
 
@@ -305,7 +336,7 @@ struct StartProjectView: View {
                     selectedCompletion = nil
                     return .handled
                 }
-            Button("Choose\u{2026}", action: chooseFolder)
+            if !isRemote { Button("Choose\u{2026}", action: chooseFolder) }
         }
 
         if !completions.isEmpty {
@@ -336,6 +367,8 @@ struct StartProjectView: View {
             Callout(text: identityProblem, symbol: "exclamationmark.triangle.fill", tone: .warning)
         }
 
+        Button("Browse GitHub…") { showsGitHub = true }
+        if let inspectionProblem { Callout(text: inspectionProblem, symbol: "exclamationmark.triangle", tone: .negative) }
         block
     }
 
@@ -516,7 +549,7 @@ struct StartProjectView: View {
                 // Enabled, and carrying Escape. A disabled Cancel over a step that has hung is a
                 // dialog with no way out, which is the bug the neighbouring sheet was left with
                 // when `git commit` sat waiting on a signing helper.
-                Button("Stop", role: .cancel, action: stop)
+                Button(isRemote ? "Close" : "Stop", role: .cancel, action: stop)
                     .keyboardShortcut(.cancelAction)
 
             case .failed:
@@ -533,7 +566,8 @@ struct StartProjectView: View {
     }
 
     private var canStart: Bool {
-        guard isLocationLoaded, hasTyped, verdict.isAllowed else { return false }
+        guard isLocationLoaded, hasTyped, verdict.isAllowed, !isWorking else { return false }
+        if isRemote, inspectedText != typed || inspectionProblem != nil { return false }
         return identityProblem == nil || !verdict.makesACommit
     }
 
@@ -570,7 +604,32 @@ struct StartProjectView: View {
     }
 
     /// The button, whichever verb it is wearing.
+    private var isWorking: Bool { if case .working = phase { true } else { false } }
+
+    private func finishRegistered(_ repo: Repo, opensWorkspace: Bool) {
+        isFinishing = true
+        dismiss()
+        openWindow(id: BloomApp.mainWindowID)
+        if opensWorkspace { openWindow(id: CreateWorkspaceWindow.id, value: repo.id) }
+    }
+
     private func start() {
+        if isRemote {
+            guard canStart else { return }
+            let opening = verdict.opensAWorkspace
+            let action = ServerCreationOperation.startProject(typed: typed, expected: facts)
+            phase = .working(.initialise)
+            createTask = Task {
+                do {
+                    guard case .project(let repo) = try await backend.request(action) else { throw ServerFailure("The server did not return a project.") }
+                    let registered = try await backend.register(repo)
+                    finishRegistered(registered, opensWorkspace: opening)
+                } catch {
+                    phase = .failed(NewProjectFailure(title: "Could not start the project", message: error.localizedDescription, folderWasCreated: false))
+                }
+            }
+            return
+        }
         // Asked again here, from what is typed at this instant. The block is a beat behind the
         // keyboard on purpose, and Return is faster than that beat: without this, typing a name
         // and pressing Return in one movement pressed a button that was still looking at the empty
@@ -624,6 +683,7 @@ struct StartProjectView: View {
     /// what it did not make is left exactly where it was. See `NewProjectStarter.discard`, which
     /// is the rule that keeps a folder somebody else's files are in.
     private func stop() {
+        if isRemote { finish(nil); return }
         createTask?.cancel()
         createTask = nil
         let target = facts.path
@@ -669,6 +729,7 @@ struct StartProjectView: View {
     }
 
     private func discardAndClose() {
+        if isRemote { finish(nil); return }
         guard case .failed(let failure) = phase else {
             finish(nil)
             return

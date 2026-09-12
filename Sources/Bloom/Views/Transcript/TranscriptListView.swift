@@ -603,6 +603,7 @@ struct TranscriptListView: View {
                                 agentKind: agentKind,
                                 wasStopped: wasStopped,
                                 recovered: recovered,
+                                isRemote: home.remoteWorkspaceID != nil,
                                 stillRunning: stillRunning,
                                 transcript: transcript
                             )

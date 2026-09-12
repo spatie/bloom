@@ -188,7 +188,7 @@ public enum Shell {
         return result
     }
 
-    /// Run a user-authored script through zsh. Used only for setup and run scripts, where the
+    /// Run a user-authored script through the platform shell. Used for setup and run scripts, where the
     /// whole point is that the user wrote shell.
     @discardableResult
     public static func script(
@@ -197,6 +197,6 @@ public enum Shell {
         env: [String: String] = [:],
         timeout: Duration? = nil
     ) async throws -> ShellResult {
-        try await run("/bin/zsh", ["-c", source], cwd: cwd, env: env, timeout: timeout)
+        try await run(LoginShell.fallback, ["-c", source], cwd: cwd, env: env, timeout: timeout)
     }
 }

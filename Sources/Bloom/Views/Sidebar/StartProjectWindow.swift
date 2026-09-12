@@ -47,3 +47,10 @@ struct StartProjectWindow: Scene {
         .restorationBehavior(.disabled)
     }
 }
+
+@MainActor
+@Observable
+final class StartProjectOpening {
+    static let shared = StartProjectOpening()
+    var isRemote: Bool?
+}

@@ -48,7 +48,7 @@ public struct WorkspaceStartContext: Sendable {
 /// Loaded separately from `WorkspaceStartContext` and after it, because listing pull requests is a
 /// network call: the sheet has to be typeable the moment it opens, and a project whose GitHub is
 /// slow or unreachable must delay the picker rather than the composer.
-public struct WorkspaceCheckoutOptions: Sendable {
+public struct WorkspaceCheckoutOptions: Sendable, Codable {
     public let pullRequests: [PullRequestListing]
     public let branches: [ExistingBranch]
     /// Why there are no pull requests, when gh is the reason. `ready` with an empty list means the

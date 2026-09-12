@@ -1,0 +1,40 @@
+name: HTTPS gateway
+
+on:
+  pull_request:
+    paths:
+      - Gateway/**
+      - Sources/BloomCore/Server/ServerProtocol.swift
+      - .github/workflows/gateway.yml
+  push:
+    branches: [main]
+    paths:
+      - Gateway/**
+      - Sources/BloomCore/Server/ServerProtocol.swift
+      - .github/workflows/gateway.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bloom-gateway-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: Gateway
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: Gateway/go.mod
+          cache-dependency-path: Gateway/go.sum
+      - run: test -z "$(gofmt -l cmd internal)"
+      - run: go test -race ./...
+      - run: go vet ./...
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...

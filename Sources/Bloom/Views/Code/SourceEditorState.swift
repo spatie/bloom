@@ -63,7 +63,7 @@ final class SourceNavigation {
     static let shared = SourceNavigation()
     var histories: [WorkspaceID: SourceHistory] = [:]
 
-    func visit(_ location: CodeLocation, in model: WorkspaceModel) {
+    func visit(_ location: CodeLocation, in model: any WorkspacePaneModel) {
         var history = histories[model.workspace.id] ?? SourceHistory()
         if history.entries.indices.contains(history.index) {
             let current = history.entries[history.index].path
@@ -76,7 +76,7 @@ final class SourceNavigation {
         histories[model.workspace.id] = history
     }
 
-    func move(_ delta: Int, in model: WorkspaceModel) {
+    func move(_ delta: Int, in model: any WorkspacePaneModel) {
         guard var history = histories[model.workspace.id] else { return }
         if history.entries.indices.contains(history.index) {
             let current = history.entries[history.index].path

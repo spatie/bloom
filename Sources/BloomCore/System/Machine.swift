@@ -1,6 +1,8 @@
 import Foundation
+#if os(macOS)
 import IOKit
 import IOKit.ps
+#endif
 
 /// What kind of Mac this is, for the few decisions that turn on it.
 ///
@@ -24,6 +26,7 @@ public enum Machine {
         publishesClamshellState || hasInternalBattery || model.lowercased().contains("book")
     }
 
+    #if os(macOS)
     public static var isPortable: Bool {
         isPortable(
             model: hardwareModel,
@@ -63,4 +66,5 @@ public enum Machine {
         // `sysctl` answers with a trailing null, which is not part of the name.
         return String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
     }
+    #endif
 }

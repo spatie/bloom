@@ -250,6 +250,18 @@ final class PromptAttachmentStore {
 
     // MARK: - Persistence
 
+    /// Remote files already exist on the server. These records carry comments, never local ownership.
+    func recordRemote(paths: [String], comment: BrowserImageComment?, sessionID: String) {
+        load(sessionID: sessionID)
+        let existing = attachments(for: sessionID)
+        let known = Set(existing.map(\.path))
+        let additions = paths.filter { !known.contains($0) }.map {
+            PromptAttachment(path: $0, isCopy: false, imageComment: comment)
+        }
+        apply(existing + additions, to: sessionID)
+        if let comment { annotate(paths: paths, with: comment, sessionID: sessionID) }
+    }
+
     func annotate(paths: [String], with comment: BrowserImageComment, sessionID: String) {
         let paths = Set(paths)
         let updated = attachments(for: sessionID).map { attachment in

@@ -34,7 +34,7 @@ final class CloseSessionAlert {
     struct Request: Identifiable, Equatable {
         let id = UUID()
         var session: Session
-        var model: WorkspaceModel
+        var model: any WorkspacePaneModel
         var cost: SessionClosure
 
         var title: String { cost.title(of: session.title) }
@@ -52,7 +52,7 @@ final class CloseSessionAlert {
     /// Closes the conversation, asking first when there is something to lose by it. An idle
     /// conversation with others beside it is never asked about: a dialog that appears when there is
     /// nothing to lose is a dialog that stops being read.
-    func close(_ session: Session, in model: WorkspaceModel) {
+    func close(_ session: Session, in model: any WorkspacePaneModel) {
         let cost = SessionClosure.closing(
             isRunning: model.isRunning(session),
             otherConversations: model.sessions.count - 1
@@ -71,9 +71,10 @@ final class CloseSessionAlert {
         request = nil
     }
 
-    private func perform(_ session: Session, in model: WorkspaceModel) {
+    private func perform(_ session: Session, in model: any WorkspacePaneModel) {
         Task {
             await model.closeSession(session)
+            guard !model.sessions.contains(where: { $0.id == session.id }) else { return }
             // A no-op unless the chat was a pane of some tab. A tab down to one pane dissolves
             // into whatever is left rather than taking the column with it, and a tab named after
             // this conversation is re-filed under one of its other panes. See `TabSurgery`.

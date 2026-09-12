@@ -28,6 +28,20 @@ struct CreateWorkspaceView: View {
     /// the repo of whatever is selected. Either way the project arrives decided, so the control
     /// for it never asks a question: it reports, and opens only if you want to change your mind.
     var initialRepo: Repo?
+    @State private var isRemote: Bool
+    @State private var showsGitHub = false
+    @State private var creationProblem: String?
+    @State private var isCreatingRemote = false
+    @State private var creationSource = CreationComposerSource()
+
+    init(initialRepo: Repo? = nil, initialIsRemote: Bool = false) {
+        self.initialRepo = initialRepo
+        _isRemote = State(initialValue: initialIsRemote)
+    }
+
+    private var backend: ProjectCreationBackend { ProjectCreationBackend(app: app, isRemote: isRemote) }
+    private var repos: [Repo] { isRemote ? (app.remoteServer.catalogue?.repositories ?? []) : app.repos }
+    private var creationKey: String { "\(isRemote)-\(repoID?.rawValue ?? "")-\(String(describing: app.remoteServer.endpoint))" }
 
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -136,7 +150,7 @@ struct CreateWorkspaceView: View {
     /// work on" and a one-line box answers it with "something short".
     private static let minEditorLines: CGFloat = 5
 
-    private var repo: Repo? { app.repos.first { $0.id == repoID } }
+    private var repo: Repo? { repos.first { $0.id == repoID } }
 
     private var trimmedPrompt: String {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -181,12 +195,12 @@ struct CreateWorkspaceView: View {
     /// two ways to finish and only one of them used what had been typed. The mode answers it
     /// first, so there is nothing left to disagree about.
     private var canCreate: Bool {
-        WorkspaceStartPlan.canStart(
+        (!isRemote || !mode.runsAnAgent || creationSource.models.offers(controls.agentKind)) && WorkspaceStartPlan.canStart(
             hasProject: repo != nil,
             prompt: task,
             hasCheckout: checkout != nil,
             isChatWorkspace: mode.runsAnAgent,
-            isBusy: app.isCreatingWorkspace || isLoading
+            isBusy: app.isCreatingWorkspace || isCreatingRemote || isLoading
         )
     }
 
@@ -205,7 +219,7 @@ struct CreateWorkspaceView: View {
     /// where the project has one. No worktree jargon, because a person who knows the word does not
     /// need the sentence and a person who does not is not helped by it.
     private var consequence: some View {
-        Text("Creates a separate copy of the project on this Mac, on its own branch.")
+        Text(isRemote ? "Creates a separate copy of the project on the server, on its own branch." : "Creates a separate copy of the project on this Mac, on its own branch.")
             .font(Typo.caption)
             .foregroundStyle(Palette.textTertiary)
             .fixedSize(horizontal: false, vertical: true)
@@ -220,11 +234,16 @@ struct CreateWorkspaceView: View {
             header
             Hairline()
 
-            if app.repos.isEmpty {
+            if repos.isEmpty {
                 noProjects
                     .padding(Metrics.gutter)
             } else {
                 composer
+                if isRemote, mode.runsAnAgent, !creationSource.models.offers(controls.agentKind) {
+                    Callout(text: "No usable agent models are available on this server. Check agent installation and sign-in.", symbol: "exclamationmark.triangle", tone: .warning)
+                        .padding(.horizontal, Metrics.gutter)
+                        .padding(.bottom, Metrics.spacingWide)
+                }
                 if hasSetupScript {
                     WorkspaceSetupOption(isEnabled: $runSetupScript)
                         .disabled(isLoading)
@@ -240,7 +259,7 @@ struct CreateWorkspaceView: View {
         // every open (the first pass writes `repoID`, which fired the onChange), and a load left
         // in flight when the project changed could land another project's branches on this one's
         // window. `.task(id:)` cancels the stale load; `load` checks before writing.
-        .task(id: repoID) { await load() }
+        .task(id: creationKey) { await load() }
         // The keyboard goes to the pull request box rather than to the task, when the window was
         // opened to open a pull request. `load` puts it in the task unconditionally, so this has
         // to come after it rather than beside it.
@@ -263,8 +282,23 @@ struct CreateWorkspaceView: View {
         // A second task, and a second trip, because listing pull requests is a network call and
         // the composer has to be typeable before it lands. The window opens on the branch route
         // either way; the picker fills in behind it.
-        .task(id: repoID) { await loadCheckouts() }
+        .task(id: creationKey) { await loadCheckouts() }
         // The draft's chips and the files behind them belong to a window that is going away.
+        .onChange(of: repoID) { _, _ in
+            checkout = nil; baseBranch = ""; referenceProblem = nil
+            isEnteringReference = false; checkoutOptions = WorkspaceCheckoutOptions()
+        }
+        .onChange(of: isRemote) { _, _ in
+            repoID = nil; checkout = nil; baseBranch = ""; checkoutOptions = WorkspaceCheckoutOptions()
+            creationSource = CreationComposerSource(); creationProblem = nil
+        }
+        .sheet(isPresented: $showsGitHub) {
+            GitHubProjectPicker(isRemote: isRemote) { selected in repoID = selected.id }
+                .environment(app)
+        }
+        .alert("Could not create workspace", isPresented: Binding(get: { creationProblem != nil }, set: { if !$0 { creationProblem = nil } })) {
+            Button("OK", role: .cancel) { creationProblem = nil }
+        } message: { Text(creationProblem ?? "") }
         .onDisappear(perform: discardDraft)
     }
 
@@ -285,6 +319,7 @@ struct CreateWorkspaceView: View {
             // What the band is now is the sentence that was already after the title: "in bloom,
             // from main", the two choices that are about the workspace rather than about the turn.
             projectControl
+            CreationDestinationPicker(isRemote: $isRemote).disabled(isCreatingRemote)
 
             if repo != nil {
                 sourceControl
@@ -292,10 +327,10 @@ struct CreateWorkspaceView: View {
 
             Spacer(minLength: 0)
 
-            if isLoading {
+            if isLoading || isCreatingRemote {
                 ProgressView()
                     .controlSize(.small)
-                    .accessibilityLabel("Loading branches")
+                    .accessibilityLabel(isCreatingRemote ? "Creating workspace" : "Loading branches")
             }
         }
         // The same padding as `ProjectSetupSheet`'s header, which is the app's other header
@@ -322,68 +357,49 @@ struct CreateWorkspaceView: View {
     /// The project, with its mark on it. A `Menu` rather than a `Picker`, which is what finally
     /// gets the tile into this control: a picker on macOS is an `NSPopUpButton` whose items draw a
     /// title and an `NSImage`, so a `Label` with a SwiftUI icon had the icon silently dropped.
-    @ViewBuilder
     private var projectControl: some View {
-        let label = ComposerControlLabel(
-            text: repo?.name ?? "Choose a project",
-            tint: Palette.textPrimary,
-            showsMenuIndicator: app.repos.count > 1
-        ) {
-            RepoIcon(repo: repo, size: Metrics.repoIconSmall)
-        }
-
-        // One project is not a choice. It still says which project, because a window that cut a
-        // worktree without naming the repository would be asking for trust it has not earned.
-        if app.repos.count > 1 {
-            Menu {
-                // An inline `Picker` inside the menu, not a `Picker` in place of it. The tile on
-                // the control above still needs a `Menu`, for the reason written just above; the
-                // tick beside the project you are already in is the platform's to draw, and a
-                // `Button` whose label carries a checkmark symbol never got one. See
-                // `ComposerOptionMenu`.
-                //
-                // Each row carries the project's own mark as well, which an item in an `NSMenu`
-                // has room for: a title, an image and a state marker are three separate slots and
-                // they coexist. What the image slot will not take is a SwiftUI view, so the mark
-                // arrives as a bitmap of the same `RepoIcon` the chip and the sidebar draw. See
-                // `RepoIconImage`.
-                //
-                // One picker keeps a single selection across both visibility groups.
-                Picker("Project", selection: Binding(
-                    get: { repoID ?? RepoID("") },
-                    set: { repoID = $0.rawValue.isEmpty ? nil : $0 }
-                )) {
-                    ForEach(ProjectMenuGroup.grouped(app.repos)) { group in
-                        Section(group.title) {
-                            ForEach(group.repos) { candidate in
-                                Label {
-                                    Text(candidate.name)
-                                } icon: {
-                                    if let mark = RepoIconImage.of(candidate) {
-                                        // Keep the project's colours in the menu's image slot.
-                                        Image(nsImage: mark).renderingMode(.original)
-                                    }
+        Menu {
+            // One picker keeps the selection across visible and hidden projects, scoped to the
+            // selected destination. The menu also creates projects when there are none yet.
+            Picker("Project", selection: Binding(
+                get: { repoID ?? RepoID("") },
+                set: { repoID = $0.rawValue.isEmpty ? nil : $0 }
+            )) {
+                ForEach(ProjectMenuGroup.grouped(repos)) { group in
+                    Section(group.title) {
+                        ForEach(group.repos) { candidate in
+                            Label {
+                                Text(candidate.name)
+                            } icon: {
+                                if isRemote {
+                                    Image(systemName: "folder")
+                                } else if let mark = RepoIconImage.of(candidate) {
+                                    Image(nsImage: mark).renderingMode(.original)
                                 }
-                                .tag(candidate.id)
                             }
+                            .tag(candidate.id)
                         }
                     }
                 }
-                .pickerStyle(.inline)
-                .labelsHidden()
-            } label: {
-                label
             }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Choose the project")
-            .accessibilityLabel("Project")
-            .accessibilityValue(repo?.name ?? "")
-        } else {
-            label
+            .pickerStyle(.inline)
+            .labelsHidden()
+            Divider()
+            Button("Browse GitHub…") { showsGitHub = true }
+            Button("Start a Project…", action: addProject)
+        } label: {
+            ComposerControlLabel(text: repo?.name ?? "Choose a project", tint: Palette.textPrimary, showsMenuIndicator: true) {
+                if isRemote { Image(systemName: "folder") } else { RepoIcon(repo: repo, size: Metrics.repoIconSmall) }
+            }
         }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(isCreatingRemote)
+        .help("Choose the project")
+        .accessibilityLabel("Project")
+        .accessibilityValue(repo?.name ?? "")
     }
 
     /// Where the work comes from: a new branch cut from a base, an open pull request, or a branch
@@ -581,7 +597,8 @@ struct CreateWorkspaceView: View {
             editorHeight: editorHeight,
             onContentHeightChange: { contentHeight = $0 },
             onKey: handle(key:),
-            onOpenAttachment: open(attachment:)
+            onOpenAttachment: open(attachment:),
+            creationSource: isRemote ? creationSource : nil
         ) { actions in
             ComposerFooterView(
                 controls: controls,
@@ -600,7 +617,8 @@ struct CreateWorkspaceView: View {
                 // not going to cut a worktree because a row was arrowed onto. `QuickPromptDelivery`
                 // is the same fallback said once, for a surface that can do neither.
                 onQuickPrompt: actions.insert,
-                onSend: create
+                onSend: create,
+                creationSource: isRemote ? creationSource : nil
             )
         }
     }
@@ -816,7 +834,7 @@ struct CreateWorkspaceView: View {
         } description: {
             Text("Add a git repository before starting a workspace.")
         } actions: {
-            Button("Choose a folder", systemImage: "folder", action: addProject)
+            Button("Start a Project…", systemImage: "folder", action: addProject)
                 .buttonStyle(.borderedProminent)
                 // Explicit so every primary action reads from the shared semantic token.
                 .tint(Palette.controlAccent)
@@ -900,12 +918,16 @@ struct CreateWorkspaceView: View {
     // MARK: - Actions
 
     private func load() async {
+        if isRemote, !app.remoteServer.isConnected {
+            app.remoteServer.connectionMode = .remote
+            await app.remoteServer.connect()
+            guard !Task.isCancelled else { return }
+        }
         if repoID == nil {
             // Writing `repoID` restarts this task for the resolved project, so the listing below
             // runs once per project rather than once on open and again on the change.
-            repoID = initialRepo?.id
-                ?? app.selectedWorkspace.flatMap { app.repo(for: $0) }?.id
-                ?? app.repos.first?.id
+            repoID = repos.first(where: { $0.id == initialRepo?.id })?.id
+                ?? repos.first?.id
             return
         }
         guard let repo else { return }
@@ -923,6 +945,18 @@ struct CreateWorkspaceView: View {
         focusTheBox()
         isLoading = true
 
+        if isRemote {
+            do {
+                guard case .workspaceContext(let context) = try await backend.request(.workspaceContext(repo.id)) else { return }
+                guard !Task.isCancelled else { return }
+                branches = context.branches; branchPrefix = context.branchPrefix
+                hasSetupScript = context.hasSetupScript; isNamingAvailable = false
+                controls = context.composer.controls; creationSource.receive(context)
+                baseBranch = WorkspaceStartContext.resolvedBaseBranch(current: baseBranch, branches: branches, defaultBranch: repo.defaultBranch)
+            } catch { if !Task.isCancelled { creationProblem = error.localizedDescription } }
+            if !Task.isCancelled { isLoading = false }
+            return
+        }
         let path = repo.path
         var appDefaults = AppDefaults()
         if let store = app.store {
@@ -1015,9 +1049,9 @@ struct CreateWorkspaceView: View {
         }
         let branch = WorkspaceCheckoutPlan.localBranch(for: chosen, taken: Set(branches))
         if holder.isBloomWorkspace, let repo, let held = WorkspaceCheckoutPlan.workspaceHolding(
-            branch: branch, in: repo.id, among: app.workspaces
+            branch: branch, in: repo.id, among: isRemote ? (app.remoteServer.catalogue?.workspaces ?? []) : app.workspaces
         ) {
-            app.selection = .workspace(held.id)
+            app.selection = isRemote ? .remoteWorkspace(held.id) : .workspace(held.id)
             dismiss()
             return
         }
@@ -1065,11 +1099,19 @@ struct CreateWorkspaceView: View {
     private func resolveReference(_ text: String) {
         guard let repo, !isResolvingReference else { return }
         let path = repo.path
+        let key = creationKey
         isResolvingReference = true
         referenceProblem = nil
         Task {
-            let resolution = await WorkspaceCheckoutResolver.resolve(text, repoPath: path)
+            let resolution: WorkspaceCheckoutResolution
+            if isRemote {
+                do {
+                    guard case .reference(let value) = try await backend.request(.resolveReference(repoID: repo.id, reference: text)) else { return }
+                    resolution = value
+                } catch { resolution = .failure(error.localizedDescription) }
+            } else { resolution = await WorkspaceCheckoutResolver.resolve(text, repoPath: path) }
             isResolvingReference = false
+            guard key == creationKey else { return }
             switch resolution {
             case .checkout(let resolved): offer(resolved)
             case .failure(let sentence): referenceProblem = sentence
@@ -1094,6 +1136,13 @@ struct CreateWorkspaceView: View {
     private func loadCheckouts() async {
         guard let repo else { return }
         isLoadingCheckouts = true
+        if isRemote {
+            do {
+                if case .checkouts(let options) = try await backend.request(.checkouts(repo.id)), !Task.isCancelled { checkoutOptions = options }
+            } catch { if !Task.isCancelled { referenceProblem = error.localizedDescription } }
+            if !Task.isCancelled { isLoadingCheckouts = false }
+            return
+        }
         let options = await WorkspaceCheckoutOptions.load(
             repoPath: repo.path,
             repoID: repo.id,
@@ -1111,7 +1160,8 @@ struct CreateWorkspaceView: View {
     }
 
     private func addProject() {
-        Task { await app.addProjectByAsking() }
+        StartProjectOpening.shared.isRemote = isRemote
+        openWindow(id: StartProjectWindow.id)
     }
 
     /// A chip in this window has no review tab to open into, so it opens where a file opens when
@@ -1157,6 +1207,19 @@ struct CreateWorkspaceView: View {
             FileManager.default.fileExists(atPath: $0.url(in: directory).path)
         }
         let staged = StagedAttachments(directory: directory, attachments: ready)
+        if isRemote {
+            isCreatingRemote = true
+            Task {
+                defer { isCreatingRemote = false }
+                do {
+                    try await backend.startWorkspace(repo: repo, text: text, mode: chosen, base: base, checkout: source,
+                        controls: chosenControls, runSetup: shouldRunSetup, staged: staged)
+                    dismiss()
+                    openWindow(id: BloomApp.mainWindowID)
+                } catch { creationProblem = error.localizedDescription }
+            }
+            return
+        }
         // The chips go now; the files stay until the worktree has taken them.
         PromptAttachmentStore.shared.clear(sessionID: handedOver)
         // Still rotated, even though creating now always dismisses. `dismiss` runs `onDisappear`,

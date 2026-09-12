@@ -1,5 +1,7 @@
-import CoreGraphics
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 /// The inspector's slide, sampled: how wide the title bar's trailing end is part way through it.
 ///

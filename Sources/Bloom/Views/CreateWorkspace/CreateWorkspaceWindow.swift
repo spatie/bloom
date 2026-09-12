@@ -65,9 +65,10 @@ private struct CreateWorkspaceWindowContent: View {
     let repoID: RepoID?
 
     @Environment(AppModel.self) private var app
-
     var body: some View {
-        CreateWorkspaceView(initialRepo: app.repos.first { $0.id == repoID })
+        let remoteRepo = app.remoteServer.catalogue?.repositories.first { $0.id == repoID }
+        let isRemote = remoteRepo != nil || (repoID == nil && app.selection.isRemote)
+        CreateWorkspaceView(initialRepo: remoteRepo ?? app.repos.first { $0.id == repoID }, initialIsRemote: isRemote)
     }
 }
 

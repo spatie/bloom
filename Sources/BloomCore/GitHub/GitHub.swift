@@ -44,7 +44,7 @@ public struct CheckRun: Sendable, Hashable, Identifiable {
 /// Two failures rather than one, because they are different problems: `gh` missing is fixed by
 /// installing it, `gh` signed out is fixed by signing in, and a sentence that covers both says
 /// nothing useful about either.
-public enum GitHubAccess: Sendable, Equatable {
+public enum GitHubAccess: Sendable, Equatable, Codable {
     case ready
     case notInstalled
     case signedOut

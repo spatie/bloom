@@ -379,8 +379,9 @@ final class WorkspaceModel {
     private func drainSettingsRefreshes() async {
         repeat {
             if let path = repo?.path {
+                let workspacePath = workspace.path
                 let loaded = await Task.detached(priority: .utility) {
-                    SettingsLoader.load(repo: path)
+                    SettingsLoader.load(workspace: workspacePath, repo: path)
                 }.value
                 if settings != loaded { settings = loaded }
             }
@@ -1055,8 +1056,9 @@ final class WorkspaceModel {
         // Off the main actor: this reads and parses up to six files from disk, and it runs at the
         // moment a workspace is created, which is exactly when the window must stay responsive.
         let repoPath = repo.path
+        let workspacePath = workspace.path
         let settings = await Task.detached(priority: .userInitiated) {
-            SettingsLoader.load(repo: repoPath)
+            SettingsLoader.load(workspace: workspacePath, repo: repoPath)
         }.value
 
         if workspace.setupState == .pending, settings.setupScript != nil || Git.hasSubmodules(in: workspace.path) {
@@ -1148,7 +1150,7 @@ final class WorkspaceModel {
         return await Task.detached(priority: .userInitiated) {
             WorkspaceBrowserURL.read(
                 worktree: worktree,
-                settings: SettingsLoader.load(repo: repoPath),
+                settings: SettingsLoader.load(workspace: worktree, repo: repoPath),
                 environment: environment,
                 port: port
             )

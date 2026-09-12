@@ -2,7 +2,7 @@ import Foundation
 
 /// One setting the user changed, with its new value. `nil` means "stop stating this here", which
 /// removes the key rather than writing an empty one, so a file only ever says what it means.
-public enum SettingsEdit: Sendable, Hashable {
+public enum SettingsEdit: Codable, Sendable, Hashable {
     case setupScript(String?)
     case archiveScript(String?)
     case runScripts([RunScript])

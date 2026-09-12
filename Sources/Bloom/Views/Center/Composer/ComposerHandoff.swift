@@ -41,7 +41,7 @@ enum ComposerHandoff {
     @discardableResult
     static func attach(
         _ sources: [AttachmentSource],
-        to model: WorkspaceModel,
+        to model: some WorkspacePaneModel,
         sessionID: SessionID? = nil,
         revealConversation: Bool = true,
         imageComment: BrowserImageComment? = nil,
@@ -67,6 +67,18 @@ enum ComposerHandoff {
         let key = session.id.rawValue
         let store = PromptAttachmentStore.shared
         store.load(sessionID: key)
+
+        if let remote = transcript.remote {
+            do {
+                let paths = try await remote.attach(sources)
+                guard !paths.isEmpty else { return Outcome(failure: "Nothing could be attached.") }
+                store.recordRemote(paths: paths, comment: imageComment, sessionID: key)
+                append(body(paths), to: transcript)
+                remote.saveDraft(transcript.draft)
+                if revealConversation { WorkspaceTabsStore.shared.reveal(.chat(session.id), in: model) }
+                return Outcome(paths: paths)
+            } catch { return Outcome(failure: error.readableMessage) }
+        }
 
         let added = await store.add(sources, sessionID: key, workspace: model.workspace.path)
         guard !added.paths.isEmpty else {

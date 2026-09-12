@@ -115,6 +115,9 @@ jobs:
       - name: Check licence packaging
         run: zsh Tools/release/tests/licences.sh
 
+      - name: Check server service packaging
+        run: python3 Tools/test-server-packaging.py
+
       - name: Check the house rules
         run: ./Tools/house-rules.sh
 

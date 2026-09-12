@@ -104,7 +104,7 @@ struct RootView: View {
                     // column. Nothing it could reach was taken away with the field, which is the
                     // whole point of relocating it rather than replacing it. See `SearchPanelView`
                     // for the card and `SearchToolbarButton` for the glyph.
-                    .onChange(of: app.selectedWorkspace != nil, initial: true) { _, available in
+                    .onChange(of: app.selectedWorkspace != nil || app.selection.isRemote, initial: true) { _, available in
                         InspectorGeometry.shared.setWorkspaceAvailable(available)
                     }
             }
@@ -156,7 +156,12 @@ struct RootView: View {
             }
             .animation(reduceMotion ? nil : Motion.pane, value: app.notice)
 
-            .task { await app.bootstrap() }
+            .task {
+                await app.bootstrap()
+                await app.remoteServer.maintainConnection()
+            }
+            .task(id: app.remoteServer.connectionGeneration) { await app.remoteServer.poll() }
+            .task(id: app.remoteServer.connectionGeneration) { await app.remoteServer.pollReview() }
             // The install ping. Started from here because this is the first moment there is a window
             // and a model, and it keeps a loop of its own from then on rather than living inside this
             // task: Bloom goes on running with its window closed, and a view's task does not. It waits
@@ -439,7 +444,10 @@ struct RootView: View {
     /// which is the empty state that offers to add one; every control that could ask is disabled
     /// or diverted in that state anyway.
     private func openCreateWindow(in repo: Repo?) {
-        let target = repo ?? app.selectedWorkspace.flatMap(app.repo(for:)) ?? app.repos.first
+        let selected: Repo? = if app.selection.isRemote {
+            app.remoteServer.catalogue?.repositories.first { $0.id == app.selectedRemoteWorkspace?.repoID }
+        } else { app.selectedWorkspace.flatMap(app.repo(for:)) ?? app.repos.first }
+        let target = repo ?? selected
         guard let target else { return openWindow(id: CreateWorkspaceWindow.id) }
         openWindow(id: CreateWorkspaceWindow.id, value: target.id)
     }

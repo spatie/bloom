@@ -22,6 +22,7 @@ import BloomCore
 /// custom label away and draws only the indicator, which is why it rendered as a lone letter.
 struct SidebarView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Whether this window is the one being used, which is what tells a loud selection from a
     /// resting one. See `selectionFill(for:)` for what this can and cannot say.
@@ -95,6 +96,40 @@ struct SidebarView: View {
     /// Home's list uses.
     @State private var arrival = RowArrival<WorkspaceID>()
 
+    private func presentRemoteCreate(_ repo: Repo) {
+        app.remoteServer.remoteRepositoryPath = repo.path
+        app.remoteServer.workspaceName = ""
+        presentCreate(in: repo)
+    }
+
+    private func remoteProjects(_ catalogue: ServerCatalogue) -> some View {
+                Section {
+                    ForEach(SidebarRepoGroup.build(repos: app.remoteServer.sidebarRepositories,
+                        workspaces: catalogue.workspaces, filter: filter, showingHidden: showsHiddenProjects)) { group in
+                        RepoHeaderRow(repo: group.repo, remote: app.remoteServer,
+                            hasUnreadWork: group.hasUnreadWork, workspaceCount: group.workspaces.count,
+                            onCreateWorkspace: presentRemoteCreate)
+                            .selectionDisabled()
+                            .moveDisabled(true)
+                        if !group.repo.collapsed {
+                            if group.workspaces.isEmpty { SidebarEmptyNoticeRow(isFiltered: filter != .all).selectionDisabled() }
+                            ForEach(group.workspaces) { workspace in
+                                SidebarWorkspaceRow(workspace: workspace, remote: app.remoteServer,
+                                    arrival: arrival, projectName: group.repo.name,
+                                    renaming: $renaming, archivePresentation: $archivePresentation)
+                                    .tag(SidebarSelection.remoteWorkspace(workspace.id))
+                                    .listRowBackground(selectionFill(for: .remoteWorkspace(workspace.id)))
+                                    .selectedRowInk(isEmphasized: isEmphasized(.remoteWorkspace(workspace.id)))
+                                    .moveDisabled(true)
+                            }
+                        }
+                    }
+                } header: {
+                    SidebarServerHeader(server: app.remoteServer)
+                }
+                .task(id: app.remoteServer.connectionGeneration) { app.remoteServer.loadSidebarPreferences() }
+    }
+
     var body: some View {
         List(selection: $listSelection) {
             // One row, and it is the root of the list rather than one of three destinations:
@@ -123,7 +158,7 @@ struct SidebarView: View {
             // themselves sections and a list cannot nest one inside another. It carries no tag
             // and refuses selection, so it stays a label. Home keeps its own section above it,
             // which is what stops it reading as the first project.
-            SidebarProjectsHeader(onStartProject: startProject)
+            SidebarProjectsHeader(onStartProject: { StartProjectOpening.shared.isRemote = false; startProject() })
                 .selectionDisabled()
                 .listRowSeparator(.hidden)
 
@@ -213,6 +248,14 @@ struct SidebarView: View {
             // drag image, the autoscroll at the pane's edges, the snap back on a cancel and the
             // settle on drop are all AppKit's, and none of it is drawn here.
             .onMove(perform: move)
+            if let catalogue = app.remoteServer.catalogue {
+                remoteProjects(catalogue)
+            } else if app.remoteServer.isConfigured {
+                SidebarServerHeader(server: app.remoteServer).selectionDisabled()
+            } else {
+                Button("Add Server…", systemImage: "server.rack") { openWindow(id: ServerWindow.id) }
+                    .buttonStyle(.plain).foregroundStyle(Palette.textSecondary).selectionDisabled()
+            }
         }
         // The list draws its own row height, and that is left to it. Its selection is not.
         //
@@ -230,6 +273,9 @@ struct SidebarView: View {
         // that. What was in reach was making the rhythm EVEN, which is what a project header's
         // own top padding is spent on. See `SidebarMetrics.headerLead`.
         .listStyle(.sidebar)
+        .sheet(isPresented: Binding(get: { app.remoteServer.showsArchivedWorkspaces }, set: { app.remoteServer.showsArchivedWorkspaces = $0 })) {
+            ServerArchivedWorkspacesView(server: app.remoteServer)
+        }
         .confirmation($stoppingCrew) { pending in
             Confirmation(
                 title: "Stop \(pending.name)?",
@@ -288,7 +334,7 @@ struct SidebarView: View {
             reorderNote = nil
         }
         .overlay {
-            if app.repos.isEmpty, app.isLoaded {
+            if app.repos.isEmpty, !app.remoteServer.isConfigured, app.isLoaded {
                 noProjects
             }
         }

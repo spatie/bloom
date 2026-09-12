@@ -17,6 +17,7 @@ struct ComposerModelSection: Identifiable, Equatable {
 final class ComposerModelCatalog {
     static let shared = ComposerModelCatalog()
 
+    private(set) var availableAgents: [AgentKind]?
     private(set) var models: [AgentKind: [AgentModel]] = [:]
     private(set) var isLoading = false
     private(set) var lastFailure: String?
@@ -34,6 +35,20 @@ final class ComposerModelCatalog {
         sources = AgentModelSource.live(store: store)
         refresh()
     }
+
+    func receive(_ models: [CodexModel], availableAgents: [AgentKind]? = nil) {
+        // Remote discovery is authoritative. An earlier local fetch must not replace it.
+        loadTask?.cancel()
+        loadTask = nil
+        loadGeneration = UUID()
+        sources = [:]
+        self.models = [.codex: models.map(\.agentModel)]
+        self.availableAgents = availableAgents
+        isLoading = false
+        lastFailure = nil
+    }
+
+    func offers(_ kind: AgentKind) -> Bool { availableAgents?.contains(kind) ?? true }
 
     func load() {
         guard loadTask == nil else { return }
@@ -85,7 +100,7 @@ final class ComposerModelCatalog {
     /// empty section is a heading over nothing.
     func sections(includingCurrent current: String, on kind: AgentKind) -> [ComposerModelSection] {
         let owner = backend(ofModel: current, current: kind)
-        return AgentKind.allCases.filter(\.canRunWorkspaces).compactMap { backend in
+        return AgentKind.allCases.filter { $0.canRunWorkspaces && offers($0) }.compactMap { backend in
             var options = self.options(for: backend)
             // Whatever this chat is set to stays on the list even when nothing recognises it: a
             // settings file can pin an id Bloom has never heard of, and a picker that dropped it

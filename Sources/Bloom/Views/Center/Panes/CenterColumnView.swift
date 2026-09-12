@@ -8,16 +8,21 @@ import BloomCore
 /// conversation and a terminal rebuild the column and re-run the workspace's arrival work, and it
 /// is also what made a chat and a terminal mutually exclusive. A pane holds a tab, so now they are
 /// not.
-struct CenterColumnView: View {
-    @Bindable var model: WorkspaceModel
+struct CenterColumnView<Model: WorkspacePaneModel>: View {
+    @Bindable var model: Model
 
     var body: some View {
         VStack(spacing: 0) {
             SessionTabsView(model: model)
+            WorkspaceSetupStatusView(model: model)
             CenterPanesView(model: model)
         }
         .background(Palette.windowBackground)
+        .onChange(of: CenterTabStore.shared.tabs(for: model.workspace.id).map(\.id)) {
+            model.remoteServer?.prepareTabs(for: model.workspace)
+        }
         .task(id: model.workspace.id) {
+            model.remoteServer?.prepareTabs(for: model.workspace)
             openStartingPane()
             await model.onAppear()
             // Last, and that ordering is the whole of it. `onAppear` does not return until the
@@ -53,10 +58,12 @@ struct CenterColumnView: View {
         guard let opening = WorkspaceStartMode.consumeOpeningTab(workspaceID: workspaceID) else {
             return
         }
-        // No address for a browser, where the strip's `+` passes the workspace's own dev server.
-        // The worktree was cut seconds ago and its setup script may still be running, so the port
-        // is answering nothing: an opening tab on a refused connection would be an error page as
-        // the first thing a new workspace shows. The address field is where somebody says.
-        NewPane.open(opening.pane, in: model) { WorkspaceTabsStore.shared.select($0, in: model) }
+        NewPane.open(opening.pane, in: model) { content in
+            if opening == .browser, case .tool(let id) = content,
+               let tab = CenterTabStore.shared.tabs(for: workspaceID).first(where: { $0.id == id }) {
+                CenterTabStore.shared.awaitPreviewAfterSetup(for: tab)
+            }
+            WorkspaceTabsStore.shared.select(content, in: model)
+        }
     }
 }

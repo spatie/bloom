@@ -26,6 +26,10 @@ public enum SidebarSelection: Hashable, Sendable {
     /// because neither of them is a worktree.
     case ask
     case workspace(WorkspaceID)
+    /// A server-owned conversation. It must never produce a local workspaceID, because local
+    /// filesystem actions, terminals and git commands all use that property to find their target.
+    case remote(SessionID)
+    case remoteWorkspace(WorkspaceID)
     /// An archived workspace, open for reading.
     ///
     /// Its own case rather than a flag on `workspace`, because an archived workspace is not a
@@ -85,8 +89,22 @@ public enum SidebarSelection: Hashable, Sendable {
     public var workspaceID: WorkspaceID? {
         switch self {
         case .workspace(let id), .subagent(let id, _), .crew(let id, _): id
-        case .home, .ask, .archived: nil
+        case .home, .ask, .archived, .remote, .remoteWorkspace: nil
         }
+    }
+
+    public var remoteSessionID: SessionID? {
+        if case .remote(let id) = self { return id }
+        return nil
+    }
+
+    public var remoteWorkspaceID: WorkspaceID? {
+        if case .remoteWorkspace(let id) = self { return id }
+        return nil
+    }
+
+    public var isRemote: Bool {
+        remoteSessionID != nil || remoteWorkspaceID != nil
     }
 
     /// The crew member being read, when one is. Only the centre column asks.

@@ -1,6 +1,5 @@
 import Foundation
 import Synchronization
-import os
 
 // MARK: - Process seam
 
@@ -89,6 +88,7 @@ public actor AgentRunner {
     /// effect on the next thing sent rather than on the next launch of the app.
     private var isFastMode = false
     /// The executable selected in Settings, or the ordinary command name when none was selected.
+    private var execution = WorkspaceExecution()
     private var configuredExecutable = AgentKind.claudeCode.executableName
     /// Which output style the composer's picker is on for this session, or nil for the default.
     ///
@@ -305,23 +305,27 @@ public actor AgentRunner {
     /// How this runner would spawn right now. Recomputed per start, because the agent session id
     /// only exists after the first run and a restart has to resume rather than begin again.
     public func launch() -> AgentLaunch {
-        AgentLaunch(
+        execution.wrapping(AgentLaunch(
             executable: configuredExecutable,
             arguments: Self.argv(
                 session: session,
                 resume: session.agentSessionID,
                 isFastMode: isFastMode,
                 outputStyle: outputStyle,
-                mcpConfigPath: mcpConfigPath
+                mcpConfigPath: execution.commandPrefix.isEmpty ? mcpConfigPath : nil
             ),
             cwd: workspacePath,
             environment: Shell.environment()
-        )
+        ))
     }
 
     // MARK: State
 
     public var isRunning: Bool { alive }
+
+    /// Cancelling marks the turn idle before SIGTERM has reaped its child. Server shutdown must
+    /// wait for the actual process, otherwise its SIGKILL fallback dies with the server.
+    public nonisolated var isProcessAlive: Bool { handle.current?.isRunning ?? false }
 
     public var currentSession: Session { session }
 
@@ -402,6 +406,7 @@ public actor AgentRunner {
         await refreshFastMode()
         await refreshOutputStyle()
         await refreshExecutable()
+        if !alive { execution = try await WorkspaceExecution.resolve(store: store, session: session) }
         try await waitForCancelledRunToExit()
         start()
 
@@ -755,7 +760,7 @@ public actor AgentRunner {
         }
     }
 
-    private static let log = Logger(
+    private static let log = CoreLogger(
         subsystem: Bundle.main.bundleIdentifier ?? "be.spatie.bloom",
         category: "agent-runner"
     )

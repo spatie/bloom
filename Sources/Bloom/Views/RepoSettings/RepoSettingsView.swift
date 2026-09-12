@@ -21,6 +21,7 @@ import BloomCore
 /// `SettingsWriter` for why there is no third, invisible copy in the database.
 struct RepoSettingsView: View {
     let repo: Repo
+    var remote: ServerWindowModel?
 
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -52,9 +53,10 @@ struct RepoSettingsView: View {
     /// write reloads the whole sidebar and typing a name would do it once a letter.
     @FocusState private var isEditingName: Bool
 
-    init(repo: Repo) {
+    init(repo: Repo, remote: ServerWindowModel? = nil) {
         self.repo = repo
-        _model = State(initialValue: RepoSettingsModel(repo: repo))
+        self.remote = remote
+        _model = State(initialValue: RepoSettingsModel(repo: repo, remote: remote))
     }
 
     /// Long enough that the scripts are readable, and no wider than the longest sentence in the
@@ -81,7 +83,7 @@ struct RepoSettingsView: View {
                                 filesSection
                             }
                         }
-                        removeSection
+                        if remote == nil { removeSection }
                     }
                     .settingsForm()
                 case .workspaces:
@@ -104,6 +106,7 @@ struct RepoSettingsView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .disabled(!model.isLoaded || model.isSaving)
 
             if pane != .project || model.isDirty || model.hasExternalChange || model.saveError != nil {
                 Hairline()
@@ -176,7 +179,7 @@ struct RepoSettingsView: View {
                         .textSelection(.enabled)
                         .help(repo.path)
 
-                    Button("Reveal") { Reveal.inFinder(repo.path) }
+                    if remote == nil { Button("Reveal") { Reveal.inFinder(repo.path) } }
                 }
             }
         } footer: {
@@ -220,8 +223,10 @@ struct RepoSettingsView: View {
                 HStack(spacing: Metrics.gutter) {
                     markTile(size: Self.markTileSize)
 
-                    Button(repo.iconSource == .undetected ? "Find icon" : "Look again", action: findIcon)
-                    Button("Choose…", action: chooseIcon)
+                    if remote == nil {
+                        Button(repo.iconSource == .undetected ? "Find icon" : "Look again", action: findIcon)
+                        Button("Choose…", action: chooseIcon)
+                    }
                     // One button for "draw the letters", where there were two. It clears both the
                     // picture and the emoji, because clearing only one of them leaves the other
                     // standing and the button would be lying about what it did.
@@ -382,6 +387,7 @@ struct RepoSettingsView: View {
     }
 
     private func apply(icon: String?, source: RepoIconSource) async {
+        guard remote == nil else { return }
         guard let store = app.store else { return }
         // Both paths, because the one being left may be back in a moment and the one arriving may
         // be a file that has changed since it was last read.
@@ -411,6 +417,10 @@ struct RepoSettingsView: View {
             set: { color in
                 guard let hex = color.hexString, hex != repo.accent else { return }
                 Task {
+                    if remote != nil {
+                        await model.updateRemoteProject(.setAccent(hex))
+                        return
+                    }
                     guard let store = app.store else { return }
                     // The colour and nothing else: the icon buttons above write from a value
                     // this one knows nothing about.
@@ -429,7 +439,9 @@ struct RepoSettingsView: View {
             return
         }
         guard trimmed != repo.name else { return }
-        Task { await app.rename(repo, to: trimmed) }
+        Task {
+            if remote != nil { await model.updateRemoteProject(.rename(trimmed)) } else { await app.rename(repo, to: trimmed) }
+        }
     }
 
     // MARK: - Branches
@@ -516,7 +528,7 @@ struct RepoSettingsView: View {
 
                         Spacer(minLength: Metrics.spacingSmall)
 
-                        Button("Open") { Reveal.inEditor(source, repo: repo.id) }
+                        if remote == nil { Button("Open") { Reveal.inEditor(source, repo: repo.id) } }
                     }
                 }
             }

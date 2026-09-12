@@ -20,7 +20,7 @@ import Foundation
 ///
 /// In `BloomCore` rather than in `CreateWorkspaceView`, because everything below this line is a
 /// decision, and a decision taken inside a `View` is a decision nothing can test.
-public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable {
+public enum WorkspaceStartMode: String, CaseIterable, Identifiable, Sendable, Codable {
     /// Describe a task, and the agent starts on it. The branch name is derived from what you typed.
     case chat
     /// A shell in the worktree, and you run whatever you like in it. You name the branch yourself,

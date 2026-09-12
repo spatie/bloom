@@ -19,7 +19,14 @@ final class FileEditSession {
     /// Absolute paths are unique across workspaces, so one store serves all of them.
     static let shared = FileEditSession()
 
-    private init() {}
+    private let remoteRead: ((String) async throws -> EditableFile)?
+    private let remoteWrite: ((String, String, EditableFile) async throws -> EditableFile)?
+
+    init(remoteRead: ((String) async throws -> EditableFile)? = nil,
+         remoteWrite: ((String, String, EditableFile) async throws -> EditableFile)? = nil) {
+        self.remoteRead = remoteRead
+        self.remoteWrite = remoteWrite
+    }
 
     /// One file's editing state. `baseline` is the exact bytes the text was loaded from, which is
     /// what makes a save checkable rather than hopeful.
@@ -73,9 +80,7 @@ final class FileEditSession {
 
         let operation = UUID()
         operations[absolutePath] = operation
-        let outcome = await Task.detached(priority: .userInitiated) {
-            Self.reading(absolutePath)
-        }.value
+        let outcome = await readFile(absolutePath, priority: .userInitiated)
         guard !Task.isCancelled, operations[absolutePath] == operation,
               drafts[absolutePath]?.isDirty != true, !saving.contains(absolutePath) else { return }
 
@@ -103,15 +108,20 @@ final class FileEditSession {
 
         let text = draft.text
         let baseline = draft.baseline
-        let outcome = await Task.detached(priority: .userInitiated) {
-            Self.writing(text, over: baseline)
-        }.value
+        let outcome: Result<EditableFile, FileEditorError>
+        if let remoteWrite {
+            do { outcome = .success(try await remoteWrite(absolutePath, text, baseline)) } catch { outcome = .failure(.unwritable(path: absolutePath, reason: error.localizedDescription)) }
+        } else {
+            outcome = await Task.detached(priority: .userInitiated) { Self.writing(text, over: baseline) }.value
+        }
+
         guard operations[absolutePath] == operation else { return }
 
         switch outcome {
         case let .success(saved):
             // Typing during the disk write belongs to the next save, never to the completed one.
             guard var current = drafts[absolutePath] else { return }
+            if current.text == text { current.text = saved.text }
             current.didSave(saved)
             drafts[absolutePath] = current
             diskVersions[absolutePath] = nil
@@ -125,7 +135,7 @@ final class FileEditSession {
         guard let baseline = drafts[path]?.baseline, !saving.contains(path) else { return }
         let operation = UUID()
         operations[path] = operation
-        let outcome = await Task.detached(priority: .utility) { Self.reading(path) }.value
+        let outcome = await readFile(path, priority: .utility)
         guard !Task.isCancelled, operations[path] == operation, !saving.contains(path),
               let current = drafts[path], current.baseline == baseline else { return }
         switch outcome {
@@ -165,6 +175,13 @@ final class FileEditSession {
         diskVersions[absolutePath] = nil
         drafts[absolutePath] = nil
         status[absolutePath] = nil
+    }
+
+    private func readFile(_ path: String, priority: TaskPriority) async -> Result<EditableFile, FileEditorError> {
+        if let remoteRead {
+            do { return .success(try await remoteRead(path)) } catch { return .failure(.unreadable(path: path, reason: error.localizedDescription)) }
+        }
+        return await Task.detached(priority: priority) { Self.reading(path) }.value
     }
 
     /// Typed throws do not survive being caught inside a `Task.detached` closure, so the two

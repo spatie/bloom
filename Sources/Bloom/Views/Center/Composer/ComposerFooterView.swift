@@ -58,6 +58,8 @@ struct ComposerFooterView: View {
     /// a shell and never sends any of them anywhere. What is left is the send button, which is the
     /// one control on the row that still does something.
     var showsAgentControls: Bool = true
+    var remote: RemoteSessionConnection?
+    var creationSource: CreationComposerSource?
 
     /// Model and effort ids this footer has been set to that are not on the built-in lists, kept
     /// so the menu can offer the way back. See `ComposerOption.adding`.
@@ -77,7 +79,7 @@ struct ComposerFooterView: View {
 
     /// Shared, because `ViewThatFits` below builds this row three times and three copies would be
     /// three fetches of the Codex model list.
-    private var catalog: ComposerModelCatalog { ComposerModelCatalog.shared }
+    private var catalog: ComposerModelCatalog { remote?.models ?? creationSource?.models ?? ComposerModelCatalog.shared }
 
     /// Held here rather than in `ComposerContextGauge`, because two of the three candidates below
     /// contain that control and `ViewThatFits` throws away the state of the ones it does not
@@ -157,11 +159,13 @@ struct ComposerFooterView: View {
         }
         // On appearance rather than on first use of the menu, so the Codex section is there when
         // the menu is opened rather than a moment after. It fetches once.
-        .task { if showsAgentControls { catalog.load() } }
+        .task { if showsAgentControls, remote == nil, creationSource == nil { catalog.load() } }
         // Re-run when the composer moves to another checkout, because a project's own styles are
         // that project's. The scan itself does nothing when the answer is already held and fresh.
-        .task(id: project) {
+        .task(id: project ?? remote?.sessionID.rawValue ?? "") {
             guard showsAgentControls else { return }
+            if let remote { outputStyles = remote.styles; return }
+            if let creationSource { outputStyles = creationSource.styles; return }
             let catalog = ComposerOutputStyleCatalog.shared(for: project)
             outputStyles = catalog
             await catalog.refreshIfStale(project: project)

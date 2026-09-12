@@ -5,9 +5,9 @@ import Foundation
 /// Bloom ships almost no list of its own. What exists is whatever the Claude Code CLI would
 /// resolve for this checkout, and that is spread over six places on disk which change while the
 /// app is running without anything telling us. So this is read, never modelled.
-public struct SlashCommand: Identifiable, Hashable, Sendable {
+public struct SlashCommand: Identifiable, Hashable, Sendable, Codable {
     /// Where the entry came from, which is what decides precedence and what the row badges.
-    public enum Scope: Hashable, Sendable {
+    public enum Scope: Hashable, Sendable, Codable {
         /// Built into the CLI itself. Not discoverable on disk, so this is a short hand kept list.
         case builtIn
         /// `~/.claude`, so it is available in every checkout.
@@ -20,7 +20,7 @@ public struct SlashCommand: Identifiable, Hashable, Sendable {
 
     /// A markdown command file and a skill directory are invoked the same way and are told apart
     /// only for the sake of a sensible tie break, since a command is the more specific thing.
-    public enum Kind: Hashable, Sendable {
+    public enum Kind: Hashable, Sendable, Codable {
         case command
         case skill
     }

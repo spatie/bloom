@@ -23,6 +23,7 @@ import BloomCore
 /// already said.
 struct RepoHeaderRow: View {
     var repo: Repo
+    var remote: ServerWindowModel?
     /// Whether any of this project's workspaces has a finished turn nobody has read.
     ///
     /// Passed in rather than derived from the rows, because the rows are what the filter is
@@ -156,7 +157,7 @@ struct RepoHeaderRow: View {
         // row's own menu, so a menu can be photographed rather than only read.
         .contextMenu {
             ProjectMenuItems(
-                repo: repo,
+                repo: repo, remote: remote,
                 onCreateWorkspace: onCreateWorkspace,
                 onRename: beginRepoRename,
                 onRemove: askAboutRemoving
@@ -381,7 +382,7 @@ struct RepoHeaderRow: View {
     /// it with its expanded state as a value.
     private var disclosure: some View {
         Button {
-            Task { await app.toggleCollapsed(repo) }
+            if let remote { remote.toggleCollapsed(repo) } else { Task { await app.toggleCollapsed(repo) } }
         } label: {
             Image(systemName: "chevron.right")
                 .font(.system(size: SidebarMetrics.caretSize, weight: .medium))
@@ -436,6 +437,8 @@ struct RepoHeaderRow: View {
         guard case .commit(let name) = InPlaceRename.outcome(
             ending, draft: repoDraft, current: repo.name
         ) else { return }
-        Task { await app.rename(repo, to: name) }
+        Task {
+            if let remote { await remote.updateProject(repo, action: .rename(name)) } else { await app.rename(repo, to: name) }
+        }
     }
 }

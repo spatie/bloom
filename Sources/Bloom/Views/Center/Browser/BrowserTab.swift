@@ -27,7 +27,7 @@ enum BrowserTab {
     /// front rather than trusted, because a tab that has been closed or rearranged since the
     /// transcript was drawn leaves a pane id naming nothing, and `WorkspaceTabsStore.split` would
     /// then do nothing at all rather than say so.
-    static func placement(of pane: String?, in model: WorkspaceModel?) -> TranscriptLinkPlacement {
+    static func placement(of pane: String?, in model: (any WorkspacePaneModel)?) -> TranscriptLinkPlacement {
         guard let model else { return .detached }
         guard let pane, let tab = WorkspaceTabsStore.shared.selectedTab(in: model),
               WorkspaceTabsStore.shared.layout(of: tab).contains(pane) else { return .column }
@@ -52,7 +52,7 @@ enum BrowserTab {
     /// hold. The one way this could do nothing is a pane id naming nothing, which is what
     /// `placement` above rules out before the items are offered and what the guard below repeats
     /// for the moment between the menu opening and an item being chosen.
-    static func split(_ url: URL, in model: WorkspaceModel, pane: String, axis: SplitAxis) {
+    static func split(_ url: URL, in model: any WorkspacePaneModel, pane: String, axis: SplitAxis) {
         guard canOpen(url) else { return }
         let tabs = WorkspaceTabsStore.shared
         guard let tab = tabs.selectedTab(in: model), tabs.layout(of: tab).contains(pane) else {
@@ -86,7 +86,7 @@ enum BrowserTab {
     /// type, so a window a page opened is exactly the tab a browser tab normally is: closable,
     /// nameable, splittable, and with the same address field over it. How many of these a page may
     /// have is `BrowserPopups`, which has already answered by the time this is called.
-    static func openWindow(_ url: URL, in model: WorkspaceModel) {
+    static func openWindow(_ url: URL, in model: any WorkspacePaneModel) {
         guard canOpen(url) else { return }
         let tab = CenterTabStore.shared.add(
             kind: .browser, workspaceID: model.workspace.id, url: url.absoluteString
@@ -94,7 +94,28 @@ enum BrowserTab {
         WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
     }
 
-    static func open(_ url: URL, in model: WorkspaceModel) {
+    /// Reuse a preview already at this origin, leaving other browser tabs alone.
+    static func openPreview(in model: any WorkspacePaneModel) {
+        Task {
+            guard let address = WorkspacePreview.address(port: await model.ensurePort()) else { return }
+            let tabs = CenterTabStore.shared
+            tabs.load(workspaceID: model.workspace.id)
+            let existing = tabs.tabs(for: model.workspace.id).first {
+                guard $0.kind == .browser, let url = BrowserAddress.url(from: $0.url) else { return false }
+                return BrowserAddress.shows(url) && ServerPreview.isLoopback(url) && url.port == model.port
+            }
+            if let existing {
+                let session = tabs.browser(for: existing, root: model.remoteServer == nil ? model.workspace.path : "",
+                    resolve: model.browserAddressResolver)
+                if session.failure != nil { session.reload() }
+                WorkspaceTabsStore.shared.reveal(.tool(existing.id), in: model)
+            } else {
+                NewPane.open(.browser, in: model, url: address) { WorkspaceTabsStore.shared.reveal($0, in: model) }
+            }
+        }
+    }
+
+    static func open(_ url: URL, in model: any WorkspacePaneModel) {
         guard canOpen(url) else { return }
         show(url.absoluteString, in: model)
     }
@@ -113,7 +134,7 @@ enum BrowserTab {
     /// would bury the conversations the strip is mostly for.
     ///
     /// - Parameter path: absolute, which is what `ChangedFileRow.fullPath` already carries.
-    static func openFile(_ path: String, in model: WorkspaceModel) {
+    static func openFile(_ path: String, in model: any WorkspacePaneModel) {
         guard let address = LocalPage.address(forFile: path) else { return }
         show(address, in: model)
     }
@@ -127,7 +148,7 @@ enum BrowserTab {
     /// Open in Split Right divides. Unlike `split` above there is no pane for the caller to name:
     /// a file row is drawn in the inspector rather than inside the column, so it has no pane of
     /// its own to be beside.
-    static func splitFile(_ path: String, in model: WorkspaceModel, axis: SplitAxis) {
+    static func splitFile(_ path: String, in model: any WorkspacePaneModel, axis: SplitAxis) {
         guard let address = LocalPage.address(forFile: path) else { return }
         let tabs = WorkspaceTabsStore.shared
         guard let tab = tabs.selectedTab(in: model) else { return }
@@ -140,13 +161,14 @@ enum BrowserTab {
     /// The workspace's browser tab, pointed at `address` and brought forward. Shared by the two
     /// doors above so that a page and a link land in the same tab, which is what stops a worktree
     /// full of reports from opening a strip full of browsers.
-    private static func show(_ address: String, in model: WorkspaceModel) {
+    private static func show(_ address: String, in model: any WorkspacePaneModel) {
         let tabs = CenterTabStore.shared
         let existing = tabs.tabs(for: model.workspace.id).last { $0.kind == .browser }
         let tab: CenterTab
         if let existing {
             tabs.setURL(address, for: existing)
-            tabs.browser(for: existing, root: model.workspace.path).load(address)
+            tabs.browser(for: existing, root: model.remoteServer == nil ? model.workspace.path : "",
+                resolve: model.browserAddressResolver).load(address)
             tab = existing
         } else {
             tab = tabs.add(kind: .browser, workspaceID: model.workspace.id, url: address)

@@ -60,7 +60,18 @@ struct BloomWindowToolbar: ToolbarContent {
         // Second in the group, so the `+` keeps the leading edge on the one screen it appears on.
         // See `WindowTitleControl` for why the title is a view of ours at all.
         ToolbarItem(placement: .navigation) {
-            WindowTitleControl(app: app)
+            if let workspace = app.selectedRemoteWorkspace {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(workspace.name).fontWeight(.semibold)
+                    Label(app.remoteServer.displayName, systemImage: "server.rack")
+                        // Toolbars otherwise inherit icon-only labels, leaving a stray glyph below the title.
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            } else {
+                WindowTitleControl(app: app)
+            }
         }
         // No plate behind the name. AppKit gives every toolbar item a shared background, which
         // put a glass capsule around the window's title; next to the bare `Home`/`Ask Bloom` rows

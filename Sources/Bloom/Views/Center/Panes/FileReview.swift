@@ -14,7 +14,7 @@ import BloomCore
 @MainActor
 enum FileReview {
     /// Opens the workspace's review on a file, or points the open one at it.
-    static func open(path: String, in model: WorkspaceModel, focusing: Bool = false) {
+    static func open(path: String, in model: any WorkspacePaneModel, focusing: Bool = false) {
         let location = CodeLocation.parse(path)
         if location.path != path { open(location: location, in: model); return }
         SourceEditorState.file((model.workspace.path as NSString).appendingPathComponent(path)).diffRequest = nil
@@ -28,7 +28,7 @@ enum FileReview {
         }
     }
 
-    static func open(location: CodeLocation, in model: WorkspaceModel, recording: Bool = true) {
+    static func open(location: CodeLocation, in model: any WorkspacePaneModel, recording: Bool = true) {
         var location = location
         location.path = location.displayPath(relativeTo: model.workspace.path)
         if recording { SourceNavigation.shared.visit(location, in: model) }
@@ -87,7 +87,7 @@ enum FileReview {
     /// they are walking. It is true for the routes that name no file, which are the `+` menu and
     /// the keyboard: those are somebody asking to BE in the review, and a request that lands on a
     /// pane nobody is standing in looks exactly like a menu item that does nothing.
-    private static func show(path: String, in model: WorkspaceModel, focusing: Bool) {
+    private static func show(path: String, in model: any WorkspacePaneModel, focusing: Bool) {
         let tab = CenterTabStore.shared.showReview(path: path, workspaceID: model.workspace.id)
         // `reveal` brings the tab holding the review forward and takes nothing off a pane, so the
         // rule above is kept by the door rather than by a guard here. A review already on screen
@@ -102,7 +102,7 @@ enum FileReview {
     /// what a single click does. This one is the deliberate second gesture: the tab it opens is
     /// never the one `showReview` repoints, so a reading you set aside survives the next filename
     /// you click. See `CenterTab.isPinnedToPath`.
-    static func openInNewTab(path: String, in model: WorkspaceModel) {
+    static func openInNewTab(path: String, in model: any WorkspacePaneModel) {
         let location = CodeLocation.parse(path)
         SourceNavigation.shared.visit(location, in: model)
         if location.path != path {
@@ -122,7 +122,7 @@ enum FileReview {
     /// nothing in its diff still has a review tab to open, and what it draws is the sentence
     /// saying nothing differs from the base branch yet. Refusing here, or greying the menu row
     /// out, is what made this read as a control that did nothing.
-    static func open(in model: WorkspaceModel) {
+    static func open(in model: any WorkspacePaneModel) {
         let remembered = currentPath(in: model)
         let fallback = model.selectedFilePath ?? model.reviewFiles.first?.path
         show(
@@ -134,18 +134,18 @@ enum FileReview {
 
     /// Scroll-follow is transient selection, not a navigation request. Keeping it out of
     /// the tab store avoids rebuilding every tool pane and writing defaults while scrolling.
-    static func currentPath(in model: WorkspaceModel) -> String? {
+    static func currentPath(in model: any WorkspacePaneModel) -> String? {
         let tab = CenterTabStore.shared.review(for: model.workspace.id)
         return tab?.showsAllFiles == true ? model.selectedFilePath ?? tab?.path : tab?.path
     }
 
-    static func openAll(in model: WorkspaceModel) {
+    static func openAll(in model: any WorkspacePaneModel) {
         setShowsAllFiles(true, in: model)
     }
 
     /// Both mode controls use the review tab's state and remember the selected file.
     /// Returning to one file must not land on an empty review or silently choose another file.
-    static func setShowsAllFiles(_ all: Bool, in model: WorkspaceModel) {
+    static func setShowsAllFiles(_ all: Bool, in model: any WorkspacePaneModel) {
         let store = CenterTabStore.shared
         let remembered = store.review(for: model.workspace.id)?.path
         let candidates = [model.selectedFilePath, remembered].compactMap { $0 }
@@ -160,7 +160,7 @@ enum FileReview {
     /// The same keystroke both ways: open the review, or, if the pane the reader is in is already
     /// showing it, put the conversation back. The tab stays open, because the keystroke is about
     /// what is in front of them rather than about what they are keeping.
-    static func toggle(in model: WorkspaceModel) {
+    static func toggle(in model: any WorkspacePaneModel) {
         let tabs = WorkspaceTabsStore.shared
         guard let tab = tabs.selectedTab(in: model) else { return open(in: model) }
         let pane = tabs.focusedPane(of: tab)
@@ -180,7 +180,7 @@ enum FileReview {
     /// Walks the changed files, which is what a review is for. Wraps, so holding the shortcut down
     /// goes round rather than stopping dead at the last file, and keeps the inspector's own
     /// selection in step so the list scrolls and highlights along with the diff.
-    static func step(_ delta: Int, in model: WorkspaceModel) {
+    static func step(_ delta: Int, in model: any WorkspacePaneModel) {
         let files = model.reviewFiles
         guard !files.isEmpty else { return }
 

@@ -11,8 +11,8 @@ import Foundation
 /// one a pull request strip can afford to ask beside a poll. Its own comment has the difference.
 ///
 /// `ChangedFile` below is one entry of the answer: a path, what happened to it, and the counts.
-public struct ChangedFile: Identifiable, Sendable, Hashable {
-    public enum Change: String, Sendable {
+public struct ChangedFile: Identifiable, Sendable, Hashable, Codable {
+    public enum Change: String, Sendable, Codable {
         case added = "A"
         case modified = "M"
         case deleted = "D"
@@ -27,6 +27,9 @@ public struct ChangedFile: Identifiable, Sendable, Hashable {
     public var additions: Int
     public var deletions: Int
     public var isBinary: Bool
+    /// An untracked file exceeded the caller's counting budget, so its line counts are unknown.
+    public var contentRevision: String?
+    public var hasIncompleteStats: Bool
 
     public var id: String { path }
 
@@ -39,7 +42,8 @@ public struct ChangedFile: Identifiable, Sendable, Hashable {
         change: Change,
         additions: Int = 0,
         deletions: Int = 0,
-        isBinary: Bool = false
+        isBinary: Bool = false,
+        hasIncompleteStats: Bool = false
     ) {
         self.path = path
         self.oldPath = oldPath
@@ -47,6 +51,7 @@ public struct ChangedFile: Identifiable, Sendable, Hashable {
         self.additions = additions
         self.deletions = deletions
         self.isBinary = isBinary
+        self.hasIncompleteStats = hasIncompleteStats
     }
 }
 
@@ -120,7 +125,7 @@ extension Git {
     /// Throws if any of the git calls fail, because an empty list has to mean "nothing changed"
     /// and never "we could not find out".
     public static func changedFiles(
-        worktree: String, base: String, scope: DiffScope = .all
+        worktree: String, base: String, scope: DiffScope = .all, maximumUntrackedFileBytes: Int? = nil
     ) async throws -> [ChangedFile] {
         let mergeBase = try await revision(for: scope, base: base, in: worktree)
 
@@ -153,15 +158,29 @@ extension Git {
             // Counted the way git counts. `components(separatedBy:)` returns an empty trailing
             // piece after the final newline, and since practically every text file ends in one,
             // every untracked file used to read one addition too many.
-            let lineCount = (try? String(contentsOfFile: full, encoding: .utf8))
-                .map(countLines) ?? 0
+            let summary = untrackedText(path: path, worktree: worktree, limit: maximumUntrackedFileBytes)
+            let lineCount = summary.text.map(countLines) ?? 0
             byPath[path] = ChangedFile(
                 path: path, change: .untracked, additions: lineCount, deletions: 0,
-                isBinary: lineCount == 0 && FileManager.default.fileExists(atPath: full)
+                isBinary: summary.text == nil && !summary.isLimited && FileManager.default.fileExists(atPath: full),
+                hasIncompleteStats: summary.isLimited
             )
         }
 
         return byPath.values.sorted { $0.path < $1.path }
+    }
+
+    private static func untrackedText(path: String, worktree: String, limit: Int?) -> (text: String?, isLimited: Bool) {
+        let full = URL(fileURLWithPath: worktree).appendingPathComponent(path).path
+        // Git records a symlink's target spelling, not the contents of whatever it points at.
+        if let target = try? FileManager.default.destinationOfSymbolicLink(atPath: full) { return (target, false) }
+        guard let contained = ContainedPath.relative(path, inside: worktree),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: contained.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = attributes[.size] as? NSNumber else { return (nil, false) }
+        if let limit, size.int64Value > limit { return (nil, true) }
+        guard let text = try? String(contentsOf: contained, encoding: .utf8), !text.contains("\0") else { return (nil, false) }
+        return (text, false)
     }
 
     /// `diff --name-status -z` records: a status field, then one path, except for `R`/`C` where

@@ -1,6 +1,5 @@
 import Foundation
 import Synchronization
-import os
 
 /// A table in the store, named by the table it is derived from.
 ///
@@ -82,7 +81,7 @@ public final class StoreChangeHub: Sendable {
     private static let runawayWindow = Duration.seconds(5)
     private static let runawayCount = 1_000
 
-    private static let log = Logger(
+    private static let log = CoreLogger(
         subsystem: Bundle.main.bundleIdentifier ?? "be.spatie.bloom",
         category: "store"
     )

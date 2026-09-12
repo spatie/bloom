@@ -31,6 +31,7 @@ import Synchronization
 /// automatically; reach for `upsert` on an existing row and it is reintroduced.
 public actor Store {
     private let db: SQLiteDatabase
+    private var setupAttempts: [WorkspaceID: UUID] = [:]
     public nonisolated let path: String
 
     /// The bundle identifier of the copy the owner actually uses, and the one the dev build gets.
@@ -40,6 +41,7 @@ public actor Store {
     /// `Tools/guard.sh` names the directory that goes with it.
     public static let primaryBundleIdentifier = "be.spatie.bloom"
     public static let devBundleIdentifier = "be.spatie.bloom.dev"
+    public static let remoteBundleIdentifier = "be.spatie.bloom.remote"
 
     /// Which Application Support directory a binary with this bundle identifier may use.
     ///
@@ -69,6 +71,7 @@ public actor Store {
         switch identifier {
         case primaryBundleIdentifier: "Bloom"
         case devBundleIdentifier: "Bloom Dev"
+        case remoteBundleIdentifier: "Bloom Remote"
         case .some(let other) where !other.isEmpty: "Bloom (\(other))"
         // An executable that is not inside a bundle at all: `swift run`, `.build/debug/Bloom`, or
         // a test host. Nil and empty are the same claim and are treated the same way.
@@ -1362,6 +1365,32 @@ public actor Store {
         change(&row)
         row.id = workspaceID
         return try upsert(row)
+    }
+
+    // Attempt ownership is transient, like the child process. After a restart the durable
+    // running state and its latest output are recovered by recoverInterruptedSetups.
+    func beginSetupAttempt(workspaceID: WorkspaceID) throws -> UUID {
+        let attempt = UUID()
+        _ = try update(workspaceID: workspaceID) {
+            $0.apply(.runStarted)
+            $0.setupLog = ""
+        }
+        setupAttempts[workspaceID] = attempt
+        return attempt
+    }
+
+    func recordSetupOutput(workspaceID: WorkspaceID, attempt: UUID, log: String) throws {
+        guard setupAttempts[workspaceID] == attempt else { return }
+        _ = try update(workspaceID: workspaceID) {
+            guard $0.setupState == .running else { return }
+            $0.setupLog = String(log.suffix(Workspace.setupLogLimit))
+        }
+    }
+
+    func finishSetupAttempt(workspaceID: WorkspaceID, attempt: UUID, succeeded: Bool, log: String) throws {
+        guard setupAttempts[workspaceID] == attempt else { return }
+        setupAttempts.removeValue(forKey: workspaceID)
+        _ = try update(workspaceID: workspaceID) { $0.apply(.runFinished(succeeded: succeeded, log: log)) }
     }
 
     /// Writes a whole workspace drag's new order in one transaction.

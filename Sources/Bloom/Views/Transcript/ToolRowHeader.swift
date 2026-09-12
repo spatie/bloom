@@ -356,6 +356,7 @@ struct ToolRowHeader: View {
             onOpen: onOpen,
             onOpenInNewTab: onOpenInNewTab,
             onPreview: { frame in
+                guard home.remoteWorkspaceID == nil else { return }
                 let file = TranscriptHoverCard.file(attachment: attachment, worktree: worktree)
                 guard let frame else {
                     if hoverHost?.request?.card == file { hoverHost?.request = nil }
@@ -381,6 +382,11 @@ struct ToolRowHeader: View {
 
     /// The same door the composer's chips and a sent turn's chips use.
     private func open(_ path: String) {
+        if home.remoteWorkspaceID != nil {
+            app.remoteServer.openFile(path)
+            app.isInspectorVisible = true
+            return
+        }
         // No workspace is Ask Bloom, which has no review pane for a file to open into. The chip
         // still draws and still previews: what a path in that conversation is for is reading.
         guard let id = home.workspaceID, let model = app.existingModel(for: id) else { return }

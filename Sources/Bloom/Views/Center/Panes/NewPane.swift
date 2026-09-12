@@ -37,7 +37,7 @@ enum NewPane {
     /// `FolderTerminal`.
     static func open(
         _ kind: PaneKind,
-        in model: WorkspaceModel,
+        in model: any WorkspacePaneModel,
         url: String = "",
         title: String? = nil,
         directory: String = "",

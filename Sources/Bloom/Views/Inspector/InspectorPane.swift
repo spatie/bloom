@@ -25,7 +25,9 @@ struct InspectorPane: View {
 
     @ViewBuilder
     private var content: some View {
-        if let model {
+        if app.selection.isRemote {
+            ServerReviewView(model: app.remoteServer.review, server: app.remoteServer)
+        } else if let model {
             InspectorView(model: model)
                 .disabled(app.isArchiving(model.workspace.id))
                 // Rebuilt per workspace, so a diff selection never leaks across a switch.

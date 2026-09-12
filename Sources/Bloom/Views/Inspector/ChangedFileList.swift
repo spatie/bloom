@@ -11,8 +11,8 @@ import BloomCore
 ///
 /// Selection, hover, the revert dialog and the empty states live here rather than in either shape,
 /// which is what keeps picking a file identical in both.
-struct ChangedFileList: View {
-    let model: WorkspaceModel
+struct ChangedFileList<Model: WorkspaceFileListing>: View {
+    let model: Model
 
     @State private var pendingRevert: ChangedFile?
     /// A revert that failed, so the user hears about it. It used to be a `try?` that threw the
@@ -165,11 +165,7 @@ struct ChangedFileList: View {
             // The same sentence the header bar's Revert shows, from the same place, because it is
             // the same command on the same file and two wordings would eventually describe two
             // different operations.
-            Text(FileRevert.losses(
-                for: file,
-                in: model.workspace,
-                hasDraft: FileEditSession.shared.isDirty(fullPath(file.path))
-            ))
+            Text(revertLosses(file))
         }
         .alert(
             "Could not revert \(revertProblem?.filename ?? "the file")",
@@ -179,6 +175,11 @@ struct ChangedFileList: View {
         } message: { problem in
             Text(problem.message)
         }
+    }
+
+    private func revertLosses(_ file: ChangedFile) -> String {
+        let hasDraft = FileEditSession.shared.isDirty(fullPath(file.path))
+        return FileRevert.losses(for: file, in: model.workspace, hasDraft: hasDraft)
     }
 
     private var followsReviewScroll: Bool {
@@ -295,8 +296,9 @@ struct ChangedFileList: View {
                     fullPath: fullPath(item.node.path),
                     action: { activate(folder: item.node.path) },
                     onOpenTerminal: {
-                        FolderTerminalTab.open(folder: fullPath(item.node.path), in: model)
-                    }
+                        model.showTerminal(folder: fullPath(item.node.path))
+                    },
+                    supportsLocalFileActions: model.supportsLocalFileActions
                 )
                 .equatable()
             }
@@ -323,9 +325,12 @@ struct ChangedFileList: View {
                 // quiet.
                 onSelect: { move(to: file.path) },
                 onRevert: { pendingRevert = file },
-                onOpenPage: { BrowserTab.openFile(fullPath(file.path), in: model) },
-                onSplitPage: { BrowserTab.splitFile(fullPath(file.path), in: model, axis: $0) },
-                onSetViewed: { setViewed($0, file: file) }
+                onOpenPage: { model.showPage(path: fullPath(file.path), axis: nil) },
+                onSplitPage: { model.showPage(path: fullPath(file.path), axis: $0) },
+                onSetViewed: { setViewed($0, file: file) },
+                supportsLocalFileActions: model.supportsLocalFileActions,
+                supportsFileRevert: model.supportsFileRevert,
+                supportsViewedMarks: model.supportsViewedMarks
             )
             .equatable()
         }
@@ -528,7 +533,7 @@ struct ChangedFileList: View {
 
         if let file = model.changedFiles.first(where: { $0.path == path }) {
             model.selectedFilePath = file.path
-            FileReview.open(path: file.path, in: model)
+            model.showReview(path: file.path)
         }
 
         // Opening a review moves the centre column, so the keyboard is put back here afterwards
@@ -596,11 +601,11 @@ struct ChangedFileList: View {
     /// the keyboard is actually on. A directory resolves to nothing, which disarms the preview
     /// rather than opening a panel on a folder.
     private func refreshPreview() {
-        previewURL = cursor.flatMap { QuickLookTarget.url(for: fullPath($0)) }
+        previewURL = model.supportsLocalFileActions ? cursor.flatMap { QuickLookTarget.url(for: fullPath($0)) } : nil
     }
 
     private func refresh() {
-        Task { await model.refreshChanges() }
+        Task { await model.reloadChanges() }
     }
 
     /// Through `FileRevert`, which is the one place that knows what reverting a file means.
@@ -611,19 +616,14 @@ struct ChangedFileList: View {
     /// Revert buttons in this column gave the file two different contents. Renames were handled by
     /// neither half.
     private func revert(_ file: ChangedFile) {
-        let workspace = model.workspace
-        let absolute = fullPath(file.path)
         Task {
             // The draft goes with the file, exactly as it does from the header bar. Left behind,
             // an open Edit pane would keep offering to save the text that was just reverted.
-            FileEditSession.shared.discard(path: absolute)
-            if let message = await FileRevert.revert(file: file, in: workspace) {
+            if let message = await model.revertFile(file) {
                 revertProblem = RevertProblem(filename: file.filename, message: message)
             }
             // As from the header bar's own Revert: what the review pane is holding for this file
             // is a picture of lines that are no longer there. See `WorkspaceModel.forgetHeldDiff`.
-            model.forgetHeldDiff(for: file.path)
-            await model.refreshChanges()
         }
     }
 

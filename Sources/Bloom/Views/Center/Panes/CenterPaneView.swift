@@ -7,8 +7,8 @@ import BloomCore
 /// its own is the dropping: a tab dragged from the strip lands here, and where in the pane it is
 /// let go decides whether it replaces what is showing or opens beside it. That is the whole
 /// interaction, and it is the same one every editor on this platform uses.
-struct CenterPaneView: View {
-    @Bindable var model: WorkspaceModel
+struct CenterPaneView<Model: WorkspacePaneModel>: View {
+    @Bindable var model: Model
     /// The tab this pane belongs to, and nil when the workspace has no tab to be in at all. A
     /// pane belongs to a tab now rather than to the workspace, which is what stops picking a tab
     /// from rewriting whatever pane the user happened to be standing in.
@@ -157,7 +157,7 @@ struct CenterPaneView: View {
             // The lookup only, never `transcript(for:)`: building one writes observed state, and a
             // body may not do that. `prepare` below is where it is built.
             if let transcript = model.existingTranscript(for: sessionID) {
-                ChatPaneView(transcript: transcript, model: model, pane: pane)
+                ChatPaneView(transcript: transcript, model: model.localWorkspaceModel, pane: pane, paneModel: model)
             } else if model.sessions.contains(where: { $0.id == sessionID }) {
                 // Nothing, rather than the `LoadingView` that used to be here. This branch is the
                 // gap between a session being known and its transcript being built, which is one

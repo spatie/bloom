@@ -31,7 +31,7 @@ import Foundation
 /// spends the user's allowance faster, and Bloom's own "Fast mode" switch is already a different
 /// thing on the other backend (Claude Code's `--thinking disabled`, see `AgentRunner`), so a
 /// second control by that name needs a decision about both rather than a field being decoded.
-public struct CodexModel: Sendable, Hashable, Identifiable {
+public struct CodexModel: Sendable, Hashable, Identifiable, Codable {
     public let id: String
     public let displayName: String
     public let description: String
@@ -110,7 +110,7 @@ public struct CodexModel: Sendable, Hashable, Identifiable {
 
 /// One reasoning level, with the sentence the server wrote for it. The description is worth
 /// keeping: it is what a picker can put under the name instead of Bloom inventing one.
-public struct CodexReasoningEffort: Sendable, Hashable, Identifiable {
+public struct CodexReasoningEffort: Sendable, Hashable, Identifiable, Codable {
     public let id: String
     public let description: String
 

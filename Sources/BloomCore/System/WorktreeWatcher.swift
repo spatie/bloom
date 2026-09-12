@@ -1,3 +1,4 @@
+#if canImport(CoreServices)
 import Foundation
 import CoreServices
 import Synchronization
@@ -294,3 +295,5 @@ public final class WorktreeWatcher: Sendable {
         return trimmed
     }
 }
+
+#endif

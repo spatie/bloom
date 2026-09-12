@@ -10,8 +10,8 @@ import BloomCore
 /// A path rather than a `ChangedFile`, because the two ways into a file are the diff of one the
 /// agent touched and the worktree tree, and the tree opens files git has never heard of. Editing
 /// is a question about bytes on disk either way, so the pane only ever needed the path.
-struct FileEditPane: View {
-    let model: WorkspaceModel
+struct FileEditPane<Model: WorkspacePaneModel>: View {
+    let model: Model
     /// Relative to the workspace's worktree, the way every path in the inspector is.
     let path: String
     let session: FileEditSession
@@ -91,11 +91,11 @@ struct FileEditPane: View {
                     colorScheme: colorScheme,
                     isEditable: isEditable,
                     editorState: state,
-                    onOpenReference: { SourceActions.open($0, at: $1, path: path, model: model, state: state, newTab: $2) },
-                    onDefinition: { SourceActions.definition(at: $0, path: path, model: model, state: state) },
-                    onReferences: { SourceActions.references(at: $0, path: path, model: model, state: state) },
-                    onNavigateSymbol: { SourceActions.navigate(at: $0, path: path, model: model, state: state, newTab: $1) },
-                    onAsk: { SourceActions.ask(path: path, model: model, state: state) }
+                    onOpenReference: openReference,
+                    onDefinition: findDefinition,
+                    onReferences: findReferences,
+                    onNavigateSymbol: navigateSymbol,
+                    onAsk: askAboutSelection
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -122,6 +122,31 @@ struct FileEditPane: View {
             LoadingView("Reading the file")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private var openReference: ((String, Int, Bool) -> Void)? {
+        guard let local = model.localWorkspaceModel else { return nil }
+        return { SourceActions.open($0, at: $1, path: path, model: local, state: state, newTab: $2) }
+    }
+
+    private var findDefinition: ((Int) -> Void)? {
+        guard let local = model.localWorkspaceModel else { return nil }
+        return { SourceActions.definition(at: $0, path: path, model: local, state: state) }
+    }
+
+    private var findReferences: ((Int) -> Void)? {
+        guard let local = model.localWorkspaceModel else { return nil }
+        return { SourceActions.references(at: $0, path: path, model: local, state: state) }
+    }
+
+    private var navigateSymbol: ((Int, Bool) -> Void)? {
+        guard let local = model.localWorkspaceModel else { return nil }
+        return { SourceActions.navigate(at: $0, path: path, model: local, state: state, newTab: $1) }
+    }
+
+    private var askAboutSelection: (() -> Void)? {
+        guard let local = model.localWorkspaceModel else { return nil }
+        return { SourceActions.ask(path: path, model: local, state: state) }
     }
 
     private var footer: some View {
@@ -178,7 +203,7 @@ struct FileEditPane: View {
                         if case .saved = session.status(for: absolutePath) {
                             comparing = false
                             model.forgetHeldDiff(for: path)
-                            await model.refreshChanges()
+                            await model.reloadChanges()
                             onSaved()
                         }
                     }
@@ -200,7 +225,7 @@ struct FileEditPane: View {
             // Including whatever the review pane is holding for this file, which is a picture of
             // the bytes that have just been replaced. See `WorkspaceModel.forgetHeldDiff`.
             model.forgetHeldDiff(for: path)
-            await model.refreshChanges()
+            await model.reloadChanges()
             onSaved()
         }
     }

@@ -181,10 +181,6 @@ public final class EventFanout<Element: Sendable>: Sendable {
 extension AgentRunner: SessionRunner {
     public nonisolated var agentKind: AgentKind { .claudeCode }
 
-    /// `isRunning` here has always meant the process, because this runner has only one and Stop
-    /// kills it. The seam says so in its name instead of relying on a reader knowing that.
-    public var isProcessAlive: Bool { isRunning }
-
     /// Stop and "this is over" are one act on this backend. `cancelNow` already denies the open
     /// questions in words, SIGTERMs the whole process group and SIGKILLs what ignores it, and the
     /// next turn spawns a new process with `--resume`, so there is nothing left for a second path

@@ -20,7 +20,7 @@ final class LoginTerminalSession {
 
     /// Nil when the program is not on this Mac at all, which is the one case that cannot be a
     /// terminal because there is nothing to run in it.
-    init?(
+    convenience init?(
         executable: String,
         arguments: [String],
         directory: String,
@@ -34,8 +34,7 @@ final class LoginTerminalSession {
         variables["TERM_PROGRAM"] = "Bloom"
         if variables["LANG"] == nil { variables["LANG"] = "en_US.UTF-8" }
 
-        label = ([executable] + arguments).joined(separator: " ")
-        launch = TerminalLaunch(
+        let launch = TerminalLaunch(
             executable: path,
             execName: executable,
             arguments: arguments,
@@ -45,6 +44,14 @@ final class LoginTerminalSession {
                 ? directory
                 : AgentScratchDirectory.current()
         )
+
+        self.init(launch: launch, label: ([executable] + arguments).joined(separator: " "), onExit: onExit)
+    }
+
+    /// Remote sign-in supplies an SSH launch, but shares the same terminal lifetime as local login.
+    init(launch: TerminalLaunch, label: String, onExit: @escaping @MainActor (TerminalExit) -> Void) {
+        self.label = label
+        self.launch = launch
 
         terminal = BloomTerminalView(frame: .zero)
         // Keep the output visible after exit so the sheet can offer retry or completion.

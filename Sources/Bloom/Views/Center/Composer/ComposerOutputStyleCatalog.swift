@@ -18,6 +18,7 @@ import BloomCore
 @Observable
 final class ComposerOutputStyleCatalog {
     private(set) var styles: [OutputStyle] = OutputStyle.builtIns
+    func receive(_ value: [OutputStyle]) { styles = value }
 
     private var loadedPath: String?
     private var loadedAt: Date?

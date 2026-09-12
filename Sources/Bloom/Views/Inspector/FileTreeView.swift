@@ -6,8 +6,8 @@ import BloomCore
 /// `git ls-files` is asked once and turned into a directory index. Rows are then produced only
 /// for directories the user actually opened, so a repository with fifty thousand files costs one
 /// subprocess and a handful of views rather than a tree of fifty thousand nodes.
-struct FileTreeView: View {
-    let model: WorkspaceModel
+struct FileTreeView<Model: WorkspaceFileListing>: View {
+    let model: Model
 
     /// Which folders this reader has opened. The listing itself is the model's: see
     /// `WorkspaceModel.fileTree`, and the note there for why it cannot live in this view.
@@ -110,9 +110,9 @@ struct FileTreeView: View {
             // The filter goes with the workspace it was typed at. Carrying it across would show
             // the next worktree already narrowed by a word nobody typed at it.
             query = ""
-            await model.refreshFileTree()
+            await model.loadFileTree()
             guard !Task.isCancelled else { return }
-            if let path = FileReview.activePath(in: model), let ancestors = FileTreeNode.ancestors(of: path, in: model.fileTree) {
+            if let local = model as? WorkspaceModel, let path = FileReview.activePath(in: local), let ancestors = FileTreeNode.ancestors(of: path, in: model.fileTree) {
                 expanded.formUnion(ancestors)
                 rebuildRows()
                 selection = path
@@ -133,7 +133,7 @@ struct FileTreeView: View {
             if !focused { keyboard.forgetTyping() }
         }
         .onChange(of: selection) { _, path in
-            previewURL = path.flatMap { QuickLookTarget.url(for: fullPath($0)) }
+            previewURL = model.supportsLocalFileActions ? path.flatMap { QuickLookTarget.url(for: fullPath($0)) } : nil
         }
         .onChange(of: model.changedFiles, initial: true) { _, files in
             changedPaths = Set(files.map(\.path))
@@ -188,9 +188,10 @@ struct FileTreeView: View {
                 isChanged: changedPaths.contains(path),
                 fullPath: fullPath(path),
                 action: { activate(item.node) },
-                onOpenTerminal: { FolderTerminalTab.open(folder: fullPath(path), in: model) },
-                onOpenPage: { BrowserTab.openFile(fullPath(path), in: model) },
-                onSplitPage: { BrowserTab.splitFile(fullPath(path), in: model, axis: $0) }
+                onOpenTerminal: { model.showTerminal(folder: fullPath(path)) },
+                onOpenPage: { model.showPage(path: fullPath(path), axis: nil) },
+                onSplitPage: { model.showPage(path: fullPath(path), axis: $0) },
+                supportsLocalFileActions: model.supportsLocalFileActions
             )
             .equatable()
         }
@@ -224,7 +225,7 @@ struct FileTreeView: View {
         guard node.isDirectory else {
             selection = node.path
             if changedPaths.contains(node.path) { model.selectedFilePath = node.path }
-            FileReview.open(path: node.path, in: model)
+            model.showReview(path: node.path)
             return
         }
 

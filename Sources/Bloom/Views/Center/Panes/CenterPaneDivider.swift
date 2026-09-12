@@ -147,7 +147,7 @@ struct CenterPaneDivider: View {
     /// `.global`: this view moves the moment the ratio changes, so a translation measured from an
     /// origin the translation itself moved oscillates instead of following.
     private var drag: some Gesture {
-        DragGesture(minimumDistance: 1, coordinateSpace: .named(CenterPanesView.space))
+        DragGesture(minimumDistance: 1, coordinateSpace: .named(CenterPanesView<WorkspaceModel>.space))
             .onChanged { value in
                 if dragOrigin == nil, carrying == nil {
                     carrying = pane(at: local(value.startLocation))

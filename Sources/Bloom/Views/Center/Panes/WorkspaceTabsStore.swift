@@ -177,7 +177,7 @@ final class WorkspaceTabsStore {
     /// Everything the workspace has, minus whatever a tab has absorbed, in whatever order the user
     /// has dragged it into. `TabSet` states the first rule and `StripOrder` the second, and this is
     /// the only place either is asked, so a tab is in the strip once or not at all.
-    func entries(in model: WorkspaceModel) -> [PaneContent] {
+    func entries(in model: any WorkspacePaneModel) -> [PaneContent] {
         // `TabSet.tabbable` and never `sessions.map(\.id)`: a workspace's chats include the crew
         // members an agent started in it, and those are sidebar rows rather than tabs. See
         // `TabSet.tabbable`, which is where that rule is argued.
@@ -197,7 +197,7 @@ final class WorkspaceTabsStore {
     /// which is the caller's job and not this one's: see `StripOrder` for why that matters, which is
     /// that a lost defaults file should cost the interleaving and not the order of the
     /// conversations within it.
-    func reorder(_ drawn: [PaneContent], in model: WorkspaceModel) {
+    func reorder(_ drawn: [PaneContent], in model: any WorkspacePaneModel) {
         let workspaceID = model.workspace.id
         guard let order = StripOrder.rewritten(
             drawn,
@@ -217,7 +217,7 @@ final class WorkspaceTabsStore {
     /// closed, itself absorbed into another tab) cannot leave the column pointing at nothing. It
     /// deliberately does not write the answer back: a view body asks this, and a body may not
     /// mutate observed state.
-    func selectedTab(in model: WorkspaceModel) -> PaneContent? {
+    func selectedTab(in model: any WorkspacePaneModel) -> PaneContent? {
         selectedTab(in: model, entries: entries(in: model))
     }
 
@@ -228,7 +228,7 @@ final class WorkspaceTabsStore {
     /// absorbed and lays the user's own order over the result, and the tab strip needs the list
     /// itself as well as the selection. Asking through the parameterless overload above made every
     /// pass derive it once for the `ForEach` and again in here.
-    func selectedTab(in model: WorkspaceModel, entries: [PaneContent]) -> PaneContent? {
+    func selectedTab(in model: any WorkspacePaneModel, entries: [PaneContent]) -> PaneContent? {
         if let chosen = selected[model.workspace.id], entries.contains(chosen) { return chosen }
 
         // The active conversation, which is what the toolbar, the inspector and the pull request
@@ -314,7 +314,7 @@ final class WorkspaceTabsStore {
     /// request button all speak about one conversation, so a tab whose focused pane is a chat says
     /// which one that is. A tab whose focused pane is a shell or a page says nothing about it and
     /// leaves the last answer standing, which is what clicking a terminal tab has always done.
-    func select(_ tab: PaneContent, in model: WorkspaceModel) {
+    func select(_ tab: PaneContent, in model: any WorkspacePaneModel) {
         // A selected tab remains clickable. Do not turn that click into an observed dictionary
         // mutation and a redraw of the strip and panes when the selection did not move.
         if selected[model.workspace.id] != tab { selected[model.workspace.id] = tab }
@@ -327,7 +327,7 @@ final class WorkspaceTabsStore {
     /// the shortcut walks the tabs in the order they are seen rather than in the order they were
     /// opened. Which tab is next is `TabCycle` in the core, with the wrapping and the
     /// closed-tab case tested; what is here is the strip it asks about.
-    func selectNextTab(offset: Int, in model: WorkspaceModel) {
+    func selectNextTab(offset: Int, in model: any WorkspacePaneModel) {
         let tabs = entries(in: model)
         guard let next = TabCycle.next(from: selectedTab(in: model), in: tabs, offset: offset) else {
             return
@@ -348,7 +348,7 @@ final class WorkspaceTabsStore {
     ///   should be made the focused one. False for a click on a filename, whose reader is standing
     ///   in the inspector; true for a menu item or a keystroke that asks for the thing itself,
     ///   where landing on a pane nobody is in is indistinguishable from nothing having happened.
-    func reveal(_ content: PaneContent, in model: WorkspaceModel, focusing: Bool = false) {
+    func reveal(_ content: PaneContent, in model: any WorkspacePaneModel, focusing: Bool = false) {
         if let current = selectedTab(in: model),
            let showing = layout(of: current).panes
                .first(where: { self.content(of: $0, in: current) == content }) {
@@ -373,7 +373,7 @@ final class WorkspaceTabsStore {
     ///
     /// It moves the active session where picking a tab does, and for the same reason: a composite
     /// tab holding two conversations has to point the toolbar at the one the caret is in.
-    func focus(_ pane: String, in tab: PaneContent, of model: WorkspaceModel) {
+    func focus(_ pane: String, in tab: PaneContent, of model: any WorkspacePaneModel) {
         if var arrangement = arrangements[tab.id], arrangement.layout.focus != pane,
            arrangement.layout.setFocus(pane) {
             arrangements[tab.id] = arrangement
@@ -385,7 +385,7 @@ final class WorkspaceTabsStore {
     /// Only when it moved. Every click into a pane comes through here, and assigning an identical
     /// value is still a mutation as far as Observation is concerned: `WorkspaceModel.reloadSessions`
     /// is the note about what that costs, an invalidation that reaches every pane of the column.
-    private func adoptActiveSession(of tab: PaneContent, in model: WorkspaceModel) {
+    private func adoptActiveSession(of tab: PaneContent, in model: any WorkspacePaneModel) {
         guard case .chat(let sessionID) = content(of: focusedPane(of: tab), in: tab),
               model.activeSessionID != sessionID else { return }
         model.activeSessionID = sessionID
@@ -439,7 +439,7 @@ final class WorkspaceTabsStore {
     /// An unsplit tab has no pane to repoint. Its one pane IS the tab, so showing something else
     /// in it means picking that other tab, and picking a tab is the one thing here that never
     /// writes a pane. That is the inversion, stated where `CenterPaneStore.show` used to break it.
-    func replace(pane: String, of tab: PaneContent, with content: PaneContent, in model: WorkspaceModel) {
+    func replace(pane: String, of tab: PaneContent, with content: PaneContent, in model: any WorkspacePaneModel) {
         guard var arrangement = arrangements[tab.id] else { return select(content, in: model) }
         guard arrangement.contents[pane] != content, arrangement.canHold(content),
               canAbsorb(content) else { return }
@@ -487,7 +487,7 @@ final class WorkspaceTabsStore {
     @discardableResult
     func move(
         pane: String, beside target: String, axis: SplitAxis, before: Bool,
-        in tab: PaneContent, of model: WorkspaceModel
+        in tab: PaneContent, of model: any WorkspacePaneModel
     ) -> Bool {
         guard var arrangement = arrangements[tab.id],
               arrangement.layout.move(pane, beside: target, axis: axis, before: before)
@@ -506,7 +506,7 @@ final class WorkspaceTabsStore {
     /// there would be.
     @discardableResult
     func exchange(
-        pane: String, with other: String, in tab: PaneContent, of model: WorkspaceModel
+        pane: String, with other: String, in tab: PaneContent, of model: any WorkspacePaneModel
     ) -> Bool {
         guard var arrangement = arrangements[tab.id],
               arrangement.layout.exchange(pane, with: other) else { return false }
@@ -561,7 +561,7 @@ final class WorkspaceTabsStore {
     /// Called from `CenterColumnView` after `WorkspaceModel.onAppear`, which is what makes the
     /// first of those an answer rather than doubt on the first visit of a launch. Its own task
     /// loads the tool tabs before it awaits, so both are settled by the time this runs.
-    func reconcile(in model: WorkspaceModel) {
+    func reconcile(in model: any WorkspacePaneModel) {
         let workspaceID = model.workspace.id
         let tabs = CenterTabStore.shared
 

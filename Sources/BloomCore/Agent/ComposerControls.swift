@@ -17,7 +17,7 @@ import Foundation
 /// Fast mode and the output style are in here with the columns even though neither has one on
 /// `Session`. They are two of the things the footer offers, the user does not know or care which
 /// of them SQLite holds, and leaving them out is what would make this a partial answer.
-public struct ComposerControls: Equatable, Sendable {
+public struct ComposerControls: Equatable, Sendable, Codable {
     public var model: String
     public var effort: String
     /// Which CLI runs the chat. Not a picker of its own: choosing a model out of the Codex section

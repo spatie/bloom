@@ -1,4 +1,7 @@
 import Foundation
+#if os(Linux)
+import Glibc
+#endif
 import Synchronization
 
 /// The whole of `bloom-bridge`, the stdio shim Bloom ships in its own bundle.
@@ -27,6 +30,7 @@ public enum BridgeShim {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         shim: String? = CommandLine.arguments.first
     ) async -> Int32 {
+        SystemCalls.configurePipeWrites(STDOUT_FILENO)
         if let complaint = missingEnvironment(environment) {
             complain(complaint)
             return Exit.notConfigured
@@ -156,7 +160,7 @@ public enum BridgeShim {
         var offset = 0
         while offset < payload.count {
             let written = payload.withUnsafeMutableBufferPointer { bytes in
-                Darwin.write(descriptor, bytes.baseAddress! + offset, bytes.count - offset)
+                SystemCalls.write(descriptor, bytes.baseAddress! + offset, bytes.count - offset)
             }
             if written < 0 {
                 if errno == EINTR { continue }

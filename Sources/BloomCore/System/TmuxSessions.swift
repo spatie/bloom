@@ -312,13 +312,15 @@ public struct TmuxCommand: Sendable, Equatable {
     public func attachOrCreate(
         session: String,
         directory: String,
-        environment: [String: String]
+        environment: [String: String],
+        shellCommand: String? = nil
     ) -> [String] {
         var tail = ["new-session", "-A", "-D", "-s", session, "-c", directory]
         for key in environment.keys.sorted() {
             tail.append("-e")
             tail.append("\(key)=\(environment[key]!)")
         }
+        if let shellCommand { tail.append(shellCommand) }
         return arguments(tail)
     }
 

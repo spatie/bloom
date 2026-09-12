@@ -21,14 +21,17 @@ struct TranscriptHome: Hashable {
     var workspaceID: WorkspaceID?
     /// The directory the paths in this conversation are relative to.
     var worktree: String
+    var remoteWorkspaceID: WorkspaceID?
 
-    init(workspaceID: WorkspaceID? = nil, worktree: String = "") {
+    init(workspaceID: WorkspaceID? = nil, worktree: String = "", remoteWorkspaceID: WorkspaceID? = nil) {
         self.workspaceID = workspaceID
         self.worktree = worktree
+        self.remoteWorkspaceID = remoteWorkspaceID
     }
 
     init(_ workspace: Workspace) {
         self.workspaceID = workspace.id
         self.worktree = workspace.path
+        self.remoteWorkspaceID = nil
     }
 }

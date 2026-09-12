@@ -1,6 +1,5 @@
 import Foundation
 import Synchronization
-import os
 
 /// Supervises one `codex app-server` connection for one Bloom chat.
 ///
@@ -53,6 +52,7 @@ public actor CodexRunner: SessionRunner {
     /// id is the server's own numbering and means nothing outside this connection, while the ask
     /// is written to a database that outlives it.
     private var approvals: [String: CodexApprovalRequest] = [:]
+    private var connectionID = UUID()
 
     /// The live connection, held outside the actor so quit, close and archive can signal the
     /// server without waiting for a turn on one. Attached on every connect and never cleared, for
@@ -391,11 +391,11 @@ public actor CodexRunner: SessionRunner {
         await previous?.stop()
     }
 
-    /// No suspension while removing the old connection. Stopping its client may let another
-    /// send resume, and cleanup from this connection must never clear that replacement.
+    /// Detach without suspension so cleanup cannot clear a replacement connection.
     private func detachConnection() -> CodexClient? {
         let previous = client
         client = nil
+        connectionID = UUID()
         // The thread belonged to the process that has just been killed. Held on to, the next
         // message would open a turn on a thread the new server has never heard of; cleared, the
         // stored id on the session row makes that message a `thread/resume`, which is the whole
@@ -440,25 +440,39 @@ public actor CodexRunner: SessionRunner {
     // MARK: - Connecting
 
     private func connected() async throws -> CodexClient {
-        if let client { return client }
+        if let client {
+            guard session.state != .running && session.state != .waiting else { return client }
+            let connected = await client.isConnected
+            guard self.client === client else { return try await self.connected() }
+            guard !connected, session.state != .running && session.state != .waiting else { return client }
+            // The event pump may still be draining the previous process's output. Reconnect
+            // before starting a new turn, never by retrying a turn whose request was sent.
+            await dropConnection()
+            if let client = self.client { return client }
+        }
 
         let stored = try? await store.setting(AgentCatalog.executablePathSettingKey(.codex))
+        let execution = try await WorkspaceExecution.resolve(store: store, session: session)
         let client = makeClient(CodexClient.Configuration(
             executable: AgentCatalog.executable(for: .codex, override: stored),
+            commandPrefix: execution.commandPrefix,
             cwd: workspacePath,
             clientName: "Bloom",
             clientVersion: Self.clientVersion,
-            bridge: bridge,
+            environment: Shell.environment(extra: execution.environment),
+            bridge: execution.commandPrefix.isEmpty ? bridge : nil,
             contextWindow: contextWindow
         ))
         self.client = client
+        let connectionID = UUID()
+        self.connectionID = connectionID
         connection.attach(client)
         // Attached before the handshake, so nothing the server says between connecting and the
         // first turn can arrive with nowhere to go.
         let events = client.events
         pumpTask = Task { [weak self] in
             for await event in events {
-                await self?.handle(event)
+                await self?.handle(event, connectionID: connectionID)
             }
         }
         try await client.start()
@@ -606,10 +620,13 @@ public actor CodexRunner: SessionRunner {
         return CodexSubagentTranscript.read(result["thread"] ?? .null, sessionID: session.id)
     }
 
-    private func handle(_ event: CodexEvent) async {
+    private func handle(_ event: CodexEvent, connectionID: UUID) async {
+        guard connectionID == self.connectionID else { return }
         if case .itemCompleted(let item) = event, case .plan(let plan) = item.item,
            item.threadID == threadID {
             _ = try? await store.recordPlan(sessionID: session.id, sourceID: plan.id, markdown: plan.text)
+            // Saving a plan can suspend while a replacement connection takes over.
+            guard connectionID == self.connectionID else { return }
         }
         if let threadID {
             let previousChildTurns = subagents.liveTurns
@@ -658,7 +675,7 @@ public actor CodexRunner: SessionRunner {
            let json = try? JSONDecoder().decode(JSONValue.self, from: raw),
            let id = CodexRequestID(json["params"]?["requestId"]),
            let threadID = json["params"]?["threadId"]?.stringValue {
-            let requestID = CodexPermission.requestID(id, threadID: threadID)
+            let requestID = CodexPermission.requestID(id, threadID: threadID, connectionID: connectionID)
             if let ask = pending.take(requestID) {
                 await close(ask, as: PermissionAskOutcome.resolved, note: "")
                 if pending.isEmpty, session.apply(.unblocked).moves { await save(session) }
@@ -671,7 +688,11 @@ public actor CodexRunner: SessionRunner {
         // agent stopped in <workspace>", so a chat whose workspace was archived, removed or simply
         // closed produced a modal saying the Codex process had ended: true, and the owner is the
         // one who ended it. Only a server that went away on its own is worth a word.
-        if case .closed = event, handle.wasCancelled || trouble.hasStopped { return }
+        if case .closed = event {
+            client = nil
+            threadID = nil
+            if handle.wasCancelled || trouble.hasStopped || (session.state != .running && session.state != .waiting) { return }
+        }
 
         if case .approval(let request) = event {
             await ask(request)
@@ -739,7 +760,7 @@ public actor CodexRunner: SessionRunner {
     // MARK: - Asking
 
     private func ask(_ request: CodexApprovalRequest) async {
-        let ask = CodexPermission.ask(for: request, item: items[request.threadID]?[request.itemID])
+        let ask = CodexPermission.ask(for: request, item: items[request.threadID]?[request.itemID], connectionID: connectionID)
         pending.add(ask)
         approvals[ask.requestID] = request
 
@@ -941,7 +962,7 @@ public actor CodexRunner: SessionRunner {
     /// the suite, and for the same reason as `AgentRunner.hasBeenCancelled`.
     var transcriptWasRemoved: Bool { trouble.hasStopped }
 
-    private static let log = Logger(
+    private static let log = CoreLogger(
         subsystem: Bundle.main.bundleIdentifier ?? "be.spatie.bloom",
         category: "codex-runner"
     )
