@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SystemConfiguration
 import BloomCore
 
 /// Sends the install ping, and does nothing else.
@@ -138,6 +139,7 @@ final class InstallPingService {
             agent: InstallPing.agentName(installed: installed),
             theme: InstallPing.Theme(),
             appBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+            computerName: SCDynamicStoreCopyComputerName(nil, nil) as String?,
             architecture: FeedbackEnvironment.architecture(),
             translated: FeedbackEnvironment.isTranslated(),
             screenWidth: screen.map { Double($0.frame.width) },
