@@ -208,6 +208,12 @@ struct UsageMenuRow: View {
 
 /// The capsule meter, with the tick where usage would be if it were spread evenly across the
 /// window.
+///
+/// **Drawn rather than a `ProgressView`, and that was tried.** The system's linear progress bar is
+/// the right control by every other measure, but it is `NSProgressIndicator` underneath, and an
+/// `NSViewRepresentable` renders as SwiftUI's yellow placeholder offscreen. That would cost the
+/// `limits` snapshot scene, which is the only way this block can be looked at without taking over
+/// the owner's screen (see `Snapshot`). Two rounded rectangles are worth keeping for that.
 struct UsageMeterBar: View {
     let reading: UsageMeterReading
     var height: CGFloat = 5

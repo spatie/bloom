@@ -17,6 +17,9 @@ struct MenuBarSettingsView: View {
     @State private var choosing: AgentKind?
     @State private var dragging: AgentKind?
 
+    /// One provider's row, which is two lines of text with controls beside it.
+    private static let rowHeight: CGFloat = 42
+
     private var metrics: [AgentKind: [UsageMetric]] {
         UsageCatalogue.metrics(quotas: app.quotas, accounts: app.accounts)
     }
@@ -49,9 +52,23 @@ struct MenuBarSettingsView: View {
             }
 
             Section("Providers") {
-                ForEach(model.layout.orderedProviders(), id: \.self) { provider in
-                    providerRow(provider)
+                // A `List` with `onMove` rather than `draggable` and `dropDestination`, which is
+                // what this was: hand rolled drag and drop gave a bare text label for a drag image,
+                // no gap where the row would land, and rows that snapped into place. A list does
+                // all three itself, the way every other reorderable list on the Mac does.
+                List {
+                    ForEach(model.layout.orderedProviders(), id: \.self) { provider in
+                        providerRow(provider)
+                    }
+                    .onMove { offsets, destination in
+                        model.update { $0.moveProviders(fromOffsets: offsets, toOffset: destination) }
+                    }
                 }
+                .listStyle(.plain)
+                .scrollDisabled(true)
+                .frame(height: Self.rowHeight * CGFloat(model.layout.orderedProviders().count))
+                .listRowInsets(EdgeInsets())
+
                 Text("Drag to reorder.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -67,9 +84,12 @@ struct MenuBarSettingsView: View {
                 }
                 switch sleepSwitch.standing {
                 case .ready:
-                    Text("Sleep is restored when the session ends, or if Bloom crashes.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    Label(
+                        "Bloom's helper is approved. Sleep is restored when the session ends, or if Bloom crashes.",
+                        systemImage: "checkmark.circle.fill"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 case .needsApproval:
                     HStack {
                         Text("Allow Bloom's helper to finish switching this on.")
@@ -86,6 +106,7 @@ struct MenuBarSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { sleepSwitch.refresh() }
     }
 
     // MARK: - The live preview
@@ -138,9 +159,6 @@ struct MenuBarSettingsView: View {
         let available = metrics[provider] ?? []
         let starred = model.layout.orderedMetrics(available).filter { model.layout.isPinned($0.id) }
         return HStack(spacing: 10) {
-            Image(systemName: "line.3.horizontal")
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
             ProviderMarkView(provider: provider)
                 .foregroundStyle(.secondary)
                 .frame(width: 16, height: 16)
@@ -166,16 +184,6 @@ struct MenuBarSettingsView: View {
             .labelsHidden()
         }
         .opacity(model.layout.isEnabled(provider) ? 1 : 0.55)
-        .draggable(provider.rawValue) {
-            Text(provider.label)
-        }
-        .dropDestination(for: String.self) { items, _ -> Bool in
-            guard let raw = items.first, let dragged = AgentKind(rawValue: raw), dragged != provider else {
-                return false
-            }
-            withAnimation { model.move(dragged, toward: provider) }
-            return true
-        }
     }
 
     private func menuBarSummary(starred: [UsageMetric], available: [UsageMetric]) -> String {

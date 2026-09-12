@@ -247,6 +247,21 @@ public struct UsageLayout: Codable, Sendable, Hashable {
         moveProvider(provider, before: after < order.endIndex ? order[after] : nil)
     }
 
+    /// Moves providers the way a `List` reports a drag: a set of offsets into the current order,
+    /// and the offset they were dropped before.
+    public mutating func moveProviders(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        var order = orderedProviders()
+        let moved = offsets.sorted().compactMap { order.indices.contains($0) ? order[$0] : nil }
+        guard !moved.isEmpty else { return }
+        // Back to front, so the indices still to be removed stay valid.
+        for index in offsets.sorted(by: >) where order.indices.contains(index) {
+            order.remove(at: index)
+        }
+        let landing = destination - offsets.filter { $0 < destination }.count
+        order.insert(contentsOf: moved, at: min(max(landing, 0), order.count))
+        providerOrder = order
+    }
+
     public mutating func setEnabled(_ isEnabled: Bool, for provider: AgentKind) {
         if isEnabled { disabledProviders.remove(provider) } else { disabledProviders.insert(provider) }
     }

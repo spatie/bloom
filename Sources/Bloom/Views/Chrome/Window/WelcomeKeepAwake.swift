@@ -44,6 +44,7 @@ struct WelcomeKeepAwake: View {
         }
         .padding(Metrics.pane)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear { sleepSwitch.refresh() }
     }
 
     @ViewBuilder
