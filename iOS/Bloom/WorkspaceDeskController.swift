@@ -32,7 +32,8 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     private var conversationWidth: NSLayoutConstraint?
     private var filesWidth: NSLayoutConstraint?
     private var showsConversation = true
-    private var showsFiles = true
+    private var showsFiles = false
+    private var filesButton: UIBarButtonItem?
     private var focusesConversation = false
     private var refreshTask: Task<Void, Never>?
     #if DEBUG
@@ -51,7 +52,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     override func viewDidLoad() {
         super.viewDidLoad()
         title = workspace.name
-        navigationItem.prompt = workspace.branch
+        navigationItem.prompt = nil
         navigationItem.largeTitleDisplayMode = .never
         view.backgroundColor = BloomTheme.background
         view.tintColor = BloomTheme.accent
@@ -166,39 +167,43 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     }
 
     private func updateToolbar() {
-        let chat = UIBarButtonItem(image: UIImage(systemName: "bubble.left.and.bubble.right"), primaryAction: UIAction { [weak self] _ in
-            guard let self else { return }
-            if self.primaryInDeck { self.focusConversation(); return }
-            if self.tool != nil {
-                if self.view.safeAreaLayoutGuide.layoutFrame.width < 760 { self.focusesConversation = true } else {
-                    self.showsConversation.toggle()
-                }
-                self.layoutPanes()
-            }
-        })
-        chat.accessibilityLabel = "Show conversation"
-        let preview = UIBarButtonItem(image: UIImage(systemName: "safari"), primaryAction: UIAction { [weak self] _ in self?.openPreview() })
+        let preview = UIBarButtonItem(title: "Preview", primaryAction: UIAction { [weak self] _ in self?.openPreview() })
         preview.accessibilityLabel = "Open browser preview"
-        let changes = UIBarButtonItem(image: UIImage(systemName: "doc.text.magnifyingglass"), primaryAction: UIAction { [weak self] _ in self?.openReview(all: true) })
-        changes.accessibilityLabel = "Review all changes"
-        let inspector = UIBarButtonItem(image: UIImage(systemName: "sidebar.right"), primaryAction: UIAction { [weak self] _ in self?.toggleFiles() })
-        inspector.accessibilityLabel = "Show workspace files"
+        let inspector = UIBarButtonItem(title: "Files", primaryAction: UIAction { [weak self] _ in self?.toggleFiles() })
+        inspector.accessibilityLabel = "Show files and changes"
+        filesButton = inspector
+        let onlyConversation = primaryInDeck ? deck.focusesSinglePane && deck.selectedPane?.content === conversation : focusesConversation || tool == nil
+        let sideBySide = primaryInDeck ? !deck.focusesSinglePane : tool != nil && showsConversation && !focusesConversation
+        let toolName = deck.selectedPane?.kind == "browser" ? "Preview" : deck.selectedPane?.kind == "review" ? "Review" : "Current Pane"
+        let viewMenu = UIMenu(title: "Workspace view", options: .singleSelection, children: [
+            UIAction(title: "Conversation", image: UIImage(systemName: "text.bubble"),
+                     state: onlyConversation ? .on : .off) { [weak self] _ in
+                self?.focusConversation(); self?.updateToolbar()
+            },
+            UIAction(title: "Side by Side", image: UIImage(systemName: "rectangle.split.2x1"),
+                     attributes: tool == nil ? .disabled : [],
+                     state: sideBySide ? .on : .off) { [weak self] _ in
+                self?.deck.focusesSinglePane = false
+                self?.showsConversation = true; self?.focusesConversation = false; self?.layoutPanes(); self?.updateToolbar()
+            },
+            UIAction(title: toolName + " Only", image: UIImage(systemName: "rectangle"),
+                     attributes: tool == nil ? .disabled : [],
+                     state: tool != nil && !onlyConversation && !sideBySide ? .on : .off) { [weak self] _ in
+                self?.deck.focusesSinglePane = true
+                self?.showsConversation = false; self?.focusesConversation = false; self?.layoutPanes(); self?.updateToolbar()
+            },
+        ])
+        let layout = UIBarButtonItem(title: "View", menu: viewMenu)
+        layout.accessibilityLabel = "Workspace layout"
         let menu = UIMenu(children: [
-            UIMenu(title: "New tab", children: PaneKind.allCases.map { kind in
-                UIAction(title: kind.title, image: UIImage(systemName: kind.symbol)) { [weak self] _ in self?.requestNewPane(kind: kind) }
-            }),
+            deck.paneActionsMenu,
             UIMenu(title: "Open tabs", children: (tabsJSON()["tabs"]?.arrayValue ?? []).compactMap { tab -> UIAction? in
                 guard let number = tab["tab"]?.intValue, let title = tab["title"]?.stringValue else { return nil }
                 return UIAction(title: title, state: tab["active"]?.boolValue == true ? .on : .off) { [weak self] _ in
                     Task { _ = await self?.handleUI(.init(name: "workspace_tab_select", arguments: .object(["tab": .integer(number)]))) }
                 }
             }),
-            UIMenu(title: "Split beside", children: PaneKind.allCases.map { kind in
-                UIAction(title: kind.title, image: UIImage(systemName: kind.symbol)) { [weak self] _ in self?.requestNewPane(kind: kind, split: .horizontal) }
-            }),
-            UIMenu(title: "Split below", children: PaneKind.allCases.map { kind in
-                UIAction(title: kind.title, image: UIImage(systemName: kind.symbol)) { [weak self] _ in self?.requestNewPane(kind: kind, split: .vertical) }
-            }),
+            UIAction(title: "Review All Changes", image: UIImage(systemName: "doc.text.magnifyingglass")) { [weak self] _ in self?.openReview(all: true) },
             UIAction(title: "Agent UI tools", image: UIImage(systemName: "rectangle.connected.to.line.below")) { [weak self] _ in self?.showAgentUIStatus() },
             UIAction(title: "Workspace notes", image: UIImage(systemName: PaneGlyph.notes)) { [weak self] _ in self?.openNotes() },
             UIAction(title: "Workspace details", image: UIImage(systemName: "info.circle")) { [weak self] _ in
@@ -217,9 +222,8 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
                 Task { await self?.review.refresh() }
             },
         ])
-        let more = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"), menu: menu)
-        more.accessibilityLabel = "Workspace options"
-        navigationItem.rightBarButtonItems = usesCompactTabs ? [more] : [more, inspector, changes, preview, chat]
+        navigationItem.titleMenuProvider = { _ in menu }
+        navigationItem.rightBarButtonItems = usesCompactTabs ? [] : [layout, inspector, preview]
     }
 
     private func openConversation() {
@@ -394,14 +398,28 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     }
 
     private func toggleFiles() {
-        if view.safeAreaLayoutGuide.layoutFrame.width >= 960 {
+        guard presentedViewController == nil else { return }
+        let width = view.safeAreaLayoutGuide.layoutFrame.width
+        let minimum = tool != nil && showsConversation && !focusesConversation ? 1320.0 : 1000.0
+        if width >= minimum {
             showsFiles.toggle()
             layoutPanes()
         } else {
             remove(files)
+            // UINavigationController owns the frame now, instead of our inline host constraints.
+            files.view.translatesAutoresizingMaskIntoConstraints = true
+            files.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            files.view.frame = CGRect(x: 0, y: 0, width: 420, height: 640)
             let navigation = BloomTheme.navigation(files)
             files.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak self] _ in self?.dismissFileSheetIfNeeded() })
-            navigation.sheetPresentationController?.detents = [.large()]
+            if traitCollection.horizontalSizeClass == .regular, let filesButton {
+                navigation.modalPresentationStyle = .popover
+                navigation.preferredContentSize = CGSize(width: 420, height: 640)
+                navigation.popoverPresentationController?.barButtonItem = filesButton
+            } else {
+                navigation.modalPresentationStyle = .pageSheet
+                navigation.sheetPresentationController?.detents = [.large()]
+            }
             navigation.presentationController?.delegate = self
             present(navigation, animated: true)
         }
@@ -437,23 +455,22 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     private func layoutPanes() {
         guard isViewLoaded else { return }
         let width = view.safeAreaLayoutGuide.layoutFrame.width
-        let compact = width < 760
+        let compact = width < 900
         if usesCompactTabs != compact { usesCompactTabs = compact; updateToolbar() }
         compactTabs.isHidden = !compact
         compactTabsHeight?.constant = compact ? 49 + view.safeAreaInsets.bottom : 0
         let hasTool = tool != nil
-        let inlineFiles = showsFiles && width >= (hasTool ? 960 : 720) && files.parent === self
-        let splitConversation = hasTool && showsConversation && width >= 760 && !primaryInDeck
-        let compactConversation = width < 760 && focusesConversation
-        conversationHost.isHidden = primaryInDeck || (hasTool && !splitConversation && !compactConversation)
+        let splitConversation = hasTool && showsConversation && !focusesConversation && !compact && !primaryInDeck
+        let inlineFiles = showsFiles && width >= (splitConversation ? 1320 : 1000) && files.parent === self
+        conversationHost.isHidden = primaryInDeck || (hasTool && !splitConversation && !focusesConversation)
         conversationRule.isHidden = !splitConversation
-        toolHost.isHidden = !hasTool || (compactConversation && !primaryInDeck)
+        toolHost.isHidden = !hasTool || (focusesConversation && !primaryInDeck)
         reviewController.isReviewVisible = deck.selectedTab?.panes.contains { $0.content === reviewController } == true && !toolHost.isHidden
         filesHost.isHidden = !inlineFiles
         filesRule.isHidden = !inlineFiles
-        filesWidth?.constant = width > 1100 ? 240 : 220
+        filesWidth?.constant = 300
         conversationWidth?.isActive = splitConversation
-        conversationWidth?.constant = min(420, max(310, (width - (inlineFiles ? 240 : 0)) * 0.44))
+        conversationWidth?.constant = min(600, max(400, (width - (inlineFiles ? 300 : 0)) * 0.46))
     }
 
     private func install(_ child: UIViewController, in host: UIView) {
@@ -539,6 +556,7 @@ extension WorkspaceDeskController {
     }
 
     private func focusConversation() {
+        if primaryInDeck { deck.focusesSinglePane = true }
         if primaryInDeck, let pane = deck.allPanes.first(where: { $0.content === conversation }) {
             deck.selectPane(pane)
             showDeck()

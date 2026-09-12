@@ -10,9 +10,11 @@ final class BloomSplitController: UISplitViewController, UISplitViewControllerDe
         delegate = self
         preferredDisplayMode = .oneBesideSecondary
         preferredSplitBehavior = .tile
-        minimumPrimaryColumnWidth = 220
-        preferredPrimaryColumnWidthFraction = 0.19
-        maximumPrimaryColumnWidth = 320
+        minimumPrimaryColumnWidth = 280
+        preferredPrimaryColumnWidth = 300
+        maximumPrimaryColumnWidth = 340
+        displayModeButtonVisibility = .always
+        presentsWithGesture = true
         view.tintColor = BloomTheme.accent
         let projects = ProjectsController(model: model)
         setViewController(BloomTheme.navigation(projects), for: .primary)
@@ -37,8 +39,19 @@ final class BloomSplitController: UISplitViewController, UISplitViewControllerDe
         let controller = WorkspaceDeskController(connection: model, workspace: workspace)
         controller.preferredSessionID = preferredSessionID
         (viewController(for: .primary) as? UINavigationController)?.viewControllers.compactMap { $0 as? ProjectsController }.first?.selectWorkspace(workspace.id, reveal: true)
+        // Keep workspace width stable while the native sidebar slides over it. A tiled
+        // project column otherwise takes space from both the chat and the browser.
+        preferredSplitBehavior = .overlay
+        preferredDisplayMode = .secondaryOnly
         showDetailViewController(BloomTheme.navigation(controller), sender: self)
+        if !isCollapsed { hide(.primary) }
         return controller
+    }
+
+    func showWorkspacePicker() {
+        preferredSplitBehavior = .tile
+        preferredDisplayMode = .oneBesideSecondary
+        show(.primary)
     }
 
     required init?(coder: NSCoder) { fatalError("Use init(model:)") }
@@ -48,6 +61,7 @@ final class ProjectsController: UITableViewController {
     private let model: MobileConnection
     private var displayedAddress: String?
     private var selectedWorkspaceID: WorkspaceID?
+    private var headerWidth: CGFloat = 0
     private var projects: [RemoteProject] { model.catalogue?.repositories.filter { !$0.hidden } ?? [] }
 
     init(model: MobileConnection) { self.model = model; super.init(style: .insetGrouped) }
@@ -55,9 +69,12 @@ final class ProjectsController: UITableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Bloom"
-        navigationController?.navigationBar.prefersLargeTitles = true
+        title = "Projects"
+        navigationItem.largeTitleDisplayMode = .never
+        navigationController?.navigationBar.prefersLargeTitles = false
         BloomTheme.list(tableView)
+        tableView.sectionHeaderTopPadding = 8
+        tableView.estimatedRowHeight = 64
         navigationItem.leftBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "server.rack"), primaryAction: UIAction { [weak self] _ in self?.connect() })
         navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .add, primaryAction: UIAction { [weak self] _ in self?.importProject() })
         navigationItem.leftBarButtonItem?.accessibilityLabel = "Server connection"
@@ -82,6 +99,7 @@ final class ProjectsController: UITableViewController {
             content.secondaryText = "Your agents keep running on Bloom Server."
             empty.contentUnavailableConfiguration = content
             splitViewController?.setViewController(BloomTheme.navigation(empty), for: .secondary)
+            (splitViewController as? BloomSplitController)?.showWorkspacePicker()
         }
         tableView.reloadData()
         if let selectedWorkspaceID { selectWorkspace(selectedWorkspaceID, reveal: false) }
@@ -120,7 +138,9 @@ final class ProjectsController: UITableViewController {
             let state = waiting ? "Needs your answer" : busy ? "Agent working" : workspace.branch
             let tint = waiting ? BloomTheme.colour(PaletteInk.warning) : BloomTheme.accent
             let cell = BloomTheme.cell(title: workspace.name, detail: state,
-                                       symbol: waiting ? "hand.raised" : busy ? "circle.dotted.circle" : "square.stack.3d.up", tint: tint)
+                                       symbol: waiting ? "hand.raised" : busy ? "circle.dotted.circle" : "square.stack.3d.up", tint: tint,
+                                       disclosure: traitCollection.horizontalSizeClass == .compact)
+            configureRow(cell)
             let original = cell.contentConfiguration as? UIListContentConfiguration
             cell.automaticallyUpdatesContentConfiguration = false
             cell.automaticallyUpdatesBackgroundConfiguration = false
@@ -140,6 +160,7 @@ final class ProjectsController: UITableViewController {
             return cell
         }
         let cell = BloomTheme.cell(title: "New workspace", symbol: "plus", disclosure: false)
+        configureRow(cell)
         var content = cell.contentConfiguration as? UIListContentConfiguration
         content?.textProperties.font = .preferredFont(forTextStyle: .body)
         content?.textProperties.color = BloomTheme.accent
@@ -147,18 +168,36 @@ final class ProjectsController: UITableViewController {
         return cell
     }
 
+    private func configureRow(_ cell: UITableViewCell) {
+        guard var content = cell.contentConfiguration as? UIListContentConfiguration else { return }
+        content.textProperties.font = .preferredFont(forTextStyle: .body)
+        content.secondaryTextProperties.font = .preferredFont(forTextStyle: .caption1)
+        content.imageToTextPadding = 10
+        content.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14)
+        cell.contentConfiguration = content
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        if abs(headerWidth - tableView.bounds.width) > 1 { updateHeader() }
+    }
+
     private func updateHeader() {
+        headerWidth = tableView.bounds.width
         guard model.catalogue != nil || model.canRetryConnection || model.recovery.phase == .connecting || model.recovery.phase == .reconnecting else { tableView.tableHeaderView = nil; return }
         let host = URL(string: model.address)?.host ?? model.address
         let label = BloomTheme.label(host, style: .subheadline)
-        let detail = BloomTheme.label("\(model.catalogue?.workspaces.count ?? 0) workspaces", style: .footnote, secondary: true)
+        label.numberOfLines = 1
+        label.lineBreakMode = .byTruncatingMiddle
+        let count = model.catalogue?.workspaces.count ?? 0
+        let detail = BloomTheme.label(count == 1 ? "1 workspace" : "\(count) workspaces", style: .footnote, secondary: true)
         let icon = UIImageView(image: UIImage(systemName: "server.rack", withConfiguration: UIImage.SymbolConfiguration(textStyle: .title2)))
         icon.tintColor = BloomTheme.accent
         icon.setContentHuggingPriority(.required, for: .horizontal)
         let text = UIStackView(arrangedSubviews: [label, detail]); text.axis = .vertical; text.spacing = 4
-        let stack = UIStackView(arrangedSubviews: [icon, text]); stack.spacing = 14; stack.alignment = .center
+        let stack = UIStackView(arrangedSubviews: [icon, text]); stack.spacing = 12; stack.alignment = .center
         stack.isLayoutMarginsRelativeArrangement = true
-        stack.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 16, leading: 24, bottom: 12, trailing: 24)
+        stack.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20)
         let connectionStatus = MobileConnectionStatusView()
         connectionStatus.update(model.recovery, canRetry: model.canRetryConnection)
         connectionStatus.onRetry = { [weak self] in self?.model.retryConnection() }

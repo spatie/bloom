@@ -38,15 +38,28 @@ final class WorkspaceToolDeckController: UIViewController {
     var onRename: ((WorkspaceToolPane) -> Void)?
     var onClosePane: ((WorkspaceToolPane) -> Void)?
     var onEndTerminal: ((WorkspaceToolPane) -> Void)?
+    /// Temporarily present the focused leaf without changing the saved split or selected tab.
+    var focusesSinglePane = false {
+        didSet {
+            guard focusesSinglePane != oldValue, isViewLoaded else { return }
+            renderSelection()
+            view.setNeedsLayout()
+        }
+    }
     private let selector = UISegmentedControl()
     private let leafSelector = UISegmentedControl()
     private let tabScroll = UIScrollView()
     private let canvas = UIView()
     private let menu = UIButton(type: .system)
+    private let tabHeader = UIStackView()
+    private var tabHeaderHeight: NSLayoutConstraint?
+    private var shouldRevealSelectedTab = false
+    private var previousTabWidth: CGFloat = 0
     private var leafHeight: NSLayoutConstraint?
     private var dividers: [UIView] = []
     private var installed: [String: WorkspaceToolPane] = [:]
     private var compactSplit = false
+    private var showsFocusedPaneOnly: Bool { compactSplit || focusesSinglePane }
     var selectedTab: WorkspaceToolTab? { tabs.first { $0.id == selectedID } }
     var selectedPane: WorkspaceToolPane? { selectedTab.flatMap { $0.contents[$0.layout.focus] } }
     var allPanes: [WorkspaceToolPane] { tabs.flatMap(\.panes) }
@@ -63,26 +76,32 @@ final class WorkspaceToolDeckController: UIViewController {
             guard let self, let tab = selectedTab, tab.panes.indices.contains(leafSelector.selectedSegmentIndex) else { return }
             tab.layout.setFocus(tab.panes[leafSelector.selectedSegmentIndex].id)
             renderSelection()
+            updateMenu()
+            onSelection?()
         }, for: .valueChanged)
+        selector.accessibilityLabel = "Workspace tabs"
+        leafSelector.accessibilityLabel = "Split panes"
         tabScroll.showsHorizontalScrollIndicator = false
         tabScroll.addSubview(selector)
         menu.setImage(UIImage(systemName: "ellipsis.circle"), for: .normal)
         menu.showsMenuAsPrimaryAction = true
         menu.accessibilityLabel = "Tab and split options"
-        let header = UIStackView(arrangedSubviews: [tabScroll, menu])
-        header.spacing = 8
-        header.layoutMargins = UIEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
-        header.isLayoutMarginsRelativeArrangement = true
-        let stack = UIStackView(arrangedSubviews: [header, leafSelector, canvas])
+        [tabScroll, menu].forEach { tabHeader.addArrangedSubview($0) }
+        tabHeader.spacing = 8
+        tabHeader.layoutMargins = UIEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
+        tabHeader.isLayoutMarginsRelativeArrangement = true
+        let stack = UIStackView(arrangedSubviews: [tabHeader, leafSelector, canvas])
         stack.axis = .vertical
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
         leafHeight = leafSelector.heightAnchor.constraint(equalToConstant: 0)
         leafHeight?.isActive = true
+        tabHeaderHeight = tabHeader.heightAnchor.constraint(equalToConstant: 0)
+        tabHeaderHeight?.isActive = true
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: view.leadingAnchor), stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             stack.topAnchor.constraint(equalTo: view.topAnchor), stack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            header.heightAnchor.constraint(equalToConstant: 52), menu.widthAnchor.constraint(equalToConstant: 44)
+            menu.widthAnchor.constraint(equalToConstant: 44)
         ])
         refreshTabs()
     }
@@ -91,6 +110,7 @@ final class WorkspaceToolDeckController: UIViewController {
         super.viewDidLayoutSubviews()
         selector.frame = CGRect(x: 0, y: 0, width: max(tabScroll.bounds.width, CGFloat(tabs.count) * 140), height: 44)
         tabScroll.contentSize = selector.bounds.size
+        revealSelectedTab()
         let compact = canvas.bounds.width < 440
         if compact != compactSplit { compactSplit = compact; renderSelection() }
         layoutSelectedPanes()
@@ -163,6 +183,12 @@ final class WorkspaceToolDeckController: UIViewController {
         selector.removeAllSegments()
         for (index, tab) in tabs.enumerated() { selector.insertSegment(withTitle: tab.title, at: index, animated: false) }
         selector.selectedSegmentIndex = tabs.firstIndex { $0.id == selectedID } ?? UISegmentedControl.noSegment
+        // A single browser or terminal already supplies its own toolbar. The workspace menu
+        // keeps pane actions available without adding a redundant title row above it.
+        tabHeaderHeight?.constant = tabs.count > 1 ? 44 : 0
+        tabHeader.isHidden = tabs.count <= 1
+        shouldRevealSelectedTab = true
+        view.setNeedsLayout()
         updateMenu()
         renderSelection()
         onSelection?()
@@ -171,7 +197,7 @@ final class WorkspaceToolDeckController: UIViewController {
     private func renderSelection() {
         guard isViewLoaded else { return }
         let tab = selectedTab
-        let visible = compactSplit ? tab?.panes.filter { $0.id == tab?.layout.focus } ?? [] : tab?.panes ?? []
+        let visible = showsFocusedPaneOnly ? tab?.panes.filter { $0.id == tab?.layout.focus } ?? [] : tab?.panes ?? []
         let ids = Set(visible.map(\.id))
         for (id, pane) in installed where !ids.contains(id) { detach(pane.content); installed[id] = nil }
         for pane in visible where installed[pane.id] == nil {
@@ -184,7 +210,7 @@ final class WorkspaceToolDeckController: UIViewController {
             installed[pane.id] = pane
         }
         leafSelector.removeAllSegments()
-        if compactSplit, let tab, tab.panes.count > 1 {
+        if showsFocusedPaneOnly, let tab, tab.panes.count > 1 {
             for (index, pane) in tab.panes.enumerated() { leafSelector.insertSegment(withTitle: pane.title, at: index, animated: false) }
             leafSelector.selectedSegmentIndex = tab.panes.firstIndex { $0.id == tab.layout.focus } ?? 0
             leafHeight?.constant = 44
@@ -196,7 +222,7 @@ final class WorkspaceToolDeckController: UIViewController {
     private func layoutSelectedPanes() {
         dividers.forEach { $0.removeFromSuperview() }; dividers.removeAll()
         guard let tab = selectedTab else { return }
-        if compactSplit {
+        if showsFocusedPaneOnly {
             installed[tab.layout.focus]?.content.view.frame = canvas.bounds
             return
         }
@@ -210,7 +236,19 @@ final class WorkspaceToolDeckController: UIViewController {
         }
     }
 
-    private func updateMenu() {
+    private func revealSelectedTab() {
+        let resized = previousTabWidth != tabScroll.bounds.width
+        previousTabWidth = tabScroll.bounds.width
+        guard shouldRevealSelectedTab || resized, tabScroll.bounds.width > 0 else { return }
+        shouldRevealSelectedTab = false
+        guard tabs.count > 1, selector.selectedSegmentIndex != UISegmentedControl.noSegment else { return }
+        let width = selector.bounds.width / CGFloat(tabs.count)
+        let frame = CGRect(x: CGFloat(selector.selectedSegmentIndex) * width, y: 0, width: width, height: 44)
+        tabScroll.scrollRectToVisible(frame, animated: false)
+    }
+
+    /// Shared with the workspace toolbar, including when the single-tab header is hidden.
+    var paneActionsMenu: UIMenu {
         var groups: [UIMenuElement] = []
         groups.append(UIMenu(title: "New tab", children: PaneKind.allCases.map { kind in
             UIAction(title: kind.title, image: UIImage(systemName: kind.symbol)) { [weak self] _ in self?.onNewPane?(kind, nil) }
@@ -227,8 +265,10 @@ final class WorkspaceToolDeckController: UIViewController {
             groups += [UIAction(title: "Rename pane", image: UIImage(systemName: "pencil")) { [weak self] _ in self?.onRename?(pane) },
                        UIAction(title: "Close pane", image: UIImage(systemName: "xmark")) { [weak self] _ in self?.onClosePane?(pane) }]
         }
-        menu.menu = UIMenu(children: groups)
+        return UIMenu(children: groups)
     }
+
+    private func updateMenu() { menu.menu = paneActionsMenu }
 
     private func detach(_ child: UIViewController) {
         guard child.parent === self else { return }

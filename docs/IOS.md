@@ -161,9 +161,13 @@ The foundation lists projects, workspaces and sessions, imports a GitHub reposit
 server's credentials, creates a workspace using server-advertised composer defaults, sends and
 stops turns, merges incremental transcripts, runs configured scripts and opens HTTPS previews.
 
-The iPad workspace keeps its native conversation controller beside a WebKit preview or review,
-with a searchable Changes/Files inspector. Narrow windows use a native tab bar to switch tools and put the
-file list in a native sheet. Branch and uncommitted scopes use the existing server review API;
+The iPad workspace gives conversation and the selected tool the main canvas. Project navigation
+uses UIKit's overlay sidebar, and the Changes/Files inspector opens on demand. It appears in a
+popover on regular iPad windows or a sheet on compact screens; large windows can show it inline
+without reducing the two main panes below their readable widths. View offers conversation,
+side-by-side and focused-tool modes, including for agent-created splits. A single tool has no
+redundant tab-title bar; multiple tabs retain native selection. Narrow windows use a native tab
+bar to switch tools. Workspace actions live in the navigation title menu. Branch and uncommitted scopes use the existing server review API;
 diffs load lazily with at most two requests at once. All-files review, per-file diffs and read-only
 source browsing reuse the Mac diff parser, file tree/filter logic and BloomUI components. A
 refresh failure remains visible above cached changes. Source files and previews execute no code
