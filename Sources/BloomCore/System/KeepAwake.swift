@@ -30,6 +30,13 @@ public struct KeepAwakeSession: Sendable, Hashable, Codable {
         KeepAwakeSession(startedAt: now, until: now.addingTimeInterval(seconds))
     }
 
+    /// The same session, running longer. An open ended one has no end to move, so it is returned
+    /// as it stands rather than given one.
+    public func extended(by seconds: TimeInterval, at now: Date) -> KeepAwakeSession {
+        guard let until else { return self }
+        return KeepAwakeSession(startedAt: startedAt, until: max(until, now).addingTimeInterval(seconds))
+    }
+
     public func isActive(at now: Date) -> Bool {
         guard let until else { return true }
         return until > now
@@ -126,6 +133,41 @@ public enum KeepAwake {
             // sentence this replaces.
             detail: whileAgentsRun ? "Awake while agents run" : "Nothing keeps this Mac awake"
         )
+    }
+
+    /// The one dimmed line the menu leads with, or nothing at all when the Mac is free to sleep.
+    ///
+    /// **A reading, not a control, and silence when there is nothing to report.** The menu used to
+    /// carry a checkmark row that was at once a state ("29m left"), a setting and an action, in a
+    /// flat list with two preferences, so four rows all looked like settings. Now the state is this
+    /// sentence, the rows under it are plain commands, and the preferences are behind their own
+    /// submenu. A Mac that nothing is holding says nothing: the two rows left speak for themselves.
+    public static func menuState(
+        session: KeepAwakeSession?,
+        whileAgentsRun: Bool,
+        runningCount: Int,
+        at now: Date,
+        clock: UsageTimeFormat = .automatic,
+        calendar: Calendar = .current,
+        locale: Locale = .current
+    ) -> String? {
+        if let session, session.isActive(at: now) {
+            guard let until = session.until else { return "Keeping this Mac awake" }
+            let clockTime = UsageFormat.timeOfDay(until, clock: clock, calendar: calendar, locale: locale)
+            return "\(UsageFormat.compactDuration(until.timeIntervalSince(now))) left, until \(clockTime)"
+        }
+        if SleepPrevention.preventsSleep(isEnabled: whileAgentsRun, runningCount: runningCount) {
+            let verb = runningCount == 1 ? "runs" : "run"
+            return "While \(Counted.of(runningCount, "agent")) \(verb)"
+        }
+        return nil
+    }
+
+    /// How much longer a running session can be pushed back by, offered when it has an end to push.
+    public static let extensionChoices: [TimeInterval] = [15 * 60, 30 * 60, 3600, 2 * 3600]
+
+    public static func extensionLabel(_ seconds: TimeInterval) -> String {
+        seconds < 3600 ? label(minutes: Int(seconds / 60)) : label(hours: Int(seconds / 3600))
     }
 
     public static func label(minutes: Int) -> String { Counted.of(minutes, "minute") }

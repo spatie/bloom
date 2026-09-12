@@ -40,6 +40,13 @@ final class KeepAwakeModel {
         apply()
     }
 
+    /// Pushes a running session's end back. Nothing to do for one that has no end.
+    func extend(by seconds: TimeInterval) {
+        guard let session, session.isActive(at: Date()) else { return }
+        self.session = session.extended(by: seconds, at: Date())
+        apply()
+    }
+
     func stop() {
         session = nil
         apply()

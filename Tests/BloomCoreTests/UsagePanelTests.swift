@@ -531,6 +531,38 @@ struct KeepAwakeTests {
         #expect(status(nil, false).detail == "Nothing keeps this Mac awake")
     }
 
+    @Test("the menu says what is holding the Mac, and says nothing when nothing is")
+    func menuState() {
+        func line(_ session: KeepAwakeSession?, whileRunning: Bool = true, running: Int = 0) -> String? {
+            KeepAwake.menuState(
+                session: session, whileAgentsRun: whileRunning, runningCount: running, at: now,
+                clock: .twentyFourHour, calendar: utc, locale: english
+            )
+        }
+        #expect(line(.lasting(1800, from: now)) == "30m left, until 16:16")
+        #expect(line(.indefinitely(from: now)) == "Keeping this Mac awake")
+        #expect(line(nil, running: 2) == "While 2 agents run")
+        #expect(line(nil, running: 1) == "While 1 agent runs")
+        // A Mac that is free to sleep gets no line at all: the rows under it speak for themselves.
+        #expect(line(nil) == nil)
+        #expect(line(nil, whileRunning: false, running: 3) == nil)
+        // A session that has run out is not a session.
+        #expect(line(.lasting(60, from: now.addingTimeInterval(-3600))) == nil)
+    }
+
+    @Test("extending moves the end back, and an open ended session has no end to move")
+    func extending() {
+        let timed = KeepAwakeSession.lasting(600, from: now)
+        #expect(timed.extended(by: 900, at: now).until == now.addingTimeInterval(1500))
+        // From the end, not from now, so extending twice adds up.
+        #expect(timed.extended(by: 900, at: now).extended(by: 900, at: now).until
+            == now.addingTimeInterval(2400))
+        #expect(KeepAwakeSession.indefinitely(from: now).extended(by: 900, at: now).until == nil)
+        // What the submenu offers, said the way the rows say it.
+        #expect(KeepAwake.extensionChoices.map(KeepAwake.extensionLabel)
+            == ["15 minutes", "30 minutes", "1 hour", "2 hours"])
+    }
+
     @Test("a session is saved, read back, and forgotten once it has run out")
     func storage() throws {
         let defaults = try #require(UserDefaults(suiteName: "bloom.keepawake.\(UUID().uuidString)"))
