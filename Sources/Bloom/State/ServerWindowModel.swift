@@ -225,10 +225,10 @@ final class ServerWindowModel {
         conversation?.draft = written
     }
 
-    func read(_ operation: ServerOperation) async throws -> ServerResult {
+    func read(_ operation: ServerOperation, timeout: Duration = .seconds(660)) async throws -> ServerResult {
         guard let client, !isRemovingServer else { throw ServerFailure("Connect to the server first.") }
         let generation = connectionGeneration
-        let reply = try await client.request(ServerRequest(operation))
+        let reply = try await client.request(ServerRequest(operation), timeout: timeout)
         guard generation == connectionGeneration else { throw ServerFailure("The server connection changed. Try again.") }
         return reply.result
     }
@@ -1000,7 +1000,7 @@ final class ServerWindowModel {
         }
     }
 
-    func perform(_ operation: ServerOperation) async -> ServerResult? {
+    func perform(_ operation: ServerOperation, timeout: Duration = .seconds(660)) async -> ServerResult? {
         guard let client, !isPerformingCommand else { return nil }
         isPerformingCommand = true
         defer { isPerformingCommand = false }
@@ -1013,7 +1013,7 @@ final class ServerWindowModel {
         uncertainRequest = request
         error = nil
         do {
-            let reply = try await client.request(request)
+            let reply = try await client.request(request, timeout: timeout)
             guard generation == connectionGeneration else { return nil }
             uncertainRequest = nil
             return reply.result

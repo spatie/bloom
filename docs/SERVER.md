@@ -82,6 +82,24 @@ Repository setup still comes from the selected branch. Bloom does not rewrite a 
 setup script into a Linux one. Container-ready branches should commit their `.bloom/settings.toml`
 and setup script, including creation of development environment files when required.
 
+### Storage and cleanup
+
+**Server Settings > Storage & Cleanup** shows capacity on the filesystem containing Bloom's data,
+alongside Docker's image, container, volume and build-cache usage. Docker categories share layers
+and cannot be added together. Reclaimable build-cache sizes are estimates; image reclaimability
+is deliberately not presented because Docker can report it incorrectly for active images.
+
+The reader selects build cache or unused images, reviews the current server, then confirms cleanup.
+Cleanup uses only that account's verified, private rootless Docker engine. It never removes
+containers, volumes, workspace files, uploads, credentials or swap. Images referenced by either
+running or stopped containers stay available. Later builds may need to recreate caches or download
+images again. Retained data from archived workspaces is not automatically deleted by this panel.
+
+Only one cleanup runs at a time. Failed or interrupted operations retain per-category outcomes,
+with a copyable report and a refresh action. Closing settings does not revoke an already confirmed
+cleanup. The server API supports both SSH and authenticated HTTPS clients; older servers without
+the storage capability show an update-required state instead of receiving an unknown command.
+
 Failures retain the address and selected key. A step list and selectable live output remain visible
 during installation. Structured errors retain the sanitised command, exit status and diagnostic tail;
 Copy Error retains the failure diagnostic; Copy Output sits beside the live log. Credential patterns and terminal
