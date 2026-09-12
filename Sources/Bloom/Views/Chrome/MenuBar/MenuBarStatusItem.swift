@@ -348,9 +348,18 @@ final class MenuBarStatusItem: NSObject, NSMenuDelegate {
         if isRunning {
             // Only a session with an end has an end to push back.
             if session?.until != nil {
-                items.append(Self.submenu("Extend", KeepAwake.extensionChoices.map { seconds in
-                    ClosureMenuItem(KeepAwake.extensionLabel(seconds)) { keepAwake.extend(by: seconds) }
-                }))
+                var lengths: [NSMenuItem] = KeepAwake.extensionMinuteChoices.map { count in
+                    ClosureMenuItem(KeepAwake.label(minutes: count)) {
+                        keepAwake.extend(by: TimeInterval(count * 60))
+                    }
+                }
+                lengths.append(.separator())
+                lengths += KeepAwake.extensionHourChoices.map { count in
+                    ClosureMenuItem(KeepAwake.label(hours: count)) {
+                        keepAwake.extend(by: TimeInterval(count * 3600))
+                    }
+                }
+                items.append(Self.submenu("Extend", lengths))
             }
             items.append(ClosureMenuItem("End Keep Awake") { keepAwake.stop() })
         } else {

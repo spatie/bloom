@@ -163,12 +163,11 @@ public enum KeepAwake {
         return nil
     }
 
-    /// How much longer a running session can be pushed back by, offered when it has an end to push.
-    public static let extensionChoices: [TimeInterval] = [15 * 60, 30 * 60, 3600, 2 * 3600]
-
-    public static func extensionLabel(_ seconds: TimeInterval) -> String {
-        seconds < 3600 ? label(minutes: Int(seconds / 60)) : label(hours: Int(seconds / 3600))
-    }
+    /// How much longer a running session can be pushed back by, offered when it has an end to
+    /// push. Two groups with a rule between them, because a list that runs from fifteen minutes to
+    /// twelve hours in one column is a column nobody reads the bottom of.
+    public static let extensionMinuteChoices = [15, 30, 45]
+    public static let extensionHourChoices = Array(1...12)
 
     public static func label(minutes: Int) -> String { Counted.of(minutes, "minute") }
     public static func label(hours: Int) -> String { Counted.of(hours, "hour") }

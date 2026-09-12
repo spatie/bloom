@@ -558,9 +558,12 @@ struct KeepAwakeTests {
         #expect(timed.extended(by: 900, at: now).extended(by: 900, at: now).until
             == now.addingTimeInterval(2400))
         #expect(KeepAwakeSession.indefinitely(from: now).extended(by: 900, at: now).until == nil)
-        // What the submenu offers, said the way the rows say it.
-        #expect(KeepAwake.extensionChoices.map(KeepAwake.extensionLabel)
-            == ["15 minutes", "30 minutes", "1 hour", "2 hours"])
+        // What the submenu offers, in two groups: minutes, then hours to twelve.
+        #expect(KeepAwake.extensionMinuteChoices.map(KeepAwake.label(minutes:))
+            == ["15 minutes", "30 minutes", "45 minutes"])
+        #expect(KeepAwake.extensionHourChoices.first == 1)
+        #expect(KeepAwake.extensionHourChoices.last == 12)
+        #expect(KeepAwake.label(hours: 1) == "1 hour")
     }
 
     @Test("a session is saved, read back, and forgotten once it has run out")
