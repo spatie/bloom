@@ -55,7 +55,7 @@ final class BloomAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificatio
         // The updater needs the same state, for one question: how many agents are mid turn. This
         // is also the first moment there is any, and it is deliberately after launching rather
         // than during it, so Sparkle's first scheduled check cannot land inside the launch.
-        SoftwareUpdater.shared.start(app: model)
+        SoftwareUpdater.shared.start(app: model, appDelegate: self)
     }
 
     /// Claiming the URL Apple Event has to happen before launching finishes. If SwiftUI's own
