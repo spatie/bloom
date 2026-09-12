@@ -65,6 +65,7 @@ public enum PaneGlyph {
         switch kind {
         case .claudeCode: "asterisk"
         case .codex: "circle.hexagongrid"
+        case .grok: "sparkles"
         // Neither can run a chat, so neither can be on a tab. Named anyway rather than defaulted,
         // so adding a third backend is a compiler error here instead of a wrong glyph.
         case .cursor: "cursorarrow"

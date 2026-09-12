@@ -142,10 +142,22 @@ fi
 # ditto rather than cp, because the framework is a versioned bundle held together by symlinks and
 # carries a code signature of its own. install_name_tool invalidates the signature the build
 # system just applied, which is why both happen before the codesign pass at the foot of this file.
+# SwiftPM used to put products at <scratch>/<triple>/<config>. The Xcode build
+# system puts them at <scratch>/out/Products/<config>, so two dirnames from
+# BIN_DIR lands on `out` rather than the scratch that holds artifacts and
+# checkouts. Walk up until the named sibling exists.
+spm_scratch_containing() {
+  local scratch name="$1"
+  scratch="$(dirname "$(dirname "$BIN_DIR")")"
+  while [[ ! -d "$scratch/$name" && "$scratch" != "/" ]]; do
+    scratch="$(dirname "$scratch")"
+  done
+  print -r -- "$scratch"
+}
+
 embed_sparkle() {
   local scratch framework
-  # BIN_DIR is <scratch>/<triple>/<config>, and the binary artifacts sit beside the triple.
-  scratch="$(dirname "$(dirname "$BIN_DIR")")"
+  scratch="$(spm_scratch_containing artifacts)"
   framework="$(/usr/bin/find "$scratch/artifacts" -maxdepth 6 -type d \
     -name 'Sparkle.framework' -path '*Sparkle.xcframework/macos*' 2>/dev/null | head -1)"
 
@@ -175,7 +187,7 @@ embed_sparkle() {
 
 embed_sparkle
 
-zsh Tools/package-licences.sh "$APP" "$(dirname "$(dirname "$BIN_DIR")")/checkouts"
+zsh Tools/package-licences.sh "$APP" "$(spm_scratch_containing checkouts)/checkouts"
 
 # The accent Bloom hands to AppKit, checked against the one Bloom draws with itself.
 #
@@ -327,6 +339,14 @@ emit_app_intents_metadata() {
   constvalues="$BIN_DIR/Bloom.swiftconstvalues"
 
   find Sources/Bloom -name '*.swift' > "$sources"
+
+  # Beside the binary on the old SwiftPM layout. The Xcode build system does not write it
+  # there, and failing the whole bundle over missing Shortcuts metadata is worse than an
+  # app whose intents are invisible.
+  if [[ ! -f "$BIN_DIR/description.json" ]]; then
+    echo "==> skipping App Intents metadata: no description.json beside the binary"
+    return 0
+  fi
 
   # The frontend wants a bare array of protocol names. The file Xcode ships wraps the same list in
   # an object, which it rejects as malformed.

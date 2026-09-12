@@ -1332,6 +1332,13 @@ final class TranscriptModel {
                 store: store,
                 bridge: bridge?.attachment
             )
+        case .grok:
+            return GrokRunner(
+                workspacePath: workspacePath,
+                session: session,
+                store: store,
+                bridge: bridge?.attachment
+            )
         // Cursor and OpenCode have no runner, and `AgentKind.canRunWorkspaces` is what stops a
         // chat ever being on one. A chat that somehow is falls back to Claude Code rather than
         // refusing to start, because a transcript that cannot be typed into is a worse answer

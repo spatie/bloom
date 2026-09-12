@@ -28,33 +28,64 @@ final class ComposerModelCatalog {
     static let shared = ComposerModelCatalog()
 
     private(set) var codexModels: [CodexModel] = []
+    private(set) var grokModels: [GrokModel] = []
     private(set) var isLoading = false
     /// Set when a fetch failed, so a menu can say why its section is short rather than pretending
     /// the account has one model.
     private(set) var lastFailure: String?
 
     private let catalog: CodexModelCatalog
+    private var grokCatalog: GrokModelCatalog
     private var loadTask: Task<Void, Never>?
+    private var loadGeneration = UUID()
 
-    init(catalog: CodexModelCatalog = CodexModelCatalog.live()) {
+    init(
+        catalog: CodexModelCatalog = CodexModelCatalog.live(),
+        grokCatalog: GrokModelCatalog = GrokModelCatalog.live()
+    ) {
         self.catalog = catalog
+        self.grokCatalog = grokCatalog
+    }
+
+    func configure(store: Store) {
+        grokCatalog = GrokModelCatalog.live(store: store)
+        refresh()
     }
 
     /// Fetches once, and again only after `refresh()`. Cheap to call on every menu appearance,
     /// which is exactly how the footer calls it.
     func load() {
-        guard loadTask == nil, codexModels.isEmpty else { return }
+        guard loadTask == nil else { return }
+        let needsCodex = codexModels.isEmpty
+        let needsGrok = grokModels.isEmpty
+        guard needsCodex || needsGrok else { return }
         isLoading = true
-        loadTask = Task { [catalog] in
-            do {
-                let models = try await catalog.pickerModels()
-                self.codexModels = models
-                self.lastFailure = nil
-            } catch {
-                // Not an alert. A model menu that cannot reach the CLI is a menu with one section
-                // in it, and the section that is there still works.
-                self.lastFailure = error.readableMessage
+        let generation = loadGeneration
+        loadTask = Task { [catalog, grokCatalog] in
+            var failure: String?
+            if needsCodex {
+                do {
+                    let models = try await catalog.pickerModels()
+                    guard generation == self.loadGeneration else { return }
+                    self.codexModels = models
+                } catch {
+                    failure = error.readableMessage
+                }
             }
+            guard generation == self.loadGeneration else { return }
+            if needsGrok {
+                do {
+                    let models = try await grokCatalog.pickerModels()
+                    guard generation == self.loadGeneration else { return }
+                    self.grokModels = models
+                } catch {
+                    if failure == nil { failure = error.readableMessage }
+                }
+            }
+            guard generation == self.loadGeneration else { return }
+            // Not an alert. A model menu that cannot reach a CLI is a menu with fewer sections,
+            // and the sections that are there still work.
+            self.lastFailure = failure
             self.isLoading = false
             self.loadTask = nil
         }
@@ -62,9 +93,18 @@ final class ComposerModelCatalog {
 
     func refresh() {
         loadTask?.cancel()
-        loadTask = nil
+        loadGeneration = UUID()
+        let generation = loadGeneration
         codexModels = []
-        Task { await catalog.invalidate(); load() }
+        grokModels = []
+        isLoading = true
+        loadTask = Task { [catalog, grokCatalog] in
+            await catalog.invalidate()
+            await grokCatalog.invalidate()
+            guard generation == self.loadGeneration else { return }
+            self.loadTask = nil
+            load()
+        }
     }
 
     // MARK: - The menus
@@ -99,6 +139,7 @@ final class ComposerModelCatalog {
         switch kind {
         case .claudeCode: ComposerOption.models
         case .codex: codexModels.map { ComposerOption(id: $0.id, label: $0.displayName) }
+        case .grok: grokModels.map { ComposerOption(id: $0.id, label: $0.displayName) }
         case .cursor, .openCode: []
         }
     }
@@ -111,7 +152,12 @@ final class ComposerModelCatalog {
     /// drift this file exists to avoid. An id nothing recognises belongs to whoever is running
     /// now, which is what keeps a pinned id from silently moving a chat to the other backend.
     func backend(ofModel id: String, current: AgentKind) -> AgentKind {
-        DefaultBackend.kind(ofModel: id, running: current, codexModels: codexModels)
+        DefaultBackend.kind(
+            ofModel: id,
+            running: current,
+            codexModels: codexModels,
+            grokModels: grokModels
+        )
     }
 
     /// The efforts one model takes.
@@ -128,6 +174,11 @@ final class ComposerModelCatalog {
                 return ComposerOption.efforts
             }
             return found.supportedEfforts.map { ComposerOption(id: $0.id, label: $0.label) }
+        case .grok:
+            guard let found = grokModels.first(where: { $0.id == model }) else {
+                return ComposerOption.efforts
+            }
+            return found.supportedEfforts.map { ComposerOption(id: $0.id, label: $0.label) }
         case .claudeCode, .cursor, .openCode:
             return ComposerOption.efforts
         }
@@ -136,6 +187,12 @@ final class ComposerModelCatalog {
     /// The effort to keep when the model changes underneath it, which is the model's own default
     /// rather than Bloom's `high`: `gpt-5.6-sol` defaults to `low` and `gpt-5.5` to `medium`.
     func resolvedEffort(_ wanted: String, for kind: AgentKind, model: String) -> String {
-        DefaultBackend.effort(wanted, on: kind, model: model, codexModels: codexModels)
+        DefaultBackend.effort(
+            wanted,
+            on: kind,
+            model: model,
+            codexModels: codexModels,
+            grokModels: grokModels
+        )
     }
 }
