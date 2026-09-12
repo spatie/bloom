@@ -50,7 +50,7 @@ public struct ComposerDefaults: Equatable {
     ///   is picked, and a Codex chat opened under it was being written a mode Codex cannot be
     ///   sent. `WorkspaceStart` runs its own answer through the same rule; this is the other route
     ///   a session's opening values arrive by.
-    /// - Parameter codexModels: what `model/list` last answered, empty when it has not answered
+    /// - Parameter models: what model discovery last answered, empty when it has not answered
     ///   yet, which is every caller that has never opened a model menu. It only ever adds
     ///   precision: the backend Settings recorded is read without it.
     public static func resolve(
@@ -58,7 +58,7 @@ public struct ComposerDefaults: Equatable {
         app: AppDefaults,
         hasWorktree: Bool = true,
         running: AgentKind = .claudeCode,
-        codexModels: [CodexModel] = []
+        models: [AgentKind: [AgentModel]] = [:]
     ) -> ComposerDefaults {
         // Repo file, then what the user chose in Settings, then a machine-wide settings file, then
         // the built-in. The home file sits below the Settings screen deliberately: a global
@@ -83,7 +83,7 @@ public struct ComposerDefaults: Equatable {
             ),
             app: app,
             running: running,
-            codexModels: codexModels
+            models: models
         )
         return ComposerDefaults(
             // `resolved.model` rather than the string the file held. A settings file has to name a

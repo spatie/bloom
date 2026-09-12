@@ -94,7 +94,7 @@ private extension ServerCreationOperation {
 @MainActor
 @Observable
 final class CreationComposerSource {
-    let models = ComposerModelCatalog()
+    let models = ComposerModelCatalog(sources: [:])
     let commands = SlashCommandCatalog()
     let styles = ComposerOutputStyleCatalog()
     var files: [String] = []

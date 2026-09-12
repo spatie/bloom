@@ -4,6 +4,7 @@ import FoundationNetworking
 #endif
 
 /// Reports distinct installations and coarse setup metrics about once a day.
+/// Includes the computer name, which may contain a person's name.
 /// No paths, prompts, account details, serial numbers or hardware identifiers are collected.
 /// The random token identifies an installation, not a person or a physical Mac.
 public enum InstallPing {
@@ -156,7 +157,7 @@ public enum InstallPing {
     /// The defaults domain survives what this has to survive: quitting, updating in place, and
     /// Sparkle replacing the bundle, because none of those touch
     /// `~/Library/Preferences/be.spatie.bloom.plist`. It does not survive somebody deleting Bloom's
-    /// data, and that is the right way round for an anonymous counter: removing the app should
+    /// data, and that is the right way round for an installation counter: removing the app should
     /// mean the app forgets you, and a reinstall afterwards is honestly a new install. A keychain
     /// item would outlive the uninstall, which makes the number very slightly more accurate and
     /// leaves a thing behind on the user's disk that they did not ask for and cannot easily find.
@@ -306,6 +307,7 @@ public enum InstallPing {
         /// The appearance setting.
         public let theme: Theme
         public let appBuild: String?
+        public let computerName: String?
         public let architecture: String?
         public let translated: Bool?
         public let screenWidth: Int?
@@ -321,6 +323,7 @@ public enum InstallPing {
             agent: String,
             theme: Theme,
             appBuild: String? = nil,
+            computerName: String? = nil,
             architecture: Feedback.Architecture = .unknown,
             translated: Bool? = nil,
             screenWidth: Double? = nil,
@@ -335,6 +338,7 @@ public enum InstallPing {
             self.agent = InstallPing.checked(agent, InstallPing.namePattern, or: InstallPing.unknownName)
             self.theme = theme
             self.appBuild = appBuild.flatMap { InstallPing.matches($0, #"^[A-Za-z0-9.]{1,16}$"#) ? $0 : nil }
+            self.computerName = InstallPing.checkedComputerName(computerName)
             self.architecture = architecture.wireName
             self.translated = architecture == .unknown ? nil : translated
             let width = InstallPing.roundedScreenDimension(screenWidth)
@@ -355,6 +359,7 @@ public enum InstallPing {
             case agent
             case theme
             case appBuild = "app_build"
+            case computerName = "computer_name"
             case architecture
             case translated
             case screenWidth = "screen_width"
@@ -363,6 +368,14 @@ public enum InstallPing {
             case displayCount = "display_count"
             case memoryBucket = "memory_bucket"
         }
+    }
+
+    public static func checkedComputerName(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty, value.unicodeScalars.count <= 255,
+              value.rangeOfCharacter(from: .controlCharacters) == nil
+        else { return nil }
+        return value
     }
 
     public enum MemoryBucket: String, Sendable, Equatable, Encodable, CaseIterable {
@@ -532,8 +545,8 @@ public enum InstallPing {
     public static let settingTitle = "Share daily usage reports"
 
     public static let settingDetail =
-        "Help improve Bloom by sharing a random install token, app version and build, macOS version, installed agents, theme, processor architecture, Rosetta status, rounded display dimensions, display scale and count, and memory range."
+        "Help improve Bloom by sharing a random install token, computer name, app version and build, macOS version, installed agents, theme, processor architecture, Rosetta status, rounded display dimensions, display scale and count, and memory range."
 
     public static let settingFooter =
-        "Reports start a day after first launch and count installations. Display dimensions are rounded to 100 points and memory is grouped into broad ranges. Reports contain no names, account details, hardware identifiers, project paths or prompts. Feedback uses the same token, so an email you include with feedback can identify that installation."
+        "Reports start a day after first launch and count installations. Your computer name may include your name and identify you. Display dimensions are rounded to 100 points and memory is grouped into broad ranges. Reports contain no account details, hardware identifiers, project paths or prompts. Feedback uses the same token, so an email you include with feedback can identify that installation."
 }

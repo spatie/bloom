@@ -693,7 +693,7 @@ struct ComposerView: View {
             model: session.model,
             on: session.agentKind,
             hasSpoken: hasSpoken,
-            codexModels: ComposerModelCatalog.shared.codexModels
+            models: ComposerModelCatalog.shared.models
         ) else { return }
 
         sessionEditor.apply {
@@ -782,7 +782,7 @@ struct ComposerView: View {
             // Everything else is decided by the model, including the permission mode, so "start in
             // plan mode" still cannot write Plan onto a Codex row.
             running: transcript.session.agentKind,
-            codexModels: ComposerModelCatalog.shared.codexModels
+            models: ComposerModelCatalog.shared.models
         )
 
         if appDefaults.fastMode != isFastMode {

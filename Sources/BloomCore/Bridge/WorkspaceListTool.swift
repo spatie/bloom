@@ -413,6 +413,7 @@ public struct WorkspaceListTool: BridgeToolHandling {
     private func remedy(_ remedy: PullRequestStatus.Remedy) -> String {
         switch remedy {
         case .merge: "merge"
+        case .markReadyForReview: "markReadyForReview"
         case .push: "push"
         case .commitAndPush: "commitAndPush"
         case .fixConflicts: "fixConflicts"

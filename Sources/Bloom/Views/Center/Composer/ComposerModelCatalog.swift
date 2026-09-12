@@ -10,88 +10,65 @@ struct ComposerModelSection: Identifiable, Equatable {
     var title: String { kind.label }
 }
 
-/// What the composer's model and effort menus offer, per backend.
-///
-/// Claude Code's four are a list in the source, because the CLI has nothing to ask. **Codex's are
-/// fetched**, because `model/list` is a real call that answers without an account, because each
-/// model brings its own set of reasoning efforts (six for `gpt-5.6-sol`, four for `gpt-5.5`), and
-/// because a list written down goes stale between releases: Conductor's hardcoded one still names
-/// `gpt-5.4`, which no longer exists, and has none of the three current models.
-///
-/// A shared object rather than state on the footer, because `ViewThatFits` builds that row three
-/// times and three copies would be three fetches. It starts empty and fills in, so a menu opened
-/// in the first second shows Claude Code's section alone rather than nothing, and the Codex
-/// section arrives without anything having to be reopened.
+/// The composer and Settings share one discovery state. Backend sources supply common model
+/// descriptions, so another fetched agent does not need its own array or loading branch here.
 @MainActor
 @Observable
 final class ComposerModelCatalog {
     static let shared = ComposerModelCatalog()
 
     private(set) var availableAgents: [AgentKind]?
-    private(set) var codexModels: [CodexModel] = []
-    private(set) var grokModels: [GrokModel] = []
+    private(set) var models: [AgentKind: [AgentModel]] = [:]
     private(set) var isLoading = false
-    /// Set when a fetch failed, so a menu can say why its section is short rather than pretending
-    /// the account has one model.
     private(set) var lastFailure: String?
 
-    private let catalog: CodexModelCatalog
-    private var grokCatalog: GrokModelCatalog
+    private var sources: [AgentKind: AgentModelSource]
     private var loadTask: Task<Void, Never>?
     private var loadGeneration = UUID()
 
-    init(
-        catalog: CodexModelCatalog = CodexModelCatalog.live(),
-        grokCatalog: GrokModelCatalog = GrokModelCatalog.live()
-    ) {
-        self.catalog = catalog
-        self.grokCatalog = grokCatalog
+    init(sources: [AgentKind: AgentModelSource] = AgentModelSource.live()) {
+        self.sources = sources
     }
 
     func configure(store: Store) {
-        grokCatalog = GrokModelCatalog.live(store: store)
+        sources = AgentModelSource.live(store: store)
         refresh()
     }
 
     func receive(_ models: [CodexModel], availableAgents: [AgentKind]? = nil) {
-        codexModels = models; self.availableAgents = availableAgents; lastFailure = nil
+        // Remote discovery is authoritative. An earlier local fetch must not replace it.
+        loadTask?.cancel()
+        loadTask = nil
+        loadGeneration = UUID()
+        sources = [:]
+        self.models = [.codex: models.map(\.agentModel)]
+        self.availableAgents = availableAgents
+        isLoading = false
+        lastFailure = nil
     }
 
     func offers(_ kind: AgentKind) -> Bool { availableAgents?.contains(kind) ?? true }
 
-    /// Fetches once, and again only after `refresh()`. Cheap to call on every menu appearance,
-    /// which is exactly how the footer calls it.
     func load() {
         guard loadTask == nil else { return }
-        let needsCodex = codexModels.isEmpty
-        let needsGrok = grokModels.isEmpty
-        guard needsCodex || needsGrok else { return }
+        let needed = AgentKind.runnable.filter { sources[$0] != nil && (models[$0] ?? []).isEmpty }
+        guard !needed.isEmpty else { return }
         isLoading = true
         let generation = loadGeneration
-        loadTask = Task { [catalog, grokCatalog] in
+        loadTask = Task { [sources] in
             var failure: String?
-            if needsCodex {
+            for kind in needed {
+                guard generation == self.loadGeneration else { return }
+                guard let source = sources[kind] else { continue }
                 do {
-                    let models = try await catalog.pickerModels()
+                    let fetched = try await source.models()
                     guard generation == self.loadGeneration else { return }
-                    self.codexModels = models
-                } catch {
-                    failure = error.readableMessage
-                }
-            }
-            guard generation == self.loadGeneration else { return }
-            if needsGrok {
-                do {
-                    let models = try await grokCatalog.pickerModels()
-                    guard generation == self.loadGeneration else { return }
-                    self.grokModels = models
+                    self.models[kind] = fetched
                 } catch {
                     if failure == nil { failure = error.readableMessage }
                 }
             }
             guard generation == self.loadGeneration else { return }
-            // Not an alert. A model menu that cannot reach a CLI is a menu with fewer sections,
-            // and the sections that are there still work.
             self.lastFailure = failure
             self.isLoading = false
             self.loadTask = nil
@@ -102,14 +79,13 @@ final class ComposerModelCatalog {
         loadTask?.cancel()
         loadGeneration = UUID()
         let generation = loadGeneration
-        codexModels = []
-        grokModels = []
+        models = [:]
         isLoading = true
-        loadTask = Task { [catalog, grokCatalog] in
-            await catalog.invalidate()
-            await grokCatalog.invalidate()
+        loadTask = Task { [sources] in
+            for source in sources.values { await source.invalidate() }
             guard generation == self.loadGeneration else { return }
             self.loadTask = nil
+            self.isLoading = false
             load()
         }
     }
@@ -143,12 +119,9 @@ final class ComposerModelCatalog {
     }
 
     func options(for kind: AgentKind) -> [ComposerOption] {
-        switch kind {
-        case .claudeCode: ComposerOption.models
-        case .codex: codexModels.map { ComposerOption(id: $0.id, label: $0.displayName) }
-        case .grok: grokModels.map { ComposerOption(id: $0.id, label: $0.displayName) }
-        case .cursor, .openCode: []
-        }
+        if kind == .claudeCode { return ComposerOption.models }
+        return (models[kind] ?? []).filter { !$0.hidden }
+            .map { ComposerOption(id: $0.id, label: $0.displayName) }
     }
 
     /// Which backend a model id belongs to, so choosing one out of another section is understood
@@ -162,8 +135,7 @@ final class ComposerModelCatalog {
         DefaultBackend.kind(
             ofModel: id,
             running: current,
-            codexModels: codexModels,
-            grokModels: grokModels
+            models: models
         )
     }
 
@@ -173,22 +145,10 @@ final class ComposerModelCatalog {
     /// the chosen model does not take is not on the list: offering `max` on `gpt-5.5`, which stops
     /// at `xhigh`, is offering something the server will refuse.
     func efforts(for kind: AgentKind, model: String) -> [ComposerOption] {
-        switch kind {
-        case .codex:
-            guard let found = codexModels.first(where: { $0.id == model }) else {
-                // Not yet fetched, or a pinned id. The flat list is the honest fallback: it is
-                // what every one of these models has in common.
-                return ComposerOption.efforts
-            }
-            return found.supportedEfforts.map { ComposerOption(id: $0.id, label: $0.label) }
-        case .grok:
-            guard let found = grokModels.first(where: { $0.id == model }) else {
-                return ComposerOption.efforts
-            }
-            return found.supportedEfforts.map { ComposerOption(id: $0.id, label: $0.label) }
-        case .claudeCode, .cursor, .openCode:
+        guard kind != .claudeCode, let found = models[kind]?.first(where: { $0.id == model }) else {
             return ComposerOption.efforts
         }
+        return found.supportedEfforts.map { ComposerOption(id: $0.id, label: $0.label) }
     }
 
     /// The effort to keep when the model changes underneath it, which is the model's own default
@@ -198,8 +158,7 @@ final class ComposerModelCatalog {
             wanted,
             on: kind,
             model: model,
-            codexModels: codexModels,
-            grokModels: grokModels
+            models: models
         )
     }
 }

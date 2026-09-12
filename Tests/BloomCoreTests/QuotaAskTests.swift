@@ -173,9 +173,10 @@ struct QuotaPollScheduleTests {
     }
 
     @Test func declinesUntilTheGapHasPassed() {
-        let last = now - 60
+        let last = now - 10
         #expect(!QuotaPollSchedule.isDue(lastAskedAt: last, at: now, after: QuotaPollSchedule.onDemandFloor))
         #expect(QuotaPollSchedule.isDue(lastAskedAt: now - 300, at: now, after: QuotaPollSchedule.onDemandFloor))
+        #expect(!QuotaPollSchedule.isDue(lastAskedAt: now - 30, at: now, after: QuotaPollSchedule.interval))
     }
 
     /// The menu may ask sooner than the background poll, and never as often as it is opened.
@@ -421,12 +422,19 @@ struct RequestedQuotaPayloadTests {
 
         let quotas = AgentQuotaAdapters.quotas(fromRateLimitEvent: payload, at: now)
 
-        #expect(quotas.count == 1)
-        #expect(quotas[0].provider == .codex)
-        #expect(quotas[0].window.key == "primary")
-        #expect(quotas[0].window.duration == 604_800)
-        #expect(quotas[0].fraction == 0)
-        #expect(quotas[0].resetsAt == Date(timeIntervalSince1970: 1_787_986_128))
+        // The account's own week, and Spark's two windows out of `rateLimitsByLimitId`. The map
+        // repeats the account's own limit under `codex`, and that copy is not read twice.
+        #expect(quotas.count == 3)
+        let own = try #require(quotas.first { $0.window.key == "primary" })
+        #expect(own.provider == .codex)
+        #expect(own.window.duration == 604_800)
+        #expect(own.fraction == 0)
+        #expect(own.resetsAt == Date(timeIntervalSince1970: 1_787_986_128))
+
+        let spark = try #require(quotas.first { $0.window.key == "codex_bengalfox.primary" })
+        #expect(spark.window.duration == 18_000)
+        #expect(spark.window.label == "5 hours (Spark)")
+        #expect(quotas.contains { $0.window.key == "codex_bengalfox.secondary" })
     }
 
     /// The sparse case, and the reason `CodexQuotaAdapter` no longer requires a length. Only

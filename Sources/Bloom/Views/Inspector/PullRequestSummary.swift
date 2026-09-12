@@ -36,6 +36,7 @@ struct PullRequestSummary: View {
     /// and `onMerge`.
     var onChooseMergeMethod: (GitHub.MergeMethod) -> Void
     var onMerge: (GitHub.MergeMethod) -> Void
+    var onMarkReadyForReview: () -> Void
     /// Hands the outstanding work to the workspace's agent to commit and push.
     var onPush: () -> Void
     /// Asks the workspace's agent to bring the base branch in and resolve the conflicts with it.
@@ -265,7 +266,7 @@ struct PullRequestSummary: View {
         // agreed to throw away.
     }
 
-    /// Which of the three the open state's primary slot holds.
+    /// Which action the open state's primary slot holds.
     ///
     /// A switch rather than a chain of conditions, and the reason is the failure this project has
     /// had four times: the remedy is an enum in the core, and a case added to it has to stop
@@ -276,6 +277,7 @@ struct PullRequestSummary: View {
     private var primaryButton: some View {
         switch status.remedy {
         case .merge: mergeControl
+        case .markReadyForReview: markReadyForReviewButton
         case .fixConflicts: fixConflictsButton
         case .commitAndPush, .push: pushButton
         }
@@ -426,6 +428,19 @@ struct PullRequestSummary: View {
 
     private var pushLabel: String {
         status.remedy == .push ? "Push" : "Commit and push"
+    }
+
+    private var markReadyForReviewButton: some View {
+        Button("Mark ready for review", action: onMarkReadyForReview)
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.roundedRectangle(radius: Metrics.corner))
+            .tint(status.tone.fill)
+            .controlSize(.regular)
+            .fixedSize()
+            .help(
+                branchActions.reason
+                    ?? "Ask this workspace's agent to mark #\(pullRequest.number) ready for review on GitHub."
+            )
     }
 
     /// What stands where Merge stands, when merging is the one thing this state cannot do.
