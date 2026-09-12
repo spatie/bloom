@@ -219,6 +219,11 @@ public enum TranscriptFold {
         /// Only compared, never parsed. It is already on the row for the indent the view draws,
         /// so the fold reads it for nothing.
         public var parentToolUseID: String?
+        /// The row says why a turn the CLI started by itself began, which is a background task
+        /// finishing. It stands where a prompt would, so it is a boundary like one and never
+        /// folds: counted into "17 actions" it would hide the one line explaining them. See
+        /// `BackgroundWake`.
+        public var opensTurn: Bool
 
         public init(
             seq: Int,
@@ -228,7 +233,8 @@ public enum TranscriptFold {
             drawsNothing: Bool = false,
             settled: Bool = true,
             toolUseID: String? = nil,
-            parentToolUseID: String? = nil
+            parentToolUseID: String? = nil,
+            opensTurn: Bool = false
         ) {
             self.seq = seq
             self.kind = kind
@@ -238,6 +244,7 @@ public enum TranscriptFold {
             self.settled = settled
             self.toolUseID = toolUseID
             self.parentToolUseID = parentToolUseID
+            self.opensTurn = opensTurn
         }
 
         /// Whether this is a grey activity row that may belong to a compact group. Black prose and
@@ -462,8 +469,9 @@ public enum TranscriptFold {
             markHeader(of: fact)
             // A message and the footer settle everything above them. Neither belongs to an
             // activity group, and a crew row is a message: it is what another agent said to start
-            // this turn, in the place a user row sits when a person started it.
-            if fact.kind == .user || fact.kind == .crew || fact.kind == .result {
+            // this turn, in the place a user row sits when a person started it. A background
+            // task's notification is the same for a turn nobody started.
+            if fact.kind == .user || fact.kind == .crew || fact.kind == .result || fact.opensTurn {
                 close(hasAnswer: false)
                 resume = offset + 1
                 continue

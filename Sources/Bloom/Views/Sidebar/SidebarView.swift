@@ -302,14 +302,12 @@ struct SidebarView: View {
         // a workspace must not start a fold, and a running agent rewrites its diff stat
         // every few seconds, which would otherwise animate the whole column once a second.
         .animation(foldMotion, value: foldedProjects)
-        // Hiding and unhiding, which is a different curve from folding because it is a different
-        // change: a fold hides rows the list still holds, and this inserts or removes them. The
-        // value is the projects that are hidden and the switch that decides whether being hidden
-        // takes a row out of the pane at all, so both halves of the one gesture reach the table
-        // through the same transaction. See `ProjectVisibilityMotion`, which is where the two
-        // halves are told apart.
+        // Observe the displayed project IDs alongside their dimmed state. With hidden projects
+        // filtered out, `hiddenProjects` stays empty even as a project leaves. The preference
+        // changes before `regroup` publishes the rows, so animating that switch misses the row
+        // update too. Both values here come from the groups published with `paneRows`.
         .animation(visibilityMotion, value: hiddenProjects)
-        .animation(visibilityMotion, value: showsHiddenProjects)
+        .animation(visibilityMotion, value: projectIdentities)
         // Membership is published with the rows, after asynchronous creates, archives, deletes
         // and restores reach the model. A set ignores renames, status updates and reordering;
         // pending and stored workspaces share an id, so finishing a create does not reinsert it.
@@ -462,9 +460,12 @@ struct SidebarView: View {
         groups.filter(\.repo.collapsed).map(\.id)
     }
 
-    /// Which projects are hidden, in order. The same discipline `foldedProjects` is under: this
-    /// must change when one is hidden or unhidden and at no other time, or a diff stat landing
-    /// mid animation would restart it.
+    /// Membership only, so renames, reordering and status updates do not trigger visibility motion.
+    private var projectIdentities: Set<RepoID> {
+        Set(groups.map(\.id))
+    }
+
+    /// Hidden projects still on screen, whose headers dim when "Show hidden projects" is on.
     private var hiddenProjects: [RepoID] {
         groups.filter(\.repo.hidden).map(\.id)
     }

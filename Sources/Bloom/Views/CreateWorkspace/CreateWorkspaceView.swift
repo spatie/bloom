@@ -486,6 +486,17 @@ struct CreateWorkspaceView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if let carryOn {
+                HStack(spacing: Metrics.spacingSmall) {
+                    Text(carryOn.sentence)
+                        .font(Typo.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                    Button(carryOn.action) { pick(carryOn.source) }
+                        .linkButton()
+                        .font(Typo.caption)
+                }
+            }
+
             // A rung below the title in the band, which is what makes the band the anchor. Both
             // were `Typo.heading` for one build and the sheet had two things the same size
             // competing to be read first, which is most of what "janky" was: "New workspace" and
@@ -853,6 +864,13 @@ struct CreateWorkspaceView: View {
             branches: checkoutOptions.branches,
             baseBranches: branchOptions
         )
+    }
+
+    /// The other verb, offered when a new branch is about to be cut from a branch that could have
+    /// been opened. See `WorkspaceSourceOffering.carryOn`.
+    private var carryOn: WorkspaceCarryOnOffer? {
+        guard checkout == nil else { return nil }
+        return offering.carryOn(from: baseBranch, holders: checkoutOptions.holders)
     }
 
     /// The same question `AppModel` will ask a moment from now, so the hint and what happens cannot

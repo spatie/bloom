@@ -124,7 +124,8 @@ final class TranscriptModel {
                     || TranscriptRowInk.drawsNothing(kind: row.kind, payload: row.payload),
                 settled: settled,
                 toolUseID: row.kind == .toolUse ? row.refID : nil,
-                parentToolUseID: row.parentToolUseID
+                parentToolUseID: row.parentToolUseID,
+                opensTurn: BackgroundWake.isRow(kind: row.kind, payload: row.payload)
             )
         })
     }
@@ -202,8 +203,17 @@ final class TranscriptModel {
         didSet {
             if let id = workspace?.id { app.noteSubagentsChanged(workspaceID: id) }
             if oldValue.isWorking != subagents.isWorking { app.noteAgentTurnsChanged() }
+            let note = BackgroundWork.note(for: subagents)
+            if note != backgroundWork { backgroundWork = note }
         }
     }
+
+    /// What the agent left running when its turn ended, named, for the last turn's footer.
+    ///
+    /// Stored rather than read off `subagents` by the transcript, because the roster moves on every
+    /// `tool_progress` tick, about once a second per subagent, and the transcript's table reading
+    /// it would rebuild on each one. This moves only when the sentence does. See `BackgroundWork`.
+    private(set) var backgroundWork: String?
 
     var draft = ""
 
@@ -1583,6 +1593,10 @@ final class TranscriptModel {
 
         case .subagent(let signal):
             subagents.apply(signal)
+            // Between turns the runner has just stored this as the line opening the turn the CLI
+            // is about to start, and nothing else would read it in until that turn's first row
+            // arrived. See `BackgroundWake`.
+            if case .reported = signal, !isRunning { await appendLatestMessages() }
 
         case .hook, .unknown:
             break

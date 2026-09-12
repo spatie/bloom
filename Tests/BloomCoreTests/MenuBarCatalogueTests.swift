@@ -17,6 +17,11 @@ struct MenuBarCatalogueTests {
         }
     }
 
+    @Test func fileHistoryShortcuts() {
+        #expect(MenuBarCatalogue[.fileBack].key == MenuShortcut("[", .command))
+        #expect(MenuBarCatalogue[.fileForward].key == MenuShortcut("]", .command))
+    }
+
     @Test("every action has exactly one row, so a lookup cannot trap")
     func everyActionHasARow() {
         for action in MenuBarAction.allCases {

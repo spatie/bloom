@@ -64,6 +64,30 @@ public struct RepoSettingsDraft: Sendable, Hashable {
         browserURL = settings.browserURL ?? ""
     }
 
+    // MARK: - One run script, by identity
+
+    /// A run script's row reads and writes through these rather than through a position in the
+    /// array. `ForEach($model.draft.runScripts)` hands each row a binding that subscripts by index,
+    /// and a row removed from under it (its own minus button, a Revert, the files changing on
+    /// disk) could still be asked for its value once more, at an index that no longer existed.
+    /// That is `Index out of range` inside SwiftUI, and it was two SIGABRT reports in Flare, on
+    /// 1.6.0 and 1.9.1, both stopping in the key path getter for `RepoSettingsModel.draft`. By
+    /// identity, a stale row reads nothing and writes nothing.
+    public func runScript(id: DraftRunScript.ID) -> DraftRunScript? {
+        runScripts.first { $0.id == id }
+    }
+
+    /// Writes a row back in place. A row that has already gone is left gone rather than appended,
+    /// because a late keystroke from a removed row must not bring it back.
+    public mutating func updateRunScript(_ script: DraftRunScript) {
+        guard let index = runScripts.firstIndex(where: { $0.id == script.id }) else { return }
+        runScripts[index] = script
+    }
+
+    public mutating func removeRunScript(id: DraftRunScript.ID) {
+        runScripts.removeAll { $0.id == id }
+    }
+
     /// The patterns, one per line. A blank line is not a pattern, and an empty field means "copy
     /// nothing", which is a different answer from "say nothing" and is written as such.
     public var globs: [String] {

@@ -107,11 +107,11 @@ enum DiffRow: Identifiable {
     /// expanders, bands and the editor from four different places, and a rule about what sits next
     /// to what is only reliable once all of them have had their say. Where a run stops is
     /// `DiffRunGrouping`, in the core, with the tests.
-    static func grouped(_ rows: [DiffRow]) -> [DiffRow] {
+    static func grouped(_ rows: [DiffRow], stoppingAt line: Int? = nil) -> [DiffRow] {
         var result: [DiffRow] = []
         result.reserveCapacity(rows.count)
 
-        for chunk in DiffRunGrouping.chunks(count: rows.count, isLine: { rows[$0].isRunnable }) {
+        for chunk in DiffRunGrouping.chunks(count: rows.count, isLine: { rows[$0].isRunnable && !rows[$0].sourceLines.contains { $0.newNumber == line && line != nil } }) {
             switch chunk {
             case let .single(index):
                 result.append(rows[index])

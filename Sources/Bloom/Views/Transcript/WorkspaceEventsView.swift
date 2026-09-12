@@ -455,14 +455,27 @@ struct WorkspaceEventRow: View {
                         .frame(width: TranscriptLayout.rule)
                 }
 
-            if showsExpandLink {
-                Button(isExpanded ? "Show less" : "Show more of the log") { isExpanded.toggle() }
-                    .linkButton()
-                    .font(Typo.caption)
-                    .help(isExpanded ? "Folds the log back to its last lines" : "Unfolds the log in this row")
-                    // The header's caret already announces this same disclosure to accessibility.
-                    .accessibilityHidden(true)
-                    .padding(.leading, TranscriptLayout.block)
+            // The retry stays beside the failure title. Log disclosure and stopping the current
+            // run remain together below its output, with no empty action row after completion.
+            if showsExpandLink || showsStopSetup {
+                HStack(spacing: Metrics.gutter) {
+                    if showsExpandLink {
+                        Button(isExpanded ? "Show less" : "Show more of the log") { isExpanded.toggle() }
+                            .linkButton()
+                            .font(Typo.caption)
+                            .help(isExpanded ? "Folds the log back to its last lines" : "Unfolds the log in this row")
+                            // The header's caret already announces this same disclosure to accessibility.
+                            .accessibilityHidden(true)
+                    }
+                    if showsStopSetup, let model {
+                        Button("Stop setup") { model.stopSetup() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .font(Typo.caption)
+                            .help("Stops the setup script. Anything waiting for it goes to the agent")
+                    }
+                }
+                .padding(.leading, TranscriptLayout.block)
             }
         }
         .padding(.leading, TranscriptLayout.detailIndent)
@@ -509,6 +522,11 @@ struct WorkspaceEventRow: View {
     /// a wrong answer.
     private var showsRunSetupAgain: Bool {
         event.kind == .setup && event.outcome == .failed && (onRunSetupAgain != nil || model?.canRunSetup == true)
+    }
+
+    /// Whether this row offers to stop the run, which is for as long as the script is going.
+    private var showsStopSetup: Bool {
+        event.kind == .setup && event.isRunning && model?.isRunningSetup == true
     }
 
     /// Whether unfolding this row would actually show anything the reader cannot already see.

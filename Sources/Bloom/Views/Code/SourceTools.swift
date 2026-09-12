@@ -15,10 +15,10 @@ struct SourceTools<Model: WorkspacePaneModel>: View {
         HStack(spacing: InspectorLayout.gap) {
             Button { navigation.move(-1, in: model) } label: { Image(systemName: "chevron.left") }
                 .disabled(navigation.histories[model.workspace.id]?.canGoBack != true)
-                .help("Go back")
+                .help("Go back (Command-[)")
             Button { navigation.move(1, in: model) } label: { Image(systemName: "chevron.right") }
                 .disabled(navigation.histories[model.workspace.id]?.canGoForward != true)
-                .help("Go forward")
+                .help("Go forward (Command-])")
             Button("Find") { state.find() }
                 .help("Find in this file (Command-F)")
             Menu("Navigate") {
@@ -30,6 +30,11 @@ struct SourceTools<Model: WorkspacePaneModel>: View {
                 Button("Go to Definition") {
                     if let local = model.localWorkspaceModel {
                         SourceActions.definition(at: state.selection.location, path: path, model: local, state: state)
+                    }
+                }.disabled(model.localWorkspaceModel == nil)
+                Button("Find Usages") {
+                    if let local = model.localWorkspaceModel {
+                        SourceActions.references(at: state.selection.location, path: path, model: local, state: state)
                     }
                 }.disabled(model.localWorkspaceModel == nil)
                 Divider()

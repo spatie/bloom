@@ -280,13 +280,18 @@ public enum ClaudeCodeUsageAdapter: AgentQuotaAdapter {
     /// against a monthly ceiling and the provider states neither a turnover instant nor a window.
     /// `QuotaBoard` sorts a window of unknown length last and `QuotaPace` declines to pace it, both
     /// of which are the right answers for a row that is money.
+    ///
+    /// **Both amounts arrive in minor units.** The CLI's own names for them are `usedCents` and
+    /// `spendLimitCents`, and they were read as whole pounds until a user on a £20.00 ceiling who
+    /// had spent £18.56 was told "£1,856.00 of £2,000.00". `utilization` agreed either way, which is
+    /// why the fraction looked right and nothing caught it.
     static func extraUsage(in limits: JSONValue, at now: Date) -> [AgentQuota] {
         guard let extra = limits["extra_usage"], extra["is_enabled"]?.boolValue == true else {
             return []
         }
-        let used = extra["used_credits"]?.doubleValue
-        let limit = extra["monthly_limit"]?.doubleValue
-        let currency = extra["currency"]?.stringValue ?? "USD"
+        let currency = (extra["currency"]?.stringValue ?? "USD").uppercased()
+        let used = extra["used_credits"]?.doubleValue.map { majorUnits($0, currency: currency) }
+        let limit = extra["monthly_limit"]?.doubleValue.map { majorUnits($0, currency: currency) }
         let measure: QuotaMeasure
         if let used {
             // The amounts when they are there, because "$17.20 of $50.00" is a thing somebody can
@@ -304,6 +309,15 @@ public enum ClaudeCodeUsageAdapter: AgentQuotaAdapter {
             resetsAt: nil,
             observedAt: now
         )]
+    }
+
+    /// The currencies the CLI prints without dividing, because they have no minor unit. The list
+    /// is the CLI's own rather than `NumberFormatter`'s fraction digits, so Bloom and `/usage`
+    /// cannot disagree about one amount.
+    static let zeroDecimalCurrencies: Set<String> = ["JPY", "KRW", "VND"]
+
+    static func majorUnits(_ minor: Double, currency: String) -> Double {
+        zeroDecimalCurrencies.contains(currency) ? minor : minor / 100
     }
 
     /// ISO 8601, with and without fractional seconds, because a timestamp that gains milliseconds
