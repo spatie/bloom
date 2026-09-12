@@ -88,7 +88,7 @@ struct ChatPaneView: View {
         .overlay(alignment: .topLeading) {
             if let model, let origin = sideOrigin, transcript.session.sideConversationParentID == nil {
                 Button {
-                    WorkspaceTabsStore.shared.reveal(.chat(origin.parentID), in: model)
+                    model.paneStores.tabs.reveal(.chat(origin.parentID), in: model)
                 } label: {
                     Label("From \(origin.title)", systemImage: "arrow.turn.up.left")
                         .font(.caption)

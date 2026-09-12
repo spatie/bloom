@@ -37,8 +37,7 @@ public enum ServerCommandLine {
                 ? try LocalServerIdentity(bundleID: arguments[2]).directory()
                 : arguments[2]
             if arguments[0] == "connect" {
-                let connection = try UnixSocketConnection.connect(to: ServerDaemon.socketPath(directory: directory))
-                await relay(connection)
+                try await ServerTerminalRelay.run(directory: directory)
             } else {
                 var gatewayGroupID: UInt32?
                 if let value = ProcessInfo.processInfo.environment["BLOOM_SERVER_GATEWAY_GID"] {
@@ -47,9 +46,11 @@ public enum ServerCommandLine {
                     }
                     gatewayGroupID = parsed
                 }
-                let daemon = try await ServerDaemon.start(directory: directory, gatewayGroupID: gatewayGroupID)
+                let maintenance = try ServerMaintenanceControl.inherited()
+                let daemon = try await ServerDaemon.start(directory: directory, gatewayGroupID: gatewayGroupID,
+                                                         maintenanceTrial: maintenance?.trialID != nil)
                 complain("Bloom server listening at \(daemon.socketPath)")
-                await waitForTermination()
+                await waitForTermination(maintenance: maintenance, runtime: daemon.runtime)
                 await daemon.shutdown()
             }
             return 0
@@ -79,16 +80,23 @@ public enum ServerCommandLine {
         return report.needsAttention ? 1 : 0
     }
 
-    private static func relay(_ connection: UnixSocketConnection) async {
+    static func relay(_ connection: UnixSocketConnection, initial: Data = Data()) async {
         let input = FileHandle.standardInput
         let buffer = LineBuffer()
+        for line in buffer.take(initial) { connection.writeLine(line) }
         input.readabilityHandler = { handle in
-            let data = handle.availableData
-            if data.isEmpty {
+            do {
+                guard let data = try ProcessPipeReader.available(from: handle) else { return }
+                if data.isEmpty {
+                    input.readabilityHandler = nil
+                    connection.close()
+                } else {
+                    for line in buffer.take(data) { connection.writeLine(line) }
+                }
+            } catch {
                 input.readabilityHandler = nil
+                complain("Could not read server connection input: " + error.localizedDescription)
                 connection.close()
-            } else {
-                for line in buffer.take(data) { connection.writeLine(line) }
             }
         }
         for await line in connection.lines {
@@ -98,7 +106,7 @@ public enum ServerCommandLine {
         connection.close()
     }
 
-    private static func waitForTermination() async {
+    private static func waitForTermination(maintenance: ServerMaintenanceControl? = nil, runtime: ServerRuntime? = nil) async {
         let (stream, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let sources = [SIGTERM, SIGINT].map { number -> any DispatchSourceSignal in
             signal(number, SIG_IGN)
@@ -107,7 +115,15 @@ public enum ServerCommandLine {
             source.resume()
             return source
         }
+        let supervisor = Task {
+            if let maintenance, let runtime {
+                await maintenance.run(runtime: runtime)
+                continuation.yield(())
+            }
+        }
         for await _ in stream { break }
+        maintenance?.close()
+        await supervisor.value
         for source in sources { source.cancel() }
     }
 

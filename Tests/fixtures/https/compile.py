@@ -22,7 +22,7 @@ arguments += [
     str(root / 'Tests/fixtures/https/AuthHarness.swift'),
     str(root / 'Sources/Bloom/System/ServerAuthentication.swift'),
 ]
-for module in ['BloomCore', 'AppAuth', 'AppAuthCore']:
+for module in ['BloomCore', 'BloomClient', 'BloomAuthentication', 'AppAuth', 'AppAuthCore']:
     arguments += [str(path) for path in (build / (module + '.build')).rglob('*.o')]
 arguments += ['-o', str(fixture / 'auth-harness')]
 result = subprocess.run(arguments, capture_output=True, text=True, cwd=root)

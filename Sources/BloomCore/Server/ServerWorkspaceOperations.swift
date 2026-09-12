@@ -91,12 +91,19 @@ enum ServerWorkspaceOperations {
         case .terminal(let name):
             return .terminal(try await terminal(workspace: workspace, name: name, store: store, service: terminals))
         case .newSession(let agent, let model, let effort, let permissionMode):
-            guard agent.canRunWorkspaces, !model.isEmpty else { throw ServerFailure("Choose an available agent and model.") }
-            let existing = try await store.sessions(workspaceID: workspace.id)
-            let title = PaneNaming.nextTitle(base: PaneNaming.chat, taken: existing.map(\.title))
-            let session = try await store.upsert(Session(workspaceID: workspace.id, title: title, model: model, effort: effort, agentKind: agent, permissionMode: permissionMode))
+            let session = try await createSession(workspace: workspace, controls: ComposerControls(model: model, effort: effort, agentKind: agent, permissionMode: permissionMode), store: store)
             return .created(session: session, workspace: workspace, setupSucceeded: nil)
         }
+    }
+
+    static func createSession(workspace: Workspace, controls: ComposerControls, title: String? = nil, store: Store) async throws -> Session {
+        guard controls.agentKind.canRunWorkspaces, !controls.model.isEmpty else { throw ServerFailure("Choose an available agent and model.") }
+        let existing = try await store.sessions(workspaceID: workspace.id)
+        let title = title ?? PaneNaming.nextTitle(base: PaneNaming.chat, taken: existing.map(\.title))
+        let session = try await store.upsert(Session(workspaceID: workspace.id,
+            title: title, model: controls.model, effort: controls.effort, agentKind: controls.agentKind, permissionMode: controls.permissionMode))
+        try await ServerComposer.save(controls, session: session, store: store)
+        return session
     }
 
     private static func terminal(workspace: Workspace, name: String, store: Store, service: ServerTerminalService) async throws -> ServerTerminal {

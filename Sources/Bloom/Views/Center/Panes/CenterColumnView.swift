@@ -14,14 +14,20 @@ struct CenterColumnView<Model: WorkspacePaneModel>: View {
     var body: some View {
         VStack(spacing: 0) {
             SessionTabsView(model: model)
-            WorkspaceSetupStatusView(model: model)
-            CenterPanesView(model: model)
+            GeometryReader { geometry in
+                VStack(spacing: 0) {
+                    WorkspaceSetupStatusView(model: model, paneHeight: geometry.size.height)
+                        .id(model.workspace.id)
+                    CenterPanesView(model: model)
+                }
+            }
         }
+        .id(model.paneStores.identity)
         .background(Palette.windowBackground)
-        .onChange(of: CenterTabStore.shared.tabs(for: model.workspace.id).map(\.id)) {
+        .onChange(of: model.paneStores.center.tabs(for: model.workspace.id).map(\.id)) {
             model.remoteServer?.prepareTabs(for: model.workspace)
         }
-        .task(id: model.workspace.id) {
+        .task(id: model.paneStateID) {
             model.remoteServer?.prepareTabs(for: model.workspace)
             openStartingPane()
             await model.onAppear()
@@ -33,7 +39,7 @@ struct CenterColumnView<Model: WorkspacePaneModel>: View {
             // of every terminal or browser tab somebody had split, on the first open after each
             // relaunch. `TabReconciliation` refuses an unread list as well, because an ordering
             // that is only correct by inspection is one edit away from being incorrect.
-            WorkspaceTabsStore.shared.reconcile(in: model)
+            model.paneStores.tabs.reconcile(in: model)
         }
     }
 
@@ -54,16 +60,16 @@ struct CenterColumnView<Model: WorkspacePaneModel>: View {
         let workspaceID = model.workspace.id
         // Idempotent, and first: adding a tab to a workspace whose stored list has not been read
         // back yet would replace that list rather than extend it.
-        CenterTabStore.shared.load(workspaceID: workspaceID)
-        guard let opening = WorkspaceStartMode.consumeOpeningTab(workspaceID: workspaceID) else {
+        model.paneStores.center.load(workspaceID: workspaceID)
+        guard let opening = WorkspaceStartMode.consumeOpeningTab(workspaceID: workspaceID, defaults: model.paneStores.defaults) else {
             return
         }
         NewPane.open(opening.pane, in: model) { content in
             if opening == .browser, case .tool(let id) = content,
-               let tab = CenterTabStore.shared.tabs(for: workspaceID).first(where: { $0.id == id }) {
-                CenterTabStore.shared.awaitPreviewAfterSetup(for: tab)
+               let tab = model.paneStores.center.tabs(for: workspaceID).first(where: { $0.id == id }) {
+                model.paneStores.center.awaitPreviewAfterSetup(for: tab)
             }
-            WorkspaceTabsStore.shared.select(content, in: model)
+            model.paneStores.tabs.select(content, in: model)
         }
     }
 }

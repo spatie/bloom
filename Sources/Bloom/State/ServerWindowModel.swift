@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import BloomCore
+import BloomClient
 
 /// Remote state is kept apart from AppModel so a server path can never reach a local file action.
 /// Each connection generation discards replies from an earlier server or window selection.
@@ -8,6 +9,16 @@ import BloomCore
 @Observable
 final class ServerWindowModel {
     enum ConnectionMode { case remote, local, existingLocal }
+    let savedServers: ServerConnectionShelf
+    @ObservationIgnored private var paneStoresByConnection: [String: PaneStores] = [:]
+    @ObservationIgnored private let unconnectedPaneID = UUID().uuidString
+    var paneStores: PaneStores {
+        let key = endpoint.map(PaneStateNamespace.connectionID) ?? unconnectedPaneID
+        if let existing = paneStoresByConnection[key] { return existing }
+        let stores = PaneStores.remote(connectionID: key)
+        paneStoresByConnection[key] = stores
+        return stores
+    }
     var connectionMode = ConnectionMode.remote
     var usesHTTPS = false
     var httpsAddress = ""
@@ -46,10 +57,13 @@ final class ServerWindowModel {
         let name = String(label.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
         serverLabels[labelKey] = name.isEmpty ? nil : name
         preferences.set(serverLabels, forKey: "server.labels")
+        rememberConnection()
     }
+    @ObservationIgnored var onCatalogueChanged: (() -> Void)?
     var catalogue: ServerCatalogue? {
         didSet {
             for workspace in catalogue?.workspaces ?? [] { workspaceModels[workspace.id]?.workspace = workspace }
+            onCatalogueChanged?()
         }
     }
     var selectedWorkspaceID: WorkspaceID?
@@ -61,8 +75,8 @@ final class ServerWindowModel {
                 selectedWorkspaceID = workspaceID
                 activeSessions[workspaceID] = id
             }
-            if let oldValue { drafts[oldValue.rawValue] = draft }
-            draft = selectedSessionID.flatMap { drafts[$0.rawValue] } ?? ""
+            if let oldValue { persistRemoteDraft(draft, sessionID: oldValue) }
+            draft = selectedSessionID.map { remoteDraft(sessionID: $0) } ?? ""
             messages = []
             runScripts = []
             questions = []
@@ -81,23 +95,38 @@ final class ServerWindowModel {
     var streamingText = ""
     var draft = "" {
         didSet {
-            if let selectedSessionID { drafts[selectedSessionID.rawValue] = draft }
-            preferences.set(drafts, forKey: "server.drafts")
+            guard oldValue != draft, let selectedSessionID else { return }
+            persistRemoteDraft(draft, sessionID: selectedSessionID)
         }
     }
-    private var drafts: [String: String] = [:]
+    @ObservationIgnored private let draftStore: ConversationDraftStore
+    var connectionRecovery = RemoteConnectionRecovery()
+    private var nextConnectionRetry: Date?
+    private(set) var pendingSendRevision = 0
+    private var pendingSendFailures: [UUID: String] = [:]
+    private(set) var sendingSessionID: SessionID?
     var shouldReconnect = true
-    var isEditingConnection = false
+    private var connectionEditors: Set<UUID> = []
+    var isEditingConnection: Bool { !connectionEditors.isEmpty }
+    func setConnectionEditing(_ editing: Bool, id: UUID) {
+        if editing { connectionEditors.insert(id) } else { connectionEditors.remove(id) }
+    }
     var isUploading = false
     var runScripts: [RunScript] = []
     private var terminalPanes: [String: [ServerTerminalPane]] = [:]
     private var forwards: [Int: ServerPortForward] = [:]
     private var previewAddresses: [BrowserPreviewAddress] = []
     var isBusy = false
+    private(set) var isDisconnecting = false
+    var isRemovingServer = false
     var isConnecting = false
     var isPerformingCommand = false
     var error: String?
     var connectionGeneration = 0
+    private(set) var agentAuthenticationRevision = 0
+
+    /// Account sign-in/import changes CLI state without changing the connected server.
+    func invalidateAgentAuthentication() { agentAuthenticationRevision &+= 1 }
     var showsArchivedWorkspaces = false
     var sidebarCollapsed: Set<RepoID> = []
     var sidebarCollapseLoaded = false
@@ -129,7 +158,7 @@ final class ServerWindowModel {
         if let existing = conversationModels[session.id] { return existing }
         let connection = RemoteSessionConnection(server: self, endpoint: endpoint, session: session, workspace: workspace)
         let model = TranscriptModel(session: session, workspace: workspace, app: app, remote: connection)
-        model.draft = drafts[session.id.rawValue] ?? ""
+        model.draft = remoteDraft(sessionID: session.id, endpoint: endpoint)
         conversationModels[session.id] = model
         return model
     }
@@ -145,6 +174,9 @@ final class ServerWindowModel {
         catalogue = value
     }
 
+    func uiBridgeService() -> RemoteWorkspaceService? { client.map { RemoteWorkspaceService(client: $0) } }
+    func maintenanceService() -> RemoteWorkspaceService? { client.map { RemoteWorkspaceService(client: $0) } }
+
     func existingWorkspaceModel(_ id: WorkspaceID) -> RemoteWorkspaceFileListing? { workspaceModels[id] }
     func existingConversation(_ id: SessionID) -> TranscriptModel? { conversationModels[id] }
     func forgetConversation(_ id: SessionID) { conversationModels[id] = nil }
@@ -156,7 +188,7 @@ final class ServerWindowModel {
     }
     func activateSession(_ id: SessionID?, in workspaceID: WorkspaceID) {
         activeSessions[workspaceID] = id
-        preferences.set(Dictionary(uniqueKeysWithValues: activeSessions.map { ($0.key.rawValue, $0.value.rawValue) }), forKey: "server.activeSessions")
+        paneStores.defaults.set(Dictionary(uniqueKeysWithValues: activeSessions.map { ($0.key.rawValue, $0.value.rawValue) }), forKey: "server.activeSessions")
         if selectedWorkspaceID == workspaceID { selectedSessionID = id }
     }
     func selectWorkspace(_ id: WorkspaceID) {
@@ -164,16 +196,40 @@ final class ServerWindowModel {
         selectedSessionID = activeSession(in: id)
     }
 
-    func saveRemoteDraft(_ text: String, sessionID: SessionID) {
-        drafts[sessionID.rawValue] = text
-        preferences.set(drafts, forKey: "server.drafts")
-        if selectedSessionID == sessionID { draft = text }
+    private func remoteDraft(sessionID: SessionID, endpoint: ServerEndpoint? = nil) -> String {
+        guard let endpoint = endpoint ?? self.endpoint else { return "" }
+        do { return try draftStore.draft(scope: .init(connectionID: PaneStateNamespace.connectionID(endpoint)), sessionID: sessionID).text } catch {
+            self.error = "Saved conversation drafts could not be read: " + error.localizedDescription
+            return ""
+        }
     }
 
-    func read(_ operation: ServerOperation) async throws -> ServerResult {
-        guard let client else { throw ServerFailure("Connect to the server first.") }
+    private func persistRemoteDraft(_ text: String, sessionID: SessionID, endpoint: ServerEndpoint? = nil) {
+        guard let endpoint = endpoint ?? self.endpoint else { return }
+        do { try draftStore.save(text: text, scope: .init(connectionID: PaneStateNamespace.connectionID(endpoint)), sessionID: sessionID) } catch {
+            self.error = "This conversation draft could not be saved: " + error.localizedDescription
+        }
+    }
+
+    func saveRemoteDraft(_ text: String, sessionID: SessionID, endpoint: ServerEndpoint? = nil) {
+        guard let origin = endpoint ?? self.endpoint else { return }
+        persistRemoteDraft(text, sessionID: sessionID, endpoint: origin)
+        if self.endpoint == origin, selectedSessionID == sessionID, draft != text { draft = text }
+    }
+
+    func preserveUploadedAttachments(_ paths: [String], sessionID: SessionID, endpoint: ServerEndpoint) {
+        guard !paths.isEmpty else { return }
+        let conversation = self.endpoint == endpoint ? conversationModels[sessionID] : nil
+        let current = conversation?.draft ?? remoteDraft(sessionID: sessionID, endpoint: endpoint)
+        let written = AttachmentDraft.inserting(paths, into: current, at: (current as NSString).length).text
+        saveRemoteDraft(written, sessionID: sessionID, endpoint: endpoint)
+        conversation?.draft = written
+    }
+
+    func read(_ operation: ServerOperation, timeout: Duration = .seconds(660)) async throws -> ServerResult {
+        guard let client, !isRemovingServer else { throw ServerFailure("Connect to the server first.") }
         let generation = connectionGeneration
-        let reply = try await client.request(ServerRequest(operation))
+        let reply = try await client.request(ServerRequest(operation), timeout: timeout)
         guard generation == connectionGeneration else { throw ServerFailure("The server connection changed. Try again.") }
         return reply.result
     }
@@ -203,18 +259,14 @@ final class ServerWindowModel {
 
     init(preferences: UserDefaults = .standard, bundle: Bundle = .main) {
         self.preferences = preferences
+        draftStore = ConversationDraftStore(preferences: preferences, key: "server.scopedDrafts")
+        savedServers = ServerConnectionShelf(preferences: preferences)
         serverLabels = preferences.dictionary(forKey: "server.labels") as? [String: String] ?? [:]
-        if let saved = preferences.dictionary(forKey: "server.activeSessions") as? [String: String] {
-            activeSessions = Dictionary(uniqueKeysWithValues: saved.map { (WorkspaceID($0.key), SessionID($0.value)) })
-        }
-        if let data = preferences.data(forKey: "server.terminalPanes"),
-           let saved = try? JSONDecoder().decode([String: [ServerTerminalPane]].self, from: data) { terminalPanes = saved }
         let seed = bundle.object(forInfoDictionaryKey: "BloomRemoteConnection") as? [String: String] ?? [:]
         let saved = preferences.dictionary(forKey: "server.connection") as? [String: String] ?? [:]
-        let values = seed.merging(saved) { _, saved in saved }
+        let values = savedServers.connectionValues(seed: seed)
         usesHTTPS = values["usesHTTPS"] == "true"
         httpsAddress = values["httpsAddress"] ?? ""
-        drafts = preferences.dictionary(forKey: "server.drafts") as? [String: String] ?? [:]
         host = values["host"] ?? ""
         executable = values["executable"] ?? ""
         identityFile = values["identityFile"] ?? ""
@@ -227,6 +279,16 @@ final class ServerWindowModel {
         agentModel = values["model"] ?? (agent == .codex ? "" : AppDefaults.fallbackModel)
         effort = values["effort"] ?? AppDefaults.fallbackEffort
         permissionMode = (values["permissionMode"].flatMap(PermissionMode.init(rawValue:)) ?? .plan).nearest(on: agent)
+        // Legacy entries have no per-entry origin. Attribute them only to the original saved
+        // connection, never a newly selected profile or a bundle seed.
+        if let original = ServerConnectionProfile(values: saved),
+           let legacy = preferences.dictionary(forKey: "server.drafts") as? [String: String] {
+            do {
+                try draftStore.importLegacy(legacy, scope: .init(connectionID: original.id))
+                preferences.removeObject(forKey: "server.drafts")
+            } catch { self.error = "Existing conversation drafts could not be migrated: " + error.localizedDescription }
+        }
+        rememberConnection()
     }
 
     var destinationLabel: String { connectionMode == .remote ? "Remote server" : "This Mac" }
@@ -243,6 +305,8 @@ final class ServerWindowModel {
     }
 
     private func saveConnection() {
+        guard !isRemovingServer else { return }
+        rememberConnection()
         preferences.set([
             "usesHTTPS": usesHTTPS ? "true" : "false", "httpsAddress": httpsAddress,
             "host": host, "executable": executable, "directory": remoteDirectory, "identityFile": identityFile, "knownHostsFile": knownHostsFile,
@@ -316,8 +380,8 @@ final class ServerWindowModel {
     }
 
     private var terminalNames: [String: String] {
-        get { preferences.dictionary(forKey: "server.tabTerminalNames") as? [String: String] ?? [:] }
-        set { preferences.set(newValue, forKey: "server.tabTerminalNames") }
+        get { paneStores.defaults.dictionary(forKey: "server.tabTerminalNames") as? [String: String] ?? [:] }
+        set { paneStores.defaults.set(newValue, forKey: "server.tabTerminalNames") }
     }
 
     func terminalName(for tab: CenterTab) -> String { terminalNames[tab.id] ?? tab.id }
@@ -325,22 +389,15 @@ final class ServerWindowModel {
     func prepareCreatedWorkspace(_ workspace: Workspace, opensWith mode: WorkspaceStartMode) {
         // Fresh workspaces have no legacy terminal to migrate. The shared pane system opens
         // exactly the tab requested by the creation window.
-        preferences.set(true, forKey: "server.sharedTabs." + workspace.id.rawValue)
-        WorkspaceStartMode.record(mode, workspaceID: workspace.id)
+        paneStores.defaults.set(true, forKey: "server.sharedTabs." + workspace.id.rawValue)
+        WorkspaceStartMode.record(mode, workspaceID: workspace.id, defaults: paneStores.defaults)
     }
 
     func prepareTabs(for workspace: Workspace) {
-        let tabs = CenterTabStore.shared
+        let tabs = paneStores.center
         tabs.load(workspaceID: workspace.id)
-        let key = "server.sharedTabs." + workspace.id.rawValue
-        if !preferences.bool(forKey: key) {
-            let legacy = [ServerTerminalPane(id: "main", title: "Terminal")] + (terminalPanes[workspace.id.rawValue] ?? [])
-            for pane in legacy {
-                let tab = tabs.add(kind: .terminal, workspaceID: workspace.id, title: pane.title)
-                terminalNames[tab.id] = pane.id.rawValue
-            }
-            preferences.set(true, forKey: key)
-        }
+        // Unqualified remote records may belong to a copied local database or another server.
+        // Start from this connection's own tab list without importing ambiguous legacy terminals.
         for tab in tabs.tabs(for: workspace.id) where tab.kind == .terminal {
             let capturedEndpoint = endpoint
             let name = terminalName(for: tab)
@@ -421,7 +478,7 @@ final class ServerWindowModel {
     }
 
     func reloadFile(_ buffer: ServerFileBuffer) async {
-        guard let client, lastEndpoint == buffer.endpoint, !buffer.isSaving else { return }
+        guard let client, lastEndpoint == buffer.endpoint, !buffer.isSaving, !isRemovingServer else { return }
         buffer.isSaving = true
         defer { buffer.isSaving = false }
         let original = buffer.text
@@ -432,7 +489,7 @@ final class ServerWindowModel {
     }
 
     func saveFile(_ buffer: ServerFileBuffer) async {
-        guard let client, lastEndpoint == buffer.endpoint, !buffer.isSaving else { return }
+        guard let client, lastEndpoint == buffer.endpoint, !buffer.isSaving, !isRemovingServer else { return }
         buffer.isSaving = true
         defer { buffer.isSaving = false }
         let text = buffer.text
@@ -443,8 +500,13 @@ final class ServerWindowModel {
         } catch { buffer.error = error.localizedDescription }
     }
 
+    func liveTerminal(named name: String, workspaceID: WorkspaceID) -> BloomTerminalView? {
+        guard let endpoint = lastEndpoint else { return nil }
+        return terminals[String(reflecting: endpoint) + workspaceID.rawValue + "/" + name]
+    }
+
     func terminal(named name: String = "main") async throws -> BloomTerminalView {
-        guard let workspace = selectedWorkspace, let client, let endpoint = lastEndpoint else {
+        guard let workspace = selectedWorkspace, let client, let endpoint = lastEndpoint, !isRemovingServer else {
             throw ServerFailure("Connect to this workspace's server first.")
         }
         let key = String(reflecting: endpoint) + workspace.id.rawValue + "/" + name
@@ -456,7 +518,9 @@ final class ServerWindowModel {
             terminals[key] = view
             return view
         }
+        let generation = connectionGeneration
         let reply = try await client.request(ServerRequest(.workspace(workspaceID: workspace.id, action: .terminal(name: name))))
+        guard generation == connectionGeneration, !isRemovingServer, !Task.isCancelled else { throw CancellationError() }
         guard case .terminal(let terminal) = reply.result else { throw ServerFailure("The server did not return a terminal.") }
         let launch = try endpoint.terminalLaunch(terminal)
         var environment = launch.environment
@@ -471,17 +535,23 @@ final class ServerWindowModel {
         return view
     }
 
-    func connect() async {
-        guard !isConnecting else { return }
-        shouldReconnect = true
-        saveConnection()
-        await disconnect()
-        let generation = connectionGeneration
+    func connect(automatically: Bool = false) async {
+        guard !isConnecting, !isRemovingServer, !isDisconnecting, !Task.isCancelled else { return }
         isConnecting = true
         defer { isConnecting = false }
+        shouldReconnect = true
+        saveConnection()
+        let generation = connectionGeneration + 1
+        await disconnectTransport()
+        guard generation == connectionGeneration else { return }
+        guard shouldReconnect, !Task.isCancelled else {
+            shouldReconnect = automatically && shouldReconnect
+            connectionRecovery.cancelAttempt(automaticallyRetry: shouldReconnect)
+            return
+        }
+        connectionRecovery.beginAttempt()
         var stage = usesHTTPS ? "Connecting over HTTPS" : "Connecting over SSH"
         needsBackgroundApproval = false
-        error = nil
         do {
             let endpoint: ServerEndpoint
             switch connectionMode {
@@ -510,37 +580,60 @@ final class ServerWindowModel {
                     forwards.removeAll()
                     previewAddresses.removeAll()
                 }
+                guard generation == connectionGeneration else { return }
+                guard shouldReconnect, !Task.isCancelled else { throw CancellationError() }
                 lastEndpoint = endpoint
+                let saved = paneStores.defaults.dictionary(forKey: "server.activeSessions") as? [String: String] ?? [:]
+                activeSessions = Dictionary(uniqueKeysWithValues: saved.map { (WorkspaceID($0.key), SessionID($0.value)) })
+                terminalPanes = paneStores.defaults.data(forKey: "server.terminalPanes")
+                    .flatMap { try? JSONDecoder().decode([String: [ServerTerminalPane]].self, from: $0) } ?? [:]
             }
             var accessToken: ServerHTTPTransport.AccessToken?
             if case .https(let address) = endpoint {
                 accessToken = { [authentication] in try await authentication.token(for: address) }
             }
-            let connected = try await ServerClient.connect(to: endpoint, accessToken: accessToken)
-            guard generation == connectionGeneration, !Task.isCancelled else {
-                await connected.disconnect()
-                return
+            let token = accessToken
+            let connected = try await RemoteReadDeadline.run {
+                try await ServerClient.connect(to: endpoint, accessToken: token)
             }
-            client = connected
-            stage = "Reading server identity"
-            let reply = try await connected.request(ServerRequest(.hello), timeout: .seconds(15))
-            guard generation == connectionGeneration else { return }
-            if case .hello(let name) = reply.result { serverName = name }
-            stage = "Loading workspaces"
-            let listed = try await connected.request(ServerRequest(.catalogue), timeout: .seconds(15))
-            guard generation == connectionGeneration else { return }
-            if case .catalogue(let value) = listed.result { catalogue = value }
-            connectionGeneration += 1
+            do {
+                guard generation == connectionGeneration, !Task.isCancelled else { throw CancellationError() }
+                stage = "Reading server identity"
+                let reply = try await connected.request(ServerRequest(.hello), timeout: .seconds(15))
+                guard case .hello(let name) = reply.result else { throw ServerFailure("The endpoint did not identify itself as a Bloom Server.") }
+                guard generation == connectionGeneration, !Task.isCancelled else { throw CancellationError() }
+                stage = "Loading workspaces"
+                let listed = try await connected.request(ServerRequest(.catalogue), timeout: .seconds(15))
+                guard case .catalogue(let value) = listed.result else { throw ServerFailure("The server did not return its workspace catalogue.") }
+                guard generation == connectionGeneration, !Task.isCancelled else { throw CancellationError() }
+                // A transport alone is not a usable connection. Publish identity and catalogue
+                // together, so polling and workspace controls cannot run halfway through setup.
+                client = connected
+                serverName = name
+                catalogue = value
+                connectionRecovery.connected()
+                error = nil
+                connectionGeneration += 1
+            } catch {
+                await connected.disconnect()
+                throw error
+            }
         } catch {
-            if generation == connectionGeneration {
+            guard generation == connectionGeneration else { return }
+            if error is CancellationError || Task.isCancelled {
+                shouldReconnect = automatically && shouldReconnect
+                connectionRecovery.cancelAttempt(automaticallyRetry: shouldReconnect)
+                await disconnectTransport()
+            } else {
                 needsBackgroundApproval = error is LocalServerServiceError
-                self.error = stage + ": " + error.localizedDescription
-                await disconnect()
+                await connectionFailed(error, generation: generation, stage: stage)
             }
         }
     }
 
-    func disconnect() async {
+    func disconnect() async { await shutdown() }
+
+    private func disconnectTransport() async {
         connectionGeneration += 1
         let previous = client
         client = nil
@@ -549,9 +642,14 @@ final class ServerWindowModel {
 
     /// Tear down only Mac-side transports. The server's agents, shells and queued prompts stay.
     func shutdown() async {
-        for model in conversationModels.values { await model.saveDraft() }
+        guard !isDisconnecting else { return }
+        isDisconnecting = true
         shouldReconnect = false
-        await disconnect()
+        connectionGeneration += 1
+        connectionRecovery.disconnect()
+        defer { isDisconnecting = false }
+        for model in conversationModels.values { await model.saveDraft() }
+        await disconnectTransport()
         for terminal in terminals.values { terminal.shutdown() }
         terminals.removeAll()
         let tunnels = Array(forwards.values)
@@ -559,6 +657,58 @@ final class ServerWindowModel {
         await withTaskGroup(of: Void.self) { group in
             for tunnel in tunnels { group.addTask { await tunnel.close() } }
         }
+    }
+
+    var canRemoveServer: Bool {
+        connectionMode == .remote && connectionProfile != nil && !isRemovingServer && !isConnecting && !isDisconnecting
+            && !isSigningIn && !isPerformingCommand && !isUploading && !isEditingConnection
+            && !fileBuffers.values.contains(where: \.isSaving) && !editingSessions.values.contains(where: { !$0.saving.isEmpty })
+    }
+
+    /// Removal forgets this client's connection only. In-memory editor drafts are retained by
+    /// endpoint, just like persisted conversation drafts, in case the user adds the server again.
+    @discardableResult
+    func removeServer(_ profile: ServerConnectionProfile, clearSelection: () -> Void) async -> Bool {
+        guard canRemoveServer, connectionProfile?.id == profile.id else { return false }
+        isRemovingServer = true
+        isPerformingCommand = true
+        shouldReconnect = false
+        connectionGeneration += 1
+        defer { isRemovingServer = false; isPerformingCommand = false }
+        clearSelection()
+        await shutdown()
+        guard savedServers.remove(profile) else { error = savedServers.failure; return false }
+        // Preserve the origin until the final conversation draft has been saved.
+        selectedSessionID = nil
+        selectedWorkspaceID = nil
+        catalogue = nil
+        messages = []; questions = []; queuedPrompts = []; runScripts = []
+        queueError = nil; streamingText = ""
+        review.reset()
+        conversationModels.removeAll()
+        workspaceModels.removeAll()
+        messageIdentity.reset()
+        activeSessions = [:]
+        terminalPanes = [:]
+        previewAddresses = []
+        archiveConfirmations = [:]
+        archivingWorkspaceIDs = []
+        sidebarCollapsed = []
+        sidebarCollapseLoaded = false
+        uncertainRequest = nil
+        transcriptSessionID = nil
+        permissionDecisions = [:]
+        serverName = ""
+        host = ""; executable = ""; remoteDirectory = ""; identityFile = ""; knownHostsFile = ""
+        usesHTTPS = false; httpsAddress = ""; remoteRepositoryPath = ""
+        serverLabels = preferences.dictionary(forKey: "server.labels") as? [String: String] ?? [:]
+        lastEndpoint = nil
+        isBusy = false
+        showsArchivedWorkspaces = false
+        showsNewWorkspace = false
+        needsBackgroundApproval = false
+        error = nil
+        return true
     }
 
     func stopLocalServer() async {
@@ -574,13 +724,90 @@ final class ServerWindowModel {
 
     /// Keep the last readable snapshot while SSH reconnects. Agent ownership never follows the UI.
     func maintainConnection() async {
-        var delay = 1
         while !Task.isCancelled {
-            if shouldReconnect, !isEditingConnection, !isConnected, !isConnecting, isConfigured {
-                await connect()
-                delay = isConnected ? 1 : min(30, delay * 2)
-            } else { delay = 1 }
-            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            if shouldReconnect, !isEditingConnection, !isConnected, !isConnecting, isConfigured,
+               nextConnectionRetry.map({ $0 <= Date() }) ?? true {
+                await connect(automatically: true)
+            }
+            do { try await Task.sleep(for: .seconds(1)) } catch { return }
+        }
+    }
+
+    private func connectionFailed(_ failure: Error, generation: Int, stage: String? = nil) async {
+        guard generation == connectionGeneration, !isRemovingServer else { return }
+        let retries = !RemoteConnectionRecovery.requiresUserAction(failure.localizedDescription)
+        let message = stage.map { $0 + ": " + failure.localizedDescription } ?? failure.localizedDescription
+        if stage != nil { error = message }
+        shouldReconnect = retries
+        connectionRecovery.failed(message: message, automaticallyRetry: retries)
+        nextConnectionRetry = Date().addingTimeInterval(Double(connectionRecovery.retryDelaySeconds))
+        await disconnectTransport()
+    }
+
+    func pendingSend(sessionID: SessionID) -> RemoteCommand? {
+        _ = pendingSendRevision
+        guard let endpoint else { return nil }
+        return try? draftStore.draft(scope: .init(connectionID: PaneStateNamespace.connectionID(endpoint)), sessionID: sessionID).submission
+    }
+
+    var selectedPendingSend: RemoteCommand? { selectedSessionID.flatMap { pendingSend(sessionID: $0) } }
+
+    var selectedPendingSendFailure: String? { selectedPendingSend.flatMap { pendingSendFailures[$0.id] } }
+
+    func keepPendingSendAsDraft(_ command: RemoteCommand) {
+        guard let endpoint, let sessionID = selectedSessionID, sendingSessionID != sessionID,
+              pendingSend(sessionID: sessionID) == command else { return }
+        let scope = ConversationDraftStore.Scope(connectionID: PaneStateNamespace.connectionID(endpoint))
+        do {
+            try draftStore.save(text: conversationModels[sessionID]?.draft ?? draft, scope: scope, sessionID: sessionID)
+            try draftStore.keepAsDraft(command, scope: scope, sessionID: sessionID)
+            let restored = try draftStore.draft(scope: scope, sessionID: sessionID).text
+            draft = restored
+            conversationModels[sessionID]?.draft = restored
+            pendingSendFailures.removeValue(forKey: command.id)
+            pendingSendRevision += 1
+        } catch {
+            pendingSendFailures[command.id] = error.localizedDescription
+            self.error = error.localizedDescription
+        }
+    }
+
+    func retryPendingSend() async {
+        guard let id = selectedSessionID, let command = pendingSend(sessionID: id),
+              let text = command.operation["send"]?["text"]?.stringValue else { return }
+        if let conversation = conversationModels[id] { await conversation.submit(text) } else {
+            _ = await perform(.send(sessionID: id, text: text))
+        }
+    }
+
+    /// Reuse the same durable draft store as iOS. Unrelated workspace commands cannot replace
+    /// an unconfirmed send, and reconnect never submits one without the user's explicit retry.
+    private func performSend(client: ServerClient, sessionID: SessionID, text: String) async -> ServerResult? {
+        guard let endpoint else { return nil }
+        let scope = ConversationDraftStore.Scope(connectionID: PaneStateNamespace.connectionID(endpoint))
+        let command: RemoteCommand
+        do { command = try draftStore.prepare(scope: scope, sessionID: sessionID, text: text) } catch {
+            self.error = error.localizedDescription
+            return nil
+        }
+        pendingSendFailures.removeValue(forKey: command.id)
+        pendingSendRevision += 1
+        sendingSessionID = sessionID
+        defer { sendingSessionID = nil; pendingSendRevision += 1 }
+        let generation = connectionGeneration
+        do {
+            let reply = try await RemoteReadDeadline.run(timeout: .seconds(30)) {
+                try await client.request(ServerRequest(.send(sessionID: sessionID, text: text), id: command.id), timeout: .seconds(30))
+            }
+            guard case .accepted = reply.result else { throw ServerFailure("The server did not confirm this message. Retry uses its original request ID.") }
+            try draftStore.acknowledge(command, scope: scope, sessionID: sessionID)
+            return reply.result
+        } catch {
+            pendingSendFailures[command.id] = error.localizedDescription
+            if error is ServerRefusal { self.error = error.localizedDescription } else if !Task.isCancelled {
+                await connectionFailed(error, generation: generation)
+            }
+            return nil
         }
     }
 
@@ -611,17 +838,17 @@ final class ServerWindowModel {
         if terminalPanes[workspaceID.rawValue]?.contains(where: { $0.id == pane.id }) != true {
             terminalPanes[workspaceID.rawValue, default: []].append(pane)
         }
-        if let data = try? JSONEncoder().encode(terminalPanes) { preferences.set(data, forKey: "server.terminalPanes") }
+        if let data = try? JSONEncoder().encode(terminalPanes) { paneStores.defaults.set(data, forKey: "server.terminalPanes") }
         if let workspace = catalogue?.workspaces.first(where: { $0.id == workspaceID }) {
-            let tab = CenterTabStore.shared.add(kind: .terminal, workspaceID: workspaceID, title: pane.title)
+            let tab = paneStores.center.add(kind: .terminal, workspaceID: workspaceID, title: pane.title)
             terminalNames[tab.id] = pane.id.rawValue
             prepareTabs(for: workspace)
-            if let model = workspaceModels[workspaceID] { WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model) }
+            if let model = workspaceModels[workspaceID] { paneStores.tabs.reveal(.tool(tab.id), in: model) }
         }
     }
 
     func upload(_ sources: [AttachmentSource]) async {
-        guard let workspaceID = selectedWorkspace?.id, let client, !isUploading else { return }
+        guard let workspaceID = selectedWorkspace?.id, let client, let attachmentEndpoint = endpoint, !isUploading else { return }
         let sessionID = selectedSessionID
         isUploading = true
         defer { isUploading = false }
@@ -642,7 +869,10 @@ final class ServerWindowModel {
                     action: .uploadFile(name: source.filename, data: data))))
                 if case .text(let path) = reply.result {
                     let addition = " `" + path + "` "
-                    if selectedSessionID == sessionID { draft += addition } else if let sessionID { drafts[sessionID.rawValue, default: ""] += addition }
+                    if let sessionID {
+                        let current = remoteDraft(sessionID: sessionID, endpoint: attachmentEndpoint)
+                        saveRemoteDraft(current + addition, sessionID: sessionID, endpoint: attachmentEndpoint)
+                    }
                 }
             }
         } catch { self.error = error.localizedDescription }
@@ -668,15 +898,15 @@ final class ServerWindowModel {
                 try await Task.sleep(for: .seconds(1))
             } catch {
                 guard !Task.isCancelled, generation == connectionGeneration else { return }
-                self.error = error.localizedDescription
                 // A refused operation is a valid reply, so the connection is still usable.
                 // Workspace lifecycle changes can briefly refuse reads on older servers.
-                if error is ServerRefusal {
+                if error is ServerRefusal, !RemoteConnectionRecovery.requiresUserAction(error.localizedDescription) {
+                    self.error = error.localizedDescription
                     do { try await Task.sleep(for: .seconds(1)) } catch { return }
                     tick += 1
                     continue
                 }
-                await disconnect()
+                await connectionFailed(error, generation: generation)
                 return
             }
         }
@@ -748,9 +978,8 @@ final class ServerWindowModel {
             if selectedSessionID == id {
                 if draft == text { draft = "" }
                 isBusy = true
-            } else if drafts[id.rawValue] == text {
-                drafts[id.rawValue] = ""
-                preferences.set(drafts, forKey: "server.drafts")
+            } else if remoteDraft(sessionID: id) == text {
+                saveRemoteDraft("", sessionID: id)
             }
         }
     }
@@ -772,17 +1001,20 @@ final class ServerWindowModel {
         }
     }
 
-    func perform(_ operation: ServerOperation) async -> ServerResult? {
+    func perform(_ operation: ServerOperation, timeout: Duration = .seconds(660)) async -> ServerResult? {
         guard let client, !isPerformingCommand else { return nil }
         isPerformingCommand = true
         defer { isPerformingCommand = false }
+        if case .send(let sessionID, let text, retryDeliveryID: nil) = operation {
+            return await performSend(client: client, sessionID: sessionID, text: text)
+        }
         let generation = connectionGeneration
         let request: ServerRequest
         if let uncertainRequest, uncertainRequest.operation == operation { request = uncertainRequest } else { request = ServerRequest(operation) }
         uncertainRequest = request
         error = nil
         do {
-            let reply = try await client.request(request)
+            let reply = try await client.request(request, timeout: timeout)
             guard generation == connectionGeneration else { return nil }
             uncertainRequest = nil
             return reply.result

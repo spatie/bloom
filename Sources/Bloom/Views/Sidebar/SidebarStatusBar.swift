@@ -8,6 +8,7 @@ import BloomCore
 /// controls that narrow a source list.
 struct SidebarStatusBar: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.openWindow) private var openWindow
 
     @Binding var filter: SidebarFilter
     /// Whether the projects the owner has hidden are in the list. A preference rather than this
@@ -25,6 +26,26 @@ struct SidebarStatusBar: View {
             Hairline()
 
             HStack(spacing: Metrics.spacingSmall) {
+                Menu {
+                    Button("Add Server…", systemImage: "server.rack") { openWindow(id: ServerSetupWindow.id) }
+                    if !app.remoteServer.savedServers.profiles.isEmpty {
+                        Divider()
+                        Menu("Saved Servers") {
+                            ForEach(app.remoteServer.savedServers.profiles) { profile in
+                                Button(profile.displayName) { Task { await app.remoteServer.selectServer(profile) } }
+                            }
+                        }
+                        .disabled(app.remoteServer.isConnecting || app.remoteServer.isPerformingCommand || app.remoteServer.isRemovingServer)
+                    }
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
+                .labelStyle(.iconOnly)
+                .menuStyle(.button)
+                .buttonStyle(.accessoryBar)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Add a server")
                 status
 
                 Spacer(minLength: Metrics.spacingSmall)

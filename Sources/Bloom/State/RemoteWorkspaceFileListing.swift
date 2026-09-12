@@ -5,6 +5,7 @@ import BloomCore
 @MainActor
 @Observable
 final class RemoteWorkspaceFileListing: WorkspacePaneModel {
+    let paneStores: PaneStores
     var browserReviews: [String: BrowserRegionCapture] = [:]
     var workspace: Workspace
     private unowned let server: ServerWindowModel
@@ -35,6 +36,7 @@ final class RemoteWorkspaceFileListing: WorkspacePaneModel {
     let fileEdits: FileEditSession
 
     init(workspace: Workspace, server: ServerWindowModel, app: AppModel) {
+        paneStores = server.paneStores
         self.workspace = workspace
         self.server = server
         self.app = app
@@ -111,8 +113,10 @@ final class RemoteWorkspaceFileListing: WorkspacePaneModel {
     func panePosition(pane: String, session: SessionID) -> TranscriptPaneState? { panePositions[.init(pane: pane, session: session)] }
     func rememberPanePosition(_ state: TranscriptPaneState, pane: String, session: SessionID) { panePositions[.init(pane: pane, session: session)] = state }
     func readNote() async throws -> String {
-        if case .text(let text) = try await read(.workspace(workspaceID: workspace.id, action: .notes)) { return text }
-        return ""
+        guard case .text(let text) = try await read(.workspace(workspaceID: workspace.id, action: .notes)) else {
+            throw ServerFailure("The server did not return workspace notes. Try loading them again.")
+        }
+        return text
     }
     func writeNote(_ body: String) async throws { _ = try await read(.workspace(workspaceID: workspace.id, action: .saveNotes(body))) }
 
@@ -148,20 +152,20 @@ final class RemoteWorkspaceFileListing: WorkspacePaneModel {
     func setViewed(_ value: Bool, file: ChangedFile) async {}
     func clearViewedFiles() async {}
     func reloadChanges() async {
-        do {
-            if case .changes(let files) = try await read(.changes(workspaceID: workspace.id, scope: server.review.scope)),
-               server.selectedWorkspace?.id == workspace.id { server.review.files = files }
-        } catch {
-            if !Task.isCancelled, server.selectedWorkspace?.id == workspace.id { server.review.error = error.localizedDescription }
+        guard server.selectedWorkspace?.id == workspace.id else { return }
+        let source = ServerWorkspaceReviewReader { [weak self] operation in
+            guard let self else { throw CancellationError() }
+            return try await self.read(operation)
         }
+        await server.review.refresh(using: source, workspaceID: workspace.id, refreshFiles: false, wait: false)
     }
     func loadFileTree() async {
-        do {
-            if case .files(let paths) = try await read(.workspace(workspaceID: workspace.id, action: .files)),
-               server.selectedWorkspace?.id == workspace.id { server.review.allFiles = paths; hasReadFileTree = true }
-        } catch {
-            if !Task.isCancelled, server.selectedWorkspace?.id == workspace.id { server.review.error = error.localizedDescription }
+        guard server.selectedWorkspace?.id == workspace.id else { return }
+        let source = ServerWorkspaceReviewReader { [weak self] operation in
+            guard let self else { throw CancellationError() }
+            return try await self.read(operation)
         }
+        hasReadFileTree = await server.review.loadFileTree(using: source, workspaceID: workspace.id)
     }
     func setShowsAllFiles(_ all: Bool) { FileReview.setShowsAllFiles(all, in: self) }
     func showReview(path: String) {

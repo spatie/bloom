@@ -1,8 +1,9 @@
 import Foundation
+import BloomClient
 
 /// Versioned values cross the connection; database handles and local file URLs never do.
 public struct ServerRequest: Codable, Sendable, Equatable {
-    public static let protocolVersion = 13
+    public static let protocolVersion = BloomWire.version
     public var version: Int
     public var id: UUID
     public var operation: ServerOperation
@@ -15,8 +16,12 @@ public struct ServerRequest: Codable, Sendable, Equatable {
 }
 
 public enum ServerOperation: Codable, Sendable, Equatable {
+    case maintenance(ServerMaintenanceRequest)
+    case uiBridge(RemoteUIBridgeOperation)
     case hello
     case diagnostics
+    case storage
+    case cleanupStorage(targets: [ServerStorageCleanupTarget])
     case reviewSnapshot(workspaceID: WorkspaceID, scope: ServerDiffScope, knownRevision: String?, wait: Bool)
     case reviewPatch(workspaceID: WorkspaceID, path: String, scope: ServerDiffScope, knownRevision: String?)
     case creation(ServerCreationOperation)
@@ -36,51 +41,25 @@ public enum ServerOperation: Codable, Sendable, Equatable {
     case file(workspaceID: WorkspaceID, path: String)
     case workspace(workspaceID: WorkspaceID, action: ServerWorkspaceAction)
     case configure(sessionID: SessionID, model: String, effort: String, permissionMode: PermissionMode)
-    case send(sessionID: SessionID, text: String)
+    case send(sessionID: SessionID, text: String, retryDeliveryID: DeliveryID? = nil)
     case cancelQueued(sessionID: SessionID, deliveryID: DeliveryID)
     case stop(sessionID: SessionID)
     case answer(sessionID: SessionID, requestID: String, answer: ServerAnswer)
 
     var mutates: Bool {
         switch self {
-        case .reviewSnapshot, .reviewPatch, .hello, .diagnostics, .catalogue, .previewAddress, .transcript, .changes, .patch, .file, .composer: false
+        // The supervisor records maintenance intents without their credentials. Never persist
+        // its authenticated envelope in the workspace command journal.
+        case .maintenance, .uiBridge, .reviewSnapshot, .reviewPatch, .hello, .diagnostics, .storage, .catalogue, .previewAddress, .transcript, .changes, .patch, .file, .composer: false
         case .creation(let action): action.mutates
         case .project(_, let action): action.mutates
-        case .create, .send, .stop, .answer, .configure, .cancelQueued, .setComposer, .markRead, .renameSession, .closeSession, .terminalStream: true
+        case .cleanupStorage, .create, .send, .stop, .answer, .configure, .cancelQueued, .setComposer, .markRead, .renameSession, .closeSession, .terminalStream: true
         case .workspace(_, let action): action.mutates
         }
     }
 }
 
-public struct ServerWorkspaceRequest: Codable, Sendable, Equatable {
-    public var repositoryPath: String
-    public var name: String
-    public var agent: AgentKind
-    public var model: String
-    public var effort: String
-    public var permissionMode: PermissionMode
-
-    public var prompt: String?
-    public var baseBranch: String?
-    public var checkout: WorkspaceCheckout?
-    public var controls: ComposerControls?
-    public var mode: WorkspaceStartMode?
-    public var runSetupScript: Bool?
-    public var attachments: [ServerInitialAttachment]?
-
-    public init(
-        repositoryPath: String, name: String, agent: AgentKind = .claudeCode,
-        model: String = AppDefaults.fallbackModel, effort: String = AppDefaults.fallbackEffort,
-        permissionMode: PermissionMode = .plan
-    ) {
-        self.repositoryPath = repositoryPath
-        self.name = name
-        self.agent = agent
-        self.model = model
-        self.effort = effort
-        self.permissionMode = permissionMode
-    }
-}
+public typealias ServerWorkspaceRequest = BloomClient.RemoteCreationRequest
 
 public enum ServerAnswer: Codable, Sendable, Equatable {
     case allowOnce
@@ -127,10 +106,14 @@ public struct ServerReply: Codable, Sendable {
 }
 
 public enum ServerResult: Codable, Sendable {
+    case maintenance(ServerMaintenanceResponse)
+    case uiBridge(RemoteUIBridgeResult)
     case reviewSnapshot(ServerReviewSnapshot)
     case reviewPatch(ServerPatchSnapshot)
     case hello(name: String)
     case diagnostics(ServerDiagnostics)
+    case storage(ServerStorageReport)
+    case storageCleanup(ServerStorageCleanupResult)
     case creation(ServerCreationResult)
     case catalogue(ServerCatalogue)
     case composer(ServerComposerState)
@@ -194,16 +177,5 @@ struct ServerCommandRecord: Codable {
     var reply: ServerReply?
 }
 
-public struct ServerFailure: Error, LocalizedError, Sendable {
-    public var message: String
-    public var errorDescription: String? { message }
-    public init(_ message: String) { self.message = message }
-}
-
-/// A received refusal has a known outcome. Transport failures do not, so clients retain the
-/// command ID only for the latter when offering a retry after reconnecting.
-public struct ServerRefusal: Error, LocalizedError, Sendable {
-    public var message: String
-    public var errorDescription: String? { message }
-    public init(_ message: String) { self.message = message }
-}
+public typealias ServerFailure = BloomClient.ConnectionFailure
+public typealias ServerRefusal = BloomClient.ConnectionRefusal

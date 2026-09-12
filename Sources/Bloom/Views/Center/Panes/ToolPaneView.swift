@@ -57,7 +57,7 @@ struct ToolPaneView<Model: WorkspacePaneModel>: View {
                             repo: model.repo,
                             port: model.port,
                             directory: tab.directory,
-                            onCloseTab: { Task { await CenterTabStore.shared.close(tab) } },
+                            onCloseTab: { Task { await model.paneStores.center.close(tab) } },
                             splitColumn: splitColumn,
                             terminalLabel: tab.title,
                             onAddToChat: terminalHandoff

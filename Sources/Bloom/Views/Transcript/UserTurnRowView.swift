@@ -1,5 +1,6 @@
 import SwiftUI
 import BloomCore
+import BloomUI
 
 /// What the user asked for, as one side of a conversation.
 ///
@@ -64,7 +65,7 @@ struct UserTurnRowView: View {
     ///
     /// Not private, for the reason `inset` above gives: `PendingTurnRowView` draws the same bubble
     /// in a different state and had a copied 560 of its own.
-    static let uncappedFallback: CGFloat = 560
+    static let uncappedFallback = BloomBubbleMetrics.maximumWidth
 
     private var maxWidth: CGFloat { bubbleWidth?.cap ?? Self.uncappedFallback }
 
@@ -89,7 +90,7 @@ struct UserTurnRowView: View {
     /// either, because `PendingTurnRowView` draws the same object in a different state and every
     /// number it uses has to be this one. A copied 12 is a bubble that stops matching the moment
     /// somebody changes one of them.
-    static let inset: CGFloat = 32
+    static let inset = BloomBubbleMetrics.leadingSpace
 
     /// The bubble's radius, which is its own number rather than `Metrics.corner`.
     ///
@@ -100,47 +101,16 @@ struct UserTurnRowView: View {
     ///
     /// Local on purpose: `Metrics` is where radii live and this is a candidate to move there as
     /// `Metrics.cornerBubble` the moment anything else needs it. Nothing else does yet.
-    static let corner: CGFloat = 12
+    static let corner = BloomBubbleMetrics.corner
 
     /// Air inside the fill. Wider than the plate it replaces, because a hairline lets text sit
     /// close to the edge and a fill does not: on a coloured ground the words need to look placed
     /// in it rather than pressed against the side of it.
-    static let padding = EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
+    static let padding = BloomBubbleMetrics.padding
 
     var body: some View {
-        HStack(spacing: 0) {
-            Spacer(minLength: Self.inset)
-
-            CappedWidth(width: maxWidth) {
-                bubble.padding(Self.padding)
-            }
-            .padding(.bottom, OutgoingBubbleShape.tailDrop)
-            .background(Palette.accentFill, in: OutgoingBubbleShape(cornerRadius: Self.corner))
-            // No stroke around the fill. A border on a filled shape is a control's outline,
-            // and the fill already separates the turn from the ground in both appearances.
-            //
-            // Everything inside is told it is sitting on the accent fill, which is the same
-            // signal a selected sidebar row sends. `Chip`, `DiffStatLabel`, `RepoIcon` and now
-            // `AttachmentChip` all read it and swap to the variant that survives the
-            // inversion, so a chip inside a user turn needs no knowledge of this view.
-            .environment(\.isOnEmphasizedSelection, true)
-            // And that the ground under them is dark, which on a light page it now is.
-            //
-            // This is not a stylistic flourish, it is what makes the text selectable in any
-            // useful sense. Selecting text in a `Text` paints `selectedTextBackgroundColor`
-            // BEHIND the glyphs and leaves the foreground exactly as it was: on the light ramp
-            // that colour is a pale blue, so dragging over a white sentence on this fill wrote
-            // it in white on near white and the selection was unreadable while it was being
-            // made. Measured off a probe of this exact bubble: the highlight comes out
-            // #BAD6FB and white on it is 1.5 to 1.
-            //
-            // Naming the scheme resolves that colour, and every other appearance-dependent
-            // colour inside the bubble, on the dark ramp, where it is a muted slate that sits
-            // clearly on Spatie Blue and leaves the white text alone: #466288, which carries the
-            // same white text at 6.2 to 1. The claim is honest rather than a trick: this bubble IS
-            // a dark surface whatever the page around it is doing, and the selection is simply the
-            // one piece of it that had to be told.
-            .environment(\.colorScheme, .dark)
+        BloomUserBubble(maxWidth: maxWidth, fill: Palette.accentFill) {
+            bubble.environment(\.isOnEmphasizedSelection, true)
         }
         .padding(.horizontal, TranscriptLayout.inset)
         .padding(.vertical, TranscriptLayout.inset)
@@ -370,41 +340,5 @@ extension TranscriptLinkActions {
     }
 }
 
-/// Lays one view out at no more than `width`, and then takes the size that view actually used.
-///
-/// This is the whole of the bubble's measure, and it is a `Layout` rather than a modifier because
-/// neither of the two obvious modifiers does the job. `frame(maxWidth:)` takes whatever width it
-/// is offered up to the cap, so the word "yes" came out in a bubble seventy percent of the pane
-/// wide with one word floating in it. Adding `fixedSize(horizontal: true)` fixes the width and
-/// breaks the height: the frame is then measured against no proposal at all, so a paragraph
-/// reports the height of the single unwrapped line it would rather be, and the bubble draws four
-/// paragraphs in the space of two with the rest clipped away.
-///
-/// Measuring once at the capped width answers both questions with the same number: a short turn
-/// comes out short, a long one comes out at the cap and wraps inside it, and the height is the
-/// height of the text as it will actually be drawn.
-///
-/// **It is only ever as honest as what it measures.** For a year it measured a bubble whose text
-/// is drawn by AppKit and which answered the width it had been offered for every string there was,
-/// so "continue" came out in a bubble the full measure of the cap with one word at the left of it:
-/// the exact failure described above, from the other end. Nothing was wrong here. See
-/// `TranscriptTextView.widestLine`, which is where a view drawn by AppKit says how wide it is.
-struct CappedWidth: Layout {
-    var width: CGFloat
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard let subview = subviews.first else { return .zero }
-        // The pane can be narrower than the cap, and a bubble wider than the pane is worse than a
-        // bubble that never reaches its cap.
-        let limit = min(proposal.width ?? width, width)
-        return subview.sizeThatFits(ProposedViewSize(width: limit, height: proposal.height))
-    }
-
-    func placeSubviews(
-        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
-    ) {
-        subviews.first?.place(
-            at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(bounds.size)
-        )
-    }
-}
+// Queued messages use the same measured layout as sent messages.
+typealias CappedWidth = BloomUI.CappedWidth

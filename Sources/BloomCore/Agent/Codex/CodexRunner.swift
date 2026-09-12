@@ -459,8 +459,9 @@ public actor CodexRunner: SessionRunner {
             cwd: workspacePath,
             clientName: "Bloom",
             clientVersion: Self.clientVersion,
-            environment: Shell.environment(extra: execution.environment),
-            bridge: execution.commandPrefix.isEmpty ? bridge : nil,
+            environment: Shell.environment(extra: execution.environment.merging(execution.bridgeEnvironment(bridge)) { _, bridgeValue in bridgeValue }),
+            bridge: execution.supportsBridge ? bridge : nil,
+            bridgeInWrapper: execution.bridgeEnabled,
             contextWindow: contextWindow
         ))
         self.client = client

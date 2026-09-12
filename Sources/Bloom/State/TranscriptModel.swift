@@ -1,6 +1,7 @@
 import SwiftUI
 import Observation
 import BloomCore
+import BloomClient
 
 /// One renderable row in a transcript.
 ///
@@ -289,7 +290,7 @@ final class TranscriptModel {
     /// it. An orchestrator told twice that one agent stopped picks the work back up twice, on the
     /// first sentence and then again on a second that says the same thing. Cleared where a turn
     /// begins, so it never silences the next one.
-    private var hasReportedTurnEnded = false
+    private var turnReportClaim = CrewTurnReportClaim()
 
     /// Bumped whenever something outside the list asks it to go back to the newest row. A counter
     /// rather than a flag, so two requests in a row are two requests, and the list has nothing to
@@ -541,8 +542,7 @@ final class TranscriptModel {
         into rows: inout [TranscriptRow],
         indexByRefID: inout [String: Int]
     ) {
-        if message.kind == .toolResult, let refID = message.refID,
-           let index = indexByRefID[refID] {
+        if let index = TranscriptToolPairing.resultIndex(kind: message.kind.rawValue, refID: message.refID, indexByRefID: indexByRefID) {
             rows[index].resultPayload = message.payload
             let summary = ToolResultSummary.decode(message.payload)
             rows[index].isError = summary.isError
@@ -559,9 +559,7 @@ final class TranscriptModel {
             row.permissionDecision = decisions[ask.requestID]
         }
         rows.append(row)
-        if message.kind == .toolUse, let refID = message.refID {
-            indexByRefID[refID] = rows.count - 1
-        }
+        TranscriptToolPairing.recordCall(kind: message.kind.rawValue, refID: message.refID, rowIndex: rows.count - 1, indexByRefID: &indexByRefID)
     }
 
     /// The same fold, over messages that were never stored.
@@ -935,7 +933,10 @@ final class TranscriptModel {
 
     /// Whether this delivery is at the front of an idle queue and can be attempted now.
     func canRetry(_ delivery: Delivery) -> Bool {
-        if remote != nil { return false }
+        if let remote {
+            return remote.supportsAuthenticationChecks && remoteQueueError.map(AgentAuthenticationStatus.isSignInFailure) == true
+                && pendingDeliveries.first?.id == delivery.id
+        }
         return pendingDeliveries.first?.id == delivery.id
             && dispatchingDeliveryID != delivery.id && drainState == .idle
             && deliveryHold.allowsDelivery(on: session.agentKind)
@@ -943,6 +944,11 @@ final class TranscriptModel {
 
     /// Attempts the front of the queue again without changing its order or duplicating its text.
     func retryPending() async {
+        if let remote {
+            guard let first = pendingDeliveries.first, canRetry(first) else { return }
+            _ = await remote.retryAuthenticationPaused(first)
+            return
+        }
         guard let candidate = pendingDeliveries.first, canRetry(candidate) else { return }
         if let first = pendingDeliveries.first, first.state == .uncertain {
             do { try await store?.restoreDelivery(id: first.id) } catch { return }
@@ -1182,7 +1188,7 @@ final class TranscriptModel {
         if startsATurn {
             activeInteractionMode = delivery.interactionMode ?? session.interactionMode
             turnStartedAt = Date()
-            hasReportedTurnEnded = false
+            turnReportClaim.start()
             // **The clearing rule.** The last turn's FINISHED subagents go here, at the one place
             // a turn starts, and nowhere else. Clearing them when they finish is the option that
             // reads well in a screenshot and badly in use: three rows leaving one by one take
@@ -1304,7 +1310,7 @@ final class TranscriptModel {
         // Not this turn, whatever the last one was. A Stop the owner pressed belongs to the turn
         // it stopped, and leaving it set would make the next result skip the queue drain.
         wasStoppedByHand = false
-        hasReportedTurnEnded = false
+        turnReportClaim.start()
         subagents.turnStarted()
         setRunning(true)
     }
@@ -1756,9 +1762,9 @@ final class TranscriptModel {
             // Both endings report, and this is the one that would otherwise be silent: an
             // orchestrator waiting on a crew member that died looks exactly like one waiting on a
             // crew member that is still thinking. See `Crew.failedSentence`.
-            await reportToOrchestrator(
-                CrewMessage.failed(name: session.title, reason: failure.message)
-            )
+            if let report = CrewTurnEnd.failed(failure.message).report(name: session.title, continuing: false) {
+                await reportToOrchestrator(report)
+            }
             // An agent that died is an agent whose turn has ended, so a workspace it had asked to
             // archive is due now. `notifyFinished` is not on this path and never was: it is about
             // a result, and there is none. The recheck decides as it does everywhere else.
@@ -1819,10 +1825,8 @@ final class TranscriptModel {
             // is about to be superseded. `drain` is awaited to completion above, `runner.send` and
             // all, and `deliver` sets `isRunning` before that send, so by this line the flag is
             // already describing the turn that has just begun rather than the one that ended.
-            if !isReconcilingPresentation, !isRunning {
-                await reportToOrchestrator(
-                    CrewMessage.stopped(name: session.title, lastMessage: result.summary)
-                )
+            if !isReconcilingPresentation, let report = CrewTurnEnd.completed(result.summary).report(name: session.title, continuing: isRunning) {
+                await reportToOrchestrator(report)
             }
 
         case .permissionAsk:
@@ -2099,7 +2103,7 @@ final class TranscriptModel {
     ///
     /// A chat nobody started returns on the first line, which is nearly every chat in the app.
     ///
-    /// At most one report per turn, whichever ending gets here first. See `hasReportedTurnEnded`.
+    /// At most one report per turn, whichever ending gets here first. See `turnReportClaim`.
     ///
     /// A `CrewMessage` rather than a sentence, because the two readers want different lengths of
     /// it: the orchestrator is handed the paragraph with the agent's last words and the hint about
@@ -2107,7 +2111,7 @@ final class TranscriptModel {
     /// string to both is what put an instruction addressed to a model in the owner's own bubble.
     private func reportToOrchestrator(_ message: CrewMessage) async {
         guard let parentID = session.parentSessionID, let store, let workspace else { return }
-        guard !hasReportedTurnEnded else { return }
+        guard turnReportClaim.claim() else { return }
         // **Claimed here rather than after the read below, and the difference is the promise this
         // method makes.** The doc says at most one report per turn, whichever ending gets here
         // first, and with the flag set after the `await` that held only because the event pump is
@@ -2119,7 +2123,6 @@ final class TranscriptModel {
         // three guards above have already established that there is a parent to report to, and a
         // report abandoned because that parent turned out to be closed is a report that must not
         // be tried again anyway.
-        hasReportedTurnEnded = true
 
         // Read before the enqueue, and dropped when the chat above has been closed. `session(id:)`
         // answers for an archived row where `sessions(workspaceID:)` and `crew(of:)` do not, and

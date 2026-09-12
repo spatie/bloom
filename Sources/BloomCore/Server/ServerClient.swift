@@ -1,15 +1,22 @@
 import Foundation
+import BloomClient
 
 /// A client owns a connection, never an agent. Explicit disconnect and transport failure finish
 /// waiting requests; neither sends Stop or asks the standalone server to exit.
-public actor ServerClient {
+public actor ServerClient: RemoteRequesting {
     private let socket: UnixSocketConnection?
     private let process: StreamingProcess?
     private let http: ServerHTTPTransport?
     private var pump: Task<Void, Never>?
     private var errorPump: Task<Void, Never>?
-    private var pending: [UUID: CheckedContinuation<ServerReply, Error>] = [:]
-    private var isClosed = false
+    private struct PendingReply {
+        let attempt: UUID
+        let continuation: CheckedContinuation<Data, Error>
+    }
+    private var pending: [UUID: PendingReply] = [:]
+    private var wire: RemoteWireSession?
+    private var closureReason: String?
+    private var isClosed: Bool { closureReason != nil }
     private var stderr = ""
 
     private init(socket: UnixSocketConnection?, process: StreamingProcess?, http: ServerHTTPTransport? = nil) {
@@ -35,6 +42,15 @@ public actor ServerClient {
                 environment: launch.environment, mergeStderr: false
             ))
         }
+        return try await connect(client, timeout: timeout)
+    }
+
+    /// Shared subprocess handshake, also exercised with isolated local transport fixtures.
+    static func connect(process: StreamingProcess, timeout: Duration) async throws -> ServerClient {
+        try await connect(ServerClient(socket: nil, process: process), timeout: timeout)
+    }
+
+    private static func connect(_ client: ServerClient, timeout: Duration) async throws -> ServerClient {
         await client.start()
         do {
             let reply = try await client.request(ServerRequest(.hello), timeout: timeout)
@@ -59,10 +75,11 @@ public actor ServerClient {
             let errors = process.errorLines
             let lines = process.lines
             pump = Task { [weak self] in
+                var failure: String?
                 do {
                     for try await line in lines { await self?.receive(line) }
-                } catch { /* The transport's stderr supplies the actionable SSH error. */ }
-                await self?.connectionEnded()
+                } catch { failure = (error as? ShellError)?.description ?? error.localizedDescription }
+                await self?.connectionEnded(failure: failure)
             }
             errorPump = Task { [weak self] in
                 for await line in errors { await self?.recordError(line) }
@@ -71,51 +88,94 @@ public actor ServerClient {
     }
 
     public func request(_ request: ServerRequest, timeout: Duration = .seconds(660)) async throws -> ServerReply {
-        guard !isClosed else { throw ServerFailure("The server connection is closed. Reconnect to continue.") }
-        if let http { return try await http.request(request, timeout: timeout) }
-        guard pending[request.id] == nil else { throw ServerFailure("This command is already awaiting a reply.") }
-        let line = String(decoding: try JSONEncoder().encode(request), as: UTF8.self)
+        let operation = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request.operation))
+        let value: JSONValue
+        do {
+            value = try await ServerWireTimeout.$duration.withValue(timeout) {
+                try await self.request(RemoteCommand(operation, id: request.id))
+            }
+        } catch let error as ConnectionRefusal { throw ServerRefusal(error.localizedDescription) }
+        var reply = ServerReply(id: request.id, result: try JSONDecoder().decode(ServerResult.self, from: JSONEncoder().encode(value)))
+        reply.version = await wire?.negotiatedVersion ?? ServerRequest.protocolVersion
+        return reply
+    }
+
+    public func request(_ command: RemoteCommand) async throws -> JSONValue {
+        if let closureReason { throw ServerFailure(closureReason) }
+        if wire == nil {
+            wire = RemoteWireSession { [weak self] body in
+                guard let self else { throw ServerFailure("The server connection closed.") }
+                return try await self.exchange(body, timeout: ServerWireTimeout.duration)
+            }
+        }
+        return try await wire!.request(command)
+    }
+
+    private func exchange(_ body: Data, timeout: Duration) async throws -> Data {
+        if let closureReason { throw ServerFailure(closureReason) }
+        if let http { return try await http.exchange(body, timeout: timeout) }
+        let id = try JSONDecoder().decode(ServerWireIdentity.self, from: body).id
+        guard pending[id] == nil else { throw ServerFailure("This command is already awaiting a reply.") }
+        let line = String(decoding: body, as: UTF8.self)
+        let attempt = UUID()
         let deadline = Task { [weak self] in
             do { try await Task.sleep(for: timeout) } catch { return }
-            await self?.fail(request.id, message: "The server did not reply. Reconnect and refresh before retrying.")
+            await self?.fail(id, attempt: attempt, message: "The server did not reply. Reconnect and refresh before retrying.")
         }
         defer { deadline.cancel() }
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
-                pending[request.id] = continuation
-                if let socket { socket.writeLine(line) } else { process?.writeLine(line) }
+                pending[id] = PendingReply(attempt: attempt, continuation: continuation)
+                if let socket {
+                    Task { [weak self] in
+                        guard await self?.maySend(id, attempt: attempt) == true else { return }
+                        await socket.writeLineAsync(line)
+                    }
+                } else { process?.writeLine(line) }
             }
         } onCancel: {
-            Task { await self.fail(request.id, message: "The request was cancelled. It may still be running on the server.") }
+            Task { await self.fail(id, attempt: attempt, message: "The request was cancelled. It may still be running on the server.") }
         }
     }
 
     private func receive(_ line: String) {
-        guard let reply = try? JSONDecoder().decode(ServerReply.self, from: Data(line.utf8)),
-              reply.version == ServerRequest.protocolVersion else {
-            disconnect(message: "The server sent an incompatible reply.")
+        let data = Data(line.utf8)
+        guard data.count <= 16_777_216, let reply = try? JSONDecoder().decode(ServerWireIdentity.self, from: data) else {
+            disconnect(message: "The server sent an invalid reply.")
             return
         }
-        guard let continuation = pending.removeValue(forKey: reply.id) else { return }
-        if case .failure(let message) = reply.result { continuation.resume(throwing: ServerRefusal(message)) } else { continuation.resume(returning: reply) }
+        pending.removeValue(forKey: reply.id)?.continuation.resume(returning: data)
     }
 
-    private func fail(_ id: UUID, message: String) {
-        pending.removeValue(forKey: id)?.resume(throwing: ServerFailure(message))
+    private func maySend(_ id: UUID, attempt: UUID) -> Bool {
+        !isClosed && pending[id]?.attempt == attempt
+    }
+
+    private func fail(_ id: UUID, attempt: UUID, message: String) {
+        guard pending[id]?.attempt == attempt else { return }
+        pending.removeValue(forKey: id)?.continuation.resume(throwing: ServerFailure(message))
     }
 
     private func recordError(_ line: String) { stderr = String((stderr + line + "\n").suffix(4_096)) }
 
-    private func connectionEnded() {
-        disconnect(message: stderr.isEmpty ? "The server disconnected. Reconnect to see current progress." : stderr)
+    private func connectionEnded(failure: String? = nil) async {
+        // StreamingProcess finishes both streams together, but their consumers run separately.
+        // Cancelling the stderr pump at stdout EOF discarded buffered SSH diagnostics. Its
+        // bounded stream is already finished here, so joining it cannot wait for more output.
+        // Explicit disconnect remains synchronous and can cancel this drain at any suspension.
+        await errorPump?.value
+        guard !isClosed else { return }
+        disconnect(message: stderr.isEmpty
+                   ? (failure ?? "The server disconnected. Reconnect to see current progress.")
+                   : stderr)
     }
 
     public func disconnect() { disconnect(message: "Disconnected from the server.") }
 
     private func disconnect(message: String) {
         guard !isClosed else { return }
-        isClosed = true
+        closureReason = message
         http?.close()
         socket?.close()
         process?.terminate()
@@ -125,7 +185,7 @@ public actor ServerClient {
         errorPump = nil
         let waiting = pending.values
         pending.removeAll()
-        for continuation in waiting { continuation.resume(throwing: ServerFailure(message)) }
+        for reply in waiting { reply.continuation.resume(throwing: ServerFailure(message)) }
     }
 
     deinit {
@@ -135,3 +195,6 @@ public actor ServerClient {
         errorPump?.cancel()
     }
 }
+
+private struct ServerWireIdentity: Decodable { let id: UUID }
+private enum ServerWireTimeout { @TaskLocal static var duration: Duration = .seconds(660) }

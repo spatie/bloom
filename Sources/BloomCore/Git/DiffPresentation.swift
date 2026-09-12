@@ -1,3 +1,4 @@
+import BloomClient
 import Foundation
 
 /// Everything the review pane needs to draw one file, in the form it was last drawn in.

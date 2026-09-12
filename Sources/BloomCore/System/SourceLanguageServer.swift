@@ -185,8 +185,12 @@ public actor SourceLanguageServer {
     private func start(executable: String, arguments: [String], root: String) throws {
         let (stream, continuation) = AsyncStream<Data>.makeStream()
         output.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            if data.isEmpty { continuation.finish() } else { continuation.yield(data) }
+            do {
+                guard let data = try ProcessPipeReader.available(from: handle) else { return }
+                if data.isEmpty { continuation.finish() } else { continuation.yield(data) }
+            } catch {
+                continuation.finish()
+            }
         }
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -198,7 +202,7 @@ public actor SourceLanguageServer {
         // A crashed server must fail the request, never send SIGPIPE to the app.
         SystemCalls.configurePipeWrites(input.fileHandleForWriting.fileDescriptor)
         Shell.countSpawn()
-        do { try process.run() } catch { stop(); throw error }
+        do { try ProcessLaunch.run(process) } catch { stop(); throw error }
         reader = Task { [weak self] in
             for await data in stream {
                 guard !Task.isCancelled else { return }

@@ -1,5 +1,6 @@
 import SwiftUI
 import BloomCore
+import BloomUI
 
 /// The file's path relative to the worktree root, drawn as the path it is: the folders quiet, a
 /// slash between them, then the filename in bold.
@@ -32,7 +33,7 @@ struct FilePathLabel: View {
     var width: CGFloat
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 0) {
+        BloomFilePath {
             if let folder {
                 folder
                     .font(Typo.body)
@@ -47,6 +48,7 @@ struct FilePathLabel: View {
                     .layoutPriority(-1)
             }
 
+        } name: {
             Text(filename)
                 .font(Typo.bodyEmphasis)
                 .foregroundStyle(Palette.textPrimary)

@@ -9,7 +9,7 @@ struct SourceTools<Model: WorkspacePaneModel>: View {
     @State private var panel: SourceSearchPanel.Mode?
     @State private var showsLine = false
     @State private var line = ""
-    private let navigation = SourceNavigation.shared
+    private var navigation: SourceNavigation { model.paneStores.sourceNavigation }
 
     var body: some View {
         HStack(spacing: InspectorLayout.gap) {
@@ -81,9 +81,9 @@ struct SourceTools<Model: WorkspacePaneModel>: View {
         guard let first = line.split(separator: ":").first, let number = Int(first), number > 0 else { return }
         let parts = line.split(separator: ":")
         let column = parts.count > 1 ? Int(parts[1]) ?? 1 : 1
-        SourceNavigation.shared.visit(CodeLocation(path: path, line: state.line, column: state.column), in: model)
+        model.paneStores.sourceNavigation.visit(CodeLocation(path: path, line: state.line, column: state.column), in: model)
         let location = CodeLocation(path: path, line: number, column: column)
-        SourceNavigation.shared.visit(location, in: model)
+        model.paneStores.sourceNavigation.visit(location, in: model)
         state.go(to: location)
         showsLine = false
     }

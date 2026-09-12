@@ -52,6 +52,10 @@
 included:
   - Sources
   - Tests
+  - Packages/BloomClient/Sources
+  - Packages/BloomClient/Tests
+  - Packages/BloomAuthentication/Sources
+  - iOS/Bloom
 
 disabled_rules:
   # Every length and complexity threshold, off for the reason CLAUDE.md gives for having no house

@@ -11,14 +11,19 @@ actor ServerSession {
     private var isSending = false
     private var generation = 0
     private var answering: Set<String> = []
+    private let onTurnEnded: @Sendable (CrewTurnEnd) async -> Void
+    private var turnReportClaim = CrewTurnReportClaim()
+    private var wasStopped = false
 
-    init(runner: any SessionRunner) { self.runner = runner }
+    init(runner: any SessionRunner, onTurnEnded: @escaping @Sendable (CrewTurnEnd) async -> Void = { _ in }) { self.runner = runner; self.onTurnEnded = onTurnEnded }
 
-    func send(_ text: String) async throws {
+    func send(_ text: String, recording: Data? = nil) async throws {
         guard !isClosed else { throw ServerFailure("This session is closed.") }
         guard !isBusy else { throw ServerFailure("The agent is busy. Wait for it to finish or stop it first.") }
         isBusy = true
         isSending = true
+        wasStopped = false
+        turnReportClaim.start()
         generation += 1
         defer { isSending = false }
         streamingText = ""
@@ -32,14 +37,15 @@ actor ServerSession {
             }
         }
         do {
-            try await runner.send(text)
+            try await runner.send(text, recording: recording)
         } catch {
+            if turnReportClaim.claim() { await onTurnEnded(wasStopped ? .cancelled(error.localizedDescription) : .failed(error.localizedDescription)) }
             isBusy = false
             throw error
         }
     }
 
-    private func receive(_ event: AgentEvent) {
+    private func receive(_ event: AgentEvent) async {
         switch event {
         case .streamDelta(.text(let text)):
             // The durable transcript remains complete; only the transient tail is bounded.
@@ -47,9 +53,16 @@ actor ServerSession {
             if streamingText.utf8.count > 262_144 { streamingText = String(streamingText.suffix(65_536)) }
         case .assistantText:
             streamingText = ""
-        case .result, .error:
-            isBusy = false
+        case .result(let result):
+            guard turnReportClaim.claim() else { return }
             streamingText = ""
+            await onTurnEnded(wasStopped ? .cancelled(result.summary) : .completed(result.summary))
+            isBusy = false
+        case .error(let error):
+            guard turnReportClaim.claim() else { return }
+            streamingText = ""
+            await onTurnEnded(wasStopped ? .cancelled(error.message) : .failed(error.message))
+            isBusy = false
         default: break
         }
     }
@@ -57,6 +70,7 @@ actor ServerSession {
     func stop() {
         // Keep the turn reserved until its terminal event. A late stop must not cancel a new turn.
         guard isBusy else { return }
+        wasStopped = true
         runner.cancelNow()
     }
 
@@ -65,9 +79,13 @@ actor ServerSession {
         let observedGeneration = generation
         let session = try await store.session(id: sessionID)
         guard isBusy, !isSending, generation == observedGeneration else { return }
-        if let session, [.cancelled, .idle, .failed].contains(session.state) {
-            isBusy = false
+        // A stored idle/failed row can beat its terminal event to this actor. Releasing the
+        // turn here would let a queued send start before that old event arrives. Only explicit
+        // Stop has a backend that may finish without a result event (Claude SIGTERM).
+        if let session, session.state == .cancelled, wasStopped {
             streamingText = ""
+            if turnReportClaim.claim() { await onTurnEnded(.cancelled("")) }
+            isBusy = false
         }
     }
 

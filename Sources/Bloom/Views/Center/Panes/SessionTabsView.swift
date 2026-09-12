@@ -57,9 +57,9 @@ struct SessionTabsView<Model: WorkspacePaneModel>: View {
     /// itself, so it scrolls with them and the two sets of numbers cannot drift apart.
     private static var stripSpace: String { "bloom.tabStrip" }
 
-    private var tabs: CenterTabStore { .shared }
+    private var tabs: CenterTabStore { model.paneStores.center }
 
-    private var store: WorkspaceTabsStore { .shared }
+    private var store: WorkspaceTabsStore { model.paneStores.tabs }
 
     /// The strip, derived rather than stored.
     ///
@@ -194,7 +194,7 @@ struct SessionTabsView<Model: WorkspacePaneModel>: View {
             // kinds, which is what lets one notification carry no id of its own.
             renamingID = selected.id
         }
-        .task(id: model.workspace.id) {
+        .task(id: model.paneStateID) {
             tabs.load(workspaceID: model.workspace.id)
             // The icons this Mac has already seen, read back once per launch. Here rather than at
             // startup because this is what needs them: a workspace reopening on a browser tab

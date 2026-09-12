@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 import Synchronization
 
 /// One `codex app-server` process, spoken to in JSON-RPC.
@@ -43,6 +44,7 @@ public actor CodexClient {
         /// `-c` override at launch is a per-session registration exactly as Claude Code's
         /// recomputed argv is. See `BridgeRegistration.codexArguments`.
         public var bridge: BridgeAttachment?
+        public var bridgeInWrapper: Bool
         /// How large this process should be told the model's context window is, in tokens, or
         /// `CodexContextWindow.modelDefault` for Codex's own catalogue. Per process, which here is
         /// per chat, and unlike the model and the effort it cannot travel with a turn: the two
@@ -58,6 +60,7 @@ public actor CodexClient {
             clientVersion: String = "0.0.0",
             environment: [String: String] = Shell.environment(),
             bridge: BridgeAttachment? = nil,
+            bridgeInWrapper: Bool = false,
             contextWindow: Int = CodexContextWindow.modelDefault
         ) {
             self.commandPrefix = commandPrefix
@@ -68,6 +71,7 @@ public actor CodexClient {
             self.clientVersion = clientVersion
             self.environment = environment
             self.bridge = bridge
+            self.bridgeInWrapper = bridgeInWrapper
             self.contextWindow = contextWindow
         }
     }
@@ -89,7 +93,7 @@ public actor CodexClient {
         // the same trap, refusing to start on a user config holding anything this build of Codex
         // does not recognise.
         var arguments = Self.arguments
-        if configuration.commandPrefix.isEmpty, let bridge = configuration.bridge {
+        if configuration.commandPrefix.isEmpty || configuration.bridgeInWrapper, let bridge = configuration.bridge {
             arguments += BridgeRegistration.codexArguments(bridge)
         }
         arguments += CodexContextWindow.overrides(for: configuration.contextWindow)

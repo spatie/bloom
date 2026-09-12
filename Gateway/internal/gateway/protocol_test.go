@@ -8,11 +8,11 @@ import (
 )
 
 func TestProtocolMatchesSwiftRuntime(t *testing.T) {
-	source, err := os.ReadFile("../../../Sources/BloomCore/Server/ServerProtocol.swift")
+	source, err := os.ReadFile("../../../Packages/BloomClient/Sources/BloomClient/RemoteCommand.swift")
 	if err != nil {
 		t.Fatal(err)
 	}
-	match := regexp.MustCompile(`protocolVersion = ([0-9]+)`).FindSubmatch(source)
+	match := regexp.MustCompile(`version = ([0-9]+)`).FindSubmatch(source)
 	if len(match) != 2 {
 		t.Fatal("Swift protocol version not found")
 	}

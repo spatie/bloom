@@ -1,3 +1,4 @@
+import BloomClient
 import Foundation
 
 public func newID() -> String { UUID().uuidString.lowercased() }
@@ -334,47 +335,14 @@ public struct Workspace: Identifiable, Sendable, Hashable, Codable {
 
 /// What a chat is doing. `CaseIterable` so `Store.resetRunningSessions` can build its `WHERE`
 /// clause out of `SessionLifecycle`'s table instead of restating it in SQL.
-public enum SessionState: String, Sendable, Codable, CaseIterable, Hashable {
-    case idle
-    case running
-    /// The agent asked to do something and is holding its turn open until somebody answers.
-    ///
-    /// Distinct from `running` because it is the opposite of running: the process is alive, the
-    /// clock is going, and no work is happening. The CLI puts no timer on the question, so this
-    /// state ends when a person ends it. A session in it is the one thing in Bloom that gets
-    /// worse the longer it is left alone.
-    case waiting
-    case failed
-    case cancelled
-}
+public typealias SessionState = BloomClient.SessionState
 
 /// The rows in the composer's permission picker.
 ///
 /// **The cases are Bloom's slots, and the words over them belong to whichever CLI is about to
 /// run.** `PermissionVocabulary` holds those words and the reason there are two sets of them; the
 /// order here is the order the menu draws, strictest first.
-public enum PermissionMode: String, Sendable, Codable, CaseIterable {
-    case auto
-    case acceptEdits
-    /// Approvals answered by the agent's own reviewer instead of by the person at the keyboard.
-    ///
-    /// **Added because Bloom had no row for it and a user said so.** Codex's four presets are
-    /// `read-only`, `workspace`, `auto` and `full-access`, and Bloom offered three of them:
-    /// `acceptEdits` sends the pair the Codex app labels "Ask for approval", so the preset that
-    /// app labels "Approve for me" was not reachable from any row in the menu. On the wire it is
-    /// `approvalsReviewer: auto_review`, which nothing in Bloom had ever sent.
-    ///
-    /// Codex only, and Claude Code loses nothing by that: `auto` already is this mode there, which
-    /// is why `nearest(on:)` sends a chat carrying this one back to `auto` when it moves.
-    case autoReview
-    case bypassPermissions
-    case plan
-
-    /// The name with no backend said, which is Claude Code's, because that is what a chat is
-    /// until somebody picks a model out of another section. `label(on:)` is the one to reach for
-    /// wherever the agent is known.
-    public var label: String { label(on: .claudeCode) }
-}
+public typealias PermissionMode = BloomClient.PermissionMode
 
 public struct Session: Identifiable, Sendable, Hashable, Codable {
     public var id: SessionID
@@ -423,9 +391,8 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     ///
     /// **It can only ever be a mode `agentKind` has a row for**, and the initialiser below is what
     /// makes that true of every value of this type, including the one `Store` builds from a row
-    /// it has just read. A synthesised `init(from:)` is the one door that would go round this, and
-    /// nothing in the app or the suite decodes a `Session`. Codex
-    /// has no Plan and Claude Code has no Approve for me; a row written before this rule existed,
+    /// it has just read. Decoded server replies pass through the same initialiser. Codex
+    /// has no Plan permission and Claude Code has no Approve for me; a row written before this rule existed,
     /// or by a version that had a different one, would otherwise be drawn with no tick on any row
     /// of the picker while the wire carried something else again. See `PermissionMode.nearest(on:)`.
     ///
@@ -451,6 +418,41 @@ public struct Session: Identifiable, Sendable, Hashable, Codable {
     public var outputTokens: Int
     public var costUSD: Double
     public var contextTokens: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case id, workspaceID, parentSessionID, sideConversationParentID, title, agentSessionID
+        case model, effort, agentKind, permissionMode, interactionMode, state, sortOrder
+        case createdAt, updatedAt, archivedAt, lastReadSeq, inputTokens, outputTokens, costUSD, contextTokens
+    }
+
+    /// Cached protocol replies outlive the runtime that wrote them. Older replies have no
+    /// interaction mode, so adding planning must not make an accepted command unreadable.
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try values.decode(SessionID.self, forKey: .id),
+            workspaceID: try values.decodeIfPresent(WorkspaceID.self, forKey: .workspaceID),
+            parentSessionID: try values.decodeIfPresent(SessionID.self, forKey: .parentSessionID),
+            sideConversationParentID: try values.decodeIfPresent(SessionID.self, forKey: .sideConversationParentID),
+            title: try values.decode(String.self, forKey: .title),
+            agentSessionID: try values.decodeIfPresent(String.self, forKey: .agentSessionID),
+            model: try values.decode(String.self, forKey: .model),
+            effort: try values.decode(String.self, forKey: .effort),
+            agentKind: try values.decode(AgentKind.self, forKey: .agentKind),
+            permissionMode: try values.decode(PermissionMode.self, forKey: .permissionMode),
+            interactionMode: try values.decodeIfPresent(InteractionMode.self, forKey: .interactionMode) ?? .build,
+            state: try values.decode(SessionState.self, forKey: .state),
+            sortOrder: try values.decode(Int.self, forKey: .sortOrder),
+            createdAt: try values.decode(Date.self, forKey: .createdAt),
+            updatedAt: try values.decode(Date.self, forKey: .updatedAt),
+            archivedAt: try values.decodeIfPresent(Date.self, forKey: .archivedAt),
+            lastReadSeq: try values.decode(Int.self, forKey: .lastReadSeq),
+            inputTokens: try values.decode(Int.self, forKey: .inputTokens),
+            outputTokens: try values.decode(Int.self, forKey: .outputTokens),
+            costUSD: try values.decode(Double.self, forKey: .costUSD),
+            contextTokens: try values.decode(Int.self, forKey: .contextTokens)
+        )
+    }
 
     /// A chat as it is at rest, `state` spelled out. **Internal for the same reason
     /// `Workspace`'s is**, and read that one: `internal(set)` on the property stopped assignment
@@ -697,142 +699,4 @@ public struct PullRequest: Sendable, Hashable, Codable {
 ///
 /// **A chat picks one of these, not a workspace.** One worktree can hold a Claude Code
 /// conversation and a Codex one at the same time. See `Session.agentKind` and docs/CODEX.md.
-public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
-    case claudeCode
-    case codex
-    case grok
-    case cursor
-    case openCode
-
-    public var id: String { rawValue }
-
-    public var label: String {
-        switch self {
-        case .claudeCode: "Claude Code"
-        case .codex: "Codex"
-        case .grok: "Grok"
-        case .cursor: "Cursor"
-        case .openCode: "OpenCode"
-        }
-    }
-
-    public var executableName: String {
-        switch self {
-        case .claudeCode: "claude"
-        case .codex: "codex"
-        case .grok: "grok"
-        case .cursor: "cursor-agent"
-        case .openCode: "opencode"
-        }
-    }
-
-    /// Absolute path to the file the settings screen offers to open.
-    ///
-    /// Claude Code and Codex point at a real config file. Cursor and OpenCode point at their
-    /// config directory instead, because their file layout is not verified and guessing a
-    /// filename would send the user to something that does not exist.
-    public var configPath: String {
-        let home = NSHomeDirectory()
-        switch self {
-        case .claudeCode: return "\(home)/.claude/settings.json"
-        case .codex: return "\(home)/.codex/config.toml"
-        case .grok: return "\(home)/.grok/config.toml"
-        case .cursor: return "\(home)/.cursor"
-        case .openCode: return "\(home)/.opencode"
-        }
-    }
-
-    /// Interactive, so it has to be handed to a terminal rather than run inline.
-    public var loginCommand: String {
-        ([executableName] + loginArguments).joined(separator: " ")
-    }
-
-    /// Kept separate from the executable so Settings can use the binary it actually detected,
-    /// including an override outside PATH.
-    public var loginArguments: [String] {
-        switch self {
-        case .claudeCode: ["auth", "login"]
-        case .codex, .grok, .cursor: ["login"]
-        case .openCode: ["auth", "login"]
-        }
-    }
-
-    /// Whether Bloom can actually drive a chat with it.
-    ///
-    /// Three, now. `AgentRunner` speaks Claude Code's stream-json, `CodexRunner` speaks Codex's
-    /// JSON-RPC, and `GrokRunner` speaks Grok's ACP over stdio. All three answer to
-    /// `SessionRunner`. Cursor and OpenCode are detected and configurable so the settings screen
-    /// can be honest about what is installed, and neither has a runner, so neither is offered
-    /// anywhere a chat is started.
-    public var canRunWorkspaces: Bool {
-        switch self {
-        case .claudeCode, .codex, .grok: true
-        case .cursor, .openCode: false
-        }
-    }
-
-    /// Whether a user message may be written into a turn that is already running.
-    ///
-    /// **Measured per backend, because the answer is a fact about the CLI rather than a taste.**
-    /// `DeliveryHold.turn` used to refuse every delivery on every backend, so a message typed
-    /// during a turn waited for a turn that would have taken it.
-    ///
-    /// **Claude Code: yes.** stdin stays open for the whole session (see `docs/PROTOCOL.md`), and
-    /// a user line written four seconds into a running turn was measured on 2.1.260 to be
-    /// accepted rather than refused, with the message neither lost nor turned into an error. The
-    /// CLI's own copy says what it does with one: a message whose origin is the person is framed
-    /// as "The user sent a new message while you were working", and the paragraph under it says
-    /// that is how Claude Code surfaces a mid-turn message, within the running turn and often
-    /// alongside the next tool result rather than as a separate turn. A turn with no tool call
-    /// left in it has no such boundary, and the probe measured that case: the CLI ran the message
-    /// as the next turn instead, announcing it with a second `init`. Both landings are ones Bloom
-    /// already handles, because `AgentRunner.ingest` applies `turnStarted` on an `init` for
-    /// exactly the CLI's habit of starting turns of its own. See `StrayResult`.
-    ///
-    /// **Codex: yes.** `turn/steer` is the protocol's own call for this, it takes the running
-    /// turn's id, and `docs/CODEX.md` records it measured against the real server: a steered
-    /// sentence behind a refusal made the agent do the different thing that was asked for.
-    /// `CodexRunner` has shipped it since, as the reason that travels behind a denial.
-    ///
-    /// **Grok: no**, until measured. ACP's `session/prompt` stays open for the whole turn, and a
-    /// second prompt on the same session while one is in flight is not a documented call the way
-    /// Codex's `turn/steer` is. The TUI can interject; this wire has not been shown to. Queuing
-    /// until the turn ends is the honest default, and a measurement that says otherwise flips this.
-    ///
-    /// **Cursor and OpenCode: no**, and not as a judgement about the CLIs. Neither has a runner,
-    /// so there is no turn to write into and no wire to write on. This answers `false` for the
-    /// same reason `canRunWorkspaces` does, and a backend that grows a runner has to measure this
-    /// rather than inherit it.
-    ///
-    /// **What this is NOT.** It does not widen `DeliveryHold.question` or `DeliveryHold.setup`,
-    /// neither of which is about the backend: a turn blocked on a permission answer is not
-    /// reading anything else, which `SessionLifecycle` states independently by refusing
-    /// `turnStarted` from `waiting`, and a worktree whose setup script is still running has no
-    /// dependencies installed to work with.
-    public var acceptsMidTurnMessage: Bool {
-        switch self {
-        case .claudeCode, .codex: true
-        case .grok, .cursor, .openCode: false
-        }
-    }
-
-    /// The ones a workspace can actually be started on, in the order they are offered.
-    ///
-    /// Derived rather than listed, so an agent that grows a runner joins this by answering
-    /// `canRunWorkspaces` and nothing else has to be remembered.
-    public static var runnable: [AgentKind] { allCases.filter(\.canRunWorkspaces) }
-
-    /// The runnable ones named in a sentence, for prose that has to list them.
-    ///
-    /// Derived for the reason `runnable` is, and it exists because the literal that used to do
-    /// this job outlived the fact it stated. The Agents settings screen said "Workspaces run on
-    /// Claude Code" for the whole of the work that made Codex a backend, and went on saying it
-    /// afterwards, because nothing about giving a CLI a runner touches a string in a view. A
-    /// backend that grows one joins this sentence by answering `canRunWorkspaces`.
-    public static var runnableSentence: String {
-        let names = runnable.map(\.label)
-        guard let last = names.last else { return "no agent Bloom can run" }
-        guard names.count > 1 else { return last }
-        return names.dropLast().joined(separator: ", ") + " and " + last
-    }
-}
+public typealias AgentKind = BloomClient.AgentKind

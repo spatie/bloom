@@ -20,8 +20,11 @@ was drawn from, which is a page to open in a browser rather than to read here.
 `Sources/BloomCore` is everything that is not a view: `Store`, `Git`, `Shell`, `WorkspaceManager`,
 the agent protocols, the parsers, the models. **It never imports a UI framework.**
 
-`Sources/Bloom` is the SwiftUI app and the only target allowed to import SwiftUI, AppKit, SwiftTerm
-or Sparkle.
+`Sources/Bloom` is the macOS app and owns AppKit, SwiftTerm and Sparkle integration.
+`iOS/Bloom` owns UIKit navigation, tables, editing and WebKit previews. `Packages/BloomUI` owns
+shared SwiftUI presentation used by both apps, including transcript bubbles and markdown layout.
+`Packages/BloomClient` owns portable client logic, parsers and presentation decisions, without UI
+framework imports. Keep native interaction adapters in their app and reusable rendering in BloomUI.
 
 `Sources/bloom-bridge` is the MCP stdio shim an agent CLI launches as a child process, which
 relays lines to the running app over a unix socket. Three lines of `main.swift`; everything worth
@@ -41,6 +44,19 @@ the app target declares them in `Package.swift`, so importing either anywhere el
 dependency and it is not the app. **So a decision taken inside a view is a decision nothing can
 test.** When behaviour needs a test, and most does, it belongs in BloomCore as a pure function or a
 type, with the view calling it. That is the whole reason the split exists.
+
+## Shared client and iOS boundary
+
+`Packages/BloomClient` contains portable HTTPS transport, wire values and remote client state.
+It imports no UI frameworks and owns no host execution or database lifecycle. `BloomCore`
+re-exports moved value types through aliases so the Mac app and server retain their typed API.
+`Packages/BloomAuthentication` shares AppAuth and Keychain handling between Mac and iOS, with
+small platform-specific presentation and callback code. `iOS/Bloom` is the UIKit client shell.
+
+The iOS application needs a signed bundle and scene metadata. `Tools/build-ios.sh` generates its
+ignored Xcode container in a persistent per-checkout cache and builds without launching Simulator. This is separate from
+the Mac SwiftPM build and is not a second description of the Mac targets. Read `docs/IOS.md` for
+the current functionality, HTTPS requirements and verification limits.
 
 ## Build and test
 
@@ -329,7 +345,8 @@ existing dev data, and restart only the dev copy. Fast mode cannot be combined w
 
 For agent verification without installation or launch, use
 `./Tools/dev-build.sh --fast --no-install`. To install without restarting, use
-`./Tools/dev-build.sh --fast --no-launch`. Restarting the dev app still needs authorisation.
+`./Tools/dev-build.sh --fast --no-launch`; this refuses if the destination app is running.
+Restarting the dev app still needs authorisation.
 See `.claude/skills/bloom-dev-build/SKILL.md` for the full workflow.
 
 **Bloom Dev has its own identity:** bundle id `be.spatie.bloom.dev`, and with it its own

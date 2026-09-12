@@ -39,7 +39,20 @@ struct StartProjectView: View {
     @State private var inspectedText = ""
     @State private var inspectionProblem: String?
     private var backend: ProjectCreationBackend { ProjectCreationBackend(app: app, isRemote: isRemote) }
-    private var destinationKey: String { "\(isRemote)-\(String(describing: app.remoteServer.endpoint))" }
+    private var destinationKey: String {
+        isRemote ? "remote-" + String(describing: app.remoteServer.connectionProfile?.id) : "local"
+    }
+    private var contextKey: String {
+        destinationKey + "/" + (isRemote ? String(app.remoteServer.connectionGeneration) : "") + "/" + contextRetryID.uuidString
+    }
+    @State private var contextRetryID = UUID()
+    @State private var contextRequestID = UUID()
+    @State private var isContextLoading = false
+    @State private var contextFailure: String?
+    private var contextAvailability: ProjectContextAvailability {
+        .resolve(isRemote: isRemote, isConnected: app.remoteServer.isConnected, isConnecting: app.remoteServer.isConnecting,
+                 hasLoaded: isLocationLoaded, isLoading: isContextLoading, error: contextFailure)
+    }
     @State private var typed = ""
     @State private var facts = NewProjectFacts()
     /// What the folder holds, once the walk that counts it has come back. Only ever asked of a
@@ -99,9 +112,16 @@ struct StartProjectView: View {
 
     /// The block, from the core: the instruction before anything is typed, and the verdict after.
     private var consequence: ProjectConsequence {
-        guard isLocationLoaded else {
-            return ProjectConsequence(detail: "Loading project folders…", tone: .waiting)
+        switch contextAvailability {
+        case .disconnected: return ProjectConsequence(detail: "Connect to the server to choose project folders. The name you entered stays here.", tone: .caution)
+        case .connecting: return ProjectConsequence(detail: "Connecting to the server…", tone: .waiting)
+        case .loading: return ProjectConsequence(detail: "Loading project folders…", tone: .waiting)
+        case .waiting: return ProjectConsequence(detail: "Project folders have not loaded yet.", tone: .waiting)
+        case .failed: return ProjectConsequence(detail: "Project folders could not be loaded. Try again when the server is available.", tone: .refusal)
+        case .ready: break
         }
+        if let inspectionProblem { return ProjectConsequence(detail: inspectionProblem, tone: .refusal) }
+        if isRemote, hasTyped, inspectedText != typed { return ProjectConsequence(detail: "Checking this project folder…", tone: .waiting) }
         guard hasTyped else {
             return .opening(location: defaultLocation, projectsThere: projectsThere, home: home)
         }
@@ -146,41 +166,22 @@ struct StartProjectView: View {
         }
         .onChange(of: isRemote) { _, _ in
             facts = NewProjectFacts(); contents = nil; completions = []; inspectedText = ""
-            isLocationLoaded = false; phase = .naming; inspectionProblem = nil
+            isLocationLoaded = false; phase = .naming; inspectionProblem = nil; contextFailure = nil
         }
-        .task(id: destinationKey) {
-            if isRemote {
-                do {
-                    guard case .projectContext(let context) = try await backend.request(.projectContext), !Task.isCancelled else { return }
-                    remoteHome = context.home; defaultLocation = context.location; branch = context.branch
-                    projectsThere = NewProjectPlan.projectsIn(defaultLocation, projectPaths: context.projectPaths)
-                    identityProblem = context.identityProblem; isLocationLoaded = true; isFieldFocused = true
-                } catch { if !Task.isCancelled { inspectionProblem = error.localizedDescription } }
-                return
-            }
-            let preferences: DirectoryPreferences
-            if let store = app.store { preferences = await DirectoryPreferences.load(from: store) } else {
-                preferences = DirectoryPreferences()
-            }
-            let paths = app.repos.map(\.path)
-            defaultLocation = preferences.projectLocation(projectPaths: paths, home: home)
-            searchLocations = preferences.searchLocations(projectPaths: paths, home: home)
-            projectsThere = NewProjectPlan.projectsIn(defaultLocation, projectPaths: paths)
-            isLocationLoaded = true
-            isFieldFocused = true
-            branch = await NewProjectStarter.plannedBranch()
-            identityProblem = await RepositoryStarter.identityProblem(at: home)
-        }
+        .task(id: contextKey) { await loadContext() }
         // Re-asked after a pause rather than on every keystroke: this walks up the tree looking
         // for a `.git`, reads a directory and, for a folder with something in it, asks the same
         // question of every child. Cheap once and rude sixty times.
-        .task(id: Draft(typed: typed, location: destinationKey + defaultLocation)) {
+        .task(id: Draft(typed: typed, location: contextKey + defaultLocation + String(isLocationLoaded))) {
             try? await Task.sleep(for: Self.inspectionDelay)
             guard !Task.isCancelled else { return }
-            guard isLocationLoaded else { return }
+            guard contextAvailability.allowsActions else { return }
             if isRemote {
                 do {
-                    guard case .inspection(let result) = try await backend.request(.inspectProject(typed)), !Task.isCancelled else { return }
+                    guard case .inspection(let result) = try await backend.request(.inspectProject(typed), requiresConnection: true) else {
+                        throw ServerFailure("The server did not return the project folder check.")
+                    }
+                    guard !Task.isCancelled else { return }
                     facts = result.facts; contents = result.contents; inspectedText = typed
                     completions = typed == acceptedCompletion ? [] : result.completions
                     inspectionProblem = nil
@@ -238,6 +239,64 @@ struct StartProjectView: View {
             let target = facts.path
             let made = !facts.targetExists
             Task { await NewProjectStarter.discard(at: target, folderWasCreated: made) }
+        }
+    }
+
+    private func loadContext() async {
+        let token = UUID()
+        contextRequestID = token
+        isLocationLoaded = false; isContextLoading = false
+        contextFailure = nil; inspectionProblem = nil; inspectedText = ""
+        facts = NewProjectFacts(); contents = nil; completions = []; selectedCompletion = nil
+        guard !isRemote || (app.remoteServer.isConnected && !app.remoteServer.isConnecting) else { return }
+        isContextLoading = true
+        defer { if contextRequestID == token { isContextLoading = false } }
+        if isRemote {
+            do {
+                guard case .projectContext(let context) = try await backend.request(.projectContext, requiresConnection: true) else {
+                    throw ServerFailure("The server did not return its project folders.")
+                }
+                guard !Task.isCancelled, contextRequestID == token else { return }
+                remoteHome = context.home; defaultLocation = context.location; branch = context.branch
+                projectsThere = NewProjectPlan.projectsIn(defaultLocation, projectPaths: context.projectPaths)
+                identityProblem = context.identityProblem; isLocationLoaded = true
+                if !hasTyped { isFieldFocused = true }
+            } catch {
+                if !Task.isCancelled, contextRequestID == token { contextFailure = error.localizedDescription }
+            }
+            return
+        }
+        let preferences: DirectoryPreferences
+        if let store = app.store { preferences = await DirectoryPreferences.load(from: store) } else { preferences = DirectoryPreferences() }
+        let paths = app.repos.map(\.path)
+        let plannedBranch = await NewProjectStarter.plannedBranch()
+        let identity = await RepositoryStarter.identityProblem(at: home)
+        guard !Task.isCancelled, contextRequestID == token else { return }
+        defaultLocation = preferences.projectLocation(projectPaths: paths, home: home)
+        searchLocations = preferences.searchLocations(projectPaths: paths, home: home)
+        projectsThere = NewProjectPlan.projectsIn(defaultLocation, projectPaths: paths)
+        branch = plannedBranch; identityProblem = identity; isLocationLoaded = true
+        if !hasTyped { isFieldFocused = true }
+    }
+
+    @ViewBuilder private var contextActions: some View {
+        switch contextAvailability {
+        case .disconnected:
+            HStack {
+                Button("Connect") { Task { await app.remoteServer.connect() } }.disabled(!app.remoteServer.isConfigured)
+                Button("Server Settings…") { openWindow(id: ServerWindow.id) }
+            }.padding(.top, Metrics.spacingSmall)
+        case .failed(let message):
+            HStack {
+                Button("Try Again") { contextRetryID = UUID() }
+                if isRemote { Button("Server Settings…") { openWindow(id: ServerWindow.id) } }
+            }.padding(.top, Metrics.spacingSmall)
+            DisclosureGroup("Details") { Text(message).font(Typo.caption).textSelection(.enabled) }
+        case .waiting:
+            Button("Load Project Folders") { contextRetryID = UUID() }
+        case .ready where inspectionProblem != nil:
+            Button("Try Again") { contextRetryID = UUID() }
+        case .ready, .loading, .connecting: EmptyView()
         }
     }
 
@@ -306,7 +365,7 @@ struct StartProjectView: View {
                 .textFieldStyle(.roundedBorder)
                 .font(Typo.body)
                 .focused($isFieldFocused)
-                .disabled(!isLocationLoaded)
+                .disabled(!isRemote && !isLocationLoaded)
                 .onKeyPress(.return) {
                     guard let selectedCompletion else { return .ignored }
                     acceptCompletion(selectedCompletion)
@@ -339,7 +398,7 @@ struct StartProjectView: View {
             if !isRemote { Button("Choose\u{2026}", action: chooseFolder) }
         }
 
-        if !completions.isEmpty {
+        if contextAvailability.allowsActions, !completions.isEmpty {
             VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
                 ForEach(Array(completions.enumerated()), id: \.element) { index, path in
                     Button { acceptCompletion(index) } label: {
@@ -363,12 +422,12 @@ struct StartProjectView: View {
         // Only where a commit is about to be made. Adding a repository writes nothing, so an
         // unconfigured git is none of its business and saying so there would be a warning about
         // something that is not going to happen.
-        if let identityProblem, verdict.makesACommit {
+        if contextAvailability.allowsActions, let identityProblem, verdict.makesACommit {
             Callout(text: identityProblem, symbol: "exclamationmark.triangle.fill", tone: .warning)
         }
 
-        Button("Browse GitHub…") { showsGitHub = true }
-        if let inspectionProblem { Callout(text: inspectionProblem, symbol: "exclamationmark.triangle", tone: .negative) }
+        Button("Browse GitHub…") { if contextAvailability.allowsActions { showsGitHub = true } }
+            .disabled(!contextAvailability.allowsActions)
         block
     }
 
@@ -401,6 +460,7 @@ struct StartProjectView: View {
                     )
                     .fixedSize(horizontal: false, vertical: true)
 
+                contextActions
                 if !said.excluded.isEmpty { excluded(said.excluded) }
 
                 if let alternative = said.alternative {
@@ -566,7 +626,7 @@ struct StartProjectView: View {
     }
 
     private var canStart: Bool {
-        guard isLocationLoaded, hasTyped, verdict.isAllowed, !isWorking else { return false }
+        guard contextAvailability.allowsActions, hasTyped, verdict.isAllowed, !isWorking else { return false }
         if isRemote, inspectedText != typed || inspectionProblem != nil { return false }
         return identityProblem == nil || !verdict.makesACommit
     }
@@ -614,6 +674,7 @@ struct StartProjectView: View {
     }
 
     private func start() {
+        guard contextAvailability.allowsActions else { return }
         if isRemote {
             guard canStart else { return }
             let opening = verdict.opensAWorkspace
@@ -621,7 +682,7 @@ struct StartProjectView: View {
             phase = .working(.initialise)
             createTask = Task {
                 do {
-                    guard case .project(let repo) = try await backend.request(action) else { throw ServerFailure("The server did not return a project.") }
+                    guard case .project(let repo) = try await backend.request(action, requiresConnection: true) else { throw ServerFailure("The server did not return a project.") }
                     let registered = try await backend.register(repo)
                     finishRegistered(registered, opensWorkspace: opening)
                 } catch {

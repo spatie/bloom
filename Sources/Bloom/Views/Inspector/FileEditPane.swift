@@ -28,7 +28,7 @@ struct FileEditPane<Model: WorkspacePaneModel>: View {
         absolutePathOverride ?? (model.workspace.path as NSString).appendingPathComponent(path)
     }
 
-    private var state: SourceEditorState { SourceEditorState.file(absolutePath) }
+    private var state: SourceEditorState { model.paneStores.sourceFile(absolutePath) }
     @State private var comparing = false
 
     private var filename: String { (path as NSString).lastPathComponent }

@@ -1,4 +1,5 @@
 import SwiftUI
+import BloomUI
 
 /// The `@@` line, showing the enclosing function git found. Quiet, because it is orientation
 /// rather than content.
@@ -14,22 +15,14 @@ struct DiffHunkHeaderView: View {
     var width: CGFloat
 
     var body: some View {
-        HStack(spacing: InspectorLayout.gap) {
-            Image(systemName: "curlybraces")
-                .font(Typo.micro)
-                .imageScale(.small)
-                // Decoration: the scope is in the text beside it, and every comparable glyph down
-                // this column is already hidden.
-                .accessibilityHidden(true)
-            Text(text)
-                .font(Typo.codeTiny)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer(minLength: 0)
+        BloomDiffHunkHeader(
+            spacing: InspectorLayout.gap, inset: CodeMetrics.textInset,
+            width: width, height: CodeMetrics.rowHeight,
+            foreground: Palette.textTertiary, surface: Palette.surfaceSunken
+        ) {
+            Image(systemName: "curlybraces").font(Typo.micro).imageScale(.small)
+        } title: {
+            Text(text).font(Typo.codeTiny)
         }
-        .foregroundStyle(Palette.textTertiary)
-        .padding(.horizontal, CodeMetrics.textInset)
-        .frame(width: width, height: CodeMetrics.rowHeight, alignment: .leading)
-        .background(Palette.surfaceSunken)
     }
 }

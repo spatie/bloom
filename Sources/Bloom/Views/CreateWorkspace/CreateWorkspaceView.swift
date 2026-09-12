@@ -244,6 +244,16 @@ struct CreateWorkspaceView: View {
                         .padding(.horizontal, Metrics.gutter)
                         .padding(.bottom, Metrics.spacingWide)
                 }
+                if isRemote, mode.runsAnAgent, checkout == nil, baseBranch == repo?.defaultBranch,
+                   let status = creationSource.authentication.first(where: { $0.agent == controls.agentKind }), status.requiresSignIn {
+                    HStack {
+                        Text(status.message).font(Typo.caption).foregroundStyle(Palette.textSecondary)
+                        Spacer()
+                        Button("Sign In on Server…") { openWindow(id: ServerAccountsWindow.id) }
+                    }
+                    .padding(.horizontal, Metrics.gutter)
+                    .padding(.bottom, Metrics.spacingWide)
+                }
                 if hasSetupScript {
                     WorkspaceSetupOption(isEnabled: $runSetupScript)
                         .disabled(isLoading)
@@ -283,6 +293,15 @@ struct CreateWorkspaceView: View {
         // the composer has to be typeable before it lands. The window opens on the branch route
         // either way; the picker fills in behind it.
         .task(id: creationKey) { await loadCheckouts() }
+        .task(id: app.remoteServer.agentAuthenticationRevision) {
+            guard isRemote, app.remoteServer.agentAuthenticationRevision > 0, let repoID else { return }
+            let key = creationKey
+            do {
+                if case .workspaceContext(let context) = try await backend.request(.workspaceContext(repoID)), key == creationKey {
+                    creationSource.authentication = context.composer.authentication ?? []
+                }
+            } catch { if !Task.isCancelled { creationProblem = error.localizedDescription } }
+        }
         // The draft's chips and the files behind them belong to a window that is going away.
         .onChange(of: repoID) { _, _ in
             checkout = nil; baseBranch = ""; referenceProblem = nil
@@ -297,6 +316,9 @@ struct CreateWorkspaceView: View {
                 .environment(app)
         }
         .alert("Could not create workspace", isPresented: Binding(get: { creationProblem != nil }, set: { if !$0 { creationProblem = nil } })) {
+            if isRemote, AgentAuthenticationStatus.isSignInFailure(creationProblem ?? "") {
+                Button("Sign In on Server…") { creationProblem = nil; openWindow(id: ServerAccountsWindow.id) }
+            }
             Button("OK", role: .cancel) { creationProblem = nil }
         } message: { Text(creationProblem ?? "") }
         .onDisappear(perform: discardDraft)

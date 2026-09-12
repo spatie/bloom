@@ -5,6 +5,183 @@ import Testing
 
 @Suite("ServerRuntime", .tags(.persistence, .subprocess), .scratchDirectory)
 struct ServerRuntimeTests {
+    @Test func maintenanceTerminalInspectionProtectsDetachedJobsAndUnknownProcesses() {
+        #expect(!ServerTerminalService.panesBlockMaintenance("0\tbash\t123\n", children: { _ in "" }))
+        #expect(ServerTerminalService.panesBlockMaintenance("0\tbash\t123\n", children: { _ in "456" }))
+        #expect(ServerTerminalService.panesBlockMaintenance("0\tbash\t123\n", children: { _ in nil }))
+        #expect(ServerTerminalService.panesBlockMaintenance("0\tphp\t123\n", children: { _ in "" }))
+        #expect(ServerTerminalService.panesBlockMaintenance("unexpected format", children: { _ in "" }))
+        #expect(!ServerTerminalService.panesBlockMaintenance("1\tphp\t123\n", children: { _ in nil }))
+    }
+
+    @Test func maintenanceBlocksStandardMCPWritesButLetsAnExistingTurnFinishItsTools() async throws {
+        let fixture = try await ServerFixture()
+        let runtime = fixture.runtime()
+        let workspaceID = try #require(fixture.session.workspaceID)
+        let request = MCPRequest(id: .number(1), method: "workspace_rename",
+            params: .object(["workspace": .string(workspaceID.rawValue), "name": .string("Owner write")]))
+        _ = try await runtime.maintenanceControl("quiesce")
+        let refused = await runtime.maintenanceBridgeCall(WorkspaceRenameTool(), request: request, identity: .owner, store: fixture.store)
+        #expect(refused.isError)
+        #expect(try await fixture.store.workspace(id: workspaceID)?.name == "Fixture")
+        _ = try await runtime.maintenanceControl("resume")
+        _ = await runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "Finish this turn")))
+        await waitUntil("existing turn has started") { await fixture.runner.sends.count == 1 }
+        _ = try await runtime.maintenanceControl("quiesce")
+        let identity = BridgeIdentity(sessionID: fixture.session.id, workspaceID: workspaceID, role: .parent)
+        let finish = MCPRequest(id: .number(2), method: "workspace_rename", params: .object(["name": .string("Finished tool")]))
+        let completed = await runtime.maintenanceBridgeCall(WorkspaceRenameTool(), request: finish, identity: identity, store: fixture.store)
+        #expect(!completed.isError)
+        #expect(try await fixture.store.workspace(id: workspaceID)?.name == "Finished tool")
+        await fixture.runner.finish()
+        await waitUntil("turn drains before idle tool attempt") { (try? await runtime.maintenanceControl("status").busy) == false }
+        let idleCall = await runtime.maintenanceBridgeCall(WorkspaceRenameTool(), request: finish, identity: identity, store: fixture.store)
+        #expect(idleCall.isError)
+        await runtime.shutdown()
+        let trial = ServerRuntime(store: fixture.store, maintenanceTrial: true)
+        let trialCall = await trial.maintenanceBridgeCall(WorkspaceRenameTool(), request: request, identity: .owner, store: fixture.store)
+        #expect(trialCall.isError)
+        #expect(try await fixture.store.workspace(id: workspaceID)?.name == "Finished tool")
+        await trial.shutdown()
+    }
+
+    @Test func maintenanceCountsAnAcceptedMCPCallUntilItsStoreWriteCompletes() async throws {
+        let fixture = try await ServerFixture()
+        let runtime = fixture.runtime()
+        let gate = ServerQueueGate()
+        let workspaceID = try #require(fixture.session.workspaceID)
+        let request = MCPRequest(id: .number(1), method: "workspace_rename",
+            params: .object(["workspace": .string(workspaceID.rawValue), "name": .string("Accepted before quiesce")]))
+        let handler = ServerMaintenanceBridgeTool(wrapped: WorkspaceRenameTool(), perform: { request, identity, store in
+            await gate.wait()
+            return await WorkspaceRenameTool().call(request, as: identity, store: store)
+        })
+        let call = Task { await runtime.maintenanceBridgeCall(handler, request: request, identity: .owner, store: fixture.store) }
+        await waitUntil("MCP store mutation is suspended") { await gate.entered }
+        let draining = try await runtime.maintenanceControl("quiesce")
+        #expect(draining.busy)
+        #expect(try await fixture.store.workspace(id: workspaceID)?.name == "Fixture")
+        await gate.release()
+        let result = await call.value
+        #expect(!result.isError)
+        #expect(try await fixture.store.workspace(id: workspaceID)?.name == "Accepted before quiesce")
+        #expect(try await !runtime.maintenanceControl("status").busy)
+        await runtime.shutdown()
+    }
+
+    @Test func failedCandidateCommitKeepsAdmissionClosedAndCannotReplayRestoration() async throws {
+        let fixture = try await ServerFixture()
+        let gate = ServerQueueGate()
+        let attempts = Mutex(0)
+        let runtime = ServerRuntime(store: fixture.store, authentication: { agent, _, _ in .init(agent: agent, state: .unknown) },
+            installedAgents: { _ in [.claudeCode] }, workspaceAdmissions: ServerWorkspaceAdmissions(), maintenanceTrial: true,
+            maintenanceRestoration: {
+                attempts.withLock { $0 += 1 }
+                await gate.wait()
+                throw ServerFailure("Fixture queue restoration failed")
+            })
+        let commit = Task { try await runtime.maintenanceControl("commit") }
+        await waitUntil("candidate restoration is suspended") { await gate.entered }
+        let restoring = try await runtime.maintenanceControl("status")
+        #expect(!restoring.ready && restoring.busy)
+        #expect(await runtime.respond(to: ServerRequest(.catalogue)).failure != nil)
+        await #expect(throws: ServerFailure.self) { try await runtime.maintenanceControl("commit") }
+        await gate.release()
+        await #expect(throws: ServerFailure.self) { try await commit.value }
+        let failed = try await runtime.maintenanceControl("status")
+        #expect(!failed.ready && failed.busy)
+        #expect(await runtime.respond(to: ServerRequest(.catalogue)).failure != nil)
+        await #expect(throws: ServerFailure.self) { try await runtime.maintenanceControl("commit") }
+        #expect(attempts.withLock { $0 } == 1)
+        #expect(await fixture.runner.sends.isEmpty)
+        await runtime.shutdown()
+    }
+
+    @Test func maintenanceDrainsExistingTurnAndRefusesNewWorkWithoutJournallingTheRefusal() async throws {
+        let fixture = try await ServerFixture()
+        let runtime = fixture.runtime()
+        _ = await runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "Existing work")))
+        await waitUntil("first prompt is running") { await fixture.runner.sends.count == 1 }
+        let waiting = try await runtime.maintenanceControl("quiesce")
+        #expect(waiting.ready && waiting.busy)
+        let next = ServerRequest(.send(sessionID: fixture.session.id, text: "After maintenance"))
+        #expect(await runtime.respond(to: next).failure?.contains("preparing an update") == true)
+        #expect(try await fixture.store.setting("server.command.\(next.id.uuidString)") == nil)
+        await fixture.runner.finish()
+        await waitUntil("accepted work drains") { (try? await runtime.maintenanceControl("status").busy) == false }
+        _ = try await runtime.maintenanceControl("resume")
+        #expect(await runtime.respond(to: next).isAccepted)
+        await waitUntil("retry starts after maintenance") { await fixture.runner.sends.count == 2 }
+        await runtime.shutdown()
+    }
+
+    @Test func maintenanceTrialDoesNotReplayPromptsUntilCommitted() async throws {
+        let fixture = try await ServerFixture()
+        _ = try await fixture.store.enqueueDelivery(Delivery(targetSessionID: fixture.session.id, body: "Queued before restart"))
+        let runtime = ServerRuntime(store: fixture.store, authentication: { agent, _, _ in .init(agent: agent, state: .unknown) },
+            installedAgents: { _ in [.claudeCode] }, makeRunner: { _, _, _ in fixture.runner }, maintenanceTrial: true)
+        #expect(await runtime.respond(to: ServerRequest(.catalogue)).failure != nil)
+        await #expect(throws: ServerFailure.self) { try await runtime.maintenanceControl("resume") }
+        #expect(await fixture.runner.sends.isEmpty)
+        _ = try await runtime.maintenanceControl("commit")
+        await waitUntil("commit releases queued prompt") { await fixture.runner.sends.count == 1 }
+        #expect(await runtime.respond(to: ServerRequest(.catalogue)).failure == nil)
+        await runtime.shutdown()
+    }
+
+    @Test func maintenanceCredentialsNeverEnterWorkspaceCommandJournal() async throws {
+        let fixture = try await ServerFixture()
+        let runtime = fixture.runtime()
+        let request = ServerRequest(.maintenance(.init(action: .start, credential: "fixture-only-maintenance-key", planID: UUID().uuidString, mode: .whenIdle)))
+        #expect(await runtime.respond(to: request).failure != nil)
+        #expect(try await fixture.store.setting("server.command.\(request.id.uuidString)") == nil)
+        await runtime.shutdown()
+    }
+
+    @Test func cancellingQueuedMessageBlocksReplacementDrainUntilDeletionFinishes() async throws {
+        let fixture = try await ServerFixture()
+        let first = ServerQueueGate(), second = ServerQueueGate(), settlement = ServerQueueGate()
+        let cancelledLoad = Mutex(false)
+        let calls = Mutex(0)
+        let live = ServerSession(runner: fixture.runner)
+        let queue = ServerPromptQueue(store: fixture.store, load: { _ in
+            let call = calls.withLock { $0 += 1; return $0 }
+            if call == 1 {
+                await withTaskCancellationHandler { await first.wait() } onCancel: { cancelledLoad.withLock { $0 = true } }
+            } else if call == 2 { await second.wait() }
+            return live
+        }, settled: { _, _ in await settlement.wait() })
+        let target = Delivery(targetSessionID: fixture.session.id, body: "Cancelled prompt")
+        _ = try await fixture.store.enqueueDelivery(target)
+        let another = Delivery(targetSessionID: fixture.session.id, body: "Also cancelled")
+        _ = try await fixture.store.enqueueDelivery(another)
+        await queue.turnEnded(fixture.session.id, ending: .completed("Previous turn"))
+        await waitUntil("first drain is suspended before sending") { await first.entered }
+        let cancelling = Task { try await queue.cancel(target.id, sessionID: fixture.session.id) }
+        await waitUntil("cancellation reaches the original drain") { cancelledLoad.withLock { $0 } }
+        await first.release()
+        await waitUntil("old drain is finishing its turn report") { await settlement.entered }
+        // A second client can cancel a different row without releasing the first cancellation's
+        // admission hold or receiving a permanently journalled temporary-busy refusal.
+        do { try await queue.cancel(another.id, sessionID: fixture.session.id) } catch {
+            Issue.record("Concurrent cancellation failed: \(error)")
+        }
+        try await queue.enqueue(Delivery(targetSessionID: fixture.session.id, body: "Remaining prompt"))
+        let replacements = await queue.activeDrainCount
+        #expect(replacements == 0)
+        // On the regressed implementation, pin the replacement after it captured the deleted
+        // delivery. On the fixed path it cannot start until cancellation releases admission.
+        if replacements > 0 { await waitUntil("replacement captured its delivery") { await second.entered } }
+        await settlement.release()
+        try await cancelling.value
+        await waitUntil("remaining delivery starts after cancellation") { await second.entered }
+        await second.release()
+        await waitUntil("one queued delivery reaches the runner") { await fixture.runner.sends.count == 1 }
+        #expect(await fixture.runner.sends == ["Remaining prompt"])
+        await queue.shutdown()
+        await live.shutdown()
+    }
+
     @Test func setupPublishesOutputWhileQuietAndReplaysTheSameCommandWithoutRerunning() async throws {
         let fixture = try await ServerFixture()
         let workspaceID = try #require(fixture.session.workspaceID)
@@ -105,7 +282,7 @@ struct ServerRuntimeTests {
         defer { repository.cleanUp() }
         let fixture = try await ServerFixture()
         let captured = Mutex<ServerTestRunner?>(nil)
-        let runtime = ServerRuntime(store: fixture.store, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { session, _, store in
+        let runtime = ServerRuntime(store: fixture.store, authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { session, _, store in
             let runner = ServerTestRunner(sessionID: session.id, store: store)
             captured.withLock { $0 = runner }
             return runner
@@ -257,7 +434,7 @@ struct ServerRuntimeTests {
     @Test func concurrentReconnectsCannotReuseDescriptorsStillBeingWatched() async throws {
         let fixture = try await ServerFixture()
         let runner = fixture.runner
-        let daemon = try await ServerDaemon.start(directory: fixture.directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { _, _, _ in runner })
+        let daemon = try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: fixture.directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { _, _, _ in runner })
         do {
             try await withThrowingTaskGroup(of: Void.self) { group in
                 for _ in 0..<8 {
@@ -286,7 +463,7 @@ struct ServerRuntimeTests {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script)
         try await fixture.store.setSetting(AgentCatalog.executablePathSettingKey(.claudeCode), script)
         let child = Mutex<StreamingProcess?>(nil)
-        let daemon = try await ServerDaemon.start(directory: fixture.directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { session, path, store in
+        let daemon = try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: fixture.directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { session, path, store in
             AgentRunner(workspacePath: path, session: session, store: store, makeProcess: { launch in
                 #expect(launch.executable == script)
                 // Always run the fixture, even if executable selection regresses. This test must
@@ -381,7 +558,7 @@ struct ServerRuntimeTests {
     @Test func disconnectLeavesAgentAliveAndAnotherClientCanContinue() async throws {
         let fixture = try await ServerFixture()
         let runner = fixture.runner
-        let daemon = try await ServerDaemon.start(directory: fixture.directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { _, _, _ in runner })
+        let daemon = try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: fixture.directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { _, _, _ in runner })
         let first = try await ServerClient.connect(to: .local(directory: fixture.directory))
         _ = try await first.request(ServerRequest(.send(sessionID: fixture.session.id, text: "Keep working")))
         await first.disconnect()
@@ -465,13 +642,13 @@ struct ServerRuntimeTests {
         let fixture = try await ServerFixture()
         let directory = fixture.directory
         let runner = fixture.runner
-        let first = try await ServerDaemon.start(directory: directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { _, _, _ in runner })
+        let first = try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: directory, installedAgents: { _ in [.claudeCode, .codex] }, makeRunner: { _, _, _ in runner })
         let attributes = try FileManager.default.attributesOfItem(atPath: first.socketPath)
         #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
         _ = await first.runtime.respond(to: ServerRequest(.send(sessionID: fixture.session.id, text: "Working")))
         await waitUntil("first server owns an active turn") { (try? await fixture.store.session(id: fixture.session.id)?.state) == .running }
         do {
-            _ = try await ServerDaemon.start(directory: directory)
+            _ = try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: directory)
             Issue.record("A second server acquired the same data directory")
         } catch { #expect(error.localizedDescription.contains("already owns")) }
         let state = try await fixture.store.session(id: fixture.session.id)?.state
@@ -540,12 +717,52 @@ struct ServerRuntimeTests {
         await runtime.shutdown()
     }
 
+    @Test func ownerClosingCrewReportsOnceWithoutResumingPausedParent() async throws {
+        let fixture = try await ServerFixture()
+        let member = try await fixture.store.upsert(Session(workspaceID: fixture.session.workspaceID, parentSessionID: fixture.session.id, title: "reviewer"))
+        let runtime = fixture.runtime()
+        #expect(await runtime.respond(to: ServerRequest(.stop(sessionID: fixture.session.id))).isAccepted)
+        #expect(await runtime.respond(to: ServerRequest(.closeSession(sessionID: member.id))).isAccepted)
+        #expect(await runtime.respond(to: ServerRequest(.closeSession(sessionID: member.id))).isAccepted)
+        let reports = try await fixture.store.pendingDeliveries(sessionID: fixture.session.id)
+        #expect(reports.count == 1)
+        #expect(reports.first?.kind == .report)
+        #expect(reports.first?.crewMessage == CrewMessage.stoppedByOwner(name: "reviewer"))
+        #expect(await fixture.runner.sends.isEmpty)
+        #expect(try await fixture.store.session(id: member.id)?.archivedAt != nil)
+        await runtime.shutdown()
+    }
+
+    @Test func closingCrewCannotReviveAnArchivedParentConversation() async throws {
+        let fixture = try await ServerFixture()
+        let member = try await fixture.store.upsert(Session(workspaceID: fixture.session.workspaceID, parentSessionID: fixture.session.id, title: "reviewer"))
+        _ = try await fixture.store.update(sessionID: fixture.session.id) { $0.archivedAt = Date() }
+        let runtime = fixture.runtime()
+        #expect(await runtime.respond(to: ServerRequest(.closeSession(sessionID: member.id))).isAccepted)
+        #expect(try await fixture.store.pendingDeliveries(sessionID: fixture.session.id).isEmpty)
+        #expect(await fixture.runner.sends.isEmpty)
+        await runtime.shutdown()
+    }
+
+    @Test func restartCancelsAnArchiveBookedForTheInterruptedTurn() async throws {
+        let fixture = try await ServerFixture()
+        let key = "server.archive.after-turn." + fixture.session.id.rawValue
+        try await fixture.store.setSetting(key, fixture.session.workspaceID?.rawValue)
+        let runtime = fixture.runtime()
+        try await runtime.restoreQueuedPrompts()
+        #expect(try await fixture.store.setting(key) == nil)
+        let messages = try await fixture.store.messages(sessionID: fixture.session.id)
+        #expect(messages.contains { String(decoding: $0.payload, as: UTF8.self).contains("archive request was cancelled") })
+        #expect(try await fixture.store.workspace(id: fixture.session.workspaceID!)?.state == .active)
+        await runtime.shutdown()
+    }
+
     @Test func dataDirectoryMustBePrivate() async throws {
         let directory = TestScratch.path("public-server")
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory)
         do {
-            _ = try await ServerDaemon.start(directory: directory)
+            _ = try await ServerDaemon.start(authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, directory: directory)
             Issue.record("Server accepted a public data directory")
         } catch { #expect(error.localizedDescription.contains("700")) }
         #expect(!FileManager.default.fileExists(atPath: ServerDaemon.databasePath(directory: directory)))
@@ -591,7 +808,7 @@ private struct ServerFixture {
 
     func runtime(availableAgents: [AgentKind] = [.claudeCode, .codex]) -> ServerRuntime {
         let runner = runner
-        return ServerRuntime(store: store, installedAgents: { _ in availableAgents }, makeRunner: { _, _, _ in runner })
+        return ServerRuntime(store: store, authentication: { agent, _, _ in .init(agent: agent, state: .unknown) }, installedAgents: { _ in availableAgents }, makeRunner: { _, _, _ in runner })
     }
 }
 
@@ -636,4 +853,16 @@ private actor ServerTestRunner: SessionRunner {
         _ = try? await store.update(sessionID: sessionID) { $0.apply(.turnFinished(isError: false)) }
         sink.yield(.result(AgentResult()))
     }
+}
+
+private actor ServerQueueGate {
+    private(set) var entered = false
+    private var released = false
+    private var continuation: CheckedContinuation<Void, Never>?
+    func wait() async {
+        entered = true
+        guard !released else { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+    func release() { released = true; continuation?.resume(); continuation = nil }
 }

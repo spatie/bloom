@@ -41,7 +41,7 @@ struct BrowserTabView<Model: WorkspacePaneModel>: View {
     /// See `ControlActiveState.showsFocusRing`: a ring belongs in the key window only.
     @Environment(\.controlActiveState) private var activeState
 
-    private var tabs: CenterTabStore { .shared }
+    private var tabs: CenterTabStore { model.paneStores.center }
     /// The worktree is handed over with the tab, because a page opened from a file row is a
     /// `file://` address and the session cannot fetch that page's stylesheet without it. See
     /// `LocalPage.fileURL`.

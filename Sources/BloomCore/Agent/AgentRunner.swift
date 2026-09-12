@@ -80,6 +80,7 @@ public actor AgentRunner {
     /// new runner with a new file and a new token, which is exactly what a token held only in
     /// memory needs.
     private let mcpConfigPath: String?
+    private let bridge: BridgeAttachment?
     /// Whether the composer's Fast toggle is on for this session.
     ///
     /// Read from the store rather than passed in, because it is the one composer control with no
@@ -149,6 +150,7 @@ public actor AgentRunner {
         session: Session,
         store: Store,
         mcpConfigPath: String? = nil,
+        bridge: BridgeAttachment? = nil,
         shutdownBudget: Duration = .seconds(5),
         makeProcess: @escaping @Sendable (AgentLaunch) -> any AgentProcessing = AgentRunner.spawn
     ) {
@@ -157,6 +159,7 @@ public actor AgentRunner {
         self.session = session
         self.store = store
         self.mcpConfigPath = mcpConfigPath
+        self.bridge = bridge
         self.shutdownBudget = shutdownBudget
         self.makeProcess = makeProcess
         self.grants = SessionGrants(store: store, workspaceID: session.workspaceID)
@@ -312,10 +315,10 @@ public actor AgentRunner {
                 resume: session.agentSessionID,
                 isFastMode: isFastMode,
                 outputStyle: outputStyle,
-                mcpConfigPath: execution.commandPrefix.isEmpty ? mcpConfigPath : nil
+                mcpConfigPath: execution.supportsBridge ? mcpConfigPath : nil
             ),
             cwd: workspacePath,
-            environment: Shell.environment()
+            environment: Shell.environment(extra: execution.bridgeEnvironment(bridge, configPath: mcpConfigPath))
         ))
     }
 

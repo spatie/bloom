@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// Turns Codex's typed items into the vocabulary Bloom already stores and draws.
 ///
@@ -179,6 +180,7 @@ public struct CodexTranslation: Sendable {
                 "status": .string(call.status.rawValue),
                 "error": call.errorMessage.map { .object(["message": .string($0)]) },
                 "durationMs": call.durationMS.map { .integer($0) },
+                "result": call.result,
             ])
 
         case .webSearch(let search):
@@ -246,7 +248,7 @@ public struct CodexTranslation: Sendable {
             return change.changes.map(\.diff).joined(separator: "\n")
 
         case .mcpToolCall(let call):
-            return call.errorMessage ?? ""
+            return call.completedText
 
         case .plan(let plan):
             return plan.text
@@ -312,17 +314,20 @@ public struct CodexTranslation: Sendable {
         text: String,
         isError: Bool,
         refusalKind: String?,
-        sessionID: String
+        sessionID: String,
+        content: JSONValue? = nil,
+        structuredContent: JSONValue? = nil
     ) -> Data {
         var members: [String: JSONValue] = [
             "type": .string("user"),
             "session_id": .string(sessionID),
             "message": .object([
                 "role": .string("user"),
-                "content": .array([.object([
+                "content": .array([.object(omittingNil: [
                     "type": .string("tool_result"),
                     "tool_use_id": .string(toolUseID),
-                    "content": .string(text),
+                    "content": content ?? .string(text),
+                    "structuredContent": structuredContent,
                     "is_error": .bool(isError),
                 ])]),
             ]),
@@ -546,22 +551,29 @@ public struct CodexTranslation: Sendable {
 
         default:
             let status = Self.status(of: completed.item)
-            let isError = status == .failed || status == .declined
+            let mcpCall: CodexMcpToolCall?
+            if case .mcpToolCall(let call) = completed.item { mcpCall = call } else { mcpCall = nil }
+            let isError = mcpCall?.completedIsError ?? (status == .failed || status == .declined)
             // `user-rejected` is the CLI's own word for a call somebody refused, and it is what
             // `ToolRefusal` reads. A declined patch is not a crash and must not be drawn as one.
             let refusalKind = status == .declined ? "user-rejected" : nil
-            let text = Self.resultText(for: completed.item)
+            let content = mcpCall?.completedContent
+            let rendered = content.map { ToolResultContent.render($0) }
+            let text = rendered?.text ?? Self.resultText(for: completed.item)
             return [.toolResult(AgentToolResult(
                 toolUseID: completed.item.id,
                 text: text,
                 isError: isError,
                 refusal: status == .declined ? .denied : nil,
+                hasImages: rendered?.hasImages ?? false,
                 raw: Self.toolResultLine(
                     toolUseID: completed.item.id,
                     text: text,
                     isError: isError,
                     refusalKind: refusalKind,
-                    sessionID: completed.threadID
+                    sessionID: completed.threadID,
+                    content: content,
+                    structuredContent: mcpCall?.result?["structuredContent"]
                 ),
                 sessionID: completed.threadID
             ))]

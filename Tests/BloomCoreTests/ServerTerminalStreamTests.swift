@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import Synchronization
 #if os(Linux)
 import Glibc
 #else
@@ -9,6 +10,83 @@ import Darwin
 
 @Suite("ServerTerminalStream", .scratchDirectory, .tags(.subprocess, .persistence))
 struct ServerTerminalStreamTests {
+    @Test func shutdownRejectsLateStreamOpenAndRemovesExistingListeners() async throws {
+        let streams = ServerTerminalStreams(groupID: nil)
+        let workspace = Workspace(repoID: RepoID("fixture"), name: "Fixture", branch: "main", path: TestScratch.path("terminal-shutdown"), baseBranch: "main")
+        let terminal = ServerTerminal(executable: "/bin/sh", socket: "/unused/socket", session: "fixture")
+        let path = try await streams.open(terminal: terminal, workspace: workspace)
+        await streams.shutdown()
+        #expect(!FileManager.default.fileExists(atPath: path))
+        let late = try? await streams.open(terminal: terminal, workspace: workspace)
+        #expect(late == nil)
+        // Keep a deliberately failing regression run from leaving its late listener behind.
+        await streams.shutdown()
+    }
+
+    @Test func shutdownWaitsForATerminalClientThatIgnoresTermination() async throws {
+        let directory = TestScratch.unique("terminal-client-shutdown")
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        let ready = directory + "/ready"
+        let process = StreamingProcess(executable: "/bin/sh",
+            arguments: ["-c", "trap '' TERM; printf ready > \"$1\"; while :; do sleep 1; done", "bloom-terminal-test", ready], cwd: directory)
+        defer { process.kill() }
+        let streams = ServerTerminalStreams(groupID: nil, makeProcess: { _, _ in process })
+        let workspace = Workspace(repoID: RepoID("fixture"), name: "Fixture", branch: "main", path: directory, baseBranch: "main")
+        let terminal = ServerTerminal(executable: "/bin/sh", socket: "/unused/socket", session: "fixture")
+        let path = try await streams.open(terminal: terminal, workspace: workspace)
+        let client = try UnixSocketConnection.connect(to: path)
+        defer { client.close() }
+        await waitUntil("fixture installed its TERM handler") { FileManager.default.fileExists(atPath: ready) }
+        #expect(process.isRunning)
+        await streams.shutdown()
+        #expect(!process.isRunning)
+        #expect(!FileManager.default.fileExists(atPath: path))
+    }
+
+    @Test func shutdownInvalidatesAndDrainsAnInFlightTerminalStart() async throws {
+        let directory = TestScratch.unique("terminal-start-shutdown")
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        let process = StreamingProcess(executable: "/bin/sh", arguments: ["-c", "sleep 30"], cwd: directory)
+        defer { process.kill() }
+        let gate = TerminalStartGate()
+        let cancelled = Mutex(false)
+        let finished = Mutex(false)
+        let service = ServerTerminalService(ownsDaemon: true, makeProcess: { _, _ in process }, run: { _, arguments, _ in
+            if arguments.first == "show-options" {
+                await withTaskCancellationHandler { await gate.wait() } onCancel: { cancelled.withLock { $0 = true } }
+            }
+            return ShellResult(status: 0, stdout: "", stderr: "")
+        })
+        let command = TmuxCommand(executable: "/unused/tmux", socketName: "fixture", configPath: directory + "/tmux.conf")
+        let start = Task { () -> Bool in
+            do { try await service.start(command: command, key: "fixture", cwd: directory); return true } catch { return false }
+        }
+        await waitUntil("terminal readiness probe is pending") { await gate.entered }
+        let shutdown = Task { await service.shutdown(); finished.withLock { $0 = true } }
+        await waitUntil("shutdown cancels the owned start") { cancelled.withLock { $0 } }
+        #expect(!finished.withLock { $0 })
+        await gate.release()
+        let accepted = await start.value
+        await shutdown.value
+        #expect(!accepted)
+        #expect(!process.isRunning)
+        await #expect(throws: ServerFailure.self) { try await service.start(command: command, key: "late", cwd: directory) }
+    }
+
+    @Test func failedTerminalReadinessCleansUpItsOwnedProcess() async throws {
+        let directory = TestScratch.unique("terminal-start-failure")
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        let process = StreamingProcess(executable: "/bin/sh", arguments: ["-c", "sleep 30"], cwd: directory)
+        defer { process.kill() }
+        let service = ServerTerminalService(ownsDaemon: true, makeProcess: { _, _ in process }, run: { _, _, _ in
+            throw ServerFailure("Readiness failed")
+        })
+        let command = TmuxCommand(executable: "/unused/tmux", socketName: "fixture", configPath: directory + "/tmux.conf")
+        await #expect(throws: ServerFailure.self) { try await service.start(command: command, key: "fixture", cwd: directory) }
+        #expect(!process.isRunning)
+        await service.shutdown()
+    }
+
     @Test func controlOutputPreservesEscapeSequencesAndBinaryBytes() {
         var parser = TmuxControlOutput()
         let bytes = parser.take("%output %0 hello\\015\\012\\033[31m\\377")
@@ -68,7 +146,7 @@ struct ServerTerminalStreamTests {
         let workspace = try await store.upsert(Workspace(repoID: storedRepo.id, name: "Terminal", branch: "main", path: repo.path, baseBranch: "main"))
         let configuration = URL(fileURLWithPath: store.path).deletingLastPathComponent().appendingPathComponent("tmux.conf")
         try (TmuxSessions.configuration(defaultShell: "/bin/sh") + "\nset -g default-command /bin/sh\n").write(to: configuration, atomically: true, encoding: .utf8)
-        let runtime = ServerRuntime(store: store)
+        let runtime = ServerRuntime(store: store, authentication: { agent, _, _ in .init(agent: agent, state: .unknown) })
         do {
             let first = await runtime.respond(to: ServerRequest(.terminalStream(workspaceID: workspace.id, name: "https")))
             guard case .text(let path) = first.result else { Issue.record("Terminal stream failed: \(first.result)"); await runtime.shutdown(); return }
@@ -96,4 +174,11 @@ struct ServerTerminalStreamTests {
         }
         await runtime.shutdown()
     }
+}
+
+private actor TerminalStartGate {
+    private(set) var entered = false
+    private var continuation: CheckedContinuation<Void, Never>?
+    func wait() async { entered = true; await withCheckedContinuation { continuation = $0 } }
+    func release() { continuation?.resume(); continuation = nil }
 }

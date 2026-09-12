@@ -110,7 +110,7 @@ struct ServerHTTPTests {
     }
 }
 
-private final class TestHTTPProtocol: URLProtocol, @unchecked Sendable {
+private final class TestHTTPProtocol: URLProtocol {
     typealias Response = @Sendable (URLRequest) throws -> (Int, Data)
     static let responses = Mutex<[String: Response]>([:])
     override static func canInit(with request: URLRequest) -> Bool { true }
@@ -127,3 +127,9 @@ private final class TestHTTPProtocol: URLProtocol, @unchecked Sendable {
     }
     override func stopLoading() {}
 }
+
+#if !canImport(FoundationNetworking)
+// Darwin URLProtocol is Sendable; FoundationNetworking explicitly makes it unavailable.
+// This fixture responds synchronously and protects its only shared state with a mutex.
+extension TestHTTPProtocol: @unchecked Sendable {}
+#endif

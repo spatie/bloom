@@ -19,7 +19,7 @@ import BloomCore
 @MainActor
 @Observable
 final class CenterTabStore {
-    static let shared = CenterTabStore()
+    static var shared: CenterTabStore { PaneStores.local.center }
 
     private(set) var tabsByWorkspace: [WorkspaceID: [CenterTab]] = [:]
 
@@ -38,7 +38,11 @@ final class CenterTabStore {
     /// time a tab is first drawn would be a redraw for nothing.
     @ObservationIgnored private var browsers: [String: BrowserSession] = [:]
 
-    private init() {}
+    private let defaults: UserDefaults
+    private let usesLocalTerminals: Bool
+    weak var workspaceTabs: WorkspaceTabsStore?
+
+    init(defaults: UserDefaults, usesLocalTerminals: Bool) { self.defaults = defaults; self.usesLocalTerminals = usesLocalTerminals }
 
     // MARK: - Reading
 
@@ -117,7 +121,7 @@ final class CenterTabStore {
     /// cause one.
     func load(workspaceID: WorkspaceID) {
         guard tabsByWorkspace[workspaceID] == nil else { return }
-        guard let restored = Self.restore(workspaceID: workspaceID) else {
+        guard let restored = restore(workspaceID: workspaceID) else {
             // The strip has to draw something, and there is nothing to draw, so the map still gets
             // an empty list. What is remembered here is that it is not an answer.
             unreadable.insert(workspaceID)
@@ -162,7 +166,7 @@ final class CenterTabStore {
     /// their panes anyway: a tmux session whose tab is only on disk is still one Bloom can reach,
     /// and a sweep that could not see it would kill the shell the user left running in it.
     func terminalTabIDs(for workspaceID: WorkspaceID) -> [String] {
-        let tabs = tabsByWorkspace[workspaceID] ?? Self.restore(workspaceID: workspaceID) ?? []
+        let tabs = tabsByWorkspace[workspaceID] ?? restore(workspaceID: workspaceID) ?? []
         return tabs.filter { $0.kind == .terminal }.map(\.id)
     }
 
@@ -210,7 +214,7 @@ final class CenterTabStore {
         let live = await TerminalSessionStore.shared.liveSessions(store: store).map(Set.init)
 
         for (workspaceID, rows) in rowsByWorkspace {
-            var tabs = tabsByWorkspace[workspaceID] ?? Self.restore(workspaceID: workspaceID) ?? []
+            var tabs = tabsByWorkspace[workspaceID] ?? restore(workspaceID: workspaceID) ?? []
             let known = Set(tabs.map(\.id))
 
             for row in rows where !known.contains(row.id.rawValue) {
@@ -420,7 +424,7 @@ final class CenterTabStore {
         if let close = closeHandlers[tab.id], !(await close()) { return }
         closeHandlers[tab.id] = nil
         apply(tabs(for: tab.workspaceID).filter { $0.id != tab.id }, to: tab.workspaceID)
-        WorkspaceTabsStore.shared.forget(.tool(tab.id), workspaceID: tab.workspaceID)
+        workspaceTabs?.forget(.tool(tab.id), workspaceID: tab.workspaceID)
 
         switch tab.kind {
         case .browser:
@@ -477,6 +481,7 @@ final class CenterTabStore {
     /// empties a workspace's list, so a centre tab could conjure a bottom panel terminal for a
     /// workspace whose panel had not loaded yet.
     private func stopShell(for tab: CenterTab) {
+        guard usesLocalTerminals else { return }
         TerminalSessionStore.shared.closePanes(of: tab.id)
     }
 
@@ -494,16 +499,15 @@ final class CenterTabStore {
         // it: from here the list in hand is the list on disk.
         unreadable.remove(workspaceID)
         tabsByWorkspace[workspaceID] = tabs
-        Self.persist(tabs, workspaceID: workspaceID)
+        persist(tabs, workspaceID: workspaceID)
     }
 
     /// `TabDefaults` rather than a literal here, because `TerminalPaneCensus` reads the same key
     /// to decide which tmux sessions the orphan sweep may kill. The two used to state the prefix
     /// separately, with nothing pinning them together.
-    private static func key(_ workspaceID: WorkspaceID) -> String { TabDefaults.tabListKey(workspaceID) }
+    private func key(_ workspaceID: WorkspaceID) -> String { TabDefaults.tabListKey(workspaceID) }
 
-    private static func persist(_ tabs: [CenterTab], workspaceID: WorkspaceID) {
-        let defaults = UserDefaults.standard
+    private func persist(_ tabs: [CenterTab], workspaceID: WorkspaceID) {
         guard !tabs.isEmpty else {
             defaults.removeObject(forKey: key(workspaceID))
             return
@@ -514,8 +518,8 @@ final class CenterTabStore {
 
     /// Nil when a list is stored and will not decode, which is doubt. No key at all is a fact and
     /// answers with none: most workspaces have never opened a terminal or a browser.
-    private static func restore(workspaceID: WorkspaceID) -> [CenterTab]? {
-        guard let data = UserDefaults.standard.data(forKey: key(workspaceID)) else { return [] }
+    private func restore(workspaceID: WorkspaceID) -> [CenterTab]? {
+        guard let data = defaults.data(forKey: key(workspaceID)) else { return [] }
         return try? JSONDecoder().decode([CenterTab].self, from: data)
     }
 

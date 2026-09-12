@@ -29,9 +29,9 @@ extension AppModel {
     /// the strip would be right until a tab pointing at an archived chat was dropped from the
     /// listing, at which point every number after it would name the tab next door.
     private func tabRows(
-        in model: WorkspaceModel
+        in model: any WorkspacePaneModel
     ) async -> [(content: PaneContent, report: WorkspaceTabReport)] {
-        let tabs = WorkspaceTabsStore.shared
+        let tabs = model.paneStores.tabs
         let entries = tabs.entries(in: model)
         let active = tabs.selectedTab(in: model, entries: entries)
         let numbers = browserNumbers(in: model)
@@ -52,7 +52,7 @@ extension AppModel {
                 entry,
                 WorkspaceTabReport(
                     number: 0,
-                    title: CenterTabStore.shared.title(of: entry, in: model),
+                    title: model.paneStores.center.title(of: entry, in: model),
                     isActive: entry == active,
                     detail: root,
                     panes: panes
@@ -101,7 +101,7 @@ extension AppModel {
         // suite can read it.
         if chosen.isActive { return .alreadyInFront(chosen) }
 
-        WorkspaceTabsStore.shared.select(row.content, in: model)
+        model.paneStores.tabs.select(row.content, in: model)
         return .brought(chosen)
     }
 
@@ -112,7 +112,7 @@ extension AppModel {
     /// arrangement. Dropped rather than reported as an empty row, for the reason `PaneCensus` drops
     /// one: a listing a model reads should hold what is there.
     private func detail(
-        of content: PaneContent, in model: WorkspaceModel, numbers: [String: Int]
+        of content: PaneContent, in model: any WorkspacePaneModel, numbers: [String: Int]
     ) async -> WorkspaceTabDetail? {
         switch content {
         case .chat(let sessionID):
@@ -128,7 +128,7 @@ extension AppModel {
             )
 
         case .tool(let id):
-            let centre = CenterTabStore.shared
+            let centre = model.paneStores.center
             guard let tab = centre.tabs(for: model.workspace.id).first(where: { $0.id == id })
             else { return nil }
 
@@ -145,9 +145,8 @@ extension AppModel {
                         ),
                         // Every pane of the tab, because a split terminal is one tab with two
                         // shells and either of them being alive makes the tab a live one.
-                        isLive: TerminalSplitStore.shared.panes(of: tab.id).contains {
-                            TerminalSessionStore.shared.hasShell(paneID: $0)
-                        }
+                        isLive: model.remoteServer.map { $0.liveTerminal(named: tab.id, workspaceID: model.workspace.id)?.hasExited == false }
+                            ?? TerminalSplitStore.shared.panes(of: tab.id).contains { TerminalSessionStore.shared.hasShell(paneID: $0) }
                     )
                 )
 
@@ -155,17 +154,13 @@ extension AppModel {
                 return .review(WorkspaceTabReview(file: tab.path))
 
             case .notes:
-                var characters = 0
-                if let store {
-                    let note = try? await store.note(workspaceID: model.workspace.id)
-                    characters = note?.body.count ?? 0
-                }
+                let characters = (try? await model.readNote().count) ?? 0
                 return .notes(WorkspaceTabNote(characters: characters))
 
             case .browser:
                 guard let number = numbers[tab.id] else { return nil }
                 return .browser(
-                    report(tab, number: number, name: centre.displayTitle(of: tab, in: model))
+                    report(tab, number: number, name: centre.displayTitle(of: tab, in: model), center: centre)
                 )
             }
         }
@@ -174,16 +169,16 @@ extension AppModel {
     /// One pane of a split tab, which is the kind, the name and, for a browser, the number the
     /// `browser_` tools take. Everything else about a pane is `pane_list`.
     private func pane(
-        _ content: PaneContent, in model: WorkspaceModel, numbers: [String: Int]
+        _ content: PaneContent, in model: any WorkspacePaneModel, numbers: [String: Int]
     ) -> WorkspaceTabPane? {
-        let title = CenterTabStore.shared.title(of: content, in: model)
+        let title = model.paneStores.center.title(of: content, in: model)
         switch content {
         case .chat(let sessionID):
             guard model.sessions.contains(where: { $0.id == sessionID }) else { return nil }
             return WorkspaceTabPane(kind: .chat, title: title)
 
         case .tool(let id):
-            let centre = CenterTabStore.shared
+            let centre = model.paneStores.center
             guard let tab = centre.tabs(for: model.workspace.id).first(where: { $0.id == id })
             else { return nil }
             return WorkspaceTabPane(

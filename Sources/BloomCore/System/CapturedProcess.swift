@@ -81,7 +81,7 @@ final class CapturedProcess: Sendable {
 
         let started = ContinuousClock.now
         let deadline = timeout.map { started.advanced(by: $0) }
-        try process.run()
+        try ProcessLaunch.run(process)
         Shell.countSpawn()
         let pid = process.processIdentifier
         let ownsGroup = getpgid(pid) == pid && pid != getpgrp()

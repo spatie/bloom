@@ -3,7 +3,63 @@ import PackageDescription
 #if os(Linux)
 import Foundation
 
-let serverTests = ["ShellCaptureTests.swift", "ShellTests.swift", "ServerSetupTests.swift", "ServerDiagnosticsTests.swift", "SetupOutputTests.swift", "WorkspacePreviewTests.swift", "BrowserAddressDisplayTests.swift", "WorkspaceExecutionTests.swift", "ServerProjectSettingsTests.swift", "ServerReviewCacheTests.swift", "CodexRunnerTests.swift", "CodexTestSupport.swift", "ServerRuntimeTests.swift", "ServerReviewTests.swift", "ServerWorkspaceTests.swift", "ServerSidebarTests.swift", "ServerPreviewTests.swift", "ServerHTTPTests.swift", "ServerTerminalStreamTests.swift", "ProcessPipeLifetimeTests.swift", "PlanApprovalTests.swift", "CodexTranslationTests.swift", "LocalServerIdentityTests.swift", "TestSupport.swift"]
+let serverTests = [
+    "SessionWireCompatibilityTests.swift",
+    "ShellCaptureTests.swift",
+    "ShellTests.swift",
+    "AtomicCrewStartTests.swift",
+    "BridgeDrainTests.swift",
+    "CodexMcpResultTests.swift",
+    "ServerOwnershipTests.swift",
+    "ServerConnectionsTests.swift",
+    "ServerConnectionProfileTests.swift",
+    "ServerReviewLifecycleTests.swift",
+    "UnixSocketShutdownTests.swift",
+    "ServerWorkspaceAdmissionsTests.swift",
+    "ServerArchiveAdmissionTests.swift",
+    "ProcessPipeAvailableTests.swift",
+    "ServerClientLifecycleTests.swift",
+    "ServerMCPTests.swift",
+    "ServerUIBrokerTests.swift",
+    "ServerPaneSplitTests.swift",
+    "ServerAgentAuthenticationTests.swift",
+    "ServerProjectLocationTests.swift",
+    "ServerCredentialImportTests.swift",
+    "ServerCredentialImportRemoteTests.swift",
+    "ServerTerminalRelayTests.swift",
+    "RemoteCreationContractTests.swift",
+    "ServerSetupTests.swift",
+    "ServerProtocolVectorTests.swift",
+    "SharedComposerContractTests.swift",
+    "RemoteReviewContractTests.swift",
+    "MobileProtocolContractTests.swift",
+    "ServerDiagnosticsTests.swift",
+    "SetupOutputTests.swift",
+    "WorkspacePreviewTests.swift",
+    "BrowserAddressDisplayTests.swift",
+    "WorkspaceExecutionTests.swift",
+    "ServerProjectSettingsTests.swift",
+    "ServerReviewCacheTests.swift",
+    "CodexRunnerTests.swift",
+    "CodexTestSupport.swift",
+    "ServerRuntimeTests.swift",
+    "ServerReviewTests.swift",
+    "ServerWorkspaceTests.swift",
+    "ServerSidebarTests.swift",
+    "ServerPreviewTests.swift",
+    "ServerHTTPTests.swift",
+    "ServerTerminalStreamTests.swift",
+    "ProcessPipeLifetimeTests.swift",
+    "PlanApprovalTests.swift",
+    "CodexTranslationTests.swift",
+    "LocalServerIdentityTests.swift",
+    "TestSupport.swift",
+    "ProcessLaunchTests.swift",
+    "WorkspaceFileAccessTests.swift",
+    "PaneStateNamespaceTests.swift",
+    "ServerCrewQueueTests.swift",
+    "ServerUIMediaTests.swift",
+]
 let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Tests/BloomCoreTests")
 let otherTests = (try FileManager.default.contentsOfDirectory(atPath: testDirectory.path)).filter { !serverTests.contains($0) }
 
@@ -14,12 +70,12 @@ let package = Package(
         .executable(name: "bloom-bridge", targets: ["bloom-bridge"]),
         .library(name: "BloomCore", targets: ["BloomCore"]),
     ],
-    dependencies: [.package(url: "https://github.com/apple/swift-crypto.git", from: "4.5.2")],
+    dependencies: [.package(path: "Packages/BloomClient"), .package(url: "https://github.com/apple/swift-crypto.git", from: "4.5.2")],
     targets: [
         .systemLibrary(name: "SQLite3", path: "Sources/CSQLite", pkgConfig: "sqlite3", providers: [.apt(["libsqlite3-dev"])]),
         .target(
             name: "BloomCore",
-            dependencies: ["SQLite3", .product(name: "Crypto", package: "swift-crypto")],
+            dependencies: [.product(name: "BloomClient", package: "BloomClient"), "SQLite3", .product(name: "Crypto", package: "swift-crypto")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(name: "bloom-server", dependencies: ["BloomCore"], swiftSettings: [.swiftLanguageMode(.v6)]),
@@ -43,6 +99,9 @@ let package = Package(
         .library(name: "BloomCore", targets: ["BloomCore"]),
     ],
     dependencies: [
+        .package(path: "Packages/BloomClient"),
+        .package(path: "Packages/BloomAuthentication"),
+        .package(path: "Packages/BloomUI"),
         .package(url: "https://github.com/openid/AppAuth-iOS.git", exact: "3.0.0"),
         // Native live Markdown editing for workspace notes. Pin the pre-1.0 API we integrate.
         .package(url: "https://github.com/nodes-app/swift-markdown-engine", exact: "0.12.0"),
@@ -61,12 +120,15 @@ let package = Package(
     targets: [
         .target(
             name: "BloomCore",
+            dependencies: [.product(name: "BloomClient", package: "BloomClient")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
             name: "Bloom",
             dependencies: [
                 "BloomCore",
+                .product(name: "BloomAuthentication", package: "BloomAuthentication"),
+                .product(name: "BloomUI", package: "BloomUI"),
                 .product(name: "AppAuth", package: "AppAuth-iOS"),
                 .product(name: "MarkdownEngine", package: "swift-markdown-engine"),
                 .product(name: "SwiftTerm", package: "SwiftTerm"),

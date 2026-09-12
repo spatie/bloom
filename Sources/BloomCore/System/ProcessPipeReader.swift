@@ -17,6 +17,15 @@ final class ProcessPipeReader: Sendable {
         guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
     }
 
+    /// A readability callback must not fill a requested byte count or trap on EINTR, both of
+    /// which Foundation's convenience readers can do. Nil means readiness was already consumed;
+    /// empty Data means EOF. The duplicate keeps the descriptor owned until the read finishes.
+    static func available(from handle: FileHandle) throws -> Data? {
+        let reader = try ProcessPipeReader(handle)
+        defer { reader.close() }
+        return try reader.next(timeoutMilliseconds: 0)
+    }
+
     func next(timeoutMilliseconds: Int32 = -1) throws -> Data? {
         guard !closed.withLock({ $0 }) else { throw POSIXError(.EBADF) }
         var event = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)

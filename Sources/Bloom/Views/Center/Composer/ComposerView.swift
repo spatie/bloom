@@ -36,6 +36,7 @@ struct ComposerView: View {
     var onSelectDestination: ((SessionID) -> Void)?
 
     @Environment(AppModel.self) private var app
+    @Environment(\.openWindow) private var openWindow
 
     /// The space a short pane keeps for the conversation when the draft grows.
     private static let minTranscriptHeight: CGFloat = 120
@@ -75,6 +76,15 @@ struct ComposerView: View {
                 )
             }
 
+            if let remote = transcript.remote, let message = remote.signInMessage {
+                HStack {
+                    Text(message).font(Typo.caption).foregroundStyle(Palette.textSecondary)
+                    Spacer()
+                    Button("Sign In on Server…") {
+                        if remote.isCurrentServer { openWindow(id: ServerAccountsWindow.id) }
+                    }
+                }.padding(.vertical, Metrics.spacing)
+            }
             PaneDivider(
                 axis: .vertical,
                 length: Binding(
@@ -158,8 +168,12 @@ struct ComposerView: View {
         }
         .id(transcript.remote?.sessionID.rawValue ?? "local")
         .task(id: transcript.session.id) { await prepare() }
+        .task(id: app.remoteServer.agentAuthenticationRevision) {
+            guard app.remoteServer.agentAuthenticationRevision > 0 else { return }
+            await transcript.remote?.refreshAuthentication()
+        }
         .task(id: "planning:\(transcript.session.id):\(transcript.rows.last?.seq ?? -1)") {
-            if let store = app.store { await ComposerPlanningSupport.shared.refresh(from: store) }
+            if transcript.remote == nil, let store = app.store { await ComposerPlanningSupport.shared.refresh(from: store) }
         }
         .onChange(of: transcript.draft) { _, _ in scheduleDraftSave() }
         // Something put words in the box for the owner to carry on writing, which today is Edit on
@@ -391,7 +405,7 @@ struct ComposerView: View {
             // The whole point of the press, and what was missing. A fork nobody is shown is
             // indistinguishable from a picker that does nothing: the reported bug was a menu
             // dismissed, a chat made off screen, and a composer still saying Sonnet 5.
-            WorkspaceTabsStore.shared.reveal(.chat(session.id), in: model)
+            model.paneStores.tabs.reveal(.chat(session.id), in: model)
             app.notice = BloomNotice(message: BackendChange.forkNotice(title: title, from: from))
         }
     }
@@ -560,7 +574,7 @@ struct ComposerView: View {
                 guard let session = await remote.newChat() else { return }
                 remote.saveDraft(prompt.text, for: session)
                 app.selectRemoteSession(session.id)
-                if sending { _ = await remote.submit(prompt.text, to: session.id); remote.saveDraft("", for: session) }
+                if sending, await remote.submit(prompt.text, to: session.id) { remote.saveDraft("", for: session) }
             }
             return
         }
@@ -596,7 +610,7 @@ struct ComposerView: View {
                 return
             }
             if let model {
-                let tabs = WorkspaceTabsStore.shared
+                let tabs = model.paneStores.tabs
                 let order = tabs.entries(in: model)
                 let owner = order.first { tab in
                     tabs.layout(of: tab).panes.contains { tabs.content(of: $0, in: tab) == .chat(previous.session.id) }

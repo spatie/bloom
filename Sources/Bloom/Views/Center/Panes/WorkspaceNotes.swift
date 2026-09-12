@@ -15,7 +15,7 @@ enum WorkspaceNotes {
     /// dragged into the half the user is typing in. Writing a note beside the conversation it is
     /// about is the arrangement this pane is for.
     static func open(in model: any WorkspacePaneModel) {
-        let tab = CenterTabStore.shared.showNotes(workspaceID: model.workspace.id)
-        WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
+        let tab = model.paneStores.center.showNotes(workspaceID: model.workspace.id)
+        model.paneStores.tabs.reveal(.tool(tab.id), in: model)
     }
 }

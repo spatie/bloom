@@ -1,0 +1,1050 @@
+[
+  {
+    "name" : "request-uiAttach",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "uiBridge" : {
+          "_0" : {
+            "attach" : {
+              "actions" : [
+                "pane_open"
+              ],
+              "clientID" : "00000000-0000-4000-8000-000000000001",
+              "workspaceID" : "workspace-example"
+            }
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-uiClaim",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "uiBridge" : {
+          "_0" : {
+            "claim" : {
+              "leaseID" : "00000000-0000-4000-8000-000000000001",
+              "requestID" : "00000000-0000-4000-8000-000000000001",
+              "token" : "example-ui-lease"
+            }
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-uiRespond",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "uiBridge" : {
+          "_0" : {
+            "respond" : {
+              "leaseID" : "00000000-0000-4000-8000-000000000001",
+              "requestID" : "00000000-0000-4000-8000-000000000001",
+              "result" : {
+                "isError" : false,
+                "text" : "Opened Browser"
+              },
+              "token" : "example-ui-lease"
+            }
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-hello",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "hello" : {
+
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-catalogue",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "catalogue" : {
+
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-diagnostics",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "diagnostics" : {
+
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-storage",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "storage" : {
+
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-cleanupStorage",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "cleanupStorage" : {
+          "targets" : [
+            "buildCache",
+            "unusedImages"
+          ]
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-composer",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "composer" : {
+          "sessionID" : "session-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-setComposer",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "setComposer" : {
+          "controls" : {
+            "agentKind" : "codex",
+            "codexContextWindow" : 0,
+            "effort" : "medium",
+            "hasWorktree" : true,
+            "isFastMode" : false,
+            "model" : "example-model",
+            "outputStyle" : "default",
+            "permissionMode" : "auto"
+          },
+          "sessionID" : "session-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-send",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "send" : {
+          "sessionID" : "session-example",
+          "text" : "Run tests"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-retryAuthentication",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "send" : {
+          "retryDeliveryID" : "delivery-example",
+          "sessionID" : "session-example",
+          "text" : "Run tests"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-stop",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "stop" : {
+          "sessionID" : "session-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-cancelQueued",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "cancelQueued" : {
+          "deliveryID" : "delivery-example",
+          "sessionID" : "session-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-markRead",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "markRead" : {
+          "seq" : 1,
+          "sessionID" : "session-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-renameSession",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "renameSession" : {
+          "sessionID" : "session-example",
+          "title" : "Review"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-closeSession",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "closeSession" : {
+          "sessionID" : "session-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-terminalStream",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "terminalStream" : {
+          "name" : "Terminal",
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-archivePreview",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "workspace" : {
+          "action" : {
+            "archivePreview" : {
+
+            }
+          },
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-archive",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "workspace" : {
+          "action" : {
+            "archive" : {
+              "confirmation" : "00000000-0000-4000-8000-000000000001"
+            }
+          },
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-restore",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "workspace" : {
+          "action" : {
+            "restore" : {
+
+            }
+          },
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-transcript",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "transcript" : {
+          "afterSeq" : 0,
+          "sessionID" : "session-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-snapshot",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "reviewSnapshot" : {
+          "scope" : "branch",
+          "wait" : true,
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-patch",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "reviewPatch" : {
+          "knownRevision" : "revision-1",
+          "path" : "README.md",
+          "scope" : "uncommitted",
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-file",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "file" : {
+          "path" : "README.md",
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-files",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "workspace" : {
+          "action" : {
+            "files" : {
+
+            }
+          },
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-browserAddress",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "workspace" : {
+          "action" : {
+            "browserAddress" : {
+
+            }
+          },
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-upload",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "workspace" : {
+          "action" : {
+            "uploadFile" : {
+              "data" : "AAH/",
+              "name" : "note.txt"
+            }
+          },
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-clearColour",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "workspace" : {
+          "action" : {
+            "setColour" : {
+
+            }
+          },
+          "workspaceID" : "workspace-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-settings",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "project" : {
+          "action" : {
+            "settings" : {
+
+            }
+          },
+          "repoID" : "repo-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-context",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "creation" : {
+          "_0" : {
+            "workspaceContext" : {
+              "_0" : "repo-example"
+            }
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-answer",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "answer" : {
+          "answer" : {
+            "question" : {
+              "input" : {
+                "choice" : "yes"
+              }
+            }
+          },
+          "requestID" : "ask-example",
+          "sessionID" : "session-example"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-uiAttached",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "uiBridge" : {
+          "_0" : {
+            "attached" : {
+              "_0" : {
+                "expiresAtMilliseconds" : 1800000030000,
+                "id" : "00000000-0000-4000-8000-000000000001",
+                "token" : "example-ui-lease",
+                "workspaceID" : "workspace-example"
+              }
+            }
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-uiClaimed",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "uiBridge" : {
+          "_0" : {
+            "claimed" : {
+              "_0" : true
+            }
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-uiRequests",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "uiBridge" : {
+          "_0" : {
+            "requests" : {
+              "_0" : {
+                "lease" : {
+                  "expiresAtMilliseconds" : 1800000030000,
+                  "id" : "00000000-0000-4000-8000-000000000001",
+                  "token" : "example-ui-lease",
+                  "workspaceID" : "workspace-example"
+                },
+                "requests" : [
+                  {
+                    "action" : {
+                      "arguments" : {
+                        "kind" : "browser",
+                        "url" : "http://localhost:3000"
+                      },
+                      "name" : "pane_open"
+                    },
+                    "expiresAtMilliseconds" : 1800000020000,
+                    "id" : "00000000-0000-4000-8000-000000000001",
+                    "workspaceID" : "workspace-example"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-catalogue",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "catalogue" : {
+          "_0" : {
+            "archivedWorkspaces" : [
+              {
+                "additions" : 0,
+                "baseBranch" : "main",
+                "branch" : "archived",
+                "changedFiles" : 0,
+                "createdAt" : 0,
+                "deletions" : 0,
+                "id" : "archived-example",
+                "lastActivityAt" : 0,
+                "name" : "Archived work",
+                "origin" : {
+                  "user" : {
+
+                  }
+                },
+                "path" : "/server/archived",
+                "pinned" : false,
+                "port" : 0,
+                "repoID" : "repo-example",
+                "setupLog" : "",
+                "setupState" : "pending",
+                "sortOrder" : 0,
+                "state" : "active",
+                "unread" : false
+              }
+            ],
+            "repositories" : [
+              {
+                "accent" : "4C8DF6",
+                "collapsed" : false,
+                "createdAt" : 0,
+                "defaultBranch" : "main",
+                "hidden" : false,
+                "iconSource" : "undetected",
+                "id" : "repo-example",
+                "name" : "Project",
+                "path" : "/server/project",
+                "sortOrder" : 0
+              }
+            ],
+            "sessions" : [
+              {
+                "agentKind" : "claudeCode",
+                "contextTokens" : 0,
+                "costUSD" : 0,
+                "createdAt" : 0,
+                "effort" : "medium",
+                "id" : "session-example",
+                "inputTokens" : 0,
+                "lastReadSeq" : 0,
+                "model" : "example-model",
+                "outputTokens" : 0,
+                "permissionMode" : "bypassPermissions",
+                "sortOrder" : 0,
+                "state" : "idle",
+                "title" : "Chat",
+                "updatedAt" : 0,
+                "workspaceID" : "workspace-example"
+              }
+            ],
+            "workspaces" : [
+
+            ]
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-composer",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "composer" : {
+          "_0" : {
+            "availableAgents" : [
+              "codex"
+            ],
+            "commands" : [
+
+            ],
+            "controls" : {
+              "agentKind" : "codex",
+              "codexContextWindow" : 0,
+              "effort" : "medium",
+              "hasWorktree" : true,
+              "isFastMode" : false,
+              "model" : "example-model",
+              "outputStyle" : "default",
+              "permissionMode" : "auto"
+            },
+            "models" : [
+
+            ],
+            "styles" : [
+
+            ]
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-composerAuthentication",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "composer" : {
+          "_0" : {
+            "authentication" : [
+              {
+                "agent" : "codex",
+                "state" : "signInRequired"
+              }
+            ],
+            "commands" : [
+
+            ],
+            "controls" : {
+              "agentKind" : "codex",
+              "codexContextWindow" : 0,
+              "effort" : "medium",
+              "hasWorktree" : true,
+              "isFastMode" : false,
+              "model" : "example-model",
+              "outputStyle" : "default",
+              "permissionMode" : "auto"
+            },
+            "models" : [
+
+            ],
+            "styles" : [
+
+            ]
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-archivePreview",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "archivePreview" : {
+          "_0" : {
+            "createdAt" : 0,
+            "hazards" : {
+              "isAgentRunning" : true,
+              "isDeletingBranch" : true,
+              "isPullRequestMerged" : false
+            },
+            "id" : "00000000-0000-4000-8000-000000000001",
+            "report" : {
+              "detachedCommits" : 0,
+              "hasUncommittedChanges" : true,
+              "isBranchMerged" : false,
+              "modifiedIgnoredFiles" : [
+                ".env"
+              ],
+              "unpushedCommits" : 2,
+              "untrackedFiles" : [
+                "notes.txt"
+              ]
+            },
+            "workspace" : {
+              "additions" : 0,
+              "baseBranch" : "main",
+              "branch" : "archived",
+              "changedFiles" : 0,
+              "createdAt" : 0,
+              "deletions" : 0,
+              "id" : "archived-example",
+              "lastActivityAt" : 0,
+              "name" : "Archived work",
+              "origin" : {
+                "user" : {
+
+                }
+              },
+              "path" : "/server/archived",
+              "pinned" : false,
+              "port" : 0,
+              "repoID" : "repo-example",
+              "setupLog" : "",
+              "setupState" : "pending",
+              "sortOrder" : 0,
+              "state" : "active",
+              "unread" : false
+            }
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-terminal",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "terminal" : {
+          "_0" : {
+            "executable" : "/usr/local/bin/bloom-server",
+            "session" : "terminal-example",
+            "socket" : "/tmp/bloom-terminal-example.sock"
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-storage",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "storage" : {
+          "_0" : {
+            "checkedAt" : 0,
+            "dockerState" : "ready",
+            "freeBytes" : 8589934592,
+            "notes" : [
+
+            ],
+            "totalBytes" : 42949672960,
+            "usage" : [
+              {
+                "activeCount" : 2,
+                "kind" : "Build Cache",
+                "reclaimableLabel" : "200MB (16%)",
+                "sizeLabel" : "1.2GB",
+                "totalCount" : 12
+              }
+            ]
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-storageCleanup",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "storageCleanup" : {
+          "_0" : {
+            "interrupted" : true,
+            "outcomes" : [
+              {
+                "message" : "Unused cache removed",
+                "reclaimedLabel" : "200MB",
+                "status" : "completed",
+                "target" : "buildCache"
+              },
+              {
+                "message" : "Refresh storage before retrying",
+                "status" : "uncertain",
+                "target" : "unusedImages"
+              }
+            ]
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-storageCapability",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "diagnostics" : {
+          "_0" : {
+            "account" : "bloom",
+            "checkedAt" : 0,
+            "checks" : [
+
+            ],
+            "hostname" : "example-server",
+            "operatingSystem" : "Ubuntu",
+            "storageManagement" : true
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-hello",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "hello" : {
+          "name" : "example-server"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-accepted",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "accepted" : {
+
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-failure",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "failure" : {
+          "_0" : "Example refusal"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-snapshot",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "reviewSnapshot" : {
+          "_0" : {
+            "files" : [
+              {
+                "additions" : 2,
+                "change" : "M",
+                "deletions" : 1,
+                "hasIncompleteStats" : false,
+                "isBinary" : false,
+                "path" : "README.md"
+              }
+            ],
+            "revision" : "revision-1"
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-unchangedSnapshot",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "reviewSnapshot" : {
+          "_0" : {
+            "revision" : "revision-1"
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-unchangedPatch",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "reviewPatch" : {
+          "_0" : {
+            "revision" : "revision-1"
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-file",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "file" : {
+          "_0" : {
+            "path" : "README.md",
+            "revision" : "90f8ec5669cd34183b9b0fdf8b94f5efb4c3672876330f4aa76088c2b4ad17be",
+            "text" : "# Hello\n"
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-browserAddress",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "text" : {
+          "_0" : "http://localhost:8000/admin"
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-download",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "download" : {
+          "_0" : {
+            "data" : "AAH/",
+            "path" : "note.txt"
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-transcript",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "transcript" : {
+          "_0" : {
+            "isBusy" : false,
+            "messages" : [
+              {
+                "createdAt" : 0,
+                "id" : 7,
+                "kind" : "assistantText",
+                "payload" : "eyJ0ZXh0IjoiSGVsbG9cbndvcmxkIn0=",
+                "seq" : 1,
+                "sessionID" : "session-example"
+              }
+            ],
+            "pendingQuestions" : [
+              "e30="
+            ],
+            "permissionDecisions" : {
+              "ask-example" : "allowed"
+            },
+            "queuedPrompts" : [
+              {
+                "id" : "delivery-example",
+                "text" : "Next task"
+              }
+            ],
+            "session" : {
+              "agentKind" : "claudeCode",
+              "contextTokens" : 0,
+              "costUSD" : 0,
+              "createdAt" : 0,
+              "effort" : "medium",
+              "id" : "session-example",
+              "inputTokens" : 0,
+              "lastReadSeq" : 0,
+              "model" : "example-model",
+              "outputTokens" : 0,
+              "permissionMode" : "bypassPermissions",
+              "sortOrder" : 0,
+              "state" : "idle",
+              "title" : "Chat",
+              "updatedAt" : 0,
+              "workspaceID" : "workspace-example"
+            },
+            "streamingText" : ""
+          }
+        }
+      },
+      "version" : 14
+    }
+  }
+]

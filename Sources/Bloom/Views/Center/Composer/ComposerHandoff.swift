@@ -75,7 +75,7 @@ enum ComposerHandoff {
                 store.recordRemote(paths: paths, comment: imageComment, sessionID: key)
                 append(body(paths), to: transcript)
                 remote.saveDraft(transcript.draft)
-                if revealConversation { WorkspaceTabsStore.shared.reveal(.chat(session.id), in: model) }
+                if revealConversation { model.paneStores.tabs.reveal(.chat(session.id), in: model) }
                 return Outcome(paths: paths)
             } catch { return Outcome(failure: error.readableMessage) }
         }
@@ -87,7 +87,7 @@ enum ComposerHandoff {
 
         if let imageComment { store.annotate(paths: added.paths, with: imageComment, sessionID: key) }
         append(body(added.paths), to: transcript)
-        if revealConversation { WorkspaceTabsStore.shared.reveal(.chat(session.id), in: model) }
+        if revealConversation { model.paneStores.tabs.reveal(.chat(session.id), in: model) }
 
         return Outcome(failure: added.failures.first, paths: added.paths)
     }
@@ -107,7 +107,7 @@ enum ComposerHandoff {
             return Outcome(failure: "This workspace's conversation could not be opened.")
         }
         append(sentence, to: transcript)
-        WorkspaceTabsStore.shared.reveal(.chat(session.id), in: model)
+        model.paneStores.tabs.reveal(.chat(session.id), in: model)
         return Outcome()
     }
 

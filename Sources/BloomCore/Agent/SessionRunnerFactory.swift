@@ -15,7 +15,7 @@ public enum SessionRunnerFactory {
         case .grok:
             GrokRunner(workspacePath: workspacePath, session: session, store: store, bridge: bridge?.attachment)
         case .claudeCode, .cursor, .openCode:
-            AgentRunner(workspacePath: workspacePath, session: session, store: store, mcpConfigPath: bridge?.mcpConfigPath)
+            AgentRunner(workspacePath: workspacePath, session: session, store: store, mcpConfigPath: bridge?.mcpConfigPath, bridge: bridge?.attachment)
         }
     }
 }

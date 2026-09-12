@@ -84,6 +84,21 @@ final class BloomTerminalView: LocalProcessTerminalView {
     private(set) var hasExited = false
     private var remoteConnection: RemoteTerminalConnection?
 
+    var hasLiveConnection: Bool { !hasExited && (remoteConnection != nil || process?.running == true) }
+
+    func renderedOutput(lines limit: Int) -> String {
+        let terminal = getTerminal()
+        var lines: [String] = []
+        var row = terminal.buffer.totalLinesTrimmed
+        while let line = terminal.getScrollInvariantLine(row: row) {
+            let text = line.translateToString(trimRight: true, skipNullCellsFollowingWide: true)
+            if line.isWrapped, !lines.isEmpty { lines[lines.count - 1] += text } else { lines.append(text) }
+            row += 1
+        }
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        return lines.suffix(max(1, min(limit, 1000))).joined(separator: "\n")
+    }
+
     func startRemote(_ connection: RemoteTerminalConnection) {
         hasExited = false
         remoteConnection = connection

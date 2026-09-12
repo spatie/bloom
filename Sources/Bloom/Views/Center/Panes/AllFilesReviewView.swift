@@ -105,7 +105,7 @@ struct AllFilesReviewView<Model: WorkspacePaneModel>: View {
 
     private func scroll(to path: String, using reader: ScrollViewProxy) {
         let absolute = (model.workspace.path as NSString).appendingPathComponent(path)
-        if destinationPrepared, let destination = SourceEditorState.file(absolute).diffRequest {
+        if destinationPrepared, let destination = model.paneStores.sourceFile(absolute).diffRequest {
             reader.scrollTo("\(path):definition:\(destination.line)", anchor: .center)
         } else {
             reader.scrollTo(path, anchor: .top)

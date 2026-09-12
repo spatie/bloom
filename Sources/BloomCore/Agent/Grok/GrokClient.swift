@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 import Synchronization
 
 /// One `grok agent stdio` process, spoken to in ACP JSON-RPC.

@@ -127,6 +127,7 @@ struct WorkspaceEventRow: View {
     var paneHeight: CGFloat = 0
     var model: WorkspaceModel?
     var onRunSetupAgain: (@MainActor () -> Void)?
+    var onRecoverDocker: (@MainActor () -> Void)?
     /// See `endID`, and `WorkspaceEventsView.onShowLogEnd`.
     var onShowLogEnd: (@MainActor (Bool) -> Void)?
 
@@ -194,14 +195,18 @@ struct WorkspaceEventRow: View {
             HStack(alignment: .top, spacing: Metrics.spacing) {
                 if canExpand {
                     ExpandableRowHeader(isExpanded: isExpanded, onToggle: { isExpanded.toggle() }) {
-                        header
+                        header(showsLog: !tail.isEmpty)
                     }
                 } else {
-                    header
+                    header(showsLog: !tail.isEmpty)
                 }
-                if showsRunSetupAgain {
-                    retryButton.padding(.trailing, TranscriptLayout.inset)
+                HStack(spacing: Metrics.spacing) {
+                    if event.kind == .setup, event.outcome == .failed, let onRecoverDocker {
+                        setupActionButton("Start Docker…", help: "Check Docker and start or configure it for this server", action: onRecoverDocker)
+                    }
+                    if showsRunSetupAgain { retryButton }
                 }
+                .padding(.trailing, TranscriptLayout.inset)
             }
 
             if !tail.isEmpty {
@@ -285,9 +290,13 @@ struct WorkspaceEventRow: View {
         }
     }
 
-    private var header: some View {
-        ToolRowHeader(
-            presentation: event.presentation,
+    private func header(showsLog: Bool) -> some View {
+        var presentation = event.presentation
+        // The visible log already contains this detail in full. Repeating a truncated copy in
+        // the header leaves less room for the failure label and its recovery actions.
+        if showsLog { presentation.detail = "" }
+        return ToolRowHeader(
+            presentation: presentation,
             // Only ever read by a file chip, and an event has none: its detail is a line of log or
             // a branch name, never a path this row invites anybody to open. It used to build an
             // empty `Workspace` with a blank `RepoID` every pass to satisfy the type.
@@ -485,18 +494,22 @@ struct WorkspaceEventRow: View {
 
     /// The retry stays beside the failure title, before any log that needs scrolling.
     private var retryButton: some View {
-        Button("Run setup again") {
+        setupActionButton("Run setup again", help: "Runs this repository's setup script in this workspace again") {
             if let onRunSetupAgain {
                 onRunSetupAgain()
             } else if let model {
                 SetupRunAlert.shared.ask(model)
             }
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .font(Typo.caption)
-        .fixedSize()
-        .help("Runs this repository's setup script in this workspace again")
+    }
+
+    private func setupActionButton(_ title: String, help: String, action: @escaping @MainActor () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .font(Typo.caption)
+            .fixedSize()
+            .help(help)
     }
 
     /// Whether the link that unfolds the log is worth drawing. See `hasMoreToShow`.

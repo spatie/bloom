@@ -42,8 +42,9 @@ changes merely to try them locally. Fast mode cannot be combined with a revision
    no release certificate or notarisation credentials are needed. Running App Intents through
    Shortcuts requires a real signing identity.
 3. Run the selected command. Only restart the dev app when authorised. `make dev-fast` and
-   `make dev` both quit and relaunch the dev copy. `--no-launch` still replaces the installed bundle;
-   an already running copy does not switch to the new code until restarted.
+   `make dev` both quit and relaunch the verified dev copy after its replacement is ready.
+   `--no-launch` refuses installation while the destination app is running. Use `--no-install`
+   to verify a build while keeping that copy open.
 4. Verify the bundle at the path printed by the script. With `--no-install`, use that build path;
    otherwise use `~/Applications/Bloom Dev.app`. Check its `Contents/Info.plist` and signature:
    - `CFBundleIdentifier` is `be.spatie.bloom.dev`.
@@ -66,11 +67,56 @@ dev data; copying production data with `make dev-db` is optional and replaces de
 use it when requested.
 
 Do not bypass `Tools/guard.sh`. If installation is refused because Bloom Dev hosts this session,
-use `--no-install` for verification or install from an external terminal. Run only one installation
-at a time because both modes share the destination. Fast mode also locks its cache per checkout;
-release mode shares `/tmp/bloom-dev-src` and `/tmp/bloom-dev-build` across checkouts.
+use `--no-install` for verification or install from an external terminal. Both modes lock publication because they share the destination. Fast mode also locks its cache
+per checkout. Release mode locks the shared `/tmp/bloom-dev-src` and `/tmp/bloom-dev-build`
+across checkouts. A failed candidate leaves the installed app untouched.
 
 On failure, read the log path printed by the script. Fast mode uses
 `/tmp/bloom-dev-fast-<checkout-hash>/build.log`; release mode uses `/tmp/bloom-dev-build.log`.
 Compilation and signing finish before installation, so failure in either leaves the previous
 installed app in place. Report the actual failure stage.
+
+## Bloom Remote
+
+Use the same fast snapshot workflow for the isolated Remote app:
+
+| Purpose | Command |
+| --- | --- |
+| Build current edits, install and restart Remote | `make remote-fast` |
+| Verify current edits without changing the installed Remote app | `./Tools/remote-build.sh --fast --no-install` |
+| Install current edits without launching | `./Tools/remote-build.sh --fast --no-launch` |
+| Install committed HEAD without launching | `make remote` |
+| Install a specific committed revision without launching | `./Tools/remote-build.sh <ref>` |
+
+`--launch` gracefully quits only the verified Bloom Remote app after its replacement has been
+built, copied and signature-checked. If Remote will not quit, installation stops. Launch uses
+`open -g`. `--no-install` never quits, replaces or launches an app and may run from Remote itself.
+Installation still refuses to replace the app hosting the current agent. `--fast` cannot take a
+revision. The existing `BLOOM_REMOTE_BUILD_ONLY=1` exports `/tmp/Bloom-Remote-ready.app` without
+installing or launching, including in fast mode.
+
+Remote caches survive reboot under `~/Library/Caches/BloomBuild/remote/<checkout-hash>/`;
+committed release builds use the sibling `release/` cache. Each cache has its own lock and
+`build.log`; installations have a shared lock because all caches install the same app. Do not
+remove a lock while its build is running. Fast snapshots include current tracked and nonignored
+untracked files, exclude build caches, and preserve repository symlinks. Identity-transform inputs
+must be regular files without symlink ancestors. Dev and Remote share `Tools/build-snapshot.py`.
+Unchanged transformed sources keep their cache timestamps, preserving incremental compilation.
+
+Both modes retain `be.spatie.bloom.remote`, the existing Bloom Remote data, its saved connection
+preset and client-key path. Remote claims no production URL scheme or Finder services. Normal
+assets, App Intents metadata and all bundled Mac executables are packaged in fast mode too.
+`BloomMasterCommit` uses `<short-hash>-working` in fast mode and the committed hash in release mode.
+
+Provide `BLOOM_LINUX_SERVER_ARCHIVE` for a newly tested Linux runtime. Otherwise the build retains
+the installed Remote app's embedded server archive. A missing archive stops the build, and normal
+packaging rejects a protocol mismatch. The script prints the archive path and SHA-256. Reusing a
+protocol-compatible archive does not establish that it contains current server source changes;
+rebuild and test that archive whenever Linux server code changes. Fast mode rebuilds the Mac
+client and its local executables, while retaining this separately tested Linux payload.
+
+The candidate is signature-verified before publication. Installation stages beside the destination
+and exchanges app directories atomically, so copy/signing/publication failures retain the old app.
+Report whether installation or launch occurred and use the printed candidate path for no-install
+verification. For a warm-build comparison, run the same `--fast --no-install` command twice without
+source changes and compare elapsed time and Swift compilation lines in the same cache's build log.

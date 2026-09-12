@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 public struct PlanArtefactID: Identifier {
     public let rawValue: String

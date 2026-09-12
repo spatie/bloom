@@ -18,6 +18,10 @@ final class RemoteSessionConnection {
     private(set) var isApplying = false
     private(set) var isUploading = false
     private var prepared = false
+    private(set) var supportsAuthenticationChecks = false
+    private(set) var authentication: AgentAuthenticationStatus?
+    var isCurrentServer: Bool { server?.endpoint == endpoint }
+    var signInMessage: String? { isCurrentServer && authentication?.requiresSignIn == true ? authentication?.message : nil }
     let attachmentCache: String
 
     init(server: ServerWindowModel, endpoint: ServerEndpoint, session: Session, workspace: Workspace) {
@@ -29,7 +33,7 @@ final class RemoteSessionConnection {
         attachmentCache = FileManager.default.temporaryDirectory.appendingPathComponent("bloom-remote-previews/\(UUID().uuidString)").path
     }
 
-    var canSend: Bool { server?.isConnected == true && server?.endpoint == endpoint && !isApplying && !isUploading }
+    var canSend: Bool { server?.isConnected == true && server?.isConnecting == false && server?.isPerformingCommand == false && server?.pendingSend(sessionID: sessionID) == nil && server?.endpoint == endpoint && !isApplying && !isUploading }
 
     private func request(_ operation: ServerOperation) async throws -> ServerResult {
         guard let server, server.endpoint == endpoint else { throw ServerFailure("Reconnect to this workspace's server.") }
@@ -38,7 +42,19 @@ final class RemoteSessionConnection {
 
     private func perform(_ operation: ServerOperation) async -> ServerResult? {
         guard let server, server.endpoint == endpoint else { return nil }
-        return await server.perform(operation)
+        let result = await server.perform(operation)
+        if result == nil, let error = server.error, AgentAuthenticationStatus.isSignInFailure(error) {
+            authentication = .init(agent: controls.agentKind, state: .signInRequired)
+        }
+        return result
+    }
+
+    func refreshAuthentication() async {
+        do {
+            guard case .composer(let state) = try await request(.composer(sessionID: sessionID)), isCurrentServer else { return }
+            supportsAuthenticationChecks = state.authentication != nil
+            authentication = state.authentication?.first { $0.agent == controls.agentKind }
+        } catch { if !Task.isCancelled { server?.error = error.localizedDescription } }
     }
 
     func prepare() async {
@@ -48,6 +64,8 @@ final class RemoteSessionConnection {
         do {
             guard case .composer(let state) = try await request(.composer(sessionID: sessionID)) else { return }
             controls = state.controls
+            supportsAuthenticationChecks = state.authentication != nil
+            authentication = state.authentication?.first { $0.agent == controls.agentKind }
             models.receive(state.models, availableAgents: state.availableAgents)
             // Source-file previews require a fetched local copy. Never hand a server path to a
             // component that reads the Mac filesystem.
@@ -63,6 +81,7 @@ final class RemoteSessionConnection {
         defer { isApplying = false }
         switch await perform(.setComposer(sessionID: sessionID, controls: value)) {
         case .accepted:
+            if controls.agentKind != value.agentKind { authentication = nil }
             controls = value
             return nil
         case .created(let session, _, _):
@@ -74,6 +93,15 @@ final class RemoteSessionConnection {
 
     func submit(_ text: String) async -> Bool { await perform(.send(sessionID: sessionID, text: text)) != nil }
     func submit(_ text: String, to id: SessionID) async -> Bool { await perform(.send(sessionID: id, text: text)) != nil }
+    func retryAuthenticationPaused(_ delivery: Delivery) async -> Bool {
+        guard let server, isCurrentServer else { return false }
+        let generation = server.connectionGeneration
+        do {
+            guard case .composer(let state) = try await request(.composer(sessionID: sessionID)),
+                  state.authentication != nil, generation == server.connectionGeneration else { return false }
+            return await perform(.send(sessionID: sessionID, text: delivery.body, retryDeliveryID: delivery.id)) != nil
+        } catch { if !Task.isCancelled { server.error = error.localizedDescription }; return false }
+    }
     func stop() async { _ = await perform(.stop(sessionID: sessionID)) }
     func answer(requestID: String, decision: PermissionDecision) async {
         _ = await perform(.answer(sessionID: sessionID, requestID: requestID, answer: ServerAnswer(decision)))
@@ -84,7 +112,7 @@ final class RemoteSessionConnection {
     func markRead(_ seq: Int) async { _ = try? await request(.markRead(sessionID: sessionID, seq: seq)) }
     func saveDraft(_ text: String) {
         guard server?.endpoint == endpoint else { return }
-        server?.saveRemoteDraft(text, sessionID: sessionID)
+        server?.saveRemoteDraft(text, sessionID: sessionID, endpoint: endpoint)
     }
 
     func newChat() async -> Session? {
@@ -103,7 +131,7 @@ final class RemoteSessionConnection {
 
     func saveDraft(_ text: String, for session: Session) {
         guard server?.endpoint == endpoint else { return }
-        server?.saveRemoteDraft(text, sessionID: session.id)
+        server?.saveRemoteDraft(text, sessionID: session.id, endpoint: endpoint)
     }
 
     func files() async -> [String] {
@@ -118,23 +146,29 @@ final class RemoteSessionConnection {
         isUploading = true
         defer { isUploading = false }
         var paths: [String] = []
-        for source in sources {
-            let data: Data
-            switch source {
-            case .file(let url), .promisedFile(let url, _):
-                let access = url.startAccessingSecurityScopedResource()
-                defer { if access { url.stopAccessingSecurityScopedResource() } }
-                guard try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max <= ServerFileOperations.transferLimit else {
-                    throw ServerFailure("Choose a file up to 8 MB.")
+        do {
+            for source in sources {
+                let data: Data
+                switch source {
+                case .file(let url), .promisedFile(let url, _):
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    guard try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max <= ServerFileOperations.transferLimit else {
+                        throw ServerFailure("Choose a file up to 8 MB.")
+                    }
+                    data = try Data(contentsOf: url)
+                case .image(let bytes, _, _): data = bytes
+                case .text(let text, _): data = Data(text.utf8)
                 }
-                data = try Data(contentsOf: url)
-            case .image(let bytes, _, _): data = bytes
-            case .text(let text, _): data = Data(text.utf8)
+                guard case .text(let path) = try await request(.workspace(workspaceID: workspace.id,
+                    action: .uploadFile(name: source.filename, data: data))) else { throw ServerFailure("The server did not confirm this attachment.") }
+                try cache(data, at: path)
+                paths.append(path)
             }
-            guard case .text(let path) = try await request(.workspace(workspaceID: workspace.id,
-                action: .uploadFile(name: source.filename, data: data))) else { continue }
-            try cache(data, at: path)
-            paths.append(path)
+        } catch {
+            server?.preserveUploadedAttachments(paths, sessionID: sessionID, endpoint: endpoint)
+            let suffix = paths.isEmpty ? "" : " Uploaded files have been kept in your draft."
+            throw ServerFailure(error.localizedDescription + suffix + " Reattach any remaining files after reconnecting.")
         }
         return paths
     }

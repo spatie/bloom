@@ -3,6 +3,7 @@ package gateway
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -54,7 +55,7 @@ func TestRPCRequiresAuthenticationBeforeConnectingAndPreservesIDs(t *testing.T) 
 	count := runtimeFixture(t, f, func(connection net.Conn, request rpcRequest) {
 		json.NewEncoder(connection).Encode(map[string]any{"version": protocolVersion, "id": request.ID, "result": map[string]any{"hello": map[string]string{"name": "test"}}})
 	})
-	body := `{"version":13,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{}}}`
+	body := `{"version":14,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{}}}`
 	if response := f.request("POST", f.config.APIHost, "/v1/rpc", "", "", body); response.Code != 401 {
 		t.Fatal(response.Code)
 	}
@@ -75,8 +76,8 @@ func TestRPCRejectsMalformedAndOversizedBodies(t *testing.T) {
 	token := f.token(t, "control", nil)
 	for _, body := range []string{
 		`{}`, `{"version":8,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{}}}`,
-		`{"version":13,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{},"catalogue":{}}}`,
-		`{"version":13,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{}}}{"extra":true}`,
+		`{"version":14,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{},"catalogue":{}}}`,
+		`{"version":14,"id":"00000000-0000-0000-0000-000000000001","operation":{"hello":{}}}{"extra":true}`,
 	} {
 		if response := f.request("POST", f.config.APIHost, "/v1/rpc", token, "", body); response.Code != 400 {
 			t.Fatal(response.Code)
@@ -84,6 +85,38 @@ func TestRPCRejectsMalformedAndOversizedBodies(t *testing.T) {
 	}
 	if response := f.request("POST", f.config.APIHost, "/v1/rpc", token, "", strings.Repeat("x", maxBody+1)); response.Code != 413 {
 		t.Fatal(response.Code)
+	}
+}
+
+func TestRPCKeepsNegotiatedVersionsAndLimitsHelloDowngrades(t *testing.T) {
+	for _, test := range []struct {
+		name, operation, result              string
+		requestVersion, replyVersion, status int
+	}{
+		{"legacy12", "catalogue", `{"catalogue":{}}`, 12, 12, 200},
+		{"legacy13", "catalogue", `{"catalogue":{}}`, 13, 13, 200},
+		{"helloNegotiation", "hello", `{"failure":{"_0":"Incompatible Bloom server protocol. Update the client and server."}}`, 14, 13, 200},
+		{"noMutationDowngrade", "send", `{"failure":{"_0":"Incompatible Bloom server protocol. Update the client and server."}}`, 14, 13, 502},
+		{"unknownVersion", "hello", `{"failure":{"_0":"Incompatible Bloom server protocol. Update the client and server."}}`, 14, 15, 502},
+		{"wrongHelloVersion", "hello", `{"hello":{"name":"test"}}`, 14, 13, 502},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newFixture(t)
+			count := runtimeFixture(t, f, func(connection net.Conn, request rpcRequest) {
+				if request.Version != test.requestVersion {
+					t.Error("gateway rewrote the client's wire version")
+				}
+				json.NewEncoder(connection).Encode(map[string]any{"version": test.replyVersion, "id": request.ID, "result": json.RawMessage(test.result)})
+			})
+			body := fmt.Sprintf(`{"version":%d,"id":"00000000-0000-0000-0000-000000000001","operation":{"%s":{}}}`, test.requestVersion, test.operation)
+			response := f.request("POST", f.config.APIHost, "/v1/rpc", f.token(t, "control", nil), "", body)
+			if response.Code != test.status {
+				t.Fatal(response.Code, response.Body.String())
+			}
+			if count.Load() != 1 {
+				t.Fatal("gateway retried the request")
+			}
+		})
 	}
 }
 

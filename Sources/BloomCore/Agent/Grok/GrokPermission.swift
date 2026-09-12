@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// Grok's `session/request_permission`, in the vocabulary Bloom's permission prompt already speaks.
 ///

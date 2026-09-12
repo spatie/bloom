@@ -13,7 +13,7 @@ struct FilePreview<Model: WorkspacePaneModel>: View {
     private var absolutePath: String {
         absolutePathOverride ?? (model.workspace.path as NSString).appendingPathComponent(path)
     }
-    private var state: SourceEditorState { SourceEditorState.file(absolutePath) }
+    private var state: SourceEditorState { model.paneStores.sourceFile(absolutePath) }
 
     var body: some View {
         VStack(spacing: 0) {

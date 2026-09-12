@@ -35,7 +35,7 @@ public enum NotificationEvent: String, CaseIterable, Sendable, Hashable, Codable
         case .agentFailed:
             "The agent exited without finishing. A model it does not know, expired credentials, a crash."
         case .setupFailed:
-            "The workspace was created but its setup script exited non-zero, so no agent was started."
+            "The workspace was created, but its setup script failed."
         case .checksFinished:
             "CI on the workspace's pull request went from pending to a result."
         }
@@ -47,7 +47,7 @@ public enum NotificationEvent: String, CaseIterable, Sendable, Hashable, Codable
         case .turnFinished: "The agent finished its turn."
         case .needsInput: "The agent needs something from you before it can carry on."
         case .agentFailed: "The agent stopped without finishing the turn."
-        case .setupFailed: "The setup script failed. The agent was started anyway."
+        case .setupFailed: "The setup script failed. Check its output and run setup again."
         case .checksFinished: "The checks finished."
         }
     }

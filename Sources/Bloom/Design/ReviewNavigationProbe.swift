@@ -67,8 +67,8 @@ enum ReviewNavigationProbe {
             check(expanded.isSuperset(of: ["Sources", "Sources/Nested", "Remembered", "Remembered/Child"]),
                   "opening the file tree did not reveal the active file or preserve previous folders")
             window.contentView = nil
-            let notes = CenterTabStore.shared.showNotes(workspaceID: model.workspace.id)
-            WorkspaceTabsStore.shared.reveal(.tool(notes.id), in: model)
+            let notes = model.paneStores.center.showNotes(workspaceID: model.workspace.id)
+            model.paneStores.tabs.reveal(.tool(notes.id), in: model)
             check(FileReview.activePath(in: model) == nil, "a hidden file tab was treated as active")
             window.contentView = NSHostingView(rootView: FileTreeView(model: model))
             await settle(window)
@@ -84,7 +84,7 @@ enum ReviewNavigationProbe {
         let destination = CodeLocation(path: "File06.swift", line: 19, column: 5)
         await FileReview.openFromDiff(destination, in: model, newTab: false)
         await settle(window)
-        check(CenterTabStore.shared.review(for: model.workspace.id)?.showsAllFiles == true, "definition left the all-files diff")
+        check(model.paneStores.center.review(for: model.workspace.id)?.showsAllFiles == true, "definition left the all-files diff")
         if let text = textViews(in: host).first(where: { $0.string.hasPrefix("let file6Line18 =") }),
            let scroll = scrollView(in: host) {
             let rect = text.convert(text.bounds, to: scroll.contentView)
@@ -107,21 +107,21 @@ enum ReviewNavigationProbe {
                 }
             }
         } else {
-            check(false, "definition target did not render as its own diff row: \(textViews(in: host).map { String($0.string.prefix(28)) }), request=\(String(describing: SourceEditorState.file(model.workspace.path + "/File06.swift").diffRequest)), layouts=\(ReviewRunProbe.preparedLayouts)")
+            check(false, "definition target did not render as its own diff row: \(textViews(in: host).map { String($0.string.prefix(28)) }), request=\(String(describing: model.paneStores.sourceFile(model.workspace.path + "/File06.swift").diffRequest)), layouts=\(ReviewRunProbe.preparedLayouts)")
         }
         await FileReview.openFromDiff(destination, in: model, newTab: true)
         await settle(window)
         check(textViews(in: host).contains { $0.string.hasPrefix("let file6Line18 =") },
               "opening a source tab switched the existing diff into edit mode")
-        check(CenterTabStore.shared.tabs(for: model.workspace.id).contains { $0.isPinnedToPath && $0.path == destination.path },
+        check(model.paneStores.center.tabs(for: model.workspace.id).contains { $0.isPinnedToPath && $0.path == destination.path },
               "forced new-tab navigation reused the diff")
         let outside = CodeLocation(path: "Outside.swift", line: 2, column: 5)
         do {
             try "// outside the loaded diff\nlet outside = 1\n".write(toFile: model.workspace.path + "/Outside.swift", atomically: true, encoding: .utf8)
             await FileReview.openFromDiff(outside, in: model, newTab: false)
-            check(CenterTabStore.shared.tabs(for: model.workspace.id).contains { $0.isPinnedToPath && $0.path == outside.path },
+            check(model.paneStores.center.tabs(for: model.workspace.id).contains { $0.isPinnedToPath && $0.path == outside.path },
                   "a definition outside the diff did not open a new tab")
-            check(SourceEditorState.file(model.workspace.path + "/Outside.swift").request == outside,
+            check(model.paneStores.sourceFile(model.workspace.path + "/Outside.swift").request == outside,
                   "new-tab navigation lost the destination position")
         } catch { check(false, "could not create the outside-diff fixture: \(error)") }
     }
@@ -194,7 +194,7 @@ enum ReviewNavigationProbe {
         let model: WorkspaceModel
 
         var body: some View {
-            if let tab = CenterTabStore.shared.review(for: model.workspace.id) {
+            if let tab = model.paneStores.center.review(for: model.workspace.id) {
                 AllFilesReviewView(model: model, selectedPath: tab.path,
                                    navigationRevision: tab.reviewNavigationRevision)
             }

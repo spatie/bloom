@@ -11,6 +11,8 @@ struct NotesPage: View {
     var couldNotLoad: Bool
     var couldNotSave: Bool
     var hasChanges: Bool
+    var isSaving = false
+    var saveFailure: String?
     var onRetryLoad: () -> Void
     var onRetrySave: () -> Void
 
@@ -81,7 +83,7 @@ struct NotesPage: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
             if couldNotSave {
-                Text(WorkspaceNote.unwritable)
+                Text(saveFailure ?? WorkspaceNote.unwritable)
                     .foregroundStyle(Palette.warning)
                 Button("Try saving again", action: onRetrySave)
                     .buttonStyle(.borderless)
@@ -92,8 +94,8 @@ struct NotesPage: View {
                 Text("Loading notes…")
                     .foregroundStyle(Palette.textSecondary)
             } else {
-                Label(hasChanges ? "Saving…" : "Saved with this workspace",
-                      systemImage: hasChanges ? "ellipsis" : "checkmark")
+                Label(hasChanges ? (isSaving ? "Saving…" : "Draft saved on this device") : "Saved with this workspace",
+                      systemImage: hasChanges ? (isSaving ? "ellipsis" : "doc.text") : "checkmark")
                     .foregroundStyle(Palette.textSecondary)
             }
         }

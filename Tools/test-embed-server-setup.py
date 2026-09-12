@@ -6,13 +6,15 @@ import pathlib
 import re
 import tarfile
 import tempfile
+import subprocess
+import sys
 import unittest
 
 root = pathlib.Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location('embed_server_setup', root / 'Tools/embed-server-setup.py')
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-protocol = int(re.search(r'protocolVersion = (\d+)', (root / 'Sources/BloomCore/Server/ServerProtocol.swift').read_text())[1])
+protocol = int(re.search(r'version = (\d+)', (root / 'Packages/BloomClient/Sources/BloomClient/RemoteCommand.swift').read_text())[1])
 
 
 class PackageTests(unittest.TestCase):
@@ -31,6 +33,13 @@ class PackageTests(unittest.TestCase):
             module.embed(path / 'Bloom.app', archive)
             output = path / 'Bloom.app/Contents/Resources/ServerSetup'
             self.assertTrue((output / 'install-bloom-server.py').is_file())
+            for name in ('install-bloom-server.py', 'install-bloom-browser.py', 'install-bloom-docker.py', 'install-bloom-swap.py'):
+                bundled = (output / name).read_text()
+                self.assertTrue(bundled.startswith('#!/usr/bin/env python3\n'))
+                self.assertIn('class InstallProcessFailure(', bundled)
+                self.assertTrue(bundled.endswith((root / 'Tools' / name).read_text()))
+                result = subprocess.run([sys.executable, '-I', str(output / name), '--help'], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual((output / 'server.tar.gz').read_bytes(), archive.read_bytes())
             self.assertEqual(json.loads((output / 'package.json').read_text())['protocolVersion'], protocol)
 

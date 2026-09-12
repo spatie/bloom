@@ -1,17 +1,7 @@
 import Foundation
+import BloomClient
 
-public struct GitHubRepositoryListing: Codable, Sendable, Identifiable, Equatable {
-    public var nameWithOwner: String
-    public var description: String?
-    public var isPrivate: Bool
-    public var id: String { nameWithOwner }
-
-    enum CodingKeys: String, CodingKey {
-        case nameWithOwner = "full_name"
-        case description
-        case isPrivate = "private"
-    }
-}
+public typealias GitHubRepositoryListing = BloomClient.GitHubRepositoryListing
 
 /// Both creation windows use the execution host's gh account. Tokens never cross the connection.
 public enum GitHubRepositoryBrowser {

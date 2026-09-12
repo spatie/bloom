@@ -183,7 +183,7 @@ struct ChangedFileList<Model: WorkspaceFileListing>: View {
     }
 
     private var followsReviewScroll: Bool {
-        CenterTabStore.shared.review(for: model.workspace.id)?.showsAllFiles == true
+        model.paneStores.center.review(for: model.workspace.id)?.showsAllFiles == true
     }
 
     private var list: some View {

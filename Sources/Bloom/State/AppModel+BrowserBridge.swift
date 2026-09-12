@@ -23,7 +23,7 @@ extension AppModel {
     /// strip.
     func paneCensusForBridge(_ workspaceID: WorkspaceID) async -> PaneCensus? {
         guard let model = paneTarget(workspaceID) else { return nil }
-        let tabs = WorkspaceTabsStore.shared
+        let tabs = model.paneStores.tabs
         let entries = tabs.entries(in: model)
         let selected = tabs.selectedTab(in: model, entries: entries)
         let numbers = browserNumbers(in: model)
@@ -53,9 +53,9 @@ extension AppModel {
     /// pane a later call acts on have to mean the same thing. Two walks written separately can
     /// come to disagree about a split tab, and disagreeing here means reading one page and
     /// reporting another.
-    func browserTabs(in model: WorkspaceModel) -> [CenterTab] {
-        let tabs = WorkspaceTabsStore.shared
-        let centre = CenterTabStore.shared
+    func browserTabs(in model: any WorkspacePaneModel) -> [CenterTab] {
+        let tabs = model.paneStores.tabs
+        let centre = model.paneStores.center
         var found: [CenterTab] = []
         for entry in tabs.entries(in: model) {
             for pane in tabs.layout(of: entry).panes {
@@ -71,7 +71,7 @@ extension AppModel {
     /// The same order as a lookup, which is what both censuses actually want. It was the walk
     /// above plus an `enumerated()` map, written out in each of the two files that argue the walk
     /// must only be written once.
-    func browserNumbers(in model: WorkspaceModel) -> [String: Int] {
+    func browserNumbers(in model: any WorkspacePaneModel) -> [String: Int] {
         var numbers: [String: Int] = [:]
         for (index, tab) in browserTabs(in: model).enumerated() { numbers[tab.id] = index + 1 }
         return numbers
@@ -83,7 +83,7 @@ extension AppModel {
     /// model reads should hold what is there.
     private func describe(
         _ content: PaneContent,
-        in model: WorkspaceModel,
+        in model: any WorkspacePaneModel,
         showing: Bool,
         numbers: [String: Int],
         terminalNumbers: [String: Int]
@@ -96,14 +96,13 @@ extension AppModel {
             return PaneCensusEntry(kind: .chat, name: session.title, isShowing: showing)
 
         case .tool(let id):
-            let centre = CenterTabStore.shared
+            let centre = model.paneStores.center
             guard let tab = centre.tabs(for: model.workspace.id).first(where: { $0.id == id })
             else { return nil }
             let name = centre.displayTitle(of: tab, in: model)
             if tab.kind == .terminal, let number = terminalNumbers[tab.id] {
-                let live = TerminalSplitStore.shared.panes(of: tab.id).contains {
-                    TerminalSessionStore.shared.hasShell(paneID: $0)
-                }
+                let live = model.remoteServer.map { $0.liveTerminal(named: tab.id, workspaceID: model.workspace.id)?.hasExited == false }
+                    ?? TerminalSplitStore.shared.panes(of: tab.id).contains { TerminalSessionStore.shared.hasShell(paneID: $0) }
                 return PaneCensusEntry(
                     kind: .terminal,
                     name: name,
@@ -121,7 +120,7 @@ extension AppModel {
                 kind: .browser,
                 name: name,
                 isShowing: showing,
-                browser: report(tab, number: number, name: name)
+                browser: report(tab, number: number, name: name, center: model.paneStores.center)
             )
         }
     }
@@ -132,8 +131,8 @@ extension AppModel {
     /// The second half is not a fallback for tidiness. A workspace reopened this morning has every
     /// browser tab it had last night, and none of them has a web view until somebody clicks it, so
     /// "the tab is at this address and has not been drawn yet" is the ordinary answer.
-    func report(_ tab: CenterTab, number: Int, name: String) -> BrowserPaneReport {
-        guard let session = CenterTabStore.shared.liveBrowser(for: tab) else {
+    func report(_ tab: CenterTab, number: Int, name: String, center: CenterTabStore) -> BrowserPaneReport {
+        guard let session = center.liveBrowser(for: tab) else {
             return BrowserPaneReport(
                 number: number,
                 name: name,
@@ -190,7 +189,7 @@ extension AppModel {
         // Counted again rather than remembered, because the strip is live: a tab closed between
         // the census above and this line leaves the number naming something else or nothing.
         guard chosen.number <= tabs.count,
-              let session = CenterTabStore.shared.liveBrowser(for: tabs[chosen.number - 1]) else {
+              let session = model.paneStores.center.liveBrowser(for: tabs[chosen.number - 1]) else {
             return .refused(
                 "Browser \(chosen.number) is a tab nobody has opened this session, so there is no "
                     + "page in it yet. It remembers \(chosen.address). Ask the person to click "
@@ -198,7 +197,7 @@ extension AppModel {
             )
         }
         return await perform(
-            command, on: session, tab: tabs[chosen.number - 1], report: chosen
+            command, on: session, tab: tabs[chosen.number - 1], report: chosen, center: model.paneStores.center
         )
     }
 
@@ -207,7 +206,8 @@ extension AppModel {
         _ command: BrowserPaneCommand,
         on session: BrowserSession,
         tab: CenterTab,
-        report: BrowserPaneReport
+        report: BrowserPaneReport,
+        center: CenterTabStore
     ) async -> BrowserPaneAnswer {
         switch command {
         case .read:
@@ -226,7 +226,7 @@ extension AppModel {
             // pane the reader is not looking at has no view mounted to notice the navigation and
             // write the new address into the strip, so a tab moved from here would otherwise keep
             // showing the page it was on.
-            CenterTabStore.shared.setURL(url, for: tab)
+            center.setURL(url, for: tab)
             session.load(url)
             return .told(
                 "Pointed browser \(report.number) at \(url). It is loading now: browser_read says "

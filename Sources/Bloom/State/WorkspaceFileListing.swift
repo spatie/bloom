@@ -5,6 +5,7 @@ import BloomCore
 @MainActor
 protocol WorkspaceFileListing: AnyObject {
     var workspace: Workspace { get }
+    var paneStores: PaneStores { get }
     var changedFiles: [ChangedFile] { get }
     var reviewFiles: [ChangedFile] { get }
     var selectedFilePath: String? { get set }
@@ -30,7 +31,12 @@ protocol WorkspaceFileListing: AnyObject {
     func revertFile(_ file: ChangedFile) async -> String?
 }
 
+extension WorkspaceFileListing {
+    var paneStateID: String { paneStores.identity + ":" + workspace.id.rawValue }
+}
+
 extension WorkspaceModel: WorkspaceFileListing {
+    var paneStores: PaneStores { .local }
     var supportsLocalFileActions: Bool { true }
     var supportsFileRevert: Bool { true }
     var supportsViewedMarks: Bool { true }

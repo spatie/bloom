@@ -168,6 +168,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Release version fixtures compare commit counts across repository history.
+          fetch-depth: 0
 
       # Verbatim from release.yml. Swift 6 language mode, actool for the
       # layered icon and the App Intents metadata processor all come from Xcode,
@@ -260,6 +263,9 @@ jobs:
       # Bloom and BloomCore targets only.
       - name: Build the app target
         run: swift build -Xswiftc -warnings-as-errors
+
+      - name: Check build and release script regressions on macOS
+        run: python3 Tools/run-script-tests.py
 
       - name: Check welcome navigation and window sizing
         run: ./Tools/welcome-layout-probe.sh

@@ -8,9 +8,12 @@ struct ProjectCreationBackend {
     let app: AppModel
     let isRemote: Bool
 
-    func request(_ action: ServerCreationOperation) async throws -> ServerCreationResult {
+    func request(_ action: ServerCreationOperation, requiresConnection: Bool = false) async throws -> ServerCreationResult {
         if isRemote {
             let server = app.remoteServer
+            if requiresConnection, !server.isConnected || server.isConnecting {
+                throw ServerFailure("Connect to the server before choosing a project.")
+            }
             if !server.isConnected { server.connectionMode = .remote; await server.connect() }
             let result: ServerResult
             if action.isMutation {
@@ -98,11 +101,13 @@ final class CreationComposerSource {
     let commands = SlashCommandCatalog()
     let styles = ComposerOutputStyleCatalog()
     var files: [String] = []
+    var authentication: [AgentAuthenticationStatus] = []
 
     func receive(_ context: ServerWorkspaceContext) {
         models.receive(context.composer.models, availableAgents: context.composer.availableAgents)
         commands.receive(context.composer.commands.map { var value = $0; value.path = nil; return value })
         styles.receive(context.composer.styles)
         files = context.files
+        authentication = context.composer.authentication ?? []
     }
 }

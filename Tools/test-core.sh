@@ -30,6 +30,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
+source "$ROOT/Tools/isolated-build.sh"
 TMP="${TMPDIR:-/tmp}"
 ID="${BLOOM_TEST_ID:-$$}"
 
@@ -40,6 +41,7 @@ ID="${BLOOM_TEST_ID:-$$}"
 # so leaving it shared would have re-introduced exactly the corruption the work directory avoids.
 WORK="$TMP/bloom-core-tests-$ID"
 SCRATCH="$TMP/bloom-core-build-$ID"
+bloom_build_lock "$SCRATCH.lock"
 
 # **Both go when this exits, unless the caller named the run.** A build directory is ~750MB and
 # this script made a fresh one per invocation and never removed it; on the machine this was written
@@ -48,10 +50,10 @@ SCRATCH="$TMP/bloom-core-build-$ID"
 # directory kept, because that is what makes a repeated run incremental, and a caller that named it
 # is a caller that knows it is there.
 #
-# `EXIT` alone covers the ordinary end and a `set -e` failure; the signals are the ones a person or
-# an editor sends, and without them a cancelled run keeps its 750MB for ever.
+# The shared lifecycle releases locks and removes disposable paths on failure and cancellation.
+# Named runs retain copied inputs and compiled objects, keeping both stable across invocations.
 if [[ -z "${BLOOM_TEST_ID:-}" ]]; then
-  trap 'rm -rf "$WORK" "$SCRATCH"' EXIT INT TERM HUP
+  BLOOM_BUILD_CLEANUP_PATHS=("$WORK" "$SCRATCH" "$TMP/.bloom-core-tests-$ID-package-structure")
 fi
 
 # What a previous run left when it was killed outright, which no trap can cover. A day, so a run
@@ -59,31 +61,27 @@ fi
 # this is tidying rather than news. The test process sweeps its own scratch the same way: see
 # `TestProcessScratch` in Tests/BloomCoreTests/TestSupport.swift.
 find "$TMP" -maxdepth 1 \( -name 'bloom-core-build-*' -o -name 'bloom-core-tests-*' \
-  -o -name 'bloom-test-run-*' \) -mtime +1 -print0 2>/dev/null \
+  -o -name 'bloom-test-run-*' \) ! -name '*.lock' ! -path "$WORK" ! -path "$SCRATCH" -mtime +1 -print0 2>/dev/null \
   | xargs -0 -n 20 rm -rf 2>/dev/null || true
 
-rm -rf "$WORK"
-mkdir -p "$WORK/Sources" "$WORK/Tests"
-ln -sfn "$ROOT/Sources/BloomCore" "$WORK/Sources/BloomCore"
-# The MCP shim, mirrored alongside. It depends on BloomCore and nothing else, so building it here
-# cannot be stopped by a broken view, which is the whole reason this mirror exists. It is built
-# rather than merely compiled because BridgeShimTests drives the real binary: a shim that is only
-# ever spoken to by another test proves nothing about the process an agent CLI actually launches.
-ln -sfn "$ROOT/Sources/bloom-bridge" "$WORK/Sources/bloom-bridge"
-ln -sfn "$ROOT/Tests/BloomCoreTests" "$WORK/Tests/BloomCoreTests"
-# The tests find a fixture by walking up from their own file, so it has to be reachable
-# from the mirrored Tests directory as well as from the real one.
-ln -sfn "$ROOT/Tests/fixtures" "$WORK/Tests/fixtures"
+# Freeze Git-visible inputs before invoking Swift. Symlinks into the working checkout let
+# another agent edit a dependency halfway through compilation, invalidating the test result.
+# Copy fixtures and other repository inputs too, preserving paths resolved relative to #filePath.
+STAGE="$(mktemp -d "$TMP/bloom-core-stage.XXXXXX")"
+BLOOM_BUILD_STAGE="$STAGE"
+python3 "$ROOT/Tools/build-snapshot.py" snapshot "$ROOT" "$STAGE"
+python3 "$ROOT/Tools/build-snapshot.py" check-inputs "$STAGE" Package.swift
 
-cat > "$WORK/Package.swift" <<'EOF'
+cat > "$STAGE/Package.swift" <<'EOF'
 // swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
     name: "BloomCoreOnly",
     platforms: [.macOS(.v26)],
+    dependencies: [.package(path: "Packages/BloomClient")],
     targets: [
-        .target(name: "BloomCore", swiftSettings: [.swiftLanguageMode(.v6)]),
+        .target(name: "BloomCore", dependencies: [.product(name: "BloomClient", package: "BloomClient")], swiftSettings: [.swiftLanguageMode(.v6)]),
         .executableTarget(
             name: "bloom-bridge",
             dependencies: ["BloomCore"],
@@ -97,6 +95,10 @@ let package = Package(
     ]
 )
 EOF
+
+python3 "$ROOT/Tools/build-snapshot.py" sync "$STAGE" "$WORK"
+rm -rf "$STAGE"
+BLOOM_BUILD_STAGE=""
 
 filters=()
 for name in "$@"; do

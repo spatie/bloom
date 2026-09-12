@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// Each revision keeps its exact text. A handoff refers to that revision even if planning
 /// continues in the original conversation while implementation is running elsewhere.

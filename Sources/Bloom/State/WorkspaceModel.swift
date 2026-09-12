@@ -609,66 +609,14 @@ final class WorkspaceModel {
     /// opened gets, and it would turn "cascade-read" into "Chat 3": this name is the address the
     /// other two crew tools take, so it has to be the one the orchestrator chose.
     ///
-    /// **The nesting rule is checked here as well as in the tool, and only the nesting rule.**
-    /// This method is a second door into the same act, and a door that trusted its caller to have
-    /// checked would be one refactor away from a ring of agents in one worktree. The ceiling and
-    /// the name's uniqueness stay `AgentStartTool`'s alone, weighed there against the same rows a
-    /// moment earlier: which sessions count as running is `CrewCensus`, which the app target
-    /// cannot see, and a second opinion about that would be worse than one. The name goes back
-    /// through `Crew.normalisedName` because that is the same pure function the tool used, so the
-    /// two cannot come out with different strings.
+    /// The shared Store transaction owns parent validation, name/slot reservation, controls and
+    /// the initial brief. Mac and server cannot disagree or create a half-started crew member.
     func startCrewMember(
         _ order: CrewOrder, reportingTo parentID: SessionID
     ) async -> CrewStartOutcome {
         guard let store else { return .refused(Self.crewWithoutStore) }
-        guard let parent = try? await store.session(id: parentID) else {
-            return .refused("The chat that asked for this subagent is not in Bloom any more.")
-        }
-        guard parent.parentSessionID == nil else {
-            return .refused(Crew.sentence(for: .notAnOrchestrator))
-        }
-        guard let name = Crew.normalisedName(order.name) else {
-            return .refused(Crew.sentence(for: .noName))
-        }
-
-        // Whatever the orchestrator is itself on, unless the order named otherwise, which is the
-        // same inheritance `startWorkspaceForBridge` spells out: an agent splitting up its own
-        // work wants help from the thing it already trusts. The backend and the permission mode
-        // come across for a second reason as well, that a crew member is meant to be able to do
-        // what the chat above it can do without a person being asked twice for the same grant.
-        let member = Session(
-            workspaceID: workspace.id,
-            parentSessionID: parentID,
-            title: name,
-            model: order.model ?? parent.model,
-            effort: order.effort ?? parent.effort,
-            agentKind: parent.agentKind,
-            permissionMode: parent.permissionMode,
-            sortOrder: sessions.count
-        )
-        // `upsert` is right here and nowhere else on this path: the row is being created, out of a
-        // value built three lines up, which is the one shape the head of `Store.upsert(_ session:)`
-        // allows it in.
-        guard let stored = try? await store.upsert(member) else {
-            return .refused("Bloom could not open a chat for that subagent.")
-        }
-
-        // The brief joins the queue rather than being sent, exactly as a workspace's opening
-        // prompt does, so there is one ordered route into every conversation in the app. See
-        // `enqueueOpening` and the head of `Delivery`.
-        //
-        // As a crew message rather than a plain body, so the first row of this agent's chat says
-        // who set the task rather than reading as though the owner typed it. `CrewMessage.brief`
-        // is the one that is deliberately not wrapped: it is the instruction this agent exists to
-        // follow, and fencing it off would leave it with no task at all.
-        _ = try? await store.enqueueDelivery(
-            Delivery(
-                targetSessionID: stored.id,
-                sourceWorkspaceID: workspace.id,
-                kind: .message,
-                crew: CrewMessage.brief(from: parent.title, task: order.task)
-            )
-        )
+        let stored: Session
+        do { stored = try await store.startCrewMember(order, parentID: parentID, workspaceID: workspace.id) } catch { return .refused(error.localizedDescription) }
 
         // `activeSessionID` is deliberately left alone, which is the rule `select: false` holds
         // for a workspace the bridge starts: an agent appearing while somebody is typing in
@@ -683,7 +631,7 @@ final class WorkspaceModel {
         await transcript.drain()
 
         return .started(
-            "Started subagent \"\(name)\" in this workspace. Talk to it with agent_say, and Bloom "
+            "Started subagent \"\(stored.title)\" in this workspace. Talk to it with agent_say, and Bloom "
                 + "will tell you here when it stops, with the last thing it said."
         )
     }

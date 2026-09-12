@@ -21,24 +21,22 @@ jobs:
       - name: Install system dependencies
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends libsqlite3-dev pkg-config git python3 patchelf tmux
+          apt-get install -y --no-install-recommends libsqlite3-dev pkg-config git python3 patchelf tmux zsh rsync
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global user.name "Bloom tests"
           git config --global user.email "tests@runbloom.app"
       - name: Build the standalone server
-        run: swift build --product bloom-server -j 4 -Xswiftc -warnings-as-errors
+        run: |
+          swift build --product bloom-server -j 4 -Xswiftc -warnings-as-errors
+          swift build --product bloom-bridge -j 4 -Xswiftc -warnings-as-errors
       - name: Run the server tests
         run: swift test -j 4 -Xswiftc -warnings-as-errors
       - name: Check sustained subprocess descriptor usage
         run: BLOOM_FD_STRESS=1 swift test --skip-build --filter processDescriptorsStayBounded
       - name: Exercise the server executable
         run: python3 Tools/server-smoke.py .build/debug/bloom-server
-      - name: Check service packaging
-        run: |
-          python3 Tools/test-install-bloom-server.py
-          python3 Tools/test-embed-server-setup.py
-          python3 Tools/test-server-packaging.py
-          python3 Tools/test-remote-packaging.py
+      - name: Check script and installer regressions as Linux root
+        run: python3 Tools/run-script-tests.py
       - name: Package the server and its runtime
         run: python3 Tools/package-linux-server.py .build/debug/bloom-server .build/bloom-server-linux-x86_64.tar.gz
       - uses: actions/upload-artifact@v7
@@ -68,3 +66,5 @@ jobs:
           if command -v swift >/dev/null; then exit 1; fi
           tar -xzf package/bloom-server-linux-x86_64.tar.gz -C package
           python3 Tools/server-smoke.py package/bloom-server-linux-x86_64/bin/bloom-server
+          python3 Tools/maintenance-runtime-smoke.py package/bloom-server-linux-x86_64/bin/bloom-server
+          python3 Tools/maintenance-supervisor-smoke.py package/bloom-server-linux-x86_64/bin/bloom-server --disposable-container

@@ -67,7 +67,7 @@ public enum ServerSetupSSH {
             "-o", "PreferredAuthentications=publickey",
         ]
         if let identity = try validateIdentityFile(identityFile ?? "") {
-            arguments += ["-o", "IdentitiesOnly=yes", "-i", identity]
+            arguments += ["-o", "IdentityAgent=none", "-o", "IdentitiesOnly=yes", "-i", identity]
         }
         arguments += ["--", host, command]
         return arguments

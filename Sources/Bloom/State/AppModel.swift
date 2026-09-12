@@ -77,14 +77,21 @@ final class AppModel {
             // Observation treats an identical assignment as a mutation. A click on the selected
             // sidebar row can arrive here again, and without this guard it writes defaults,
             // rebuilds the subagent rows and starts another settings read for no state change.
-            guard newValue != storedSelection else { return }
+            guard newValue != storedSelection else {
+                if !newValue.isRemote {
+                    pendingRemoteSelection = nil
+                    SidebarSelectionMemory.clearRemote(in: .standard)
+                }
+                return
+            }
             if let id = newValue.workspaceID, id != storedSelection.workspaceID {
                 SwitchTrace.begin(workspaceID: id)
             }
             let vacated = storedSelection.workspaceID
             storedSelection = newValue
             if let id = newValue.remoteWorkspaceID { remoteServer.selectWorkspace(id) } else { remoteServer.selectedSessionID = newValue.remoteSessionID }
-            Self.rememberSelection(newValue)
+            pendingRemoteSelection = nil
+            SidebarSelectionMemory.remember(newValue, in: .standard)
             // Opening or closing a subagent's pane changes which rows are exempt from being
             // removed. See `SubagentRetention`: the row you are reading stays. Both workspaces,
             // because moving away from one leaves a row there that is no longer being read.
@@ -113,52 +120,45 @@ final class AppModel {
 
     // MARK: - Remembering where you were
 
-    private static let lastWorkspaceKey = "sidebar.lastWorkspaceID"
-    private static let lastRemoteSessionKey = "sidebar.lastRemoteSessionID"
-    private static let lastRemoteWorkspaceKey = "sidebar.lastRemoteWorkspaceID"
+    private var pendingRemoteSelection: SidebarSelection?
 
-    /// Only a workspace is worth remembering. Home and Search are where you go when you are
-    /// looking for something, so reopening on them would be reopening on a question rather than
-    /// on the work.
-    private static func rememberSelection(_ selection: SidebarSelection) {
-        if let id = selection.remoteWorkspaceID {
-            UserDefaults.standard.set(id.rawValue, forKey: lastRemoteWorkspaceKey)
-            UserDefaults.standard.removeObject(forKey: lastRemoteSessionKey)
-            return
-        }
-        if let remote = selection.remoteSessionID {
-            UserDefaults.standard.set(remote.rawValue, forKey: lastRemoteSessionKey)
-            return
-        }
-        guard let id = selection.workspaceID else { return }
-        // `rawValue`, not the id itself. User defaults takes an `Any` and only checks at runtime,
-        // so handing it a `WorkspaceID` compiles and then raises inside `NSUserDefaults`, which
-        // AppKit turns into a trap during the layout pass. Every sidebar click reaches this line,
-        // so the app died on selecting any workspace at all.
-        UserDefaults.standard.removeObject(forKey: lastRemoteSessionKey)
-        UserDefaults.standard.removeObject(forKey: lastRemoteWorkspaceKey)
-        UserDefaults.standard.set(id.rawValue, forKey: lastWorkspaceKey)
-    }
-
-    /// Reselects the workspace this window was last on.
-    ///
-    /// Validated against the loaded list rather than trusted: the workspace may have been archived
-    /// since, either from here or by someone deleting the worktree, and selecting an id that no
-    /// longer exists would leave the window on an empty detail column with a sidebar that agrees
-    /// with nothing.
+    /// A saved server ID is restored only after that server returns its catalogue.
     private func restoreLastSelection() {
         guard case .home = storedSelection else { return }
-        if remoteServer.isConfigured, let id = UserDefaults.standard.string(forKey: Self.lastRemoteWorkspaceKey) {
-            selection = .remoteWorkspace(WorkspaceID(id))
+        if remoteServer.isConfigured, let saved = SidebarSelectionMemory.savedRemote(in: .standard) {
+            pendingRemoteSelection = saved
+            reconcileRemoteSelection()
             return
         }
-        if remoteServer.isConfigured, let remote = UserDefaults.standard.string(forKey: Self.lastRemoteSessionKey) {
-            selection = .remote(SessionID(rawValue: remote))
-            return
-        }
-        guard let id = UserDefaults.standard.string(forKey: Self.lastWorkspaceKey).map(WorkspaceID.init),
+        SidebarSelectionMemory.clearRemote(in: .standard)
+        guard let id = UserDefaults.standard.string(forKey: SidebarSelectionMemory.localWorkspaceKey).map(WorkspaceID.init),
               workspaces.contains(where: { $0.id == id }) else { return }
         selection = .workspace(id)
+    }
+
+    /// Forget navigation to a removed server without touching local history or unsent drafts.
+    func clearRemoteSelection() {
+        pendingRemoteSelection = nil
+        SidebarSelectionMemory.clearRemote(in: .standard)
+        if selection.isRemote { selection = .home }
+    }
+
+    func reconcileRemoteSelection() {
+        guard remoteServer.isConnected, let catalogue = remoteServer.catalogue else { return }
+        let candidate = pendingRemoteSelection ?? (selection.isRemote ? selection : nil)
+        guard let candidate else { return }
+        let exists = SidebarSelectionMemory.contains(
+            candidate, workspaceIDs: Set(catalogue.workspaces.map(\.id)),
+            sessionIDs: Set(catalogue.sessions.filter { session in
+                catalogue.workspaces.contains { $0.id == session.workspaceID }
+            }.map(\.id))
+        )
+        if !exists {
+            clearRemoteSelection()
+        } else if pendingRemoteSelection != nil {
+            pendingRemoteSelection = nil
+            selection = candidate
+        }
     }
 
     /// Window chrome, not per-workspace state.
@@ -406,6 +406,7 @@ final class AppModel {
 
     func bootstrap() async {
         Self.probeInstance = self
+        remoteServer.onCatalogueChanged = { [weak self] in self?.reconcileRemoteSelection() }
         guard store == nil else { return }
         let began = Date()
         do {
@@ -1106,7 +1107,7 @@ final class AppModel {
         remoteServer.activateSession(id, in: workspaceID)
         if let workspace = remoteServer.workspaceModel(app: self) {
             workspace.prepareTranscript(for: id)
-            WorkspaceTabsStore.shared.reveal(.chat(id), in: workspace)
+            workspace.paneStores.tabs.reveal(.chat(id), in: workspace)
         }
     }
 

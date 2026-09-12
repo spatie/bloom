@@ -1,36 +1,15 @@
 import Foundation
+import BloomClient
 
-/// Public facts only. Command output, environment variables and credentials never cross the wire.
-public struct ServerDiagnostics: Codable, Sendable, Equatable {
-    public struct Check: Codable, Sendable, Equatable, Identifiable {
-        public enum Status: String, Codable, Sendable { case ready, attention, unavailable }
-        public enum Kind: String, Codable, Sendable { case git, tmux, github, docker, agents, disk, memory, watches }
-        public var id: Kind
-        public var title: String
-        public var status: Status
-        public var detail: String
-    }
-
-    public var checkedAt: Date
-    public var hostname: String
-    public var operatingSystem: String
-    public var account: String
-    public var checks: [Check]
-
-    public var needsAttention: Bool { checks.contains { $0.status == .attention } }
-    public var summary: String { needsAttention ? "Some checks need attention" : "Server checks complete" }
-    public var text: String {
-        (["\(hostname) (\(operatingSystem)), account \(account)"] + checks.map {
-            "\($0.title) [\($0.status.rawValue)]: \($0.detail)"
-        }).joined(separator: "\n")
-    }
-}
+public typealias ServerDiagnostics = BloomClient.ServerDiagnostics
 
 public enum ServerDiagnosticsCollector {
     typealias Probe = @Sendable (String, [String]) async -> Bool?
 
-    public static func collect(directory: String) async -> ServerDiagnostics {
-        await collect(directory: directory, probe: probe)
+    public static func collect(directory: String, authentication: [AgentAuthenticationStatus]? = nil) async -> ServerDiagnostics {
+        var result = await collect(directory: directory, probe: probe)
+        result.authentication = authentication
+        return result
     }
 
     static func collect(directory: String, probe: @escaping Probe) async -> ServerDiagnostics {
@@ -42,7 +21,7 @@ public enum ServerDiagnosticsCollector {
             tool(.git, "Git", git, required: true, missing: "Install Git to create workspaces.", failed: "Git could not run under the server account."),
             tool(.tmux, "Terminals", tmux, required: true, missing: "Install tmux for persistent terminals.", failed: "tmux could not run under the server account."),
             tool(.github, "GitHub", github, required: false, missing: "Install gh to browse and clone private GitHub repositories.", failed: "GitHub authentication failed or could not be checked. Run gh auth login as the server account."),
-            tool(.docker, "Docker", docker, required: false, missing: "Docker is optional. Install it for projects with container setup scripts.", failed: "The Docker daemon could not be reached. Check the server account's Docker context and service."),
+            dockerCapability(docker),
         ]
         let agents = ["claude", "codex", "opencode", "pi"].filter { Shell.which($0) != nil }
         checks.append(.init(id: .agents, title: "Agents", status: agents.isEmpty ? .attention : .ready,
@@ -58,7 +37,8 @@ public enum ServerDiagnosticsCollector {
         #endif
         return ServerDiagnostics(checkedAt: Date(), hostname: ProcessInfo.processInfo.hostName,
                                  operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
-                                 account: NSUserName(), checks: checks)
+                                 account: NSUserName(), checks: checks, browser: browserReadiness(), storageManagement: true,
+                                 maintenanceManagement: ServerMaintenanceRoute.available(directory: directory) != nil)
     }
 
     private static func probe(_ executable: String, _ arguments: [String]) async -> Bool? {
@@ -71,7 +51,18 @@ public enum ServerDiagnosticsCollector {
 
     static func tool(_ id: ServerDiagnostics.Check.Kind, _ title: String, _ result: Bool?, required: Bool, missing: String, failed: String) -> ServerDiagnostics.Check {
         .init(id: id, title: title, status: result == true ? .ready : (result == nil && !required ? .unavailable : .attention),
-              detail: result == true ? "Available to the server account." : (result == nil ? missing : failed))
+              detail: result == true ? (id == .github ? "Signed in to GitHub as the server account." : "Available to the server account.") : (result == nil ? missing : failed))
+    }
+
+    /// A globally installed CLI does not mean this account has configured a Docker daemon.
+    /// Container requirements belong to project setup, not the baseline server connection.
+    static func dockerCapability(_ available: Bool?) -> ServerDiagnostics.Check {
+        if available == true {
+            return .init(id: .docker, title: "Docker", status: .ready, detail: "Available to the server account.")
+        }
+        let reason = available == nil ? "Docker is not installed." : "No Docker daemon is available to this server account."
+        return .init(id: .docker, title: "Docker", status: .unavailable,
+                     detail: reason + " Docker is optional. Configure it when a project's setup requires containers; local processes can run without it.")
     }
 
     static func disk(freeBytes: UInt64?) -> ServerDiagnostics.Check {

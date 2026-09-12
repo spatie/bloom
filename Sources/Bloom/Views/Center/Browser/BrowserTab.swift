@@ -29,8 +29,8 @@ enum BrowserTab {
     /// then do nothing at all rather than say so.
     static func placement(of pane: String?, in model: (any WorkspacePaneModel)?) -> TranscriptLinkPlacement {
         guard let model else { return .detached }
-        guard let pane, let tab = WorkspaceTabsStore.shared.selectedTab(in: model),
-              WorkspaceTabsStore.shared.layout(of: tab).contains(pane) else { return .column }
+        guard let pane, let tab = model.paneStores.tabs.selectedTab(in: model),
+              model.paneStores.tabs.layout(of: tab).contains(pane) else { return .column }
         return .pane
     }
 
@@ -54,7 +54,7 @@ enum BrowserTab {
     /// for the moment between the menu opening and an item being chosen.
     static func split(_ url: URL, in model: any WorkspacePaneModel, pane: String, axis: SplitAxis) {
         guard canOpen(url) else { return }
-        let tabs = WorkspaceTabsStore.shared
+        let tabs = model.paneStores.tabs
         guard let tab = tabs.selectedTab(in: model), tabs.layout(of: tab).contains(pane) else {
             return
         }
@@ -88,17 +88,17 @@ enum BrowserTab {
     /// have is `BrowserPopups`, which has already answered by the time this is called.
     static func openWindow(_ url: URL, in model: any WorkspacePaneModel) {
         guard canOpen(url) else { return }
-        let tab = CenterTabStore.shared.add(
+        let tab = model.paneStores.center.add(
             kind: .browser, workspaceID: model.workspace.id, url: url.absoluteString
         )
-        WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
+        model.paneStores.tabs.reveal(.tool(tab.id), in: model)
     }
 
     /// Reuse a preview already at this origin, leaving other browser tabs alone.
     static func openPreview(in model: any WorkspacePaneModel) {
         Task {
             guard let address = WorkspacePreview.address(port: await model.ensurePort()) else { return }
-            let tabs = CenterTabStore.shared
+            let tabs = model.paneStores.center
             tabs.load(workspaceID: model.workspace.id)
             let existing = tabs.tabs(for: model.workspace.id).first {
                 guard $0.kind == .browser, let url = BrowserAddress.url(from: $0.url) else { return false }
@@ -108,9 +108,9 @@ enum BrowserTab {
                 let session = tabs.browser(for: existing, root: model.remoteServer == nil ? model.workspace.path : "",
                     resolve: model.browserAddressResolver)
                 if session.failure != nil { session.reload() }
-                WorkspaceTabsStore.shared.reveal(.tool(existing.id), in: model)
+                model.paneStores.tabs.reveal(.tool(existing.id), in: model)
             } else {
-                NewPane.open(.browser, in: model, url: address) { WorkspaceTabsStore.shared.reveal($0, in: model) }
+                NewPane.open(.browser, in: model, url: address) { model.paneStores.tabs.reveal($0, in: model) }
             }
         }
     }
@@ -150,7 +150,7 @@ enum BrowserTab {
     /// its own to be beside.
     static func splitFile(_ path: String, in model: any WorkspacePaneModel, axis: SplitAxis) {
         guard let address = LocalPage.address(forFile: path) else { return }
-        let tabs = WorkspaceTabsStore.shared
+        let tabs = model.paneStores.tabs
         guard let tab = tabs.selectedTab(in: model) else { return }
         let pane = tabs.focusedPane(of: tab)
         NewPane.open(.browser, in: model, url: address) { content in
@@ -162,7 +162,7 @@ enum BrowserTab {
     /// doors above so that a page and a link land in the same tab, which is what stops a worktree
     /// full of reports from opening a strip full of browsers.
     private static func show(_ address: String, in model: any WorkspacePaneModel) {
-        let tabs = CenterTabStore.shared
+        let tabs = model.paneStores.center
         let existing = tabs.tabs(for: model.workspace.id).last { $0.kind == .browser }
         let tab: CenterTab
         if let existing {
@@ -174,6 +174,6 @@ enum BrowserTab {
             tab = tabs.add(kind: .browser, workspaceID: model.workspace.id, url: address)
         }
 
-        WorkspaceTabsStore.shared.reveal(.tool(tab.id), in: model)
+        model.paneStores.tabs.reveal(.tool(tab.id), in: model)
     }
 }

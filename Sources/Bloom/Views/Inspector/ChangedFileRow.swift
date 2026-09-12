@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import BloomCore
+import BloomUI
 
 /// One changed file: git's own status letter, the filename, and what it cost in lines.
 ///
@@ -57,8 +58,9 @@ struct ChangedFileRow: View, Equatable {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: InspectorLayout.gap) {
+            BloomFileRow(spacing: InspectorLayout.gap) {
                 glyph
+            } name: {
                 // No colour of its own: the list already set the row's foreground, and a pinned
                 // label colour would stay dark on the accent fill.
                 Text(file.filename)
@@ -72,7 +74,7 @@ struct ChangedFileRow: View, Equatable {
                     // already made the row the loudest thing in the list and dimming its name
                     // against that reads as unreadable rather than as quiet.
                     .opacity(isViewed && !isOnSelection ? InspectorLayout.viewedOpacity : 1)
-                Spacer(minLength: Metrics.spacingSmall)
+            } trailing: {
                 if isViewed {
                     Image(systemName: "checkmark.circle.fill")
                         .font(Typo.micro)

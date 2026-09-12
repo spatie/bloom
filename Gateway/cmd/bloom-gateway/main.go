@@ -51,9 +51,12 @@ func main() {
 		log.Fatal(err)
 	}
 	server := &http.Server{Addr: config.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 32 << 10}
+	shutdownDone := make(chan struct{})
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(signals)
 	go func() {
+		defer close(shutdownDone)
 		for sig := range signals {
 			if sig == syscall.SIGHUP {
 				fresh, err := gateway.LoadConfig(*path)
@@ -69,13 +72,15 @@ func main() {
 			}
 			cancel()
 			ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
-			server.Shutdown(ctx)
+			if err := server.Shutdown(ctx); err != nil {
+				log.Printf("HTTP shutdown did not finish: %v", err)
+			}
 			stop()
 			return
 		}
 	}()
 	log.Printf("Bloom gateway listening on %s", config.Listen)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := serveHTTP(server.ListenAndServe, shutdownDone); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -1,5 +1,7 @@
 # Standalone server preview
 
+Client implementers: see [the wire protocol guide](SERVER-PROTOCOL.md) and [schemas and Python example](../Protocol/README.md).
+
 Bloom can connect to a standalone server while its existing local workspaces remain available.
 The server owns its agent processes, worktrees and SQLite database. Closing the server window,
 quitting the Mac client or disconnecting SSH leaves those agents running.
@@ -11,15 +13,26 @@ moved into this server. New server workspaces can run locally or on another mach
 
 ## Add Server assistant
 
-Choose Add Server, enter `root@server-ip` (or an administrative SSH account with passwordless
+Choose **+** in the bottom-left sidebar footer, then **Add Server…**. The same command is available
+in the File menu and the workspace destination menu, including when a server is already connected.
+It introduces remote workspaces and explains the requirements before asking for connection details.
+Choose **Get Started**, then enter `root@server-ip` (or an administrative SSH account with passwordless
 sudo), and select a key or use your SSH agent. Existing trusted host keys are copied into the
 app's private trust store. New hosts show their Ed25519 fingerprint for explicit verification;
 changed and revoked keys are refused. Automatic first-time key discovery supports direct IPv4
 and DNS connections; advanced SSH routes need their host verified with SSH first.
 
+Create the Ubuntu machine with your hosting provider first; Bloom installs and configures the
+software on that machine. Saved connection profiles retain earlier servers when you add another.
+Use **Server Settings > Saved servers**, or **Switch Server** in the server's sidebar menu, to
+change the active remote connection. This Mac's projects remain available alongside it. Profiles
+contain addresses and references to local key files, never the private key contents or access tokens.
+
 The assistant checks Ubuntu 24.04/26.04 x86_64, systemd, administrator access, free disk space and
-existing installation ownership. Set Up Server uploads the package bundled with Bloom, verifies
-its checksum, installs Git, tmux, gh, Node and npm, and creates a dedicated `bloom` account. The
+existing installation ownership. Results stay with the editable connection details. Review Installation
+shows the changes before Confirm and Install uploads the bundled package, verifies its checksum,
+prepares Git, tmux, gh, Node and npm, and creates a dedicated `bloom` account. Compatible tools are
+reused, including npm bundled with NodeSource's Node package; only missing packages are installed. The
 account has no sudo privileges. Its home, data and SSH keys are private; the app generates a
 separate client key and uploads only its public half. Normal connections and agents run as that
 account. No TCP control listener or public development port is opened.
@@ -30,11 +43,80 @@ browsing an empty server, but private GitHub repositories and agent turns requir
 sign-ins. Reopen Guided Setup to return to the account step for a managed server. The final step
 opens Bloom's existing repository picker.
 
-Failures retain the address and selected key. Installation progress is bounded, and raw SSH or
-package-manager output is not copied into alerts. Repeating a successful installation of the same
+Existing-server sign-ins are under **Server Settings > Accounts**, the first settings section.
+The GitHub repository picker links to the same account screen when authentication is needed.
+GitHub, Codex and Claude use one shared sign-in view in setup and settings. Installation locations
+are shown directly in the review step. Optional browser, Docker or swap availability does not block
+connecting to the core server.
+
+**Add 2 GB of swap** is selected by default when the server check finds no active or configured
+swap. It provides extra room during memory spikes, including development builds, and can be
+turned off. Existing active swap and inactive swap configuration are preserved. An unknown check
+result never opts the server into swap provisioning.
+
+Swap uses a root-owned `/var/lib/bloom/swapfile` and a dedicated systemd swap unit for subsequent
+boots. It stays outside the service account's writable home because that account must not be able
+to replace a file activated by root. Provisioning requires 4 GiB free on ext4 or XFS: 2 GiB for the
+file and 2 GiB remaining disk space. Unsupported filesystems or insufficient space produce a
+copyable error and retry action, while the rest of setup can continue. Bloom never disables
+existing swap or rewrites unrelated swap settings.
+
+The optional browser step installs a pinned agent-browser and Chrome for the service account,
+then verifies the browser sandbox and a screenshot. A browser setup failure leaves the core
+server usable and offers a retry. This host browser is separate from browser tooling inside a
+project's Docker container. See [browser provisioning](SERVER-BROWSER.md) for the boundaries.
+
+**Docker for container projects** is selected by default during installation and can be turned off. This installs
+Ubuntu's Docker, Compose and rootless dependencies, reserves subordinate user/group IDs and enables
+a separate lingering user service. Images and container data live under `~/bloom/docker/data`.
+Bloom never joins the rootful Docker group or exposes a public Docker socket. Ordinary Docker
+commands use the service account's private rootless context.
+
+On macOS, a Docker-related workspace setup failure offers **Start Docker** beside the retry action.
+It starts only an existing, managed rootless user service. If that service is missing, the recovery
+window offers explicit administrator SSH setup, preserving the selected server's host-key pin.
+Successful recovery can rerun setup in the original workspace. Administrator privileges are needed
+for initial provisioning; restarting an already configured user service does not need root.
+
+Repository setup still comes from the selected branch. Bloom does not rewrite a project's macOS
+setup script into a Linux one. Container-ready branches should commit their `.bloom/settings.toml`
+and setup script, including creation of development environment files when required.
+
+### Storage and cleanup
+
+**Server Settings > Storage & Cleanup** shows capacity on the filesystem containing Bloom's data,
+alongside Docker's image, container, volume and build-cache usage. Docker categories share layers
+and cannot be added together. Reclaimable build-cache sizes are estimates; image reclaimability
+is deliberately not presented because Docker can report it incorrectly for active images.
+
+The reader selects build cache or unused images, reviews the current server, then confirms cleanup.
+Cleanup uses only that account's verified, private rootless Docker engine. It never removes
+containers, volumes, workspace files, uploads, credentials or swap. Images referenced by either
+running or stopped containers stay available. Later builds may need to recreate caches or download
+images again. Retained data from archived workspaces is not automatically deleted by this panel.
+
+Only one cleanup runs at a time. Failed or interrupted operations retain per-category outcomes,
+with a copyable report and a refresh action. Closing settings does not revoke an already confirmed
+cleanup. The server API supports both SSH and authenticated HTTPS clients; older servers without
+the storage capability show an update-required state instead of receiving an unknown command.
+
+Failures retain the address and selected key. A step list and selectable live output remain visible
+during installation. Structured errors retain the sanitised command, exit status and diagnostic tail;
+Copy Error retains the failure diagnostic; Copy Output sits beside the live log. Credential patterns and terminal
+control sequences are filtered before display or copying. The retained log is bounded to 1,000 lines
+and 256 KiB. Back preserves completed installation work and returns to account setup without reinstalling.
+
+The standalone installers emit JSON lines: `progress` events carry `step` and `message`, `output`
+events carry live command lines, and `error` events include `code`, `message`, `recovery` and optional
+`command`, `exitStatus` and `details`. The app recognises a final `complete` event only after a successful
+process exit. Browser and server installers embed the same subprocess/output helper, so they need no
+additional Python package on the server. These setup events are separate from the workspace RPC protocol.
+
+Repeating a successful installation of the same
 package adds the client key if needed and reuses the service. Updating a different package refuses
 a running server; stop it when idle before retrying. Startup failure restores the prior binary and
-database. This conservative update path does not yet provide a maintenance-mode handover.
+database. This administrator installer is also the bootstrap and repair path for the protected
+maintenance supervisor. Routine supported updates use the server-owned jobs described below.
 
 Release builds bundle a matching Ubuntu package automatically. Development builds can set
 `BLOOM_LINUX_SERVER_ARCHIVE=/absolute/path/bloom-server-linux-x86_64.tar.gz` before building the
@@ -49,15 +131,32 @@ connection settings. The assistant configures SSH; HTTPS gateway deployment rema
 `make remote` builds a pinned release copy at `~/Applications/Bloom Remote.app`. It has its own
 bundle identifier, preferences, database fallback and local background service. It launches the regular
 Bloom interface, with local and remote workspaces together in its normal sidebar. Installation
-does not restart any running app.
+does not restart any running app by default. For everyday development, `make remote-fast` snapshots
+current edits into a persistent debug cache, builds and verifies the full app, then gracefully
+restarts only Bloom Remote with `open -g`. Use `Tools/remote-build.sh --fast --no-install` to verify
+without touching the installed app, or `--fast --no-launch` to install while Remote is closed.
+Fast mode uses four compiler jobs and a cache per checkout under
+`~/Library/Caches/BloomBuild/remote/`. It retains normal assets and App Intents metadata. Release
+mode still builds the selected committed revision; fast mode cannot take a revision.
+
+Both modes preserve the installed connection preset and client-key path. Set
+`BLOOM_LINUX_SERVER_ARCHIVE` to a tested server archive, or the build reuses the installed Remote
+app's embedded payload. Missing packages and protocol mismatches stop the build. Its printed
+archive SHA identifies the payload; protocol compatibility alone does not mean its server code
+matches current edits. Server changes require a newly tested Linux archive.
+
+Fast mode never replaces its own hosting app. `--no-install` is safe from a Remote-hosted session.
+Candidate copying/signing finishes before installation, and an atomic directory exchange retains
+the previous app if publication fails. `BLOOM_REMOTE_BUILD_ONLY=1` remains supported and exports
+`/tmp/Bloom-Remote-ready.app` without installation or launch.
 
 The first build can embed a connection preset. These values are connection addresses, not agent
 credentials, and subsequent builds preserve the installed preset unless explicitly overridden:
 
 ```sh
 BLOOM_REMOTE_HOST=developer@server \
-BLOOM_REMOTE_EXECUTABLE=/opt/bloom-server/bin/bloom-server \
-BLOOM_REMOTE_DIRECTORY=/var/lib/bloom/data \
+BLOOM_REMOTE_EXECUTABLE=/home/bloom/bloom/server/current/bin/bloom-server \
+BLOOM_REMOTE_DIRECTORY=/home/bloom/bloom/data \
 BLOOM_REMOTE_REPOSITORY=/srv/repository \
 make remote
 ```
@@ -74,6 +173,49 @@ Names, colours, pins, unread marks and archive status live on the server. Collap
 and tab layouts stay on each client. Archive confirmations are computed and rechecked on the
 server; archived workspaces can be restored with their conversation history and notes.
 
+### Guided installation layout
+
+The Mac assistant shows five steps throughout: Introduction, Server, Installation, Accounts and
+Finish. Continue moves between pages; Install is the explicit action that changes the server.
+The Accounts step first offers credential copying, then a separate page for individual sign-ins.
+Import results finish with Done, including partial results, before account status is refreshed.
+
+Remove Server in the sidebar asks for confirmation and forgets only this Mac's saved connection.
+It leaves server processes, projects and credentials alone, and retains local drafts and key
+files. Removed bundled presets stay removed on relaunch. Other saved connections remain available
+under the sidebar footer's Saved Servers menu.
+
+Server checks keep the problem and available actions visible. Hover over a circled question mark
+for recovery details, or click it to open selectable text and Copy Details. Copy Report still
+includes every check and its full recovery instructions.
+
+For an existing managed installation, Stop Server asks for confirmation and uses the verified
+administrator SSH connection. It verifies the service ownership and checks for work before
+stopping that service, then refreshes installation checks. It refuses manually managed processes,
+unknown service state and observed active work. This is an explicit administrative stop, not an
+atomic maintenance mode: another client can start work after the final activity check. Connected
+clients disconnect; projects and conversations remain on disk. Installation starts the service
+again. Installation itself never stops a running server automatically.
+
+The wizard creates the `bloom` service account with `/home/bloom` as its home. Bloom-owned runtime
+and state use `~/bloom`:
+
+- `~/bloom/server/current/bin/bloom-server`: the installed server executable.
+- `~/bloom/data`: server database and runtime data.
+- `~/bloom/data/repositories`: imported GitHub repositories, unless a project directory was explicitly configured.
+- `~/bloom/workspaces.noindex`: workspace checkouts.
+- `~/bloom/data/browser`: mutable browser profiles and state.
+
+The wizard shows the full installation paths before confirmation. Runtime files are written as
+the service user; the installer verifies packages in a private administrator directory before
+handing them over. Installation ownership metadata remains protected at
+`/etc/systemd/system/bloom-installations/bloom-server.json` alongside the service integration.
+
+System packages and systemd journals stay in their OS locations. The reviewed sandboxed browser
+bundle stays root-owned at `/opt/bloom-browser`, because its protected launchers and AppArmor
+profile depend on trusted executable paths. Agent CLIs use `~/.local/bin`; GitHub, Codex and Claude
+use their supported credential locations under the service account's home.
+
 ### Standalone executable
 
 From the repository:
@@ -88,7 +230,26 @@ mkdir -m 700 "$HOME/.bloom-server"
 
 The server runs in the foreground. Install and authenticate the agent CLIs, git and gh on the
 server machine under the same user account. The server uses those credentials and the existing
-Bloom agent backends. It does not transfer credentials from the client.
+Bloom agent backends.
+
+The Mac setup wizard and **Server Settings > Accounts** offer **Use Accounts from This Mac**.
+Opening the chooser lists GitHub account metadata and checks for a file-based Codex sign-in.
+Nothing is selected by default. Importing is a separate action that names the destination server.
+GitHub's own CLI reads the selected account token; Codex imports only its supported file-based
+cache. Claude uses its supported sign-in flow instead of exporting private Keychain entries.
+
+Credentials travel directly over SSH with the saved host-key pin, as the installed service user,
+never as the setup administrator. They are excluded from command arguments, application logs,
+clipboard and Bloom's database. Existing server sign-ins are preserved rather than overwritten.
+The result distinguishes successful import from verification that could not finish.
+
+This is intended for servers you trust. Server administrators and code running as the same Bloom
+user can use the imported credentials with their original permissions. SSH encryption and private
+file permissions do not isolate credentials from that user. Signing out on the server removes its
+stored copy; revoking the token with the provider invalidates it and may also sign out the Mac.
+A separate provider sign-in remains available, including when the local tool uses a credential
+store that cannot be imported. iPhone and iPad clients use accounts already configured on the
+server and do not need a copy of those credentials.
 
 Use a dedicated data directory owned by the server user with mode 700. The database is named
 `server.sqlite`. Do not point the desktop app at that database. An exclusive process lock is
@@ -294,7 +455,7 @@ use the previous protocol until the app and server are upgraded together.
 
 ## Protocol and ownership
 
-`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values (currently version 12). A protocol mismatch
+`ServerRequest` and `ServerReply` are versioned, newline-delimited JSON values. `BloomWire.version` declares the wire version. A protocol mismatch
 is refused before dispatch. Commands and replies carry UUIDs, so a long setup command does not
 block transcript reads or controls on the same connection.
 
@@ -305,8 +466,8 @@ does not silently execute a possibly completed command again. Receipts currently
 server database without automatic expiry.
 
 `ServerRuntime` owns one `ServerSession` per session ID. Each owns one runner and event consumer.
-Client disconnect does not cancel those tasks. A second prompt while a turn is busy is refused;
-server-side prompt queuing is not implemented yet. Permission answers are checked against current
+Client disconnect does not cancel those tasks. A second prompt while a turn is busy enters the
+durable delivery queue described below. Permission answers are checked against current
 pending requests and serialised per question, so two clients cannot answer one twice.
 
 The client refreshes the catalogue every three seconds and loaded transcripts in the selected workspace every second.
@@ -334,13 +495,17 @@ server starts, even without a connected Mac.
 
 1. Move the existing desktop execution path onto the standalone runtime. Preserve workspace data,
    startup, shutdown and existing bridge behaviour when migrating existing local workspaces.
-2. Add stable release downloads and installers, and broaden Linux coverage across agent backends.
-3. Bring Bloom's custom MCP bridge, crew/subagent management,
-   merge workflows and start-from-PR/branch controls to remote workspaces.
-4. Add saved machine profiles, push events and remote transcript search.
+2. Publish stable release downloads and broaden Linux coverage across agent backends and ARM64.
+   The bundled x86_64 package and guided SSH installer are implemented.
+3. Close the remaining interaction gaps across Mac, iPhone and iPad. Remote mid-turn messages
+   queue rather than steering the running agent, and global owner-only UI actions are not exposed
+   through a workspace lease. Shared creation, crew management, tool cards, native terminals and
+   workspace-scoped pane/browser MCP actions are implemented.
+4. Display multiple remote catalogues concurrently, add push events and remote transcript search.
+   Saved machine profiles currently switch one active remote connection.
 5. Broaden attachment limits and preview navigation across multiple forwarded origins.
-6. Add a mobile web client and decide whether to operate an encrypted relay for connections that
-   should not require SSH or a VPN.
+6. Generate complete public wire records and language SDKs from the protocol contract. Native
+   iPhone/iPad clients exist; a browser client and an operated relay remain separate future work.
 
 
 ## Verification
@@ -366,7 +531,7 @@ Use a dedicated server database and service account for this fixture.
 
 ```sh
 BLOOM_REMOTE_TEST_HOST=developer@test-server \
-BLOOM_REMOTE_TEST_EXECUTABLE=/opt/bloom-server/bin/bloom-server \
+BLOOM_REMOTE_TEST_EXECUTABLE=/home/bloom/bloom/server/current/bin/bloom-server \
 BLOOM_REMOTE_TEST_DIRECTORY=/var/lib/bloom-test/data \
 BLOOM_REMOTE_TEST_REPOSITORY=/var/lib/bloom-test/repository \
 Tools/test-core.sh RemoteServer
@@ -449,11 +614,70 @@ disks are not inspected.
 An administrator can run the same checks without starting a daemon:
 
 ```sh
-bloom-server doctor --data-dir /var/lib/bloom/data
-bloom-server doctor --data-dir /var/lib/bloom/data --json
+bloom-server doctor --data-dir /home/bloom/bloom/data
+bloom-server doctor --data-dir /home/bloom/bloom/data --json
 ```
 
 Run this as the account that runs Bloom Server. It changes no configuration and exits 1 when a
 check needs attention, 0 otherwise, or 64 for invalid arguments. Update the server, Mac client and
 HTTPS gateway together: all enforce the same protocol version. The gateway contract test checks
 its version against the Swift source to catch future drift.
+
+Remote pane splits advertise the `pane_split_anchored` UI capability. The MCP tool remains
+`pane_split`; Bloom Server supplies the authenticated caller's session ID separately from tool
+arguments. New clients resolve that chat before splitting and refuse if it is no longer open.
+Older clients without this capability refuse these requests rather than splitting another chat.
+The legacy `pane_split` UI action retains its focused-pane behaviour for older servers.
+
+### Server updates
+
+Server Settings > Updates uses server-owned maintenance jobs over either SSH or HTTPS on Mac,
+iPhone and iPad. Review the exact target version and restarts, then choose Update or Update When
+Idle. Jobs, bounded redacted output and outcomes survive closing the app or losing its connection.
+The supervisor continues serving maintenance status while Bloom Server restarts.
+
+Supported installations are deliberately specific:
+
+- **Bloom Server:** compatible, checksummed Linux release assets from `spatie/bloom`. The supervisor
+  stages the reviewed release, snapshots the database and verifies startup before committing it.
+  Failed trials restore the previous release and database.
+- **Claude Code and Codex:** recognised, account-owned npm packages under `~/.local`. Updates pin
+  the reviewed package version and preserve sign-in files. Native installers, system packages and
+  custom launchers are reported as externally managed, rather than overwritten.
+- **Docker:** the Ubuntu package set used by Bloom's managed rootless Docker installation. Only
+  reviewed package versions are upgraded, with package and service checks repeated before applying.
+  The plan discloses container and Docker service restarts. This is not a blanket APT upgrade or
+  support for every Docker installation. Package changes do not have automatic package rollback.
+
+Maintenance requires `diagnostics.maintenanceManagement: true` and a separate administrator key.
+The wizard retains the key in this Mac's Keychain and installs only its SHA-256 digest on the
+server. Other clients enter the maintenance key in Updates; normal workspace authentication alone
+cannot authorise maintenance. The [maintenance protocol](SERVER-MAINTENANCE.md) documents access,
+plans, phases, idempotency, logs and shared client behaviour.
+
+On older servers, **Set Up Server Updates…** opens the administrator installer. For SSH connections,
+review the proposed `root@host` address and complete the server checks before installing. HTTPS
+connections require an explicit SSH address; Bloom does not infer it from the web address. The
+existing connection remains unchanged until a verified setup is connected.
+
+The root-owned Python supervisor and support modules live in `/usr/local/libexec`; protected
+metadata, recovery files and verified releases live in `/var/lib/bloom-maintenance/bloom-server`.
+Project data remains under the Bloom account. These privileged Python modules are installed and
+updated through the administrator installer. A runtime update does not replace the supervisor
+or its privileged support code.
+
+An accepted job is not a successful update. `rolledBack`, `failed` and `interrupted` retain their
+actual outcomes and recovery details. **Recover Update** resumes an interrupted job's saved
+checkpoint without rerunning npm or APT installation. Clients poll first after a lost response;
+an explicit retry reuses the original request UUID. They never automatically resubmit an install.
+
+No compatible tagged release asset has been published yet for this implementation. Runtime
+self-updates become available when the tagged release workflow publishes the matching Linux
+asset. Development bootstrap uses a matching packaged server payload; client builds alone do not
+install or enable the supervisor on an existing server.
+
+On servers without the maintenance capability, the Mac app also offers **Use Legacy SSH Updates…**
+for AI tools. This older path requires the SSH connection to remain open and supports its existing
+npm and native Claude update commands. It has no durable server job or maintenance handover; do
+not confuse its process activity check with the supervised maintenance lock. Its regression suite
+is `python3 Tools/test-server-tool-updates.py`.

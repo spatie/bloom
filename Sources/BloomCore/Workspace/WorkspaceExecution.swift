@@ -5,10 +5,13 @@ import Foundation
 public struct WorkspaceExecution: Sendable, Hashable {
     public var commandPrefix: [String]
     public var environment: [String: String]
+    public var bridgeEnabled: Bool
+    public var supportsBridge: Bool { commandPrefix.isEmpty || bridgeEnabled }
 
-    public init(commandPrefix: [String] = [], environment: [String: String] = [:]) {
+    public init(commandPrefix: [String] = [], environment: [String: String] = [:], bridgeEnabled: Bool = false) {
         self.commandPrefix = commandPrefix
         self.environment = environment
+        self.bridgeEnabled = bridgeEnabled
     }
 
     public static func resolve(workspace: Workspace, repo: Repo, environment: [String: String]) throws -> Self {
@@ -24,7 +27,7 @@ public struct WorkspaceExecution: Sendable, Hashable {
             throw Failure("The execution command must name an executable file inside this workspace: \(command[0])")
         }
         command[0] = executable
-        return Self(commandPrefix: command, environment: environment)
+        return Self(commandPrefix: command, environment: environment, bridgeEnabled: settings.executionBridge == true)
     }
 
     public static func resolve(store: Store, session: Session) async throws -> Self {
@@ -38,6 +41,22 @@ public struct WorkspaceExecution: Sendable, Hashable {
         let port = await manager.ensurePort(for: workspace)
         return try resolve(workspace: workspace, repo: repo,
             environment: manager.environment(for: workspace, repo: repo, port: port))
+    }
+
+    /// An opted-in wrapper mounts only this session's config, the private socket directory and
+    /// the packaged shim runtime at the same absolute paths. No credentials are added here.
+    public func bridgeEnvironment(_ attachment: BridgeAttachment?, configPath: String? = nil) -> [String: String] {
+        guard !commandPrefix.isEmpty, supportsBridge, let attachment else { return [:] }
+        let executable = URL(fileURLWithPath: attachment.shimPath)
+        let bin = executable.deletingLastPathComponent()
+        let runtime = bin.lastPathComponent == "bin" ? bin.deletingLastPathComponent() : bin
+        var values = [
+            "BLOOM_BRIDGE_SOCKET_DIRECTORY": URL(fileURLWithPath: attachment.socketPath).deletingLastPathComponent().path,
+            "BLOOM_BRIDGE_RUNTIME_DIRECTORY": runtime.path,
+            "BLOOM_BRIDGE_SHIM_PATH": attachment.shimPath,
+        ]
+        if let configPath { values["BLOOM_BRIDGE_CONFIG_PATH"] = configPath }
+        return values
     }
 
     public func wrapping(_ launch: AgentLaunch) -> AgentLaunch {

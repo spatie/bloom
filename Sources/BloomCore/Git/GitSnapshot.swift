@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// Worktree and staging are distinct snapshots. Restoring only a worktree tree into both would
 /// turn every untracked file into a staged addition and lose the owner's partial staging.

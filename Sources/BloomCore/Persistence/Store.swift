@@ -1897,6 +1897,47 @@ public actor Store {
         ).map(Self.session(from:))
     }
 
+    /// Parent validity, names, reserved slots, controls and the initial brief are one commit.
+    /// Queued idle members reserve a slot before a runner can mark them running, so concurrent
+    /// callers cannot pass the ceiling simply by outrunning process startup.
+    public func startCrewMember(_ order: CrewOrder, parentID: SessionID, workspaceID: WorkspaceID,
+                                availableAgents: [AgentKind]? = nil) throws -> Session {
+        try Task.checkCancellation()
+        return try db.transaction {
+            guard let parent = try session(id: parentID), parent.archivedAt == nil else { throw Crew.StartRefusal.parentUnavailable }
+            guard parent.workspaceID == workspaceID else { throw Crew.StartRefusal.workspaceMismatch }
+            guard let workspace = try workspace(id: workspaceID), workspace.state == .active else { throw Crew.StartRefusal.workspaceUnavailable }
+            let members = try crew(inWorkspace: workspaceID)
+            let queued = Set(try db.query("""
+                SELECT DISTINCT d.target_session_id FROM deliveries d
+                JOIN sessions s ON s.id = d.target_session_id
+                WHERE s.workspace_id = ? AND s.archived_at IS NULL AND d.delivered_at IS NULL
+                """, [.text(workspaceID)]).compactMap { $0.string("target_session_id").map { SessionID($0) } })
+            let occupied = members.filter { CrewCensus.isRunning($0) || ($0.state == .idle && queued.contains($0.id)) }.count
+            let name = try Crew.start(name: order.name, existing: Set(members.map(\.title)), running: occupied,
+                                      callerIsSubagent: parent.parentSessionID != nil).get()
+            var controls = ComposerControls(session: parent,
+                isFastMode: try setting(ComposerControls.fastModeKey(sessionID: parentID)) == "1",
+                outputStyle: try setting(ComposerControls.outputStyleKey(sessionID: parentID)) ?? OutputStyle.defaultName,
+                codexContextWindow: CodexContextWindow.normalised(try setting(ComposerControls.contextWindowKey(sessionID: parentID))))
+            controls.model = order.model ?? controls.model
+            controls.effort = order.effort ?? controls.effort
+            guard controls.agentKind.canRunWorkspaces, !controls.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw Crew.StartRefusal.invalidControls
+            }
+            if let availableAgents, !availableAgents.contains(controls.agentKind) { throw Crew.StartRefusal.agentUnavailable(controls.agentKind.label) }
+            try Task.checkCancellation()
+            let existing = try sessions(workspaceID: workspaceID)
+            let member = try upsert(Session(workspaceID: workspaceID, parentSessionID: parentID, title: name,
+                model: controls.model, effort: controls.effort, agentKind: controls.agentKind, permissionMode: controls.permissionMode,
+                sortOrder: (existing.map(\.sortOrder).max() ?? -1) + 1))
+            for (key, value) in controls.settings(sessionID: member.id) { try setSetting(key, value) }
+            try enqueueDelivery(Delivery(targetSessionID: member.id, sourceWorkspaceID: workspaceID, kind: .message,
+                                         crew: CrewMessage.brief(from: parent.title, task: order.task)))
+            return member
+        }
+    }
+
     /// Every crew member in the app at once, grouped by the worktree it is working in.
     ///
     /// **One statement rather than one per workspace, and that is the whole reason it exists.**

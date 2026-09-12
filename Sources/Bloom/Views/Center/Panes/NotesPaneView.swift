@@ -1,138 +1,69 @@
 import SwiftUI
 import BloomCore
+import BloomClient
 
-/// The workspace's notes: one piece of scratch text, kept for as long as the workspace is.
-///
-/// It exists for the thing you notice at eleven at night and want the morning agent to fix. That
-/// makes two things load bearing and everything else decoration. It has to still be there after the
-/// app has been quit, which is why the text is a row in SQLite rather than anything this view owns.
-/// Notes are a standalone scratchpad and are never handed to the conversation automatically.
-///
-/// **What this view decides is nothing.** Where the text lives, when it is worth writing, what
-/// counts as blank are all `WorkspaceNote` in the core. This view loads the note, schedules
-/// writes, and passes its draft to the Markdown editor.
+/// Native Markdown editing over the same durable draft and serial writer used on iOS.
 struct NotesPaneView<Model: WorkspacePaneModel>: View {
     @Bindable var model: Model
-
-    @State private var text = ""
-    /// What the database is known to hold, so a save that would rewrite the same row is skipped.
-    /// See `WorkspaceNote.needsSave`.
-    @State private var saved = ""
-    @State private var hasLoaded = false
-    /// Set when the row could not be read, which keeps the editor disabled. Not a bool, because
-    /// the pane has three states and a blank field is the wrong drawing of two of them.
-    @State private var couldNotLoad = false
-    /// Set when a write was refused, cleared by the write that succeeds.
-    @State private var couldNotSave = false
-    @State private var saveTask: Task<Void, Never>?
+    @State private var session: WorkspaceNoteSession?
+    @State private var write: WorkspaceNoteSession.Write?
+    @State private var openingError: String?
     @FocusState private var isEditing: Bool
 
+    private var scope: String { model.paneStores.identity }
+    private var identity: String { scope + "/" + model.workspace.id.rawValue }
+
     var body: some View {
-        NotesPage(
-            text: $text,
-            isEditing: $isEditing,
-            workspaceID: model.workspace.id,
-            workspaceName: model.workspace.name,
-            hasLoaded: hasLoaded,
-            couldNotLoad: couldNotLoad,
-            couldNotSave: couldNotSave,
-            hasChanges: WorkspaceNote.needsSave(stored: saved, typed: text),
-            onRetryLoad: { Task { await load() } },
-            onRetrySave: saveNow
-        )
-        .onChange(of: text) { _, _ in scheduleSave() }
-        .task {
-            await load()
-            // The caret, because this pane is one text field and nobody opens it to look at it.
-            // It is reached by Shift+Cmd+N or by picking Notes out of the `+` menu, both of which
-            // are somebody saying "I want to write this down"; without this the first sentence
-            // they typed went nowhere and had to be typed again after a click.
-            //
-            // After `load`, and not in the same breath as it: the editor is `.disabled` until the
-            // row has been read back, and focus does not stick to a disabled field. `hasLoaded` is
-            // set inside `load`, so by here the field is live.
-            isEditing = true
+        Group {
+            if let session {
+                VStack(spacing: 0) {
+                    NotesPage(
+                        text: Binding(get: { session.text }, set: { text in
+                            if let write { session.edit(text, using: write) }
+                        }),
+                        isEditing: $isEditing,
+                        workspaceID: model.workspace.id,
+                        workspaceName: model.workspace.name,
+                        hasLoaded: session.canEdit,
+                        couldNotLoad: session.loadError != nil && !session.canEdit,
+                        couldNotSave: session.saveError != nil || session.draftError != nil,
+                        hasChanges: session.hasChanges,
+                        isSaving: session.isSaving,
+                        saveFailure: session.draftError ?? session.saveError,
+                        onRetryLoad: { Task { await load(session) } },
+                        onRetrySave: saveNow
+                    )
+
+                }
+            } else if let openingError {
+                ContentUnavailableView("Notes could not be opened", systemImage: "note.text", description: Text(openingError))
+            } else { LoadingView("Loading notes") }
         }
-        // The two moments the debounce is not enough on its own. Leaving the field is the ordinary
-        // one; the pane going away covers switching tab, switching workspace and closing the tab,
-        // all of which tear this view down while a scheduled save is still sleeping.
+        .task(id: identity) {
+            saveNow()
+            do {
+                let model = model
+                let session = try MacWorkspaceNoteDrafts.store.session(scope: scope, workspaceID: model.workspace.id)
+                self.session = session
+                write = { body in try await model.writeNote(body) }
+                openingError = nil
+                await session.load { try await model.readNote() }
+                if !Task.isCancelled, session.canEdit { isEditing = true }
+            } catch { openingError = error.localizedDescription }
+        }
         .onChange(of: isEditing) { _, editing in if !editing { saveNow() } }
-        // Command-Backspace is delete-to-start-of-line in every text box on macOS, and the
-        // menu bar had it for Archive Workspace. See `FocusedValues.isTypingProse`.
         .focusedValue(\.isTypingProse, isEditing)
         .onDisappear(perform: saveNow)
     }
 
-    // MARK: - Loading and saving
-
-    /// Not `try?` and not `?? ""`. A refused read used to be indistinguishable from no note at
-    /// all, so the pane showed a blank page over a real one and the first keystroke wrote the
-    /// blank version over it. A missing row is still an empty note; a database that would not
-    /// answer leaves the field disabled and says so.
-    private func load() async {
-        guard !hasLoaded else { return }
-        do {
-            let stored = try await model.readNote()
-            text = stored
-            saved = stored
-            couldNotLoad = false
-            hasLoaded = true
-        } catch {
-            couldNotLoad = true
-        }
+    private func load(_ session: WorkspaceNoteSession) async {
+        await session.load { try await model.readNote() }
     }
 
-    /// Waits out the typing rather than writing on every keystroke, for the reasons written down on
-    /// `WorkspaceNote.autosaveDelay`. The task is replaced on each keystroke, so the write happens
-    /// once the user stops.
-    private func scheduleSave() {
-        guard hasLoaded else { return }
-        saveTask?.cancel()
-        saveTask = Task {
-            try? await Task.sleep(for: WorkspaceNote.autosaveDelay)
-            guard !Task.isCancelled else { return }
-            await write()
-        }
-    }
+    private func saveNow() { if let session, let write { session.save(using: write) } }
+}
 
-    /// The scheduled save brought forward, for a pane that is about to stop existing. Detached from
-    /// the view's own lifetime on purpose: `onDisappear` runs as this view goes, so a `.task` of its
-    /// would be cancelled before it wrote anything.
-    private func saveNow() {
-        saveTask?.cancel()
-        guard hasLoaded, WorkspaceNote.needsSave(stored: saved, typed: text) else { return }
-        let model = model
-        let body = text
-        // Detached, so `saved` is set from inside rather than out here. This view is usually gone
-        // by the time the write lands, and a `saved` moved before the write is the same lie the
-        // debounced path told.
-        Task { @MainActor in
-            do {
-                try await model.writeNote(body)
-                saved = body
-                couldNotSave = false
-            } catch {
-                couldNotSave = true
-            }
-        }
-    }
-
-    /// `saved` moves only when the row actually took the text.
-    ///
-    /// It used to move whatever the write did, and `needsSave` compares against nothing else, so
-    /// one refused write convinced this pane forever that the note was on disk: no further
-    /// autosave fired, `saveNow` returned early, and the text existed only in `@State` until the
-    /// pane went away. Left where it was, the next keystroke tries again.
-    private func write() async {
-        guard WorkspaceNote.needsSave(stored: saved, typed: text) else { return }
-        let body = text
-        do {
-            try await model.writeNote(body)
-            saved = body
-            couldNotSave = false
-        } catch {
-            couldNotSave = true
-        }
-    }
-
+@MainActor
+private enum MacWorkspaceNoteDrafts {
+    static let store = WorkspaceNoteDraftStore(file: Store.defaultDirectory.appendingPathComponent("Notes/drafts.json"))
 }

@@ -123,7 +123,7 @@ func TestAccessRejectsInvalidIdentity(t *testing.T) {
 
 func TestPreviewCredentialCannotControlAgents(t *testing.T) {
 	f := newFixture(t)
-	response := f.request("POST", f.config.APIHost, "/v1/rpc", f.token(t, "workspace-a", nil), "", `{"version":13,"id":"00000000-0000-0000-0000-000000000001","operation":{"catalogue":{}}}`)
+	response := f.request("POST", f.config.APIHost, "/v1/rpc", f.token(t, "workspace-a", nil), "", `{"version":14,"id":"00000000-0000-0000-0000-000000000001","operation":{"catalogue":{}}}`)
 	if response.Code != 401 {
 		t.Fatal(response.Code)
 	}

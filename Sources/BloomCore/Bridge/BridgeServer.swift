@@ -22,6 +22,7 @@ import Synchronization
 public final class BridgeServer: Sendable {
     private let store: Store
     private let toolbox: BridgeToolbox
+    private let configurationDirectory: String?
     public let registry: BridgeRegistry
     public let socketPath: String
     /// Said out loud where the app can log it. The core has no logger of its own and should not
@@ -29,6 +30,12 @@ public final class BridgeServer: Sendable {
     private let note: @Sendable (String) -> Void
 
     private let listener = Mutex<UnixSocketListener?>(nil)
+    private struct Connections {
+        var stopped = false
+        var sockets: [ObjectIdentifier: UnixSocketConnection] = [:]
+        var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+    }
+    private let connections = Mutex(Connections())
 
     /// The owner's standalone token, on disk beside the database. See `BridgeOwnerToken` for why
     /// this one persists when no session token does.
@@ -39,12 +46,14 @@ public final class BridgeServer: Sendable {
         socketPath: String,
         registry: BridgeRegistry = BridgeRegistry(),
         toolbox: BridgeToolbox = .standard,
+        configurationDirectory: String? = nil,
         note: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.store = store
         self.socketPath = socketPath
         self.registry = registry
         self.toolbox = toolbox
+        self.configurationDirectory = configurationDirectory
         self.note = note
         self.ownerToken = BridgeOwnerToken.beside(databasePath: store.path)
     }
@@ -88,7 +97,18 @@ public final class BridgeServer: Sendable {
                     connection.close()
                     return
                 }
-                Task { await self.serve(connection) }
+                self.connections.withLock { held in
+                    guard !held.stopped else { connection.close(); return }
+                    let id = ObjectIdentifier(connection)
+                    held.sockets[id] = connection
+                    held.tasks[id] = Task {
+                        await self.serve(connection)
+                        self.connections.withLock { state in
+                            state.sockets[id] = nil
+                            state.tasks[id] = nil
+                        }
+                    }
+                }
             }
         }
         sweepConfigDirectory()
@@ -145,10 +165,24 @@ public final class BridgeServer: Sendable {
     }
 
     public func stop() {
+        let active = connections.withLock { held in
+            held.stopped = true
+            return Array(held.sockets.values)
+        }
+        registry.retireAll()
+        for connection in active { connection.close() }
         listener.withLock { held in
             held?.stop()
             held = nil
         }
+    }
+
+    /// Stop accepting work, cancel calls through their closed connections, then wait for their
+    /// mutation cleanup. The daemon must finish this before relinquishing store ownership.
+    public func shutdown() async {
+        stop()
+        let active = connections.withLock { Array($0.tasks.values) }
+        for task in active { await task.value }
     }
 
     /// What a session's shim is told, minted fresh. Called once per runner, which is once per
@@ -283,12 +317,13 @@ public final class BridgeServer: Sendable {
     /// the same fingerprint as the socket beside it, so Bloom and Bloom Dev cannot read each
     /// other's. Mode 0700, and each file inside it 0600.
     public var configDirectory: String {
-        (socketPath as NSString).deletingPathExtension + ".d"
+        configurationDirectory ?? (socketPath as NSString).deletingPathExtension + ".d"
     }
 
     // MARK: One connection
 
     private func serve(_ connection: UnixSocketConnection) async {
+        defer { connection.close() }
         var iterator = connection.lines.makeAsyncIterator()
 
         // The hello, first line and nothing before it. A connection that sends MCP straight away
@@ -303,16 +338,15 @@ public final class BridgeServer: Sendable {
             return
         }
 
+        let calls = BridgeConnectionCalls()
         while let line = await iterator.next() {
             // A handshake does not grant authority for the lifetime of a socket. Rotation and
             // retirement must also revoke clients that were already connected.
             guard let identity = registry.identity(forToken: hello.token) else { break }
             let dispatch = BridgeDispatch(store: store, identity: identity, toolbox: toolbox)
-            if let reply = await dispatch.respond(to: line) {
-                connection.writeLine(reply)
-            }
+            await calls.receive(line, dispatch: dispatch, connection: connection)
         }
-        connection.close()
+        await calls.close()
     }
 
     /// Answers the hello and says who is calling, or refuses in one sentence.
@@ -325,11 +359,11 @@ public final class BridgeServer: Sendable {
         guard let data = line.data(using: .utf8),
               let hello = try? JSONDecoder().decode(BridgeHello.self, from: data)
         else {
-            refuse("This is Bloom's workspace bridge and that was not a hello frame.", on: connection)
+            await refuse("This is Bloom's workspace bridge and that was not a hello frame.", on: connection)
             return nil
         }
         if let problem = BridgeProtocol.problem(with: hello) {
-            refuse(problem, on: connection)
+            await refuse(problem, on: connection)
             note("bridge refused a shim speaking protocol \(hello.version)")
             return nil
         }
@@ -337,7 +371,7 @@ public final class BridgeServer: Sendable {
             // What a stale token means depends entirely on which kind it is, and only the claimed
             // role says which. `BridgeProtocol.unrecognisedToken(claiming:)` holds both answers
             // and the reasoning behind the split.
-            refuse(BridgeProtocol.unrecognisedToken(claiming: hello.role), on: connection)
+            await refuse(BridgeProtocol.unrecognisedToken(claiming: hello.role), on: connection)
             note("bridge refused an unknown token claiming role \(hello.role)")
             return nil
         }
@@ -346,12 +380,12 @@ public final class BridgeServer: Sendable {
             // user can make it; the database is the answer.
             note("bridge caller claimed role \(hello.role) and is \(identity.role.rawValue)")
         }
-        connection.writeLine(encode(BridgeWelcome.accepting()))
+        await connection.writeLineAsync(encode(BridgeWelcome.accepting()))
         return hello
     }
 
-    private func refuse(_ problem: String, on connection: UnixSocketConnection) {
-        connection.writeLine(encode(BridgeWelcome.refusing(problem)))
+    private func refuse(_ problem: String, on connection: UnixSocketConnection) async {
+        await connection.writeLineAsync(encode(BridgeWelcome.refusing(problem)))
     }
 
     private func encode(_ welcome: BridgeWelcome) -> String {

@@ -1,4 +1,5 @@
 import Foundation
+import BloomClient
 
 /// The line that opens a turn nobody in Bloom sent: a background task finishing.
 ///
@@ -73,13 +74,10 @@ public struct BackgroundWake: Sendable, Equatable {
 
     // MARK: Which rows
 
-    private static let probeLength = 256
-    private static let marker = Data("\"subtype\":\"task_notification\"".utf8)
-
     /// Whether a stored row is one of these, by its first bytes. `TranscriptRowInk` and the fold
     /// both ask it once per row per pass, which is why it is a sniff rather than a decode.
     public static func isRow(kind: MessageKind, payload: Data) -> Bool {
-        kind == .system && payload.prefix(probeLength).range(of: marker) != nil
+        TranscriptVisibility.isBackgroundWake(kind: kind.rawValue, payload: payload)
     }
 
     /// Whether a notification arriving now opens a turn, and so is worth a row.

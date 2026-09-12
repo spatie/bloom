@@ -6,6 +6,7 @@ struct GitHubProjectPicker: View {
     let onSelect: (Repo) -> Void
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openWindow) private var openWindow
     @State private var query = ""
     @State private var repositories: [GitHubRepositoryListing] = []
     @State private var page = 1
@@ -14,9 +15,11 @@ struct GitHubProjectPicker: View {
     @State private var problem: String?
     @State private var selected: String?
     @State private var hasMore = false
+    @State private var needsServerSignIn = false
+    @State private var refreshID = UUID()
 
     private var backend: ProjectCreationBackend { ProjectCreationBackend(app: app, isRemote: isRemote) }
-    private var key: String { "\(isRemote)-\(String(reflecting: app.remoteServer.endpoint))-\(query)-\(page)" }
+    private var key: String { "\(isRemote)-\(String(reflecting: app.remoteServer.endpoint))-\(query)-\(page)-\(refreshID)" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
@@ -37,10 +40,22 @@ struct GitHubProjectPicker: View {
                 .tag(repo.id)
             }
             .frame(height: 290)
-            if let problem { Text(problem).foregroundStyle(Palette.negative).font(Typo.caption).textSelection(.enabled) }
+            .overlay {
+                if repositories.isEmpty && needsServerSignIn && !isLoading {
+                    ContentUnavailableView {
+                        Label("Sign in to GitHub on your server", systemImage: "person.crop.circle.badge.exclamationmark")
+                    } description: {
+                        Text("GitHub access is checked on \(app.remoteServer.displayName). Your Mac’s sign-in is separate.")
+                    } actions: {
+                        Button("Sign In on Server…") { openWindow(id: ServerAccountsWindow.id) }
+                    }
+                }
+            }
+            if let problem, !needsServerSignIn { Text(problem).foregroundStyle(Palette.negative).font(Typo.caption).textSelection(.enabled) }
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 if isLoading || isImporting { ProgressView().controlSize(.small) }
+                Button("Refresh") { page = 1; selected = nil; refreshID = UUID() }.disabled(isLoading)
                 Spacer()
                 if hasMore { Button("Load More") { page += 1 }.disabled(isLoading) }
                 Button(isImporting ? "Cloning…" : "Use Repository") { importSelection() }
@@ -56,7 +71,8 @@ struct GitHubProjectPicker: View {
         .task(id: key) {
             isLoading = true
             problem = nil
-            if page == 1 { repositories = [] }
+            needsServerSignIn = false
+            if page == 1 { repositories = []; selected = nil; hasMore = false }
             do {
                 try await Task.sleep(for: .milliseconds(250))
                 let values = try await backend.repositories(query: query, page: page)
@@ -65,7 +81,21 @@ struct GitHubProjectPicker: View {
                 hasMore = values.count == 50 && page < 20
                 if repositories.isEmpty { problem = "No matching repositories." }
             } catch { if !Task.isCancelled { problem = error.localizedDescription } }
+            if !Task.isCancelled, isRemote, repositories.isEmpty {
+                await checkServerSignIn()
+            }
             if !Task.isCancelled { isLoading = false }
+        }
+    }
+
+    @MainActor private func checkServerSignIn() async {
+        do {
+            let result = try await app.remoteServer.read(.diagnostics)
+            guard !Task.isCancelled, case .diagnostics(let report) = result else { return }
+            needsServerSignIn = report.checks.contains { $0.id == .github && $0.status == .attention }
+        } catch {
+            // A failed connection does not prove missing auth.
+            if !Task.isCancelled && problem == nil { problem = error.localizedDescription }
         }
     }
 

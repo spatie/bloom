@@ -206,7 +206,7 @@ public final class StreamingProcess: Sendable {
         }
 
         do {
-            try process.run()
+            try ProcessLaunch.run(process)
             #if os(Linux)
             try startPipeReader(stdoutPipe.fileHandleForReading, stdout: true)
             try startPipeReader(stderrPipe.fileHandleForReading, stdout: false)

@@ -1,15 +1,7 @@
 import Foundation
+import BloomClient
 
-public struct ServerTerminalFrame: Codable, Sendable {
-    public var kind: String
-    public var data: Data?
-    public var columns: Int?
-    public var rows: Int?
-
-    public init(kind: String, data: Data? = nil, columns: Int? = nil, rows: Int? = nil) {
-        self.kind = kind; self.data = data; self.columns = columns; self.rows = rows
-    }
-}
+public typealias ServerTerminalFrame = BloomClient.RemoteTerminalFrame
 
 /// Control mode provides terminal bytes without giving the gateway permission to spawn an agent
 /// or read its credentials. Disconnect terminates only the tmux client; its shell stays running.
@@ -20,14 +12,27 @@ actor ServerTerminalStreams {
         var workspace: Workspace
         var connection: UnixSocketConnection?
         var process: StreamingProcess?
-        var task: Task<Void, Never>?
     }
     private var entries: [UUID: Entry] = [:]
     private let groupID: UInt32?
+    private let makeProcess: @Sendable (ServerTerminal, Workspace) -> StreamingProcess
+    private var workers: [UUID: Task<Void, Never>] = [:]
+    private var expirations: [UUID: Task<Void, Never>] = [:]
+    private var terminations: [UUID: Task<Void, Never>] = [:]
+    private var closed = false
+    var hasConnections: Bool { !entries.isEmpty || !workers.isEmpty || !terminations.isEmpty }
 
-    init(groupID: UInt32?) { self.groupID = groupID }
+    init(groupID: UInt32?, makeProcess: (@Sendable (ServerTerminal, Workspace) -> StreamingProcess)? = nil) {
+        self.groupID = groupID
+        self.makeProcess = makeProcess ?? { terminal, workspace in
+            StreamingProcess(executable: terminal.executable,
+                arguments: ["-S", terminal.socket, "-C", "attach-session", "-t", "=" + terminal.session],
+                cwd: workspace.path, environment: Shell.environment(extra: ["TERM": "xterm-256color"]))
+        }
+    }
 
     func open(terminal: ServerTerminal, workspace: Workspace) throws -> String {
+        guard !closed else { throw ServerFailure("The server terminal connection is shutting down.") }
         guard entries.count < 32 else { throw ServerFailure("Too many terminal connections are open.") }
         let id = UUID()
         let path = "/tmp/bloom-terminal-\(id.uuidString).sock"
@@ -35,9 +40,12 @@ actor ServerTerminalStreams {
             Task { await self?.attach(id, connection: connection) }
         }
         entries[id] = Entry(listener: listener, terminal: terminal, workspace: workspace)
-        Task { [weak self] in
-            try? await Task.sleep(for: .seconds(15))
-            await self?.expire(id)
+        expirations[id] = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(15))
+                await self?.expire(id)
+            } catch { /* Closing or attaching cancels the unused-listener deadline. */ }
+            await self?.expired(id)
         }
         return path
     }
@@ -47,20 +55,21 @@ actor ServerTerminalStreams {
         close(id)
     }
 
+    private func expired(_ id: UUID) { expirations[id] = nil }
+
     private func attach(_ id: UUID, connection: UnixSocketConnection) {
-        guard var entry = entries[id], entry.connection == nil else { connection.close(); return }
+        guard !closed, var entry = entries[id], entry.connection == nil else { connection.close(); return }
         entry.listener.stop()
+        expirations[id]?.cancel()
         entry.connection = connection
         let terminal = entry.terminal
-        let process = StreamingProcess(executable: terminal.executable,
-            arguments: ["-S", terminal.socket, "-C", "attach-session", "-t", "=" + terminal.session],
-            cwd: entry.workspace.path, environment: Shell.environment(extra: ["TERM": "xterm-256color"]))
+        let process = makeProcess(terminal, entry.workspace)
         entry.process = process
         let lines = process.lines
         process.writeLine("refresh-client -C 80,24")
         process.writeLine("capture-pane -p -e -t =" + terminal.session + ":")
         process.writeLine("display-message -p -t =" + terminal.session + ": '#{cursor_x} #{cursor_y}'")
-        entry.task = Task { [weak self] in
+        workers[id] = Task { [weak self] in
             await withTaskGroup(of: Void.self) { group in
                 group.addTask {
                     var decoder = TmuxControlOutput(restoringScreen: true)
@@ -68,7 +77,7 @@ actor ServerTerminalStreams {
                         for try await line in lines {
                             guard !Task.isCancelled else { break }
                             if let data = decoder.take(line), let frame = try? JSONEncoder().encode(ServerTerminalFrame(kind: "output", data: data)) {
-                                connection.writeLine(String(decoding: frame, as: UTF8.self))
+                                await connection.writeLineAsync(String(decoding: frame, as: UTF8.self))
                             }
                         }
                     } catch { /* Closing the socket reports a terminated terminal client. */ }
@@ -87,16 +96,33 @@ actor ServerTerminalStreams {
                 connection.close()
             }
             await self?.close(id)
+            await self?.finished(id)
         }
         entries[id] = entry
     }
 
     private func close(_ id: UUID) {
         guard let entry = entries.removeValue(forKey: id) else { return }
-        entry.listener.stop(); entry.connection?.close(); entry.process?.terminate(); entry.task?.cancel()
+        entry.listener.stop(); entry.connection?.close(); entry.process?.terminate()
+        expirations[id]?.cancel()
+        workers[id]?.cancel()
+        if let process = entry.process {
+            terminations[id] = ServerTerminalProcessLifetime.stop(process)
+        }
     }
 
-    func shutdown() { for id in Array(entries.keys) { close(id) } }
+    private func finished(_ id: UUID) async {
+        if let ending = terminations[id] { await ending.value }
+        workers[id] = nil
+        terminations[id] = nil
+    }
+
+    func shutdown() async {
+        closed = true
+        let pending = Array(workers.values) + Array(expirations.values)
+        for id in Array(entries.keys) { close(id) }
+        for task in pending { await task.value }
+    }
     func close(workspaceID: WorkspaceID) {
         for (id, entry) in entries where entry.workspace.id == workspaceID { close(id) }
     }

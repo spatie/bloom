@@ -175,8 +175,8 @@ struct DiffView<Model: WorkspacePaneModel>: View {
         self.onToggleCollapsed = onToggleCollapsed
         let absolute = (model.workspace.path as NSString).appendingPathComponent(file.path)
         _mode = State(initialValue: model.fileEdits.isDirty(absolute)
-            || SourceEditorState.file(absolute).prefersEditing
-            || (embeddedWidth == nil && SourceEditorState.file(absolute).request != nil) ? .edit : .diff)
+            || model.paneStores.sourceFile(absolute).prefersEditing
+            || (embeddedWidth == nil && model.paneStores.sourceFile(absolute).request != nil) ? .edit : .diff)
 
         let held = model.heldDiff(
             for: file,
@@ -223,7 +223,7 @@ struct DiffView<Model: WorkspacePaneModel>: View {
     }
 
     private var effectiveLanguage: Language {
-        SourceEditorState.file(absolutePath).languageOverride ?? Language.detect(path: file.path)
+        model.paneStores.sourceFile(absolutePath).languageOverride ?? Language.detect(path: file.path)
     }
 
     private var presentedLanguage: Language? {
@@ -245,7 +245,7 @@ struct DiffView<Model: WorkspacePaneModel>: View {
             }
         } : nil)
         .onChange(of: mode) { old, mode in
-            let state = SourceEditorState.file(absolutePath)
+            let state = model.paneStores.sourceFile(absolutePath)
             state.prefersEditing = mode == .edit
             if old == .diff, mode == .edit, state.request == nil {
                 state.go(to: CodeLocation(path: file.path, line: state.diffLine))
@@ -255,11 +255,11 @@ struct DiffView<Model: WorkspacePaneModel>: View {
                 state.diffRow = rows.first { $0.sourceLines.contains { $0.newNumber == state.line } }?.id ?? state.diffRow
             }
         }
-        .onChange(of: SourceEditorState.file(absolutePath).revision) { _, _ in
+        .onChange(of: model.paneStores.sourceFile(absolutePath).revision) { _, _ in
             if isEditable, embeddedWidth == nil { mode = .edit }
         }
-        .onChange(of: SourceEditorState.file(absolutePath).diffRevision, initial: true) { _, _ in
-            let state = SourceEditorState.file(absolutePath)
+        .onChange(of: model.paneStores.sourceFile(absolutePath).diffRevision, initial: true) { _, _ in
+            let state = model.paneStores.sourceFile(absolutePath)
             guard state.diffRequest != nil, embeddedWidth != nil || state.request == nil else { return }
             mode = .diff
             pendingDiffNavigation = true
@@ -269,14 +269,14 @@ struct DiffView<Model: WorkspacePaneModel>: View {
             }
         }
         .overlay(alignment: .bottomLeading) {
-            if mode == .diff, let message = SourceEditorState.file(absolutePath).message {
+            if mode == .diff, let message = model.paneStores.sourceFile(absolutePath).message {
                 Text(message).font(Typo.caption).padding(8).background(Palette.surfaceSunken)
             }
         }
     }
 
     private var observedBody: some View {
-        let tracksFile = navigationTarget && SourceEditorState.file(absolutePath).diffRequest == nil
+        let tracksFile = navigationTarget && model.paneStores.sourceFile(absolutePath).diffRequest == nil
         return Group {
             if embeddedWidth != nil {
                 Section {
@@ -636,7 +636,7 @@ struct DiffView<Model: WorkspacePaneModel>: View {
         let document = prepared.document
         fileLines = prepared.lines
         phase = .ready(document)
-        if SourceEditorState.file(absolutePath).diffRequest != nil {
+        if model.paneStores.sourceFile(absolutePath).diffRequest != nil {
             expandedRuns.formUnion(document.file.hunks.flatMap(\.lines).map(\.index))
         }
         // Held for the next visit, keyed on the question it answers. `source` is the patch before
@@ -798,10 +798,10 @@ struct DiffView<Model: WorkspacePaneModel>: View {
 
     private var diffFindBar: some View {
         HStack(spacing: InspectorLayout.gap) {
-            Button { SourceNavigation.shared.move(-1, in: model) } label: { Image(systemName: "chevron.left") }
-                .disabled(SourceNavigation.shared.histories[model.workspace.id]?.canGoBack != true).help("Go back")
-            Button { SourceNavigation.shared.move(1, in: model) } label: { Image(systemName: "chevron.right") }
-                .disabled(SourceNavigation.shared.histories[model.workspace.id]?.canGoForward != true).help("Go forward")
+            Button { model.paneStores.sourceNavigation.move(-1, in: model) } label: { Image(systemName: "chevron.left") }
+                .disabled(model.paneStores.sourceNavigation.histories[model.workspace.id]?.canGoBack != true).help("Go back")
+            Button { model.paneStores.sourceNavigation.move(1, in: model) } label: { Image(systemName: "chevron.right") }
+                .disabled(model.paneStores.sourceNavigation.histories[model.workspace.id]?.canGoForward != true).help("Go forward")
             TextField("Find in diff", text: $findText).textFieldStyle(.roundedBorder).focused($findFocused)
                 .onSubmit { stepFind(1) }
             Text("\(findMatches.isEmpty ? 0 : min(findIndex + 1, findMatches.count))/\(findMatches.count)")
@@ -810,7 +810,7 @@ struct DiffView<Model: WorkspacePaneModel>: View {
             Button { stepFind(1) } label: { Image(systemName: "chevron.down") }.disabled(findMatches.isEmpty).help("Next match")
             Button("Open source") {
                 FileReview.open(location: CodeLocation(path: file.path,
-                    line: selectedFind?.newNumber ?? SourceEditorState.file(absolutePath).diffLine), in: model)
+                    line: selectedFind?.newNumber ?? model.paneStores.sourceFile(absolutePath).diffLine), in: model)
             }.disabled(!isEditable)
         }
         .buttonStyle(.borderless).controlSize(.small)
@@ -829,12 +829,12 @@ struct DiffView<Model: WorkspacePaneModel>: View {
     }
 
     private func isDiffDestination(_ row: DiffRow) -> Bool {
-        guard let destination = SourceEditorState.file(absolutePath).diffRequest else { return false }
+        guard let destination = model.paneStores.sourceFile(absolutePath).diffRequest else { return false }
         return row.sourceLines.contains { $0.kind != .deletion && $0.newNumber == destination.line }
     }
 
     private func diffDestinationID(_ row: DiffRow) -> String {
-        if isDiffDestination(row), let destination = SourceEditorState.file(absolutePath).diffRequest {
+        if isDiffDestination(row), let destination = model.paneStores.sourceFile(absolutePath).diffRequest {
             return "\(file.path):definition:\(destination.line)"
         }
         return "\(file.path):\(row.id)"
@@ -867,8 +867,8 @@ struct DiffView<Model: WorkspacePaneModel>: View {
                         .id(document.file)
                         .frame(width: width, alignment: .leading)
                     }
-                    .scrollPosition(id: Binding(get: { SourceEditorState.file(absolutePath).diffRow }, set: { id in
-                        let state = SourceEditorState.file(absolutePath)
+                    .scrollPosition(id: Binding(get: { model.paneStores.sourceFile(absolutePath).diffRow }, set: { id in
+                        let state = model.paneStores.sourceFile(absolutePath)
                         state.diffRow = id
                         if let line = rows.first(where: { $0.id == id })?.sourceLines.compactMap(\.newNumber).first {
                             state.diffLine = line
@@ -876,7 +876,7 @@ struct DiffView<Model: WorkspacePaneModel>: View {
                     }), anchor: .top)
                     .defaultScrollAnchor(.topLeading)
                     .scrollBounceBehavior(.basedOnSize)
-                    .onChange(of: SourceEditorState.file(absolutePath).diffRevision, initial: true) { _, _ in
+                    .onChange(of: model.paneStores.sourceFile(absolutePath).diffRevision, initial: true) { _, _ in
                         if let row = rows.first(where: isDiffDestination) { reader.scrollTo(row.id, anchor: .center) }
                     }
                     .onChange(of: rowRevision) { _, _ in
@@ -1110,7 +1110,7 @@ struct DiffView<Model: WorkspacePaneModel>: View {
             SourceActions.lookupInDiff(at: offset, view: view, lines: lines, source: fileLines.joined(separator: "\n"),
                 path: file.path, model: local, references: references, automatic: automatic, newTab: newTab) { location, newTab in
                 guard isCurrent(document) else { return }
-                SourceEditorState.file(absolutePath).navigationTask = Task {
+                model.paneStores.sourceFile(absolutePath).navigationTask = Task {
                     await FileReview.openFromDiff(location, in: local, newTab: newTab)
                 }
             }
@@ -1141,7 +1141,7 @@ struct DiffView<Model: WorkspacePaneModel>: View {
             wrappedHeights: wrappedHeights,
             lookupRevision: rowRevision,
             onLookup: lookupAction(for: document, lines: lines),
-            destination: SourceEditorState.file(absolutePath).diffRequest,
+            destination: model.paneStores.sourceFile(absolutePath).diffRequest,
             onComment: commentAction(for: document),
             onDragComment: dragCommentAction(for: document),
             onEndCommentDrag: finishCommentAction(for: document),
@@ -1535,7 +1535,7 @@ struct DiffView<Model: WorkspacePaneModel>: View {
         // across two of them. `DiffRow.grouped` says why it is a post pass, `DiffRunGrouping`
         // says where a run stops.
         rows = DiffRow.grouped(isSideBySide ? splitRows(document) : unifiedRows(document),
-                               stoppingAt: SourceEditorState.file(absolutePath).diffRequest?.line)
+                               stoppingAt: model.paneStores.sourceFile(absolutePath).diffRequest?.line)
 
         // The editor follows its line, and a rebuild can take that line off the screen: a reload
         // after the agent edits, or a whitespace refold dropping the expanded run the line sat

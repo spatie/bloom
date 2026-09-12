@@ -49,10 +49,13 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
       - name: Build the bundled Ubuntu server
+        env:
+          BLOOM_SERVER_VERSION: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
           apt-get update -qq
           apt-get install -y --no-install-recommends libsqlite3-dev pkg-config git python3 patchelf
           swift build --product bloom-server -j 4 -Xswiftc -warnings-as-errors
+          swift build --product bloom-bridge -j 4 -Xswiftc -warnings-as-errors
           python3 Tools/package-linux-server.py .build/debug/bloom-server .build/bloom-server-linux-x86_64.tar.gz
       - uses: actions/upload-artifact@v7
         with:
@@ -397,7 +400,7 @@ jobs:
           TAG: ${{ steps.release.outputs.tag }}
           ZIP: ${{ steps.package.outputs.zip }}
           DMG: ${{ steps.package.outputs.dmg }}
-        run: gh release upload "$TAG" "$ZIP" "$DMG" --clobber
+        run: gh release upload "$TAG" "$ZIP" "$DMG" .build/server-package/bloom-server-linux-x86_64.tar.gz --clobber
 
       - name: Say where it went
         env:

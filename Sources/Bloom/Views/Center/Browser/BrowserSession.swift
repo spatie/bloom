@@ -3,6 +3,7 @@ import Foundation
 import Observation
 import WebKit
 import BloomCore
+import BloomClient
 
 /// One browser tab's live web view, and everything the address bar needs to know about it.
 ///
@@ -289,13 +290,19 @@ final class BrowserSession {
         // rather than at half of it. Nil would give the same, but only while the default holds.
         configuration.snapshotWidth = NSNumber(value: width ?? Double(webView.bounds.width))
 
-        let image = try await webView.takeSnapshot(configuration: configuration)
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
-              let png = NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
-        else {
-            throw BrowserSnapshotFailure()
+        return try await CancellableCallback<Data>.run { finish in
+            webView.takeSnapshot(with: configuration) { image, error in
+                if let error {
+                    finish(.failure(error))
+                } else if let image,
+                          let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+                          let png = NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:]) {
+                    finish(.success(png))
+                } else {
+                    finish(.failure(BrowserSnapshotFailure()))
+                }
+            }
         }
-        return png
     }
 
     /// The rendered text of the page, for `browser_text`.
@@ -344,14 +351,14 @@ final class BrowserSession {
         _ script: BrowserPageScript,
         reading read: @escaping @Sendable (Any?) -> Value?
     ) async throws -> Value {
-        try await withCheckedThrowingContinuation { continuation in
+        try await CancellableCallback<Value>.run { finish in
             webView.evaluateJavaScript(script.source) { value, error in
                 if let error {
-                    continuation.resume(throwing: error)
+                    finish(.failure(error))
                 } else if let read = read(value) {
-                    continuation.resume(returning: read)
+                    finish(.success(read))
                 } else {
-                    continuation.resume(throwing: BrowserScriptFailure())
+                    finish(.failure(BrowserScriptFailure()))
                 }
             }
         }

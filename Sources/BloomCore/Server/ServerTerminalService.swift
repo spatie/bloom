@@ -7,35 +7,66 @@ actor ServerTerminalService {
     private var processes: [String: StreamingProcess] = [:]
     private var pumps: [String: Task<Void, Never>] = [:]
     private var starts: [String: Task<Void, Error>] = [:]
-    private var commands: [String: (TmuxCommand, String)] = [:]
+    private var commands: [String: TmuxCommand] = [:]
     private var isClosed = false
+    private var shutdownTask: Task<Void, Never>?
+    private let ownsDaemon: Bool
+    private let makeProcess: @Sendable (TmuxCommand, String) -> StreamingProcess
+    private let run: @Sendable (TmuxCommand, [String], String) async throws -> ShellResult
+
+    init(ownsDaemon: Bool? = nil,
+         makeProcess: (@Sendable (TmuxCommand, String) -> StreamingProcess)? = nil,
+         run: (@Sendable (TmuxCommand, [String], String) async throws -> ShellResult)? = nil) {
+        #if os(Linux)
+        self.ownsDaemon = ownsDaemon ?? true
+        #else
+        self.ownsDaemon = ownsDaemon ?? false
+        #endif
+        self.makeProcess = makeProcess ?? { command, cwd in
+            StreamingProcess(executable: command.executable, arguments: command.arguments(["-D"]), cwd: cwd)
+        }
+        self.run = run ?? { command, arguments, cwd in
+            try await Shell.run(command.executable, command.arguments(arguments), cwd: cwd, timeout: .seconds(5))
+        }
+    }
 
     func start(command: TmuxCommand, key: String, cwd: String) async throws {
         guard !isClosed else { throw ServerFailure("The server is shutting down.") }
-        commands[key] = (command, cwd)
-        #if os(Linux)
+        commands[key] = command
+        guard ownsDaemon else { return }
         if let task = starts[key] { return try await task.value }
         if processes[key]?.isRunning == true { return }
         let task = Task { try await self.launch(command: command, key: key, cwd: cwd) }
         starts[key] = task
         defer { starts.removeValue(forKey: key) }
         try await task.value
-        #endif
     }
 
     private func launch(command: TmuxCommand, key: String, cwd: String) async throws {
-        let process = StreamingProcess(executable: command.executable, arguments: command.arguments(["-D"]), cwd: cwd)
+        try Task.checkCancellation()
+        guard !isClosed else { throw ServerFailure("The server is shutting down.") }
+        let process = makeProcess(command, cwd)
         processes[key] = process
         let lines = process.lines
-        pumps[key] = Task { do { for try await _ in lines {} } catch { /* The readiness probe reports a failed terminal launch. */ } }
-        for _ in 0..<30 {
-            let probe = try await Shell.run(command.executable, command.arguments(["show-options", "-g", "exit-empty"]), cwd: cwd)
-            if probe.ok { return }
-            guard process.isRunning else { throw ServerFailure("The server terminal could not start.") }
-            try await Task.sleep(for: .milliseconds(100))
+        let pump = Task { do { for try await _ in lines {} } catch { /* The readiness probe reports a failed terminal launch. */ } }
+        pumps[key] = pump
+        do {
+            for _ in 0..<30 {
+                let probe = try await run(command, ["show-options", "-g", "exit-empty"], cwd)
+                try Task.checkCancellation()
+                guard !isClosed else { throw ServerFailure("The server is shutting down.") }
+                if probe.ok { return }
+                guard process.isRunning else { throw ServerFailure("The server terminal could not start.") }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            throw ServerFailure("The server terminal did not become ready.")
+        } catch {
+            await ServerTerminalProcessLifetime.stop(process).value
+            pump.cancel()
+            await pump.value
+            processes[key] = nil; pumps[key] = nil
+            throw error
         }
-        process.terminate()
-        throw ServerFailure("The server terminal did not become ready.")
     }
 
     func close(workspaceID: WorkspaceID, store: Store, cwd: String) async throws {
@@ -50,21 +81,71 @@ actor ServerTerminalService {
         }
     }
 
+    /// SSH attaches directly to tmux and never enters ServerTerminalStreams. Check both clients
+    /// and detached commands before replacing a runtime that owns the tmux process.
+    func hasMaintenanceBlockers() async -> Bool {
+        guard starts.isEmpty else { return true }
+        for command in Array(commands.values) {
+            let directory = URL(fileURLWithPath: command.configPath).deletingLastPathComponent().path
+            do {
+                let clients = try await run(command, ["list-clients", "-F", "#{client_session}"], directory)
+                if clients.ok, !clients.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+                let panes = try await run(command, ["list-panes", "-a", "-F", "#{pane_dead}\t#{pane_current_command}\t#{pane_pid}"], directory)
+                if !panes.ok {
+                    // A reaped foreground daemon has no terminal work. A live one that cannot
+                    // be inspected must not be treated as idle.
+                    if processes.values.contains(where: \.isRunning) { return true }
+                    continue
+                }
+                if Self.panesBlockMaintenance(panes.stdout) { return true }
+            } catch { return true }
+        }
+        return false
+    }
+
+    static func panesBlockMaintenance(_ output: String, children: (Int32) -> String? = processChildren) -> Bool {
+        for line in output.split(separator: "\n") {
+            let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
+            guard fields.count == 3, fields[0] == "0" || fields[0] == "1" else { return true }
+            if fields[0] == "1" { continue }
+            guard ["bash", "zsh", "sh", "dash", "fish"].contains(String(fields[1])),
+                  let pid = Int32(fields[2]), pid > 1, let running = children(pid),
+                  running.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return true }
+        }
+        return false
+    }
+
+    private static func processChildren(_ pid: Int32) -> String? {
+        #if os(Linux)
+        return try? String(contentsOfFile: "/proc/\(pid)/task/\(pid)/children", encoding: .utf8)
+        #else
+        // Managed replacement currently targets Linux. Unknown process state fails closed.
+        return nil
+        #endif
+    }
+
     func shutdown() async {
+        if let shutdownTask { await shutdownTask.value; return }
         isClosed = true
-        for start in starts.values { start.cancel() }
-        // A tmux server owns PTYs whose shells use separate process groups. Ask tmux to close
-        // those sessions before terminating its process, so a service stop leaves no shell behind.
-        for (command, cwd) in commands.values {
-            _ = try? await Shell.run(command.executable, command.arguments(["kill-server"]), cwd: cwd)
+        let task = Task { await self.finishShutdown() }
+        shutdownTask = task
+        await task.value
+    }
+
+    private func finishShutdown() async {
+        let pending = Array(starts.values)
+        for start in pending { start.cancel() }
+        for start in pending { _ = try? await start.value }
+        // Control commands need the stable server directory, not a worktree that may already
+        // have been archived. Start workers have settled before this final ownership cleanup.
+        for command in commands.values {
+            let directory = URL(fileURLWithPath: command.configPath).deletingLastPathComponent().path
+            _ = try? await run(command, ["kill-server"], directory)
         }
-        for process in processes.values { process.terminate() }
-        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
-        while processes.values.contains(where: \.isRunning), ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(25))
-        }
-        for process in processes.values where process.isRunning { process.kill() }
+        let endings = processes.values.map(ServerTerminalProcessLifetime.stop)
+        for ending in endings { await ending.value }
         for pump in pumps.values { pump.cancel() }
+        for pump in pumps.values { await pump.value }
         processes.removeAll(); pumps.removeAll(); commands.removeAll()
     }
 

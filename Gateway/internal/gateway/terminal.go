@@ -33,15 +33,23 @@ func requestID() string {
 }
 
 func (server *Server) terminal(writer http.ResponseWriter, request *http.Request, config Config) {
+	// Allocating the runtime stream can start a terminal. Ordinary HTTP requests must not
+	// cause that side effect before the WebSocket upgrader rejects them.
+	if !websocket.IsWebSocketUpgrade(request) {
+		http.Error(writer, "WebSocket upgrade required", http.StatusBadRequest)
+		return
+	}
 	query := request.URL.Query()
 	if request.Method != "GET" || len(query) != 2 || len(query["workspace_id"]) != 1 || len(query["name"]) != 1 || len(query.Get("workspace_id")) > 128 || len(query.Get("name")) > 64 || query.Get("workspace_id") == "" || query.Get("name") == "" {
 		http.Error(writer, "Invalid terminal request", 400)
 		return
 	}
 	id := requestID()
-	body, _ := json.Marshal(map[string]any{"version": protocolVersion, "id": id, "operation": map[string]any{"terminalStream": map[string]string{"workspaceID": query.Get("workspace_id"), "name": query.Get("name")}}})
+	operation, _ := json.Marshal(map[string]string{"workspaceID": query.Get("workspace_id"), "name": query.Get("name")})
+	input := rpcRequest{Version: protocolVersion, ID: id, Operation: map[string]json.RawMessage{"terminalStream": operation}}
+	body, _ := json.Marshal(input)
 	ctx, cancel := context.WithTimeout(request.Context(), 15*time.Second)
-	reply, err := runtimeRequest(ctx, config.RuntimeSocket, body, id)
+	reply, err := runtimeRequest(ctx, config.RuntimeSocket, body, input)
 	cancel()
 	if err != nil {
 		http.Error(writer, "Terminal unavailable", 502)
@@ -95,6 +103,12 @@ func (server *Server) terminal(writer http.ResponseWriter, request *http.Request
 			if socket.WriteMessage(websocket.BinaryMessage, frame.Data) != nil {
 				return
 			}
+		}
+		if reader.Err() == nil && request.Context().Err() == nil {
+			// A terminal ending normally is different from a broken WebSocket. Native
+			// clients use this close code to show a settled session instead of an error.
+			_ = socket.WriteControl(websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Session ended"), time.Now().Add(time.Second))
 		}
 	}()
 	for {
