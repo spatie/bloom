@@ -19,6 +19,15 @@ public enum OnboardingStep: String, Sendable, Hashable, CaseIterable, Identifiab
     case greeting
     /// What this Mac already has, which is the window's other half.
     case checks
+    /// Approving the helper that keeps a laptop awake with its lid shut, which is the one part of
+    /// Keep Awake that Bloom cannot do on its own. Optional twice over: only a Mac with a lid is
+    /// asked, and only one that has not already approved it. See `OnboardingFlow.steps`.
+    ///
+    /// **Here rather than in Settings alone, because of what it costs to be found later.** The
+    /// approval is a trip to System Settings, and a switch that needs one is a switch people flip,
+    /// see nothing happen, and give up on. Asked once, on the screen after the checks, it can be
+    /// on by default for the rest of the app's life.
+    case keepAwake
     /// The one command that couples the owner's own Claude Code to this Bloom. Optional, and
     /// omitted entirely when there is nothing to offer. See `OnboardingFlow.steps`.
     case commandLine
@@ -53,12 +62,12 @@ public enum OnboardingStep: String, Sendable, Hashable, CaseIterable, Identifiab
     /// Reading order. Which of these a given window actually walks is `OnboardingFlow.steps`,
     /// which is the same list with the optional step taken out when it has nothing to say.
     public static let order: [OnboardingStep] = [
-        .greeting, .checks, .commandLine, .promptSubmission, .postcard,
+        .greeting, .checks, .keepAwake, .commandLine, .promptSubmission, .postcard,
     ]
 
     /// True of a step the sequence may leave out. Nothing is lost by leaving it out: the offer is
     /// in Settings for the rest of the app's life, which is where somebody goes back for it.
-    public var isOptional: Bool { self == .commandLine }
+    public var isOptional: Bool { self == .commandLine || self == .keepAwake }
 
     /// What the button that opens this screen says, or nil for a screen nothing advances to.
     ///
@@ -96,6 +105,7 @@ public enum OnboardingStep: String, Sendable, Hashable, CaseIterable, Identifiab
         switch self {
         case .greeting: nil
         case .checks: "See what Bloom needs"
+        case .keepAwake: "Keep this Mac awake"
         case .commandLine: "Use Bloom from your terminal"
         case .promptSubmission: "Say what Bloom does next"
         case .postcard: "Send us a postcard"
@@ -123,11 +133,19 @@ public struct OnboardingFlow: Sendable, Hashable {
     /// reading the owner's own configuration, which is a file on disk and therefore an answer that
     /// arrives after the window has opened. See `offerCommandLine`.
     public private(set) var offersCommandLine: Bool
+    /// Whether the lid step is part of this window's sequence: a Mac with a lid, whose helper has
+    /// not been approved already. Answered by the app, which is the only side that can ask.
+    public private(set) var offersKeepAwake: Bool
 
-    public init(step: OnboardingStep = .greeting, offersCommandLine: Bool = false) {
+    public init(
+        step: OnboardingStep = .greeting,
+        offersCommandLine: Bool = false,
+        offersKeepAwake: Bool = false
+    ) {
         self.step = step
         self.history = [step]
         self.offersCommandLine = offersCommandLine
+        self.offersKeepAwake = offersKeepAwake
     }
 
     /// Where a window opened by this trigger starts.
@@ -140,9 +158,14 @@ public struct OnboardingFlow: Sendable, Hashable {
 
     public static func opening(
         trigger: OnboardingTrigger,
-        offersCommandLine: Bool = false
+        offersCommandLine: Bool = false,
+        offersKeepAwake: Bool = false
     ) -> OnboardingFlow {
-        OnboardingFlow(step: firstStep(trigger: trigger), offersCommandLine: offersCommandLine)
+        OnboardingFlow(
+            step: firstStep(trigger: trigger),
+            offersCommandLine: offersCommandLine,
+            offersKeepAwake: offersKeepAwake
+        )
     }
 
     /// The screens this window walks, in order.
@@ -151,12 +174,25 @@ public struct OnboardingFlow: Sendable, Hashable {
     /// an answer arriving a moment late would take the screen out from under a reader, and the
     /// back control on it would point at a step the list no longer contains.
     public var steps: [OnboardingStep] {
-        OnboardingStep.order.filter { !$0.isOptional || offersCommandLine || $0 == step }
+        OnboardingStep.order.filter { !$0.isOptional || isOffered($0) || $0 == step }
     }
 
-    /// Says whether the optional step is worth showing. Nothing else may change the sequence.
+    /// Whether one optional step has something to offer on this Mac.
+    public func isOffered(_ step: OnboardingStep) -> Bool {
+        switch step {
+        case .commandLine: offersCommandLine
+        case .keepAwake: offersKeepAwake
+        default: true
+        }
+    }
+
+    /// Says whether an optional step is worth showing. Nothing else may change the sequence.
     public mutating func offerCommandLine(_ isOffered: Bool) {
         offersCommandLine = isOffered
+    }
+
+    public mutating func offerKeepAwake(_ isOffered: Bool) {
+        offersKeepAwake = isOffered
     }
 
     private var position: Int { steps.firstIndex(of: step) ?? 0 }
