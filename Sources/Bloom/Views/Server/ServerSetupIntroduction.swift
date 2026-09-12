@@ -8,10 +8,8 @@ struct ServerSetupIntroduction: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Metrics.gutter) {
-                BloomServerIllustration(accent: Brand.shallow)
-                    .environment(\.colorScheme, .dark)
-                    .background { BrandWater() }
-                    .background(Brand.depth)
+                BloomServerIllustration(accent: Palette.controlAccent)
+                    .background(Palette.surfaceSunken)
                     .clipShape(RoundedRectangle(cornerRadius: Metrics.corner * 2))
                 HStack(alignment: .top, spacing: Metrics.gutter * 1.5) {
                     benefit("Keep agents working", symbol: "play.circle",

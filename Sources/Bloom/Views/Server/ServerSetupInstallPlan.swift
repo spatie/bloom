@@ -1,36 +1,42 @@
 import SwiftUI
 
-/// The review is the one place for the complete installation decision.
+/// Review names the required software and its destination before optional tools are chosen.
 struct ServerSetupInstallPlan: View {
     var installationRoot: String?
     var serviceHome: String?
     var dataDirectory: String?
+    var alreadyInstalled = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
-            item("Software", detail: "Bloom Server, Git, GitHub CLI, tmux, Node.js, npm and trusted CA certificates. Compatible tools already installed are reused.")
-            item("Account and startup", detail: "Creates a private bloom account, adds this Mac’s public SSH key and starts Bloom automatically.")
-            item("Your projects", detail: "Existing projects, conversations and sign-ins are preserved.")
-            LabeledContent("Install location", value: installationRoot ?? "/home/bloom/bloom/server")
-                .font(Typo.caption).textSelection(.enabled)
-            DisclosureGroup("Installation details") {
-                VStack(alignment: .leading, spacing: Metrics.spacing) {
-                    Text("Includes Git, GitHub CLI, tmux, Node.js, npm and trusted CA certificates. Startup uses systemd.")
-                    LabeledContent("Server files", value: installationRoot ?? "/home/bloom/bloom/server")
-                    LabeledContent("Server data", value: dataDirectory ?? "/home/bloom/bloom/data")
-                    LabeledContent("Account home", value: serviceHome ?? "/home/bloom")
-                    Text("OS packages and the startup service use system locations. Browser tools use /opt/bloom-browser. Sign-ins use the account’s configuration folders.")
-                    Text("Codex and Claude install during sign-in. Configure PHP, Docker and databases per project.")
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                Text(alreadyInstalled ? "Your installation" : "Included with Bloom Server").font(Typo.labelEmphasis)
+                Text("Git, GitHub CLI, tmux, Node.js, npm and trusted CA certificates. Compatible tools already installed are reused.")
+                    .font(Typo.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: Metrics.spacing) {
+                Text(alreadyInstalled ? "Runs as the bloom account and starts automatically." : "Creates a bloom account and starts automatically.")
+                    .font(Typo.caption).foregroundStyle(.secondary)
+                ServerSetupHelpButton(title: "Account and startup", details: "Bloom adds this Mac’s public SSH key to the dedicated server account. The private key stays on your Mac. Startup uses systemd. Existing projects, conversations and sign-ins are preserved.")
+            }
+            VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                HStack(spacing: Metrics.spacing) {
+                    Text("Install location").font(Typo.captionEmphasis)
+                    ServerSetupHelpButton(title: "Files and system changes", details: locations)
                 }
-                .font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(installationRoot ?? "/home/bloom/bloom/server")
+                    .font(Typo.codeSmall).foregroundStyle(.secondary).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
-    private func item(_ title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-            Text(title).font(Typo.labelEmphasis)
-            Text(detail).font(Typo.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        }
+    private var locations: String {
+        "Server files: " + (installationRoot ?? "/home/bloom/bloom/server")
+            + "\nServer data: " + (dataDirectory ?? "/home/bloom/bloom/data")
+            + "\nAccount home: " + (serviceHome ?? "/home/bloom")
+            + "\n\nOS packages and the startup service use system locations. Optional browser tools use /opt/bloom-browser. Sign-ins use the account’s configuration folders."
+            + "\n\nCodex and Claude Code install during sign-in when needed. PHP and databases are configured per project, often using Docker."
     }
 }

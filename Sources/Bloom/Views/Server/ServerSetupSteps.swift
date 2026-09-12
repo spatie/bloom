@@ -19,8 +19,9 @@ struct ServerSetupSteps: View {
     let current: Step
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Metrics.gutter * 1.5) {
+        VStack(alignment: .leading, spacing: Metrics.spacing) {
             Text("Server Setup").font(Typo.captionEmphasis).foregroundStyle(.secondary)
+                .padding(.bottom, Metrics.spacing)
             ForEach(Step.allCases, id: \.rawValue) { step in
                 HStack(spacing: Metrics.spacingWide) {
                     Image(systemName: step.rawValue < current.rawValue ? "checkmark.circle.fill" : "\(step.rawValue + 1).circle\(step == current ? ".fill" : "")")
@@ -28,7 +29,12 @@ struct ServerSetupSteps: View {
                         .accessibilityHidden(true)
                     Text(step.title).font(step == current ? Typo.captionEmphasis : Typo.caption)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Metrics.spacing)
+                .padding(.vertical, Metrics.spacing)
                 .foregroundStyle(step == current ? Palette.controlAccent : Palette.textSecondary)
+                .background(step == current ? Palette.controlAccent.opacity(0.08) : .clear,
+                            in: RoundedRectangle(cornerRadius: Metrics.corner))
                 .accessibilityElement(children: .combine)
                 .accessibilityValue(step == current ? "Current step" : step.rawValue < current.rawValue ? "Complete" : "Not started")
             }
@@ -36,7 +42,7 @@ struct ServerSetupSteps: View {
             Text("Step \(current.rawValue + 1) of \(Step.allCases.count)")
                 .font(Typo.caption).foregroundStyle(.secondary)
         }
-        .padding(Metrics.gutter * 1.5)
+        .padding(Metrics.gutter)
         .frame(width: 170, alignment: .leading)
         .frame(maxHeight: .infinity)
         .background(.bar)

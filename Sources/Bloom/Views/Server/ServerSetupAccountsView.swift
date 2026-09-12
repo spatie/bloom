@@ -7,14 +7,13 @@ struct ServerSetupAccountsView: View {
     @State private var login: LoginTerminalSession?
     @State private var loginProblem: String?
     @State private var credentialImport: ServerCredentialImportModel?
+    @State private var showsServerTools = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
             if !model.hasChosenAccountMethod {
-                if model.swapDiagnostic != nil { swapRow }
-                if model.dockerDiagnostic != nil { dockerRow }
-                if model.browserDiagnostic != nil { browserRow }
                 accountChoice
+                if hasToolFailure { serverTools }
             } else {
                 signIns
             }
@@ -25,14 +24,15 @@ struct ServerSetupAccountsView: View {
         .sheet(isPresented: Binding(get: { credentialImport != nil }, set: { if !$0 { closeImport() } })) {
             if let credentialImport { ServerCredentialImportView(model: credentialImport, close: closeImport) }
         }
+        .onAppear { showsServerTools = hasToolFailure }
+        .onChange(of: hasToolFailure) { _, failed in if failed { showsServerTools = true } }
         .onDisappear { login?.stop(); login = nil; credentialImport?.cancel(); credentialImport = nil }
     }
 
     private var accountChoice: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter * 1.5) {
-            Image(systemName: "person.crop.circle.badge.checkmark")
-                .font(.system(size: 40)).foregroundStyle(Palette.controlAccent).accessibilityHidden(true)
-            Text("Bring your accounts with you").font(Typo.heading)
+            Label("Use accounts from this Mac", systemImage: "person.crop.circle.badge.checkmark")
+                .font(Typo.labelEmphasis).foregroundStyle(Palette.controlAccent)
             Text("Copy your GitHub and Codex sign-ins from this Mac. You choose which accounts to share, and this Mac stays signed in.")
                 .font(Typo.label).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Button("Copy Accounts from This Mac…") {
@@ -41,7 +41,7 @@ struct ServerSetupAccountsView: View {
             }
             .buttonStyle(.borderedProminent).tint(Palette.controlAccent)
             .disabled(model.isBusy || model.accountConnection == nil)
-            Text("Prefer to sign in separately? Choose Continue. You can also connect Claude on the next screen.")
+            Text("Claude Code uses a separate sign-in on the next screen. You can add or change accounts later in Server Settings.")
                 .font(Typo.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -53,17 +53,9 @@ struct ServerSetupAccountsView: View {
             Divider()
             accountRow("Codex", detail: agentDetail(.codex, name: "Codex"), account: .codex)
             Divider()
-            accountRow("Claude", detail: agentDetail(.claudeCode, name: "Claude"), account: .claude)
+            accountRow("Claude Code", detail: agentDetail(.claudeCode, name: "Claude Code"), account: .claude)
             Divider()
-            browserRow
-            if model.installsDocker || model.dockerAttempted {
-                Divider()
-                dockerRow
-            }
-            if model.swapAttempted {
-                Divider()
-                swapRow
-            }
+            serverTools
             HStack {
                 Button("Refresh Status") { Task { await model.refreshAccounts() } }.disabled(model.isBusy)
                 if model.isBusy { ProgressView().controlSize(.small) }
@@ -77,6 +69,38 @@ struct ServerSetupAccountsView: View {
             }
             if let loginProblem { Text(loginProblem).font(Typo.caption).foregroundStyle(Palette.warning).textSelection(.enabled) }
         }
+    }
+
+    private var hasToolFailure: Bool {
+        model.swapDiagnostic != nil || model.dockerDiagnostic != nil || model.browserDiagnostic != nil || model.browserFailure != nil
+    }
+
+    private var serverTools: some View {
+        DisclosureGroup(isExpanded: $showsServerTools) {
+            VStack(alignment: .leading, spacing: Metrics.gutter) {
+                browserRow
+                if model.installsDocker || model.dockerAttempted {
+                    Divider()
+                    dockerRow
+                }
+                if model.swapAttempted {
+                    Divider()
+                    swapRow
+                }
+            }
+            .padding(.top, Metrics.spacing)
+        } label: {
+            Label(hasToolFailure ? "Server tools need attention" : "Server tools",
+                  systemImage: hasToolFailure ? "exclamationmark.triangle" : "wrench.and.screwdriver")
+                .font(Typo.captionEmphasis)
+                .foregroundStyle(hasToolFailure ? Palette.warning : Palette.textSecondary)
+        }
+    }
+
+    private func isAuthenticated(_ account: ServerSetupAccount) -> Bool {
+        if account == .github { return model.githubIsAuthenticated }
+        let agent: AgentKind = account == .codex ? .codex : .claudeCode
+        return model.agentAuthentication.contains { $0.agent == agent && $0.state == .ready }
     }
 
     private var githubDetail: String {
@@ -98,11 +122,13 @@ struct ServerSetupAccountsView: View {
     private func accountRow(_ title: String, detail: String, account: ServerSetupAccount) -> some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                Text(title).font(Typo.labelEmphasis)
+                Label(title, systemImage: isAuthenticated(account) ? "checkmark.circle.fill" : "person.crop.circle")
+                    .font(Typo.labelEmphasis)
+                    .foregroundStyle(isAuthenticated(account) ? Palette.controlAccent : Palette.textPrimary)
                 Text(detail).font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
             Spacer()
-            Button(account == .github && model.githubIsAuthenticated ? "Change Account…" : "Sign In…") {
+            Button(isAuthenticated(account) ? "Change Account…" : "Sign In…") {
                 guard let launch = model.accountTerminal(account) else {
                     loginProblem = "This connection cannot open a server sign-in session. Use the SSH connection configured for this server account."
                     return
@@ -111,6 +137,7 @@ struct ServerSetupAccountsView: View {
                 login = LoginTerminalSession(launch: launch, label: "\(title) on \(model.host)") { _ in }
             }
             .disabled(model.isBusy)
+            .fixedSize()
         }
     }
 

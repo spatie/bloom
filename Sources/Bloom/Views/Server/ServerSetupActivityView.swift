@@ -10,19 +10,28 @@ struct ServerSetupActivityView: View {
 
     var compact = false
     var stages = ServerSetupActivity.Stage.allCases
+    private var visibleStages: [ServerSetupActivity.Stage] { stages.filter { activity.status(of: $0) != .skipped } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
-            if let failure { ServerSetupFailureView(failure: failure) }
             if compact {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 2), alignment: .leading, spacing: Metrics.spacing) {
-                    ForEach(stages) { stage in stageRow(stage) }
+                // A long failure must not push the live, selectable output below the window.
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Metrics.gutter) {
+                        if let failure { ServerSetupFailureView(failure: failure) }
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 2), alignment: .leading, spacing: Metrics.spacing) {
+                            ForEach(visibleStages) { stage in stageRow(stage) }
+                        }
+                    }
                 }
+                .scrollBounceBehavior(.basedOnSize)
+                .frame(maxHeight: failure == nil ? CGFloat((visibleStages.count + 1) / 2) * 28 : 180)
                 output
             } else {
+                if let failure { ServerSetupFailureView(failure: failure) }
                 HStack(alignment: .top, spacing: Metrics.gutter * 2) {
                     VStack(alignment: .leading, spacing: Metrics.gutter) {
-                        ForEach(stages) { stage in stageRow(stage) }
+                        ForEach(visibleStages) { stage in stageRow(stage) }
                         Spacer(minLength: 0)
                     }
                     .frame(width: 185, alignment: .leading)
@@ -62,10 +71,11 @@ struct ServerSetupActivityView: View {
                 .buttonStyle(.bordered).controlSize(.small).help("Copy server output").accessibilityLabel("Copy server output")
             }
             ServerSetupOutputView(lines: activity.lines)
+                .frame(minHeight: compact ? 180 : 240, maxHeight: .infinity)
             if failure == nil {
                 Text(activity.currentMessage)
                     .font(Typo.caption).foregroundStyle(.secondary)
-                    .lineLimit(2).textSelection(.enabled)
+                    .lineLimit(1).truncationMode(.middle).help(activity.currentMessage).textSelection(.enabled)
             }
         }
     }
@@ -95,13 +105,14 @@ struct ServerSetupFailureView: View {
             HStack(alignment: .firstTextBaseline) {
                 Label(failure.message, systemImage: "exclamationmark.triangle.fill")
                     .font(Typo.labelEmphasis).foregroundStyle(Palette.warning)
+                    .fixedSize(horizontal: false, vertical: true).layoutPriority(1)
                 Spacer(minLength: 0)
                 if let status = failure.exitStatus {
                     Text("Exit \(status)").font(Typo.codeSmall).foregroundStyle(.secondary)
                 }
             }
             if let command = failure.command {
-                Text(command).font(Typo.codeSmall).foregroundStyle(.secondary).lineLimit(2)
+                Text(command).font(Typo.codeSmall).foregroundStyle(.secondary).lineLimit(2).help(command)
             }
             Text(failure.recovery).font(Typo.caption).foregroundStyle(.secondary)
             Button(copiedError ? "Copied" : "Copy Error") {

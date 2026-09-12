@@ -25,10 +25,13 @@ struct ServerSetupView: View {
                     VStack(alignment: .leading, spacing: Metrics.spacing) {
                         HStack(alignment: .firstTextBaseline) {
                             Text(title).font(model.phase == .introduction ? Typo.displayHeading : Typo.heading)
+                                .fixedSize(horizontal: false, vertical: true).layoutPriority(1)
                             Spacer()
                             if model.phase != .introduction && model.phase != .address && model.phase != .checking {
                                 Text(model.label.isEmpty ? model.host : "\(model.label) · \(model.host)")
-                                    .font(Typo.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    .font(Typo.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                                    .frame(maxWidth: 180, alignment: .trailing)
+                                    .help(model.label.isEmpty ? model.host : "\(model.label) · \(model.host)")
                             }
                         }
                         if !subtitle.isEmpty {
@@ -36,7 +39,8 @@ struct ServerSetupView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    .padding(Metrics.gutter * 2)
+                    .padding(.horizontal, Metrics.gutter * 2)
+                    .padding(.vertical, Metrics.gutter * 1.5)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     Group {
@@ -64,10 +68,19 @@ struct ServerSetupView: View {
 
             Divider()
             HStack(spacing: Metrics.gutter) {
-                Button(model.isStopping ? "Stopping…" : model.isBusy ? "Stop Setup" : "Cancel") {
-                    if model.isBusy { Task { await model.stopSetup() } } else { model.cancel(); dismissWindow(id: windowID) }
+                if model.phase != .complete {
+                    Button(model.isStopping ? "Stopping…" : model.isBusy ? "Stop Setup" : "Cancel") {
+                        if model.isBusy { Task { await model.stopSetup() } } else { model.cancel(); dismissWindow(id: windowID) }
+                    }
+                    .keyboardShortcut(.cancelAction).disabled(model.isStopping)
                 }
-                .keyboardShortcut(.cancelAction).disabled(model.isStopping)
+                if model.failure != nil || !model.activity.lines.isEmpty {
+                    Button("Copy Report") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(model.diagnosticReport, forType: .string)
+                    }
+                    .help("Copy setup steps, server output and error details")
+                }
                 Spacer()
                 if model.phase != .introduction && model.phase != .complete {
                     Button("Back") {
@@ -125,7 +138,7 @@ struct ServerSetupView: View {
         switch model.phase {
         case .introduction: "Run projects on your server and pick up where you left off on any device."
         case .address, .checking: "Enter an Ubuntu server with administrator SSH access. This step only checks the server."
-        case .trust: "Compare this fingerprint with your provider’s before trusting the connection."
+        case .trust: "Check this fingerprint in your server console or with your administrator before continuing."
         case .readyToInstall: model.hasInstalledServer ? "Your installation and sign-ins are preserved. Continue to finish connecting." : "Check what will be installed, then choose Install."
         case .accounts: model.isInstallingOptionalTools || !model.hasChosenAccountMethod ? "" : "Check your accounts below. You can connect more tools later."
         case .installing, .connecting: ""
@@ -212,29 +225,29 @@ struct ServerSetupView: View {
 
     private var installationSummary: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter * 1.5) {
-            ServerSetupInstallPlan(installationRoot: model.check?.installationRoot, serviceHome: model.check?.serviceHome, dataDirectory: model.check?.dataDirectory)
-            Divider()
-            swapOption
-            VStack(alignment: .leading, spacing: Metrics.spacing) {
-                Toggle("Add browser testing tools", isOn: $model.installsBrowserTools).disabled(model.hasInstalledServer)
-                Text("Lets agents test websites with sandboxed Chrome. Website previews work without it.")
-                    .font(Typo.caption).foregroundStyle(.secondary)
-                DisclosureGroup("Browser tool details") {
-                    Text("Installs agent-browser, Chrome, browser libraries and fonts. May add a Chrome-specific AppArmor rule. Docker projects need their own browser setup.")
-                        .font(Typo.caption).foregroundStyle(.secondary)
+            ServerSetupInstallPlan(installationRoot: model.check?.installationRoot, serviceHome: model.check?.serviceHome, dataDirectory: model.check?.dataDirectory, alreadyInstalled: model.hasInstalledServer)
+            if !model.hasInstalledServer {
+                Divider()
+                Text("Development tools").font(Typo.labelEmphasis)
+                VStack(alignment: .leading, spacing: Metrics.gutter) {
+                    VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                        HStack(spacing: Metrics.spacing) {
+                            Toggle("Docker for container projects", isOn: $model.installsDocker).disabled(model.hasInstalledServer)
+                            ServerSetupHelpButton(title: "Docker installation", details: dockerDetails)
+                        }
+                        Text("Run each project’s app and databases together. Starts automatically after a reboot.")
+                            .font(Typo.caption).foregroundStyle(.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
+                        HStack(spacing: Metrics.spacing) {
+                            Toggle("Browser testing tools", isOn: $model.installsBrowserTools).disabled(model.hasInstalledServer)
+                            ServerSetupHelpButton(title: "Browser testing tools", details: "Installs agent-browser, Chrome, browser libraries and fonts. May add a Chrome-specific AppArmor rule. Docker projects need their own browser setup. Website previews in Bloom work without these tools.")
+                        }
+                        Text("Let agents test websites with sandboxed Chrome.")
+                            .font(Typo.caption).foregroundStyle(.secondary)
+                    }
+                    swapOption
                 }
-            }
-            VStack(alignment: .leading, spacing: Metrics.spacing) {
-                Toggle("Docker for container projects", isOn: $model.installsDocker).disabled(model.hasInstalledServer)
-                Text("Run a project's app and databases in containers, without configuring each tool separately.")
-                    .font(Typo.caption).foregroundStyle(.secondary)
-                DisclosureGroup("Docker installation details") {
-                    Text("Installs Ubuntu's Docker, Compose and rootless networking packages. Docker runs as the Bloom account, without administrator access, and starts automatically after a reboot.")
-                    Text("Raises the server's file-watch limit when needed, so development servers can watch large projects.")
-                    Text("Images and container data: " + (model.check?.serviceHome ?? "/home/bloom") + "/bloom/docker/data")
-                    Text("The user service and Docker connection settings use the account's .config folder. Docker projects can still run commands and access files as the Bloom account.")
-                }
-                .font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
             if model.hasInstalledServer {
                 Label("Already installed. Continue to Accounts without reinstalling.", systemImage: "checkmark.circle.fill")
@@ -243,15 +256,19 @@ struct ServerSetupView: View {
         }
     }
 
+    private var dockerDetails: String {
+        "Installs Ubuntu’s Docker, Compose and rootless networking packages. Docker runs as the Bloom account, without administrator access."
+            + "\n\nRaises the server’s file-watch limit when needed, so development servers can watch large projects."
+            + "\n\nImages and container data: " + (model.check?.serviceHome ?? "/home/bloom") + "/bloom/docker/data"
+            + "\n\nThe user service and Docker connection settings use the account’s .config folder. Docker projects can run commands and access files as the Bloom account."
+    }
+
     @ViewBuilder private var swapOption: some View {
         VStack(alignment: .leading, spacing: Metrics.spacing) {
             if model.check?.shouldOfferSwapInstall == true {
                 HStack {
                     Toggle("Add 2 GB of swap", isOn: $model.installsSwap).disabled(model.hasInstalledServer)
-                    Image(systemName: "questionmark.circle")
-                        .foregroundStyle(.secondary)
-                        .help("Swap uses disk space when memory is full. Bloom creates /var/lib/bloom/swapfile, protected by root, and enables it after reboots. Setup requires 4 GB free so at least 2 GB remains available. Existing swap is always preserved.")
-                        .accessibilityLabel("About swap: uses 2 GB of disk space and starts after reboots")
+                    ServerSetupHelpButton(title: "Swap space", details: "Swap uses disk space when memory is full. Bloom creates /var/lib/bloom/swapfile, protected by root, and enables it after reboots. Setup requires 4 GB free so at least 2 GB remains available. Existing swap is always preserved.")
                 }
                 Text("Helps keep the server responsive during memory spikes. Uses 2 GB of disk space.")
                     .font(Typo.caption).foregroundStyle(.secondary)
@@ -299,7 +316,7 @@ struct ServerSetupView: View {
                         .disabled(model.check == nil || model.check?.blockers.isEmpty == false || model.isBusy)
                 }
             case .accounts:
-                Button("Continue") {
+                Button(model.hasChosenAccountMethod ? "Connect to Server" : "Sign In Separately") {
                     if model.hasChosenAccountMethod { Task { await model.connect() } } else { model.hasChosenAccountMethod = true }
                 }
                 .keyboardShortcut(.defaultAction)
