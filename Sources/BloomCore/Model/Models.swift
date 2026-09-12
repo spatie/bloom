@@ -690,6 +690,7 @@ public struct PullRequest: Sendable, Hashable, Codable {
 public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
     case claudeCode
     case codex
+    case grok
     case cursor
     case openCode
 
@@ -699,6 +700,7 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
         switch self {
         case .claudeCode: "Claude Code"
         case .codex: "Codex"
+        case .grok: "Grok"
         case .cursor: "Cursor"
         case .openCode: "OpenCode"
         }
@@ -708,6 +710,7 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
         switch self {
         case .claudeCode: "claude"
         case .codex: "codex"
+        case .grok: "grok"
         case .cursor: "cursor-agent"
         case .openCode: "opencode"
         }
@@ -723,6 +726,7 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
         switch self {
         case .claudeCode: return "\(home)/.claude/settings.json"
         case .codex: return "\(home)/.codex/config.toml"
+        case .grok: return "\(home)/.grok/config.toml"
         case .cursor: return "\(home)/.cursor"
         case .openCode: return "\(home)/.opencode"
         }
@@ -738,20 +742,21 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
     public var loginArguments: [String] {
         switch self {
         case .claudeCode: ["auth", "login"]
-        case .codex, .cursor: ["login"]
+        case .codex, .grok, .cursor: ["login"]
         case .openCode: ["auth", "login"]
         }
     }
 
     /// Whether Bloom can actually drive a chat with it.
     ///
-    /// Two, now. `AgentRunner` speaks Claude Code's stream-json and `CodexRunner` speaks Codex's
-    /// JSON-RPC, and both answer to `SessionRunner`. Cursor and OpenCode are detected and
-    /// configurable so the settings screen can be honest about what is installed, and neither has
-    /// a runner, so neither is offered anywhere a chat is started.
+    /// Three, now. `AgentRunner` speaks Claude Code's stream-json, `CodexRunner` speaks Codex's
+    /// JSON-RPC, and `GrokRunner` speaks Grok's ACP over stdio. All three answer to
+    /// `SessionRunner`. Cursor and OpenCode are detected and configurable so the settings screen
+    /// can be honest about what is installed, and neither has a runner, so neither is offered
+    /// anywhere a chat is started.
     public var canRunWorkspaces: Bool {
         switch self {
-        case .claudeCode, .codex: true
+        case .claudeCode, .codex, .grok: true
         case .cursor, .openCode: false
         }
     }
@@ -779,6 +784,11 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
     /// sentence behind a refusal made the agent do the different thing that was asked for.
     /// `CodexRunner` has shipped it since, as the reason that travels behind a denial.
     ///
+    /// **Grok: no**, until measured. ACP's `session/prompt` stays open for the whole turn, and a
+    /// second prompt on the same session while one is in flight is not a documented call the way
+    /// Codex's `turn/steer` is. The TUI can interject; this wire has not been shown to. Queuing
+    /// until the turn ends is the honest default, and a measurement that says otherwise flips this.
+    ///
     /// **Cursor and OpenCode: no**, and not as a judgement about the CLIs. Neither has a runner,
     /// so there is no turn to write into and no wire to write on. This answers `false` for the
     /// same reason `canRunWorkspaces` does, and a backend that grows a runner has to measure this
@@ -792,7 +802,7 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Identifiable {
     public var acceptsMidTurnMessage: Bool {
         switch self {
         case .claudeCode, .codex: true
-        case .cursor, .openCode: false
+        case .grok, .cursor, .openCode: false
         }
     }
 

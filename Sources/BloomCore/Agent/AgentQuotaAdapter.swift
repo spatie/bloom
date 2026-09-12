@@ -7,7 +7,7 @@ import Foundation
 /// the type to `AgentQuotaAdapters.all`. Nothing else in Bloom changes: the store is keyed by
 /// provider and window key, the board groups by `AgentKind`, and the panel draws whatever it is
 /// given. A provider that publishes no allowance at all needs no adapter and is not an error; two
-/// of the four CLIs Bloom detects are exactly that, and they contribute nothing rather than
+/// of the CLIs Bloom detects are exactly that, and they contribute nothing rather than
 /// contributing a row that says "unknown".
 public protocol AgentQuotaAdapter: Sendable {
     static var provider: AgentKind { get }

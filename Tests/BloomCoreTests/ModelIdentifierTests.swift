@@ -137,6 +137,19 @@ struct ModelIdentifierTests {
         #expect(ModelIdentifier.resolve("").model == "")
     }
 
+    @Test("a grok-prefixed id names Grok without a fetch")
+    func grokPrefixIsItsOwnNamespace() {
+        let resolved = ModelIdentifier.resolve("grok-4.6")
+        #expect(resolved.model == "grok-4.6")
+        #expect(resolved.kind == .grok)
+        #expect(!resolved.namesBackend)
+
+        let named = ModelIdentifier.resolve("grok:grok-4.6")
+        #expect(named.model == "grok-4.6")
+        #expect(named.kind == .grok)
+        #expect(named.namesBackend)
+    }
+
     // MARK: - Getting a stuck chat back
 
     /// The chat in the report: a Claude Code row holding a Codex id, which has never opened a

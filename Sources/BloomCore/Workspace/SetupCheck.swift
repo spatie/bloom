@@ -4,17 +4,18 @@ import Foundation
 
 /// One thing the welcome window looks for on this machine.
 ///
-/// Four, and they are not equal. `git` is the only flat requirement: a workspace IS a worktree,
+/// Five, and they are not equal. `git` is the only flat requirement: a workspace IS a worktree,
 /// so `Git.worktreeAdd` is reached on the first task anybody describes and there is no path
-/// through the app that avoids it. Claude Code and Codex are a pair, and what is required is
-/// **either** of them, because `AgentKind.runnable` is derived from `canRunWorkspaces` and both
-/// answer true: a machine with Codex and no Claude Code is a working machine, and telling that
-/// person they are missing something would be a lie. The GitHub CLI is wanted and not needed,
+/// through the app that avoids it. Claude Code, Codex and Grok are a set, and what is required
+/// is **any** of them, because `AgentKind.runnable` is derived from `canRunWorkspaces` and all
+/// three answer true: a machine with Grok and no Claude Code is a working machine, and telling
+/// that person they are missing something would be a lie. The GitHub CLI is wanted and not needed,
 /// which the README already says in as many words, so it is never allowed to read as a failure.
 public enum SetupTool: String, Sendable, Hashable, CaseIterable, Identifiable, Codable {
     case git
     case claudeCode
     case codex
+    case grok
     case gitHub
 
     public var id: String { rawValue }
@@ -27,6 +28,7 @@ public enum SetupTool: String, Sendable, Hashable, CaseIterable, Identifiable, C
         switch self {
         case .claudeCode: .claudeCode
         case .codex: .codex
+        case .grok: .grok
         case .git, .gitHub: nil
         }
     }
@@ -37,6 +39,7 @@ public enum SetupTool: String, Sendable, Hashable, CaseIterable, Identifiable, C
         case .git: "Git"
         case .claudeCode: "Claude Code"
         case .codex: "Codex"
+        case .grok: "Grok"
         case .gitHub: "GitHub CLI"
         }
     }
@@ -47,7 +50,7 @@ public enum SetupTool: String, Sendable, Hashable, CaseIterable, Identifiable, C
     public var sentenceName: String {
         switch self {
         case .gitHub: "the GitHub CLI"
-        case .git, .claudeCode, .codex: title
+        case .git, .claudeCode, .codex, .grok: title
         }
     }
 
@@ -64,6 +67,8 @@ public enum SetupTool: String, Sendable, Hashable, CaseIterable, Identifiable, C
             "The agent Bloom runs in a worktree, and the one most people come here for."
         case .codex:
             "OpenAI's agent. Bloom can drive a workspace with it instead of Claude Code."
+        case .grok:
+            "xAI's agent. Bloom can drive a workspace with it instead of Claude Code or Codex."
         case .gitHub:
             "Pull requests, checks and merges. Everything else in Bloom works without it."
         }
@@ -73,14 +78,14 @@ public enum SetupTool: String, Sendable, Hashable, CaseIterable, Identifiable, C
     public var executableName: String {
         switch self {
         case .git: "git"
-        case .claudeCode, .codex: agentKind?.executableName ?? rawValue
+        case .claudeCode, .codex, .grok: agentKind?.executableName ?? rawValue
         case .gitHub: "gh"
         }
     }
 
     /// The order the window lists them in: the flat requirement, then the agents, then the one
     /// that is optional. Reading down the column is reading down the strength of the ask.
-    public static let displayOrder: [SetupTool] = [.git, .claudeCode, .codex, .gitHub]
+    public static let displayOrder: [SetupTool] = [.git, .claudeCode, .codex, .grok, .gitHub]
 }
 
 // MARK: - How a tool turned out
@@ -220,6 +225,21 @@ public extension SetupCheck {
                 isInteractive: true
             )
 
+        case (.grok, .missing):
+            return SetupFix(
+                summary: "Install Grok",
+                command: "curl -fsSL https://x.ai/cli/install.sh | bash",
+                url: URL(string: "https://x.ai/cli")
+            )
+
+        case (.grok, .needsSignIn):
+            return SetupFix(
+                summary: "Sign in to Grok",
+                command: AgentKind.grok.loginCommand,
+                url: nil,
+                isInteractive: true
+            )
+
         case (.gitHub, .missing):
             return SetupFix(
                 summary: "Install the GitHub CLI",
@@ -331,7 +351,7 @@ public struct SetupReport: Sendable, Hashable {
         switch tool {
         case .git:
             return .problem
-        case .claudeCode, .codex:
+        case .claudeCode, .codex, .grok:
             // A missing agent is only a problem when it is the LAST agent. While the other row is
             // still being looked at, this one holds its tongue rather than flashing red and going
             // quiet again half a second later.

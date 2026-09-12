@@ -12,6 +12,8 @@ public enum SessionRunnerFactory {
         switch session.agentKind {
         case .codex:
             CodexRunner(workspacePath: workspacePath, session: session, store: store, bridge: bridge?.attachment)
+        case .grok:
+            GrokRunner(workspacePath: workspacePath, session: session, store: store, bridge: bridge?.attachment)
         case .claudeCode, .cursor, .openCode:
             AgentRunner(workspacePath: workspacePath, session: session, store: store, mcpConfigPath: bridge?.mcpConfigPath)
         }

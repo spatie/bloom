@@ -58,16 +58,26 @@ public struct ModelIdentifier: Equatable, Sendable {
     ///   yet. Empty costs only the label reading and the Codex half of the recognition; a string
     ///   that names its own backend is read without any list at all, which is the whole reason
     ///   the namespace is trusted over a lookup.
-    public static func resolve(_ raw: String, codexModels: [CodexModel] = []) -> ModelIdentifier {
+    public static func resolve(
+        _ raw: String,
+        codexModels: [CodexModel] = [],
+        grokModels: [GrokModel] = []
+    ) -> ModelIdentifier {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return ModelIdentifier(model: raw) }
 
         guard let (named, rest) = namespaced(trimmed) else {
             // Nothing named, so the lists answer, in the order `DefaultBackend` has always asked
-            // them in: Codex's fetched list is authoritative for its own ids, and
-            // `ClaudeModelRank` knows the four families.
+            // them in: Codex's fetched list is authoritative for its own ids, Grok's prefix is
+            // its own namespace even before a fetch, and `ClaudeModelRank` knows the four families.
             if let match = codexModel(named: trimmed, in: codexModels) {
                 return ModelIdentifier(model: match, kind: .codex)
+            }
+            if let match = grokModel(named: trimmed, in: grokModels) {
+                return ModelIdentifier(model: match, kind: .grok)
+            }
+            if GrokModelRank.recognises(trimmed) {
+                return ModelIdentifier(model: trimmed, kind: .grok)
             }
             if ClaudeModelRank.recognises(trimmed) {
                 return ModelIdentifier(model: trimmed, kind: .claudeCode)
@@ -75,10 +85,15 @@ public struct ModelIdentifier: Equatable, Sendable {
             return ModelIdentifier(model: trimmed)
         }
 
-        // The backend is settled; only the id still has to be read, and only Codex has a list to
-        // read it against. A Claude Code id is left exactly as it was, because `ModelAlias` is
-        // what translates those and it is the only thing that should.
-        let model = named == .codex ? codexModel(named: rest, in: codexModels) ?? rest : rest
+        // The backend is settled; only the id still has to be read. Codex and Grok have lists to
+        // read a label back as an id. A Claude Code id is left exactly as it was, because
+        // `ModelAlias` is what translates those and it is the only thing that should.
+        let model: String
+        switch named {
+        case .codex: model = codexModel(named: rest, in: codexModels) ?? rest
+        case .grok: model = grokModel(named: rest, in: grokModels) ?? rest
+        default: model = rest
+        }
         return ModelIdentifier(model: model, kind: named, namesBackend: true)
     }
 
@@ -98,9 +113,10 @@ public struct ModelIdentifier: Equatable, Sendable {
         model raw: String,
         on kind: AgentKind,
         hasSpoken: Bool,
-        codexModels: [CodexModel] = []
+        codexModels: [CodexModel] = [],
+        grokModels: [GrokModel] = []
     ) -> ModelIdentifier? {
-        let resolved = resolve(raw, codexModels: codexModels)
+        let resolved = resolve(raw, codexModels: codexModels, grokModels: grokModels)
         let moved = !hasSpoken && resolved.namesBackend ? resolved.kind : nil
         let settled = moved ?? kind
         guard resolved.model != raw || settled != kind else { return nil }
@@ -136,6 +152,13 @@ public struct ModelIdentifier: Equatable, Sendable {
     /// A fetched model whose id or display name is this value once both are stripped to letters
     /// and digits, which is what reads a label back as the id it was rendered from.
     private static func codexModel(named value: String, in models: [CodexModel]) -> String? {
+        let wanted = normalised(value)
+        guard !wanted.isEmpty else { return nil }
+        if let exact = models.first(where: { normalised($0.id) == wanted }) { return exact.id }
+        return models.first { normalised($0.displayName) == wanted }?.id
+    }
+
+    private static func grokModel(named value: String, in models: [GrokModel]) -> String? {
         let wanted = normalised(value)
         guard !wanted.isEmpty else { return nil }
         if let exact = models.first(where: { normalised($0.id) == wanted }) { return exact.id }

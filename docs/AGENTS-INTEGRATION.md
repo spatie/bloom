@@ -17,6 +17,7 @@ log, put on the pasteboard, or included in an error message. When a field is mis
 | --- | --- | --- | --- |
 | Claude Code | `claude` | `claude --version` | `2.1.234 (Claude Code)` |
 | Codex | `codex` | `codex --version` | `codex-cli 0.147.0` |
+| Grok | `grok` | `grok --version` | `grok 1.0.24 (68e414c661e3) [alpha]` |
 | Cursor | `cursor-agent` | `cursor-agent --version` | not installed here |
 | OpenCode | `opencode` | `opencode --version` | not installed here |
 
@@ -64,6 +65,19 @@ So: Provider `openai`, Plan from `chatgpt_plan_type` (title case it), Auth from 
 
 Config file: `~/.codex/config.toml`. Login command: `codex login`.
 
+## Grok
+
+Account facts live in `~/.grok/auth.json`, a map of issuer keys to credential objects. Relevant
+keys, all optional, on each credential object:
+
+- `email`, `first_name`, `auth_mode`, `expires_at`
+
+`key` and `refresh_token` are live credentials and must never be rendered. An `XAI_API_KEY` in
+the environment means API key auth instead, and takes precedence in what is displayed when no
+auth file is present. Config file to offer for opening: `~/.grok/config.toml`.
+
+Login command: `grok login`.
+
 ## Cursor and OpenCode
 
 Not installed here, so nothing about their auth files is verified. Detect the binary and show the
@@ -74,12 +88,13 @@ config directory is `~/.cursor` (exists here, holds `hooks.json`). OpenCode's is
 
 ## What Bloom can actually run
 
-Claude Code and Codex. The stream-json protocol in `PROTOCOL.md` is Claude Code's and
+Claude Code, Codex and Grok. The stream-json protocol in `PROTOCOL.md` is Claude Code's and
 `AgentRunner` speaks it; the JSON-RPC app-server protocol in `CODEX.md` is Codex's and
-`CodexRunner` speaks it. Both answer to `SessionRunner`, and `AgentKind.canRunWorkspaces` is the
-one place that decides which backends a chat can be started on. Cursor and OpenCode are detected
-and configurable and neither has a runner, so neither is offered anywhere a chat is started. The
-UI must say so plainly rather than implying a connected CLI is a usable backend.
+`CodexRunner` speaks it; ACP over `grok agent --no-leader stdio` in `GROK.md` is Grok's and
+`GrokRunner` speaks it. All three answer to `SessionRunner`, and `AgentKind.canRunWorkspaces` is
+the one place that decides which backends a chat can be started on. Cursor and OpenCode are
+detected and configurable and neither has a runner, so neither is offered anywhere a chat is
+started. The UI must say so plainly rather than implying a connected CLI is a usable backend.
 
 ## Registering Bloom in a client the owner runs themselves
 

@@ -66,9 +66,10 @@ public struct DefaultBackend: Equatable, Sendable {
         effort: String,
         app: AppDefaults,
         running: AgentKind = .claudeCode,
-        codexModels: [CodexModel] = []
+        codexModels: [CodexModel] = [],
+        grokModels: [GrokModel] = []
     ) -> DefaultBackend {
-        let identity = ModelIdentifier.resolve(model, codexModels: codexModels)
+        let identity = ModelIdentifier.resolve(model, codexModels: codexModels, grokModels: grokModels)
         let kind: AgentKind
         if identity.namesBackend, let named = identity.kind {
             kind = named
@@ -80,7 +81,13 @@ public struct DefaultBackend: Equatable, Sendable {
         return DefaultBackend(
             kind: kind,
             model: identity.model,
-            effort: self.effort(effort, on: kind, model: identity.model, codexModels: codexModels)
+            effort: self.effort(
+                effort,
+                on: kind,
+                model: identity.model,
+                codexModels: codexModels,
+                grokModels: grokModels
+            )
         )
     }
 
@@ -92,9 +99,10 @@ public struct DefaultBackend: Equatable, Sendable {
     public static func kind(
         ofModel model: String,
         running: AgentKind,
-        codexModels: [CodexModel]
+        codexModels: [CodexModel],
+        grokModels: [GrokModel] = []
     ) -> AgentKind {
-        ModelIdentifier.resolve(model, codexModels: codexModels).kind ?? running
+        ModelIdentifier.resolve(model, codexModels: codexModels, grokModels: grokModels).kind ?? running
     }
 
     /// The effort a model actually takes, which on Codex is the model's business and not ours.
@@ -107,11 +115,15 @@ public struct DefaultBackend: Equatable, Sendable {
         _ wanted: String,
         on kind: AgentKind,
         model: String,
-        codexModels: [CodexModel]
+        codexModels: [CodexModel],
+        grokModels: [GrokModel] = []
     ) -> String {
-        guard kind == .codex, let found = codexModels.first(where: { $0.id == model }) else {
-            return wanted
+        if kind == .codex, let found = codexModels.first(where: { $0.id == model }) {
+            return found.resolvedEffort(preferring: wanted)
         }
-        return found.resolvedEffort(preferring: wanted)
+        if kind == .grok, let found = grokModels.first(where: { $0.id == model }) {
+            return found.resolvedEffort(preferring: wanted)
+        }
+        return wanted
     }
 }
