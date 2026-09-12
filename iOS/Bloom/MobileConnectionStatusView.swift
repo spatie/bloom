@@ -12,7 +12,8 @@ final class MobileConnectionStatusView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = .secondarySystemBackground
+        backgroundColor = BloomTheme.panel
+        tintColor = BloomTheme.accent
         title.font = .preferredFont(forTextStyle: .footnote)
         title.adjustsFontForContentSizeCategory = true
         title.numberOfLines = 0
@@ -25,12 +26,17 @@ final class MobileConnectionStatusView: UIView {
         symbol.contentMode = .scaleAspectFit
         symbol.isAccessibilityElement = false
         var configuration = UIButton.Configuration.plain()
-        configuration.title = "Retry Now"
+        configuration.title = "Retry"
+        configuration.image = UIImage(systemName: "arrow.clockwise")
+        configuration.imagePadding = 5
+        configuration.buttonSize = .small
         configuration.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 6, bottom: 10, trailing: 6)
         retry.configuration = configuration
+        retry.accessibilityLabel = "Retry server connection"
         retry.setContentCompressionResistancePriority(.required, for: .horizontal)
         retry.addAction(UIAction { [weak self] _ in self?.onRetry?() }, for: .touchUpInside)
-        let text = UIStackView(arrangedSubviews: [title, detail]); text.axis = .vertical; text.spacing = 3
+        let text = UIStackView(arrangedSubviews: [title, detail]); text.axis = .vertical; text.spacing = 2
+
         let icon = UIStackView(arrangedSubviews: [symbol, progress]); icon.axis = .vertical
         let stack = UIStackView(arrangedSubviews: [icon, text, retry]); stack.alignment = .center; stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -41,9 +47,13 @@ final class MobileConnectionStatusView: UIView {
             stack.topAnchor.constraint(equalTo: topAnchor, constant: 8), bottom,
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            symbol.widthAnchor.constraint(equalToConstant: 22), symbol.heightAnchor.constraint(equalToConstant: 22),
+            symbol.widthAnchor.constraint(equalToConstant: 22),
             retry.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
         ])
+        let symbolHeight = symbol.heightAnchor.constraint(equalToConstant: 22)
+        // The icon stack hides the symbol while showing connection progress.
+        symbolHeight.priority = .defaultHigh
+        symbolHeight.isActive = true
     }
 
     required init?(coder: NSCoder) { fatalError("Use init(frame:)") }

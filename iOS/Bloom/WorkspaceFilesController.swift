@@ -27,7 +27,9 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
     private let table = UITableView(frame: .zero, style: .plain)
     private let segments = UISegmentedControl(items: ["Changes", "Files"])
     private let search = UISearchBar()
-    private let toolbar = UIToolbar()
+    private let summary = UILabel()
+    private let summaryRow = UIStackView()
+    private let reviewButton = UIButton(type: .system)
     private var changedRows: [ChangedFileTreeRow] = []
     private var collapsedChanges: Set<String> = []
     private var filteredCollapsedChanges: Set<String> = []
@@ -38,8 +40,7 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
     private var treeChildren: [String: [FileTreeNode]] = [:]
     private var needle = ""
     private var refreshing: Task<Void, Never>?
-    private lazy var reviewItem = UIBarButtonItem(title: "Review all changes", image: UIImage(systemName: "doc.text.magnifyingglass"),
-                                                 primaryAction: UIAction { [weak self] _ in self?.onReviewAll?() })
+    private var minimumRowHeight: CGFloat { traitCollection.userInterfaceIdiom == .pad ? 40 : 44 }
 
     init(review: MobileWorkspaceReview) {
         self.review = review
@@ -55,8 +56,8 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
         view.backgroundColor = BloomTheme.panel
         view.tintColor = BloomTheme.accent
         configureHeader()
+        configureSummary()
         configureTable()
-        configureToolbar()
         refreshUI()
     }
 
@@ -77,11 +78,10 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
         search.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(search)
         NSLayoutConstraint.activate([
-            segments.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
+            segments.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 6),
             segments.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
             segments.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            segments.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
-            search.topAnchor.constraint(equalTo: segments.bottomAnchor, constant: 4),
+            search.topAnchor.constraint(equalTo: segments.bottomAnchor),
             search.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 4),
             search.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -4)
         ])
@@ -91,8 +91,8 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
         table.backgroundColor = .clear
         table.separatorStyle = .none
         table.rowHeight = UITableView.automaticDimension
-        table.estimatedRowHeight = 52
-        table.sectionHeaderTopPadding = 8
+        table.estimatedRowHeight = minimumRowHeight
+        table.sectionHeaderTopPadding = 0
         table.dataSource = self
         table.delegate = self
         table.keyboardDismissMode = .onDrag
@@ -100,28 +100,41 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
         table.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(table)
         NSLayoutConstraint.activate([
-            table.topAnchor.constraint(equalTo: search.bottomAnchor),
+            table.topAnchor.constraint(equalTo: summaryRow.bottomAnchor),
             table.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            table.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            table.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            table.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor)
         ])
     }
 
-    private func configureToolbar() {
-        let appearance = UIToolbarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = BloomTheme.panel
-        appearance.shadowColor = BloomTheme.border
-        toolbar.standardAppearance = appearance
-        toolbar.scrollEdgeAppearance = appearance
-        toolbar.items = [UIBarButtonItem(systemItem: .flexibleSpace), reviewItem, UIBarButtonItem(systemItem: .flexibleSpace)]
-        toolbar.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(toolbar)
+    private func configureSummary() {
+        summary.font = .preferredFont(forTextStyle: .caption1)
+        summary.adjustsFontForContentSizeCategory = true
+        summary.textColor = .secondaryLabel
+        summary.numberOfLines = 1
+        var configuration = UIButton.Configuration.plain()
+        configuration.title = "Review All"
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 0)
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.preferredFont(forTextStyle: .caption1)
+            return attributes
+        }
+        reviewButton.configuration = configuration
+        reviewButton.heightAnchor.constraint(greaterThanOrEqualToConstant: traitCollection.userInterfaceIdiom == .pad ? 32 : 44).isActive = true
+        reviewButton.accessibilityLabel = "Review all changes"
+        reviewButton.setContentHuggingPriority(.required, for: .horizontal)
+        reviewButton.addAction(UIAction { [weak self] _ in self?.onReviewAll?() }, for: .touchUpInside)
+        summaryRow.axis = .horizontal; summaryRow.alignment = .center; summaryRow.spacing = 8
+        summaryRow.addArrangedSubview(summary); summaryRow.addArrangedSubview(reviewButton)
+        summaryRow.isLayoutMarginsRelativeArrangement = true
+        summaryRow.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 14, bottom: 4, trailing: 14)
+        summaryRow.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(summaryRow)
         NSLayoutConstraint.activate([
-            toolbar.topAnchor.constraint(equalTo: table.bottomAnchor),
-            toolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            toolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            toolbar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
-            toolbar.heightAnchor.constraint(equalToConstant: 48)
+            summaryRow.topAnchor.constraint(equalTo: search.bottomAnchor),
+            summaryRow.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            summaryRow.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
     }
 
@@ -141,7 +154,9 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
         } else {
             rows = FileTreeRowItem.flatten(children: treeChildren, expanded: expanded)
         }
-        reviewItem.isEnabled = !review.changes.isEmpty
+        reviewButton.isEnabled = !review.changes.isEmpty
+        reviewButton.isHidden = showsAllFiles
+        summary.text = showsAllFiles ? "\(review.paths.count) files" : "\(review.changes.count) changed " + (review.changes.count == 1 ? "file" : "files")
         table.reloadData()
         updateEmptyState()
         updateSelection()
@@ -236,19 +251,20 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
     }
 
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        showsAllFiles ? "Workspace files" : "\(review.changes.count) changed files"
+        nil
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "file") ?? UITableViewCell(style: .default, reuseIdentifier: "file")
         cell.backgroundColor = .clear
         cell.accessoryView = nil
+        let minimumHeight = minimumRowHeight
         if showsAllFiles {
             let row = rows[indexPath.row]
             cell.contentConfiguration = UIHostingConfiguration {
                 BloomFileRow(path: row.node.path, isDirectory: row.node.isDirectory)
-                    .frame(minHeight: 44)
-            }.margins(.vertical, 2).margins(.leading, 14 + CGFloat(min(row.depth, 8)) * 12).margins(.trailing, 10)
+                    .font(.subheadline).frame(minHeight: minimumHeight)
+            }.margins(.vertical, 0).margins(.leading, 10 + CGFloat(min(row.depth, 8)) * 10).margins(.trailing, 10)
             if row.node.isDirectory {
                 let isExpanded = expanded.contains(row.node.path) || !needle.isEmpty
                 let indicator = UIImageView(image: UIImage(systemName: isExpanded ? "chevron.down" : "chevron.right"))
@@ -263,7 +279,7 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
             let row = changedRows[indexPath.row]
             cell.contentConfiguration = UIHostingConfiguration {
                 if let file = row.node.file {
-                    BloomFileRow(file: file, showsDirectory: false).frame(minHeight: 44)
+                    BloomFileRow(file: file, showsDirectory: false).font(.subheadline).frame(minHeight: minimumHeight)
                 } else {
                     BloomFileRow {
                         BloomFileIcon(isDirectory: true)
@@ -271,9 +287,9 @@ final class WorkspaceFilesController: UIViewController, UITableViewDataSource, U
                         Text(verbatim: row.node.name).font(.subheadline.weight(.medium))
                     } trailing: {
                         EmptyView()
-                    }.frame(minHeight: 44)
+                    }.font(.subheadline).frame(minHeight: minimumHeight)
                 }
-            }.margins(.vertical, 2).margins(.leading, 14 + CGFloat(min(row.depth, 8)) * 12).margins(.trailing, 10)
+            }.margins(.vertical, 0).margins(.leading, 10 + CGFloat(min(row.depth, 8)) * 10).margins(.trailing, 10)
             if row.node.isFolder {
                 let closed = (needle.isEmpty ? collapsedChanges : filteredCollapsedChanges).contains(row.node.path)
                 let indicator = UIImageView(image: UIImage(systemName: closed ? "chevron.right" : "chevron.down"))

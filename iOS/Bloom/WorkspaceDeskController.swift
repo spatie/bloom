@@ -409,12 +409,12 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
             // UINavigationController owns the frame now, instead of our inline host constraints.
             files.view.translatesAutoresizingMaskIntoConstraints = true
             files.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            files.view.frame = CGRect(x: 0, y: 0, width: 420, height: 640)
+            files.view.frame = CGRect(x: 0, y: 0, width: 360, height: 560)
             let navigation = BloomTheme.navigation(files)
-            files.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak self] _ in self?.dismissFileSheetIfNeeded() })
+            files.navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Close", primaryAction: UIAction { [weak self] _ in self?.dismissFileSheetIfNeeded() })
             if traitCollection.horizontalSizeClass == .regular, let filesButton {
                 navigation.modalPresentationStyle = .popover
-                navigation.preferredContentSize = CGSize(width: 420, height: 640)
+                navigation.preferredContentSize = CGSize(width: 360, height: 560)
                 navigation.popoverPresentationController?.barButtonItem = filesButton
             } else {
                 navigation.modalPresentationStyle = .pageSheet
@@ -538,10 +538,10 @@ extension WorkspaceDeskController {
         let attached = uiSession?.isAttached == true
         let detail = attached
             ? "Agents in this workspace can use this device’s tabs, browsers and terminals while Bloom is active."
-            : uiSession?.error ?? "Connect this workspace to let its agents use this device’s tabs, browsers and terminals."
+            : uiSession?.failureMessage ?? "Connect this workspace to let its agents use this device’s tabs, browsers and terminals."
         let alert = UIAlertController(title: "Agent UI tools", message: detail, preferredStyle: .alert)
         if !attached {
-            alert.addAction(UIAlertAction(title: "Reconnect", style: .default) { [weak self] _ in
+            alert.addAction(UIAlertAction(title: "Retry Agent UI", style: .default) { [weak self] _ in
                 guard let self, connection.isActive, let service = review.service else { return }
                 if let uiSession { uiSession.start(using: service) } else { attachUI() }
             })

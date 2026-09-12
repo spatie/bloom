@@ -41,7 +41,9 @@ final class TranscriptCell: UITableViewCell {
                     Label(isCancelling ? "Removing from queue…" : "Queued", systemImage: "clock")
                         .font(.caption).foregroundStyle(.white.opacity(0.85))
                 }
-            }.id("queued-" + prompt.id.rawValue)
+            }
+            .padding(.vertical, 8)
+            .id("queued-" + prompt.id.rawValue)
         }.margins(.all, 0)
         let button = UIButton(type: .system)
         button.setImage(UIImage(systemName: "xmark.circle"), for: .normal)
@@ -85,9 +87,18 @@ private struct MobileTranscriptRow: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } label: {
-                Label(title, systemImage: kind == "error" ? "exclamationmark.triangle" : "terminal")
-                    .font(.callout)
-                    .foregroundStyle(kind == "error" ? Color.red : Color.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(title, systemImage: symbol)
+                        .font(.callout)
+                        .foregroundStyle(kind == "error" ? Color.red : Color.secondary)
+                    if kind == "error", !text.isEmpty {
+                        Text(verbatim: text)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                .frame(minHeight: 44, alignment: .leading)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -95,7 +106,18 @@ private struct MobileTranscriptRow: View {
     }
 
     private var title: String {
-        let titles = ["thinking": "Thinking", "toolUse": "Tool call", "toolResult": "Tool result", "permissionAsk": "Permission request", "result": "Turn complete", "error": "Error", "system": "Session", "notice": "Notice", "crew": "Agent update"]
-        return titles[kind] ?? kind
+        let titles = ["thinking": "Thinking", "toolUse": "Tool activity", "toolResult": "Tool result", "permissionAsk": "Permission request", "result": "Completed", "error": "Something went wrong", "system": "Conversation", "notice": "Notice", "crew": "Agent update"]
+        return titles[kind] ?? "Activity"
+    }
+
+    private var symbol: String {
+        switch kind {
+        case "error": "exclamationmark.triangle"
+        case "result": "checkmark.circle"
+        case "thinking": "ellipsis"
+        case "permissionAsk": "hand.raised"
+        case "system", "notice": "info.circle"
+        default: "terminal"
+        }
     }
 }

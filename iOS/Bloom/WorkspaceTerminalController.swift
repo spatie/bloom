@@ -58,9 +58,12 @@ final class WorkspaceTerminalController: UIViewController, @preconcurrency Termi
         toolbar.standardAppearance = appearance
         toolbar.scrollEdgeAppearance = appearance
         status.font = .preferredFont(forTextStyle: .footnote)
+        status.adjustsFontForContentSizeCategory = true
+        status.lineBreakMode = .byTruncatingTail
         status.textColor = .secondaryLabel
         status.text = "Connecting…"
         status.accessibilityIdentifier = "terminal-status"
+        status.widthAnchor.constraint(lessThanOrEqualToConstant: 100).isActive = true
         let interrupt = UIBarButtonItem(title: "Ctrl-C", primaryAction: UIAction { [weak self] _ in self?.enqueue(RemoteTerminalKey.controlC.data) })
         interrupt.accessibilityLabel = "Interrupt command"
         let reconnect = UIBarButtonItem(image: UIImage(systemName: "arrow.clockwise"), primaryAction: UIAction { [weak self] _ in self?.reconnect() })
@@ -189,7 +192,11 @@ final class WorkspaceTerminalController: UIViewController, @preconcurrency Termi
         }
     }
     private func reconnect() { disconnect(); setStatus("Connecting…"); attach() }
-    private func setStatus(_ text: String) { status.text = text; status.sizeToFit() }
+    private func setStatus(_ text: String) {
+        status.text = text
+        status.accessibilityLabel = "Terminal: " + text
+        status.sizeToFit()
+    }
 
     private func enqueue(_ data: Data) {
         guard !data.isEmpty else { return }

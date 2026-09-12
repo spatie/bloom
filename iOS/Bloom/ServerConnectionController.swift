@@ -32,6 +32,7 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Connect to Server"
+        navigationItem.largeTitleDisplayMode = .never
         configureLayout()
         navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .cancel, primaryAction: UIAction { [weak self] _ in
             self?.task?.cancel(); self?.dismiss(animated: true)
@@ -138,8 +139,8 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 36, weight: .regular)))
         icon.tintColor = BloomTheme.accent; icon.contentMode = .left
         icon.accessibilityElementsHidden = true
-        let heading = BloomTheme.label("Your workspace, wherever you are.", style: .largeTitle)
-        let detail = BloomTheme.label("Connect to Bloom Server to pick up your projects and conversations. Your agents keep working when you leave.", style: .body, secondary: true)
+        let heading = BloomTheme.label("Pick up where you left off.", style: .title1)
+        let detail = BloomTheme.label("Your projects and conversations, together on your server. Agents keep working while you’re away.", style: .body, secondary: true)
         connectionStatus.font = .preferredFont(forTextStyle: .subheadline)
         connectionStatus.adjustsFontForContentSizeCategory = true
         connectionStatus.textColor = BloomTheme.accent
@@ -165,12 +166,12 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
         NSLayoutConstraint.activate([
             content.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
             content.widthAnchor.constraint(lessThanOrEqualToConstant: 1040),
-            content.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
-            content.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
-            content.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),
+            content.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            content.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            content.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
             content.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -12),
         ])
-        let width = content.widthAnchor.constraint(equalTo: view.safeAreaLayoutGuide.widthAnchor, constant: -48)
+        let width = content.widthAnchor.constraint(equalTo: view.safeAreaLayoutGuide.widthAnchor, constant: -32)
         width.priority = .defaultHigh; width.isActive = true
     }
 
@@ -212,7 +213,11 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
         if indexPath.section == 2 {
             var configuration = cell.defaultContentConfiguration()
             configuration.text = "Authorise This Device"
-            configuration.secondaryText = "Your private key stays in its Keychain."
+            configuration.secondaryText = "Share its public key with your server."
+            configuration.textProperties.numberOfLines = 0
+            configuration.secondaryTextProperties.numberOfLines = 0
+            configuration.secondaryTextProperties.font = .preferredFont(forTextStyle: .subheadline)
+            configuration.secondaryTextProperties.color = .secondaryLabel
             configuration.image = UIImage(systemName: "key")
             configuration.imageProperties.tintColor = BloomTheme.accent
             cell.contentConfiguration = configuration; cell.accessoryType = .disclosureIndicator

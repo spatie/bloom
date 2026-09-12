@@ -2,13 +2,15 @@ import UIKit
 import BloomClient
 
 /// Native creation form over the execution host's existing creation contract and planners.
-final class CreateWorkspaceController: UITableViewController, UITextViewDelegate {
-    private enum Row { case project, name, mode, prompt, source, base, options, setup, discard }
+final class CreateWorkspaceController: UITableViewController, UITextViewDelegate, UITextFieldDelegate {
+    private enum Row { case project, name, mode, prompt, source, advanced, base, options, setup, discard }
     private let model: MobileConnection
     private let origin: String
     private var project: RemoteProject
     private let name = UITextField()
     private let prompt = UITextView()
+    private let promptPlaceholder = UILabel()
+    private var showsAdvanced = false
     private var mode = WorkspaceStartMode.chat
     private var context: RemoteWorkspaceContext?
     private var controls: ComposerControls?
@@ -19,12 +21,20 @@ final class CreateWorkspaceController: UITableViewController, UITextViewDelegate
     private var isSubmitting = false
     private var loading: Task<Void, Never>?
     private var generation = 0
+    private var isLoadingContext = false
     var onCreated: ((RemoteWorkspaceCreated, WorkspaceStartMode) -> Void)?
     private var scope: String { "workspace:\(project.id.rawValue)" }
-    private var rows: [Row] {
-        [.project, .name, .mode] + (mode.runsAnAgent ? [.prompt] : []) + [.source]
-            + (checkout == nil ? [.base] : []) + (mode.runsAnAgent ? [.options] : [])
-            + (context?.hasSetupScript == true ? [.setup] : []) + (pending == nil ? [] : [.discard])
+    private var sections: [[Row]] {
+        var result: [[Row]] = [[.project, .name], [.mode] + (mode.runsAnAgent ? [.prompt] : []),
+                              [.source] + (mode.runsAnAgent ? [.options] : [])]
+        var advanced: [Row] = [.advanced]
+        if showsAdvanced {
+            if checkout == nil { advanced.append(.base) }
+            if context?.hasSetupScript == true { advanced.append(.setup) }
+        }
+        result.append(advanced)
+        if pending != nil { result.append([.discard]) }
+        return result
     }
 
     init(model: MobileConnection, project: RemoteProject) {
@@ -33,15 +43,33 @@ final class CreateWorkspaceController: UITableViewController, UITextViewDelegate
     }
     required init?(coder: NSCoder) { fatalError("Use init(model:project:)") }
     override func viewDidLoad() {
-        super.viewDidLoad(); title = "New workspace"
+        super.viewDidLoad(); title = "New Workspace"
+        navigationItem.largeTitleDisplayMode = .never
+        preferredContentSize = CGSize(width: 620, height: 740)
+        BloomTheme.list(tableView)
+        tableView.cellLayoutMarginsFollowReadableWidth = true
         navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .cancel, primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) })
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Create", primaryAction: UIAction { [weak self] _ in self?.create() })
-        name.placeholder = "Workspace name"; name.font = .preferredFont(forTextStyle: .body)
+        name.placeholder = "Name your workspace"; name.returnKeyType = .next; name.clearButtonMode = .whileEditing; name.font = .preferredFont(forTextStyle: .body)
+        name.delegate = self
         name.adjustsFontForContentSizeCategory = true; name.accessibilityLabel = "Workspace name"
         name.addAction(UIAction { [weak self] _ in self?.updateButton() }, for: .editingChanged)
         prompt.font = .preferredFont(forTextStyle: .body); prompt.adjustsFontForContentSizeCategory = true
         prompt.backgroundColor = .clear; prompt.accessibilityLabel = "Optional first prompt"; prompt.delegate = self
-        prompt.textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
+        prompt.textContainerInset = UIEdgeInsets(top: 10, left: 0, bottom: 10, right: 0)
+        promptPlaceholder.text = "What would you like to work on?"
+        promptPlaceholder.font = .preferredFont(forTextStyle: .body)
+        promptPlaceholder.adjustsFontForContentSizeCategory = true
+        promptPlaceholder.textColor = .placeholderText
+        promptPlaceholder.numberOfLines = 0
+        promptPlaceholder.isUserInteractionEnabled = false
+        promptPlaceholder.translatesAutoresizingMaskIntoConstraints = false
+        prompt.addSubview(promptPlaceholder)
+        NSLayoutConstraint.activate([
+            promptPlaceholder.leadingAnchor.constraint(equalTo: prompt.frameLayoutGuide.leadingAnchor, constant: 5),
+            promptPlaceholder.trailingAnchor.constraint(equalTo: prompt.frameLayoutGuide.trailingAnchor, constant: -5),
+            promptPlaceholder.topAnchor.constraint(equalTo: prompt.frameLayoutGuide.topAnchor, constant: 10),
+        ])
         tableView.rowHeight = UITableView.automaticDimension; tableView.keyboardDismissMode = .interactive
         restorePending(); loadContext()
     }
@@ -49,9 +77,14 @@ final class CreateWorkspaceController: UITableViewController, UITextViewDelegate
         super.viewDidDisappear(animated)
         if !isSubmitting, isBeingDismissed || navigationController?.isBeingDismissed == true { loading?.cancel() }
     }
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        if mode.runsAnAgent { prompt.becomeFirstResponder() } else { textField.resignFirstResponder() }
+        return false
+    }
     func textViewDidChange(_ textView: UITextView) { updateButton() }
     private func updateButton() {
-        navigationItem.rightBarButtonItem?.title = pending == nil ? "Create" : "Retry creation"
+        promptPlaceholder.isHidden = !prompt.text.isEmpty
+        navigationItem.rightBarButtonItem?.title = isSubmitting ? "Creating…" : pending == nil ? "Create" : "Retry Creation"
         navigationItem.rightBarButtonItem?.isEnabled = !isSubmitting && (pending != nil || (context != nil && (!(name.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (mode.runsAnAgent && !prompt.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))))
         navigationItem.leftBarButtonItem?.isEnabled = !isSubmitting
         name.isEnabled = pending == nil && !isSubmitting; prompt.isEditable = name.isEnabled
@@ -71,32 +104,49 @@ final class CreateWorkspaceController: UITableViewController, UITextViewDelegate
     }
     private func loadContext() {
         guard model.address == origin, let service = model.service else { return }
-        loading?.cancel(); generation += 1
+        loading?.cancel(); generation += 1; isLoadingContext = true
         let generation = generation, project = project
         loading = Task { [weak self] in
             do {
                 let context = try await service.workspaceContext(projectID: project.id)
                 guard let self, !Task.isCancelled, generation == self.generation else { return }
-                self.context = context
+                self.context = context; self.isLoadingContext = false
                 if self.pending == nil { self.controls = context.composer.controls; self.baseBranch = project.defaultBranch ?? context.branches.first }
                 self.tableView.reloadData(); self.updateButton()
-            } catch { if !Task.isCancelled { self?.show(error, retry: { [weak self] in self?.loadContext() }) } }
+            } catch {
+                guard let self, !Task.isCancelled, generation == self.generation else { return }
+                self.isLoadingContext = false; self.tableView.reloadData()
+                self.show(error, retry: { [weak self] in self?.loadContext() })
+            }
         }
     }
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { rows.count }
+    override func numberOfSections(in tableView: UITableView) -> Int { sections.count }
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { sections[section].count }
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        switch section {
+        case 0: "Workspace"
+        case 1: "Open with"
+        case 2: "Configuration"
+        default: nil
+        }
+    }
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
-        pending != nil ? "Creation has not been confirmed. Retry sends the exact saved request, even after restarting the app."
-            : "Leave the first prompt empty to create a workspace without starting an agent turn. Setup runs on the server."
+        if section == sections.count - 1, pending != nil {
+            return "Creation has not been confirmed. Retry reuses the same saved request."
+        }
+        if section == 1, mode.runsAnAgent { return "Add a first prompt, or leave it empty and start when you’re ready." }
+        if section == 2, context?.hasSetupScript == true { return runsSetup ? "Your project’s setup script runs automatically on the server." : "The setup script is turned off for this workspace." }
+        if section == 3, showsAdvanced { return "Setup scripts run on the server. Your project’s defaults are already selected." }
+        return nil
     }
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
         var content = cell.defaultContentConfiguration()
-        switch rows[indexPath.row] {
+        switch sections[indexPath.section][indexPath.row] {
         case .project: content.text = "Project"; content.secondaryText = project.name; cell.accessoryType = .disclosureIndicator
-        case .name: embed(name, in: cell, height: 44); return cell
-        case .prompt: embed(prompt, in: cell, height: 140); return cell
+        case .name: cell.selectionStyle = .none; embed(name, in: cell, height: 44); return cell
+        case .prompt: cell.selectionStyle = .none; embed(prompt, in: cell, height: 110); return cell
         case .mode:
-            content.text = "Open with"
             let picker = UISegmentedControl(items: WorkspaceStartMode.allCases.map(\.label))
             picker.selectedSegmentIndex = WorkspaceStartMode.allCases.firstIndex(of: mode) ?? 0
             picker.isEnabled = pending == nil && !isSubmitting
@@ -104,17 +154,31 @@ final class CreateWorkspaceController: UITableViewController, UITextViewDelegate
                 guard let self, let index = picker?.selectedSegmentIndex, WorkspaceStartMode.allCases.indices.contains(index) else { return }
                 self.mode = WorkspaceStartMode.allCases[index]; self.tableView.reloadData(); self.updateButton()
             }, for: .valueChanged)
-            cell.accessoryView = picker
+            picker.accessibilityLabel = "Open workspace with"
+            cell.selectionStyle = .none
+            embed(picker, in: cell, height: 36)
+            return cell
         case .source: content.text = "Start from"; content.secondaryText = checkoutLabel; cell.accessoryType = .disclosureIndicator
-        case .base: content.text = "Base branch"; content.secondaryText = baseBranch ?? "Loading"; cell.accessoryType = .disclosureIndicator
-        case .options: content.text = "Agent options"; content.secondaryText = controls.map { ModelLabel.readable($0.model) } ?? "Loading"; cell.accessoryType = .disclosureIndicator
+        case .advanced:
+            content.text = "Advanced options"
+            content.image = UIImage(systemName: "slider.horizontal.3")
+            content.imageProperties.tintColor = .secondaryLabel
+            cell.accessoryView = UIImageView(image: UIImage(systemName: showsAdvanced ? "chevron.up" : "chevron.down"))
+            cell.accessoryView?.tintColor = .tertiaryLabel
+            cell.accessibilityValue = showsAdvanced ? "Expanded" : "Collapsed"
+        case .base: content.text = "Base branch"; content.secondaryText = baseBranch ?? (isLoadingContext ? "Loading…" : "Unavailable"); cell.accessoryType = .disclosureIndicator
+        case .options: content.text = "Agent options"; content.secondaryText = controls.map { ModelLabel.readable($0.model) } ?? (isLoadingContext ? "Loading…" : "Unavailable"); cell.accessoryType = .disclosureIndicator
         case .setup:
             content.text = "Run setup script"
             let toggle = UISwitch(); toggle.isOn = runsSetup; toggle.isEnabled = pending == nil && !isSubmitting
-            toggle.addAction(UIAction { [weak self, weak toggle] _ in self?.runsSetup = toggle?.isOn == true }, for: .valueChanged)
+            toggle.addAction(UIAction { [weak self, weak toggle] _ in
+                self?.runsSetup = toggle?.isOn == true
+                self?.tableView.reloadSections(IndexSet(integer: 2), with: .none)
+            }, for: .valueChanged)
             cell.accessoryView = toggle
         case .discard: content.text = "Forget saved retry"; content.textProperties.color = .systemRed
         }
+        content.textProperties.numberOfLines = 0
         content.secondaryTextProperties.numberOfLines = 2
         cell.contentConfiguration = content
         return cell
@@ -139,10 +203,12 @@ final class CreateWorkspaceController: UITableViewController, UITextViewDelegate
     }
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        let row = rows[indexPath.row]
+        let row = sections[indexPath.section][indexPath.row]
         if row == .discard { discard(); return }
         guard pending == nil, !isSubmitting else { return }
         switch row {
+        case .advanced:
+            showsAdvanced.toggle(); tableView.reloadSections(IndexSet(integer: 3), with: .automatic)
         case .project:
             navigationController?.pushViewController(CreationProjectPickerController(model: model) { [weak self] project in
                 guard let self else { return }

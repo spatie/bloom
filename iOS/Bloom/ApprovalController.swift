@@ -30,31 +30,38 @@ final class ApprovalController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = request.questions.isEmpty ? "Review request" : "Answer questions"
+        title = request.questions.isEmpty ? "Review Request" : "Your Input"
         view.backgroundColor = BloomTheme.background
+        view.tintColor = BloomTheme.accent
+        preferredContentSize = CGSize(width: 580, height: 640)
         navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) })
         let scroll = UIScrollView()
+        scroll.keyboardDismissMode = .interactive
         scroll.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scroll)
         stack.axis = .vertical; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
         scroll.addSubview(stack)
+        let readableWidth = stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -40)
+        readableWidth.priority = UILayoutPriority(999)
         NSLayoutConstraint.activate([
             scroll.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
             scroll.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             scroll.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
-            stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 20),
-            stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -20),
+            scroll.contentLayoutGuide.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
+            stack.centerXAnchor.constraint(equalTo: scroll.frameLayoutGuide.centerXAnchor),
+            stack.widthAnchor.constraint(lessThanOrEqualToConstant: 620), readableWidth,
             stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 20),
             stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -20),
-            stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -40),
         ])
-        label(request.toolName, style: .headline)
         if request.questions.isEmpty {
+            label(request.toolName, style: .headline)
             let context = UITextView()
             context.text = request.context; context.isEditable = false; context.isScrollEnabled = false
             context.backgroundColor = BloomTheme.panel
             context.layer.cornerRadius = 12
+            context.layer.cornerCurve = .continuous
+            context.accessibilityLabel = "Requested action"
             context.textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
             context.font = .monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular)
             context.adjustsFontForContentSizeCategory = true
@@ -65,21 +72,29 @@ final class ApprovalController: UIViewController {
             return
         }
         if request.questions.isEmpty {
-            label("Allow once applies only to this call. It does not create a session or project permission.")
-            button("Allow once") { [weak self] in self?.decide(allow: true) }
-            button("Deny", destructive: true) { [weak self] in self?.decide(allow: false) }
+            label("Allow this action once. This does not change your conversation’s permissions.", style: .subheadline)
+            button("Allow Once", primary: true) { [weak self] in self?.decide(allow: true) }
+            button("Don’t Allow", destructive: true) { [weak self] in self?.decide(allow: false) }
         } else {
             for question in request.questions { questionFields(question) }
-            submitButton = button("Send answers") { [weak self] in self?.answer() }
+            submitButton = button("Send Answers", primary: true) { [weak self] in self?.answer() }
             updateCompleteness()
         }
     }
 
     private func questionFields(_ question: AgentQuestion) {
         label(question.question, style: .headline)
+        if question.options.count > 1 { label(question.multiSelect ? "Choose all that apply." : "Choose one option.", style: .subheadline) }
         optionButtons[question.id] = []
         for option in question.options {
-            let control = button(option.label + (option.description.isEmpty ? "" : "\n" + option.description)) {}
+            let control = button(option.label) {}
+            control.contentHorizontalAlignment = .leading
+            control.configuration?.subtitle = option.description.isEmpty ? nil : option.description
+            control.configuration?.titleAlignment = .leading
+            control.configuration?.image = UIImage(systemName: question.multiSelect ? "square" : "circle")
+            control.configuration?.imagePadding = 12
+            control.configuration?.baseForegroundColor = .label
+            control.configuration?.background.backgroundColor = BloomTheme.panel
             control.addAction(UIAction { [weak self] _ in
                 guard let self else { return }
                 self.draft.toggle(option.label, on: question)
@@ -96,6 +111,7 @@ final class ApprovalController: UIViewController {
             field.placeholder = question.options.isEmpty ? "Your answer" : "Other answer"
             field.accessibilityLabel = question.question
             field.font = .preferredFont(forTextStyle: .body); field.adjustsFontForContentSizeCategory = true
+            field.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
             field.isSecureTextEntry = question.isSecret
             field.autocorrectionType = question.isSecret ? .no : .default
             field.autocapitalizationType = question.isSecret ? .none : .sentences
@@ -117,7 +133,12 @@ final class ApprovalController: UIViewController {
         for (index, button) in (optionButtons[question.id] ?? []).enumerated() {
             button.isSelected = draft.chosen[question.id]?.contains(question.options[index].label) == true
             button.accessibilityTraits = button.isSelected ? [.button, .selected] : .button
-            button.configuration?.image = button.isSelected ? UIImage(systemName: "checkmark") : nil
+            let symbol = question.multiSelect
+                ? (button.isSelected ? "checkmark.square.fill" : "square")
+                : (button.isSelected ? "checkmark.circle.fill" : "circle")
+            button.configuration?.image = UIImage(systemName: symbol)
+            button.configuration?.baseForegroundColor = button.isSelected ? BloomTheme.accent : .label
+            button.configuration?.background.backgroundColor = button.isSelected ? BloomTheme.accent.withAlphaComponent(0.08) : BloomTheme.panel
         }
     }
 
@@ -125,13 +146,29 @@ final class ApprovalController: UIViewController {
         let label = UILabel()
         label.text = text; label.numberOfLines = 0
         label.font = .preferredFont(forTextStyle: style); label.adjustsFontForContentSizeCategory = true
+        if style == .headline { label.accessibilityTraits.insert(.header) }
+        if style == .subheadline { label.textColor = .secondaryLabel }
         stack.addArrangedSubview(label)
     }
 
-    @discardableResult private func button(_ title: String, destructive: Bool = false, action: @escaping () -> Void) -> UIButton {
+    @discardableResult private func button(_ title: String, destructive: Bool = false, primary: Bool = false, action: @escaping () -> Void) -> UIButton {
         let button = UIButton(type: .system)
-        var configuration = UIButton.Configuration.bordered()
+        var configuration = primary ? UIButton.Configuration.filled() : .plain()
         configuration.title = title
+        configuration.cornerStyle = .large
+        configuration.baseBackgroundColor = BloomTheme.accent
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16)
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var attributes = incoming
+            attributes.font = .preferredFont(forTextStyle: primary ? .headline : .body)
+            return attributes
+        }
+        configuration.subtitleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var attributes = incoming
+            attributes.font = .preferredFont(forTextStyle: .subheadline)
+            attributes.foregroundColor = .secondaryLabel
+            return attributes
+        }
         if destructive { configuration.baseForegroundColor = .systemRed }
         button.configuration = configuration
         button.titleLabel?.numberOfLines = 0

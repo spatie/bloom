@@ -34,9 +34,10 @@ enum BloomTheme {
     static func navigation(_ root: UIViewController) -> UINavigationController {
         let navigation = UINavigationController(rootViewController: root)
         navigation.view.tintColor = accent
+        navigation.navigationBar.tintColor = accent
         let appearance = UINavigationBarAppearance()
         appearance.configureWithDefaultBackground()
-        appearance.backgroundColor = panel
+        appearance.backgroundColor = background
         appearance.shadowColor = .clear
         navigation.navigationBar.standardAppearance = appearance
         navigation.navigationBar.scrollEdgeAppearance = appearance
@@ -57,15 +58,16 @@ enum BloomTheme {
         var content = cell.defaultContentConfiguration()
         content.text = title
         content.secondaryText = detail
-        content.textProperties.font = .preferredFont(forTextStyle: .headline)
+        content.textProperties.font = UIFontMetrics(forTextStyle: .subheadline)
+            .scaledFont(for: .systemFont(ofSize: 15, weight: .semibold))
         content.textProperties.numberOfLines = 2
-        content.secondaryTextProperties.font = .preferredFont(forTextStyle: .subheadline)
+        content.secondaryTextProperties.font = .preferredFont(forTextStyle: .footnote)
         content.secondaryTextProperties.color = secondary
         content.secondaryTextProperties.numberOfLines = 2
         content.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(textStyle: .body))
         content.imageProperties.tintColor = tint
-        content.imageToTextPadding = 14
-        content.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16)
+        content.imageToTextPadding = 10
+        content.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14)
         cell.contentConfiguration = content
         cell.backgroundColor = background
         cell.accessoryType = disclosure ? .disclosureIndicator : .none

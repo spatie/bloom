@@ -80,14 +80,16 @@ final class WorkspaceSourceController: UIViewController {
         content?.view.removeFromSuperview()
         content?.removeFromParent()
         let path = path
-        let host = UIHostingController(rootView: VStack(alignment: .leading, spacing: 12) {
+        let host = UIHostingController(rootView: VStack(alignment: .leading, spacing: 8) {
             Text(verbatim: path)
-                .font(.caption)
+                .font(.caption2)
+                .lineLimit(1)
+                .truncationMode(.middle)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
             BloomCodeBlock(code: text, language: Language.detect(path: path))
-        }.padding(16))
+        }.padding(12))
         host.sizingOptions = .intrinsicContentSize
         host.view.backgroundColor = .clear
         host.view.translatesAutoresizingMaskIntoConstraints = false
@@ -109,7 +111,7 @@ final class WorkspaceSourceController: UIViewController {
         state.image = UIImage(systemName: "doc.badge.ellipsis")
         state.text = "File couldn’t load"
         state.secondaryText = message
-        state.button.title = "Try again"
+        state.button.title = "Try Again"
         state.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.loadFile() }
         contentUnavailableConfiguration = state
     }

@@ -163,7 +163,8 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         // A custom toolbar item has no flexible width. Reserve room for native history controls.
-        address.frame.size = CGSize(width: max(80, toolbar.bounds.width - (onClose == nil ? 176 : 220)), height: 36)
+        let controls = 2 + (browser.canGoForward ? 1 : 0) + (onClose == nil ? 0 : 1)
+        address.frame.size = CGSize(width: max(80, toolbar.bounds.width - CGFloat(controls * 44 + 24)), height: 44)
     }
 
     func textFieldDidBeginEditing(_ textField: UITextField) {
@@ -184,7 +185,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         appearance.shadowColor = BloomTheme.border
         toolbar.standardAppearance = appearance
         toolbar.scrollEdgeAppearance = appearance
-        toolbar.tintColor = .secondaryLabel
+        toolbar.tintColor = BloomTheme.accent
         toolbar.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(toolbar)
         NSLayoutConstraint.activate([
@@ -195,15 +196,21 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         ])
         address.font = .preferredFont(forTextStyle: .footnote)
         address.adjustsFontForContentSizeCategory = true
-        address.textColor = .secondaryLabel
+        address.textColor = .label
         address.textAlignment = .center
         address.delegate = self
         address.keyboardType = .URL
         address.returnKeyType = .go
         address.autocapitalizationType = .none
         address.autocorrectionType = .no
-        address.placeholder = "Enter a preview address"
-        address.borderStyle = .roundedRect
+        address.placeholder = "Website address"
+        address.borderStyle = .none
+        address.backgroundColor = BloomTheme.background
+        address.layer.cornerRadius = 12
+        address.clipsToBounds = true
+        address.clearButtonMode = .whileEditing
+        address.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: 1))
+        address.leftViewMode = .always
         address.accessibilityLabel = "Preview address"
         address.accessibilityIdentifier = "preview-address"
         backItem.accessibilityLabel = "Go back"
@@ -262,13 +269,15 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         view.addSubview(errorView)
         let symbol = UIImageView(image: UIImage(systemName: "globe.badge.chevron.backward"))
         symbol.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 30, weight: .light)
-        symbol.tintColor = BloomTheme.secondary
+        symbol.tintColor = BloomTheme.accent
         symbol.contentMode = .scaleAspectFit
         let heading = BloomTheme.label("Preview couldn’t load", style: .headline)
         heading.textAlignment = .center
         errorDetail.textAlignment = .center
         let retry = UIButton(configuration: .tinted(), primaryAction: UIAction { [weak self] _ in self?.reload() })
-        retry.configuration?.title = "Try again"
+        retry.configuration?.title = "Try Again"
+        retry.configuration?.cornerStyle = .capsule
+        retry.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         retry.tintColor = BloomTheme.accent
         let stack = UIStackView(arrangedSubviews: [symbol, heading, errorDetail, retry])
         stack.axis = .vertical
@@ -391,8 +400,10 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         } }
         address.accessibilityValue = current.absoluteString
         address.accessibilityHint = browser.title
-        var items = [backItem, forwardItem, UIBarButtonItem(systemItem: .flexibleSpace),
-                     UIBarButtonItem(customView: address), UIBarButtonItem(systemItem: .flexibleSpace), reloadItem]
+        var items = [backItem]
+        if browser.canGoForward { items.append(forwardItem) }
+        items += [UIBarButtonItem(systemItem: .flexibleSpace), UIBarButtonItem(customView: address),
+                  UIBarButtonItem(systemItem: .flexibleSpace), reloadItem]
         if onClose != nil { items.append(closeItem) }
         toolbar.setItems(items, animated: false)
         view.setNeedsLayout()

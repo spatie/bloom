@@ -15,6 +15,7 @@ final class WorkspaceMediaController: UIViewController, QLPreviewControllerDataS
     init(model: MobileConnection, workspaceID: WorkspaceID, path: String) {
         self.model = model; self.workspaceID = workspaceID; self.path = path; origin = model.address
         super.init(nibName: nil, bundle: nil)
+        title = (path as NSString).lastPathComponent
     }
     required init?(coder: NSCoder) { fatalError("Use init(model:workspaceID:path:)") }
     deinit { loading?.cancel(); if let file { try? FileManager.default.removeItem(at: file) } }
@@ -28,6 +29,7 @@ final class WorkspaceMediaController: UIViewController, QLPreviewControllerDataS
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = BloomTheme.background
+        view.tintColor = BloomTheme.accent
         preview.dataSource = self
         addChild(preview)
         preview.view.translatesAutoresizingMaskIntoConstraints = false
@@ -37,6 +39,17 @@ final class WorkspaceMediaController: UIViewController, QLPreviewControllerDataS
             preview.view.leadingAnchor.constraint(equalTo: view.leadingAnchor), preview.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
         preview.didMove(toParent: self)
+        loadFile()
+    }
+
+    private func loadFile() {
+        loading?.cancel()
+        failure = nil
+        preview.view.isHidden = true
+        var state = UIContentUnavailableConfiguration.loading()
+        state.text = "Opening file"
+        state.secondaryText = (path as NSString).lastPathComponent
+        contentUnavailableConfiguration = state
         loading = Task { [weak self] in
             guard let self else { return }
             do {
@@ -49,8 +62,20 @@ final class WorkspaceMediaController: UIViewController, QLPreviewControllerDataS
                 let local = URL.cachesDirectory.appendingPathComponent(UUID().uuidString + "-" + name)
                 try data.write(to: local, options: .atomic)
                 file = local
+                contentUnavailableConfiguration = nil
+                preview.view.isHidden = false
                 preview.reloadData()
-            } catch { failure = error.localizedDescription; if !Task.isCancelled { show(error) } }
+            } catch {
+                failure = error.localizedDescription
+                guard !Task.isCancelled else { return }
+                var state = UIContentUnavailableConfiguration.empty()
+                state.image = UIImage(systemName: "doc")
+                state.text = "File couldn’t open"
+                state.secondaryText = error.localizedDescription
+                state.button.title = "Try Again"
+                state.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.loadFile() }
+                contentUnavailableConfiguration = state
+            }
         }
     }
     func numberOfPreviewItems(in controller: QLPreviewController) -> Int { file == nil ? 0 : 1 }

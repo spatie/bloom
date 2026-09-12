@@ -21,9 +21,17 @@ final class BloomSplitController: UISplitViewController, UISplitViewControllerDe
         let empty = UIViewController()
         empty.view.backgroundColor = BloomTheme.background
         var content = UIContentUnavailableConfiguration.empty()
-        content.text = "Your work, wherever you are"
-        content.secondaryText = "Connect to Bloom Server to open a workspace."
-        content.image = UIImage(systemName: "leaf")
+        content.text = "Bloom on your server"
+        content.secondaryText = "Connect once. Pick up your projects from any device."
+        content.image = UIImage(systemName: "server.rack")
+        content.imageProperties.tintColor = BloomTheme.accent
+        content.button.title = "Connect to Server"
+        content.buttonProperties.primaryAction = UIAction { [weak self] _ in
+            guard let self else { return }
+            let navigation = BloomTheme.navigation(ServerConnectionController(model: self.model))
+            navigation.modalPresentationStyle = .fullScreen
+            self.present(navigation, animated: true)
+        }
         empty.contentUnavailableConfiguration = content
         setViewController(BloomTheme.navigation(empty), for: .secondary)
     }
@@ -95,8 +103,10 @@ final class ProjectsController: UITableViewController {
             let empty = UIViewController()
             empty.view.backgroundColor = BloomTheme.background
             var content = UIContentUnavailableConfiguration.empty()
-            content.text = "Choose a workspace"
-            content.secondaryText = "Your agents keep running on Bloom Server."
+            content.text = model.catalogue == nil ? "Bloom on your server" : "Choose a workspace"
+            content.secondaryText = model.catalogue == nil ? "Connect to pick up your projects." : "Open a workspace from Projects to start working."
+            content.image = UIImage(systemName: model.catalogue == nil ? "server.rack" : "square.stack.3d.up")
+            content.imageProperties.tintColor = BloomTheme.accent
             empty.contentUnavailableConfiguration = content
             splitViewController?.setViewController(BloomTheme.navigation(empty), for: .secondary)
             (splitViewController as? BloomSplitController)?.showWorkspacePicker()
@@ -107,10 +117,11 @@ final class ProjectsController: UITableViewController {
         updateHeader()
         if projects.isEmpty {
             var content = UIContentUnavailableConfiguration.empty()
-            content.image = UIImage(systemName: model.service == nil ? "leaf" : "folder.badge.plus")
-            content.text = model.service == nil ? "Your workspace, anywhere" : "Make room for your next idea"
+            content.image = UIImage(systemName: model.service == nil ? "server.rack" : "folder.badge.plus")
+            content.imageProperties.tintColor = BloomTheme.accent
+            content.text = model.service == nil ? "Connect your server" : "Your first project"
             content.secondaryText = model.service == nil
-                ? "Connect your server and pick up where you left off. Your agents keep working while you're away."
+                ? "Your projects will appear here."
                 : "Add a GitHub project to start your first workspace on this server."
             content.button.title = model.service == nil ? "Connect to server" : "Add project"
             content.buttonProperties.primaryAction = UIAction { [weak self] _ in

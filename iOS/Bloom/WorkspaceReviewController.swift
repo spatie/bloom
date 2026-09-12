@@ -33,6 +33,7 @@ final class WorkspaceReviewController: UIViewController, UITableViewDataSource, 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = BloomTheme.background
+        mode.accessibilityLabel = "Review scope"
         mode.selectedSegmentIndex = showsAllFiles ? 0 : 1
         mode.addAction(UIAction { [weak self] _ in
             guard let self else { return }
@@ -43,7 +44,7 @@ final class WorkspaceReviewController: UIViewController, UITableViewDataSource, 
             UIBarButtonItem(image: UIImage(systemName: "xmark"), primaryAction: UIAction { [weak self] _ in self?.onClose?() })]
         toolbar.items?.last?.accessibilityLabel = "Close review"
         toolbar.tintColor = BloomTheme.accent
-        summary.font = .preferredFont(forTextStyle: .footnote)
+        summary.font = .preferredFont(forTextStyle: .caption1)
         summary.adjustsFontForContentSizeCategory = true
         summary.textColor = BloomTheme.secondary
         summary.numberOfLines = 0
@@ -55,7 +56,7 @@ final class WorkspaceReviewController: UIViewController, UITableViewDataSource, 
         summaryContainer.spacing = 12
         summaryContainer.alignment = .center
         summaryContainer.isLayoutMarginsRelativeArrangement = true
-        summaryContainer.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+        summaryContainer.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 6, leading: 14, bottom: 6, trailing: 14)
         table.dataSource = self
         table.delegate = self
         table.backgroundColor = BloomTheme.background
@@ -74,7 +75,7 @@ final class WorkspaceReviewController: UIViewController, UITableViewDataSource, 
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: view.leadingAnchor), stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             stack.topAnchor.constraint(equalTo: view.topAnchor), stack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            toolbar.heightAnchor.constraint(equalToConstant: 50),
+            toolbar.heightAnchor.constraint(equalToConstant: 44),
         ])
         refreshUI()
     }
@@ -84,9 +85,20 @@ final class WorkspaceReviewController: UIViewController, UITableViewDataSource, 
         let previous = displayed
         let path = selectedPath.flatMap { selected in review.changes.contains { $0.path == selected } ? selected : nil } ?? review.changes.first?.path
         displayed = showsAllFiles ? review.changes : review.changes.filter { $0.path == path }
-        summary.text = "\(review.changes.count) changed files   +\(review.changes.reduce(0) { $0 + $1.additions })  −\(review.changes.reduce(0) { $0 + $1.deletions })"
+        let count = review.changes.count
+        let additions = review.changes.reduce(0) { $0 + $1.additions }
+        let deletions = review.changes.reduce(0) { $0 + $1.deletions }
+        let totals = NSMutableAttributedString(string: "\(count) " + (count == 1 ? "changed file" : "changed files"),
+            attributes: [.foregroundColor: UIColor.secondaryLabel])
+        totals.append(NSAttributedString(string: "   +\(additions)", attributes: [.foregroundColor: BloomTheme.colour(PaletteInk.accent)]))
+        totals.append(NSAttributedString(string: "  −\(deletions)", attributes: [.foregroundColor: BloomTheme.colour(PaletteInk.negative)]))
+        summary.attributedText = totals
+        summary.accessibilityLabel = "\(count) changed files, \(additions) additions, \(deletions) deletions"
         retry.isHidden = review.error == nil
-        if let error = review.error { summary.text = "Could not refresh. " + error }
+        if let error = review.error {
+            summary.text = "Could not refresh. " + error
+            summary.accessibilityLabel = summary.text
+        }
         if displayed.isEmpty {
             var empty = UIContentUnavailableConfiguration.empty()
             empty.image = UIImage(systemName: review.error == nil ? "checkmark.circle" : "wifi.exclamationmark")
@@ -131,7 +143,7 @@ final class WorkspaceReviewController: UIViewController, UITableViewDataSource, 
         cell.backgroundColor = .clear
         if let diff = review.diffs[file.path] {
             cell.contentConfiguration = UIHostingConfiguration {
-                BloomDiffFile(file: diff, scrollsVertically: false).padding(12).id(file.path)
+                BloomDiffFile(file: diff, scrollsVertically: false).padding(8).id(file.path)
             }.margins(.all, 0)
         } else if let error = review.errors[file.path] {
             cell.contentConfiguration = UIHostingConfiguration {

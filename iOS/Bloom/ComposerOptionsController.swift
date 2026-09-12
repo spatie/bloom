@@ -13,11 +13,13 @@ final class ComposerOptionsController: UITableViewController {
     private var state: RemoteComposerState? { store?.state ?? creationState }
     private var hasPendingSave: Bool { store?.hasPendingSave ?? false }
     private var isApplying: Bool { store?.isApplying ?? false }
-    private var rows: [Row] {
+    private var sections: [(title: String, rows: [Row])] {
         guard let controls else { return [] }
-        return [.model, .effort, .permissions] + (controls.offersContextWindow ? [.context] : [])
+        let preferences: [Row] = (controls.offersContextWindow ? [.context] : [])
             + (controls.offersFastMode ? [.fast] : []) + (controls.offersOutputStyle ? [.style] : [])
-            + (hasPendingSave ? [.discard] : [])
+        return [("Agent", [.model, .effort]), ("Access", [.permissions])]
+            + (preferences.isEmpty ? [] : [("Preferences", preferences)])
+            + (hasPendingSave ? [("Unconfirmed changes", [.discard])] : [])
     }
 
     init(store: RemoteComposerStore, onApplied: @escaping (RemoteSession?) -> Void) {
@@ -35,11 +37,12 @@ final class ComposerOptionsController: UITableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Agent options"
+        title = "Agent Options"
         view.tintColor = BloomTheme.accent
         tableView.backgroundColor = .systemGroupedBackground
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 54
+        tableView.cellLayoutMarginsFollowReadableWidth = true
         navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .cancel, primaryAction: UIAction { [weak self] _ in
             self?.work?.cancel()
             self?.dismiss(animated: true)
@@ -92,16 +95,18 @@ final class ComposerOptionsController: UITableViewController {
         }
     }
 
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { rows.count }
+    override func numberOfSections(in tableView: UITableView) -> Int { sections.count }
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { sections[section].rows.count }
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { sections[section].title }
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
-        guard let controls else { return nil }
+        guard let controls, section == sections.count - 1 else { return nil }
         if hasPendingSave {
-            return "The last save has not been confirmed. Retry uses the same request, including any conversation it created."
+            return "Your last changes haven’t been confirmed. Retry safely before making more changes."
         }
         if controls.agentKind != state?.controls.agentKind {
             return "Changing agents starts a new conversation in this workspace. Your current conversation stays available."
         }
-        return "These options are saved on the server and used for your next message."
+        return "Applies to your next message."
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -109,10 +114,12 @@ final class ComposerOptionsController: UITableViewController {
         guard let controls else { return cell }
         var content = cell.defaultContentConfiguration()
         content.textProperties.font = .preferredFont(forTextStyle: .body)
+        content.textProperties.numberOfLines = 0
         content.secondaryTextProperties.font = .preferredFont(forTextStyle: .subheadline)
-        content.secondaryTextProperties.numberOfLines = 2
+        content.secondaryTextProperties.numberOfLines = 0
+        if traitCollection.preferredContentSizeCategory.isAccessibilityCategory { content.prefersSideBySideTextAndSecondaryText = false }
         cell.accessoryType = .disclosureIndicator
-        switch rows[indexPath.row] {
+        switch sections[indexPath.section].rows[indexPath.row] {
         case .model: content.text = "Model"; content.secondaryText = ModelLabel.readable(controls.model)
         case .effort:
             content.text = "Reasoning"
@@ -127,6 +134,7 @@ final class ComposerOptionsController: UITableViewController {
             content.text = "Prefer faster replies"
             let toggle = UISwitch()
             toggle.isOn = controls.isFastMode
+            toggle.onTintColor = BloomTheme.accent
             toggle.isEnabled = !hasPendingSave
             toggle.accessibilityLabel = "Prefer faster replies"
             toggle.addAction(UIAction { [weak self, weak toggle] _ in
@@ -139,6 +147,7 @@ final class ComposerOptionsController: UITableViewController {
         if hasPendingSave {
             cell.accessoryType = .none
             cell.selectionStyle = .none
+            if sections[indexPath.section].rows[indexPath.row] != .discard { content.textProperties.color = .secondaryLabel }
         }
         cell.contentConfiguration = content
         return cell
@@ -146,31 +155,31 @@ final class ComposerOptionsController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        if rows[indexPath.row] == .discard { confirmDiscard(); return }
+        if sections[indexPath.section].rows[indexPath.row] == .discard { confirmDiscard(); return }
         guard !hasPendingSave, let controls, let state = state else { return }
-        let row = rows[indexPath.row]
+        let row = sections[indexPath.section].rows[indexPath.row]
         let title: String
-        let sections: [(String, [ComposerOption])]
+        let choiceSections: [(String, [ComposerOption])]
         let selected: String
         switch row {
         case .model:
             title = "Model"; selected = controls.model
-            sections = state.choices.sections(includingCurrent: controls.model, on: controls.agentKind).map { ($0.kind.label, $0.options) }
+            choiceSections = state.choices.sections(includingCurrent: controls.model, on: controls.agentKind).map { ($0.kind.label, $0.options) }
         case .effort:
             title = "Reasoning"; selected = controls.effort
-            sections = [("", state.choices.efforts(for: controls.agentKind, model: controls.model))]
+            choiceSections = [("", state.choices.efforts(for: controls.agentKind, model: controls.model))]
         case .permissions:
             title = "Permissions"; selected = controls.permissionMode.rawValue
-            sections = [("", controls.permissionModeChoices.map { ComposerOption(id: $0.mode.rawValue, label: $0.label, detail: $0.summary) })]
+            choiceSections = [("", controls.permissionModeChoices.map { ComposerOption(id: $0.mode.rawValue, label: $0.label, detail: $0.summary) })]
         case .context:
             title = "Context window"; selected = String(controls.codexContextWindow)
-            sections = [("", CodexContextWindow.options(including: controls.codexContextWindow).map { ComposerOption(id: String($0), label: CodexContextWindow.label(for: $0)) })]
+            choiceSections = [("", CodexContextWindow.options(including: controls.codexContextWindow).map { ComposerOption(id: String($0), label: CodexContextWindow.label(for: $0)) })]
         case .style:
             title = "Output style"; selected = controls.outputStyle
-            sections = [("", state.styles.map { ComposerOption(id: $0.name, label: $0.name == OutputStyle.defaultName ? "Default" : $0.name, detail: $0.detail) })]
+            choiceSections = [("", state.styles.map { ComposerOption(id: $0.name, label: $0.name == OutputStyle.defaultName ? "Default" : $0.name, detail: $0.detail) })]
         case .fast, .discard: return
         }
-        let picker = ComposerChoiceController(title: title, sections: sections, selected: selected) { [weak self] value in
+        let picker = ComposerChoiceController(title: title, sections: choiceSections, selected: selected) { [weak self] value in
             guard let self, var next = self.controls else { return }
             switch row {
             case .model: next = state.choices.selecting(value, in: next)

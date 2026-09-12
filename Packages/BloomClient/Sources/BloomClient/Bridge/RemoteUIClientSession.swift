@@ -8,6 +8,14 @@ import Observation
 public final class RemoteUIClientSession {
     public private(set) var isAttached = false
     public private(set) var error: String?
+    /// Keep the original refusal for diagnostics while explaining its limited scope in clients.
+    public var failureMessage: String? {
+        guard let error else { return nil }
+        if error == "Another client is attached to this workspace's UI. Detach it or wait for its lease to expire." {
+            return "Agent UI control is active on another device. Chat, files and previews still work here. Close this workspace on the other device, then retry."
+        }
+        return error
+    }
     public let workspaceID: WorkspaceID
     private let clientID: UUID
     private let actions: [String]

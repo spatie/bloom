@@ -34,7 +34,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
     private var queueCancellationIDs: [DeliveryID: UUID] = [:]
     private var cancellingQueued: Set<DeliveryID> = []
 
-    private let uncertainSend = "Message delivery is unconfirmed. Check the conversation, then choose Retry Message. Bloom reuses its original ID to avoid sending it twice."
+    private let uncertainSend = "Delivery isn’t confirmed. Check the conversation, then retry safely. Your message is saved on this device."
 
     init(model: MobileConnection, session: RemoteSession) {
         self.model = model; self.session = session
@@ -57,7 +57,6 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         view.backgroundColor = BloomTheme.background
         view.tintColor = BloomTheme.accent
         navigationItem.largeTitleDisplayMode = .never
-        navigationItem.prompt = session.model
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "stop.circle"), style: .plain, target: nil, action: nil)
         navigationItem.rightBarButtonItem?.accessibilityLabel = "Stop agent"
         navigationItem.rightBarButtonItem?.primaryAction = UIAction { [weak self] _ in self?.stop() }
@@ -67,6 +66,8 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         table.separatorStyle = .none
         table.keyboardDismissMode = .interactive
         table.estimatedRowHeight = 120
+        table.rowHeight = UITableView.automaticDimension
+        table.accessibilityLabel = "Conversation"
         table.contentInset = UIEdgeInsets(top: 8, left: 0, bottom: 12, right: 0)
         composer.font = .preferredFont(forTextStyle: .body)
         composer.adjustsFontForContentSizeCategory = true
@@ -88,30 +89,37 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         sendConfiguration.cornerStyle = .capsule
         send.configuration = sendConfiguration
         send.accessibilityLabel = "Send message"
+        send.accessibilityHint = "You can also press Command Return."
+        send.setContentCompressionResistancePriority(.required, for: .horizontal)
         send.addAction(UIAction { [weak self] _ in self?.submit() }, for: .touchUpInside)
         status.font = .preferredFont(forTextStyle: .footnote)
         status.adjustsFontForContentSizeCategory = true
         status.textColor = BloomTheme.secondary
         status.numberOfLines = 0
+        status.isHidden = true
         var reviewConfiguration = UIButton.Configuration.tinted()
         reviewConfiguration.title = "Review request"
         reviewConfiguration.image = UIImage(systemName: "hand.raised")
         reviewConfiguration.imagePadding = 8
         review.configuration = reviewConfiguration
+        let reviewHeight = review.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
+        // The stack collapses this button while no approval is pending.
+        reviewHeight.priority = .defaultHigh
+        reviewHeight.isActive = true
         review.isHidden = true
         review.addAction(UIAction { [weak self] _ in self?.reviewRequest() }, for: .touchUpInside)
         configureOptionsButton()
         let spacer = UIView()
         let footer = UIStackView(arrangedSubviews: [options, spacer, send])
         footer.spacing = 12; footer.alignment = .center
-        let compose = UIStackView(arrangedSubviews: [composer, status, footer])
+        let compose = UIStackView(arrangedSubviews: [composer, footer])
         compose.axis = .vertical; compose.spacing = 2
         compose.isLayoutMarginsRelativeArrangement = true
         compose.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 6, bottom: 10, trailing: 10)
         compose.backgroundColor = BloomTheme.panel
         compose.layer.cornerRadius = 22
         compose.layer.cornerCurve = .continuous
-        let stack = UIStackView(arrangedSubviews: [table, review, compose])
+        let stack = UIStackView(arrangedSubviews: [table, review, status, compose])
         stack.axis = .vertical; stack.spacing = 8; stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
         let width = stack.widthAnchor.constraint(equalTo: view.safeAreaLayoutGuide.widthAnchor, constant: -32)
@@ -208,6 +216,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         configuration.title = ModelLabel.readable(session.model)
         configuration.image = UIImage(systemName: "slider.horizontal.3")
         configuration.imagePadding = 7
+        configuration.titleLineBreakMode = .byTruncatingTail
         configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
             var result = incoming
             result.font = .preferredFont(forTextStyle: .footnote)
@@ -216,6 +225,9 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         configuration.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 6, bottom: 10, trailing: 6)
         options.configuration = configuration
         options.accessibilityLabel = "Agent options"
+        options.accessibilityHint = "Choose a model, reasoning level and permissions."
+        options.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        options.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         options.accessibilityValue = configuration.title
         options.accessibilityIdentifier = "composer-options"
         options.addAction(UIAction { [weak self] _ in self?.showOptions() }, for: .touchUpInside)
@@ -237,7 +249,6 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         let label = ModelLabel.readable(controls?.model ?? session.model)
         options.configuration?.title = label
         options.accessibilityValue = label
-        navigationItem.prompt = label
     }
 
     private func showOptions() {
@@ -448,6 +459,7 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         updateComposer()
         do { try MobileConnection.drafts.save(text: composer.text, origin: origin, sessionID: session.id) } catch {
             status.text = "Draft could not be saved: " + error.localizedDescription
+            status.isHidden = false
         }
     }
 
@@ -459,7 +471,10 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
             composer.isEditable = draft.submission == nil
             updateComposer()
             updateStatus()
-        } catch { status.text = "Draft could not be restored: " + error.localizedDescription }
+        } catch {
+            status.text = "Draft could not be restored: " + error.localizedDescription
+            status.isHidden = false
+        }
     }
 
     private func updateStatus() {
@@ -468,23 +483,26 @@ final class ConversationController: UIViewController, UITableViewDataSource, UIT
         if rows.isEmpty && buffer.streamingText.isEmpty && buffer.queuedPrompts.isEmpty {
             var empty = UIContentUnavailableConfiguration.empty()
             empty.image = UIImage(systemName: "bubble.left.and.text.bubble.right")
-            empty.text = "Start a conversation"
-            empty.secondaryText = "Describe what you'd like to build. Your agent works on the server, even when you're away."
+            empty.text = "What shall we work on?"
+            empty.secondaryText = "Describe a change, ask a question, or share an idea."
             table.backgroundView = UIContentUnavailableView(configuration: empty)
         } else { table.backgroundView = nil }
 
         navigationItem.rightBarButtonItem?.isEnabled = model.canSend && (buffer.isBusy || !buffer.pendingQuestions.isEmpty)
         review.isEnabled = model.canSend && model.address == origin
-        if isSending { status.text = "Sending to the server" } else if hasPendingSubmission {
+        review.isHidden = buffer.pendingQuestions.isEmpty
+        review.configuration?.title = buffer.pendingQuestions.count > 1 ? "Review requests (\(buffer.pendingQuestions.count))" : "Review request"
+        if isSending { status.text = "Sending…" } else if hasPendingSubmission {
             status.text = model.canSend ? uncertainSend : "Message delivery is unconfirmed. It is saved on this device. Reconnect before choosing Retry Message."
         } else if model.address != origin {
             status.text = "Reconnect to this conversation's server. Your draft is saved on this device."
         } else if !model.canSend {
             status.text = model.recovery.title + ". You can keep writing; your draft stays on this device."
         } else if let transcriptProblem { status.text = transcriptProblem
-        } else if !buffer.pendingQuestions.isEmpty { status.text = "The agent is waiting for your answer." } else {
-            status.text = buffer.queueError ?? (buffer.isBusy ? "Working on the server" : "Ready when you are")
+        } else if !buffer.pendingQuestions.isEmpty { status.text = nil } else {
+            status.text = buffer.queueError ?? (buffer.isBusy ? "Working on your request…" : nil)
         }
+        status.isHidden = status.text?.isEmpty != false
     }
 
     private func reviewRequest() {

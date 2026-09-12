@@ -53,8 +53,20 @@ struct RemoteWorkspaceContentView: View {
         .onDisappear { uiBridge?.stop(); uiBridge = nil }
         .safeAreaInset(edge: .top, spacing: 0) { connectionNotice }
         .safeAreaInset(edge: .bottom) {
-            if model.connectionRecovery.phase == .connected, let error = uiBridge?.error {
-                Text(error).font(.caption).foregroundStyle(.secondary).padding(8).frame(maxWidth: .infinity)
+            if model.connectionRecovery.phase == .connected, let session = uiBridge, let message = session.failureMessage {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Agent UI tools").font(Typo.captionEmphasis)
+                        Text(message).font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                    Spacer(minLength: 0)
+                    Button("Retry Agent UI") {
+                        guard let service = model.uiBridgeService() else { return }
+                        session.start(using: service)
+                    }
+                    .disabled(!model.isConnected || model.isConnecting)
+                }
+                .padding(10)
             }
         }
     }

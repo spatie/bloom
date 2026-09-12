@@ -16,6 +16,8 @@ final class ComposerChoiceController: UITableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         tableView.backgroundColor = .systemGroupedBackground
+        tableView.tintColor = BloomTheme.accent
+        tableView.cellLayoutMarginsFollowReadableWidth = true
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 58
     }
@@ -28,6 +30,11 @@ final class ComposerChoiceController: UITableViewController {
         var content = cell.defaultContentConfiguration()
         content.text = option.label
         content.secondaryText = option.detail
+        content.textProperties.font = .preferredFont(forTextStyle: .body)
+        content.secondaryTextProperties.font = .preferredFont(forTextStyle: .subheadline)
+        content.textToSecondaryTextVerticalPadding = 5
+        content.directionalLayoutMargins.top = 14
+        content.directionalLayoutMargins.bottom = 14
         content.textProperties.numberOfLines = 0
         content.secondaryTextProperties.numberOfLines = 0
         cell.contentConfiguration = content
