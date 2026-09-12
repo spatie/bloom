@@ -190,7 +190,9 @@ final class ProjectsController: UITableViewController {
     }
 
     private func connect() {
-        present(BloomTheme.navigation(ServerConnectionController(model: model)), animated: true)
+        let navigation = BloomTheme.navigation(ServerConnectionController(model: model))
+        navigation.modalPresentationStyle = .fullScreen
+        present(navigation, animated: true)
     }
 
     private func importProject() {

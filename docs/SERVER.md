@@ -627,3 +627,26 @@ Remote pane splits advertise the `pane_split_anchored` UI capability. The MCP to
 arguments. New clients resolve that chat before splitting and refuse if it is no longer open.
 Older clients without this capability refuse these requests rather than splitting another chat.
 The legacy `pane_split` UI action retains its focused-pane behaviour for older servers.
+
+### Updating AI tools
+
+Server Settings > Updates inspects Claude Code and Codex through the saved, verified SSH
+connection. Each update requires confirmation and shows live, copyable output. The updater
+uses the unprivileged server account; HTTPS-only connections cannot run this maintenance step.
+
+Recognised npm installations under the service account's `~/.local` prefix are updated with
+`npm install --global --prefix "$HOME/.local"` and the fixed vendor package name at `@latest`.
+Native Claude installations use `claude update`, retaining the configured release channel.
+These follow the [Codex installation instructions](https://github.com/openai/codex#installing-and-running-codex-cli)
+and [Claude update instructions](https://code.claude.com/docs/en/setup#update-manually).
+
+System installations and unknown launchers are reported as externally managed. Bloom does
+not overwrite them, run privileged package upgrades, or update tools inside project containers.
+Sign-in files are retained. A per-account lock prevents overlapping panel updates; Linux process
+inspection refuses an update if it finds a running agent. Finish agent turns before updating
+and avoid starting new turns until the update completes. This check is not a server-wide
+maintenance lock, so another client can still start work after inspection.
+
+Failures, interruptions and timeouts require a fresh version check before an explicit retry.
+Updates are never retried automatically, since an installer may already have changed files.
+The SSH helper's isolated regression suite is `python3 Tools/test-server-tool-updates.py`.

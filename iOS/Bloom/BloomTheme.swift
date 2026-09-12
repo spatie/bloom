@@ -9,7 +9,7 @@ enum BloomTheme {
     static let panel = colour(PaletteInk.surfaceSunken)
     static let raised = colour(PaletteInk.surfaceRaised)
     static let border = colour(PaletteInk.border)
-    static let accent = colour(PaletteInk.accent)
+    static let accent = colour(PaletteInk.accentFill)
     static let secondary = colour(PaletteInk.textTertiary)
 
     static func colour(_ pair: PaletteInk.Pair) -> UIColor {

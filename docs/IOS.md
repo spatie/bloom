@@ -103,6 +103,13 @@ BLOOM_TEST_ID=ios-client BLOOM_TEST_SWIFT_ARGS='-j 2' \
 
 ## Connect with SSH
 
+Connection setup uses a full-screen native form. Wide iPad windows show an introduction beside
+that form; compact windows keep the introduction in the scrolling content. Advanced paths and
+ports stay collapsed unless a saved connection overrides Bloom's defaults. The mobile client
+uses light appearance and the Mac control accent. Device Access explains the generated key,
+allows copying or sharing only its public half, and describes revocation. Automatic device
+pairing through an existing Mac connection is not implemented yet.
+
 Choose Server, select SSH and enter the server IP address or hostname and SSH account.
 The default account is `bloom`. Advanced defaults match Bloom's installer:
 `/home/bloom/bloom/server/current/bin/bloom-server` with data directory `/home/bloom/bloom/data`.

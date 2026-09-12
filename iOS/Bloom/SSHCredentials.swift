@@ -3,7 +3,7 @@ import Security
 import BloomClient
 import BloomSSH
 
-/// Device credentials and host pins never enter preferences, drafts or iCloud backup.
+/// Device credentials and host pins stay in the device-only, non-synchronising Keychain.
 @MainActor
 enum SSHCredentials {
     private static let service = "be.spatie.bloom.ios.ssh"

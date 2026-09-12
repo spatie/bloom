@@ -21,6 +21,7 @@ private struct ServerConnectionContent: View {
     @State private var setup: ServerSetupModel
     @State private var showsSetup: Bool
     @State private var storage: ServerStorageModel
+    @State private var updates: ServerToolUpdatesModel
     @State private var editorID = UUID()
 
     init(server: ServerWindowModel) {
@@ -28,6 +29,7 @@ private struct ServerConnectionContent: View {
         _setup = State(initialValue: ServerSetupModel(server: server))
         _showsSetup = State(initialValue: false)
         _storage = State(initialValue: ServerStorageModel(server: server))
+        _updates = State(initialValue: ServerToolUpdatesModel(server: server))
     }
 
     var body: some View {
@@ -35,7 +37,7 @@ private struct ServerConnectionContent: View {
             if showsSetup {
                 ServerSetupView(model: setup) { showsSetup = false }
             } else {
-                ServerConnectionView(model: server, storage: storage) {
+                ServerConnectionView(model: server, storage: storage, updates: updates) {
                     setup.cancel()
                     setup = ServerSetupModel(server: server, resumeExisting: server.isConnected)
                     showsSetup = true
@@ -50,6 +52,7 @@ private struct ServerConnectionContent: View {
 private struct ServerConnectionView: View {
     @Bindable var model: ServerWindowModel
     let storage: ServerStorageModel
+    let updates: ServerToolUpdatesModel
     let showSetup: () -> Void
     @Environment(AppModel.self) private var app
     @Environment(\.dismissWindow) private var dismissWindow
@@ -77,14 +80,20 @@ private struct ServerConnectionView: View {
                 serverPicker
                 switch section ?? .connection {
                 case .connection:
-                    connectionForm
+                    connectionForm.disabled(updates.updating != nil)
                     Divider()
-                    connectionFooter
+                    connectionFooter.disabled(updates.updating != nil)
                 case .accounts:
                     ServerAccountsContent(server: model, embedded: true) { section = .connection }
                         .id(model.connectionProfile?.id)
+                        .disabled(updates.updating != nil)
                 case .storage:
                     ServerStorageView(model: storage) { section = .connection }
+                        .disabled(updates.updating != nil)
+                case .updates:
+                    ServerToolUpdatesView(model: updates, showConnection: { section = .connection },
+                                          showAccounts: { section = .accounts })
+                        .disabled(storage.isCleaning)
                 }
             }
         }
@@ -105,7 +114,7 @@ private struct ServerConnectionView: View {
                         Button(profile.displayName) { Task { await model.selectServer(profile); loadConnection() } }
                     }
                 }
-                .disabled(storage.isCleaning)
+                .disabled(storage.isCleaning || updates.updating != nil)
             }
         }
         .padding(Metrics.gutter)
@@ -176,13 +185,14 @@ private struct ServerConnectionView: View {
 }
 
 private enum ServerSettingsSection: Hashable, CaseIterable {
-    case connection, accounts, storage
+    case connection, accounts, updates, storage
 
     var title: String {
         switch self {
         case .connection: "Connection"
         case .accounts: "Accounts"
         case .storage: "Storage & Cleanup"
+        case .updates: "Updates"
         }
     }
 
@@ -191,6 +201,7 @@ private enum ServerSettingsSection: Hashable, CaseIterable {
         case .connection: "network"
         case .accounts: "person.crop.circle"
         case .storage: "externaldrive"
+        case .updates: "arrow.down.circle"
         }
     }
 }

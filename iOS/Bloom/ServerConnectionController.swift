@@ -5,8 +5,17 @@ import BloomSSH
 
 /// One connection form on iPhone and iPad. SSH keys are generated on the device, never pasted
 /// into a form whose contents could become a saved preference or diagnostic attachment.
-final class ServerConnectionController: UITableViewController {
+final class ServerConnectionController: UIViewController, UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate {
     private let model: MobileConnection
+    private let tableView = UITableView(frame: .zero, style: .insetGrouped)
+    private let content = UIStackView()
+    private let introduction = UIStackView()
+    private let connectionStatus = UILabel()
+    private var introductionWidth: NSLayoutConstraint?
+    private var tableHeight: NSLayoutConstraint?
+    private var usesColumns = false
+    private var showsAdvanced = false
+    private var hasFocusedAddress = false
     private let transport = UISegmentedControl(items: ["SSH", "HTTPS"])
     private let host = UITextField()
     private let username = UITextField()
@@ -17,12 +26,13 @@ final class ServerConnectionController: UITableViewController {
     private var connecting = false
     private var task: Task<Void, Never>?
 
-    init(model: MobileConnection) { self.model = model; super.init(style: .insetGrouped) }
+    init(model: MobileConnection) { self.model = model; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError("Use init(model:)") }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Connect to Server"
+        configureLayout()
         navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .cancel, primaryAction: UIAction { [weak self] _ in
             self?.task?.cancel(); self?.dismiss(animated: true)
         })
@@ -43,55 +53,196 @@ final class ServerConnectionController: UITableViewController {
         port.text = String(saved?.port ?? 22); port.keyboardType = .numberPad
         executable.text = saved?.executable ?? SSHConfiguration.defaultExecutable
         directory.text = saved?.dataDirectory ?? SSHConfiguration.defaultDataDirectory
+        showsAdvanced = (saved?.port ?? 22) != 22
+            || executable.text != SSHConfiguration.defaultExecutable || directory.text != SSHConfiguration.defaultDataDirectory
         https.text = model.address.hasPrefix("https:") ? model.address : nil
         https.placeholder = "https://bloom.example.com"; https.keyboardType = .URL
         transport.selectedSegmentIndex = model.address.hasPrefix("https:") ? 1 : 0
-        transport.addAction(UIAction { [weak self] _ in self?.tableView.reloadData() }, for: .valueChanged)
+        transport.addAction(UIAction { [weak self] _ in
+            self?.tableView.reloadData(); self?.updateConnectButton()
+        }, for: .valueChanged)
         for field in [host, username, port, executable, directory, https] {
             field.autocapitalizationType = .none; field.autocorrectionType = .no
             field.font = .preferredFont(forTextStyle: .body); field.adjustsFontForContentSizeCategory = true
             field.clearButtonMode = .whileEditing
+            field.delegate = self
+            field.returnKeyType = field === host ? .next : .go
+            field.addAction(UIAction { [weak self] _ in self?.updateConnectButton() }, for: .editingChanged)
+        }
+        host.accessibilityLabel = "Server address"
+        username.accessibilityLabel = "SSH username"
+        https.accessibilityLabel = "HTTPS server address"
+        port.accessibilityLabel = "SSH port"
+        executable.accessibilityLabel = "Server executable"
+        directory.accessibilityLabel = "Server data directory"
+        updateConnectButton()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !hasFocusedAddress else { return }
+        hasFocusedAddress = true
+        let field = transport.selectedSegmentIndex == 0 ? host : https
+        if (field.text ?? "").isEmpty {
+            tableView.scrollToRow(at: IndexPath(row: 0, section: 1), at: .top, animated: false)
+            tableView.layoutIfNeeded()
+            field.becomeFirstResponder()
         }
     }
 
-    override func numberOfSections(in tableView: UITableView) -> Int { transport.selectedSegmentIndex == 0 ? 4 : 2 }
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let wide = view.bounds.width >= 1000 && !traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+        if wide != usesColumns {
+            usesColumns = wide
+            if wide {
+                tableView.tableHeaderView = nil
+                introduction.translatesAutoresizingMaskIntoConstraints = false
+                content.insertArrangedSubview(introduction, at: 0)
+                content.axis = .horizontal; content.alignment = .top
+            } else {
+                introductionWidth?.isActive = false
+                content.removeArrangedSubview(introduction); introduction.removeFromSuperview()
+                content.axis = .vertical; content.alignment = .fill
+                introduction.translatesAutoresizingMaskIntoConstraints = true
+                tableView.tableHeaderView = introduction
+            }
+            introductionWidth?.isActive = wide
+            tableHeight?.isActive = wide
+        }
+        if !wide {
+            let width = tableView.bounds.width
+            let height = introduction.systemLayoutSizeFitting(CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+                withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel).height
+            let size = CGSize(width: width, height: height)
+            if introduction.frame.size != size {
+                introduction.frame = CGRect(origin: .zero, size: size)
+                tableView.tableHeaderView = introduction
+            }
+        }
+        // A contained table no longer gets UITableViewController's keyboard scrolling.
+        if let field = [host, username, port, executable, directory, https].first(where: \.isFirstResponder), field.isDescendant(of: tableView) {
+            let rect = field.convert(field.bounds, to: tableView).insetBy(dx: 0, dy: -12)
+            if !tableView.bounds.inset(by: tableView.adjustedContentInset).contains(rect) {
+                tableView.scrollRectToVisible(rect, animated: false)
+            }
+        }
+    }
+
+    func textFieldDidBeginEditing(_ textField: UITextField) { view.setNeedsLayout() }
+
+    private func configureLayout() {
+        view.backgroundColor = .systemGroupedBackground
+        view.tintColor = BloomTheme.accent
+        let icon = UIImageView(image: UIImage(systemName: "server.rack",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 36, weight: .regular)))
+        icon.tintColor = BloomTheme.accent; icon.contentMode = .left
+        icon.accessibilityElementsHidden = true
+        let heading = BloomTheme.label("Your workspace, wherever you are.", style: .largeTitle)
+        let detail = BloomTheme.label("Connect to Bloom Server to pick up your projects and conversations. Your agents keep working when you leave.", style: .body, secondary: true)
+        connectionStatus.font = .preferredFont(forTextStyle: .subheadline)
+        connectionStatus.adjustsFontForContentSizeCategory = true
+        connectionStatus.textColor = BloomTheme.accent
+        connectionStatus.numberOfLines = 0
+        connectionStatus.isHidden = true
+        introduction.axis = .vertical; introduction.alignment = .fill; introduction.spacing = 12
+        [icon, heading, detail, connectionStatus].forEach { introduction.addArrangedSubview($0) }
+        introduction.setContentHuggingPriority(.required, for: .vertical)
+        introductionWidth = introduction.widthAnchor.constraint(equalToConstant: 300)
+        tableView.dataSource = self; tableView.delegate = self
+        tableView.rowHeight = UITableView.automaticDimension; tableView.estimatedRowHeight = 72
+        tableView.keyboardDismissMode = .interactive
+        tableView.cellLayoutMarginsFollowReadableWidth = true
+        tableView.backgroundColor = .clear
+        tableView.sectionHeaderTopPadding = 12
+        content.axis = .vertical; content.spacing = 24; content.alignment = .fill
+        content.addArrangedSubview(tableView)
+        introduction.translatesAutoresizingMaskIntoConstraints = true
+        tableView.tableHeaderView = introduction
+        tableHeight = tableView.heightAnchor.constraint(equalTo: content.heightAnchor)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+            content.widthAnchor.constraint(lessThanOrEqualToConstant: 1040),
+            content.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
+            content.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
+            content.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),
+            content.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -12),
+        ])
+        let width = content.widthAnchor.constraint(equalTo: view.safeAreaLayoutGuide.widthAnchor, constant: -48)
+        width.priority = .defaultHigh; width.isActive = true
+    }
+
+    private func updateConnectButton() {
+        let address = transport.selectedSegmentIndex == 0 ? host.text : https.text
+        navigationItem.rightBarButtonItem?.isEnabled = !connecting
+            && !(address ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (transport.selectedSegmentIndex == 1 || !(username.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        if textField === host { username.becomeFirstResponder() } else if navigationItem.rightBarButtonItem?.isEnabled == true { connect() }
+        return false
+    }
+
+    func numberOfSections(in tableView: UITableView) -> Int { transport.selectedSegmentIndex == 0 ? 4 : 2 }
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         if transport.selectedSegmentIndex == 1 { return 1 }
-        return [1, 2, 1, 4][section]
+        return [1, 2, 1, showsAdvanced ? 6 : 1][section]
     }
-    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+    func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         if section == 0 { return nil }
-        return ["", "Server", "This device's SSH key", "Advanced"][section]
+        return ["Connection method", "Server", "Device access", ""][section]
     }
-    override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
+    func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         if transport.selectedSegmentIndex == 1 {
             return section == 1 ? "Use your Bloom Gateway HTTPS address. You will sign in through your browser." : nil
         }
         if section == 1 { return "Connect directly to your existing SSH server. No domain, VPN or gateway is required." }
-        if section == 2 { return "Add this public key to ~/.ssh/authorized_keys for the selected server account. Its private key stays in this device's Keychain." }
-        if section == 3 { return "The defaults match Bloom's server installer. Change these only for an existing custom installation." }
+        if section == 2 { return "Use a key generated on this device. If it is already authorised on your server, you can connect now." }
+        if section == 3, showsAdvanced { return "These defaults match Bloom’s installer. Keep them unless your server uses a custom installation." }
         return nil
     }
-    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
         cell.selectionStyle = .none
         if indexPath.section == 0 { attach(transport, to: cell); return cell }
         if transport.selectedSegmentIndex == 1 { attach(https, to: cell); return cell }
         if indexPath.section == 2 {
-            cell.textLabel?.text = "Copy Public Key"; cell.textLabel?.textColor = .tintColor
-            cell.imageView?.image = UIImage(systemName: "key"); cell.selectionStyle = .default
+            var configuration = cell.defaultContentConfiguration()
+            configuration.text = "Authorise This Device"
+            configuration.secondaryText = "Your private key stays in its Keychain."
+            configuration.image = UIImage(systemName: "key")
+            configuration.imageProperties.tintColor = BloomTheme.accent
+            cell.contentConfiguration = configuration; cell.accessoryType = .disclosureIndicator
+            cell.selectionStyle = .default
             return cell
         }
-        if indexPath.section == 3, indexPath.row == 3 {
+        if indexPath.section == 3, indexPath.row == 0 {
+            cell.textLabel?.text = "Advanced Connection Settings"
+            cell.imageView?.image = UIImage(systemName: showsAdvanced ? "chevron.down" : "chevron.right")
+            cell.imageView?.tintColor = .secondaryLabel
+            cell.accessibilityValue = showsAdvanced ? "Expanded" : "Collapsed"
+            cell.selectionStyle = .default
+            return cell
+        }
+        if indexPath.section == 3, indexPath.row == 4 {
+            cell.textLabel?.text = "Use Bloom’s Default Paths and Port"; cell.textLabel?.textColor = BloomTheme.accent
+            cell.selectionStyle = .default
+            return cell
+        }
+        if indexPath.section == 3, indexPath.row == 5 {
             cell.textLabel?.text = "Verify Host Key Again"; cell.textLabel?.textColor = .tintColor
             cell.selectionStyle = .default
             return cell
         }
         let fields = indexPath.section == 1 ? [host, username] : [port, executable, directory]
         let labels = indexPath.section == 1 ? ["Address", "Username"] : ["Port", "Executable", "Data directory"]
-        let label = UILabel(); label.text = labels[indexPath.row]; label.font = .preferredFont(forTextStyle: .caption1)
-        label.textColor = .secondaryLabel
-        let stack = UIStackView(arrangedSubviews: [label, fields[indexPath.row]])
+        let fieldIndex = indexPath.section == 3 ? indexPath.row - 1 : indexPath.row
+        let label = UILabel(); label.text = labels[fieldIndex]; label.font = .preferredFont(forTextStyle: .caption1)
+        label.textColor = .secondaryLabel; label.adjustsFontForContentSizeCategory = true
+        let stack = UIStackView(arrangedSubviews: [label, fields[fieldIndex]])
         stack.axis = .vertical; stack.spacing = 4
         attach(stack, to: cell)
         return cell
@@ -105,17 +256,21 @@ final class ServerConnectionController: UITableViewController {
             view.bottomAnchor.constraint(equalTo: cell.contentView.layoutMarginsGuide.bottomAnchor),
         ])
     }
-    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        if indexPath.section == 3, indexPath.row == 3 {
-            tableView.deselectRow(at: indexPath, animated: true); forgetHost(); return
-        }
-        guard indexPath.section == 2 else { return }
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        do {
-            UIPasteboard.general.string = try SSHIdentity.publicKey(SSHCredentials.identity()) + " bloom-ios"
-            let alert = UIAlertController(title: "Public Key Copied", message: "Only the public key was copied. Add it to the server account's authorised keys, then connect.", preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "OK", style: .default)); present(alert, animated: true)
-        } catch { show(error) }
+        if indexPath.section == 3, indexPath.row == 0 {
+            showsAdvanced.toggle(); tableView.reloadSections(IndexSet(integer: 3), with: .automatic)
+        } else if indexPath.section == 3, indexPath.row == 4 {
+            port.text = "22"; executable.text = SSHConfiguration.defaultExecutable; directory.text = SSHConfiguration.defaultDataDirectory
+            tableView.reloadSections(IndexSet(integer: 3), with: .none)
+        } else if indexPath.section == 3, indexPath.row == 5 {
+            forgetHost()
+        } else if indexPath.section == 2 {
+            do {
+                let key = try SSHIdentity.publicKey(SSHCredentials.identity()) + " bloom-ios"
+                navigationController?.pushViewController(SSHDeviceAccessController(publicKey: key, username: username.text ?? "bloom"), animated: true)
+            } catch { show(error) }
+        }
     }
     private func forgetHost() {
         do {
@@ -137,8 +292,13 @@ final class ServerConnectionController: UITableViewController {
         guard !connecting else { return }
         view.endEditing(true)
         task = Task {
-            connecting = true; isModalInPresentation = true; tableView.isUserInteractionEnabled = false; navigationItem.rightBarButtonItem?.isEnabled = false
-            defer { connecting = false; isModalInPresentation = false; tableView.isUserInteractionEnabled = true; navigationItem.rightBarButtonItem?.isEnabled = true }
+            connecting = true; isModalInPresentation = true; tableView.isUserInteractionEnabled = false
+            connectionStatus.text = "Connecting securely to your server…"; connectionStatus.isHidden = false
+            navigationItem.rightBarButtonItem?.title = "Connecting…"; updateConnectButton()
+            defer {
+                connecting = false; isModalInPresentation = false; tableView.isUserInteractionEnabled = true
+                connectionStatus.isHidden = true; navigationItem.rightBarButtonItem?.title = "Connect"; updateConnectButton()
+            }
             do {
                 if transport.selectedSegmentIndex == 1 {
                     let address = https.text ?? ""

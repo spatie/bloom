@@ -17,6 +17,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
         guard let scene = scene as? UIWindowScene else { return }
         let window = UIWindow(windowScene: scene)
+        window.overrideUserInterfaceStyle = .light
+        window.tintColor = BloomTheme.accent
         window.rootViewController = BloomSplitController(model: model)
         self.window = window
         window.makeKeyAndVisible()
