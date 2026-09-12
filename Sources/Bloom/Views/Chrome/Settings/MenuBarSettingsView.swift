@@ -30,21 +30,23 @@ struct MenuBarSettingsView: View {
             }
 
             Section("The menu bar item") {
+                // Never disabled, whatever is off below it: this switch is the way back. It was
+                // inside the `disabled` that covers the rest, which left somebody who turned the
+                // item off with a greyed out switch and no way to return.
                 Toggle("Show Bloom in the menu bar", isOn: $showsItem)
-                Toggle(isOn: $model.showsUsage) {
-                    Text("Show usage figures")
-                    Text("Off shows Bloom's mark alone.")
+                Group {
+                    Toggle("Show usage figures", isOn: $model.showsUsage)
+                    Picker("Figures", selection: $model.iconStyle) {
+                        ForEach(MenuBarIconStyle.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    Picker("Count", selection: $model.meterStyle) {
+                        ForEach(UsageMeterStyle.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
                 }
-                Picker("Figures", selection: $model.iconStyle) {
-                    ForEach(MenuBarIconStyle.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                Picker("Count", selection: $model.meterStyle) {
-                    ForEach(UsageMeterStyle.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
+                .disabled(!showsItem)
             }
-            .disabled(!showsItem)
 
             Section("Providers") {
                 ForEach(model.layout.orderedProviders(), id: \.self) { provider in

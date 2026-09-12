@@ -117,17 +117,12 @@ struct SettingsView: View {
 
 struct GeneralSettingsView: View {
     @AppStorage("confirmBeforeArchiving") private var confirmBeforeArchiving = true
-    @AppStorage(MenuBarStatusItem.settingKey) private var showsMenuBarStatus = MenuBarStatusItem.isOnByDefault
     @State private var namesWorkspaces = WorkspaceNamingPreferences().isEnabled
 
     var body: some View {
         Form {
             Section("Everyday behaviour") {
                 Toggle("Confirm before archiving", isOn: $confirmBeforeArchiving)
-                Toggle(isOn: $showsMenuBarStatus) {
-                    Text("Show agent status in the menu bar")
-                    Text("See which agents are working or waiting for you.")
-                }
             }
 
             DirectorySettingsSection()
