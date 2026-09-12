@@ -102,6 +102,7 @@ struct PullRequestBar: View {
                 mergeMethod: model.mergeMethod,
                 onChooseMergeMethod: chooseMergeMethod,
                 onMerge: merge,
+                onMarkReadyForReview: { markReadyForReview(pullRequest) },
                 onPush: push,
                 onFixConflicts: { fixConflicts(on: pullRequest) },
                 onContinue: { carryOn(after: pullRequest) },
@@ -184,6 +185,21 @@ struct PullRequestBar: View {
         Task {
             defer { isWorking = false }
             if let refusal = await model.requestPullRequest() {
+                report = PullRequestNotice(
+                    tone: .info, title: "Nothing was sent", message: refusal
+                )
+            }
+        }
+    }
+
+    private func markReadyForReview(_ pullRequest: PullRequest) {
+        guard !isWorking, branchActions.isAllowed else { return }
+        isWorking = true
+        report = nil
+
+        Task {
+            defer { isWorking = false }
+            if let refusal = await model.requestMarkReadyForReview(pullRequest) {
                 report = PullRequestNotice(
                     tone: .info, title: "Nothing was sent", message: refusal
                 )
