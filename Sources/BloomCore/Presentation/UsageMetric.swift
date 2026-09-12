@@ -182,7 +182,7 @@ public enum UsageCatalogue {
             case .weekly: return name.map { "\($0) Weekly" } ?? "Weekly"
             case .other: return name.map { "\($0) \(window.label)" } ?? window.label
             }
-        case .cursor, .openCode:
+        case .grok, .cursor, .openCode:
             return window.label
         }
     }

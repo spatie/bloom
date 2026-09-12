@@ -16,7 +16,7 @@ public enum ProviderMark {
         switch provider {
         case .claudeCode: claude
         case .codex: codex
-        case .cursor, .openCode: nil
+        case .grok, .cursor, .openCode: nil
         }
     }
 

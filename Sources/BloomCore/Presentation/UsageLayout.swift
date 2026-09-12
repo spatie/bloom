@@ -291,7 +291,7 @@ extension AgentKind {
     public var publishesUsage: Bool {
         switch self {
         case .claudeCode, .codex: true
-        case .cursor, .openCode: false
+        case .grok, .cursor, .openCode: false
         }
     }
 }
