@@ -23,7 +23,6 @@ struct ServerStorageView: View {
         VStack(spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                    Text("Storage on " + server.displayName).font(Typo.heading)
                     Text("Review disk use and remove files Docker can recreate.")
                         .font(Typo.caption).foregroundStyle(.secondary)
                 }
@@ -68,7 +67,7 @@ struct ServerStorageView: View {
                     }
                 }
             }
-            .formStyle(.grouped)
+            .settingsForm()
             HStack {
                 Button("Copy Report") {
                     NSPasteboard.general.clearContents()

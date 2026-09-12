@@ -61,60 +61,58 @@ private struct ServerConnectionView: View {
     @State private var usesHTTPS = false
     @State private var httpsAddress = ""
     @State private var label = ""
-    @State private var section = ServerSettingsSection.connection
+    @State private var section: ServerSettingsSection? = .connection
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("Settings", selection: $section) {
-                Text("Connection").tag(ServerSettingsSection.connection)
-                Text("Storage & Cleanup").tag(ServerSettingsSection.storage)
+        SettingsLayout {
+            List(selection: $section) {
+                Section("Server") {
+                    ForEach(ServerSettingsSection.allCases, id: \.self) { item in
+                        Label(item.title, systemImage: item.systemImage).tag(item)
+                    }
+                }
             }
-            .pickerStyle(.segmented).labelsHidden().padding(Metrics.gutter)
-            if section == .connection {
-                connectionForm
-            } else {
-                ServerStorageView(model: storage) { section = .connection }
-            }
-            Divider()
-            if section == .connection {
-                connectionFooter
-            } else {
-                HStack {
-                    Spacer()
-                    Button("Done") { dismissWindow(id: ServerWindow.id) }
-                        .keyboardShortcut(.cancelAction)
-                }.padding(Metrics.gutter)
+        } detail: {
+            VStack(spacing: 0) {
+                serverPicker
+                switch section ?? .connection {
+                case .connection:
+                    connectionForm
+                    Divider()
+                    connectionFooter
+                case .accounts:
+                    ServerAccountsContent(server: model, embedded: true) { section = .connection }
+                        .id(model.connectionProfile?.id)
+                case .storage:
+                    ServerStorageView(model: storage) { section = .connection }
+                }
             }
         }
-        .frame(width: 700, height: 720)
+        .navigationTitle((section ?? .connection).title)
         .disabled(model.isConnecting || model.isSigningIn)
         .onAppear(perform: loadConnection)
         .onChange(of: model.connectionProfile?.id) { loadConnection() }
     }
 
+    private var serverPicker: some View {
+        HStack {
+            Label(model.displayName, systemImage: "server.rack")
+                .font(Typo.labelEmphasis).lineLimit(1).truncationMode(.middle)
+            Spacer()
+            if model.savedServers.profiles.count > 1 {
+                Menu("Change Server") {
+                    ForEach(model.savedServers.profiles) { profile in
+                        Button(profile.displayName) { Task { await model.selectServer(profile); loadConnection() } }
+                    }
+                }
+                .disabled(storage.isCleaning)
+            }
+        }
+        .padding(Metrics.gutter)
+    }
+
     private var connectionForm: some View {
         Form {
-            Section("Accounts") {
-                HStack {
-                    VStack(alignment: .leading, spacing: Metrics.spacingSmall) {
-                        Text("GitHub, Codex and Claude").font(Typo.labelEmphasis)
-                        Text("Manage sign-ins on \(model.displayName).")
-                            .font(Typo.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("Sign In on Server…") { openWindow(id: ServerAccountsWindow.id) }
-                        .disabled(!model.isConfigured)
-                }
-            }
-            if !model.savedServers.profiles.isEmpty {
-                LabeledContent("Saved servers") {
-                    Menu(model.displayName) {
-                        ForEach(model.savedServers.profiles) { profile in
-                            Button(profile.displayName) { Task { await model.selectServer(profile); loadConnection() } }
-                        }
-                    }
-                }
-            }
             if let failure = model.savedServers.failure { Text(failure).foregroundStyle(Palette.warning) }
             TextField("Server label", text: $label, prompt: Text("Use server hostname"))
             Picker("Connection", selection: $usesHTTPS) {
@@ -139,7 +137,7 @@ private struct ServerConnectionView: View {
                 Text(ServerSetupDiagnostics.sanitise(error)).foregroundStyle(.red).textSelection(.enabled)
             }
         }
-        .formStyle(.grouped)
+        .settingsForm()
     }
 
     private var connectionFooter: some View {
@@ -177,4 +175,22 @@ private struct ServerConnectionView: View {
     }
 }
 
-private enum ServerSettingsSection: Hashable { case connection, storage }
+private enum ServerSettingsSection: Hashable, CaseIterable {
+    case connection, accounts, storage
+
+    var title: String {
+        switch self {
+        case .connection: "Connection"
+        case .accounts: "Accounts"
+        case .storage: "Storage & Cleanup"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .connection: "network"
+        case .accounts: "person.crop.circle"
+        case .storage: "externaldrive"
+        }
+    }
+}

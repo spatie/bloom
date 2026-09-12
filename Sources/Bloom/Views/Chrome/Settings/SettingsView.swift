@@ -27,8 +27,7 @@ struct SettingsView: View {
     @State private var saveError: String?
 
     var body: some View {
-        // A fixed sidebar avoids the split view's collapsible toolbar and its reserved top inset.
-        HStack(spacing: 0) {
+        SettingsLayout {
             List(selection: $tab) {
                 Section("Bloom") {
                     navigationRows([.general, .appearance, .notifications])
@@ -40,11 +39,7 @@ struct SettingsView: View {
                     navigationRows([.terminal, .commandLine])
                 }
             }
-            .listStyle(.sidebar)
-            .frame(width: 185)
-
-            Divider()
-
+        } detail: {
             VStack(spacing: 0) {
                 if let saveError {
                     ErrorBanner(title: "Could not save settings", message: saveError) {
@@ -53,13 +48,9 @@ struct SettingsView: View {
                     .padding(Metrics.inset)
                 }
                 pane
-                    .frame(maxWidth: 680)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .background(Palette.windowBackground)
         }
         .navigationTitle((tab ?? .general).title)
-        .frame(minWidth: 780, idealWidth: 850, minHeight: 560, idealHeight: 700)
         .task {
             guard !isLoaded, let store = app.store else { return }
             defaults = await AppDefaults.load(from: store)
