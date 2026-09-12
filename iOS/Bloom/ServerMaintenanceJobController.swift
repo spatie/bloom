@@ -8,6 +8,7 @@ final class ServerMaintenanceJobController: UITableViewController {
     private var observation: UUID?
     private var polling: Task<Void, Never>?
     private var shownLogCount = 0
+    private var isVisible = false
     private var job: ServerMaintenanceJob? { session.jobs.first { $0.id == jobID } }
 
     init(session: ServerMaintenanceSession, jobID: String, isCurrent: @escaping () -> Bool) {
@@ -30,7 +31,13 @@ final class ServerMaintenanceJobController: UITableViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         navigationController?.setToolbarHidden(false, animated: animated)
+        isVisible = true
         observation = session.observe { [weak self] in self?.updateUI() }
+        startPolling()
+    }
+    private func startPolling() {
+        guard isVisible else { return }
+        polling?.cancel()
         polling = Task { [weak self] in
             guard let self else { return }
             await refresh()
@@ -42,6 +49,7 @@ final class ServerMaintenanceJobController: UITableViewController {
     }
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        isVisible = false
         polling?.cancel(); polling = nil
         if let observation { session.removeObserver(observation) }; observation = nil
     }
@@ -59,7 +67,19 @@ final class ServerMaintenanceJobController: UITableViewController {
         if followsOutput, shownLogCount > previousCount {
             tableView.scrollToRow(at: IndexPath(row: shownLogCount - 1, section: 1), at: .bottom, animated: false)
         }
-        if job?.canCancel == true {
+        if session.pendingMutationID != nil {
+            toolbarItems = [.flexibleSpace(), UIBarButtonItem(title: "Retry Request", primaryAction: UIAction { [weak self] _ in
+                guard let self, isCurrent() else { return }
+                Task { await session.retryPendingMutation(); startPolling() }
+            }), .flexibleSpace()]
+            toolbarItems?[1].isEnabled = session.activity == .idle && session.authorized && isCurrent()
+        } else if job?.phase == .interrupted {
+            toolbarItems = [.flexibleSpace(), UIBarButtonItem(title: "Recover Update", primaryAction: UIAction { [weak self] _ in
+                guard let self, isCurrent() else { return }
+                Task { await session.recover(jobID: jobID); startPolling() }
+            }), .flexibleSpace()]
+            toolbarItems?[1].isEnabled = session.canRecover(jobID: jobID) && isCurrent()
+        } else if job?.canCancel == true {
             toolbarItems = [.flexibleSpace(), UIBarButtonItem(title: "Cancel Update…", primaryAction: UIAction { [weak self] _ in self?.confirmCancellation() }), .flexibleSpace()]
             toolbarItems?[1].isEnabled = session.activity == .idle && isCurrent()
         } else { toolbarItems = [] }
@@ -70,7 +90,8 @@ final class ServerMaintenanceJobController: UITableViewController {
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         guard section == 0 else { return nil }
         if !isCurrent() { return "Reconnect to this server, then reopen update details to see current progress. The update continues on the server." }
-        return session.failure.map { $0.message + "\n" + $0.recovery }
+        if let failure = session.failure { return failure.message + "\n" + failure.recovery }
+        return job?.phase == .interrupted ? "Resume recovery of this update. This does not rerun a package installation." : nil
     }
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)

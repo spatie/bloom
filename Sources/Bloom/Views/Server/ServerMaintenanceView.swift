@@ -8,6 +8,7 @@ struct ServerMaintenanceView: View {
     let legacy: ServerToolUpdatesModel
     let showConnection: () -> Void
     let showAccounts: () -> Void
+    let showMaintenanceSetup: () -> Void
     @State private var showsAccess = false
     @State private var showsLegacy = false
     @State private var review: ServerMaintenancePlan?
@@ -68,7 +69,12 @@ struct ServerMaintenanceView: View {
                 } else if let session = model.session {
                     if session.unsupported {
                         Section("Managed updates aren’t available yet") {
-                            Text("This server needs Bloom’s maintenance service before updates can continue independently of this app. Install it from server setup on your Mac.").settingsFootnote()
+                            Text("Add Bloom’s maintenance service so updates can continue independently of this app.").settingsFootnote()
+                            Button("Set Up Server Updates…", action: showMaintenanceSetup)
+                            Text(legacy.connection != nil
+                                 ? "Setup uses an administrator SSH connection. Review the address and check the server before installing."
+                                 : "You’ll need this server’s SSH address and administrator access. The HTTPS address is used only for your existing connection.")
+                                .settingsFootnote()
                             if legacy.connection != nil {
                                 Button("Use Legacy SSH Updates…") { showsLegacy = true }
                                 Text("Legacy updates manage AI tools over SSH. Keep the connection open until they finish.").settingsFootnote()
@@ -170,6 +176,11 @@ struct ServerMaintenanceView: View {
                     Text(job.logs.map(\.message).joined(separator: "\n"))
                         .font(Typo.codeSmall).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                 }.frame(minHeight: 100, idealHeight: 160, maxHeight: 220)
+            }
+            if job.phase == .interrupted {
+                Text("Resume recovery of this update. This does not rerun a package installation.").settingsFootnote()
+                Button("Recover Update") { Task { await session.recover(jobID: job.id) } }
+                    .disabled(!session.canRecover(jobID: job.id))
             }
             if job.canCancel {
                 Button("Cancel Update…") { cancellation = job }.disabled(session.isSubmitting)

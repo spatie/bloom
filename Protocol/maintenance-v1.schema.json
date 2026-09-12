@@ -21,7 +21,8 @@
             "prepare",
             "start",
             "status",
-            "cancel"
+            "cancel",
+            "recover"
           ]
         },
         "credential": {
@@ -151,7 +152,10 @@
           "if": {
             "properties": {
               "action": {
-                "const": "cancel"
+                "enum": [
+                  "cancel",
+                  "recover"
+                ]
               }
             }
           },

@@ -29,6 +29,7 @@ struct ServerMaintenanceTests {
             .init(action: .start, credential: "test-only", planID: "p1", mode: .whenIdle),
             .init(action: .status, credential: "test-only", jobID: "j1", afterSequence: 0),
             .init(action: .cancel, credential: "test-only", jobID: "j1"),
+            .init(action: .recover, credential: "test-only", jobID: "j1"),
         ]
         for request in requests {
             vectors.append(["name": .string("request-" + request.action.rawValue),
@@ -122,6 +123,61 @@ struct ServerMaintenanceTests {
         #expect(starts[0] == starts[1])
         #expect(session.pendingMutationID == nil)
         #expect(session.jobs.first?.phase == .waiting)
+    }
+
+    @Test @MainActor func lostRecoveryReplyRetriesTheSameJobAndUUID() async throws {
+        let client = MaintenanceFixtureClient([
+            .response(.init(authorized: true, jobs: [job(phase: .interrupted)])), .lost,
+            .response(.init(authorized: true, jobs: [job(phase: .interrupted)])),
+            .response(.init(authorized: true, jobs: [job(phase: .rolledBack)])),
+        ])
+        let session = ServerMaintenanceSession(client: client, supported: true)
+        await session.refresh(credential: "test-secret")
+        #expect(session.canRecover(jobID: "j1"))
+        await session.recover(jobID: "j1")
+        let id = try #require(session.pendingMutationID)
+        #expect(!session.canRecover(jobID: "j1"))
+        await session.poll(jobID: "j1")
+        #expect(session.pendingMutationID == id)
+        #expect(await client.commands.count == 3)
+        await session.retryPendingMutation()
+        let recoveries = await client.commands.filter { $0.operation["maintenance"]?["_0"]?["action"] == .string("recover") }
+        #expect(recoveries.count == 2)
+        #expect(recoveries.allSatisfy { $0.id == id })
+        #expect(recoveries[0] == recoveries[1])
+        #expect(session.pendingMutationID == nil)
+        #expect(session.jobs.first?.phase == .rolledBack)
+    }
+
+    @Test @MainActor func recoveryStatusResolvesLostReplyWithoutAnotherMutation() async {
+        let client = MaintenanceFixtureClient([
+            .response(.init(authorized: true, jobs: [job(phase: .interrupted)])), .lost,
+            .response(.init(authorized: true, jobs: [job(phase: .failed)])),
+        ])
+        let session = ServerMaintenanceSession(client: client, supported: true)
+        await session.refresh(credential: "test-secret")
+        await session.recover(jobID: "j1")
+        await session.poll(jobID: "j1")
+        #expect(session.pendingMutationID == nil)
+        #expect(session.jobs.first?.phase == .failed)
+        #expect(await client.commands.count == 3)
+    }
+
+    @Test @MainActor func recoveryOnlyAcceptsAnAuthenticatedInterruptedJob() async {
+        for phase in ServerMaintenancePhase.allCases where phase != .interrupted {
+            let client = MaintenanceFixtureClient([.response(.init(authorized: true, jobs: [job(phase: phase)]))])
+            let session = ServerMaintenanceSession(client: client, supported: true)
+            await session.refresh(credential: "test-secret")
+            await session.recover(jobID: "j1")
+            await session.recover(jobID: "missing")
+            #expect(await client.commands.count == 1)
+            #expect(!session.canRecover(jobID: "j1"))
+        }
+        let client = MaintenanceFixtureClient([.response(.init(authorized: false, jobs: [job(phase: .interrupted)]))])
+        let session = ServerMaintenanceSession(client: client, supported: true)
+        await session.refresh()
+        await session.recover(jobID: "j1")
+        #expect(await client.commands.count == 1)
     }
 
     @Test @MainActor func cancellationRequiresServerPermissionAndPollMergesLogs() async throws {

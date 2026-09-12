@@ -1,6 +1,6 @@
 import Foundation
 
-public enum ServerMaintenanceAction: String, Codable, Sendable { case inspect, prepare, start, status, cancel }
+public enum ServerMaintenanceAction: String, Codable, Sendable { case inspect, prepare, start, status, cancel, recover }
 public enum ServerMaintenanceComponentID: String, Codable, Sendable, CaseIterable {
     case server, claude, codex, docker
     public var title: String {

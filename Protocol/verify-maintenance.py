@@ -26,7 +26,7 @@ def main():
         {'action': 'erase'}, {'action': 'prepare'}, {'action': 'prepare', 'component': 'os'},
         {'action': 'start'}, {'action': 'start', 'planID': None},
         {'action': 'start', 'planID': 'p1', 'mode': 'force'}, {'action': 'cancel'},
-        {'action': 'status', 'afterSequence': -1},
+        {'action': 'status', 'afterSequence': -1}, {'action': 'recover'}, {'action': 'recover', 'jobID': None},
     ]
     response = next(value['value'] for value in vectors if value['name'] == 'response-queued')
     unknown_phase = copy.deepcopy(response)

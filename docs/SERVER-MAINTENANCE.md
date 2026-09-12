@@ -27,7 +27,7 @@ session retains it only in memory. Do not put it in preferences, URLs, logs, ana
 reports or the normal durable command outbox.
 
 Unauthenticated `inspect` returns only safe component information, with `authorized: false`.
-Preparing, starting, reading job status and cancelling require the maintenance credential.
+Preparing, starting, reading job status, cancelling and recovering require the maintenance credential.
 Authentication failures use code `unauthorized`; they must never silently fall back to a
 privileged SSH command or another connection route.
 
@@ -62,6 +62,7 @@ All payload fields are flat. Optional fields may be omitted or null.
 | `start` | Credential, planID, mode | A durable job. Mode is `now` or `whenIdle`; the server validates whether the choice is permitted. |
 | `status` | Credential, optional jobID and afterSequence | Job phases and logs. No mutation is started. |
 | `cancel` | Credential and jobID | Cancellation requested only while the server allows it. |
+| `recover` | Credential and jobID | Resume checkpoint recovery for an interrupted job. Never rerun package installation. |
 
 Components are `server`, `claude`, `codex` and `docker`. An advertised component can still have
 `canUpdate: false`, for example when its installer is managed externally. Show its explanation
@@ -132,3 +133,17 @@ BLOOM_MAINTENANCE_VECTORS_PATH=/tmp/bloom-maintenance-vectors.json \
   swift test --package-path Packages/BloomClient --filter ServerMaintenance
 python3 Protocol/verify-maintenance.py /tmp/bloom-maintenance-vectors.json
 ```
+
+### Interrupted update recovery
+
+Offer **Recover Update** only for a job in `interrupted`. This is an explicit authenticated
+mutation with the same UUID rules as `start`. The server resumes its saved recovery checkpoint,
+including restoring a server release or checking a tool outcome. It does not start a new npm,
+APT or Docker package installation. Normal inspection and status polling never trigger recovery.
+
+The acceptance response moves the job to `restarting`. Resume polling while its recovery
+worker runs. If the response is lost, poll the existing job. A final phase other than
+`interrupted` confirms recovery completed. Otherwise an explicit retry reuses the original action, job ID and request
+UUID. Keep displaying the server's precise failure and recovery instructions if it cannot
+complete safely. A recovered update may be `failed` or `rolledBack`; recovery is not evidence
+that the requested update succeeded.

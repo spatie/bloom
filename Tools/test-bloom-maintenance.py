@@ -332,6 +332,56 @@ class RecoveryTests(Fixture):
         self.assertTrue(runtime.alive)
         supervisor.database_snapshot.assert_not_called()
 
+    def test_lost_quiesce_reply_resumes_admission_before_resolving_job(self):
+        supervisor, runtime = self.supervisor()
+        value, plan = self.accepted()
+        gate = {'closed': False}
+        actions = []
+
+        def control(action):
+            actions.append(action)
+            if action == 'quiesce':
+                gate['closed'] = True
+                raise maintenance.MaintenanceError('runtime_unavailable', 'Quiesce acknowledgement was lost.')
+            if action == 'resume':
+                gate['closed'] = False
+            return dict(ready=True, busy=False)
+
+        runtime.control = control
+        supervisor.run_job(value, plan, 'now')
+        self.assertFalse(gate['closed'])
+        self.assertEqual(actions, ['quiesce', 'resume'])
+        self.assertEqual(self.store.get(value['id'])['phase'], 'failed')
+        self.assertEqual(runtime.starts, [])
+
+    def test_lost_resume_reply_leaves_recoverable_job_and_recovery_resumes_live_child(self):
+        supervisor, runtime = self.supervisor()
+        value, plan = self.accepted()
+        runtime.control = mock.Mock(side_effect=[dict(ready=True, busy=True),
+            maintenance.MaintenanceError('runtime_unavailable', 'Resume reply lost.')])
+        supervisor.run_job(value, plan, 'now')
+        self.assertEqual(self.store.get(value['id'])['phase'], 'interrupted')
+        runtime.control = mock.Mock(return_value=dict(ready=True, busy=False))
+        supervisor.run_recovery(self.store.get(value['id']))
+        runtime.control.assert_called_once_with('resume')
+        self.assertEqual(runtime.starts, [])
+        self.assertTrue(runtime.running())
+        self.assertEqual(self.store.get(value['id'])['phase'], 'failed')
+
+    def test_failed_startup_recovery_keeps_component_job_recoverable(self):
+        supervisor, runtime = self.supervisor()
+        value, _ = self.accepted()
+        value.update(component='codex', phase='installing')
+        self.store.update(value)
+        runtime.wait_ready = mock.Mock(side_effect=maintenance.MaintenanceError('runtime_not_ready', 'Startup failed.'))
+        with self.assertRaises(maintenance.MaintenanceError):
+            supervisor.recover()
+        self.assertEqual(self.store.get(value['id'])['phase'], 'interrupted')
+        supervisor.recovery_failed = True
+        with mock.patch.object(threading.Thread, 'start'):
+            recovered = supervisor.recover_job(fresh_id(), value['id'])
+        self.assertEqual(recovered['phase'], 'restarting')
+
     def test_cancel_before_install_never_stops_runtime(self):
         supervisor, runtime = self.supervisor()
         value, plan = self.accepted()
@@ -340,6 +390,302 @@ class RecoveryTests(Fixture):
         self.assertEqual(self.store.get(value['id'])['phase'], 'cancelled')
         self.assertEqual(runtime.starts, [])
         supervisor.database_snapshot.assert_not_called()
+
+
+class DockerIntegrationTests(Fixture):
+    def adapter(self):
+        class DockerError(Exception):
+            def __init__(self, code, message, recovery):
+                super().__init__(message)
+                self.code, self.recovery = code, recovery
+        adapter = mock.Mock()
+        adapter.DockerMaintenanceError = DockerError
+        adapter.prepare.return_value = dict(schema=1, installed={'docker.io': '1.0'}, targetVersion='1.1',
+            updates={'docker.io': '1.1'}, candidates={'docker.io': '1.1'},
+            summary='Docker services and containers may restart. No automatic rollback.',
+            restarts=['Bloom rootless Docker', 'Docker containers'])
+        adapter.apply.return_value = dict(version='1.1', message='Docker packages and the private daemon were verified.')
+        return adapter
+
+    def accepted(self, supervisor):
+        public = supervisor.prepare('docker')
+        plan = self.store.get_plan(public['id'])
+        value = job(public['id'])
+        value.update(component='docker', targetVersion='1.1')
+        self.store.accept(fresh_id(), {}, value)
+        return value, plan, public
+
+    def test_review_exposes_restart_impact_but_keeps_exact_apt_payload_server_owned(self):
+        adapter = self.adapter()
+        supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=FakeRuntime(), docker=adapter)
+        _, plan, public = self.accepted(supervisor)
+        self.assertNotIn('_docker', public)
+        self.assertEqual(plan['_docker']['updates'], {'docker.io': '1.1'})
+        self.assertEqual(public['restarts'], ['Bloom Server', 'Bloom rootless Docker', 'Docker containers'])
+        self.assertIn('No automatic rollback', public['summary'])
+
+    def test_docker_applies_only_reviewed_plan_after_bloom_stops(self):
+        adapter, runtime = self.adapter(), FakeRuntime()
+        supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=runtime, docker=adapter)
+        value, plan, _ = self.accepted(supervisor)
+
+        def apply(config, payload, log):
+            self.assertFalse(runtime.running())
+            self.assertEqual(payload, plan['_docker'])
+            self.assertEqual(config, self.config)
+            log('Installing docker.io=1.1')
+            return dict(version='1.1', message='Docker was verified.')
+
+        adapter.apply.side_effect = apply
+        supervisor.run_job(value, plan, 'whenIdle')
+        self.assertEqual(self.store.get(value['id'])['phase'], 'succeeded')
+        self.assertTrue(runtime.running())
+        self.assertEqual(runtime.actions, ['quiesce'])
+        self.assertEqual(runtime.starts, [('/old/bin/bloom-server', None)])
+        self.assertTrue(any('docker.io=1.1' in item['message'] for item in self.store.logs(value['id'])))
+
+    def test_partial_docker_failure_preserves_diagnostics_and_restarts_bloom_without_reapply(self):
+        adapter, runtime = self.adapter(), FakeRuntime()
+        adapter.apply.side_effect = adapter.DockerMaintenanceError('package_lock',
+            'apt-get exited with status 100. Could not get lock.', 'Wait for the other package manager. No rollback was attempted.')
+        supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=runtime, docker=adapter)
+        value, plan, _ = self.accepted(supervisor)
+        supervisor.run_job(value, plan, 'now')
+        failed = self.store.get(value['id'])
+        self.assertEqual(failed['phase'], 'failed')
+        self.assertIn('may be partial', failed['message'])
+        self.assertTrue(runtime.running())
+        output = '\n'.join(item['message'] for item in self.store.logs(value['id']))
+        self.assertIn('status 100', output)
+        self.assertIn('Wait for the other package manager', output)
+        runtime.alive = False
+        supervisor.recover()
+        adapter.apply.assert_called_once()
+
+    def test_cancelled_docker_plan_never_reaches_apt(self):
+        adapter, runtime = self.adapter(), FakeRuntime()
+        supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=runtime, docker=adapter)
+        value, plan, _ = self.accepted(supervisor)
+        supervisor.cancel(value['id'])
+        supervisor.run_job(value, plan, 'whenIdle')
+        adapter.apply.assert_not_called()
+        self.assertEqual(self.store.get(value['id'])['phase'], 'cancelled')
+        self.assertTrue(runtime.running())
+
+    def test_docker_plan_failure_preserves_recovery_in_protocol(self):
+        adapter = self.adapter()
+        adapter.prepare.side_effect = adapter.DockerMaintenanceError('package_changes', 'Unreviewed dependency.', 'Ask an administrator to review APT dependencies.')
+        supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=FakeRuntime(), docker=adapter)
+        reply = supervisor.handle(fresh_id(), dict(action='prepare', component='docker', credential='fixture-admin-credential'))
+        self.assertEqual(reply['error']['code'], 'package_changes')
+        self.assertIn('APT dependencies', reply['error']['recovery'])
+
+
+class OutputTests(Fixture):
+    def test_real_worker_output_is_live_redacted_and_failure_tail_is_copyable(self):
+        supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=FakeRuntime())
+        value = job()
+        value['component'] = 'codex'
+        self.store.accept(fresh_id(), {}, value)
+        release = self.root / 'output-received'
+        worker = self.root / 'fake-worker.py'
+        worker.write_text("""import json,pathlib,time,sys
+print(json.dumps(dict(event='output',message='npm EACCES authorization=super-secret-value')),flush=True)
+while not pathlib.Path(sys.argv[1]).exists(): time.sleep(.01)
+print(json.dumps(dict(error='npm exited with status 13. EACCES on installation directory.',code='tool_update_failed',recovery='Check ownership before retrying.')),flush=True)
+sys.exit(1)
+""")
+        original = subprocess.Popen
+
+        def spawn(_arguments, **kwargs):
+            for name in ('user', 'group', 'extra_groups'):
+                kwargs.pop(name)
+            return original([sys.executable, str(worker), str(release)], **kwargs)
+
+        def log(message):
+            supervisor.job_log(value['id'], message)
+            release.write_text('received before process exit')
+
+        with mock.patch.object(maintenance.subprocess, 'Popen', spawn):
+            with self.assertRaises(maintenance.MaintenanceError) as captured:
+                supervisor.account_command(['--tool-worker', 'install', 'codex', '1.2.3'], timeout=2, log=log)
+        self.assertEqual(captured.exception.code, 'tool_update_failed')
+        self.assertIn('status 13', str(captured.exception))
+        self.assertIn('ownership', captured.exception.recovery)
+        output = '\n'.join(item['message'] for item in self.store.logs(value['id']))
+        self.assertIn('EACCES', output)
+        self.assertNotIn('super-secret-value', output)
+        self.assertTrue(release.exists())
+
+    def test_log_byte_budget_and_multiline_private_key_redaction(self):
+        supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=FakeRuntime())
+        value = job()
+        self.store.accept(fresh_id(), {}, value)
+        supervisor.job_log(value['id'], '-----BEGIN OPENSSH PRIVATE KEY-----')
+        supervisor.job_log(value['id'], 'sensitive-payload')
+        supervisor.job_log(value['id'], '-----END OPENSSH PRIVATE KEY-----')
+        output = '\n'.join(item['message'] for item in self.store.logs(value['id']))
+        self.assertNotIn('sensitive-payload', output)
+        for _ in range(80):
+            supervisor.job_log(value['id'], '🌻' * 2000)
+        logs = self.store.logs(value['id'])
+        self.assertTrue(all(len(item['message'].encode()) <= 4096 for item in logs))
+        self.assertLessEqual(sum(len(item['message'].encode()) for item in logs), 262144)
+
+
+class ExplicitRecoveryTests(Fixture):
+    def accepted(self, component='server'):
+        value = job()
+        value.update(component=component, phase='interrupted', canCancel=False)
+        self.store.accept(fresh_id(), {}, value)
+        return value
+
+    def supervisor(self, runtime=None):
+        runtime = runtime or FakeRuntime()
+        supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=runtime, docker=mock.Mock())
+        supervisor.account_command = mock.Mock()
+        supervisor.database_restore = mock.Mock()
+        return supervisor, runtime
+
+    def test_recovery_acceptance_is_durable_and_replays_without_another_worker(self):
+        value = self.accepted()
+        supervisor, _ = self.supervisor()
+        request_id = fresh_id()
+        with mock.patch.object(threading.Thread, 'start') as start:
+            first = supervisor.handle(request_id, dict(action='recover', jobID=value['id'], credential='fixture-admin-credential'))
+            second = supervisor.handle(request_id, dict(action='recover', jobID=value['id'], credential='fixture-admin-credential'))
+        self.assertEqual(first['jobs'][0]['phase'], 'restarting')
+        self.assertEqual(first['jobs'][0]['id'], second['jobs'][0]['id'])
+        start.assert_called_once()
+        with self.assertRaisesRegex(maintenance.MaintenanceError, 'different recovery'):
+            supervisor.recover_job(request_id, fresh_id())
+        for path in self.state.iterdir():
+            self.assertNotIn(b'fixture-admin-credential', path.read_bytes())
+
+    def test_committed_live_runtime_recovery_only_retries_commit(self):
+        value = self.accepted()
+        supervisor, runtime = self.supervisor()
+        runtime.expected_trial = value['id']
+        maintenance.atomic_json(supervisor.marker, dict(jobID=value['id'], stage='committed', old=supervisor.current,
+            new=dict(executable='/new/bin/bloom-server', version='v2'), snapshot=str(self.state / 'snapshot-fixture.tar')))
+        supervisor.run_recovery(value)
+        self.assertEqual(self.store.get(value['id'])['phase'], 'succeeded')
+        self.assertEqual(runtime.actions, ['commit'])
+        self.assertEqual(runtime.starts, [])
+        supervisor.database_restore.assert_not_called()
+        supervisor.account_command.assert_not_called()
+        supervisor.docker.apply.assert_not_called()
+
+    def test_precommit_recovery_restores_paused_candidate_without_installing_packages(self):
+        value = self.accepted()
+        supervisor, runtime = self.supervisor()
+        runtime.expected_trial = value['id']
+        maintenance.atomic_json(supervisor.marker, dict(jobID=value['id'], stage='trial', old=supervisor.current,
+            new=dict(executable='/new/bin/bloom-server', version='v2'), snapshot=str(self.state / 'snapshot-fixture.tar')))
+        supervisor.run_recovery(value)
+        self.assertEqual(self.store.get(value['id'])['phase'], 'rolledBack')
+        supervisor.database_restore.assert_called_once()
+        self.assertEqual(runtime.starts, [('/old/bin/bloom-server', value['id'])])
+        supervisor.account_command.assert_not_called()
+        supervisor.docker.apply.assert_not_called()
+
+    def test_unresponsive_committed_live_runtime_is_not_killed_or_rolled_back(self):
+        value = self.accepted()
+        supervisor, runtime = self.supervisor()
+        runtime.control = mock.Mock(side_effect=maintenance.MaintenanceError('runtime_unavailable', 'No control reply.'))
+        runtime.stop = mock.Mock()
+        maintenance.atomic_json(supervisor.marker, dict(jobID=value['id'], stage='committed', old=supervisor.current,
+            new=dict(executable='/new/bin/bloom-server', version='v2')))
+        supervisor.run_recovery(value)
+        self.assertEqual(self.store.get(value['id'])['phase'], 'interrupted')
+        runtime.stop.assert_not_called()
+        supervisor.database_restore.assert_not_called()
+        self.assertTrue(supervisor.marker.exists())
+
+    def test_docker_recovery_restarts_bloom_but_never_reapplies_apt(self):
+        value = self.accepted('docker')
+        supervisor, runtime = self.supervisor()
+        runtime.alive = False
+        supervisor.run_recovery(value)
+        self.assertEqual(self.store.get(value['id'])['phase'], 'failed')
+        self.assertIn('outcome remains unconfirmed', self.store.get(value['id'])['message'])
+        self.assertEqual(runtime.starts, [('/old/bin/bloom-server', None)])
+        supervisor.account_command.assert_not_called()
+        supervisor.docker.apply.assert_not_called()
+
+    def test_recovery_refuses_completed_job(self):
+        value = self.accepted()
+        value['phase'] = 'succeeded'
+        self.store.update(value)
+        supervisor, _ = self.supervisor()
+        with self.assertRaisesRegex(maintenance.MaintenanceError, 'Only an interrupted'):
+            supervisor.recover_job(fresh_id(), value['id'])
+        self.assertEqual(self.store.db.execute('SELECT count(*) FROM commands').fetchone()[0], 0)
+
+
+@unittest.skipIf(os.getuid() == 0, 'The tool worker is intentionally refused for root.')
+class ToolWorkerTests(Fixture):
+    def test_npm_worker_pins_reviewed_version_and_uses_shared_streaming(self):
+        import contextlib
+        import types
+        (self.root / '.local').mkdir()
+        completed = subprocess.CompletedProcess([], 0)
+        completed.details = ''
+        with mock.patch('pwd.getpwuid', return_value=types.SimpleNamespace(pw_dir=str(self.root))), \
+             mock.patch.object(maintenance, 'tool_installation', side_effect=[dict(method='npm', installedVersion='1.1.0'), dict(method='npm', installedVersion='1.1.0'), dict(installedVersion='1.2.3')]), \
+             mock.patch.object(maintenance, 'refuse_external_agents'), \
+             mock.patch('shutil.which', return_value='/usr/bin/npm'), \
+             mock.patch.object(maintenance, 'stream_install_command', return_value=completed) as stream, \
+             mock.patch.object(maintenance.subprocess, 'run', return_value=types.SimpleNamespace(returncode=0)), \
+             contextlib.redirect_stdout(io.StringIO()):
+            maintenance.tool_worker('install', 'codex', '1.2.3', '1.1.0')
+        arguments = stream.call_args.args[0]
+        self.assertEqual(arguments[-1], '@openai/codex@1.2.3')
+        self.assertIn('--allow-scripts=@openai/codex', arguments)
+        self.assertEqual(arguments[arguments.index('--prefix') + 1], str(self.root / '.local'))
+        self.assertEqual(stream.call_args.kwargs['capture_limit'], 0)
+        self.assertEqual(stream.call_args.kwargs['event_limit'], 500)
+        self.assertTrue(callable(stream.call_args.kwargs['output']))
+
+    def test_installation_change_while_waiting_is_rejected_under_the_os_lock(self):
+        import types
+        import fcntl
+        (self.root / '.local').mkdir()
+        inspected_under_lock = []
+
+        def installation(*_):
+            if not inspected_under_lock:
+                inspected_under_lock.append(False)
+                return dict(method='npm', installedVersion='1.1.0')
+            with (self.root / '.local/.bloom-tool-update.lock').open('r') as lock:
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            inspected_under_lock.append(True)
+            return dict(method='npm', installedVersion='1.3.0')
+
+        with mock.patch('pwd.getpwuid', return_value=types.SimpleNamespace(pw_dir=str(self.root))), \
+             mock.patch.object(maintenance, 'tool_installation', side_effect=installation), \
+             mock.patch.object(maintenance, 'stream_install_command') as stream:
+            with self.assertRaisesRegex(maintenance.MaintenanceError, 'changed after review'):
+                maintenance.tool_worker('install', 'codex', '1.2.3', '1.1.0')
+        self.assertEqual(inspected_under_lock, [False, True])
+        stream.assert_not_called()
+
+    def test_npm_failure_keeps_exit_status_and_sanitised_failure_tail(self):
+        import types
+        (self.root / '.local').mkdir()
+        failed = subprocess.CompletedProcess([], 13)
+        failed.details = 'npm ERR! EACCES: permission denied'
+        with mock.patch('pwd.getpwuid', return_value=types.SimpleNamespace(pw_dir=str(self.root))), \
+             mock.patch.object(maintenance, 'tool_installation', return_value=dict(method='npm', installedVersion='1.1.0')), \
+             mock.patch.object(maintenance, 'refuse_external_agents'), \
+             mock.patch('shutil.which', return_value='/usr/bin/npm'), \
+             mock.patch.object(maintenance, 'stream_install_command', return_value=failed):
+            with self.assertRaises(maintenance.MaintenanceError) as captured:
+                maintenance.tool_worker('install', 'codex', '1.2.3', '1.1.0')
+        self.assertEqual(captured.exception.code, 'tool_update_failed')
+        self.assertIn('status 13', str(captured.exception))
+        self.assertIn('EACCES', str(captured.exception))
 
 
 class ArchiveTests(Fixture):
@@ -528,6 +874,38 @@ class WireTests(Fixture):
         finally:
             local.close()
             thread.join(timeout=1)
+        self.assertFalse(thread.is_alive())
+
+    def test_idle_deadline_does_not_close_a_pending_long_request(self):
+        supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=FakeRuntime())
+        server = maintenance.ControlServer(supervisor)
+        server.idle_timeout = .01
+        local, remote = socket.socketpair()
+        server.connections.acquire()
+        request_id = fresh_id()
+        entered, release = threading.Event(), threading.Event()
+
+        def forward(request, raw):
+            entered.set()
+            release.wait(timeout=2)
+            return maintenance.json_bytes(dict(version=14, id=request['id'], result=dict(hello=dict(name='done')))) + b'\n'
+
+        with mock.patch.object(server, 'forward', forward):
+            thread = threading.Thread(target=server.serve_client, args=(remote,))
+            thread.start()
+            try:
+                local.settimeout(2)
+                local.sendall(maintenance.json_bytes(dict(version=14, id=request_id, operation=dict(hello={}))) + b'\n')
+                self.assertTrue(entered.wait(timeout=1))
+                time.sleep(.55)
+                self.assertTrue(thread.is_alive())
+                release.set()
+                with local.makefile('rb') as reader:
+                    self.assertEqual(json.loads(reader.readline())['id'], request_id)
+            finally:
+                release.set()
+                local.close()
+                thread.join(timeout=2)
         self.assertFalse(thread.is_alive())
 
     def test_gateway_socket_requires_exact_configured_group(self):

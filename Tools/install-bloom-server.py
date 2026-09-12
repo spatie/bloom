@@ -220,6 +220,12 @@ def maintenance_docker_source():
     return pathlib.Path(__file__).with_name('bloom_maintenance_docker.py').read_text()
 
 
+def maintenance_process_source():
+    if 'MAINTENANCE_PROCESS_SOURCE' in globals():
+        return MAINTENANCE_PROCESS_SOURCE
+    return pathlib.Path(__file__).with_name('bloom_install_process.py').read_text()
+
+
 def marker_path(args):
     return args.systemd_dir / "bloom-installations" / (args.service_name + ".json")
 
@@ -963,7 +969,7 @@ def install(args):
         try:
             if supervised is not None:
                 emit("progress", step="service", message="Preparing protected server maintenance and its private configuration")
-                maintenance_call(lambda: supervised.publish(bundle, args.sha256.lower(), account, maintenance_source(), maintenance_docker_source()))
+                maintenance_call(lambda: supervised.publish(bundle, args.sha256.lower(), account, maintenance_source(), maintenance_docker_source(), maintenance_process_source()))
             protected_system_path(unit)
             atomic_text(unit, unit_contents(args))
             command(["systemctl", "daemon-reload"])

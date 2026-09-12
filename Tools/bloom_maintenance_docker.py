@@ -1,5 +1,6 @@
 """Exact, reviewed upgrades for the Ubuntu packages used by Bloom's rootless Docker installer."""
 import dataclasses
+from collections import deque
 import hashlib
 import json
 import os
@@ -7,9 +8,11 @@ from pathlib import Path
 import pwd
 import re
 import selectors
+import shlex
 import signal
 import stat
 import subprocess
+import sys
 import time
 import urllib.parse
 
@@ -53,7 +56,25 @@ def _safe_line(text):
     text = ''.join(c for c in text if c == '\t' or ord(c) >= 32)
     text = re.sub(r'https?://[^\s<>]+', url, text)
     text = re.sub(r'(?i)\b(?:authorization|password|token|secret|credential)\s*[:=]\s*\S+', '[credential redacted]', text)
-    return text[:3000]
+    return text.encode('utf-8')[:3000].decode('utf-8', errors='ignore')
+
+
+def _stop_command_group(process):
+    # Do not reap the group leader before signalling its descendants. Keeping that PID owned
+    # prevents it being reused for another process group while pipe-holding children finish.
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+        time.sleep(1)
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def run_command(arguments, *, account=None, timeout=30, log=None):
@@ -99,13 +120,7 @@ def run_command(arguments, *, account=None, timeout=30, log=None):
     except BaseException:
         # Never touch another APT process or remove a lock file. An interrupted operation is
         # reported as incomplete; dpkg recovery belongs to the administrator.
-        if process.poll() is None:
-            os.killpg(process.pid, signal.SIGTERM)
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=5)
+        _stop_command_group(process)
         raise
     finally:
         process.stdout.close()
@@ -130,15 +145,50 @@ def _protected(path, *, directory=False):
     _require(path.is_absolute() and '..' not in path.parts, 'unsafe_path', 'Docker maintenance found an invalid system path.')
     # Ubuntu legitimately symlinks python3 and os-release. Both the link path and its resolved
     # target must be protected; a user-owned target is never executed with administrator rights.
-    resolved = path.resolve(strict=True)
-    for item in (path, *path.parents, resolved, *resolved.parents):
+    pending = deque(path.parts[1:])
+    current = Path('/')
+    root = current.lstat()
+    _require(root.st_uid == 0 and not root.st_mode & 0o022, 'unsafe_path', 'The filesystem root is not protected.')
+    links = 0
+    while pending:
+        part = pending.popleft()
+        if part == '..':
+            current = current.parent
+            continue
+        item = current / part
         info = item.lstat()
-        _require(info.st_uid == 0 and not info.st_mode & 0o022, 'unsafe_path',
+        _require(info.st_uid == 0 and (stat.S_ISLNK(info.st_mode) or not info.st_mode & 0o022), 'unsafe_path',
                  f'Docker maintenance requires a root-protected path: {item}')
-    info = resolved.lstat()
+        if stat.S_ISLNK(info.st_mode):
+            links += 1
+            _require(links <= 40, 'unsafe_path', 'Docker maintenance found a system symlink loop.')
+            target = Path(os.readlink(item))
+            if target.is_absolute():
+                current = Path('/')
+                pending.extendleft(reversed(target.parts[1:]))
+            else:
+                pending.extendleft(reversed(target.parts))
+        else:
+            _require(not pending or stat.S_ISDIR(info.st_mode), 'unsafe_path', 'A system path traverses a non-directory.')
+            current = item
+    info = current.lstat()
     _require(stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode),
              'unsafe_path', f'Docker maintenance found an unexpected path type: {path}')
-    return resolved
+    return current
+
+
+def _apt_configuration_paths():
+    pending, seen, paths = [Path('/etc/apt')], set(), []
+    while pending:
+        path = pending.pop()
+        directory = path.is_dir()
+        resolved = _protected(path, directory=directory)
+        paths.append(path)
+        _require(len(paths) <= 4096, 'unsafe_path', 'APT configuration exceeds the maintenance safety limit.')
+        if directory and resolved not in seen:
+            seen.add(resolved)
+            pending.extend(resolved.iterdir())
+    return paths
 
 
 def _validate_host(config):
@@ -155,10 +205,11 @@ def _validate_host(config):
                  '/usr/bin/python3', '/usr/bin/systemctl', '/usr/bin/docker', '/usr/bin/rootlesskit',
                  '/usr/share/docker.io/contrib/dockerd-rootless.sh'):
         _protected(path)
+    _protected(__file__)
     for path in ('/etc/apt', '/var/lib/dpkg', '/var/lib/apt/lists', '/var/cache/apt'):
         _protected(path, directory=True)
-    for path in Path('/etc/apt').rglob('*'):
-        _protected(path, directory=path.is_dir())
+    _protected('/var/lib/dpkg/status')
+    _apt_configuration_paths()
     return account
 
 
@@ -180,7 +231,9 @@ contents = []
 for path in files:
     value = checked(path, stat.S_ISREG)
     if value.st_size > 65536: raise RuntimeError("The Docker configuration is too large.")
-    contents.append(path.read_bytes())
+    with path.open('rb') as source: content = source.read(65537)
+    if len(content) > 65536: raise RuntimeError("The Docker configuration is too large.")
+    contents.append(content)
 if contents[0] != b'Bloom rootless Docker v1\n': raise RuntimeError("Docker was not set up by Bloom.")
 if json.loads(contents[1]).get('data-root') != str(home / 'bloom/docker/data'): raise RuntimeError("Docker uses an unmanaged data directory.")
 starts = [line.split('=', 1)[1].strip() for line in contents[2].decode().splitlines() if line.startswith('ExecStart=')]
@@ -240,13 +293,40 @@ def _candidates(runner):
     return result
 
 
-def _apt_arguments(updates, simulate=False):
-    return ('/usr/bin/apt-get', *APT_OPTIONS, 'install', '--simulate' if simulate else '-y',
+def _apt_state():
+    digest = hashlib.sha256()
+    status = _protected('/var/lib/dpkg/status')
+    total = 0
+    with status.open('rb') as source:
+        while data := source.read(65536):
+            total += len(data)
+            _require(total <= 64 * 1024 * 1024, 'package_state', 'The package database exceeds the maintenance safety limit.')
+            digest.update(data)
+    for paths in (_apt_configuration_paths(), sorted(Path('/var/lib/apt/lists').rglob('*'))):
+        _require(len(paths) <= 4096, 'package_state', 'APT configuration exceeds the maintenance safety limit.')
+        for path in paths:
+            if path.name == 'lock' or 'partial' in path.parts or path.is_dir():
+                continue
+            info = path.stat()
+            digest.update(json.dumps([str(path), info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+                                      info.st_ctime_ns], separators=(',', ':')).encode())
+    return digest.hexdigest()
+
+
+def _apt_arguments(updates, simulate=False, state=None):
+    hook = ()
+    if state:
+        command = '/usr/bin/python3 -I ' + shlex.quote(str(Path(__file__).resolve())) + ' --verify-apt-state ' + state
+        hook = ('-o', 'DPkg::Pre-Install-Pkgs::=' + command)
+    return ('/usr/bin/apt-get', *APT_OPTIONS, *hook, 'install', '--simulate' if simulate else '-y',
             '--only-upgrade', '--no-remove', '--no-install-recommends',
             *(package + '=' + updates[package] for package in PACKAGES if package in updates))
 
 
 def _simulate(runner, updates):
+    audit = _run(runner, ('/usr/bin/dpkg', '--audit')).stdout
+    _require(not audit.strip(), 'package_state', 'dpkg has unfinished package work.\n' + '\n'.join(_safe_line(line) for line in audit.splitlines()[-10:]),
+             'Ask the administrator to finish existing package work before updating Docker.')
     raw = _run(runner, _apt_arguments(updates, simulate=True), timeout=60).stdout
     installed = {}
     for line in raw.splitlines():
@@ -259,6 +339,10 @@ def _simulate(runner, updates):
                      'package_changes', 'APT requires package changes outside this reviewed Docker update.',
                      'Ask the administrator to review dependency changes, then prepare a new update in Bloom.')
             installed[name] = match[3]
+        if line.startswith('Conf '):
+            match = re.match(r'Conf (\S+) \((\S+)', line)
+            _require(match is not None and match[1].split(':')[0] in updates and updates[match[1].split(':')[0]] == match[2],
+                     'package_changes', 'APT would configure packages outside the reviewed Docker update.')
     _require(installed == updates, 'package_changes', 'APT cannot perform exactly the reviewed Docker package changes.')
 
 
@@ -268,7 +352,12 @@ def prepare(config, *, runner=run_command):
     versions, candidates = _versions(runner), _candidates(runner)
     updates = {package: candidate for package, candidate in candidates.items()
                if _run(runner, ('/usr/bin/dpkg', '--compare-versions', candidate, 'gt', versions[package]), allowed=(0, 1)).returncode == 0}
-    _require(updates, 'up_to_date', 'Docker packages are already up to date in this server’s APT package lists.')
+    if not updates:
+        error = DockerMaintenanceError('up_to_date', 'Docker packages are up to date in this server’s APT package lists.',
+                                       'Available versions come from the server’s configured APT package lists.')
+        error.installed_version = versions['docker.io']
+        error.available_version = candidates['docker.io']
+        raise error
     _simulate(runner, updates)
     return dict(schema=1, account=dict(uid=account.pw_uid, gid=account.pw_gid, home=account.pw_dir),
                 installed=versions, candidates=candidates, updates=updates, managedFingerprint=fingerprint,
@@ -284,13 +373,18 @@ def inspect(config, *, runner=run_command):
         return dict(id='docker', title='Docker', installedVersion=plan['installed']['docker.io'],
                     availableVersion=plan['targetVersion'], canUpdate=True, detail=plan['summary'])
     except DockerMaintenanceError as error:
-        return dict(id='docker', title='Docker', installedVersion=None, availableVersion=None, canUpdate=False,
+        return dict(id='docker', title='Docker', installedVersion=getattr(error, 'installed_version', None),
+                    availableVersion=getattr(error, 'available_version', None), canUpdate=False,
                     detail=str(error) + ' ' + error.recovery)
+    except (OSError, ValueError, KeyError, TypeError):
+        return dict(id='docker', title='Docker', installedVersion=None, availableVersion=None, canUpdate=False,
+                    detail='The managed Ubuntu Docker installation could not be verified. Review Docker setup before updating.')
 
 
 def apply(config, plan, log, *, runner=run_command):
     _require(isinstance(plan, dict) and plan.get('schema') == 1, 'invalid_plan', 'Review the Docker update again.')
     account = _validate_host(config)
+    state = _apt_state()
     _require(plan.get('account') == dict(uid=account.pw_uid, gid=account.pw_gid, home=account.pw_dir),
              'stale_plan', 'The Bloom service account changed after this update was reviewed.')
     updates = plan.get('updates')
@@ -305,8 +399,9 @@ def apply(config, plan, log, *, runner=run_command):
                  and _run(runner, ('/usr/bin/dpkg', '--compare-versions', version, 'gt', plan['installed'][package]), allowed=(0, 1)).returncode == 0,
                  'invalid_plan', 'The reviewed update is not a pinned package upgrade.')
     _simulate(runner, updates)
+    _require(_apt_state() == state, 'stale_plan', 'APT or dpkg changed while this update was being checked. Review the update again.')
     log('Installing the exact reviewed Docker package versions. Services and containers may restart.')
-    _run(runner, _apt_arguments(updates), timeout=1800, log=log)
+    _run(runner, _apt_arguments(updates, state=state), timeout=1800, log=log)
     expected = dict(plan['installed'], **updates)
     _require(_versions(runner) == expected, 'version_mismatch', 'Installed Docker packages do not match the reviewed versions.',
              'Inspect dpkg state and the update log. No automatic rollback was attempted.')
@@ -324,3 +419,21 @@ def apply(config, plan, log, *, runner=run_command):
              'Review the Docker user service. Container data was not removed and no rollback was attempted.')
     log('Docker package versions and the private rootless daemon were verified.')
     return dict(version=expected['docker.io'], message='Docker was updated and its private rootless service is running. Container data was kept.')
+
+
+def verify_apt_state(expected):
+    _require(os.geteuid() == 0 and re.fullmatch(r'[0-9a-f]{64}', expected or ''),
+             'invalid_guard', 'Invalid Docker package transaction guard.')
+    _require(_apt_state() == expected, 'stale_plan', 'APT or dpkg changed after review. No Docker packages were installed; prepare a new update.')
+
+
+if __name__ == '__main__':
+    try:
+        _require(len(sys.argv) == 3 and sys.argv[1] == '--verify-apt-state', 'invalid_guard', 'Use the managed maintenance supervisor.')
+        # APT's version-one pre-install hook writes its archive list to stdin. Drain it without
+        # trusting it as arguments; the prepared state fixes the dependency solution instead.
+        _require(len(sys.stdin.buffer.read(65537)) <= 65536, 'invalid_guard', 'The package transaction exceeds the maintenance safety limit.')
+        verify_apt_state(sys.argv[2])
+    except (DockerMaintenanceError, OSError, ValueError) as error:
+        print('Bloom Docker update refused: ' + _safe_line(str(error)), file=sys.stderr)
+        sys.exit(1)

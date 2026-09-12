@@ -12,9 +12,16 @@ import socket
 import sqlite3
 import stat
 import subprocess
+import sys
 import threading
 import time
 import uuid
+
+from bloom_install_process import InstallOutputRedactor, InstallProcessFailure, redact_install_text, stream_install_command
+try:
+    import bloom_maintenance_docker as DOCKER_ADAPTER
+except ImportError:
+    DOCKER_ADAPTER = None
 
 MAX_FRAME = 65536
 MAX_RUNTIME_FRAME = 16_777_216
@@ -22,9 +29,10 @@ TERMINAL_STATES = ('succeeded', 'failed', 'cancelled', 'rolledBack')
 
 
 class MaintenanceError(Exception):
-    def __init__(self, code, message):
+    def __init__(self, code, message, recovery=None):
         super().__init__(message)
         self.code = code
+        self.recovery = recovery
 
 
 def require(condition, code, message):
@@ -92,6 +100,7 @@ class JobStore:
                 intent TEXT NOT NULL, state TEXT NOT NULL, body TEXT NOT NULL);
             CREATE UNIQUE INDEX IF NOT EXISTS one_active_job ON jobs ((1))
                 WHERE state NOT IN ('succeeded','failed','cancelled','rolledBack');
+            CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY, intent TEXT NOT NULL, job_id TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS logs (job_id TEXT NOT NULL, seq INTEGER NOT NULL,
                 body TEXT NOT NULL, PRIMARY KEY(job_id,seq));
         ''')
@@ -157,6 +166,8 @@ class JobStore:
             last = self.db.execute('SELECT COALESCE(MAX(seq),0) FROM logs WHERE job_id=?', (job_id,)).fetchone()[0]
             self.db.execute('INSERT INTO logs VALUES (?,?,?)', (job_id, last + 1, message))
             self.db.execute('DELETE FROM logs WHERE job_id=? AND seq<=?', (job_id, last - 249))
+            while self.db.execute('SELECT COALESCE(SUM(length(CAST(body AS BLOB))),0) FROM logs WHERE job_id=?', (job_id,)).fetchone()[0] > 262144:
+                self.db.execute('DELETE FROM logs WHERE job_id=? AND seq=(SELECT MIN(seq) FROM logs WHERE job_id=?)', (job_id, job_id))
 
     def logs(self, job_id):
         with self.lock:
@@ -368,7 +379,10 @@ def tool_installation(component, home):
         require(stat.S_ISREG(info.st_mode) and info.st_size <= 65536, 'unmanaged_tool', 'The tool package metadata is invalid.')
         data = source.read(65537)
     require(len(data) <= 65536, 'unmanaged_tool', 'The tool package metadata is too large.')
-    metadata_value = json.loads(data)
+    try:
+        metadata_value = json.loads(data)
+    except (ValueError, RecursionError):
+        raise MaintenanceError('unmanaged_tool', 'The tool package metadata is invalid. Repair the installation before updating.') from None
     require(isinstance(metadata_value, dict) and metadata_value.get('name') == PACKAGES[component],
             'unmanaged_tool', 'The tool package identity could not be verified.')
     version = require_version(metadata_value.get('version'))
@@ -405,7 +419,7 @@ def refuse_external_agents(home, proc=pathlib.Path('/proc')):
             raise MaintenanceError('process_inspection_unavailable', 'Running agents could not be checked safely.') from None
 
 
-def tool_worker(action, component, version):
+def tool_worker(action, component, version, from_version=None):
     import pwd
     require(os.getuid() != 0 and component in PACKAGES, 'unsafe_account', 'Tools must run as the Bloom account.')
     home = pathlib.Path(pwd.getpwuid(os.getuid()).pw_dir)
@@ -415,6 +429,8 @@ def tool_worker(action, component, version):
         return
     require(action == 'install' and value['method'] == 'npm', 'unmanaged_tool', 'This tool cannot be updated by this installer.')
     version = require_version(version)
+    from_version = require_version(from_version)
+    require(newer_version(version, from_version), 'invalid_plan', 'The reviewed tool target is not newer than its installed version.')
     # A second OS lock also excludes legacy maintenance processes using this account.
     import fcntl
     import shutil
@@ -427,17 +443,26 @@ def tool_worker(action, component, version):
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise MaintenanceError('maintenance_busy', 'Another tool updater is running.') from None
+        current = tool_installation(component, home)
+        require(current.get('method') == 'npm' and current.get('installedVersion') == from_version,
+                'installation_changed', 'The tool installation changed after review. Prepare a new update before installing.')
         refuse_external_agents(home)
         npm = shutil.which('npm', path='/usr/local/bin:/usr/bin:/bin')
         require(npm is not None, 'npm_missing', 'npm is unavailable.')
         environment = {'HOME': str(home), 'PATH': str(home / '.local/bin') + ':/usr/local/bin:/usr/bin:/bin',
                        'LANG': 'C.UTF-8', 'CI': '1', 'NO_COLOR': '1',
                        'NPM_CONFIG_USERCONFIG': '/dev/null', 'NPM_CONFIG_GLOBALCONFIG': '/dev/null'}
-        result = subprocess.run([npm, 'install', '--global', '--prefix', str(home / '.local'),
-                                 '--registry=https://registry.npmjs.org', '--no-audit', '--no-fund',
-                                 '--allow-scripts=' + PACKAGES[component], PACKAGES[component] + '@' + version],
-                                env=environment, cwd=home, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=360)
-        require(result.returncode == 0, 'tool_update_failed', 'The tool installer exited with status ' + str(result.returncode) + '. Refresh its installed version before retrying.')
+        def output(line):
+            print(json.dumps(dict(event='output', message=line)), flush=True)
+        try:
+            result = stream_install_command([npm, 'install', '--global', '--prefix', str(home / '.local'),
+                '--registry=https://registry.npmjs.org', '--no-audit', '--no-fund',
+                '--allow-scripts=' + PACKAGES[component], PACKAGES[component] + '@' + version],
+                env=environment, cwd=home, timeout=360, output=output, capture_limit=0, detail_limit=8192, event_limit=500)
+        except InstallProcessFailure as error:
+            raise MaintenanceError(error.code, 'npm maintenance could not finish.\n' + error.details,
+                                   'The installed version may be partially updated. Review this output and inspect the tool before retrying.') from None
+        require(result.returncode == 0, 'tool_update_failed', 'npm exited with status ' + str(result.returncode) + '.\n' + result.details)
         latest = tool_installation(component, home)
         require(latest['installedVersion'] == version, 'verification_failed', 'The installed tool does not match the reviewed version.')
         check = subprocess.run([str(home / '.local/bin' / component), '--version'], env=environment,
@@ -651,11 +676,13 @@ def validate_release_manifest(bundle, protocol_version=14, expected_version=None
 
 
 class Supervisor:
-    def __init__(self, config, store=None, runtime=None):
+    def __init__(self, config, store=None, runtime=None, docker=DOCKER_ADAPTER):
         self.config = config
         self.state = pathlib.Path(config['state_dir'])
         self.store = store or JobStore(self.state)
         self.runtime = runtime or RuntimeProcess(config)
+        self.docker = docker
+        self.log_redactors = {}
         self.lock = threading.RLock()
         self.cancelled = threading.Event()
         self.stopping = threading.Event()
@@ -676,21 +703,24 @@ class Supervisor:
         digest = hashlib.sha256(value.encode()).hexdigest()
         return bool(value) and hmac.compare_digest(digest, self.config['access_token_sha256'])
 
-    def account_command(self, arguments, timeout=40, stdin=None, stdout=subprocess.PIPE):
+    def account_command(self, arguments, timeout=40, stdin=None, stdout=subprocess.PIPE, log=None):
         import sys
         environment = {'HOME': self.config['service_home'], 'PATH': '/usr/local/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8'}
         child = subprocess.Popen([sys.executable, str(pathlib.Path(__file__).resolve()), *arguments],
                                  user=self.config['uid'], group=self.config['gid'], extra_groups=[], umask=0o077,
                                  env=environment, cwd=self.config['service_home'], stdin=stdin or subprocess.DEVNULL,
-                                 stdout=stdout, stderr=subprocess.DEVNULL, start_new_session=True)
+                                 stdout=stdout, stderr=subprocess.STDOUT if stdout == subprocess.PIPE else subprocess.PIPE, start_new_session=True)
         try:
             output = bytearray()
+            pending_output = bytearray()
+            redactor = InstallOutputRedactor()
             deadline = time.monotonic() + timeout
-            if stdout == subprocess.PIPE:
+            stream = child.stdout if stdout == subprocess.PIPE else child.stderr
+            if stream is not None:
                 import selectors
                 with selectors.DefaultSelector() as selector:
-                    os.set_blocking(child.stdout.fileno(), False)
-                    selector.register(child.stdout, selectors.EVENT_READ)
+                    os.set_blocking(stream.fileno(), False)
+                    selector.register(stream, selectors.EVENT_READ)
                     while selector.get_map():
                         require(time.monotonic() < deadline, 'worker_timeout', 'The account maintenance step timed out. Inspect its outcome before retrying.')
                         for key, _ in selector.select(.2):
@@ -698,25 +728,58 @@ class Supervisor:
                             if not chunk:
                                 selector.unregister(key.fileobj)
                             else:
-                                output.extend(chunk)
-                                require(len(output) <= MAX_FRAME, 'worker_failed', 'The account maintenance response is too large.')
+                                if log is None:
+                                    output.extend(chunk)
+                                    require(len(output) <= MAX_FRAME, 'worker_failed', 'The account maintenance response is too large.')
+                                else:
+                                    pending_output.extend(chunk)
+                                    while b'\n' in pending_output:
+                                        line, _, rest = pending_output.partition(b'\n')
+                                        pending_output = bytearray(rest)
+                                        require(len(line) <= MAX_FRAME, 'worker_failed', 'A maintenance output event is too large.')
+                                        event = json.loads(line)
+                                        if event.get('event') == 'output' and isinstance(event.get('message'), str):
+                                            log(redactor.redact(event['message']))
+                                        else:
+                                            output = bytearray(line)
+                                    require(len(pending_output) <= MAX_FRAME, 'worker_failed', 'A maintenance output event is too large.')
             child.wait(timeout=max(.01, deadline - time.monotonic()))
+            if log is not None and pending_output:
+                output = pending_output
             if child.returncode != 0:
                 try:
                     value = json.loads(output)
                     message = value.get('error')
                 except (ValueError, AttributeError):
+                    value = None
                     message = None
                 # Worker errors are emitted only by the protected script, with fixed text.
-                require(False, 'worker_failed', message if isinstance(message, str) and len(message) <= 500 else
-                        'The account maintenance step failed. Inspect the server before retrying.')
+                if isinstance(message, str):
+                    message = redact_install_text(message, limit=16384)
+                    if log:
+                        for line in message.splitlines():
+                            log(line)
+                code = value.get('code') if isinstance(value, dict) else None
+                recovery = value.get('recovery') if isinstance(value, dict) else None
+                raise MaintenanceError(code if isinstance(code, str) and len(code) <= 100 else 'worker_failed',
+                    message if isinstance(message, str) else 'The account maintenance step failed. Inspect the server before retrying.',
+                    redact_install_text(recovery) if isinstance(recovery, str) else None)
             return bytes(output) if stdout == subprocess.PIPE else None
         finally:
+            if child.poll() is None:
+                # The shared streaming runner owns a separate installer process group.
+                # Give its signal handler time to unwind and reap that group first.
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(child.pid, signal.SIGTERM)
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    child.wait(timeout=3)
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(child.pid, signal.SIGKILL)
             child.wait(timeout=5)
             if child.stdout:
                 child.stdout.close()
+            if child.stderr:
+                child.stderr.close()
 
     def components(self, refresh=False):
         if not refresh and self.components_cache is not None and time.monotonic() - self.cache_time < 900:
@@ -744,12 +807,17 @@ class Supervisor:
             except (MaintenanceError, OSError, ValueError):
                 pass
             values.append(value)
-        values.append(dict(id='docker', title='Docker', installedVersion=None, availableVersion=None, canUpdate=False,
-                           detail='System package upgrades are not managed here. Docker containers and volumes are preserved.'))
+        if self.docker:
+            values.append(self.docker.inspect(self.config))
+        else:
+            values.append(dict(id='docker', title='Docker', installedVersion=None, availableVersion=None, canUpdate=False,
+                               detail='The Docker maintenance component is unavailable. Update the supervisor installation first.'))
         self.components_cache, self.cache_time = values, time.monotonic()
         return values
 
     def prepare(self, component):
+        if component == 'docker':
+            return self.prepare_docker()
         require(component in ('server', 'claude', 'codex'), 'unsupported', 'This component does not support reviewed updates.')
         values = self.components(refresh=True)
         value = next(item for item in values if item['id'] == component)
@@ -767,6 +835,33 @@ class Supervisor:
             plan['summary'] = 'Install this exact server release. Bloom snapshots its database and restores the previous release if startup verification fails.'
         self.store.plan(plan)
         return {key: value for key, value in plan.items() if not key.startswith('_')}
+
+    def docker_call(self, action, *arguments):
+        require(self.docker is not None, 'unsupported', 'The Docker maintenance component is unavailable.')
+        try:
+            return getattr(self.docker, action)(self.config, *arguments)
+        except self.docker.DockerMaintenanceError as error:
+            raise MaintenanceError(error.code, redact_install_text(str(error)), redact_install_text(error.recovery)) from None
+
+    def prepare_docker(self):
+        import datetime
+        payload = self.docker_call('prepare')
+        expires = time.time() + 1800
+        plan = dict(id=str(uuid.uuid4()), component='docker', fromVersion=payload['installed']['docker.io'],
+                    targetVersion=payload['targetVersion'], summary=payload['summary'],
+                    restarts=list(dict.fromkeys(['Bloom Server', *payload['restarts']])),
+                    expiresAt=datetime.datetime.fromtimestamp(expires, datetime.timezone.utc).isoformat().replace('+00:00', 'Z'),
+                    _expires=expires, _docker=payload)
+        self.store.plan(plan)
+        return {key: value for key, value in plan.items() if not key.startswith('_')}
+
+    def job_log(self, job_id, message):
+        with self.lock:
+            redactor = self.log_redactors.setdefault(job_id, InstallOutputRedactor())
+            for line in message.splitlines():
+                safe = redactor.redact(line).encode()[:4096].decode('utf-8', 'ignore').strip()
+                if safe:
+                    self.store.log(job_id, safe)
 
     def job_view(self, job, after=0):
         result = dict(job)
@@ -786,6 +881,8 @@ class Supervisor:
         require(mode in ('now', 'whenIdle'), 'invalid_request', 'Choose when the update should run.')
         intent = dict(planID=identifier(plan_id), mode=mode)
         with self.lock, self.store.lock:
+            require(self.store.db.execute('SELECT 1 FROM commands WHERE id=?', (identifier(request_id),)).fetchone() is None,
+                    'request_reused', 'This request identifier belongs to another maintenance action.')
             existing = self.store.db.execute('SELECT intent,body FROM jobs WHERE request_id=?', (identifier(request_id),)).fetchone()
             if existing:
                 require(hmac.compare_digest(existing[0], hashlib.sha256(json_bytes(intent)).hexdigest()),
@@ -804,11 +901,77 @@ class Supervisor:
                 self.worker.start()
             return self.job_view(accepted)
 
+    def recover_job(self, request_id, job_id):
+        request_id, job_id = identifier(request_id), identifier(job_id)
+        intent = hashlib.sha256(json_bytes(dict(action='recover', jobID=job_id))).hexdigest()
+        with self.lock, self.store.lock:
+            previous = self.store.db.execute('SELECT intent,job_id FROM commands WHERE id=?', (request_id,)).fetchone()
+            if previous:
+                require(hmac.compare_digest(previous[0], intent), 'request_reused', 'This request identifier belongs to a different recovery.')
+                return self.job_view(self.store.get(previous[1]))
+            require(self.store.db.execute('SELECT 1 FROM jobs WHERE request_id=?', (request_id,)).fetchone() is None,
+                    'request_reused', 'This request identifier belongs to another maintenance action.')
+            require(not self.recovering and (self.worker is None or not self.worker.is_alive()),
+                    'maintenance_busy', 'Maintenance is still finishing. Wait before requesting recovery.')
+            job = self.store.get(job_id)
+            require(job['phase'] == 'interrupted', 'recovery_unavailable', 'Only an interrupted maintenance job needs recovery.')
+            job.update(phase='restarting', canCancel=False, message='Recovering Bloom Server without repeating the component installation.', updatedAt=timestamp())
+            self.store.db.execute('BEGIN IMMEDIATE')
+            try:
+                self.store.db.execute('INSERT INTO commands VALUES (?,?,?)', (request_id, intent, job_id))
+                self.store.update(job)
+                self.store.db.execute('COMMIT')
+            except BaseException:
+                self.store.db.execute('ROLLBACK')
+                raise
+            self.worker = threading.Thread(target=self.run_recovery, args=(job,), daemon=True)
+            self.worker.start()
+            return self.job_view(job)
+
+    def run_recovery(self, job):
+        try:
+            self.phase(job, 'restarting', 'Recovering the existing maintenance checkpoint. No package installer will run again.')
+            if self.marker.exists():
+                transaction = json.loads(self.marker.read_bytes())
+                require(transaction.get('jobID') == job['id'], 'transaction_changed', 'The saved recovery checkpoint belongs to another job.')
+                if transaction['stage'] != 'committed':
+                    # Candidates and rollback trials have never admitted workspace work.
+                    require(not self.runtime.running() or self.runtime.expected_trial == job['id'],
+                            'runtime_busy', 'The live runtime is not this job’s paused candidate. Inspect it before recovery.')
+                    self.rollback(job, transaction)
+                else:
+                    self.current = transaction['new']
+                    atomic_json(self.current_file, self.current)
+                    if self.runtime.running():
+                        response = self.runtime.control('commit')
+                        require(response['ready'], 'commit_unconfirmed', 'The committed runtime did not confirm activation.')
+                    else:
+                        self.runtime.start(self.current['executable'])
+                        self.runtime.wait_ready()
+                    restored = transaction.get('outcome') == 'rolledBack'
+                    self.phase(job, 'rolledBack' if restored else 'succeeded',
+                               'The restored server is running.' if restored else 'The committed update is running and verified.')
+                    self.clear_marker(job['id'])
+            else:
+                if self.runtime.running():
+                    response = self.runtime.control('resume')
+                    require(response['ready'], 'runtime_unavailable', 'The live runtime did not confirm that workspace admission resumed.')
+                else:
+                    self.runtime.start(self.current['executable'])
+                    self.runtime.wait_ready()
+                self.phase(job, 'failed', 'Bloom Server is running again. The component update outcome remains unconfirmed. Inspect its installed version; no installer or container rollback was repeated.')
+            self.recovery_failed = False
+            self.components_cache = None
+        except Exception as error:
+            self.job_log(job['id'], str(error) if isinstance(error, MaintenanceError) else 'The recovery checkpoint could not be completed.')
+            self.phase(job, 'interrupted', 'Recovery could not be confirmed. The saved checkpoint is retained. Inspect the supervisor service before trying again.')
+
     def phase(self, job, phase, message, cancellable=False):
         with self.lock:
-            job.update(phase=phase, message=message, canCancel=cancellable, updatedAt=timestamp())
+            summary = redact_install_text(message, limit=4096)
+            job.update(phase=phase, message=summary, canCancel=cancellable, updatedAt=timestamp())
             self.store.update(job)
-            self.store.log(job['id'], message)
+            self.job_log(job['id'], message)
 
     def check_cancelled(self):
         require(not self.cancelled.is_set() and not self.stopping.is_set(), 'cancelled', 'Maintenance was cancelled before installation started.')
@@ -851,12 +1014,14 @@ class Supervisor:
                 result['jobs'] = self.jobs(request.get('jobID'), after)
             elif action == 'cancel':
                 result['jobs'] = [self.cancel(request.get('jobID'))]
+            elif action == 'recover':
+                result['jobs'] = [self.recover_job(request_id, request.get('jobID'))]
             else:
                 raise MaintenanceError('invalid_request', 'Unknown maintenance action.')
             return result
         except MaintenanceError as error:
             return dict(authorized=True, components=[], jobs=[], error=dict(code=error.code, message=str(error),
-                        recovery='Refresh the maintenance status before preparing another update.'))
+                        recovery=error.recovery or 'Refresh the maintenance status before preparing another update.'))
         except (OSError, ValueError, KeyError, TypeError, sqlite3.Error):
             return dict(authorized=True, components=[], jobs=[], error=dict(code='maintenance_failed',
                         message='The maintenance request could not be completed.', recovery='Refresh status and check the protected supervisor service logs.'))
@@ -974,13 +1139,21 @@ class Supervisor:
                 else:
                     self.rollback(job, transaction)
                 return
+            uncertain_component = active and active['component'] != 'server' and active['phase'] in ('installing', 'restarting', 'verifying', 'interrupted')
             if active:
-                if active['phase'] in ('installing', 'restarting', 'verifying') and active['component'] != 'server':
-                    self.phase(active, 'failed', 'Maintenance was interrupted. The installed tool version is unconfirmed; inspect it before retrying.')
+                self.phase(active, 'restarting', 'Restarting Bloom Server before resolving the interrupted maintenance job.')
+            try:
+                self.runtime.start(self.current['executable'])
+                self.runtime.wait_ready()
+            except Exception:
+                if active:
+                    self.phase(active, 'interrupted', 'Bloom Server could not restart after maintenance. Choose Recover to retry runtime recovery without repeating any installer.')
+                raise
+            if active:
+                if uncertain_component:
+                    self.phase(active, 'failed', 'Maintenance was interrupted. The installed component version is unconfirmed; inspect it before retrying.')
                 else:
                     self.phase(active, 'cancelled', 'Maintenance stopped before a server release was committed. Prepare and review another update.')
-            self.runtime.start(self.current['executable'])
-            self.runtime.wait_ready()
 
     def run_job(self, job, plan, mode):
         transaction = None
@@ -993,13 +1166,17 @@ class Supervisor:
                 self.phase(job, 'downloading', 'Downloading and verifying the exact reviewed server package.', True)
                 executable = self.download(job, plan)
                 require(self.current.get('version') == plan.get('fromVersion'), 'installation_changed', 'The installed server changed since review. Prepare another update.')
+            elif plan['component'] == 'docker':
+                require(isinstance(plan.get('_docker'), dict), 'invalid_plan', 'Review the Docker package update again.')
             else:
                 value = json.loads(self.account_command(['--tool-worker', 'inspect', plan['component']]))
                 require(value.get('method') == 'npm' and value.get('installedVersion') == plan.get('fromVersion'),
                         'installation_changed', 'The tool installation changed since review. Prepare another update.')
             self.check_cancelled()
-            response = self.runtime.control('quiesce')
+            # The gate may close even when its acknowledgement is lost. Record that
+            # intent before sending, so every failure path reopens or exposes recovery.
             gated = True
+            response = self.runtime.control('quiesce')
             if response['busy'] and mode == 'now':
                 raise MaintenanceError('server_busy', 'Work is still running. Close terminal connections and choose When Idle or try again later.')
             self.phase(job, 'waiting', 'Waiting for running work to finish. Close terminal connections to continue.', True)
@@ -1036,12 +1213,19 @@ class Supervisor:
                 self.phase(job, 'succeeded', 'Bloom Server was updated and verified.')
                 self.clear_marker(job['id'])
             else:
-                self.phase(job, 'installing', 'Installing ' + plan['component'] + ' ' + plan['targetVersion'] + ' as the Bloom account.')
-                self.account_command(['--tool-worker', 'install', plan['component'], plan['targetVersion']], timeout=400)
-                self.phase(job, 'restarting', 'Restarting Bloom Server with the updated tool.')
+                if plan['component'] == 'docker':
+                    self.phase(job, 'installing', 'Installing the reviewed Docker package versions. Docker services and containers may restart.')
+                    outcome = self.docker_call('apply', plan['_docker'], lambda message: self.job_log(job['id'], message))
+                    complete = outcome['message']
+                else:
+                    self.phase(job, 'installing', 'Installing ' + plan['component'] + ' ' + plan['targetVersion'] + ' as the Bloom account.')
+                    self.account_command(['--tool-worker', 'install', plan['component'], plan['targetVersion'], plan['fromVersion']], timeout=400,
+                                         log=lambda message: self.job_log(job['id'], message))
+                    complete = 'The reviewed tool version was installed and verified.'
+                self.phase(job, 'restarting', 'Restarting Bloom Server after the component update.')
                 self.runtime.start(self.current['executable'])
                 self.runtime.wait_ready()
-                self.phase(job, 'succeeded', 'The reviewed tool version was installed and verified.')
+                self.phase(job, 'succeeded', complete)
             self.components_cache = None
         except Exception as error:
             if transaction is not None and not committed:
@@ -1062,6 +1246,10 @@ class Supervisor:
                     # Leave the committed marker for restart recovery. Never roll back accepted work.
                     self.phase(job, 'interrupted', 'The release was committed but activation is unconfirmed. Restarting the supervisor resumes this release safely.')
                 return
+            if plan['component'] == 'docker':
+                self.job_log(job['id'], str(error) if isinstance(error, MaintenanceError) else 'Docker maintenance stopped unexpectedly.')
+                if isinstance(error, MaintenanceError) and error.recovery:
+                    self.job_log(job['id'], error.recovery)
             if runtime_stopped:
                 try:
                     self.runtime.start(self.current['executable'])
@@ -1070,11 +1258,19 @@ class Supervisor:
                     self.phase(job, 'interrupted', 'The tool update outcome is unconfirmed and Bloom Server could not restart. Inspect the server before retrying.')
                     return
             elif gated:
-                with contextlib.suppress(Exception):
-                    self.runtime.control('resume')
+                try:
+                    response = self.runtime.control('resume')
+                    require(response['ready'], 'resume_unconfirmed', 'The runtime did not confirm reopening workspace admission.')
+                except Exception:
+                    self.job_log(job['id'], str(error) if isinstance(error, MaintenanceError) else 'The update stopped before installation.')
+                    self.phase(job, 'interrupted', 'The update stopped, but workspace admission could not be confirmed. Choose Recover to resume the existing runtime safely.')
+                    return
             cancelled = isinstance(error, MaintenanceError) and error.code == 'cancelled'
             message = str(error) if isinstance(error, MaintenanceError) else 'Maintenance failed. The installed version may be unchanged or partially updated; inspect it before retrying.'
+            if plan['component'] == 'docker' and runtime_stopped:
+                message = 'The Docker update could not be verified. Package changes may be partial; no container or package rollback was attempted. Review the job log.'
             self.phase(job, 'cancelled' if cancelled else 'failed', message)
+            self.components_cache = None
 
     def close(self):
         self.stopping.set()
@@ -1098,6 +1294,8 @@ class ControlServer:
         self.clients = set()
         self.clients_lock = threading.Lock()
         self.frame_timeout = 30
+        self.idle_timeout = 45
+        self.runtime_timeout = 660
 
     def fallback(self, request, operation):
         import platform
@@ -1121,7 +1319,7 @@ class ControlServer:
                 'runtime_unavailable', 'The private runtime socket is unavailable.')
         connection = socket.socket(socket.AF_UNIX)
         try:
-            connection.settimeout(900)
+            connection.settimeout(self.runtime_timeout)
             connection.connect(self.config['runtime_socket'])
             return connection
         except BaseException:
@@ -1170,7 +1368,7 @@ class ControlServer:
                 readable, _, _ = select.select([connection], [], [], min(.5, remaining))
                 if not readable:
                     with pending:
-                        if not inflight and time.monotonic() - last_read >= 45:
+                        if not inflight and time.monotonic() - last_read >= self.idle_timeout:
                             return None
                     continue
                 chunk = connection.recv(min(65536, MAX_RUNTIME_FRAME + 1 - len(buffered)))
@@ -1340,8 +1538,10 @@ def main():
     args = parser.parse_args()
     os.umask(0o077)
     if args.tool_worker:
-        require(len(args.tool_worker) in (2, 3), 'invalid_action', 'Invalid tool worker request.')
-        tool_worker(args.tool_worker[0], args.tool_worker[1], args.tool_worker[2] if len(args.tool_worker) == 3 else None)
+        require((len(args.tool_worker) == 2 and args.tool_worker[0] == 'inspect')
+                or (len(args.tool_worker) == 4 and args.tool_worker[0] == 'install'), 'invalid_action', 'Invalid tool worker request.')
+        tool_worker(args.tool_worker[0], args.tool_worker[1], args.tool_worker[2] if len(args.tool_worker) == 4 else None,
+                    args.tool_worker[3] if len(args.tool_worker) == 4 else None)
     elif args.database_worker:
         database_worker(*args.database_worker)
     else:
@@ -1361,5 +1561,7 @@ if __name__ == '__main__':
     except (MaintenanceError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         # Only our own fixed messages may reach logs. Never print request/config/token values.
         message = str(error) if isinstance(error, MaintenanceError) else 'Bloom maintenance could not finish. Inspect the supervisor configuration and service.'
-        print(json.dumps(dict(error=message)), flush=True)
+        print(json.dumps(dict(error=redact_install_text(message), code=error.code if isinstance(error, MaintenanceError) else 'worker_failed',
+                              recovery=error.recovery if isinstance(error, MaintenanceError) else None)),
+              file=sys.stderr if '--database-worker' in sys.argv else sys.stdout, flush=True)
         raise SystemExit(1) from None

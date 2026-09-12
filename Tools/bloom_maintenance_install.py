@@ -33,6 +33,7 @@ class MaintenanceInstallation:
         self.args, self.protect, self.owner_uid = args, protect, owner_uid
         self.base, self.launcher, self.runtime = base, launcher, runtime
         self.docker_module = launcher.with_name('bloom_maintenance_docker.py')
+        self.process_module = launcher.with_name('bloom_install_process.py')
         self.state = base / args.service_name
         self.releases = self.state / 'releases'
         self.config_path = self.state / 'config.json'
@@ -149,20 +150,20 @@ class MaintenanceInstallation:
         finally:
             temporary.unlink(missing_ok=True)
 
-    def publish(self, bundle, checksum, account, supervisor_source, docker_source):
+    def publish(self, bundle, checksum, account, supervisor_source, docker_source, process_source):
         self.ensure_idle()
         digest = self.validate_digest()
         if digest is None:
             maintenance_refuse('maintenance_key_required', 'A maintenance access key is required for the supervised installation.')
         version = self.validate_bundle(bundle)
-        if re.fullmatch(r'[0-9a-f]{64}', checksum) is None or not supervisor_source.strip() or not docker_source.strip():
+        if re.fullmatch(r'[0-9a-f]{64}', checksum) is None or not supervisor_source.strip() or not docker_source.strip() or not process_source.strip():
             maintenance_refuse('maintenance_package_required', 'Verified supervisor source and package checksum are required.')
         for path in (self.base, self.state, self.releases, self.launcher.parent, self.runtime):
             self.directory(path)
         self.previous = {}
         for path in (self.config_path, self.current_path):
             self.previous[path] = self.private_file(path) if path.exists() else None
-        for path in (self.launcher, self.docker_module):
+        for path in (self.launcher, self.docker_module, self.process_module):
             self.protect(path)
             if path.exists():
                 info = path.stat()
@@ -211,6 +212,7 @@ class MaintenanceInstallation:
                       service_home=str(self.args.service_home), data_dir=str(self.args.data_dir),
                       runtime_socket=str(self.args.runtime_socket), maintenance_socket=str(self.socket_path),
                       access_token_sha256=digest, release_repository='spatie/bloom')
+        self.atomic_write(self.process_module, process_source.encode(), mode=0o644)
         self.atomic_write(self.docker_module, docker_source.encode(), mode=0o644)
         self.atomic_write(self.launcher, supervisor_source.encode(), mode=0o755)
         self.atomic_write(self.config_path, (json.dumps(config) + '\n').encode())
@@ -224,7 +226,7 @@ class MaintenanceInstallation:
             if value is None:
                 self.protect(path); path.unlink(missing_ok=True)
             else:
-                self.atomic_write(path, value, mode=0o755 if path == self.launcher else 0o644 if path == self.docker_module else 0o600)
+                self.atomic_write(path, value, mode=0o755 if path == self.launcher else 0o644 if path in (self.docker_module, self.process_module) else 0o600)
         self.key_accepted = False
 
     def socket_ready(self, account):

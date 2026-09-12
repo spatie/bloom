@@ -115,7 +115,8 @@ additional Python package on the server. These setup events are separate from th
 Repeating a successful installation of the same
 package adds the client key if needed and reuses the service. Updating a different package refuses
 a running server; stop it when idle before retrying. Startup failure restores the prior binary and
-database. This conservative update path does not yet provide a maintenance-mode handover.
+database. This administrator installer is also the bootstrap and repair path for the protected
+maintenance supervisor. Routine supported updates use the server-owned jobs described below.
 
 Release builds bundle a matching Ubuntu package automatically. Development builds can set
 `BLOOM_LINUX_SERVER_ARCHIVE=/absolute/path/bloom-server-linux-x86_64.tar.gz` before building the
@@ -628,25 +629,55 @@ arguments. New clients resolve that chat before splitting and refuse if it is no
 Older clients without this capability refuse these requests rather than splitting another chat.
 The legacy `pane_split` UI action retains its focused-pane behaviour for older servers.
 
-### Updating AI tools
+### Server updates
 
-Server Settings > Updates inspects Claude Code and Codex through the saved, verified SSH
-connection. Each update requires confirmation and shows live, copyable output. The updater
-uses the unprivileged server account; HTTPS-only connections cannot run this maintenance step.
+Server Settings > Updates uses server-owned maintenance jobs over either SSH or HTTPS on Mac,
+iPhone and iPad. Review the exact target version and restarts, then choose Update or Update When
+Idle. Jobs, bounded redacted output and outcomes survive closing the app or losing its connection.
+The supervisor continues serving maintenance status while Bloom Server restarts.
 
-Recognised npm installations under the service account's `~/.local` prefix are updated with
-`npm install --global --prefix "$HOME/.local"` and the fixed vendor package name at `@latest`.
-Native Claude installations use `claude update`, retaining the configured release channel.
-These follow the [Codex installation instructions](https://github.com/openai/codex#installing-and-running-codex-cli)
-and [Claude update instructions](https://code.claude.com/docs/en/setup#update-manually).
+Supported installations are deliberately specific:
 
-System installations and unknown launchers are reported as externally managed. Bloom does
-not overwrite them, run privileged package upgrades, or update tools inside project containers.
-Sign-in files are retained. A per-account lock prevents overlapping panel updates; Linux process
-inspection refuses an update if it finds a running agent. Finish agent turns before updating
-and avoid starting new turns until the update completes. This check is not a server-wide
-maintenance lock, so another client can still start work after inspection.
+- **Bloom Server:** compatible, checksummed Linux release assets from `spatie/bloom`. The supervisor
+  stages the reviewed release, snapshots the database and verifies startup before committing it.
+  Failed trials restore the previous release and database.
+- **Claude Code and Codex:** recognised, account-owned npm packages under `~/.local`. Updates pin
+  the reviewed package version and preserve sign-in files. Native installers, system packages and
+  custom launchers are reported as externally managed, rather than overwritten.
+- **Docker:** the Ubuntu package set used by Bloom's managed rootless Docker installation. Only
+  reviewed package versions are upgraded, with package and service checks repeated before applying.
+  The plan discloses container and Docker service restarts. This is not a blanket APT upgrade or
+  support for every Docker installation. Package changes do not have automatic package rollback.
 
-Failures, interruptions and timeouts require a fresh version check before an explicit retry.
-Updates are never retried automatically, since an installer may already have changed files.
-The SSH helper's isolated regression suite is `python3 Tools/test-server-tool-updates.py`.
+Maintenance requires `diagnostics.maintenanceManagement: true` and a separate administrator key.
+The wizard retains the key in this Mac's Keychain and installs only its SHA-256 digest on the
+server. Other clients enter the maintenance key in Updates; normal workspace authentication alone
+cannot authorise maintenance. The [maintenance protocol](SERVER-MAINTENANCE.md) documents access,
+plans, phases, idempotency, logs and shared client behaviour.
+
+On older servers, **Set Up Server Updates…** opens the administrator installer. For SSH connections,
+review the proposed `root@host` address and complete the server checks before installing. HTTPS
+connections require an explicit SSH address; Bloom does not infer it from the web address. The
+existing connection remains unchanged until a verified setup is connected.
+
+The root-owned Python supervisor and support modules live in `/usr/local/libexec`; protected
+metadata, recovery files and verified releases live in `/var/lib/bloom-maintenance/bloom-server`.
+Project data remains under the Bloom account. These privileged Python modules are installed and
+updated through the administrator installer. A runtime update does not replace the supervisor
+or its privileged support code.
+
+An accepted job is not a successful update. `rolledBack`, `failed` and `interrupted` retain their
+actual outcomes and recovery details. **Recover Update** resumes an interrupted job's saved
+checkpoint without rerunning npm or APT installation. Clients poll first after a lost response;
+an explicit retry reuses the original request UUID. They never automatically resubmit an install.
+
+No compatible tagged release asset has been published yet for this implementation. Runtime
+self-updates become available when the tagged release workflow publishes the matching Linux
+asset. Development bootstrap uses a matching packaged server payload; client builds alone do not
+install or enable the supervisor on an existing server.
+
+On servers without the maintenance capability, the Mac app also offers **Use Legacy SSH Updates…**
+for AI tools. This older path requires the SSH connection to remain open and supports its existing
+npm and native Claude update commands. It has no durable server job or maintenance handover; do
+not confuse its process activity check with the supervised maintenance lock. Its regression suite
+is `python3 Tools/test-server-tool-updates.py`.

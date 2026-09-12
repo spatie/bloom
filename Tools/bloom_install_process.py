@@ -248,7 +248,8 @@ def standalone_installer_source(path, source=None):
     source = pathlib.Path(path).read_text() if source is None else source
     if "class InstallProcessFailure(" in source:
         return source
-    helper = pathlib.Path(path).with_name("bloom_install_process.py").read_text()
+    process_source = pathlib.Path(path).with_name("bloom_install_process.py").read_text()
+    helper = process_source
     if "read_swap_status" in source:
         helper += "\n" + pathlib.Path(path).with_name("bloom_swap_state.py").read_text()
     if "MaintenanceInstallation" in source:
@@ -257,6 +258,7 @@ def standalone_installer_source(path, source=None):
         helper += "\nMAINTENANCE_SUPERVISOR_SOURCE = " + repr(supervisor) + "\n"
         docker = pathlib.Path(path).with_name("bloom_maintenance_docker.py").read_text()
         helper += "MAINTENANCE_DOCKER_SOURCE = " + repr(docker) + "\n"
+        helper += "MAINTENANCE_PROCESS_SOURCE = " + repr(process_source) + "\n"
     return "#!/usr/bin/env python3\n" + helper + "\n" + source
 
 

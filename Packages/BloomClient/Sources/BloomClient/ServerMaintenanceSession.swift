@@ -74,6 +74,17 @@ public final class ServerMaintenanceSession: CustomStringConvertible, CustomDebu
         await mutate(ServerMaintenanceRequest(action: .cancel, jobID: jobID))
     }
 
+    public func canRecover(jobID: String) -> Bool {
+        activity == .idle && authorized && capability == true && pendingMutationID == nil
+            && jobs.contains(where: { $0.id == jobID && $0.phase == .interrupted })
+    }
+
+    /// Recovery resumes the server's saved checkpoint. It never requests another installation.
+    public func recover(jobID: String) async {
+        guard canRecover(jobID: jobID) else { return }
+        await mutate(ServerMaintenanceRequest(action: .recover, jobID: jobID))
+    }
+
     /// Only an explicit user retry can reuse a mutation. Its action, plan, mode and UUID stay fixed.
     public func retryPendingMutation() async {
         guard activity == .idle, authorized, let pending, let id = pendingMutationID else { return }
@@ -139,6 +150,11 @@ public final class ServerMaintenanceSession: CustomStringConvertible, CustomDebu
                             recovery: "Refresh to recover its job before retrying the saved request.")
                     }
                     plan = nil
+                } else if intent.action == .recover {
+                    guard response.jobs.contains(where: { $0.id == intent.jobID }) else {
+                        throw ServerMaintenanceFailure(code: "unconfirmed", message: "Recovery has not been confirmed.",
+                            recovery: "Refresh this update before retrying the saved recovery request.")
+                    }
                 }
             }
             pending = nil; pendingMutationID = nil
@@ -185,6 +201,8 @@ public final class ServerMaintenanceSession: CustomStringConvertible, CustomDebu
         guard let pending else { return }
         if pending.action == .start, jobs.contains(where: { $0.planID == pending.planID }) {
             self.pending = nil; pendingMutationID = nil; plan = nil
+        } else if pending.action == .recover, jobs.contains(where: { $0.id == pending.jobID && $0.phase.isTerminal && $0.phase != .interrupted }) {
+            self.pending = nil; pendingMutationID = nil
         } else if pending.action == .cancel, jobs.contains(where: { $0.id == pending.jobID && $0.phase.isTerminal }) {
             self.pending = nil; pendingMutationID = nil
         }

@@ -47,7 +47,7 @@ class MaintenanceInstallTests(unittest.TestCase):
                 raise MaintenanceInstallFailure('untrusted_directory', 'Writable path rejected', 'Repair path')
 
     def publish(self):
-        self.installation.publish(self.bundle, 'b' * 64, self.account, '# Trusted supervisor\n', '# Trusted Docker adapter\n')
+        self.installation.publish(self.bundle, 'b' * 64, self.account, '# Trusted supervisor\n', '# Trusted Docker adapter\n', '# Trusted output redactor\n')
 
     def database(self, phase):
         self.installation.directory(self.installation.state)
@@ -72,6 +72,8 @@ class MaintenanceInstallTests(unittest.TestCase):
         self.assertEqual(self.installation.launcher.stat().st_mode & 0o777, 0o755)
         self.assertEqual(self.installation.docker_module.stat().st_mode & 0o777, 0o644)
         self.assertEqual(self.installation.docker_module.read_text(), '# Trusted Docker adapter\n')
+        self.assertEqual(self.installation.process_module.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(self.installation.process_module.read_text(), '# Trusted output redactor\n')
         self.assertEqual(pathlib.Path(config['executable']).stat().st_mode & 0o777, 0o755)
         self.assertEqual(self.installation.state.stat().st_mode & 0o777, 0o755)
 
@@ -160,9 +162,23 @@ class MaintenanceInstallTests(unittest.TestCase):
             self.publish()
         self.assertEqual(target.read_text(), 'keep')
 
+    def test_output_module_symlink_is_rejected_without_changing_target(self):
+        self.installation.directory(self.installation.launcher.parent)
+        target = self.root / 'user-file'
+        target.write_text('untouched')
+        self.installation.process_module.symlink_to(target)
+        with self.assertRaises(MaintenanceInstallFailure):
+            self.publish()
+        self.assertEqual(target.read_text(), 'untouched')
+
+    def test_output_module_source_is_required_before_any_publication(self):
+        with self.assertRaises(MaintenanceInstallFailure):
+            self.installation.publish(self.bundle, 'b' * 64, self.account, '# supervisor', '# docker', '')
+        self.assertFalse(self.installation.launcher.exists())
+
     def test_docker_module_source_is_required_before_any_publication(self):
         with self.assertRaises(MaintenanceInstallFailure):
-            self.installation.publish(self.bundle, 'b' * 64, self.account, '# Trusted supervisor', '')
+            self.installation.publish(self.bundle, 'b' * 64, self.account, '# Trusted supervisor', '', '# Trusted output redactor')
         self.assertFalse(self.installation.config_path.exists())
         self.assertFalse(self.installation.launcher.exists())
 
@@ -175,9 +191,9 @@ class MaintenanceInstallTests(unittest.TestCase):
 
     def test_rollback_restores_config_current_and_previous_supervisor(self):
         self.publish()
-        before = {path: path.read_bytes() for path in (self.installation.config_path, self.installation.current_path, self.installation.launcher, self.installation.docker_module)}
+        before = {path: path.read_bytes() for path in (self.installation.config_path, self.installation.current_path, self.installation.launcher, self.installation.docker_module, self.installation.process_module)}
         (self.bundle / 'manifest.json').write_text(json.dumps(dict(version='test-2', protocolVersion=14, maintenanceProtocolVersion=1)))
-        self.installation.publish(self.bundle, 'd' * 64, self.account, '# Updated supervisor\n', '# Updated Docker adapter\n')
+        self.installation.publish(self.bundle, 'd' * 64, self.account, '# Updated supervisor\n', '# Updated Docker adapter\n', '# Updated output redactor\n')
         self.installation.rollback()
         for path, value in before.items():
             self.assertEqual(path.read_bytes(), value)
@@ -192,7 +208,7 @@ class MaintenanceInstallTests(unittest.TestCase):
                 raise OSError('simulated disk failure')
             return write(path, data, mode)
         with mock.patch.object(self.installation, 'atomic_write', side_effect=fail_current), self.assertRaises(OSError):
-            self.installation.publish(self.bundle, 'd' * 64, self.account, '# New supervisor\n', '# Updated Docker adapter\n')
+            self.installation.publish(self.bundle, 'd' * 64, self.account, '# New supervisor\n', '# Updated Docker adapter\n', '# Updated output redactor\n')
         self.installation.rollback()
         self.assertEqual(self.installation.current_path.read_bytes(), before)
 
@@ -203,6 +219,7 @@ class MaintenanceInstallTests(unittest.TestCase):
         self.assertFalse(self.installation.current_path.exists())
         self.assertFalse(self.installation.launcher.exists())
         self.assertFalse(self.installation.docker_module.exists())
+        self.assertFalse(self.installation.process_module.exists())
         self.assertTrue((self.installation.releases / ('b' * 64)).is_dir())
 
     def test_supervised_unit_recreates_runtime_directory_after_reboot(self):
@@ -223,6 +240,7 @@ class MaintenanceInstallTests(unittest.TestCase):
         exec(compile(source, '<embedded-installer>', 'exec'), namespace)
         self.assertEqual(namespace['maintenance_source'](), path.with_name('bloom-maintenance.py').read_text())
         self.assertEqual(namespace['maintenance_docker_source'](), path.with_name('bloom_maintenance_docker.py').read_text())
+        self.assertEqual(namespace['maintenance_process_source'](), path.with_name('bloom_install_process.py').read_text())
         self.assertEqual(source, standalone_installer_source(path, source))
 
 

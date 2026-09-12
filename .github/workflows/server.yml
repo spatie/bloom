@@ -66,3 +66,5 @@ jobs:
           if command -v swift >/dev/null; then exit 1; fi
           tar -xzf package/bloom-server-linux-x86_64.tar.gz -C package
           python3 Tools/server-smoke.py package/bloom-server-linux-x86_64/bin/bloom-server
+          python3 Tools/maintenance-runtime-smoke.py package/bloom-server-linux-x86_64/bin/bloom-server
+          python3 Tools/maintenance-supervisor-smoke.py package/bloom-server-linux-x86_64/bin/bloom-server --disposable-container
