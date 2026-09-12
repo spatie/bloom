@@ -15,6 +15,7 @@ struct UsageProviderSectionView: View {
     @Environment(UsagePanelModel.self) private var model
     @Environment(\.usageScale) private var scale
     @State private var isHovering = false
+    @State private var isDropTarget = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: scale.headerToCard) {
@@ -22,6 +23,36 @@ struct UsageProviderSectionView: View {
                 .padding(.horizontal, 8)
             card
         }
+        // The whole section takes the drop, not just its header, because a card is a much easier
+        // target than a row of text and the answer is the same wherever in it you let go.
+        .overlay(alignment: .top) { insertionMark }
+        .dropDestination(for: String.self) { items, _ -> Bool in
+            return adopt(items)
+        } isTargeted: { targeted in
+            withAnimation(.easeOut(duration: 0.12)) { isDropTarget = targeted && isInteractive }
+        }
+    }
+
+    /// Where the dragged provider would land, drawn above the card the pointer is over.
+    @ViewBuilder
+    private var insertionMark: some View {
+        if isDropTarget {
+            Capsule()
+                .fill(Color.accentColor)
+                .frame(height: 2)
+                .padding(.horizontal, 2)
+                .offset(y: -6)
+        }
+    }
+
+    /// Reorders the providers, which reorders the menu bar strip with them: both read
+    /// `UsageLayout.providerOrder`.
+    private func adopt(_ items: [String]) -> Bool {
+        guard isInteractive, let raw = items.first,
+              let dragged = AgentKind(rawValue: raw), dragged != provider
+        else { return false }
+        withAnimation(UsageMotion.spring) { model.update { $0.moveProvider(dragged, toward: provider) } }
+        return true
     }
 
     private var provider: AgentKind { section.provider }
@@ -74,6 +105,19 @@ struct UsageProviderSectionView: View {
         .contentShape(Rectangle())
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) { isHovering = hovering }
+        }
+        .draggable(provider.rawValue) {
+            // What follows the pointer: the mark and the name, rather than a snapshot of the
+            // whole header with its hover button and spinner in it.
+            HStack(spacing: 5) {
+                ProviderMarkView(provider: provider)
+                    .foregroundStyle(.secondary)
+                    .frame(width: scale.headerIcon, height: scale.headerIcon)
+                Text(provider.label)
+                    .font(.system(size: scale.header, weight: .semibold))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
         }
         .contextMenu {
             if isInteractive {

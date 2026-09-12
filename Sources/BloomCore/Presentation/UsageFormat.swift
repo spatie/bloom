@@ -103,15 +103,6 @@ public enum UsageFormat {
         return formatter
     }
 
-    /// The footer's countdown to the next ask: "Next update in 7m", "Next update in 45s".
-    public static func nextUpdate(lastAskedAt: Date?, interval: TimeInterval, at now: Date) -> String {
-        let base = lastAskedAt ?? now
-        let remaining = max(0, base.addingTimeInterval(interval).timeIntervalSince(now))
-        let seconds = Int(remaining.rounded(.up))
-        if seconds >= 60 { return "Next update in \(Int((Double(seconds) / 60).rounded(.up)))m" }
-        return "Next update in \(seconds)s"
-    }
-
     /// A whole percentage, clamped. "42%".
     public static func percent(_ value: Double) -> String {
         "\(Int(min(max(value, 0), 100).rounded()))%"

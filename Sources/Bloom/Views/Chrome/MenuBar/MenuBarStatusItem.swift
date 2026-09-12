@@ -312,7 +312,8 @@ final class MenuBarStatusItem: NSObject {
         panel.hide()
         let menu = NSMenu()
         menu.addItem(ClosureMenuItem("Open Bloom") { MainWindow.raise() })
-        menu.addItem(Self.keepAwakeItem())
+        menu.addItem(.separator())
+        for keepAwakeItem in Self.keepAwakeItems() { menu.addItem(keepAwakeItem) }
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem("Usage Settings\u{2026}") { [weak self] in
             guard let self, let app = self.app, let button = self.item?.button else { return }
@@ -329,32 +330,47 @@ final class MenuBarStatusItem: NSObject {
         item?.menu = nil
     }
 
-    private static func keepAwakeItem() -> NSMenuItem {
+    /// Keep Awake in the shape Amphetamine's menu has: one item that turns it on and off, and a
+    /// submenu for the times it should end by itself.
+    ///
+    /// The toggle is its own item rather than the parent of the submenu, because a parent item
+    /// opens its submenu and cannot be clicked, and being clickable is the whole point of it.
+    private static func keepAwakeItems() -> [NSMenuItem] {
         let keepAwake = KeepAwakeModel.shared
-        let menu = NSMenu()
-        if keepAwake.isActive {
-            menu.addItem(ClosureMenuItem("Stop Keeping Awake") { keepAwake.stop() })
-            menu.addItem(.separator())
-        }
-        menu.addItem(ClosureMenuItem("Indefinitely") { keepAwake.start(for: nil) })
+        let isOn = keepAwake.isActive
 
+        let toggle = ClosureMenuItem(KeepAwake.title) {
+            if keepAwake.isActive { keepAwake.stop() } else { keepAwake.start(for: nil) }
+        }
+        toggle.state = isOn ? .on : .off
+        toggle.image = NSImage(systemSymbolName: KeepAwake.menuBarSymbol, accessibilityDescription: nil)
+        toggle.toolTip = SleepPrevention.caveat
+
+        let durations = NSMenu()
+        durations.addItem(ClosureMenuItem("Indefinitely") { keepAwake.start(for: nil) })
         let minutes = NSMenu()
         for count in KeepAwake.minuteChoices {
-            minutes.addItem(ClosureMenuItem(KeepAwake.label(minutes: count)) { keepAwake.start(for: TimeInterval(count * 60)) })
+            minutes.addItem(ClosureMenuItem(KeepAwake.label(minutes: count)) {
+                keepAwake.start(for: TimeInterval(count * 60))
+            })
         }
         let minutesItem = NSMenuItem(title: "Minutes", action: nil, keyEquivalent: "")
         minutesItem.submenu = minutes
-        menu.addItem(minutesItem)
+        durations.addItem(minutesItem)
 
         let hours = NSMenu()
         for count in KeepAwake.hourChoices {
-            hours.addItem(ClosureMenuItem(KeepAwake.label(hours: count)) { keepAwake.start(for: TimeInterval(count * 3600)) })
+            hours.addItem(ClosureMenuItem(KeepAwake.label(hours: count)) {
+                keepAwake.start(for: TimeInterval(count * 3600))
+            })
         }
         let hoursItem = NSMenuItem(title: "Hours", action: nil, keyEquivalent: "")
         hoursItem.submenu = hours
-        menu.addItem(hoursItem)
+        durations.addItem(hoursItem)
 
-        menu.addItem(.separator())
+        let durationsItem = NSMenuItem(title: "Keep Awake For", action: nil, keyEquivalent: "")
+        durationsItem.submenu = durations
+
         let whileRunning = ClosureMenuItem(SleepPrevention.menuItemTitle) {
             // Written, not just registered, so the choice survives a relaunch. `AgentActivityReporter`
             // watches the same key and is what retakes or drops the assertion.
@@ -363,12 +379,8 @@ final class MenuBarStatusItem: NSObject {
         }
         whileRunning.state = UserDefaults.standard.bool(forKey: SleepPrevention.settingKey) ? .on : .off
         whileRunning.toolTip = SleepPrevention.caveat
-        menu.addItem(whileRunning)
 
-        let parent = NSMenuItem(title: KeepAwake.title, action: nil, keyEquivalent: "")
-        parent.image = NSImage(systemSymbolName: KeepAwake.menuBarSymbol, accessibilityDescription: nil)
-        parent.submenu = menu
-        return parent
+        return [toggle, durationsItem, whileRunning]
     }
 
     /// Opens the `Settings` scene from somewhere that is not a view.

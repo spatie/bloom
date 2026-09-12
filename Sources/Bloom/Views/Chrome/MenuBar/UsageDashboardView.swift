@@ -25,6 +25,11 @@ struct UsageDashboardView: View {
     var body: some View {
         let sections = model.layout.sections(for: metrics)
         VStack(alignment: .leading, spacing: scale.section) {
+            // Keep Awake first, above the limits. It is the one card here somebody comes to the
+            // panel to *change* rather than to read, so it sits where the pointer already is.
+            if showsMachineCards {
+                KeepAwakeCard(runningCount: runningCount, now: now)
+            }
             if sections.isEmpty {
                 empty
             }
@@ -38,7 +43,6 @@ struct UsageDashboardView: View {
                 )
             }
             if showsMachineCards {
-                KeepAwakeCard(runningCount: runningCount, now: now)
                 UsageAgentsCard(sections: agentSections, onOpen: onOpenWorkspace)
             }
         }
@@ -62,8 +66,8 @@ struct UsageDashboardView: View {
     /// Neither CLI installed, neither signed in, or the first second of a launch. It names the
     /// mechanism, because "nothing reported yet" on its own reads as broken.
     static let emptySentence =
-        "Nothing reported yet. Bloom asks Claude Code and Codex for their limits every few "
-        + "minutes, so this fills in shortly after either one is installed and signed in."
+        "Nothing reported yet. Bloom asks Claude Code and Codex for their limits every minute, "
+        + "so this fills in shortly after either one is installed and signed in."
 
     static let allHiddenSentence = "Every provider is switched off. Turn one on in Customize to see its limits."
 
@@ -173,10 +177,23 @@ struct KeepAwakeCard: View {
                     }
                     .accessibilityElement(children: .combine)
                     Spacer(minLength: 8)
-                    if keepAwake.session != nil {
-                        Button("Stop") { keepAwake.stop() }
-                            .controlSize(.small)
-                    }
+                    // One click, which is what Amphetamine's menu gets right: the switch starts a
+                    // session that runs until it is turned off, and the menu under it is for the
+                    // times somebody wants it to end by itself.
+                    Toggle(KeepAwake.title, isOn: Binding(
+                        get: { keepAwake.session != nil },
+                        set: { wanted in
+                            withAnimation(UsageMotion.spring) {
+                                if wanted { keepAwake.start(for: nil) } else { keepAwake.stop() }
+                            }
+                        }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .usageTooltip(keepAwake.session == nil
+                        ? "Keep this Mac awake until you turn it off"
+                        : "Stop keeping this Mac awake")
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, scale.barRowPadding)

@@ -64,7 +64,7 @@ struct UsageCustomizeListView: View {
         .draggable(provider.rawValue)
         .dropDestination(for: String.self) { items, _ in
             guard let raw = items.first, let dragged = AgentKind(rawValue: raw), dragged != provider else { return false }
-            withAnimation(UsageMotion.spring) { model.update { $0.moveProvider(dragged, before: provider) } }
+            withAnimation(UsageMotion.spring) { model.update { $0.moveProvider(dragged, toward: provider) } }
             return true
         }
         .accessibilityElement(children: .combine)

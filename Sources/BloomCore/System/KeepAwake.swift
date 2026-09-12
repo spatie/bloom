@@ -101,7 +101,9 @@ public enum KeepAwake {
         return Status(
             isOn: false,
             headline: offHeadline,
-            detail: whileAgentsRun ? "Stays awake while agents run" : "Nothing is keeping this Mac awake"
+            // Short enough to sit on one line beside the switch, which is what truncated the
+            // sentence this replaces.
+            detail: whileAgentsRun ? "Awake while agents run" : "Nothing keeps this Mac awake"
         )
     }
 

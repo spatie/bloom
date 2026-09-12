@@ -1,46 +1,23 @@
 import SwiftUI
 import BloomCore
 
-/// The strip along the bottom of the panel: which Bloom this is, when it next asks the providers
-/// (a button that asks now), and the Options menu.
+/// The strip along the bottom of the panel: whether an ask is out, and the Options menu.
 struct UsagePanelFooter: View {
     let app: AppModel
     @Environment(UsagePanelModel.self) private var model
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Bloom \(Self.version)")
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Button {
-                        model.refresh()
-                    } label: {
-                        if app.isAskingForQuotas {
-                            HStack(spacing: 4) {
-                                ProgressView()
-                                    .controlSize(.mini)
-                                Text("Updating\u{2026}")
-                            }
-                        } else {
-                            Text(UsageFormat.nextUpdate(
-                                lastAskedAt: app.lastQuotaAskAt,
-                                interval: QuotaPollSchedule.interval,
-                                at: context.date
-                            ))
-                            .contentTransition(.numericText())
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(app.isAskingForQuotas)
-                    .usageTooltip("Refresh now (\u{2318}R)")
-                }
+            // No version and no countdown to the next ask. Both were noise on a panel opened to
+            // read one number, and the countdown invited somebody to wait for it; asking takes a
+            // second and happens every minute anyway. What is left is the one thing worth saying
+            // while it happens, which is that it is happening.
+            if app.isAskingForQuotas {
+                ProgressView()
+                    .controlSize(.mini)
+                    .accessibilityLabel("Updating")
             }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .monospacedDigit()
-
-            Spacer(minLength: 8)
-
+            Spacer(minLength: 0)
             if model.screen == .dashboard {
                 UsageOptionsMenu(app: app)
             }
@@ -49,10 +26,6 @@ struct UsagePanelFooter: View {
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity)
         .glassEffect(.regular, in: Rectangle())
-    }
-
-    static var version: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
 }
 
@@ -64,6 +37,9 @@ struct UsageOptionsMenu: View {
 
     var body: some View {
         Menu {
+            Button("Refresh Now", systemImage: "arrow.clockwise") { model.refresh() }
+                .disabled(app.isAskingForQuotas)
+            Divider()
             Button("Customize", systemImage: "slider.horizontal.3") { model.navigate(to: .customize) }
             Button("Settings", systemImage: "gearshape") { model.navigate(to: .settings) }
             Divider()

@@ -173,9 +173,10 @@ struct QuotaPollScheduleTests {
     }
 
     @Test func declinesUntilTheGapHasPassed() {
-        let last = now - 60
+        let last = now - 10
         #expect(!QuotaPollSchedule.isDue(lastAskedAt: last, at: now, after: QuotaPollSchedule.onDemandFloor))
         #expect(QuotaPollSchedule.isDue(lastAskedAt: now - 300, at: now, after: QuotaPollSchedule.onDemandFloor))
+        #expect(!QuotaPollSchedule.isDue(lastAskedAt: now - 30, at: now, after: QuotaPollSchedule.interval))
     }
 
     /// The menu may ask sooner than the background poll, and never as often as it is opened.

@@ -85,12 +85,6 @@ struct UsageFormatTests {
         #expect(UsageFormat.count(821) == "821")
         #expect(UsageFormat.count(12_900) == "12.9K")
     }
-
-    @Test("the footer counts minutes up and seconds in the last minute")
-    func nextUpdate() {
-        #expect(UsageFormat.nextUpdate(lastAskedAt: now - 180, interval: 600, at: now) == "Next update in 7m")
-        #expect(UsageFormat.nextUpdate(lastAskedAt: now - 555, interval: 600, at: now) == "Next update in 45s")
-    }
 }
 
 // MARK: - Meters
@@ -379,6 +373,30 @@ struct UsageLayoutTests {
         #expect(section.onDemand.isEmpty)
     }
 
+    @Test("a provider dropped on another lands on the side the drag came from")
+    func providerOrder() {
+        var layout = UsageLayout()
+        #expect(layout.orderedProviders() == [.claudeCode, .codex])
+
+        // Dragged down onto Codex, so it lands after it.
+        layout.moveProvider(.claudeCode, toward: .codex)
+        #expect(layout.orderedProviders() == [.codex, .claudeCode])
+
+        // And dragged back up onto Codex, so it lands before it again.
+        layout.moveProvider(.claudeCode, toward: .codex)
+        #expect(layout.orderedProviders() == [.claudeCode, .codex])
+
+        // The menu bar reads the same order, so the strip follows the cards.
+        let metrics = UsageCatalogue.metrics(quotas: [
+            quota(.claudeCode, .named("five_hour"), .fraction(0.3), resetsIn: fiveHours / 2),
+            quota(.codex, .lasting(week, key: "primary"), .fraction(0.1), resetsIn: week / 2),
+        ], accounts: [:], at: now)
+        layout.adopt(metrics)
+        layout.moveProvider(.claudeCode, toward: .codex)
+        #expect(MenuBarUsageStrip.make(layout: layout, metrics: metrics, at: now).groups.map(\.provider)
+            == [.codex, .claudeCode])
+    }
+
     @Test("a switched off provider draws no card and no strip, and a reset turns it back on")
     func disabledAndReset() {
         var layout = UsageLayout()
@@ -509,8 +527,8 @@ struct KeepAwakeTests {
         #expect(status(nil, running: 2).detail == "While 2 agents run")
         #expect(status(nil, running: 1).detail == "While 1 agent runs")
         #expect(!status(nil).isOn)
-        #expect(status(nil).detail == "Stays awake while agents run")
-        #expect(status(nil, false).detail == "Nothing is keeping this Mac awake")
+        #expect(status(nil).detail == "Awake while agents run")
+        #expect(status(nil, false).detail == "Nothing keeps this Mac awake")
     }
 
     @Test("a time of day picked without a date is its next occurrence")

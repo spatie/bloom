@@ -231,6 +231,22 @@ public struct UsageLayout: Codable, Sendable, Hashable {
         providerOrder = order
     }
 
+    /// Moves a provider to where another one sits, in the direction the drag went.
+    ///
+    /// Dropping a provider on one below it puts it after that one; on one above it, before. A
+    /// plain `before` in both directions makes a downward drag look like it did nothing, because
+    /// inserting a row before the neighbour it already sits above is where it already was.
+    public mutating func moveProvider(_ provider: AgentKind, toward target: AgentKind) {
+        let order = orderedProviders()
+        guard provider != target,
+              let from = order.firstIndex(of: provider),
+              let to = order.firstIndex(of: target)
+        else { return }
+        guard from < to else { return moveProvider(provider, before: target) }
+        let after = order.index(after: to)
+        moveProvider(provider, before: after < order.endIndex ? order[after] : nil)
+    }
+
     public mutating func setEnabled(_ isEnabled: Bool, for provider: AgentKind) {
         if isEnabled { disabledProviders.remove(provider) } else { disabledProviders.insert(provider) }
     }

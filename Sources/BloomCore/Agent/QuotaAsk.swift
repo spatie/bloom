@@ -8,13 +8,16 @@ import Foundation
 /// number. Both of them will answer if asked, neither ask costs a turn, and that is what this
 /// schedules.
 ///
-/// **Ten minutes, and here is the defence.** The shortest window either provider publishes is five
-/// hours, so ten minutes is at most 3.3 percent of the tightest allowance anybody is watching, and
-/// the panel draws whole percentages. Under it, an ask is one HTTP call inside the CLI on Claude's
-/// side and one on Codex's, made against the same account from however many machines the person
-/// is sitting at; a minute long poll would be six times the traffic for a number that cannot have
-/// moved enough to redraw. Over it, the menu bar's own severity dot goes stale, and the dot is the
-/// part nobody opens anything to read.
+/// **Once a minute, which the owner asked for after watching it.** The figures are whole
+/// percentages of windows that are five hours and a week long, so a minute cannot show anything a
+/// ten minute poll would have missed; what it buys is that the panel is never explaining itself.
+/// A number that is up to ten minutes old is one somebody has to think about before trusting,
+/// which is the opposite of what a glance is for.
+///
+/// The cost was measured rather than assumed: each ask is one short lived child process per
+/// provider (about 0.4s for `claude`, less for `codex`), each making one HTTP call inside the CLI,
+/// and neither runs a model or spends anything. That is two process launches a minute while Bloom
+/// is open. If it ever needs to be cheaper, this constant is the one thing to change.
 ///
 /// **One asker, never one per session.** Everything here is account wide: two chats on the same
 /// login are looking at the same five hour window, and ten workspaces open is ten views of one
@@ -22,15 +25,15 @@ import Foundation
 /// and no runner as input. There is no path from a transcript into it.
 public enum QuotaPollSchedule {
     /// The background interval, in seconds.
-    public static let interval: TimeInterval = 600
+    public static let interval: TimeInterval = 60
 
     /// The floor under an ask made because somebody is about to look.
     ///
-    /// Opening the menu is a reason to refresh and it is also something a person does four times
-    /// in a minute while they think about something else. Two minutes is short enough that a menu
-    /// opened after a turn shows that turn's figures and long enough that the menu cannot be used
-    /// as a button that hammers an endpoint.
-    public static let onDemandFloor: TimeInterval = 120
+    /// Opening the panel is a reason to refresh and it is also something a person does four times
+    /// in a minute while they think about something else. Half the poll interval is short enough
+    /// that a panel opened after a turn shows that turn's figures, and long enough that opening it
+    /// repeatedly cannot be used as a button that hammers an endpoint.
+    public static let onDemandFloor: TimeInterval = 30
 
     /// Whether an ask is due, given when the last one went out.
     ///
