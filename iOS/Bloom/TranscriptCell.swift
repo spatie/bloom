@@ -42,7 +42,7 @@ final class TranscriptCell: UITableViewCell {
                         .font(.caption).foregroundStyle(.white.opacity(0.85))
                 }
             }
-            .padding(.vertical, 8)
+            .padding(.vertical, 4)
             .id("queued-" + prompt.id.rawValue)
         }.margins(.all, 0)
         let button = UIButton(type: .system)
@@ -73,9 +73,9 @@ private struct MobileTranscriptRow: View {
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.vertical, 8)
+            .padding(.vertical, 4)
         } else if kind == "assistant" || kind == "assistantText" {
-            BloomAssistantProse {
+            BloomAssistantProse(maxWidth: 820, verticalInset: 4) {
                 BloomMarkdown(text: text, isStreaming: isStreaming)
                     .font(.body)
                     .textSelection(.enabled)
@@ -89,7 +89,7 @@ private struct MobileTranscriptRow: View {
             } label: {
                 VStack(alignment: .leading, spacing: 4) {
                     Label(title, systemImage: symbol)
-                        .font(.callout)
+                        .font(kind == "result" ? .footnote : .callout)
                         .foregroundStyle(kind == "error" ? Color.red : Color.secondary)
                     if kind == "error", !text.isEmpty {
                         Text(verbatim: text)
@@ -101,7 +101,7 @@ private struct MobileTranscriptRow: View {
                 .frame(minHeight: 44, alignment: .leading)
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .padding(.vertical, kind == "error" ? 4 : 0)
         }
     }
 

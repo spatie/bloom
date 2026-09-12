@@ -16,6 +16,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     private var usesCompactTabs = false
     private var browser: PreviewController?
     private var previewTask: Task<Void, Never>?
+    private var previewNavigationRequests: [String: UUID] = [:]
     private let conversationHost = UIView()
     private let toolHost = UIView()
     private let filesHost = UIView()
@@ -34,6 +35,9 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     private var showsConversation = true
     private var showsFiles = false
     private var filesButton: UIBarButtonItem?
+    private var filesNavigation: UINavigationController?
+    private var isDismissingFiles = false
+    private var conversationActions: [UIBarButtonItem] = []
     private var focusesConversation = false
     private var refreshTask: Task<Void, Never>?
     #if DEBUG
@@ -100,7 +104,6 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         filesWidth?.isActive = true
         files.onSelect = { [weak self] path, changed in self?.openFile(path, changed: changed) }
         files.onReviewAll = { [weak self] in self?.openReview(all: true) }
-        reviewController.onClose = { [weak self] in self?.closeTool() }
         deck.onEmpty = { [weak self] in self?.removeDeck() }
         deck.onSelection = { [weak self] in self?.focusesConversation = false; self?.updateToolbar(); self?.layoutPanes() }
         deck.onNewPane = { [weak self] kind, split in self?.requestNewPane(kind: kind, split: split) }
@@ -174,7 +177,8 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         filesButton = inspector
         let onlyConversation = primaryInDeck ? deck.focusesSinglePane && deck.selectedPane?.content === conversation : focusesConversation || tool == nil
         let sideBySide = primaryInDeck ? !deck.focusesSinglePane : tool != nil && showsConversation && !focusesConversation
-        let toolName = deck.selectedPane?.kind == "browser" ? "Preview" : deck.selectedPane?.kind == "review" ? "Review" : "Current Pane"
+        let toolName = deck.selectedPane?.kind == "browser" ? "Preview" : deck.selectedPane?.kind == "review" ? "Review"
+            : deck.selectedPane?.kind == "source" ? "File" : "Current Pane"
         let viewMenu = UIMenu(title: "Workspace view", options: .singleSelection, children: [
             UIAction(title: "Conversation", image: UIImage(systemName: "text.bubble"),
                      state: onlyConversation ? .on : .off) { [weak self] _ in
@@ -223,7 +227,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
             },
         ])
         navigationItem.titleMenuProvider = { _ in menu }
-        navigationItem.rightBarButtonItems = usesCompactTabs ? [] : [layout, inspector, preview]
+        navigationItem.rightBarButtonItems = conversationActions + (usesCompactTabs ? [] : [layout, inspector, preview])
     }
 
     private func openConversation() {
@@ -274,7 +278,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
 
     func openReview(all: Bool, path: String? = nil) {
         loadViewIfNeeded()
-        if files.parent !== self { dismissFileSheetIfNeeded() }
+        dismissFileSheetIfNeeded()
         reviewController.selectedPath = path
         reviewController.showsAllFiles = all
         setTool(reviewController)
@@ -283,11 +287,21 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
 
     func openFile(_ path: String, changed: Bool) {
         files.selectedPath = path
-        dismissFileSheetIfNeeded()
         if changed { openReview(all: false, path: path) } else {
+            dismissFileSheetIfNeeded()
+            if let pane = deck.allPanes.first(where: { $0.kind == "source" && $0.path == path }) {
+                deck.selectPane(pane)
+                showDeck()
+                return
+            }
             let source = WorkspaceSourceController(review: review, path: path)
-            setTool(WorkspacePaneController(title: (path as NSString).lastPathComponent, image: "doc.text", content: source, onClose: { [weak self] in self?.closeTool() }))
-            deck.selectedPane?.path = path
+            let title = (path as NSString).lastPathComponent
+            let content = WorkspacePaneController(title: title, image: "doc.text", content: source)
+            let pane = WorkspaceToolPane(kind: "source", title: title, content: content)
+            pane.path = path
+            configure(pane)
+            deck.add(pane)
+            showDeck()
         }
     }
 
@@ -384,10 +398,6 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         layoutPanes()
     }
 
-    private func closeTool() {
-        if let pane = deck.selectedPane { requestClosePane(pane) } else { removeDeck() }
-    }
-
     private func removeDeck() {
         compactTabs.selectedItem = compactTabs.items?.first
         if let tool { remove(tool) }
@@ -398,7 +408,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     }
 
     private func toggleFiles() {
-        guard presentedViewController == nil else { return }
+        guard presentedViewController == nil, filesNavigation == nil else { return }
         let width = view.safeAreaLayoutGuide.layoutFrame.width
         let minimum = tool != nil && showsConversation && !focusesConversation ? 1320.0 : 1000.0
         if width >= minimum {
@@ -411,8 +421,10 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
             files.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             files.view.frame = CGRect(x: 0, y: 0, width: 360, height: 560)
             let navigation = BloomTheme.navigation(files)
+            filesNavigation = navigation
             files.navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Close", primaryAction: UIAction { [weak self] _ in self?.dismissFileSheetIfNeeded() })
-            if traitCollection.horizontalSizeClass == .regular, let filesButton {
+            if traitCollection.horizontalSizeClass == .regular, let filesButton,
+               navigationItem.rightBarButtonItems?.contains(where: { $0 === filesButton }) == true {
                 navigation.modalPresentationStyle = .popover
                 navigation.preferredContentSize = CGSize(width: 360, height: 560)
                 navigation.popoverPresentationController?.barButtonItem = filesButton
@@ -426,17 +438,28 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     }
 
     private func dismissFileSheetIfNeeded() {
-        guard presentedViewController != nil else { return }
-        dismiss(animated: true) { [weak self] in
-            guard let self else { return }
-            self.restoreFiles()
+        guard let navigation = filesNavigation, !isDismissingFiles else { return }
+        isDismissingFiles = true
+        navigation.dismiss(animated: true) { [weak self, weak navigation] in
+            guard let navigation else { return }
+            self?.restoreFiles(from: navigation)
         }
     }
 
-    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) { restoreFiles() }
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        guard let navigation = filesNavigation,
+              presentationController.presentedViewController === navigation else { return }
+        restoreFiles(from: navigation)
+    }
 
-    private func restoreFiles() {
-        files.navigationController?.setViewControllers([], animated: false)
+    private func restoreFiles(from navigation: UINavigationController) {
+        guard filesNavigation === navigation else { return }
+        // A second dismissal callback must never resolve the workspace's navigation controller
+        // after Files has moved back into its inline host.
+        filesNavigation = nil
+        isDismissingFiles = false
+        navigation.setViewControllers([], animated: false)
+        files.navigationItem.rightBarButtonItem = nil
         install(files, in: filesHost)
         let index = tool == nil || focusesConversation ? 0 : deck.selectedPane?.kind == "browser" ? 1 : deck.selectedPane?.kind == "review" ? 2 : 3
         compactTabs.selectedItem = compactTabs.items?[index]
@@ -471,6 +494,15 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         filesWidth?.constant = 300
         conversationWidth?.isActive = splitConversation
         conversationWidth?.constant = min(600, max(400, (width - (inlineFiles ? 300 : 0)) * 0.46))
+        if let wrapper = conversation as? WorkspacePaneController {
+            wrapper.showsHeader = primaryInDeck || splitConversation
+        }
+        let actions = !primaryInDeck && !splitConversation && !conversationHost.isHidden
+            ? chatContent(conversation)?.navigationItem.rightBarButtonItems ?? [] : []
+        if conversationActions != actions {
+            conversationActions = actions
+            updateToolbar()
+        }
     }
 
     private func install(_ child: UIViewController, in host: UIView) {
@@ -639,13 +671,17 @@ extension WorkspaceDeskController {
     }
 
     private func configure(_ pane: WorkspaceToolPane) {
+        if pane.kind == "source", let wrapper = pane.content as? WorkspacePaneController {
+            wrapper.onClose = { [weak self, weak pane] in if let pane { self?.requestClosePane(pane) } }
+        }
+        if let review = pane.content as? WorkspaceReviewController {
+            review.onClose = { [weak self, weak pane] in if let pane { self?.requestClosePane(pane) } }
+        }
         if let browser = pane.content as? PreviewController {
             browser.onClose = { [weak self, weak pane] in if let pane { self?.requestClosePane(pane) } }
             browser.onNavigate = { [weak self, weak pane] address in
-                Task {
-                    guard let self, let pane else { return }
-                    do { try await self.navigate(pane, address: address) } catch { self.show(error) }
-                }
+                guard let self, let pane else { throw CancellationError() }
+                try await self.navigate(pane, address: address)
             }
         }
         if let terminal = pane.content as? WorkspaceTerminalController {
@@ -668,8 +704,14 @@ extension WorkspaceDeskController {
     }
 
     private func navigate(_ pane: WorkspaceToolPane, address: String) async throws {
+        let requestID = UUID()
+        previewNavigationRequests[pane.id] = requestID
+        defer {
+            if previewNavigationRequests[pane.id] == requestID { previewNavigationRequests[pane.id] = nil }
+        }
         let lease = try await connection.preparePreview(address: address)
-        guard !Task.isCancelled, deck.allPanes.contains(where: { $0 === pane }) else { lease.close(); throw CancellationError() }
+        guard !Task.isCancelled, previewNavigationRequests[pane.id] == requestID,
+              deck.allPanes.contains(where: { $0 === pane }) else { lease.close(); throw CancellationError() }
         let preview = PreviewController(preview: lease)
         deck.replace(pane, content: preview)
         configure(pane)
@@ -785,6 +827,9 @@ extension WorkspaceDeskController {
             let session = connection.catalogue?.sessions.first { $0.id == pane.sessionID }
             return .chat(.init(agent: AgentKind(rawValue: session?.agentKind ?? "") ?? .claudeCode, state: SessionState(rawValue: session?.state ?? "") ?? .idle, messages: chatContent(pane.content)?.transcriptMessageCount ?? 0))
         case "notes": return .notes(.init(characters: notes?.characters ?? 0))
+        // The existing protocol groups source and diff viewers under its file-review detail.
+        // Native tabs retain their distinction and filename without changing that wire contract.
+        case "source", "review": return .review(.init(file: pane.path ?? ""))
         default: return .review(.init(file: pane.path ?? ""))
         }
     }

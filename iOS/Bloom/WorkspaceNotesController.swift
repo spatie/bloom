@@ -151,6 +151,7 @@ final class WorkspaceNotesController: UIViewController, UITextViewDelegate {
         } else if session.hasChanges { status.text = "Saved on this device"
         } else if session.loadError != nil { status.text = "Couldn’t load notes"
         } else if session.isLoading { status.text = "Loading notes…"
+        } else if session.baseline == nil { status.text = "Notes not loaded"
         } else { status.text = "All changes saved" }
         status.sizeToFit()
     }

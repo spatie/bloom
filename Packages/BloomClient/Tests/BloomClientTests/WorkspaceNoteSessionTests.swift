@@ -87,21 +87,26 @@ struct WorkspaceNoteSessionTests {
         #expect(note.baseline == "new text")
     }
 
-    @Test("A cancelled load releases its spinner and permits a fresh read")
-    func cancelledLoadCanRetry() async throws {
+    @Test("Hiding the first pane does not cancel another pane's shared initial load")
+    func sharedLoadSurvivesSubscriberCancellation() async throws {
         let location = temporaryFile(); defer { try? FileManager.default.removeItem(at: location.deletingLastPathComponent()) }
         let store = WorkspaceNoteDraftStore(file: location)
         let note = try store.session(scope: "server-A", workspaceID: workspace)
+        let secondPane = try store.session(scope: "server-A", workspaceID: workspace)
         let read = HeldNoteRead()
-        let loading = Task { await note.load { await read.read() } }
+        let first = Task { await note.load { await read.read() } }
         await read.waitUntilStarted()
-        loading.cancel()
-        read.release("late response")
-        await loading.value
+        var redundantReads = 0
+        first.cancel()
+        let release = Task { read.release("server notes") }
+        await secondPane.load { redundantReads += 1; return "unexpected second read" }
+        await first.value; await release.value
         #expect(!note.isLoading)
-        #expect(note.text.isEmpty)
-        await note.load { "fresh response" }
-        #expect(note.text == "fresh response")
+        #expect(note.canEdit)
+        #expect(note.text == "server notes")
+        #expect(secondPane.text == "server notes")
+        #expect(note.loadError == nil)
+        #expect(redundantReads == 0)
     }
 
     @Test("Identical workspace IDs on different servers cannot share a draft")

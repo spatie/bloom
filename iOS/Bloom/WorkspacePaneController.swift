@@ -8,9 +8,16 @@ final class WorkspacePaneController: UIViewController {
     private let image: String
     private var headingLabel: UILabel?
     private let toolbar = UIToolbar()
-    private var headingWidth: NSLayoutConstraint?
-    private var actionCount = 0
-    private let onClose: (() -> Void)?
+    private let header = UIStackView()
+    private var actionItems: [UIBarButtonItem] = []
+    var showsHeader = true {
+        didSet {
+            guard showsHeader != oldValue else { return }
+            header.isHidden = !showsHeader
+            toolbar.items = showsHeader ? actionItems : []
+        }
+    }
+    var onClose: (() -> Void)?
     init(title: String, image: String, content: UIViewController, onClose: (() -> Void)? = nil) {
         paneTitle = title; self.image = image; self.content = content; self.onClose = onClose
         super.init(nibName: nil, bundle: nil)
@@ -28,22 +35,35 @@ final class WorkspacePaneController: UIViewController {
         label.lineBreakMode = .byTruncatingTail
         let icon = UIImageView(image: UIImage(systemName: image)); icon.tintColor = BloomTheme.secondary
         icon.accessibilityElementsHidden = true
+        icon.contentMode = .scaleAspectFit
+        icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .subheadline)
+        icon.setContentHuggingPriority(.required, for: .horizontal)
         icon.setContentCompressionResistancePriority(.required, for: .horizontal)
         let heading = UIStackView(arrangedSubviews: [icon, label]); heading.spacing = 8; heading.alignment = .center
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        headingWidth = heading.widthAnchor.constraint(equalToConstant: 160)
-        headingWidth?.isActive = true
         content.loadViewIfNeeded()
-        toolbar.items = [UIBarButtonItem(customView: heading), .flexibleSpace()]
-        toolbar.items?.append(contentsOf: content.navigationItem.rightBarButtonItems ?? [])
-        if let onClose {
-            let close = UIBarButtonItem(image: UIImage(systemName: "xmark"), primaryAction: UIAction { _ in onClose() })
+        actionItems = content.navigationItem.rightBarButtonItems ?? []
+        if onClose != nil {
+            let close = UIBarButtonItem(image: UIImage(systemName: "xmark"), primaryAction: UIAction { [weak self] _ in self?.onClose?() })
             close.accessibilityLabel = "Close pane"
-            toolbar.items?.append(close)
+            actionItems.append(close)
         }
-        actionCount = (toolbar.items?.count ?? 2) - 2
+        toolbar.items = showsHeader ? actionItems : []
+        let actionCount = actionItems.count
+        toolbar.isHidden = actionCount == 0
+        toolbar.widthAnchor.constraint(equalToConstant: CGFloat(actionCount) * 44 + 16).isActive = true
+        header.addArrangedSubview(heading)
+        header.addArrangedSubview(toolbar)
+        header.alignment = .center
+        header.spacing = 8
+        header.isLayoutMarginsRelativeArrangement = true
+        header.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 6)
+        header.isHidden = !showsHeader
+        let headerHeight = header.heightAnchor.constraint(equalToConstant: 44)
+        headerHeight.priority = .defaultHigh
+        headerHeight.isActive = true
         addChild(content)
-        let stack = UIStackView(arrangedSubviews: [toolbar, content.view])
+        let stack = UIStackView(arrangedSubviews: [header, content.view])
         stack.axis = .vertical
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
@@ -55,11 +75,4 @@ final class WorkspacePaneController: UIViewController {
         content.didMove(toParent: self)
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        // Long conversation titles must yield to their native toolbar actions in narrow panes.
-        let available = max(44, toolbar.bounds.width - 32 - CGFloat(actionCount) * 44)
-        let width = actionCount == 0 ? available : min(available, toolbar.bounds.width * 0.6)
-        if headingWidth?.constant != width { headingWidth?.constant = width }
-    }
 }

@@ -17,9 +17,11 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     private var navigationObservations: [NSKeyValueObservation] = []
     private var previewLease: MobilePreviewLease?
     private var preparing: Task<Void, Never>?
+    private var ruleListIdentifier: String?
     private let toolbar = UIToolbar()
     private let address = UITextField()
-    var onNavigate: ((String) -> Void)?
+    var onNavigate: (@MainActor (String) async throws -> Void)?
+    private var navigationTask: Task<Void, Never>?
     private let activity = UIActivityIndicatorView(style: .medium)
     private let errorView = UIView()
     private let errorDetail = BloomTheme.label("", style: .subheadline, secondary: true)
@@ -58,6 +60,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         super.init(nibName: nil, bundle: nil)
         preview.onRevoked = { [weak self] in
             self?.preparing?.cancel()
+            self?.navigationTask?.cancel()
             self?.browser.stopLoading()
             self?.browser.loadHTMLString("", baseURL: nil)
             self?.showFailure("This preview connection has closed. Reconnect to the server, then reload the preview.")
@@ -65,9 +68,14 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
 
     deinit {
+        navigationTask?.cancel()
         preparing?.cancel()
         let lease = previewLease
-        Task { @MainActor in lease?.close() }
+        let identifier = ruleListIdentifier
+        Task { @MainActor in
+            lease?.close()
+            if let identifier { try? await WKContentRuleListStore.default().removeContentRuleList(forIdentifier: identifier) }
+        }
     }
 
     var currentAddress: String {
@@ -136,8 +144,11 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     func closePreview() {
         navigationObservations.removeAll()
+        navigationTask?.cancel()
         preparing?.cancel()
+        removeRuleList()
         browser.stopLoading()
+        previewLease?.onRevoked = nil
         previewLease?.close()
     }
 
@@ -174,8 +185,22 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
         let text = textField.text ?? ""
         textField.resignFirstResponder()
-        onNavigate?(text)
+        navigate(to: text)
         return true
+    }
+
+    private func navigate(to address: String) {
+        guard let onNavigate else {
+            showFailure("Close this preview and open it again from your workspace.")
+            return
+        }
+        navigationTask?.cancel()
+        navigationTask = Task { [weak self] in
+            do { try await onNavigate(address) } catch {
+                guard !Task.isCancelled else { return }
+                self?.showFailure(error.localizedDescription)
+            }
+        }
     }
 
     private func configureToolbar() {
@@ -301,7 +326,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     private func prepareBrowser() {
         if previewLease?.isClosed == true {
-            if let reconnectAddress, let onNavigate { onNavigate(reconnectAddress) } else {
+            if let reconnectAddress, onNavigate != nil { navigate(to: reconnectAddress) } else {
                 showFailure("This preview connection has closed. Reconnect to the server, then reopen the preview.")
             }
             return
@@ -318,20 +343,33 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
           {"trigger":{"url-filter":"^http://127[.]0[.]0[.]1:\(port)/"},"action":{"type":"ignore-previous-rules"}}
         ]
         """
+        let identifier = "bloom-preview-\(previewLease.id.uuidString)"
         preparing = Task { [weak self] in
             do {
                 let rules = try await WKContentRuleListStore.default().compileContentRuleList(
-                    forIdentifier: "bloom-preview-\(previewLease.id.uuidString)", encodedContentRuleList: rules
+                    forIdentifier: identifier, encodedContentRuleList: rules
                 )
-                guard !Task.isCancelled, !previewLease.isClosed, let self, let rules else { return }
+                guard !Task.isCancelled, !previewLease.isClosed, let self else {
+                    try? await WKContentRuleListStore.default().removeContentRuleList(forIdentifier: identifier)
+                    return
+                }
+                guard let rules else { throw ConnectionFailure("The preview security rules were unavailable.") }
+                ruleListIdentifier = identifier
                 browser.configuration.userContentController.add(rules)
                 loadInitialPage()
             } catch {
+                try? await WKContentRuleListStore.default().removeContentRuleList(forIdentifier: identifier)
                 guard !Task.isCancelled else { return }
                 NSLog("Bloom preview rule error: %@", error.localizedDescription)
                 self?.showFailure("Could not secure this preview. Close it and try again.")
             }
         }
+    }
+
+    private func removeRuleList() {
+        guard let identifier = ruleListIdentifier else { return }
+        ruleListIdentifier = nil
+        Task { try? await WKContentRuleListStore.default().removeContentRuleList(forIdentifier: identifier) }
     }
 
     private func loadInitialPage() {
@@ -354,7 +392,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     private func reload() {
         if previewLease?.isClosed == true {
-            showFailure("This preview connection has closed. Reconnect to the server, then reload the preview.")
+            navigate(to: reconnectAddress ?? previewLease?.sourceURL.absoluteString ?? url.absoluteString)
             return
         }
         if isLoading {
@@ -379,6 +417,10 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
 
     private func refreshNavigation() {
+        guard previewLease?.isClosed != true else {
+            finishLoading()
+            return
+        }
         isLoading = browser.isLoading
         if isLoading { activity.startAnimating() } else { activity.stopAnimating() }
         if let lease = previewLease, !lease.isClosed, let actual = browser.url, allows(actual) {
@@ -424,6 +466,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard previewLease?.isClosed != true else { return }
         isLoading = true
         hasLoadedPage = false
         lastPageFailure = nil
@@ -434,6 +477,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard previewLease?.isClosed != true else { return }
         if let previewLease, !previewLease.isClosed { reconnectAddress = currentAddress }
         hasLoadedPage = true
         lastPageFailure = nil
@@ -454,6 +498,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
 
     private func handle(_ error: Error) {
+        guard previewLease?.isClosed != true else { return }
         if (error as NSError).code == NSURLErrorCancelled { return }
         showFailure(error.localizedDescription)
     }

@@ -122,10 +122,30 @@ final class WorkspaceController: UITableViewController {
                 do {
                     let lease = try await self.model.preparePreview(address: address)
                     guard self.viewIfLoaded?.window != nil, let navigation = self.navigationController else { lease.close(); return }
-                    navigation.pushViewController(PreviewController(preview: lease), animated: true)
+                    navigation.pushViewController(self.previewController(lease: lease), animated: true)
                 } catch { self.show(error) }
             }
         })
         present(alert, animated: true)
     }
+
+    private func previewController(lease: MobilePreviewLease) -> PreviewController {
+        let controller = PreviewController(preview: lease)
+        controller.onNavigate = { [weak self, weak controller] address in
+            guard let self, let controller else { throw CancellationError() }
+            let lease = try await model.preparePreview(address: address)
+            guard !Task.isCancelled, let navigation = controller.navigationController,
+                  navigation.topViewController === controller,
+                  let index = navigation.viewControllers.firstIndex(where: { $0 === controller }) else {
+                lease.close()
+                throw CancellationError()
+            }
+            var controllers = navigation.viewControllers
+            controllers[index] = previewController(lease: lease)
+            controller.closePreview()
+            navigation.setViewControllers(controllers, animated: false)
+        }
+        return controller
+    }
+
 }

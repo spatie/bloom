@@ -54,7 +54,9 @@ public final class WorkspaceNoteSession {
             }
         }
         loading = task
-        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        // A pane is a subscriber, not the owner of this shared read. Hiding it must not
+        // cancel another pane’s initial load. A newer save still invalidates the read above.
+        await task.value
     }
 
     /// Import a previous device-only draft without replacing a newer shared-session edit.

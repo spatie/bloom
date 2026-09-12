@@ -5,37 +5,34 @@ import SwiftTerm
 /// SwiftTerm is also the Mac terminal engine. UIKit keeps native selection, hardware keyboard,
 /// text input and its existing terminal accessory; the server owns the shell across attachments.
 final class WorkspaceTerminalController: UIViewController, @preconcurrency TerminalViewDelegate {
-    typealias Open = @MainActor @Sendable () async throws -> any RemoteTerminalConnection
+    typealias Open = RemoteTerminalAttachment.Open
     let terminalName: String
     var onClose: (() -> Void)?
     var onTitleChanged: ((String) -> Void)?
     var onOpenURL: ((URL) -> Void)?
     private(set) var isConnected = false
-    private let open: Open
+    private let attachment: RemoteTerminalAttachment
     private let terminal = TerminalView(frame: .zero)
     private let toolbar = UIToolbar()
     private let status = UILabel()
-    private var connection: (any RemoteTerminalConnection)?
-    private var opening: Task<any RemoteTerminalConnection, Error>?
+    private var connection: (any RemoteTerminalConnection)? { attachment.connection }
     private var reader: Task<Void, Never>?
     private var writer: Task<Void, Never>?
     private var inputs: [Data] = []
     private var inputBytes = 0
-    private var generation = 0
+    private var generation: Int { attachment.generation }
     private var dimensions = (columns: 80, rows: 24)
     private var resizeTask: Task<Void, Never>?
 
     init(name: String, open: @escaping Open) {
         terminalName = name
-        self.open = open
+        attachment = RemoteTerminalAttachment(open: open)
         super.init(nibName: nil, bundle: nil)
         title = "Terminal"
     }
     required init?(coder: NSCoder) { fatalError("Use init(name:open:)") }
     deinit {
-        reader?.cancel(); writer?.cancel(); opening?.cancel(); resizeTask?.cancel()
-        let connection = connection
-        Task { await connection?.close() }
+        reader?.cancel(); writer?.cancel(); resizeTask?.cancel()
     }
 
     override func viewDidLoad() {
@@ -99,29 +96,13 @@ final class WorkspaceTerminalController: UIViewController, @preconcurrency Termi
 
     func connect() async throws {
         loadViewIfNeeded()
-        if connection != nil { return }
+        if connection != nil, reader != nil { return }
         let generation = generation
-        let task: Task<any RemoteTerminalConnection, Error>
-        if let opening { task = opening } else {
-            let open = open
-            task = Task { try await open() }
-            opening = task
-        }
-        let remote: any RemoteTerminalConnection
-        do { remote = try await task.value } catch {
-            if generation == self.generation { opening = nil }
-            throw error
-        }
-        guard generation == self.generation, !Task.isCancelled else { await remote.close(); throw CancellationError() }
-        if connection != nil { return }
-        opening = nil
-        connection = remote
+        let remote = try await attachment.connect(columns: dimensions.columns, rows: dimensions.rows)
+        guard generation == self.generation, !Task.isCancelled else { throw CancellationError() }
+        guard reader == nil else { return }
         isConnected = true
         setStatus("Connected")
-        do { try await remote.resize(columns: dimensions.columns, rows: dimensions.rows) } catch {
-            disconnect()
-            throw error
-        }
         reader = Task { [weak self] in
             do {
                 while let data = try await remote.read() {
@@ -129,29 +110,24 @@ final class WorkspaceTerminalController: UIViewController, @preconcurrency Termi
                     terminal.feed(byteArray: Array(data)[...])
                 }
                 guard !Task.isCancelled, let self, generation == self.generation else { return }
-                connection = nil
-                isConnected = false
-                setStatus("Session ended")
+                disconnect()
+                setStatus("Disconnected")
             } catch {
                 guard !Task.isCancelled, let self, generation == self.generation else { return }
                 disconnect()
                 setStatus("Disconnected")
-                show(error, retry: { [weak self] in self?.reconnect() })
+                showConnectionError(error)
             }
         }
     }
 
     func disconnect() {
-        generation += 1
+        attachment.disconnect()
         reader?.cancel(); reader = nil
         writer?.cancel(); writer = nil
         resizeTask?.cancel(); resizeTask = nil
-        opening?.cancel(); opening = nil
         inputs.removeAll(); inputBytes = 0
-        let connection = connection
-        self.connection = nil
         isConnected = false
-        Task { await connection?.close() }
         if isViewLoaded { setStatus("Disconnected") }
     }
 
@@ -171,6 +147,7 @@ final class WorkspaceTerminalController: UIViewController, @preconcurrency Termi
         resizeTask?.cancel(); resizeTask = nil
         _ = try RemoteTerminalFrame.resize(columns: columns, rows: rows)
         dimensions = (columns, rows)
+        attachment.updateSize(columns: columns, rows: rows)
         let screen = terminal.getTerminal()
         if screen.cols != columns || screen.rows != rows { screen.resize(cols: columns, rows: rows) }
         try await connection?.resize(columns: columns, rows: rows)
@@ -182,14 +159,23 @@ final class WorkspaceTerminalController: UIViewController, @preconcurrency Termi
     }
 
     private func attach() {
+        let generation = generation
         Task { [weak self] in
             do { try await self?.connect() } catch {
-                guard !Task.isCancelled, !(error is CancellationError), let self, viewIfLoaded?.window != nil else { return }
-                opening = nil
+                guard !Task.isCancelled, !(error is CancellationError), let self,
+                      generation == self.generation, viewIfLoaded?.window != nil else { return }
                 setStatus("Couldn’t connect")
-                show(error, retry: { [weak self] in self?.reconnect() })
+                showConnectionError(error)
             }
         }
+    }
+    private func showConnectionError(_ error: Error) {
+        guard viewIfLoaded?.window != nil, presentedViewController == nil else { return }
+        let alert = UIAlertController(title: "Terminal connection interrupted",
+            message: error.localizedDescription + "\n\nReconnect to reattach to the server’s shell. Any input already sent may have run; Bloom will not send it again.", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Close", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Reconnect", style: .default) { [weak self] _ in self?.reconnect() })
+        present(alert, animated: true)
     }
     private func reconnect() { disconnect(); setStatus("Connecting…"); attach() }
     private func setStatus(_ text: String) {
@@ -218,7 +204,7 @@ final class WorkspaceTerminalController: UIViewController, @preconcurrency Termi
             } catch {
                 guard !Task.isCancelled, generation == self.generation else { return }
                 inputs.removeAll(); inputBytes = 0
-                show(error, retry: { [weak self] in self?.reconnect() })
+                showConnectionError(error)
             }
         }
     }
@@ -227,6 +213,7 @@ final class WorkspaceTerminalController: UIViewController, @preconcurrency Termi
         let columns = min(500, max(2, newCols)), rows = min(300, max(2, newRows))
         guard columns != dimensions.columns || rows != dimensions.rows else { return }
         dimensions = (columns, rows)
+        attachment.updateSize(columns: columns, rows: rows)
         resizeTask?.cancel()
         resizeTask = Task { [weak self] in
             do {
