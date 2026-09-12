@@ -249,7 +249,7 @@ public enum UsageCatalogue {
         pattern.hasPrefix(".") ? key.hasSuffix(pattern) : key.hasPrefix(pattern)
     }
 
-    static func providerPart(of id: UsageMetricID) -> String {
+    public static func providerPart(of id: UsageMetricID) -> String {
         String(id.rawValue.split(separator: "/", maxSplits: 1).first ?? "")
     }
 

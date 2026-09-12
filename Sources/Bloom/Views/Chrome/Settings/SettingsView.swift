@@ -31,7 +31,7 @@ struct SettingsView: View {
         HStack(spacing: 0) {
             List(selection: $tab) {
                 Section("Bloom") {
-                    navigationRows([.general, .appearance, .notifications])
+                    navigationRows([.general, .appearance, .menuBar, .notifications])
                 }
                 Section("Agents") {
                     navigationRows([.agents, .sessions, .permissions, .prompts])
@@ -42,6 +42,11 @@ struct SettingsView: View {
             }
             .listStyle(.sidebar)
             .frame(width: 185)
+            // The menu bar's "Menubar Settings…" names the pane it wants; without this the window
+            // opens on whichever pane it was left on, which is not what that row promises.
+            .onReceive(NotificationCenter.default.publisher(for: SettingsTabRequest.name)) { notification in
+                if let requested = SettingsTabRequest.tab(in: notification) { tab = requested }
+            }
 
             Divider()
 
@@ -98,6 +103,7 @@ struct SettingsView: View {
         switch tab ?? .general {
         case .general: GeneralSettingsView()
         case .appearance: AppearanceSettingsView()
+        case .menuBar: MenuBarSettingsView(app: app)
         case .notifications: NotificationSettingsView()
         case .agents: AgentsSettingsView()
         case .sessions: ModelSettingsView(defaults: defaultsBinding).disabled(!isLoaded)

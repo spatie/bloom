@@ -30,6 +30,8 @@ swift build -c "$CONFIG" "${BUILD_ARGS[@]}" --product Bloom
 # product, and a separate binary because that is what an MCP server registration can point at: the
 # CLI spawns it, it forwards to the app over a unix socket, and the app answers. See BridgeShim.
 swift build -c "$CONFIG" "${BUILD_ARGS[@]}" --product bloom-bridge
+# The privileged daemon that holds the lid, for the same reason: one product per invocation.
+swift build -c "$CONFIG" "${BUILD_ARGS[@]}" --product bloom-sleep-helper
 
 BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
 APP="$BIN_DIR/Bloom.app"
@@ -42,6 +44,11 @@ cp "$BIN_DIR/Bloom" "$APP/Contents/MacOS/Bloom"
 # bundle without it is not broken: every chat simply has no bridge tools, which is what every chat
 # had before the bridge existed.
 cp "$BIN_DIR/bloom-bridge" "$APP/Contents/MacOS/bloom-bridge"
+# `SMAppService.daemon(plistName:)` reads this one path and no other, and the plist's BundleProgram
+# points back at the executable beside it. Both are signed by the pass at the foot of this file.
+cp "$BIN_DIR/bloom-sleep-helper" "$APP/Contents/MacOS/bloom-sleep-helper"
+mkdir -p "$APP/Contents/Library/LaunchDaemons"
+cp Resources/be.spatie.bloom.sleep.plist "$APP/Contents/Library/LaunchDaemons/"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
 plist_set() {

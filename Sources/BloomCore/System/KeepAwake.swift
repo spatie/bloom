@@ -41,6 +41,21 @@ public struct KeepAwakeSession: Sendable, Hashable, Codable {
 public enum KeepAwake {
     public static let sessionKey = "system.keepAwakeSession"
 
+    /// Whether a session should hold the Mac open with the lid shut.
+    ///
+    /// **A closing lid is not idle sleep, and no assertion an application can take will stop it.**
+    /// Measured against Amphetamine, which people reach for precisely because it does: it is a
+    /// sandboxed App Store app, it holds the same two IOKit assertions Bloom does, and its
+    /// "Power Protect" is an AppleScript in `~/Library/Application Scripts/` that writes a sudoers
+    /// rule so it can run `pmset -a disablesleep 1` without a password. The system sleep switch is
+    /// the whole mechanism; the assertions have nothing to do with it.
+    ///
+    /// So Bloom does the same thing through the door Apple opened for it, `SMAppService`, which a
+    /// sandboxed app cannot use and Bloom can: see `SleepSwitch`. The flag is cleared when the
+    /// session ends, when Bloom quits, and by the helper itself if Bloom dies, which is the one
+    /// case Amphetamine's own alert admits it cannot cover.
+    public static let lidKey = "system.keepAwakeWithLidClosed"
+
     public static let title = "Keep Awake"
 
     /// Drawn beside the mark in the menu bar whenever the assertion holds idle sleep off.
@@ -65,6 +80,12 @@ public enum KeepAwake {
     ) -> Bool {
         (session?.isActive(at: now) ?? false)
             || SleepPrevention.preventsSleep(isEnabled: whileAgentsRun, runningCount: runningCount)
+    }
+
+    /// Whether the system sleep switch should be off right now: only for a session somebody
+    /// started by hand, and only when they asked for the lid to be covered too.
+    public static func holdsLidClosed(session: KeepAwakeSession?, lidEnabled: Bool, at now: Date) -> Bool {
+        lidEnabled && (session?.isActive(at: now) ?? false)
     }
 
     /// What the card says: whether the Mac will stay up, and why or for how long.

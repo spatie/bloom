@@ -20,6 +20,20 @@ final class KeepAwakeModel {
 
     var isActive: Bool { session?.isActive(at: Date()) ?? false }
 
+    /// Whether a session should hold the Mac open with the lid shut. See `KeepAwake.lidKey`: this
+    /// is the only part of Keep Awake that no assertion can do, so it is the only part that needs
+    /// a privileged helper.
+    var keepsLidClosed: Bool {
+        get { UserDefaults.standard.bool(forKey: KeepAwake.lidKey) }
+        set {
+            UserDefaults.standard.set(newValue, forKey: KeepAwake.lidKey)
+            // Asking is what registers the daemon and, the first time, what sends somebody to
+            // System Settings to allow it.
+            if newValue { SleepSwitch.shared.enable() }
+            apply()
+        }
+    }
+
     /// Keep awake for a number of seconds, or until stopped when `seconds` is nil.
     func start(for seconds: TimeInterval?) {
         session = seconds.map { .lasting($0, from: Date()) } ?? .indefinitely(from: Date())
@@ -45,6 +59,10 @@ final class KeepAwakeModel {
     private func apply() {
         KeepAwake.save(session)
         AgentActivity.shared.setKeepAwakeSession(session)
+        // The lid is the one part no assertion can hold. See `SleepSwitch`.
+        SleepSwitch.shared.setHoldingLidClosed(KeepAwake.holdsLidClosed(
+            session: session, lidEnabled: keepsLidClosed, at: Date()
+        ))
         expiry?.cancel()
         expiry = nil
         guard let until = session?.until else { return }

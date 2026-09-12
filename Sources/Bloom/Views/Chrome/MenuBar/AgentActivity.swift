@@ -65,7 +65,10 @@ final class AgentActivity {
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { _ in
-            MainActor.assumeIsolated { AgentActivity.shared.releaseAssertion() }
+            MainActor.assumeIsolated {
+                AgentActivity.shared.releaseAssertion()
+                SleepSwitch.shared.releaseOnQuit()
+            }
         }
     }
 

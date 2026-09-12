@@ -991,7 +991,7 @@ enum Snapshot {
             (
                 "limits",
                 AnyView(UsagePanelSnapshot(quotas: report.quotas, accounts: report.accounts, now: Date())),
-                CGSize(width: UsagePanelView.width, height: 900)
+                CGSize(width: UsageMenuBlock.width + 28, height: 900)
             ),
             // And the states a real ask cannot produce on the machine this runs on: a window
             // nobody measured, a provider absent, extra usage switched on, a window past its wall.
@@ -1004,7 +1004,7 @@ enum Snapshot {
                     LimitsStateGallery()
                         .background(Color(nsColor: .windowBackgroundColor))
                 ),
-                CGSize(width: UsagePanelView.width, height: 2400)
+                CGSize(width: UsageMenuBlock.width + 28, height: 2400)
             ),
         ]
 
@@ -1327,8 +1327,7 @@ private struct LimitsStateGallery: View {
                 UsagePanelSnapshot(
                     quotas: scene.1,
                     staleAge: { if case .stale(let age) = scene.2 { return age } else { return nil } }(),
-                    now: Self.now,
-                    showsMachineCards: false
+                    now: Self.now
                 )
             }
         }
@@ -1336,33 +1335,28 @@ private struct LimitsStateGallery: View {
     }
 }
 
-/// The usage panel's dashboard drawn from quotas handed to it, for the two limits scenes above.
-/// The panel's own model supplies the layout and the display settings, as it does on screen.
+/// The limits block drawn from quotas handed to it, which is what hangs in the middle of the menu.
+/// The menu's own model supplies the layout and the display settings, as it does on screen.
 private struct UsagePanelSnapshot: View {
     let quotas: [AgentQuota]
     var accounts: [AgentAccount] = []
     /// How old every figure is, for the scene that shows a card marked "Outdated".
     var staleAge: TimeInterval?
     let now: Date
-    var showsMachineCards = true
 
     var body: some View {
         let byProvider = Dictionary(accounts.map { ($0.provider, $0) }, uniquingKeysWith: { first, _ in first })
         let observed = staleAge.map { age in
             Dictionary(quotas.map { ($0.provider, now.addingTimeInterval(-age)) }, uniquingKeysWith: { first, _ in first })
-        } ?? UsageDashboardView.oldestReadings(quotas)
-        UsageDashboardView(
+        } ?? MenuBarStatusItem.oldestReadings(quotas)
+        UsageMenuBlock(
+            model: UsageMenuModel.shared,
             metrics: UsageCatalogue.metrics(quotas: quotas, accounts: byProvider, at: now),
             accounts: byProvider,
             observedAt: observed,
-            isRefreshing: false,
-            agentSections: [],
-            runningCount: 0,
             now: now,
-            showsMachineCards: showsMachineCards
+            canReorder: false
         )
-        .frame(width: UsagePanelView.width)
-        .background(UsageInk.tray)
-        .environment(UsagePanelModel.shared)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }

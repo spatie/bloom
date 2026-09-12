@@ -7,13 +7,14 @@ import Foundation
 /// to `UserDefaults`, so none of them may be renamed.
 public enum UsagePreferenceKey {
     public static let layout = "menuBar.usage.layout"
+    /// "Count" in the Menu Bar pane: what is left, or what has gone.
     public static let meterStyle = "menuBar.usage.meterStyle"
-    public static let resetDisplay = "menuBar.usage.resetDisplay"
-    public static let alwaysShowsPacing = "menuBar.usage.alwaysShowsPacing"
+    /// "Figures": numbers beside each mark, or a small bar for each.
     public static let iconStyle = "menuBar.usage.iconStyle"
-    public static let density = "menuBar.usage.density"
-    public static let timeFormat = "menuBar.usage.timeFormat"
-    public static let theme = "menuBar.usage.theme"
+    /// Whether the item carries figures at all. Off leaves Bloom's mark alone.
+    public static let showsUsage = "menuBar.usage.showsFigures"
+    /// Whether a cup is drawn while the Mac is being kept awake.
+    public static let showsCup = "menuBar.usage.showsCup"
 }
 
 /// Whether a meter reads as what is left or as what has gone.
@@ -88,21 +89,6 @@ public enum UsageDensity: String, CaseIterable, Sendable {
         switch self {
         case .regular: "Default"
         case .compact: "Compact"
-        }
-    }
-}
-
-/// The appearance the panel is drawn in, independent of the window's.
-public enum UsagePanelTheme: String, CaseIterable, Sendable {
-    case system
-    case light
-    case dark
-
-    public var title: String {
-        switch self {
-        case .system: "System"
-        case .light: "Light"
-        case .dark: "Dark"
         }
     }
 }
