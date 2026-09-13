@@ -1,6 +1,25 @@
 import SwiftUI
 import BloomCore
 
+/// Merge, and the chevron that says which merge.
+///
+/// One control rather than two, which is the whole point of it. The chevron used to be a separate
+/// borderless glyph beside the button, and picking a method out of it merged by that method there
+/// and then. Now the menu sets the MODE: it ticks the method in force, the button's label changes
+/// to match, and the next press on the button is what merges. Nothing in the menu performs
+/// anything, so the one irreversible act in this app stays behind the one control that says it.
+///
+/// **It is the merge button and nothing else.** It is drawn only where the strip's primary action
+/// is a merge. An earlier version also stood, quiet and icon only, where the primary was Commit
+/// and push or Fix merge conflicts, on the argument that the old chevron was the only way to merge
+/// in those states. The owner has overruled that: a menu about merging beside a button about
+/// committing is a control the band did not ask for. `PullRequestSummary.mergeControl` carries
+/// what that costs.
+///
+/// **The system's split button, drawn by the system.** A `Menu` with a `primaryAction` and
+/// `.menuStyle(.button)` IS this control on macOS: it draws the hairline, the chevron, the pressed
+/// states and the keyboard, and an inline `Picker` inside it draws the tick in the menu's state
+/// column, which nothing hand rolled can do.
 struct MergeSplitButton: View {
     /// The method in force for this project. The button promises it and the menu ticks it, and
     /// they are the same value: see `body` for what it takes to keep that true.
@@ -18,7 +37,14 @@ struct MergeSplitButton: View {
         control
             .labelStyle(.titleAndIcon)
             .fixedSize()
-            // Recreate the menu so its captured selection follows the label.
+            // **The label and the tick are one value, and this is what makes that true.** A
+            // `Menu`'s content is not evaluated when the view is rebuilt; it is evaluated when the
+            // menu opens, out of the closure SwiftUI stored, and the tick is drawn from the
+            // selection that closure captured. The label is re-read on every rebuild. So the
+            // button said "Rebase and merge" over a menu still ticking Squash: two ages of one
+            // value, which is the exact fault this control exists to remove. Giving it the value's
+            // identity makes a changed method a new control, so there is no older closure left to
+            // evaluate.
             .id(method)
     }
 

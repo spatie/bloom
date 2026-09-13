@@ -341,6 +341,12 @@ final class AttachmentChipCell: NSTextAttachmentCell {
         var border: NSColor
         var ink: NSColor
 
+        /// The composer's own raised plate and hairline, taken from the palette rather than spelled
+        /// again here, and still resolved for whichever appearance the window is in at the moment
+        /// of drawing. Both are dynamic colours and converting one back to AppKit keeps it dynamic.
+        ///
+        /// Computed rather than stored, so a chip drawn after the theme changes picks up the new
+        /// surfaces rather than the ones in force when this was first read.
         @MainActor static var composer: Ground {
             Ground(plate: NSColor(Palette.surfaceRaised), border: NSColor(Palette.border), ink: .labelColor)
         }

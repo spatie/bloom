@@ -1,9 +1,10 @@
 # Theme presets
 
-Appearance settings edits the selected theme. A theme supplies window colours, glass,
-independent code and terminal schemes, and typography defaults. Changes are saved for that
-theme. Switching away and back restores them. Restore Theme Defaults clears only that
-preset's changes. System, Light or Dark remains a global appearance policy.
+A theme supplies window colours, glass, independent code and terminal schemes, and typography
+defaults. Glass and scheme changes are saved for the selected theme, so switching away and back
+restores them, and Restore Theme Defaults clears only those. Fonts, sizes and line heights are
+saved once and apply under every theme: a reading size belongs to the person, and held per theme
+it reset whenever the theme changed. System, Light or Dark remains a global appearance policy.
 
 ## Definitions
 
@@ -15,7 +16,8 @@ The definitions are plain Swift data with Foundation `Codable` support:
 | `CodeScheme+Builtins.swift` | Code backgrounds, text, gutter, selection, caret, diff tints and token colours |
 | `TerminalScheme+Builtins.swift` | Complete light/dark terminal palettes using the existing `GhosttyTheme` data |
 | `ThemeTypography.swift` | Optional font family, point size and line-height multiplier for code and terminal |
-| `ThemeOverrides.swift` | Optional changes, legacy preference migration and a versioned settings archive |
+| `ThemeOverrides.swift` | Per theme glass and scheme changes, and the versioned settings archive |
+| `TypographyOverrides.swift` | Code, terminal and conversation typography changes shared by every theme |
 
 Charcoal Glass keeps the stable key `neutral`, so previous selections still work.
 Colour pairs contain light and dark RGB integers. Swift definitions use `0xRRGGBB`; JSON
@@ -23,11 +25,12 @@ uses decimal integers. Glass is `off`, `thin`, `regular` or `thick`, mapped to a
 sidebar material. Conversation typography retains its existing font names and size/spacing enums.
 
 `ColourThemePreference` in BloomCore is the single preference owner and is tested with isolated defaults. It saves one versioned archive
-under `themeOverrides`, keyed by preset, instead of writing to the old global preferences.
-The first read migrates those preferences to the selected theme. Old values remain available
+under `themeOverrides`: glass and scheme changes keyed by preset, and one typography record,
+instead of writing to the old global preferences. The first read migrates glass and the Ghostty
+choice to the selected theme and typography to the shared record. Old values remain available
 on disk but no longer drive the views. An unreadable archive is backed up and logged; legacy settings supply the fallback.
 
-Each value resolves from its saved override, then its preset default. Missing scheme keys
+Each value resolves from its saved override, then the selected preset's default. Missing scheme keys
 fall back to the preset's scheme. Missing fonts use the system monospaced font for code and
 terminal, and the existing conversation font fallback. Sizes are bounded to 9...28 points;
 code and terminal spacing uses a 1...2 multiplier. An empty code/terminal font name explicitly
@@ -58,23 +61,14 @@ colours and never reads mutable preferences.
 Theme changes update editor attributes without replacing its text or undo stack. Terminal
 changes update existing sessions with SwiftTerm's colour, font and spacing APIs. All cursor
 and selection colours are assigned on each switch. Font and spacing setters run only when
-the value changes. Zoom commands write the selected theme's override for the focused code
-editor or terminal, with the conversation as the fallback.
+the value changes. Zoom commands write the shared typography for the focused code editor or
+terminal, with the conversation as the fallback.
 
 ## Future file support
 
-File importing is not implemented. Keep renderers independent of external formats:
-
-- A small versioned Bloom JSON preset will reference code and terminal schemes and provide
-  window, glass and typography defaults.
-- Target VS Code colour-theme JSON for code colours. Bloom's tokeniser is simpler than
-  TextMate and semantic highlighting, so a future adapter must document supported rules.
-- Reuse the current Ghostty parser for terminal colours and add `.itermcolors` later.
-- A VS Code file can supply both code and terminal schemes without coupling their selection.
-
-Before accepting external files, validate schema versions, colour ranges, required fields
-and contrast, and report unsupported rules. Preserve the source format at the import boundary.
-No importer, watcher, theme plugin system or external theme dependencies are needed now.
+File importing is not implemented. The definitions are `Codable` and versioned so that a Bloom
+preset file, VS Code colour themes for code and Ghostty or `.itermcolors` files for the terminal
+can be adapted later without renderers knowing about external formats.
 
 Charcoal Glass keeps its approved dark glass tint `#212938` at 40% opacity. Bloom uses its
 blue sidebar colour at 80% opacity, leaving a subtler native glass effect.

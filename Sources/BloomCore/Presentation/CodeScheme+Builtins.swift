@@ -4,6 +4,8 @@ extension CodeScheme {
         id: "charcoal", title: "Charcoal", background: .init(light: 0xFFFFFF, dark: 0x292C33)
     )
 
+    /// A constant is a number as far as these schemes are concerned, and saying so is cheaper than
+    /// keeping two copies of one pair in step.
     private static func builtin(id: String, title: String, background: PaletteInk.Pair) -> Self {
         Self(
             id: id, title: title, background: background,

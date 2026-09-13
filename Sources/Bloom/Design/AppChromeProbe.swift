@@ -72,7 +72,8 @@ enum AppChromeProbe {
         state.overrides.terminalSource = .builtin("charcoal")
         state.chatTextSize = .largest
         state.choice = .bloom
-        check(state.glass == ColourTheme.bloom.glass && state.chatTextSize == .defaultChoice, "Theme overrides leaked")
+        check(state.glass == ColourTheme.bloom.glass && state.codeScheme == .bloom, "Theme overrides leaked")
+        check(state.chatTextSize == .largest, "Typography did not follow across themes")
         state.choice = .charcoalGlass
         check(state.glass == .regular && state.chatTextSize == .largest, "Switching themes lost overrides")
         let restored = ColourThemePreference(defaults: defaults)
@@ -84,7 +85,9 @@ enum AppChromeProbe {
         let originalChoice = preference.choice
         preference.choice = .charcoalGlass
         let originalOverrides = preference.overrides
+        let originalTypography = preference.typographyOverrides
         defer {
+            preference.typographyOverrides = originalTypography
             preference.overrides = originalOverrides
             preference.choice = originalChoice
         }
@@ -106,7 +109,7 @@ enum AppChromeProbe {
         let couldUndo = editor.undoManager?.canUndo ?? false
         let smallHeight = WrappedCodeLayout.height(of: String(repeating: "code ", count: 30), width: 180)
         preference.overrides.codeScheme = "bloom"
-        preference.overrides.codeTypography = ThemeTypography(fontFamily: "Menlo", fontSize: 20, lineHeight: 1.5)
+        preference.typographyOverrides.codeTypography = ThemeTypography(fontFamily: "Menlo", fontSize: 20, lineHeight: 1.5)
         try? await Task.sleep(for: .milliseconds(250))
         host.layoutSubtreeIfNeeded()
         check(editor.string == before && editor.selectedRange() == selection, "Theme change changed the editor text or selection")
@@ -120,7 +123,7 @@ enum AppChromeProbe {
         let terminal = BloomTerminalView(frame: CGRect(x: 0, y: 0, width: 600, height: 240))
         terminal.feed(text: "theme probe")
         preference.overrides.terminalSource = .builtin("bloom")
-        preference.overrides.terminalTypography = ThemeTypography(fontSize: 18, lineHeight: 1.4)
+        preference.typographyOverrides.terminalTypography = ThemeTypography(fontSize: 18, lineHeight: 1.4)
         terminal.updateTheme()
         check(terminal.font.pointSize == 18 && abs(terminal.lineSpacing - 1.4) < 0.001, "Terminal typography did not update")
         preference.overrides.terminalSource = .builtin("charcoal")

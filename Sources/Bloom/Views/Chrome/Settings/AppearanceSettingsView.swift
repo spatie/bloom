@@ -19,7 +19,7 @@ struct AppearanceSettingsView: View {
                     Text("Dark").tag("dark")
                 }
                 .pickerStyle(.segmented)
-                Text("Changes below are saved for \(colourTheme.choice.title).")
+                Text("Glass and colour schemes are saved for \(colourTheme.choice.title). Fonts, sizes and line heights apply to every theme.")
                     .settingsFootnote()
                 Button("Restore Theme Defaults") { colourTheme.restoreDefaults() }
             }
@@ -59,32 +59,56 @@ struct AppearanceSettingsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: Metrics.corner))
             }
 
-            Section("Conversation") {
-                Picker("Font", selection: $colourTheme.overrides.chatFont) {
-                    Text("Theme default").tag(nil as String?)
-                    ForEach(ChatFontCatalogue.curated) { face in Text(face.title).tag(face.id as String?) }
+            Section {
+                Picker("Font", selection: $colourTheme.chatFont) {
+                    Section {
+                        ForEach(ChatFontCatalogue.curated) { face in
+                            Text(face.title).tag(face.id)
+                        }
+                    }
+
                     Section("Installed on this Mac") {
                         ForEach(ChatFont.familyChoices(keeping: colourTheme.chatFont), id: \.self) { family in
-                            Text(family).tag(family as String?)
+                            // Each name set in its own face, which is what a font menu is for:
+                            // three hundred names in one face is a list to read, and the same
+                            // three hundred in their own faces is a list to look at.
+                            Text(family)
+                                .font(.custom(family, fixedSize: NSFont.systemFontSize))
+                                .tag(family)
                         }
                     }
                 }
-                Text(ChatFont.summary(for: colourTheme.chatFont)).settingsFootnote()
-                Picker("Text size", selection: $colourTheme.overrides.chatTextSize) {
-                    Text("Theme default").tag(nil as ChatTextSize?)
-                    ForEach(ChatTextSize.allCases) { size in Text(size.title).tag(size as ChatTextSize?) }
+
+                Text(ChatFont.summary(for: colourTheme.chatFont))
+                    .settingsFootnote()
+
+                Picker("Text size", selection: $colourTheme.chatTextSize) {
+                    ForEach(ChatTextSize.allCases) { size in
+                        Text(size.title).tag(size)
+                    }
                 }
-                Picker("Line height", selection: $colourTheme.overrides.chatLineHeight) {
-                    Text("Theme default").tag(nil as ChatLineHeight?)
-                    ForEach(ChatLineHeight.allCases) { step in Text(step.title).tag(step as ChatLineHeight?) }
+                .pickerStyle(.segmented)
+
+                Picker("Line height", selection: $colourTheme.chatLineHeight) {
+                    ForEach(ChatLineHeight.allCases) { step in
+                        Text(step.title).tag(step)
+                    }
                 }
+                .pickerStyle(.segmented)
+
                 ChatTextPreview()
                     .environment(\.fontScale, colourTheme.chatTextSize.scale)
                     .environment(\.chatFont, ChatFont(rawValue: colourTheme.chatFont))
                     .environment(\.chatLineHeight, colourTheme.chatLineHeight)
+            } header: {
+                Text("Conversation")
+            } footer: {
+                Text("Applies to what an agent says and to what you type, whichever theme is selected.")
+                    .settingsFootnote()
             }
         }
         .settingsForm()
+        // The picker only records the choice; this is what makes the running app take it.
         .onAppear { AppearancePreference.apply(appearance) }
         .onChange(of: appearance) { _, value in AppearancePreference.apply(value) }
     }
@@ -95,7 +119,7 @@ struct AppearanceSettingsView: View {
         let defaults = terminal ? colourTheme.choice.terminalTypography : colourTheme.choice.codeTypography
         let defaultFamily = defaults.fontFamily ?? (terminal ? ghostty?.fontFamily : nil)
         Picker("Font", selection: typographyBinding(\.fontFamily, terminal: terminal)) {
-            Text("Theme default (\(defaultFamily.flatMap { $0.isEmpty ? nil : $0 } ?? "System monospace"))").tag(nil as String?)
+            Text("Default (\(defaultFamily.flatMap { $0.isEmpty ? nil : $0 } ?? "System monospace"))").tag(nil as String?)
             Text("System monospace").tag("" as String?)
             ForEach(Self.monospaceFamilies.union(family.map { [$0] } ?? []).filter { !$0.isEmpty }.sorted(), id: \.self) { name in
                 Text(name).tag(name as String?)
@@ -110,7 +134,7 @@ struct AppearanceSettingsView: View {
                     Text("\(Int(terminal ? terminalSize : (typography.fontSize ?? 13))) pt").monospacedDigit()
                 }
                 .fixedSize()
-                Button("Use Theme Default") { typographyBinding(\.fontSize, terminal: terminal).wrappedValue = nil }
+                Button("Use Default") { typographyBinding(\.fontSize, terminal: terminal).wrappedValue = nil }
                     .disabled(typographyBinding(\.fontSize, terminal: terminal).wrappedValue == nil)
             }
         }
@@ -123,7 +147,7 @@ struct AppearanceSettingsView: View {
                     Text("\(Int(((typography.lineHeight ?? 1) * 100).rounded()))%").monospacedDigit()
                 }
                 .fixedSize()
-                Button("Use Theme Default") { typographyBinding(\.lineHeight, terminal: terminal).wrappedValue = nil }
+                Button("Use Default") { typographyBinding(\.lineHeight, terminal: terminal).wrappedValue = nil }
                     .disabled(typographyBinding(\.lineHeight, terminal: terminal).wrappedValue == nil)
             }
         }
@@ -131,9 +155,16 @@ struct AppearanceSettingsView: View {
 
     private func typographyBinding<Value>(_ key: WritableKeyPath<ThemeTypography, Value>, terminal: Bool) -> Binding<Value> {
         Binding(
-            get: { (terminal ? colourTheme.overrides.terminalTypography : colourTheme.overrides.codeTypography)[keyPath: key] },
+            get: {
+                let overrides = colourTheme.typographyOverrides
+                return (terminal ? overrides.terminalTypography : overrides.codeTypography)[keyPath: key]
+            },
             set: {
-                if terminal { colourTheme.overrides.terminalTypography[keyPath: key] = $0 } else { colourTheme.overrides.codeTypography[keyPath: key] = $0 }
+                if terminal {
+                    colourTheme.typographyOverrides.terminalTypography[keyPath: key] = $0
+                } else {
+                    colourTheme.typographyOverrides.codeTypography[keyPath: key] = $0
+                }
             }
         )
     }
@@ -155,6 +186,13 @@ struct AppearanceSettingsView: View {
     })
 }
 
+/// A few rungs of the conversation at once, because one line of body text cannot show what a scale
+/// does: what the setting changes is the distance between a heading, a sentence and a filename.
+///
+/// Drawn by the transcript's own renderer rather than by a hand-built stack of `Text`, because the
+/// two questions a face has to answer here are how a paragraph reads and how a span of inline code
+/// sits inside it, and only the real renderer pairs the two the way the transcript will. Written
+/// as markdown for the same reason: this is the shape an agent actually replies in.
 private struct ChatTextPreview: View {
     private static let sample = """
     ## Ran the test suite

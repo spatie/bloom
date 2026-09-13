@@ -1,6 +1,27 @@
 import SwiftUI
 import BloomCore
 
+/// What the user asked for, as one side of a conversation.
+///
+/// **Only this side is bubbled, and that is deliberate.** The agent's replies stay unbubbled prose
+/// and must not be "finished off" later. iMessage works because both sides are a sentence long. An
+/// agent turn is paragraphs, tool rows, code blocks and a footer, and wrapping that in a tinted
+/// plate would put a box around ninety percent of the window, cap prose at the bubble's measure and
+/// leave the tool rows either inside a bubble they do not belong in or outside one, breaking the
+/// column they align on. The asymmetry IS the design: one side is a remark, the other is a report.
+///
+/// Files attached to the turn are drawn as the same chips the composer showed a moment before it
+/// was sent, rather than as the list of paths the agent was handed. The agent needs paths in the
+/// text and always will, but the reader already knows what they attached and a scratch path under
+/// `.bloom/attachments` tells them nothing they did not know. See `AttachmentTrailer` for the one
+/// place that format is written and read.
+///
+/// Instructions Bloom appended to a turn it composed itself are drawn the same way, as a chip
+/// where the block sits, and hovering one shows the words the agent was given. They used to be a
+/// button under the bubble with a popover behind a click, next to a pull request's instructions
+/// which were a pill in the sentence with a card on hover: one thing, drawn twice, and only one of
+/// the two answered the pointer. See `SentTurn` for the cut and `InlineChip` for the chip that
+/// takes either a file or a body.
 struct UserTurnRowView: View {
     var text: String
     /// The files this turn carried, worktree relative, in the order they were attached.

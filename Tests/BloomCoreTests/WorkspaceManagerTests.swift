@@ -294,12 +294,15 @@ struct WorkspaceManagerTests {
         let repo = try await TempRepo()
         defer { repo.cleanUp() }
         // Ignores SIGTERM, which is what a Stop has to get past as well as the ordinary case.
+        // Five minutes rather than thirty seconds: on a loaded CI runner the first line took long
+        // enough to arrive that the script finished on its own before the cancel, and the test
+        // failed on `finished.txt`. A stop that does not work still fails, on the time limit.
         try repo.write(".conductor/settings.toml", """
         [scripts]
         setup = '''
         trap '' TERM
         echo "seeding"
-        for _ in $(seq 1 600); do sleep 0.05; done
+        for _ in $(seq 1 6000); do sleep 0.05; done
         touch finished.txt
         '''
         """)

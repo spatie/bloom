@@ -111,6 +111,12 @@ final class BloomTerminalView: LocalProcessTerminalView {
     private var typography = ThemeTypography()
     private var usesGhosttyTheme = false
 
+    /// What is on screen, which is what the two shortcuts step from. Readable from outside because
+    /// the View menu steps from it too, and stepping from the stored size instead would make the
+    /// menu item and the keystroke disagree on any terminal following Ghostty.
+    ///
+    /// Ghostty's `font-size` when the typography names none, so a terminal opens at the size the
+    /// user reads everywhere else rather than at Bloom's own body size.
     var fontSize: CGFloat {
         CGFloat(typography.fontSize ?? ghostty?.fontSize ?? Double(TerminalTextSize.systemDefault))
     }
@@ -275,6 +281,8 @@ final class BloomTerminalView: LocalProcessTerminalView {
         usesGhosttyTheme ? TerminalGhostty.theme(for: effectiveAppearance) : nil
     }
 
+    /// SwiftTerm ships a palette that looks nothing like the rest of Bloom, so both the sixteen
+    /// ANSI slots and the default foreground and background are replaced here.
     func applyAppearanceColors() {
         let fallback = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             ? terminalScheme.dark : terminalScheme.light
@@ -286,6 +294,8 @@ final class BloomTerminalView: LocalProcessTerminalView {
         for scroller in subviews.compactMap({ $0 as? NSScroller }) {
             scroller.knobStyle = (background?.brightnessComponent ?? 1) < 0.5 ? .light : .dark
         }
+        // Ghostty falls back to the foreground for the cursor, and to the system for a selection it
+        // was never told about.
         caretColor = theme.cursorColor.map(NSColor.init) ?? nativeForegroundColor
         caretTextColor = theme.cursorTextColor.map(NSColor.init)
         selectedTextBackgroundColor = theme.selectionBackground.map(NSColor.init) ?? .selectedTextBackgroundColor

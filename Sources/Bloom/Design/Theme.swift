@@ -2,12 +2,65 @@ import SwiftUI
 import AppKit
 import BloomCore
 
-// Native colours own text and controls; themes only change the surfaces behind them.
+/// Bloom's colours.
+///
+/// Two kinds of colour live here, and the split is the whole design.
+///
+/// **Ink stays semantic.** Text, the focus ring, the caret and the text selection resolve to an
+/// AppKit semantic colour, because those already track Increase Contrast, Differentiate Without
+/// Colour and the keyboard access setting. Hard-coding them is what made the first version of
+/// this app look like a web page pretending to be a Mac.
+///
+/// **The accent and the meaning colours no longer do.** They were semantic once, and the reason
+/// they stopped is written out on `accent` and on `negative`: an app whose accent is whatever the
+/// user last picked in System Settings cannot be part of a brand built on one ramp, and the
+/// system reds are tuned to be the one saturated thing on a screen rather than one of a dozen
+/// small marks in a narrow column. Read those two before adding a third exception.
+///
+/// **Ground is Bloom's own, and it is what a theme changes.** The surfaces and the rule between
+/// them are named colours read off the chosen `ColourTheme`, not `windowBackgroundColor` and
+/// friends. On macOS 26 every one of those semantic grounds resolves to the same value: window,
+/// text and control backgrounds are all pure white in light and all `#1E1E1E` in dark. An app
+/// built on them has exactly one surface wearing five names, so nothing separates from anything
+/// and the only thing left to divide a pane from its neighbour is a separator at ten percent ink,
+/// which on white is very nearly nothing at all. That is the "everything is white and it feels
+/// heavy" complaint, stated in numbers.
+///
+/// A theme is a small, deliberate set instead: a body, a panel one step off it, a sidebar one
+/// step the other way, and a raised control. The Bloom theme's light members carry a slight cool
+/// cast so the greys read as one family rather than as camera noise, and its dark members are a
+/// deep blue rather than a neutral charcoal, which is the appearance this app was designed in and
+/// the reason its dark mode does not read as an unlit light mode.
+///
+/// Every value in a theme is a step of a single ramp, so the relationships hold: body to panel is
+/// small, body to sidebar is small, and the rule carries the actual separation. Adding another
+/// surface to `ThemeSurfaces` is how this gets heavy again, so do not.
 enum Palette {
+    // MARK: Surfaces
+    //
+    // Computed rather than stored, because they are read off `ColourThemePreference` and a theme
+    // can change while the window is open.
+
+    /// The ground the centre column stands on: the transcript, Home, Search, Settings.
+    ///
+    /// Identical to `surface` on purpose. They are two names for the reading ground because the
+    /// call sites mean different things by them, not because the colour differs; if they ever
+    /// diverge the window has grown a surface it does not need.
     @MainActor static var windowBackground: Color { surface }
+    /// Content areas: the transcript, the inspector, anything holding text.
     @MainActor static var surface: Color { themed(\.surface) }
+    /// A raised control: a segmented control's selected cell, a bordered button, a browser chip.
     @MainActor static var surfaceRaised: Color { themed(\.raised) }
+    /// A recessed strip: gutters, hunk headers, tool detail blocks, the composer box, the panel.
+    ///
+    /// The step off `surface` is meant to be small. It reads as recessed because it has a rule
+    /// under it, not because it is a different colour, which is what keeps a window holding a
+    /// dozen of these from looking like a stack of cards.
     @MainActor static var surfaceSunken: Color { themed(\.sunken) }
+    /// The chrome: the title bar, and every strip of small controls.
+    ///
+    /// One value for all of them, which is what macOS itself does, and giving each strip a step
+    /// of its own is how a window ends up with seven grounds and no shape.
     @MainActor static var sidebar: Color { Color(nsColor: sidebarNSColor) }
     @MainActor static var sidebarNSColor: NSColor { themedNSColor(\.sidebar) }
     @MainActor static var sidebarGlassTint: Color {

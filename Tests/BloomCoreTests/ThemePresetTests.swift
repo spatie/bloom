@@ -14,17 +14,17 @@ struct ThemePresetTests {
         defaults.set("looser", forKey: ChatLineHeight.defaultsKey)
         defaults.set(18, forKey: "terminal.fontSize")
         let migrated = ThemeOverrides.migrating(from: defaults)
+        let typography = TypographyOverrides.migrating(from: defaults)
         #expect(migrated.glass == .regular)
-        #expect(migrated.chatFont == "Charter")
-        #expect(migrated.chatTextSize == .largest)
-        #expect(migrated.chatLineHeight == .looser)
-        #expect(migrated.terminalTypography.fontSize == 18)
+        #expect(typography.chatFont == "Charter")
+        #expect(typography.chatTextSize == .largest)
+        #expect(typography.chatLineHeight == .looser)
+        #expect(typography.terminalTypography.fontSize == 18)
         #expect(migrated.terminalSource == .ghostty)
         defaults.set(false, forKey: "useGhosttyTerminalTheme")
         defaults.set(0, forKey: "terminal.fontSize")
-        let disabled = ThemeOverrides.migrating(from: defaults)
-        #expect(disabled.terminalSource == nil)
-        #expect(disabled.terminalTypography.fontSize == nil)
+        #expect(ThemeOverrides.migrating(from: defaults).terminalSource == nil)
+        #expect(TypographyOverrides.migrating(from: defaults).terminalTypography.fontSize == nil)
         #expect(defaults.string(forKey: ChatFontCatalogue.defaultsKey) == "Charter")
     }
 
@@ -66,7 +66,9 @@ struct ThemePresetTests {
         var charcoal = ThemeOverrides()
         charcoal.glass = .regular
         charcoal.codeScheme = "bloom"
-        let original = ThemeOverrides.Archive(themes: ["neutral": charcoal])
+        var typography = TypographyOverrides()
+        typography.chatTextSize = .large
+        let original = ThemeOverrides.Archive(themes: ["neutral": charcoal], typography: typography)
         let restored = try ThemeOverrides.Archive.decode(JSONEncoder().encode(original))
         #expect(restored == original)
         #expect(restored.themes["bloom"] == nil)
@@ -114,23 +116,26 @@ struct ThemePreferenceStateTests {
         state.overrides.terminalSource = .builtin("charcoal")
         state.glassOverride = .regular
         state.chatTextSize = .largest
-        state.overrides.codeTypography.fontSize = 20
+        state.typographyOverrides.codeTypography.fontSize = 20
         state.choice = .bloom
-        #expect(state.glass == ColourTheme.bloom.glass && state.chatTextSize == .defaultChoice)
-        #expect(state.codeTypography.fontSize == 13)
+        #expect(state.glass == ColourTheme.bloom.glass && state.codeScheme == .bloom)
+        // Typography follows the person across presets rather than resetting with the colours.
+        #expect(state.chatTextSize == .largest && state.codeTypography.fontSize == 20)
         state.choice = .charcoalGlass
         #expect(state.glass == .regular && state.chatTextSize == .largest)
         #expect(state.codeScheme == .bloom && state.terminalScheme == .charcoal)
         let reloaded = ColourThemePreference(defaults: defaults)
         #expect(reloaded.overrides == state.overrides)
-        reloaded.overrides.codeTypography.fontSize = nil
+        #expect(reloaded.typographyOverrides == state.typographyOverrides)
+        reloaded.typographyOverrides.codeTypography.fontSize = nil
         #expect(reloaded.codeTypography.fontSize == 13)
         #expect(reloaded.codeScheme == .bloom && reloaded.glass == .regular)
         reloaded.restoreDefaults()
         let reset = ColourThemePreference(defaults: defaults)
         #expect(reset.glass == .thick && reset.codeScheme == .charcoal)
         #expect(!reset.followsGhostty)
-        #expect(reset.chatTextSize == .defaultChoice)
+        // Restoring a preset's defaults is about its look, so the reading size survives it.
+        #expect(reset.chatTextSize == .largest)
     }
 
     @Test func legacyDefaultsRemainInherited() throws {
@@ -139,7 +144,7 @@ struct ThemePreferenceStateTests {
         defer { defaults.removePersistentDomain(forName: domain) }
         defaults.set(ChatTextSize.defaultChoice.rawValue, forKey: ChatTextSize.defaultsKey)
         defaults.set(ChatLineHeight.defaultChoice.rawValue, forKey: ChatLineHeight.defaultsKey)
-        let migrated = ThemeOverrides.migrating(from: defaults)
+        let migrated = TypographyOverrides.migrating(from: defaults)
         #expect(migrated.chatTextSize == nil && migrated.chatLineHeight == nil)
     }
 
@@ -156,6 +161,21 @@ struct ThemePreferenceStateTests {
         #expect(defaults.data(forKey: "themeOverrides.unreadableBackup") == corrupt)
         state.glassOverride = .off
         #expect(ColourThemePreference(defaults: defaults).chatTextSize == .largest)
+    }
+
+    @Test func archiveWrittenPerPresetMigratesTypographyFromLegacySettings() throws {
+        let domain = "bloom-theme-typography-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: domain))
+        defer { defaults.removePersistentDomain(forName: domain) }
+        // The shape an earlier build of this branch wrote: typography inside each preset, and no
+        // top level typography at all.
+        let older = Data(#"{"schemaVersion":1,"themes":{"bloom":{"glass":"thin","chatTextSize":"small"}}}"#.utf8)
+        defaults.set(older, forKey: "themeOverrides")
+        defaults.set("large", forKey: ChatTextSize.defaultsKey)
+        let state = ColourThemePreference(defaults: defaults)
+        #expect(state.glass == .thin)
+        #expect(state.chatTextSize == .large)
+        #expect(defaults.data(forKey: "themeOverrides.unreadableBackup") == nil)
     }
 
     @Test func ghosttyColourDefaultsStayTogether() {
