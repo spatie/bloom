@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import BloomCore
 import BloomClient
 import BloomAuthentication
 
@@ -123,8 +124,18 @@ struct ServerMaintenanceView: View {
                                 if let message = job.message { Text(message).settingsFootnote().textSelection(.enabled) }
                             }
                         }
-                        accessSection(session)
+                        if !session.authorized { accessSection(session) }
                         if !session.components.isEmpty { componentsSection(session) }
+                        if session.authorized {
+                            Section {
+                                HStack {
+                                    Label("This Mac can install updates", systemImage: "checkmark.shield")
+                                        .font(Typo.caption).foregroundStyle(.secondary)
+                                    Spacer()
+                                    Button("Update Permissions…") { showsAccess = true }
+                                }
+                            }
+                        }
                         Section {
                             Text("Bloom handles stopping, updating and starting the service. This Mac reconnects automatically; you do not need to stop the server yourself.").settingsFootnote()
                         }
@@ -175,13 +186,13 @@ struct ServerMaintenanceView: View {
     }
 
     private func accessSection(_ session: ServerMaintenanceSession) -> some View {
-        Section("Maintenance access") {
+        Section("Update permissions") {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Label(session.authorized ? "This Mac can manage updates" : "Authorise this Mac to manage updates",
+                    Label(session.authorized ? "This Mac can manage updates" : "Allow this Mac to install updates",
                           systemImage: session.authorized ? "checkmark.shield" : "lock.shield")
                     Text(session.authorized ? "Access is separate from your workspaces and agent sign-ins."
-                         : "Use the maintenance key from server setup. It is saved only in this Mac’s Keychain.").settingsFootnote()
+                         : "Add the update key from server setup. It authorises software installation and service restarts, and is saved in this Mac’s Keychain.").settingsFootnote()
                 }
                 Spacer()
                 Button(session.authorized ? "Manage…" : "Add Access…") { showsAccess = true }
@@ -209,6 +220,10 @@ struct ServerMaintenanceView: View {
                                 .font(Typo.caption).foregroundStyle(Palette.controlAccent)
                         }
                         if !component.detail.isEmpty { Text(component.detail).settingsFootnote() }
+                        if component.id == .server, Bundle.main.bundleIdentifier == Store.remoteBundleIdentifier {
+                            Button("Review Included Development Build…") { model.beginAdministration(.update) }
+                                .disabled(model.administrationIsRunning || session.jobs.contains(where: \.isActive))
+                        }
                     }
                     Spacer()
                     if component.canUpdate, component.availableVersion != component.installedVersion {

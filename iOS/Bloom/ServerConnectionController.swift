@@ -32,6 +32,7 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
     private let https = UITextField()
     private var connecting = false
     private var connectionFailure: String?
+    private var skillsItem: UIBarButtonItem?
     private var task: Task<Void, Never>?
 
     init(model: MobileConnection) { self.model = model; super.init(nibName: nil, bundle: nil) }
@@ -47,13 +48,19 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
         })
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Connect", primaryAction: UIAction { [weak self] _ in self?.connect() })
         if model.service != nil || model.catalogue != nil || model.canRetryConnection {
+            let skills = UIBarButtonItem(title: "Skills", image: UIImage(systemName: "books.vertical"), primaryAction: UIAction { [weak self] _ in
+                guard let self else { return }
+                navigationController?.pushViewController(ServerSkillsController(model: model), animated: true)
+            })
+            skills.accessibilityLabel = "Server skills"
+            skillsItem = skills
             toolbarItems = [UIBarButtonItem(title: model.address.hasPrefix("https:") ? "Sign Out" : "Disconnect", primaryAction: UIAction { [weak self] _ in
                 guard let self else { return }
                 do {
                     if model.address.hasPrefix("https:") { try model.authentication.signOut(address: model.address) }
                     model.disconnect(); dismiss(animated: true)
                 } catch { show(error) }
-            }), .flexibleSpace(), UIBarButtonItem(title: "Updates", image: UIImage(systemName: "arrow.down.circle"), primaryAction: UIAction { [weak self] _ in
+            }), .flexibleSpace(), skills, UIBarButtonItem(title: "Updates", image: UIImage(systemName: "arrow.down.circle"), primaryAction: UIAction { [weak self] _ in
                 guard let self else { return }
                 navigationController?.pushViewController(ServerMaintenanceController(model: model), animated: true)
             })]
@@ -216,6 +223,7 @@ final class ServerConnectionController: UIViewController, UITableViewDataSource,
     }
 
     private func updateConnectButton() {
+        skillsItem?.isEnabled = model.canSend && !connecting
         updateIntroduction()
         navigationItem.rightBarButtonItem?.title = connecting ? "Connecting…" : matchesCurrentServer ? "Reconnect" : "Connect"
         let address = transport.selectedSegmentIndex == 0 ? host.text : https.text

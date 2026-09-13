@@ -50,6 +50,18 @@ class Fixture(unittest.TestCase):
         self.addCleanup(self.store.close)
 
 
+class ComponentPresentationTests(Fixture):
+    def test_missing_release_asset_keeps_the_exact_reason(self):
+        supervisor = maintenance.Supervisor(self.config, store=self.store, runtime=mock.Mock())
+        with mock.patch.object(maintenance, 'release_asset', side_effect=maintenance.MaintenanceError(
+                'release_unavailable', 'The stable release does not include a Linux server package.')), \
+                mock.patch.object(supervisor, 'account_command', return_value='{"method":null,"detail":"Not installed"}'):
+            component = supervisor.components(refresh=True)[0]
+        self.assertIsNone(component['availableVersion'])
+        self.assertFalse(component['canUpdate'])
+        self.assertEqual(component['detail'], 'The stable release does not include a Linux server package.')
+
+
 class StoreTests(Fixture):
     def test_acceptance_is_idempotent_but_rejects_reused_intent(self):
         value, request = job(), fresh_id()

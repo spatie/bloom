@@ -56,6 +56,9 @@ public struct WorkspaceExecution: Sendable, Hashable {
             "BLOOM_BRIDGE_SHIM_PATH": attachment.shimPath,
         ]
         if let configPath { values["BLOOM_BRIDGE_CONFIG_PATH"] = configPath }
+        for key in ["BLOOM_SKILL_BUNDLES_DIRECTORY", "BLOOM_CLAUDE_SKILLS_DIRECTORY", "BLOOM_CODEX_SKILLS_DIRECTORY"] {
+            if let path = attachment.containerEnvironment[key] { values[key] = path }
+        }
         return values
     }
 

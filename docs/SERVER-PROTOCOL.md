@@ -564,3 +564,10 @@ account. Cleanup is serialised and its category outcomes are journalled like oth
 
 Portable DTOs: `Packages/BloomClient/Sources/BloomClient/ServerStorage.swift`. The JSON Schema and
 production Codable vectors include both storage operations and their reports.
+
+
+### Skill management
+
+`diagnostics._0.skillManagement == true` enables the additive protocol-14 `skills` operation.
+The server owns inventory, pinned import plans, discovery links and revision-checked mutations.
+See [Server skills](SERVER-SKILLS.md) for all actions, the review flow and import limits.

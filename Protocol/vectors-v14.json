@@ -108,6 +108,64 @@
     }
   },
   {
+    "name" : "request-skillsInspect",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "skills" : {
+          "_0" : {
+            "action" : "inspect",
+            "workspaceID" : "workspace-example"
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-skillsImport",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "skills" : {
+          "_0" : {
+            "action" : "previewImport",
+            "files" : [
+              {
+                "data" : "IyBFeGFtcGxl",
+                "isExecutable" : false,
+                "path" : "example/SKILL.md"
+              }
+            ]
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "request-skillsApply",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "operation" : {
+        "skills" : {
+          "_0" : {
+            "action" : "apply",
+            "agents" : [
+              "claude",
+              "codex"
+            ],
+            "planID" : "example-plan",
+            "selectedSkillNames" : [
+              "example"
+            ]
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
     "name" : "request-cleanupStorage",
     "value" : {
       "id" : "00000000-0000-4000-8000-000000000001",
@@ -145,6 +203,7 @@
             "codexContextWindow" : 0,
             "effort" : "medium",
             "hasWorktree" : true,
+            "interactionMode" : "build",
             "isFastMode" : false,
             "model" : "example-model",
             "outputStyle" : "default",
@@ -618,6 +677,7 @@
                 "effort" : "medium",
                 "id" : "session-example",
                 "inputTokens" : 0,
+                "interactionMode" : "build",
                 "lastReadSeq" : 0,
                 "model" : "example-model",
                 "outputTokens" : 0,
@@ -656,6 +716,7 @@
               "codexContextWindow" : 0,
               "effort" : "medium",
               "hasWorktree" : true,
+              "interactionMode" : "build",
               "isFastMode" : false,
               "model" : "example-model",
               "outputStyle" : "default",
@@ -694,6 +755,7 @@
               "codexContextWindow" : 0,
               "effort" : "medium",
               "hasWorktree" : true,
+              "interactionMode" : "build",
               "isFastMode" : false,
               "model" : "example-model",
               "outputStyle" : "default",
@@ -833,6 +895,73 @@
                 "status" : "uncertain",
                 "target" : "unusedImages"
               }
+            ]
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-skillsCapability",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "diagnostics" : {
+          "_0" : {
+            "account" : "bloom",
+            "checkedAt" : 0,
+            "checks" : [
+
+            ],
+            "hostname" : "example-server",
+            "operatingSystem" : "Ubuntu",
+            "skillManagement" : true
+          }
+        }
+      },
+      "version" : 14
+    }
+  },
+  {
+    "name" : "reply-skillsPlan",
+    "value" : {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "result" : {
+        "skills" : {
+          "_0" : {
+            "plan" : {
+              "collectionID" : "example-collection",
+              "expiresAt" : 0,
+              "id" : "example-plan",
+              "skills" : [
+                {
+                  "byteCount" : 9,
+                  "description" : "Example skill",
+                  "enabledAgents" : [
+
+                  ],
+                  "fileCount" : 1,
+                  "filePaths" : [
+                    "SKILL.md"
+                  ],
+                  "id" : "example-skill",
+                  "name" : "example",
+                  "path" : "example/SKILL.md",
+                  "revision" : "example-revision",
+                  "source" : "personal"
+                }
+              ],
+              "source" : "personal",
+              "warnings" : [
+
+              ]
+            },
+            "skills" : [
+
+            ],
+            "warnings" : [
+
             ]
           }
         }
@@ -1030,6 +1159,7 @@
               "effort" : "medium",
               "id" : "session-example",
               "inputTokens" : 0,
+              "interactionMode" : "build",
               "lastReadSeq" : 0,
               "model" : "example-model",
               "outputTokens" : 0,

@@ -10,6 +10,7 @@ public actor ServerRuntime {
     public typealias RunnerFactory = @Sendable (Session, String, Store) -> any SessionRunner
     private let store: Store
     private let storage: ServerStorageService
+    private let skills: ServerSkillsService
     private let makeRunner: RunnerFactory?
     private var bridge: BridgeServer?
     private var bridgeArchives: [SessionID: Task<Void, Never>] = [:]
@@ -46,11 +47,13 @@ public actor ServerRuntime {
     }
 
     init(store: Store, authentication: @escaping ServerAgentAuthentication.Check = ServerAgentAuthentication.inspect, gatewayGroupID: UInt32? = nil, installedAgents: @escaping AgentDiscovery,
-         makeRunner: RunnerFactory? = nil, workspaceAdmissions: ServerWorkspaceAdmissions, storageService: ServerStorageService? = nil, maintenanceTrial: Bool = false,
+         makeRunner: RunnerFactory? = nil, workspaceAdmissions: ServerWorkspaceAdmissions, storageService: ServerStorageService? = nil, skillsService: ServerSkillsService? = nil, maintenanceTrial: Bool = false,
          maintenanceRestoration: (@Sendable () async throws -> Void)? = nil) {
         self.workspaceAdmissions = workspaceAdmissions
         self.store = store
         storage = storageService ?? ServerStorageService(directory: (store.path as NSString).deletingLastPathComponent)
+        skills = skillsService ?? ServerSkillsService(directory: URL(fileURLWithPath: store.path).deletingLastPathComponent().appendingPathComponent("skills").path,
+                                     home: FileManager.default.homeDirectoryForCurrentUser.path)
         self.installedAgents = installedAgents
         self.authentication = authentication
         terminalStreams = ServerTerminalStreams(groupID: gatewayGroupID)
@@ -118,6 +121,9 @@ public actor ServerRuntime {
     private func dispatch(_ request: ServerRequest) async -> ServerReply {
         if maintenanceTrial || (maintenanceQuiescing && !request.operation.allowedDuringMaintenance) {
             return ServerReply(id: request.id, result: .failure("Bloom Server is preparing an update. Existing work can finish; new work will be available when maintenance ends."))
+        }
+        if case .skills = request.operation, request.version < 14 {
+            return ServerReply(id: request.id, result: .failure("Skill management requires Bloom protocol 14 and the skillManagement capability."))
         }
         if case .uiBridge = request.operation, request.version < 14 {
             return ServerReply(id: request.id, result: .failure("Workspace UI tools require Bloom protocol 14."))
@@ -202,6 +208,10 @@ public actor ServerRuntime {
     private func execute(_ operation: ServerOperation) async throws -> ServerResult {
         guard !isClosed else { throw ServerFailure("The server is shutting down.") }
         switch operation {
+        case .skills(let request):
+            let path: String?
+            if let id = request.workspaceID { path = try await workspace(id, readingDuringSetup: true).path } else { path = nil }
+            return .skills(try await skills.handle(request, workspacePath: path))
         case .maintenance:
             throw ServerFailure("Server updates require the managed maintenance service. Enable it through server setup, then reconnect.")
         case .uiBridge: throw ServerFailure("UI leases must be handled by the owning runtime.")
@@ -603,7 +613,15 @@ public actor ServerRuntime {
                   let workspace = try await self.store.workspace(id: workspaceID), workspace.state == .active else {
                 throw ServerFailure("This workspace is no longer available.")
             }
-            let handle = self.bridge?.register(session: session, workspace: workspace)
+            var handle = self.bridge?.register(session: session, workspace: workspace)
+            if handle != nil, self.makeRunner == nil, let repo = try await self.store.repo(id: workspace.repoID) {
+                let settings = SettingsLoader.load(workspace: workspace.path, repo: repo.path)
+                if settings.executionBridge == true, !(settings.executionCommand ?? []).isEmpty, let current = handle {
+                    var attachment = current.attachment
+                    attachment.containerEnvironment = try await self.skills.activeContainerEnvironment()
+                    handle = BridgeHandle(attachment: attachment, mcpConfigPath: current.mcpConfigPath)
+                }
+            }
             let runner = self.makeRunner?(session, workspace.path, self.store)
                 ?? SessionRunnerFactory.make(session: session, workspacePath: workspace.path, store: self.store, bridge: handle)
             return ServerSession(runner: runner) { [weak self] ending in await self?.queue().turnEnded(session.id, ending: ending) }

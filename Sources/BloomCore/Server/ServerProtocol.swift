@@ -17,6 +17,7 @@ public struct ServerRequest: Codable, Sendable, Equatable {
 
 public enum ServerOperation: Codable, Sendable, Equatable {
     case maintenance(ServerMaintenanceRequest)
+    case skills(ServerSkillsRequest)
     case uiBridge(RemoteUIBridgeOperation)
     case hello
     case diagnostics
@@ -51,6 +52,7 @@ public enum ServerOperation: Codable, Sendable, Equatable {
         // The supervisor records maintenance intents without their credentials. Never persist
         // its authenticated envelope in the workspace command journal.
         case .maintenance, .uiBridge, .reviewSnapshot, .reviewPatch, .hello, .diagnostics, .storage, .catalogue, .previewAddress, .transcript, .changes, .patch, .file, .composer: false
+        case .skills(let request): request.action != .inspect && request.action != .read
         case .creation(let action): action.mutates
         case .project(_, let action): action.mutates
         case .cleanupStorage, .create, .send, .stop, .answer, .configure, .cancelQueued, .setComposer, .markRead, .renameSession, .closeSession, .terminalStream: true
@@ -107,6 +109,7 @@ public struct ServerReply: Codable, Sendable {
 
 public enum ServerResult: Codable, Sendable {
     case maintenance(ServerMaintenanceResponse)
+    case skills(ServerSkillsResponse)
     case uiBridge(RemoteUIBridgeResult)
     case reviewSnapshot(ServerReviewSnapshot)
     case reviewPatch(ServerPatchSnapshot)

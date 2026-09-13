@@ -439,6 +439,370 @@
       ],
       "additionalProperties": false
     },
+    "ServerSkillAgent": {
+      "enum": [
+        "claude",
+        "codex"
+      ]
+    },
+    "ServerSkillSource": {
+      "enum": [
+        "personal",
+        "git",
+        "project",
+        "unmanaged"
+      ]
+    },
+    "ServerSkillFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "data": {
+          "type": "string",
+          "contentEncoding": "base64"
+        },
+        "isExecutable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "ServerSkillsRequest": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "enum": [
+            "inspect",
+            "read",
+            "previewImport",
+            "previewGit",
+            "apply",
+            "setEnabled",
+            "remove"
+          ]
+        },
+        "workspaceID": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "files": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ServerSkillFile"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "repositoryURL": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "collectionID": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "planID": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "skillID": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selectedSkillNames": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "agents": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ServerSkillAgent"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "ServerSkill": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/ServerSkillSource"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "enabledAgents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ServerSkillAgent"
+          }
+        },
+        "fileCount": {
+          "type": "integer"
+        },
+        "byteCount": {
+          "type": "integer"
+        },
+        "repositoryURL": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "collectionID": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "warning": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "filePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "source",
+        "revision",
+        "enabledAgents",
+        "fileCount",
+        "byteCount",
+        "path",
+        "filePaths"
+      ],
+      "additionalProperties": false
+    },
+    "ServerSkillsPlan": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/ServerSkillSource"
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ServerSkill"
+          }
+        },
+        "repositoryURL": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "collectionID": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "number"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "source",
+        "skills",
+        "collectionID",
+        "expiresAt",
+        "warnings"
+      ],
+      "additionalProperties": false
+    },
+    "ServerSkillsResponse": {
+      "type": "object",
+      "properties": {
+        "skills": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ServerSkill"
+          }
+        },
+        "plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServerSkillsPlan"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "skills",
+        "warnings"
+      ],
+      "additionalProperties": false
+    },
     "Request": {
       "type": "object",
       "properties": {
@@ -738,6 +1102,27 @@
           },
           "required": [
             "maintenance"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "skills": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/ServerSkillsRequest"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "skills"
           ],
           "additionalProperties": false
         },
@@ -1924,6 +2309,27 @@
           },
           "required": [
             "maintenance"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "skills": {
+              "type": "object",
+              "properties": {
+                "_0": {
+                  "$ref": "#/$defs/ServerSkillsResponse"
+                }
+              },
+              "required": [
+                "_0"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "skills"
           ],
           "additionalProperties": false
         },
@@ -3963,6 +4369,16 @@
           ]
         },
         "maintenanceManagement": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "skillManagement": {
           "anyOf": [
             {
               "type": "boolean"

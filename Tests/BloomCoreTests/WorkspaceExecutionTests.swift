@@ -4,6 +4,28 @@ import Foundation
 
 @Suite("Workspace execution", .scratchDirectory)
 struct WorkspaceExecutionTests {
+    @Test("skill mount paths reach only opted-in container launchers and never MCP registration")
+    func containerSkillPathsStayOutOfBridgeRegistration() {
+        let paths = [
+            "BLOOM_SKILL_BUNDLES_DIRECTORY": "/service/data/skills/bundles",
+            "BLOOM_CLAUDE_SKILLS_DIRECTORY": "/service/home/.claude/skills",
+            "BLOOM_CODEX_SKILLS_DIRECTORY": "/service/home/.agents/skills",
+        ]
+        var attachment = BridgeAttachment(shimPath: "/runtime/bin/bloom-bridge", socketPath: "/private/bridge/socket", token: "test-token", role: .parent,
+            containerEnvironment: paths)
+        attachment.containerEnvironment["BLOOM_BRIDGE_TOKEN"] = "must-not-override"
+        let wrapped = WorkspaceExecution(commandPrefix: ["/workspace/run"], bridgeEnabled: true)
+        let exported = wrapped.bridgeEnvironment(attachment)
+        for (key, path) in paths { #expect(exported[key] == path) }
+        #expect(exported["BLOOM_BRIDGE_TOKEN"] == nil)
+        #expect(attachment.environment[BridgeProtocol.tokenVariable] == "test-token")
+        #expect(paths.keys.allSatisfy { attachment.environment[$0] == nil })
+        #expect(WorkspaceExecution().bridgeEnvironment(attachment).isEmpty)
+        #expect(WorkspaceExecution(commandPrefix: ["/workspace/run"], bridgeEnabled: false).bridgeEnvironment(attachment).isEmpty)
+        let arguments = BridgeRegistration.codexArguments(attachment).joined(separator: " ")
+        #expect(!arguments.contains("BLOOM_SKILL") && !arguments.contains("/service/data"))
+    }
+
     private func fixture() throws -> (Repo, Workspace) {
         let root = TestScratch.unique("execution root")
         let path = TestScratch.unique("execution branch")

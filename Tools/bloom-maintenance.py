@@ -362,7 +362,7 @@ def tool_installation(component, home):
     launcher = home / '.local/bin' / component
     value = dict(installedVersion=None, method=None)
     if not launcher.exists():
-        value['detail'] = 'Not installed. Install and sign in from Accounts first.'
+        value['detail'] = 'Not installed in the managed server tool directory. Project containers and external installations are managed separately.'
         return value
     target = launcher.resolve(strict=True)
     require(account_owned(launcher.parent, home) and account_owned(target, home),
@@ -791,8 +791,10 @@ class Supervisor:
             asset = release_asset(self.config)
             server.update(availableVersion=asset['version'], canUpdate=newer_version(asset['version'], self.current.get('version')),
                           detail='Updates use the stable GitHub release and its published SHA-256 digest.')
-        except (MaintenanceError, OSError, ValueError):
-            server['detail'] = 'A verified stable server package is not available. Try refreshing later.'
+        except MaintenanceError as error:
+            server['detail'] = str(error)
+        except (OSError, ValueError):
+            server['detail'] = 'Could not check published server releases. Check the server network connection and refresh.'
         values.append(server)
         for component, package in PACKAGES.items():
             value = dict(id=component, title='Claude Code' if component == 'claude' else 'Codex',
