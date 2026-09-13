@@ -93,8 +93,7 @@ struct ChangesHistoryList: View {
                         if hasKeyboard { reader.scrollTo(scope) }
                     }
                 } else {
-                    scopeRow(.all, glyph: "square.stack.3d.up")
-                    scopeRow(.uncommitted, glyph: "pencil.line")
+                    scopeMenu
                 }
                 if let notice = model.historyNotice {
                     Text(notice).font(Typo.caption).foregroundStyle(Palette.textSecondary)
@@ -112,22 +111,31 @@ struct ChangesHistoryList: View {
         .accessibilityLabel(model.inspectorTab == .history ? "Commit history, newest first" : "Change scope")
     }
 
-    private func scopeRow(_ scope: DiffScope, glyph: String) -> some View {
-        HoverRow(isSelected: model.diffScope == scope, isFocused: hasKeyboard) {
-            Button { select(scope) } label: {
-                Label(scope.title, systemImage: glyph)
-                    .font(Typo.label)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Metrics.spacingSmall)
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
+    private var scopeMenu: some View {
+        Menu {
+            ForEach(scopes, id: \.self) { scope in
+                // Reselecting the current scope also reopens its review in the centre pane.
+                Toggle(scope.title, isOn: Binding(
+                    get: { model.diffScope == scope },
+                    set: { _ in select(scope) }
+                ))
             }
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(model.diffScope == scope ? .isSelected : [])
+        } label: {
+            Label(
+                model.diffScope.title,
+                systemImage: model.diffScope == .uncommitted ? "pencil.line" : "square.stack.3d.up"
+            )
+            .font(Typo.label)
+            .lineLimit(1)
         }
-        .padding(.horizontal, Metrics.spacingSmall)
-        .padding(.vertical, 2)
-        .id(scope)
+        .menuStyle(.borderlessButton)
+        .controlSize(.small)
+        .fixedSize()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, InspectorLayout.inset)
+        .frame(height: InspectorLayout.barHeight)
+        .accessibilityLabel("Change scope")
+        .accessibilityValue(model.diffScope.title)
     }
 
     private func select(_ scope: DiffScope) {

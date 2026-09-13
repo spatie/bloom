@@ -22,6 +22,7 @@ struct AllFilesReviewView: View {
                 title: "No changes",
                 message: model.diffScope.emptyMessage(base: model.workspace.baseBranch)
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             GeometryReader { geometry in
                 ScrollViewReader { reader in

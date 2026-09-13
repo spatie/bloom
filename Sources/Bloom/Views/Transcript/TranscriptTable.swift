@@ -2217,7 +2217,17 @@ private struct HostedRow: View {
                 // Drawn from its top down, so a row the table has made too short shows its
                 // beginning and loses its end, rather than showing its end and clipping its
                 // first line off the top of the cell.
-                measured.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                //
+                // **`minHeight: 0` is what makes the alignment mean anything.** A flexible frame
+                // with no minimum is never smaller than its child, so content taller than the row
+                // made the frame taller than the hosting view too, and `NSHostingView` centres a
+                // root that does not fit. The streaming answer grows a line before the table is
+                // told the new height, so for one frame per line the whole answer rose by half a
+                // line and then dropped back: the stutter filmed in Ask Bloom, measured at 120fps
+                // as 24 pixels up, 20 down, and then the follower's glide.
+                measured.frame(
+                    maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading
+                )
             } else {
                 measured
             }
