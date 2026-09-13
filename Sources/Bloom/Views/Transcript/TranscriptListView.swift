@@ -684,6 +684,10 @@ struct TranscriptListView: View {
             }
         ))
 
+        // The live tail's child can still report its previous empty layout for a pass after
+        // sending starts. Reserve the known status height outside that observed child.
+        let reservesActivity = transcript.isRunning || sending != nil
+        let activityMinimumHeight = reservesActivity ? TranscriptLayout.rowHeight * fontScale + TranscriptLayout.block : 0
         // The one entry that changes height without anything telling this view so, which is why
         // `TranscriptRowHeights` takes a correction from a drawn row as authoritative.
         out.append(TranscriptTableEntry(
@@ -697,10 +701,15 @@ struct TranscriptListView: View {
             contentKey: TranscriptContentKey {
                 $0.combine("streaming")
                 $0.combine(transcript.session.id)
+                // A late zero-height report from the idle tail must not replace the activity
+                // line measured alongside a newly sent bubble. The key stays stable per turn.
+                $0.combine(reservesActivity)
             },
+            minimumHeight: activityMinimumHeight,
             content: {
                 AnyView(
                     StreamingTailView(transcript: transcript)
+                        .frame(minHeight: activityMinimumHeight, alignment: .topLeading)
                         .padding(.horizontal, TranscriptLayout.inset)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 )
@@ -867,7 +876,8 @@ struct TranscriptListView: View {
                 // is the worst thing in this file.
                 scroller.stop()
                 follower.seekLiveEnd(false)
-            }
+            },
+            onContentWillChange: { follower.nudge() }
         )
         .overlay(alignment: .top) {
             if let pinnedQuestion {
@@ -1265,7 +1275,13 @@ struct TranscriptListView: View {
             transcript.liveEndRequests, isReady: arrivalSession == transcript.session.id
         ) else { return }
         opening = .liveEnd
-        goToLiveEnd()
+        if atLiveEnd.value || controller.holdsEnd || follower.isFollowing {
+            // A send at the bottom extends the existing travel. Jumping to its new destination
+            // first used to race the follower and expose the whole bubble above the composer.
+            follower.nudge()
+        } else {
+            goToLiveEnd()
+        }
     }
 
     /// Takes the reader back to the newest row, which is what the jump pill asks for, and what

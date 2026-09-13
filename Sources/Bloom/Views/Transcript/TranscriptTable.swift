@@ -45,6 +45,8 @@ struct TranscriptTableEntry: Identifiable {
     /// drawn at until somebody looks at it. See `TranscriptRowShape`, which carries the white gaps
     /// a single conversation-wide mean left on the way up.
     var shape: TranscriptRowShape = .other
+    /// Space that is already known before an observed child completes its first layout.
+    var minimumHeight: CGFloat = 0
     /// Built on demand: when the row is measured, and when it is drawn. Nothing is built for a row
     /// that is neither, which is what keeps the pass that assembles these cheap.
     let content: @MainActor () -> AnyView
@@ -198,6 +200,8 @@ struct TranscriptTable: NSViewRepresentable {
     /// `NSScrollView` posts `willStartLiveScroll` and `didEndLiveScroll` for user-initiated
     /// scrolling only, so this app's own movement is silent here.
     let onLiveScrollChange: @MainActor (Bool) -> Void
+    /// Give smooth following ownership before the table changes the document's height.
+    var onContentWillChange: (@MainActor () -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -266,6 +270,7 @@ struct TranscriptTable: NSViewRepresentable {
         coordinator.onGeometry = onGeometryChange
         coordinator.onSettled = onSettled
         coordinator.onLiveScrollChange = onLiveScrollChange
+        coordinator.onContentWillChange = onContentWillChange
         // Before the entries, so that a pass carrying another conversation's rows is applied to a
         // pane that has already stopped drawing.
         coordinator.showing(session: session, in: nsView)
@@ -284,6 +289,7 @@ struct TranscriptTable: NSViewRepresentable {
         var onGeometry: (@MainActor (TranscriptTableGeometry) -> Void)?
         var onSettled: (@MainActor () -> Void)?
         var onLiveScrollChange: (@MainActor (Bool) -> Void)?
+        var onContentWillChange: (@MainActor () -> Void)?
 
         weak var tableView: NSTableView?
         weak var scrollView: NSScrollView?
@@ -538,10 +544,20 @@ struct TranscriptTable: NSViewRepresentable {
             let wasAtEnd = changesFoldRows ? false : isFollowingAlong
             let anchor = foldAnchor ?? (change.movesRows ? anchorEntry() : nil)
 
+            if !changesFoldRows, !remeasured, !environmentMoved, holdView?.held == nil,
+               wasAtEnd || isFollowerDriving {
+                onContentWillChange?()
+            }
+
             entries = newEntries
             ids = newIDs
             index = [:]
             for (offset, id) in newIDs.enumerated() { index[id] = offset }
+            // The activity slot observes the sending state itself, so its content key stays
+            // stable. Measure it alongside the echo instead of waiting for a later height report.
+            if let sending = index[.sending], changed.contains(sending), let streaming = index[.streaming] {
+                changed.insert(streaming)
+            }
 
             // **Rows in and out rather than `reloadData()`, and this is the whole of the scroll
             // stall.** See `TranscriptEntryChange`, which carries the measurement.
@@ -551,6 +567,12 @@ struct TranscriptTable: NSViewRepresentable {
             // then reload on top of them, so the reload had every staged row view to tear off the
             // window as well as the ones on screen, at O(n²) in the observers each one removes.
             let plan = TranscriptTableUpdate.plan(change: change, environmentMoved: environmentMoved)
+            // New live rows must enter at their measured height. An estimate followed by a
+            // correction gave the scroll animation two different destinations during one send.
+            if wasAtEnd || isFollowerDriving, case .rows(.grew(let head, let tail)) = plan {
+                let inserted = IndexSet(integersIn: head).union(IndexSet(integersIn: tail))
+                measureExactly(inserted.intersection(IndexSet(integersIn: max(0, entries.count - 32)..<entries.count)))
+            }
             switch plan {
             case .nothing:
                 break
@@ -723,9 +745,9 @@ struct TranscriptTable: NSViewRepresentable {
         /// months on the strength of how plausible it sounds.
         private func height(of entry: TranscriptTableEntry) -> CGFloat {
             guard heights.isReady else { return Self.hair }
-            return CGFloat(heights.assumed(
+            return max(entry.minimumHeight, CGFloat(heights.assumed(
                 for: entry.contentKey, shape: entry.shape, drawsNothing: entry.drawsNothing
-            ))
+            )))
         }
 
         /// The one thing a row is hosted in to be measured, kept rather than built per row. See
@@ -772,7 +794,7 @@ struct TranscriptTable: NSViewRepresentable {
             ).height
             // Nought is a real answer, and `TranscriptRowHeights` carries what pretending
             // otherwise cost.
-            return height
+            return max(entry.minimumHeight, height)
         }
 
         /// **What the row turned out to be when it was drawn, which outranks anything measured off
@@ -803,7 +825,7 @@ struct TranscriptTable: NSViewRepresentable {
             guard !isHeld else { return }
             guard let row = index[entryID], entries.indices.contains(row),
                   entries[row].contentKey == contentKey else { return }
-            let height = size.height
+            let height = max(entries[row].minimumHeight, size.height)
             // Counted before it is refused, and counted whatever the height was: what is being
             // watched for is a cell laid out at a width the table is not, and a report that
             // happens to agree about the height is the same event.
@@ -881,6 +903,7 @@ struct TranscriptTable: NSViewRepresentable {
                 // at, and every correction moves everything below it. Without the anchor the text
                 // slides under the eye on the way up.
                 let anchor = anchorEntry()
+                if wasAtEnd || isFollowerDriving { onContentWillChange?() }
                 noteHeights(rows)
                 // **The correction is also what leaves a reader short of the end**, and it is the
                 // second half of "the pill does not go all the way down": a scroll that was right

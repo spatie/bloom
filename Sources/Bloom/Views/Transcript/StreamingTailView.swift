@@ -10,7 +10,7 @@ struct StreamingTailView: View {
 
     var body: some View {
         Group {
-            if transcript.isRunning || transcript.isStreaming {
+            if transcript.isRunning || transcript.sending != nil || transcript.isStreaming {
                 StreamingRowView(transcript: transcript)
                     .padding(.bottom, TranscriptLayout.block)
             }
