@@ -14,6 +14,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     private let compactTabs = UITabBar()
     private var compactTabsHeight: NSLayoutConstraint?
     private var usesCompactTabs = false
+    private var usesWorkspaceTabs: Bool { traitCollection.userInterfaceIdiom == .pad }
     private var compactToolID: String?
     private var browser: PreviewController?
     private var previewTask: Task<Void, Never>?
@@ -106,6 +107,8 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         filesWidth?.isActive = true
         files.onSelect = { [weak self] path, changed in self?.openFile(path, changed: changed) }
         files.onReviewAll = { [weak self] in self?.openReview(all: true) }
+        deck.alwaysShowsTabBar = usesWorkspaceTabs
+        deck.onCloseTab = { [weak self] tab in self?.requestCloseTab(tab) }
         deck.onEmpty = { [weak self] in self?.removeDeck() }
         deck.onSelection = { [weak self] in self?.focusesConversation = false; self?.updateToolbar(); self?.layoutPanes() }
         deck.onNewPane = { [weak self] kind, split in self?.requestNewPane(kind: kind, split: split) }
@@ -126,6 +129,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
             self.reviewController.refreshUI()
         }
         openConversation()
+        if usesWorkspaceTabs { installWorkspaceChats() }
         updateToolbar()
         layoutPanes()
     }
@@ -177,7 +181,6 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         preview.accessibilityLabel = openingPreview ? "Opening browser preview" : "Open browser preview"
         preview.isEnabled = !openingPreview
         compactTabs.items?[1].title = openingPreview ? "Opening…" : "Preview"
-        compactTabs.items?[1].isEnabled = !openingPreview
         let inspector = UIBarButtonItem(title: "Files", primaryAction: UIAction { [weak self] _ in self?.toggleFiles() })
         inspector.accessibilityLabel = "Show files and changes"
         filesButton = inspector
@@ -203,7 +206,18 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
                 self?.showsConversation = false; self?.focusesConversation = false; self?.layoutPanes(); self?.updateToolbar()
             },
         ])
-        let layout = UIBarButtonItem(title: "View", menu: viewMenu)
+        let hasSplit = (deck.selectedTab?.panes.count ?? 0) > 1
+        let tabViewMenu = UIMenu(title: "Pane layout", options: .singleSelection, children: [
+            UIAction(title: "Show All Panes", image: UIImage(systemName: "rectangle.split.2x1"),
+                     attributes: hasSplit ? [] : .disabled, state: deck.focusesSinglePane ? .off : .on) { [weak self] _ in
+                self?.deck.focusesSinglePane = false; self?.layoutPanes(); self?.updateToolbar()
+            },
+            UIAction(title: "Focus This Pane", image: UIImage(systemName: "rectangle"),
+                     attributes: hasSplit ? [] : .disabled, state: deck.focusesSinglePane ? .on : .off) { [weak self] _ in
+                self?.deck.focusesSinglePane = true; self?.layoutPanes(); self?.updateToolbar()
+            },
+        ])
+        let layout = UIBarButtonItem(title: "View", menu: usesWorkspaceTabs ? tabViewMenu : viewMenu)
         layout.accessibilityLabel = "Workspace layout"
         let menu = UIMenu(children: [
             UIMenu(title: "Tabs and panes", children: deck.paneActionsMenu.children),
@@ -233,6 +247,11 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
             },
         ])
         navigationItem.titleMenuProvider = { _ in menu }
+        if usesWorkspaceTabs, view.bounds.width < 700 {
+            preview.title = nil; preview.image = UIImage(systemName: openingPreview ? "hourglass" : "safari")
+            inspector.title = nil; inspector.image = UIImage(systemName: "sidebar.right")
+            layout.title = nil; layout.image = UIImage(systemName: "rectangle.split.2x1")
+        }
         navigationItem.rightBarButtonItems = conversationActions + (usesCompactTabs ? [] : [layout, inspector, preview])
     }
 
@@ -251,12 +270,39 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
             content.onOpenSession = { [weak self] session in self?.replaceConversation(with: session) }
             let wrapped = WorkspacePaneController(title: session.title, image: "bubble.left.and.bubble.right", content: content)
             conversation = wrapped
-            install(wrapped, in: conversationHost)
+            if !usesWorkspaceTabs { install(wrapped, in: conversationHost) }
         } else {
             let content = WorkspaceController(model: connection, workspace: workspace)
             conversation = content
-            install(content, in: conversationHost)
+            if !usesWorkspaceTabs { install(content, in: conversationHost) }
         }
+    }
+
+    /// iPad opens the server's conversations in the same deck as browsers and terminals.
+    /// Controllers stay alive when another tab is selected, preserving drafts and view state.
+    private func installWorkspaceChats() {
+        if let conversation, let primary = primarySession {
+            if conversation.parent === self { remove(conversation) }
+            let pane = WorkspaceToolPane(kind: "chat", title: primary.title, content: conversation)
+            pane.sessionID = primary.id
+            primaryInDeck = true
+            configure(pane)
+            deck.add(pane)
+            let sessions = connection.catalogue?.sessions.filter { $0.workspaceID == workspace.id && $0.id != primary.id } ?? []
+            for session in sessions where !deck.allPanes.contains(where: { $0.sessionID == session.id }) {
+                let chat = ConversationController(model: connection, session: session)
+                let wrapper = WorkspacePaneController(title: session.title, image: PaneGlyph.chat, content: chat)
+                let pane = WorkspaceToolPane(kind: "chat", title: session.title, content: wrapper)
+                pane.sessionID = session.id
+                configure(pane)
+                deck.add(pane, focus: false)
+            }
+        } else if let conversation {
+            remove(conversation)
+            self.conversation = nil
+        }
+        focusesConversation = false
+        showDeck()
     }
 
     private func replaceConversation(with session: RemoteSession) {
@@ -411,6 +457,12 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     }
 
     private func removeDeck() {
+        if usesWorkspaceTabs {
+            conversation = nil; preferredSessionID = nil; primaryInDeck = false
+            focusesConversation = false
+            layoutPanes()
+            return
+        }
         compactTabs.selectedItem = compactTabs.items?.first
         if let tool { remove(tool) }
         tool = nil
@@ -477,6 +529,10 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     }
 
     func tabBar(_ tabBar: UITabBar, didSelect item: UITabBarItem) {
+        if item.tag == 1, !previewPreparations.isEmpty {
+            updateCompactSelection()
+            return
+        }
         switch item.tag {
         case 0: focusConversation()
         case 1: openPreview()
@@ -492,7 +548,7 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
     private func layoutPanes() {
         guard isViewLoaded else { return }
         let width = view.safeAreaLayoutGuide.layoutFrame.width
-        let compact = width < 900
+        let compact = !usesWorkspaceTabs && width < 900
         if usesCompactTabs != compact { usesCompactTabs = compact; updateToolbar() }
         compactTabs.isHidden = !compact
         compactTabsHeight?.constant = compact ? 49 + view.safeAreaInsets.bottom : 0
@@ -509,10 +565,15 @@ final class WorkspaceDeskController: UIViewController, UIAdaptivePresentationCon
         conversationWidth?.isActive = splitConversation
         conversationWidth?.constant = min(600, max(400, (width - (inlineFiles ? 300 : 0)) * 0.46))
         if let wrapper = conversation as? WorkspacePaneController {
-            wrapper.showsHeader = primaryInDeck || splitConversation
+            wrapper.showsHeader = usesWorkspaceTabs ? (deck.selectedTab?.panes.count ?? 0) > 1 : primaryInDeck || splitConversation
         }
-        let actions = !primaryInDeck && !splitConversation && !conversationHost.isHidden
-            ? chatContent(conversation)?.navigationItem.rightBarButtonItems ?? [] : []
+        let actions: [UIBarButtonItem]
+        if usesWorkspaceTabs, deck.selectedTab?.panes.count == 1 {
+            actions = chatContent(deck.selectedPane?.content)?.navigationItem.rightBarButtonItems ?? []
+        } else {
+            actions = !primaryInDeck && !splitConversation && !conversationHost.isHidden
+                ? chatContent(conversation)?.navigationItem.rightBarButtonItems ?? [] : []
+        }
         if conversationActions != actions {
             conversationActions = actions
             updateToolbar()
@@ -683,7 +744,8 @@ extension WorkspaceDeskController {
             guard let value = result["created"]?["session"] else { throw ConnectionFailure("The server did not return the new conversation.") }
             let created = try JSONDecoder().decode(RemoteSession.self, from: JSONEncoder().encode(value))
             session = created
-            content = ConversationController(model: connection, session: created)
+            content = WorkspacePaneController(title: created.title, image: PaneGlyph.chat,
+                content: ConversationController(model: connection, session: created))
             try await connection.refresh()
         }
         let name = title ?? session?.title ?? PaneNaming.nextTitle(base: kind.title, taken: deck.allPanes.filter { $0.kind == kind.rawValue }.map(\.title))
@@ -710,7 +772,11 @@ extension WorkspaceDeskController {
             configure(root)
             deck.add(root)
         }
+        if axis != nil { deck.focusesSinglePane = false }
         deck.add(pane, focus: focus, split: axis)
+        if usesWorkspaceTabs, conversation == nil, let session {
+            conversation = content; preferredSessionID = session.id; primaryInDeck = true
+        }
         if focus { showDeck() } else { focusesConversation = previousFocus; layoutPanes() }
         if let terminal = content as? WorkspaceTerminalController { try await terminal.connect() }
         if let browser = content as? PreviewController { browser.loadViewIfNeeded(); self.browser = browser }
@@ -789,6 +855,14 @@ extension WorkspaceDeskController {
         (pane.content as? WorkspacePaneController)?.rename(title)
     }
 
+    private func requestCloseTab(_ tab: WorkspaceToolTab) {
+        let panes = tab.panes
+        Task { [weak self] in
+            guard let self else { return }
+            do { for pane in panes { try await closePane(pane) } } catch { show(error) }
+        }
+    }
+
     private func requestClosePane(_ pane: WorkspaceToolPane) {
         Task { [weak self] in do { try await self?.closePane(pane) } catch { self?.show(error) } }
     }
@@ -801,7 +875,16 @@ extension WorkspaceDeskController {
         }
         let wasPrimary = pane.content === conversation
         deck.close(pane)
-        if wasPrimary { conversation = nil; preferredSessionID = nil; primaryInDeck = false; openConversation(); layoutPanes() }
+        if wasPrimary {
+            if usesWorkspaceTabs {
+                let next = deck.allPanes.first { $0.kind == "chat" }
+                conversation = next?.content; preferredSessionID = next?.sessionID
+                primaryInDeck = next != nil
+            } else {
+                conversation = nil; preferredSessionID = nil; primaryInDeck = false; openConversation()
+            }
+            layoutPanes()
+        }
     }
 
     private var standalonePrimary: RemoteSession? { primaryInDeck ? nil : primarySession }
