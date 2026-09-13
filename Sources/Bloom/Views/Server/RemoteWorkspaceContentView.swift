@@ -78,18 +78,18 @@ struct RemoteWorkspaceContentView: View {
             VStack(alignment: .leading, spacing: 8) {
                 if recovery.phase != .connected {
                     HStack(alignment: .top, spacing: 10) {
-                        if recovery.phase == .connecting || recovery.phase == .reconnecting {
+                        if model.isMaintainingServer || recovery.phase == .connecting || recovery.phase == .reconnecting {
                             ProgressView().controlSize(.small)
                         } else { Image(systemName: "wifi.exclamationmark").foregroundStyle(.orange) }
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(recovery.title).font(Typo.captionEmphasis)
-                            Text(recovery.detail).font(Typo.caption).foregroundStyle(.secondary)
-                            if recovery.lastError != nil {
+                            Text(model.isMaintainingServer ? "Updating server" : recovery.title).font(Typo.captionEmphasis)
+                            Text(model.isMaintainingServer ? "Bloom will reconnect when maintenance finishes." : recovery.detail).font(Typo.caption).foregroundStyle(.secondary)
+                            if !model.isMaintainingServer, recovery.lastError != nil {
                                 Button("Connection details…") { showsConnectionFailure = true }.font(Typo.caption)
                             }
                         }
                         Spacer(minLength: 8)
-                        if recovery.canRetry {
+                        if !model.isMaintainingServer, recovery.canRetry {
                             Button("Retry Now") { Task { await model.connect() } }
                                 .disabled(model.isConnecting || model.isRemovingServer || model.isDisconnecting)
                         }

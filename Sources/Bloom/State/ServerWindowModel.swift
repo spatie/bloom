@@ -120,6 +120,7 @@ final class ServerWindowModel {
     private(set) var isDisconnecting = false
     var isRemovingServer = false
     var isConnecting = false
+    var isMaintainingServer = false
     var isPerformingCommand = false
     var error: String?
     var connectionGeneration = 0

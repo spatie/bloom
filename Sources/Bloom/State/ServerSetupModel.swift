@@ -42,6 +42,19 @@ final class ServerSetupModel {
     private(set) var activity = ServerSetupActivity()
     private(set) var isInstallingBrowser = false
     private(set) var check: ServerInstallCheck?
+    private(set) var includedPackage: ServerSetupPackageMetadata?
+    var versionComparison: ServerSetupVersionComparison {
+        .init(installedVersion: check?.installedVersion, installedPackageSHA256: check?.installedPackageSHA256,
+              included: includedPackage, maintenanceManagement: check?.maintenanceManagement)
+    }
+    var canUpdateExistingServer: Bool {
+        guard canMaintainExistingServer, includedPackage != nil else { return false }
+        if versionComparison.needsMaintenanceSetup { return true }
+        switch versionComparison.state {
+        case .sameBuild, .sameVersion, .installedNewer, .packageUnavailable: return false
+        default: return true
+        }
+    }
     private(set) var accountChecks: [ServerDiagnostics.Check] = []
     private(set) var agentAuthentication: [AgentAuthenticationStatus] = []
     private let resources: URL?
@@ -57,6 +70,8 @@ final class ServerSetupModel {
     private var task: Task<Void, Never>?
     private var stoppingServerID: UUID?
     private var maintenanceReconnectGeneration: Int?
+    private(set) var maintenanceInstallationCompleted = false
+    private(set) var maintenanceServerRunning = false
     private var generation = UUID()
     private var retryStep = Phase.address
     private var validatedHost = ""
@@ -78,6 +93,9 @@ final class ServerSetupModel {
         self.server = server
         self.inspectConnection = inspectConnection
         self.installConnection = installConnection
+        if let metadata = resource("package.json") {
+            includedPackage = try? JSONDecoder().decode(ServerSetupPackageMetadata.self, from: Data(contentsOf: metadata))
+        }
         if resumeExisting, server.isConfigured, !server.usesHTTPS, !server.knownHostsFile.isEmpty, !server.identityFile.isEmpty,
            let user = server.host.split(separator: "@").first, server.host.contains("@") {
             // Returning to accounts does not schedule a new administrator installation.
@@ -169,11 +187,13 @@ final class ServerSetupModel {
         guard canMaintainExistingServer, let connection else { return }
         let profileID = server.connectionProfile?.id
         let connectionGeneration = server.connectionGeneration
+        maintenanceServerRunning = false
         let completed = await perform(.connecting) {
             self.record("Starting the existing Bloom Server installation.")
             _ = try await connection.startServer(script: self.installerScript()) { [weak self] event in
                 await self?.receive(event)
             }
+            self.maintenanceServerRunning = true
             self.record("Bloom Server is running. Reconnecting to your workspaces.")
             guard self.server.connectionProfile?.id == profileID,
                   self.server.connectionGeneration == connectionGeneration else { throw CancellationError() }
@@ -185,11 +205,13 @@ final class ServerSetupModel {
     }
 
     func updateExistingServer() async {
-        guard canMaintainExistingServer else { return }
+        guard canUpdateExistingServer else { return }
         let profileID = server.connectionProfile?.id
         installsBrowserTools = false; installsDocker = false; installsSwap = false
         phase = .readyToInstall
         maintenanceReconnectGeneration = nil
+        maintenanceInstallationCompleted = false
+        maintenanceServerRunning = false
         installed = nil
         await install(restartingExistingServer: true)
         guard installed != nil, let reconnectGeneration = maintenanceReconnectGeneration else { return }
@@ -259,6 +281,8 @@ final class ServerSetupModel {
                         _ = try await connection.startServer(script: script, progress: progress)
                     })
                 } catch let update as ServerUpdateFailure {
+                    self.maintenanceInstallationCompleted = update.installationCompleted
+                    self.maintenanceServerRunning = update.serverRunning
                     if self.server.connectionProfile?.id == profileID, self.server.connectionGeneration == pausedGeneration {
                         self.server.shouldReconnect = true
                         if update.serverRunning {
@@ -273,7 +297,10 @@ final class ServerSetupModel {
             } else {
                 installed = try await installOperation(connection, script, package, publicKey, maintenanceDigest, progress)
             }
-            if !restartingExistingServer { try Task.checkCancellation() }
+            if restartingExistingServer {
+                self.maintenanceInstallationCompleted = true
+                self.maintenanceServerRunning = true
+            } else { try Task.checkCancellation() }
             // A confirmed maintenance installation must retain its credential association even
             // when cancellation arrives during the final readiness check.
             self.installed = installed

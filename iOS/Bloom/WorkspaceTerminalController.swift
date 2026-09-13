@@ -7,7 +7,9 @@ import SwiftTerm
 final class WorkspaceTerminalController: UIViewController, @preconcurrency TerminalViewDelegate {
     typealias Open = RemoteTerminalAttachment.Open
     let terminalName: String
-    var onClose: (() -> Void)?
+    var onClose: (() -> Void)? {
+        didSet { if isViewLoaded { updateToolbar() } }
+    }
     var onTitleChanged: ((String) -> Void)?
     var onOpenURL: ((URL) -> Void)?
     private(set) var isConnected = false
@@ -15,6 +17,9 @@ final class WorkspaceTerminalController: UIViewController, @preconcurrency Termi
     private let terminal = TerminalView(frame: .zero)
     private let toolbar = UIToolbar()
     private let status = UILabel()
+    private let header = UIView()
+    private var interruptItem: UIBarButtonItem?
+    private var moreItem: UIBarButtonItem?
     private var connection: (any RemoteTerminalConnection)? { attachment.connection }
     private var reader: Task<Void, Never>?
     private var writer: Task<Void, Never>?
@@ -37,21 +42,27 @@ final class WorkspaceTerminalController: UIViewController, @preconcurrency Termi
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = BloomTheme.background
+        view.backgroundColor = BloomTheme.panel
         view.tintColor = BloomTheme.accent
         terminal.terminalDelegate = self
         terminal.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: .monospacedSystemFont(ofSize: 13, weight: .regular))
-        terminal.nativeForegroundColor = .label
-        terminal.nativeBackgroundColor = BloomTheme.background
+        MobileTerminalAppearance.apply(to: terminal, traits: traitCollection)
+        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (controller: WorkspaceTerminalController, _: UITraitCollection) in
+            MobileTerminalAppearance.apply(to: controller.terminal, traits: controller.traitCollection)
+        }
         terminal.accessibilityIdentifier = "workspace-terminal"
         terminal.translatesAutoresizingMaskIntoConstraints = false
         toolbar.translatesAutoresizingMaskIntoConstraints = false
+        header.translatesAutoresizingMaskIntoConstraints = false
+        status.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(header)
+        header.addSubview(status)
+        header.addSubview(toolbar)
         view.addSubview(terminal)
-        view.addSubview(toolbar)
         let appearance = UIToolbarAppearance()
         appearance.configureWithOpaqueBackground()
         appearance.backgroundColor = BloomTheme.panel
-        appearance.shadowColor = BloomTheme.border
+        appearance.shadowColor = .clear
         toolbar.standardAppearance = appearance
         toolbar.scrollEdgeAppearance = appearance
         status.font = .preferredFont(forTextStyle: .footnote)
@@ -60,28 +71,37 @@ final class WorkspaceTerminalController: UIViewController, @preconcurrency Termi
         status.textColor = .secondaryLabel
         status.text = "Connecting…"
         status.accessibilityIdentifier = "terminal-status"
-        status.widthAnchor.constraint(lessThanOrEqualToConstant: 100).isActive = true
-        let interrupt = UIBarButtonItem(title: "Ctrl-C", primaryAction: UIAction { [weak self] _ in self?.enqueue(RemoteTerminalKey.controlC.data) })
+        let interrupt = UIBarButtonItem(image: UIImage(systemName: "stop.circle"), primaryAction: UIAction { [weak self] _ in self?.enqueue(RemoteTerminalKey.controlC.data) })
         interrupt.accessibilityLabel = "Interrupt command"
-        let reconnect = UIBarButtonItem(image: UIImage(systemName: "arrow.clockwise"), primaryAction: UIAction { [weak self] _ in self?.reconnect() })
-        reconnect.accessibilityLabel = "Reconnect terminal"
+        interrupt.accessibilityHint = "Sends Control-C to the running command."
+        interruptItem = interrupt
         let keyboard = UIBarButtonItem(image: UIImage(systemName: "keyboard"), primaryAction: UIAction { [weak self] _ in
             guard let self else { return }
             if terminal.isFirstResponder { _ = terminal.resignFirstResponder() } else { _ = terminal.becomeFirstResponder() }
         })
         keyboard.accessibilityLabel = "Toggle terminal keyboard"
-        let close = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in self?.disconnect(); self?.onClose?() })
-        close.accessibilityLabel = "Close terminal tab"
-        toolbar.items = [UIBarButtonItem(customView: status), UIBarButtonItem(systemItem: .flexibleSpace), interrupt, keyboard, reconnect, close]
+        let more = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: UIMenu())
+        more.accessibilityLabel = "Terminal actions"
+        moreItem = more
+        for item in [interrupt, keyboard, more] { item.hidesSharedBackground = true }
+        toolbar.items = [interrupt, keyboard, more]
+        updateToolbar()
         NSLayoutConstraint.activate([
-            toolbar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            toolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            toolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            toolbar.heightAnchor.constraint(equalToConstant: 48),
-            terminal.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            terminal.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            terminal.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            terminal.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor)
+            header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            header.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            header.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -8),
+            header.heightAnchor.constraint(equalToConstant: 44),
+            status.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+            status.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            status.trailingAnchor.constraint(lessThanOrEqualTo: toolbar.leadingAnchor, constant: -8),
+            toolbar.topAnchor.constraint(equalTo: header.topAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+            toolbar.widthAnchor.constraint(equalToConstant: 148),
+            toolbar.heightAnchor.constraint(equalTo: header.heightAnchor),
+            terminal.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
+            terminal.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            terminal.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            terminal.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -8)
         ])
     }
 
@@ -181,7 +201,19 @@ final class WorkspaceTerminalController: UIViewController, @preconcurrency Termi
     private func setStatus(_ text: String) {
         status.text = text
         status.accessibilityLabel = "Terminal: " + text
-        status.sizeToFit()
+        updateToolbar()
+    }
+
+    private func updateToolbar() {
+        interruptItem?.isEnabled = isConnected
+        var actions: [UIMenuElement] = [UIAction(title: "Reconnect terminal", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in self?.reconnect() }]
+        if onClose != nil {
+            actions.append(UIAction(title: "Close terminal tab", image: UIImage(systemName: "xmark")) { [weak self] _ in
+                self?.disconnect()
+                self?.onClose?()
+            })
+        }
+        moreItem?.menu = UIMenu(children: actions)
     }
 
     private func enqueue(_ data: Data) {

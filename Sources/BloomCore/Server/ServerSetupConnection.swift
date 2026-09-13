@@ -17,6 +17,9 @@ public struct ServerInstallNotice: Codable, Sendable, Equatable {
 }
 
 public struct ServerInstallCheck: Codable, Sendable {
+    public var installedVersion: String?
+    public var installedPackageSHA256: String?
+    public var maintenanceManagement: Bool?
     public var installationRoot: String?
     public var serviceHome: String?
     public var memoryBytes: Int64?

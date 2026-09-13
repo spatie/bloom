@@ -601,6 +601,53 @@ def start_server(args):
     return {"ready": True, "message": "Bloom Server is running and ready to reconnect.", **metadata(args)}
 
 
+def installed_release_metadata(args, account, supervised=None):
+    def read_release(root, expected_uid):
+        if not root.is_dir():
+            return {}
+        manifest = root / "manifest.json"
+        version = None
+        try:
+            descriptor = os.open(manifest, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(descriptor, "rb") as source:
+                info = os.fstat(source.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_uid != expected_uid or info.st_mode & 0o022 or info.st_size > 65536:
+                    return {}
+                value = json.loads(source.read(65537))
+            candidate = value.get("version") if isinstance(value, dict) else None
+            if isinstance(candidate, str) and re.fullmatch(r"[A-Za-z0-9._+-]{1,100}", candidate):
+                version = candidate
+        except (OSError, ValueError):
+            pass
+        digest = root.name if re.fullmatch(r"[0-9a-f]{64}", root.name) else None
+        return {"installedVersion": version, "installedPackageSHA256": digest}
+
+    if supervised is not None:
+        try:
+            config = supervised.existing_config()
+            if config is None:
+                return installed_release_metadata(args, account)
+            current = json.loads(supervised.private_file(supervised.current_path))
+            executable = pathlib.Path(current["executable"])
+            root = executable.parent.parent
+            if executable != root / "bin/bloom-server" or root.parent != supervised.releases:
+                return {}
+            supervised.protect(root)
+            return {**read_release(root, 0), "maintenanceManagement": True}
+        except (MaintenanceInstallFailure, OSError, ValueError, KeyError, TypeError):
+            return {}
+
+    def read_legacy():
+        try:
+            root = (args.install_root / "current").resolve(strict=True)
+            if root.parent != args.install_root / "releases":
+                return {}
+            return {**read_release(root, account.pw_uid), "maintenanceManagement": False}
+        except (OSError, ValueError):
+            return {}
+    return account_operation(account, read_legacy)
+
+
 def probe(args):
     blockers, warnings = [], []
     release = {}
@@ -624,16 +671,19 @@ def probe(args):
         else:
             blockers.append({"code": "administrator_required", "message": "Connect as root or an account with passwordless sudo for installation."})
     existing = None
+    installed_metadata = {}
     try:
         existing = marker(args)
         supervised = maintenance_installation(args)
-        if supervised is not None and privilege == "root":
-            maintenance_call(supervised.ensure_idle)
-            maintenance_call(supervised.validate_digest)
         # The root check is repeated during installation; unprivileged probes cannot inspect private homes.
         if privilege == "root":
             check_ownership(args, existing)
         account = existing_account(args, existing) if existing and privilege == "root" else None
+        if account is not None and existing.get("phase") == "installed":
+            installed_metadata = installed_release_metadata(args, account, supervised)
+        if supervised is not None and privilege == "root":
+            maintenance_call(supervised.ensure_idle)
+            maintenance_call(supervised.validate_digest)
         if account is not None:
             check_existing_activity(args, account)
     except InstallError as error:
@@ -661,7 +711,7 @@ def probe(args):
             "activeSwapBytes": swap["activeSwapBytes"], "configuredSwap": swap["configuredSwap"],
             "platform": "Ubuntu " + version if supported else "unsupported",
             "architecture": platform.machine(), "privilege": privilege, "existing": bool(existing),
-            "blockers": blockers, "warnings": warnings, **metadata(args)}
+            "blockers": blockers, "warnings": warnings, **metadata(args), **installed_metadata}
 
 
 def extract_package(package, destination, expected_hash):

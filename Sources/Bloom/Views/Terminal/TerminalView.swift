@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import SwiftTerm
 import BloomCore
+import BloomClient
 
 /// Everything needed to fork a shell: which one, where, and with what in its environment. Kept as
 /// a value so the decision is made once, by whoever knows the workspace, rather than by the view.
@@ -378,38 +379,9 @@ final class BloomTerminalView: LocalProcessTerminalView {
     /// They stay ordered dark to light within each appearance, because every program that colours
     /// its own output assumes slot 8 is a lighter slot 0 and slot 15 a lighter slot 7.
     private var ansiColors: [SwiftUI.Color] {
-        [
-            Self.black,
-            Palette.negative,
-            Self.green,
-            Palette.warning,
-            Palette.accent,
-            Color(nsColor: .systemPurple),
-            Color(nsColor: .systemTeal),
-            Self.white,
-            Self.brightBlack,
-            Palette.negative,
-            Self.green,
-            Palette.warning,
-            Palette.accent,
-            Color(nsColor: .systemPurple),
-            Color(nsColor: .systemTeal),
-            Self.brightWhite,
-        ]
+        TerminalPalette.ansi(resolve: { Palette.dynamic(light: $0.light, dark: $0.dark) },
+                             purple: Color(nsColor: .systemPurple), cyan: Color(nsColor: .systemTeal))
     }
-
-    /// ANSI slot 2. Tuned to sit beside `Palette.negative` and `Palette.warning` at the same
-    /// volume they do, rather than to be `systemGreen`, which is a step brighter than everything
-    /// else this terminal prints.
-    private static let green = Palette.dynamic(light: 0x2E7D32, dark: 0x6FCF7B)
-
-    // Per appearance, because the terminal's background follows the system: a fixed #FFFFFF for
-    // bright white would be invisible on a light panel, and a fixed #000000 black unreadable on a
-    // dark one.
-    private static let black = Palette.dynamic(light: 0x000000, dark: 0x1C1C1E)
-    private static let brightBlack = Palette.dynamic(light: 0x4D4D4D, dark: 0x636366)
-    private static let white = Palette.dynamic(light: 0x8E8E93, dark: 0xAEAEB2)
-    private static let brightWhite = Palette.dynamic(light: 0xB0B0B5, dark: 0xFFFFFF)
 
     private func resolved(_ color: SwiftUI.Color) -> NSColor {
         var native = NSColor(color)

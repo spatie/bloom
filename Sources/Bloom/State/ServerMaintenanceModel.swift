@@ -15,6 +15,8 @@ final class ServerMaintenanceModel {
     private(set) var administration: ServerSetupModel?
     private(set) var administrationIntent = AdministrationIntent.start
     private var administrationProfile: String?
+    private(set) var administrationIsRunning = false
+    private(set) var administrationOutcome: ServerAdministrationOutcome?
     var session: ServerMaintenanceSession? { access?.session }
 
     init(server: ServerWindowModel) { self.server = server }
@@ -35,7 +37,7 @@ final class ServerMaintenanceModel {
         while !Task.isCancelled, server.connectionProfile?.id == profileID {
             if server.isConnected {
                 if generation != server.connectionGeneration || session == nil { await refresh() } else if session?.authorized == true { await session?.poll() }
-            } else if administration?.isBusy != true, server.shouldReconnect, !server.isConnecting,
+            } else if !server.isMaintainingServer, !administrationIsRunning && administration?.isBusy != true, server.shouldReconnect, !server.isConnecting,
                       !server.isDisconnecting, server.isConfigured, Date() >= nextRetry {
                 await server.connect(automatically: true)
                 nextRetry = Date().addingTimeInterval(Double(max(2, server.connectionRecovery.retryDelaySeconds)))
@@ -46,13 +48,13 @@ final class ServerMaintenanceModel {
     }
 
     func reconnect() async {
-        guard administration?.isBusy != true else { return }
+        guard !server.isMaintainingServer, !administrationIsRunning && administration?.isBusy != true else { return }
         await server.connect()
         if server.isConnected { await refresh() }
     }
 
     func beginAdministration(_ intent: AdministrationIntent) {
-        guard administration?.isBusy != true else { return }
+        guard !server.isMaintainingServer, !administrationIsRunning && administration?.isBusy != true else { return }
         administration?.cancel()
         let setup = ServerSetupModel(server: server, resumeExisting: false)
         setup.label = server.displayName
@@ -61,33 +63,45 @@ final class ServerMaintenanceModel {
             setup.host = "root@" + hostname
         }
         setup.beginSetup()
+        administrationOutcome = nil
         administrationIntent = intent
         administrationProfile = server.connectionProfile?.id
         administration = setup
     }
 
     func performAdministration() async {
-        guard let administration, server.connectionProfile?.id == administrationProfile else { return }
+        guard !server.isMaintainingServer, !administrationIsRunning, let administration, server.connectionProfile?.id == administrationProfile else { return }
+        administrationIsRunning = true
+        administrationOutcome = nil
+        server.isMaintainingServer = true
         switch administrationIntent {
         case .start: await administration.startExistingServer()
         case .update: await administration.updateExistingServer()
         }
+        administrationIsRunning = false
+        server.isMaintainingServer = false
+        administrationOutcome = .resolve(updating: administrationIntent == .update,
+            installed: administration.maintenanceInstallationCompleted, running: administration.maintenanceServerRunning,
+            connected: administration.phase == .complete, failed: administration.failure != nil)
         if server.isConnected { await refresh() }
     }
 
     func selectedServerChanged() {
-        if administration?.isBusy != true { finishAdministration() }
+        server.isMaintainingServer = administrationIsRunning && server.connectionProfile?.id == administrationProfile
+        if server.connectionProfile?.id != administrationProfile, !administrationIsRunning, administration?.isBusy != true { finishAdministration() }
     }
 
     func recoverAdministration() {
-        guard administration?.isBusy != true else { return }
+        guard !server.isMaintainingServer, !administrationIsRunning && administration?.isBusy != true else { return }
         administrationIntent = .start
+        administrationOutcome = nil
     }
 
     func finishAdministration() {
-        guard administration?.isBusy != true else { return }
+        guard !server.isMaintainingServer, !administrationIsRunning && administration?.isBusy != true else { return }
         administration?.cancel()
         administration = nil
+        administrationOutcome = nil
     }
 
     var report: String {

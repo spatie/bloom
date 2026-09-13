@@ -23,7 +23,7 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     var onNavigate: (@MainActor (String) async throws -> Void)?
     private var navigationTask: Task<Void, Never>?
     private let activity = UIActivityIndicatorView(style: .medium)
-    private let errorView = UIView()
+    private let errorView = UIScrollView()
     private let errorDetail = BloomTheme.label("", style: .subheadline, secondary: true)
     private var isLoading = false
     private var retryURL: URL?
@@ -289,6 +289,8 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
 
     private func configureErrorView() {
         errorView.backgroundColor = BloomTheme.background
+        errorView.clipsToBounds = true
+        errorView.accessibilityIdentifier = "preview-error"
         errorView.isHidden = true
         errorView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(errorView)
@@ -309,16 +311,32 @@ final class PreviewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         stack.alignment = .center
         stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
-        errorView.addSubview(stack)
+        let content = UIView()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        errorView.addSubview(content)
+        content.addSubview(stack)
+        let preferredHeight = content.heightAnchor.constraint(equalTo: errorView.frameLayoutGuide.heightAnchor)
+        preferredHeight.priority = .defaultLow
+        let preferredWidth = stack.widthAnchor.constraint(equalTo: content.widthAnchor, constant: -56)
+        preferredWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
             errorView.topAnchor.constraint(equalTo: browser.topAnchor),
             errorView.leadingAnchor.constraint(equalTo: browser.leadingAnchor),
             errorView.trailingAnchor.constraint(equalTo: browser.trailingAnchor),
             errorView.bottomAnchor.constraint(equalTo: browser.bottomAnchor),
-            stack.centerXAnchor.constraint(equalTo: errorView.centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: errorView.centerYAnchor),
-            stack.leadingAnchor.constraint(greaterThanOrEqualTo: errorView.leadingAnchor, constant: 28),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: errorView.trailingAnchor, constant: -28),
+            content.topAnchor.constraint(equalTo: errorView.contentLayoutGuide.topAnchor),
+            content.bottomAnchor.constraint(equalTo: errorView.contentLayoutGuide.bottomAnchor),
+            content.leadingAnchor.constraint(equalTo: errorView.contentLayoutGuide.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: errorView.contentLayoutGuide.trailingAnchor),
+            content.widthAnchor.constraint(equalTo: errorView.frameLayoutGuide.widthAnchor),
+            content.heightAnchor.constraint(greaterThanOrEqualTo: errorView.frameLayoutGuide.heightAnchor),
+            preferredHeight, preferredWidth,
+            stack.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+            stack.topAnchor.constraint(greaterThanOrEqualTo: content.topAnchor, constant: 24),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -24),
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: content.leadingAnchor, constant: 28),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -28),
             stack.widthAnchor.constraint(lessThanOrEqualToConstant: 340),
             symbol.heightAnchor.constraint(equalToConstant: 40)
         ])

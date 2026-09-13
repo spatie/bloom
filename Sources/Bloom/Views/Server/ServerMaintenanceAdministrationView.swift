@@ -5,27 +5,46 @@ import BloomCore
 struct ServerMaintenanceAdministrationView: View {
     @Bindable var setup: ServerSetupModel
     let isStarting: Bool
+    let isRunning: Bool
+    let outcome: ServerAdministrationOutcome?
+    let reconnect: () -> Void
     let review: () -> Void
     let recover: () -> Void
     let finish: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.gutter) {
-            Text(setup.label.isEmpty ? setup.host : setup.label).font(Typo.labelEmphasis)
-            if setup.phase == .complete {
-                Label("Bloom Server is running and connected", systemImage: "checkmark.circle")
-                Text("Your projects and conversations are ready.").settingsFootnote()
+            if let outcome {
+                Label(outcome.title, systemImage: outcome.succeeded ? "checkmark.circle.fill" : "exclamationmark.circle")
+                    .font(Typo.labelEmphasis)
+                    .foregroundStyle(outcome.succeeded ? Palette.controlAccent : Palette.warning)
+                Text(outcome.detail).settingsFootnote().fixedSize(horizontal: false, vertical: true)
                 if let failure = setup.failure { ServerSetupFailureView(failure: failure) }
-                Button("Done", action: finish)
-            } else if setup.isBusy {
-                ProgressView(setup.phase == .checking ? "Checking administrator access…" : isStarting ? "Starting and reconnecting…" : "Updating and reconnecting…")
-                    .controlSize(.small)
-                Text(setup.phase == .checking ? "This checks the server without changing it." : "Keep this Mac connected until this step finishes. Bloom will restore the connection automatically.").settingsFootnote()
-                if !setup.activity.lines.isEmpty {
-                    ServerSetupActivityView(activity: setup.activity, failure: setup.failure, compact: true)
-                        .frame(minHeight: 180, idealHeight: 240, maxHeight: 320)
+                HStack {
+                    if outcome == .updatedNeedsConnection || outcome == .updateFailedServerRunning {
+                        Button("Reconnect", action: reconnect)
+                    }
+                    if !outcome.succeeded { Button("Start Server…", action: recover) }
+                    Button("Done", action: finish)
+                }
+                if !setup.activity.lines.isEmpty { ServerSetupLogView(activity: setup.activity) }
+            } else if isRunning || setup.isBusy {
+                HStack(spacing: Metrics.spacing) {
+                    ProgressView().controlSize(.small)
+                    Text(setup.phase == .checking ? "Checking administrator access…" : setup.phase == .connecting ? "Reconnecting to your workspaces…" : isStarting ? "Starting Bloom Server…" : "Updating Bloom Server…")
+                        .font(Typo.labelEmphasis)
+                }
+                if setup.phase == .checking {
+                    Text("This checks the server without changing it.").settingsFootnote()
+                } else {
+                    Text(setup.activity.currentMessage).settingsFootnote()
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Keep this Mac connected. Bloom will reconnect automatically when the server is ready.")
+                        .settingsFootnote().fixedSize(horizontal: false, vertical: true)
+                    ServerSetupLogView(activity: setup.activity)
                 }
             } else {
+                if !isStarting { ServerSetupVersionsView(comparison: setup.versionComparison) }
                 Text(isStarting ? "Start the existing service without reinstalling it. Bloom will reconnect this Mac when it is ready."
                      : "Install the maintenance service so future updates can run independently of this Mac. Bloom handles stopping, updating and starting the server.")
                     .settingsFootnote()
@@ -65,22 +84,20 @@ struct ServerMaintenanceAdministrationView: View {
                     }
                     Button(isStarting ? "Start and Reconnect…" : "Review Update…", action: review)
                         .buttonStyle(.borderedProminent).tint(Palette.controlAccent)
-                        .disabled(!setup.canMaintainExistingServer)
+                        .disabled(isStarting ? !setup.canMaintainExistingServer : !setup.canUpdateExistingServer)
                 }
                 if let failure = setup.failure {
                     ServerSetupFailureView(failure: failure)
-                    if !isStarting { Button("Recover Server Without Updating", action: recover) }
+                    if !isStarting, setup.maintenanceInstallationCompleted || setup.maintenanceServerRunning {
+                        Button("Start Server…", action: recover)
+                    }
                 }
                 if !setup.activity.lines.isEmpty {
-                    DisclosureGroup("Server output") {
-                        ScrollView {
-                            Text(setup.activity.output).font(Typo.codeSmall).textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }.frame(minHeight: 100, maxHeight: 220)
-                    }
+                    DisclosureGroup("Server output") { ServerSetupLogView(activity: setup.activity) }
                 }
                 Button("Back to Updates", action: finish)
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 }

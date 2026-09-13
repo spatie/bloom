@@ -662,6 +662,14 @@ for active work, stops the managed service, installs and starts it, then reconne
 fails, it attempts to restart the service without repeating installation. Keep the Mac connected
 during this initial installation of the maintenance service.
 
+Administrator checks display the installed package version alongside the exact version included
+with the Mac app. Equal package digests identify the same build; development hashes are not
+ordered as release numbers. The review action is disabled when the package is already current,
+unless the maintenance service still needs installing. Published-version checks are available
+through the managed components list, which keeps unavailable versions distinct from up-to-date
+ones. Bootstrap completion shows a separate result with copyable output, including when the
+package was installed but startup or reconnection still needs attention.
+
 When disconnected, Updates offers **Reconnect**, **Start Server…** and **Update Server…**.
 Starting verifies the existing managed installation without replacing packages or project data.
 Automatic connection retries resume after failures; a deliberate disconnect or change of server

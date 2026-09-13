@@ -18,9 +18,9 @@ protocol = int(re.search(r'version = (\d+)', (root / 'Packages/BloomClient/Sourc
 
 
 class PackageTests(unittest.TestCase):
-    def archive(self, path, version):
+    def archive(self, path, version, metadata=None):
         with tarfile.open(path, 'w:gz') as archive:
-            for name, data in [('bin/bloom-server', b'fixture'), ('manifest.json', json.dumps({'protocolVersion': version}).encode())]:
+            for name, data in [('bin/bloom-server', b'fixture'), ('manifest.json', json.dumps({'protocolVersion': version, **(metadata or {})}).encode())]:
                 entry = tarfile.TarInfo('bloom-server-linux-x86_64/' + name)
                 entry.size = len(data)
                 archive.addfile(entry, io.BytesIO(data))
@@ -42,6 +42,17 @@ class PackageTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual((output / 'server.tar.gz').read_bytes(), archive.read_bytes())
             self.assertEqual(json.loads((output / 'package.json').read_text())['protocolVersion'], protocol)
+
+    def test_bundled_version_is_exact_manifest_value_or_unknown(self):
+        for metadata in ({}, {'version': '0.0.0-dev.abcdef', 'maintenanceProtocolVersion': 1}):
+            with self.subTest(metadata=metadata), tempfile.TemporaryDirectory() as directory:
+                path = pathlib.Path(directory)
+                archive = path / 'server.tar.gz'
+                self.archive(archive, protocol, metadata)
+                module.embed(path / 'Bloom.app', archive)
+                result = json.loads((path / 'Bloom.app/Contents/Resources/ServerSetup/package.json').read_text())
+                self.assertEqual(result['version'], metadata.get('version'))
+                self.assertEqual(result['maintenanceProtocolVersion'], metadata.get('maintenanceProtocolVersion'))
 
     def test_wrong_protocol_cannot_be_bundled(self):
         with tempfile.TemporaryDirectory() as directory:

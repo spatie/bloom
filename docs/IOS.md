@@ -169,7 +169,8 @@ Closing a tab closes its panes through their existing session and connection lif
 Project navigation
 uses UIKit's overlay sidebar, and the Changes/Files inspector opens on demand. It appears in a
 popover on regular iPad windows or a sheet on compact screens; large windows can show it inline
-without reducing the main panes below their readable widths. The iPhone keeps a native bottom
+without reducing the main panes below their readable widths. Reconnect notices retain their content height, leaving the workspace visible while a connection
+is restored. Preview failures scroll inside their pane below the address bar. The iPhone keeps a native bottom
 tab bar for conversation and tools. Workspace actions live in the navigation title menu.
 Branch and uncommitted scopes use the existing server review API;
 diffs load lazily with at most two requests at once. All-files review, per-file diffs and read-only

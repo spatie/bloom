@@ -394,6 +394,76 @@ class InstallerTests(unittest.TestCase):
             self.addCleanup(patch.stop)
         return args
 
+    def installed_version_fixture(self):
+        args = self.activity_probe_fixture()
+        account = pwd.getpwuid(os.getuid())
+        installer.existing_account.return_value = account
+        release = args.install_root / "releases" / ("a" * 64)
+        release.mkdir(parents=True)
+        (release / "manifest.json").write_text(json.dumps({"version": "0.0.0-dev.abcdef"}))
+        (release / "manifest.json").chmod(0o644)
+        (args.install_root / "current").symlink_to(release)
+        return args, account, release
+
+    def test_running_service_check_still_reports_installed_package(self):
+        args, _, _ = self.installed_version_fixture()
+        installer.service_running.return_value = True
+        report = installer.probe(args)
+        self.assertEqual(report["installedVersion"], "0.0.0-dev.abcdef")
+        self.assertEqual(report["installedPackageSHA256"], "a" * 64)
+        self.assertFalse(report["maintenanceManagement"])
+        self.assertIn("server_running", [item["code"] for item in report["blockers"]])
+
+    def test_old_manifest_does_not_fabricate_installed_version(self):
+        args, account, release = self.installed_version_fixture()
+        (release / "manifest.json").write_text('{"protocolVersion":14}')
+        report = installer.installed_release_metadata(args, account)
+        self.assertIsNone(report["installedVersion"])
+        self.assertEqual(report["installedPackageSHA256"], "a" * 64)
+
+    def test_symlink_manifest_and_external_current_do_not_expose_contents(self):
+        args, account, release = self.installed_version_fixture()
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "manifest.json").write_text('{"version":"private"}')
+        (release / "manifest.json").unlink()
+        (release / "manifest.json").symlink_to(outside / "manifest.json")
+        report = installer.installed_release_metadata(args, account)
+        self.assertIsNone(report["installedVersion"])
+        (args.install_root / "current").unlink()
+        (args.install_root / "current").symlink_to(outside)
+        self.assertEqual(installer.installed_release_metadata(args, account), {})
+
+    def test_supervisor_bootstrap_check_keeps_legacy_version(self):
+        args, account, _ = self.installed_version_fixture()
+        supervisor = mock.Mock()
+        supervisor.existing_config.return_value = None
+        report = installer.installed_release_metadata(args, account, supervisor)
+        self.assertEqual(report["installedVersion"], "0.0.0-dev.abcdef")
+        self.assertFalse(report["maintenanceManagement"])
+
+    def test_supervised_version_reads_protected_current_release(self):
+        args, account, release = self.installed_version_fixture()
+        supervisor = mock.Mock()
+        supervisor.existing_config.return_value = {"fixture": True}
+        supervisor.releases = self.root / "protected/releases"
+        current = supervisor.releases / ("b" * 64)
+        current.mkdir(parents=True)
+        (current / "manifest.json").write_text('{"version":"1.2.3"}')
+        (current / "manifest.json").chmod(0o644)
+        supervisor.private_file.return_value = json.dumps({"executable": str(current / "bin/bloom-server")})
+        real_fstat = os.fstat
+        def root_owned(fd):
+            result = list(real_fstat(fd))
+            result[4] = 0
+            return os.stat_result(result)
+        with mock.patch.object(installer.os, "fstat", side_effect=root_owned):
+            report = installer.installed_release_metadata(args, account, supervisor)
+        self.assertEqual(report["installedVersion"], "1.2.3")
+        self.assertEqual(report["installedPackageSHA256"], "b" * 64)
+        self.assertTrue(report["maintenanceManagement"])
+        supervisor.protect.assert_called_once_with(current)
+
     def test_probe_reports_active_and_configured_swap_without_mutation(self):
         args = self.activity_probe_fixture()
         for active, configured in ((0, False), (0, True), (2147483648, True)):

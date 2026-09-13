@@ -78,6 +78,11 @@ struct ServerMaintenanceView: View {
             Form {
                 if let administration = model.administration {
                     administrationSection(administration)
+                } else if model.server.isMaintainingServer {
+                    Section("Server maintenance") {
+                        ProgressView("Maintenance is running…").controlSize(.small)
+                        Text("Bloom will reconnect when the operation finishes.").settingsFootnote()
+                    }
                 } else if !model.server.isConnected {
                     Section("Reconnect to your server") {
                         if model.server.isConnecting {
@@ -108,6 +113,16 @@ struct ServerMaintenanceView: View {
                             }
                         }
                     } else {
+                        if let job = session.jobs.filter({ !$0.isActive }).max(by: { $0.updatedAt < $1.updatedAt }) {
+                            Section("Latest result") {
+                                Label(job.component.title + ": " + job.phase.title,
+                                      systemImage: job.phase == .succeeded ? "checkmark.circle.fill" : "exclamationmark.circle")
+                                    .font(Typo.labelEmphasis)
+                                Text("Version " + job.targetVersion + " · " + ServerMaintenancePresentation.date(job.updatedAt))
+                                    .settingsFootnote().textSelection(.enabled)
+                                if let message = job.message { Text(message).settingsFootnote().textSelection(.enabled) }
+                            }
+                        }
                         accessSection(session)
                         if !session.components.isEmpty { componentsSection(session) }
                         Section {
@@ -144,14 +159,16 @@ struct ServerMaintenanceView: View {
                 }.disabled(model.session == nil && model.administration == nil)
                 Spacer()
                 Button("Refresh") { Task { await model.refresh() } }
-                    .disabled(!model.server.isConnected || model.session?.isLoading == true || model.session?.isSubmitting == true || model.administration?.isBusy == true)
+                    .disabled(!model.server.isConnected || model.session?.isLoading == true || model.session?.isSubmitting == true || model.administrationIsRunning || model.administration?.isBusy == true)
             }.padding(Metrics.gutter)
         }
     }
 
     private func administrationSection(_ setup: ServerSetupModel) -> some View {
-        Section(model.administrationIntent == .start ? "Start Bloom Server" : "Set up managed server updates") {
+        Section(model.administrationOutcome != nil ? "Result" : model.administrationIntent == .start ? "Start Bloom Server" : "Set up managed server updates") {
             ServerMaintenanceAdministrationView(setup: setup, isStarting: model.administrationIntent == .start,
+                isRunning: model.administrationIsRunning, outcome: model.administrationOutcome,
+                reconnect: { Task { await model.reconnect() } },
                 review: { confirmsAdministration = true }, recover: { model.recoverAdministration() },
                 finish: { model.finishAdministration() })
         }
@@ -185,13 +202,16 @@ struct ServerMaintenanceView: View {
                         Text(component.title).font(Typo.labelEmphasis)
                         Text("Installed: " + (component.installedVersion ?? "Not available"))
                             .font(Typo.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                        if let available = component.availableVersion {
-                            Text("Available: " + available).font(Typo.caption).textSelection(.enabled)
+                        Text("Latest available: " + (component.availableVersion ?? "Not available"))
+                            .font(Typo.caption).textSelection(.enabled)
+                        if let installed = component.installedVersion, component.availableVersion == installed {
+                            Label("Up to date", systemImage: "checkmark.circle")
+                                .font(Typo.caption).foregroundStyle(Palette.controlAccent)
                         }
                         if !component.detail.isEmpty { Text(component.detail).settingsFootnote() }
                     }
                     Spacer()
-                    if component.canUpdate {
+                    if component.canUpdate, component.availableVersion != component.installedVersion {
                         Button("Review Update…") {
                             Task {
                                 guard session.activity == .idle, session.pendingMutationID == nil else { return }

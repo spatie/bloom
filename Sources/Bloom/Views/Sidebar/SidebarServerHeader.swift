@@ -8,6 +8,7 @@ struct SidebarServerHeader: View {
     @Environment(\.openWindow) private var openWindow
     @State private var hovered = false
     @State private var showsConnectionFailure = false
+    @State private var reconnectHovered = false
     @State private var isRenaming = false
     @State private var label = ""
     @State private var showsRemoval = false
@@ -22,6 +23,9 @@ struct SidebarServerHeader: View {
         .onChange(of: server.isConnected) { _, connected in
             if connected { showsConnectionFailure = false }
         }
+        .onChange(of: server.isMaintainingServer) { _, updating in
+            if updating { showsConnectionFailure = false }
+        }
     }
 
     private var header: some View {
@@ -34,7 +38,7 @@ struct SidebarServerHeader: View {
             .help("Server settings")
             Text(server.displayName).lineLimit(1).truncationMode(.middle)
                 .accessibilityAddTraits(.isHeader)
-            if server.isConnecting { ProgressView().controlSize(.mini) }
+            if server.isConnecting && !server.isMaintainingServer { ProgressView().controlSize(.mini) }
             Spacer(minLength: 0)
             Menu { actions } label: {
                 Label("Server actions", systemImage: "ellipsis")
@@ -76,13 +80,15 @@ struct SidebarServerHeader: View {
     }
 
     private var hasConnectionFailure: Bool {
-        server.connectionRecovery.phase != .disconnected && server.connectionRecovery.lastError != nil
+        !server.isMaintainingServer && server.connectionRecovery.phase != .disconnected && server.connectionRecovery.lastError != nil
     }
 
     @ViewBuilder private var connectionStatus: some View {
-        if !server.isConnected || server.isConnecting {
+        if server.isMaintainingServer || !server.isConnected || server.isConnecting {
             HStack(spacing: 6) {
-                if hasConnectionFailure {
+                if server.isMaintainingServer {
+                    Text("Updating server…").foregroundStyle(Palette.textSecondary)
+                } else if hasConnectionFailure {
                     Button { showsConnectionFailure = true } label: {
                         Label(server.isConnecting ? "Retrying connection…" : "Could not connect",
                               systemImage: "exclamationmark.triangle")
@@ -96,17 +102,37 @@ struct SidebarServerHeader: View {
                         .foregroundStyle(Palette.textSecondary)
                 }
                 Spacer(minLength: 0)
-                if !server.isConnecting {
-                    Button(hasConnectionFailure ? "Retry" : "Connect") {
-                        Task { await server.connect() }
+                if server.isMaintainingServer {
+                    ProgressView().controlSize(.mini)
+                        .frame(width: 24, height: 22)
+                        .accessibilityLabel("Server maintenance in progress")
+                } else if !server.isConnecting {
+                    Button {
+                        Task {
+                            guard !server.isMaintainingServer else { return }
+                            await server.connect()
+                        }
+                    } label: {
+                        Label(hasConnectionFailure ? "Retry connection" : "Connect to server", systemImage: "arrow.clockwise")
+                            .labelStyle(.iconOnly)
+                            .font(Typo.captionEmphasis)
+                            .frame(width: 24, height: 22)
+                            .contentShape(RoundedRectangle(cornerRadius: Metrics.cornerSmall))
+                            .background(reconnectHovered ? Palette.hover : .clear,
+                                        in: RoundedRectangle(cornerRadius: Metrics.cornerSmall))
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(Color.accentColor)
-                    .disabled(server.isRemovingServer || server.isDisconnecting)
+                    .foregroundStyle(Palette.controlAccent)
+                    .help(hasConnectionFailure ? "Retry connection to " + server.displayName : "Connect to " + server.displayName)
+                    .accessibilityIdentifier("sidebar-server-reconnect")
+                    .onHoverChange { reconnectHovered = $0 }
+                    .disabled(server.isRemovingServer || server.isDisconnecting || server.isMaintainingServer)
                 }
             }
             .font(Typo.caption)
             .padding(.leading, 24)
+            .padding(.trailing, Metrics.spacingSmall * 2)
+            .frame(minHeight: 22)
         }
     }
 
@@ -114,7 +140,12 @@ struct SidebarServerHeader: View {
         if server.isConnected {
             Button("Disconnect") { Task { await server.disconnect() } }
         } else {
-            Button("Connect") { Task { await server.connect() } }.disabled(server.isConnecting)
+            Button("Connect") {
+                Task {
+                    guard !server.isMaintainingServer else { return }
+                    await server.connect()
+                }
+            }.disabled(server.isConnecting || server.isMaintainingServer || server.isRemovingServer || server.isDisconnecting)
         }
         if hasConnectionFailure {
             Button("Connection Details…") { showsConnectionFailure = true }

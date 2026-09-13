@@ -33,6 +33,8 @@ def embed(bundle, archive=None):
     (destination / 'package.json').write_text(json.dumps({
         'sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
         'protocolVersion': protocol,
+        'version': metadata.get('version'),
+        'maintenanceProtocolVersion': metadata.get('maintenanceProtocolVersion'),
     }) + '\n')
 
 
