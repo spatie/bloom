@@ -54,6 +54,9 @@ enum ChangesReviewProbe {
                                   styleMask: [.borderless], backing: .buffered, defer: false)
             window.appearance = NSAppearance(named: .darkAqua)
             window.contentView = host
+            await settle(window)
+            save(host, at: directory + "/changes-history-collapsed.png")
+            model.showsCommitHistory = true
             for layer in [ChangeLayer.staged, .unstaged] {
                 model.selectedChangeLayer = layer
                 model.selectedFilePath = "Source.swift"
@@ -83,6 +86,10 @@ enum ChangesReviewProbe {
             check(oldText.contains("let value = 1"), "historical patch did not render")
             check(!oldText.contains("let value = 3"), "historical view opened today's edit buffer")
             save(host, at: directory + "/changes-commit.png")
+            model.showsCommitHistory = false
+            await settle(window)
+            save(host, at: directory + "/changes-commit-collapsed.png")
+            model.showsCommitHistory = true
             model.selectedFilePath = "Source.swift"
             try await git(["add", "."])
             try await git(["commit", "-m", "Another agent commit"])

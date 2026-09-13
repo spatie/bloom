@@ -55,6 +55,7 @@ final class WorkspaceModel {
     private var transcripts: [SessionID: TranscriptModel] = [:]
 
     // Inspector.
+    var showsCommitHistory = false
     /// The comparison and its file list are adopted together after a refresh. Resolving the
     /// scope in a getter could label the last commit's files as all branch changes after a rebase.
     private var storedDiffScope: DiffScope = .all
