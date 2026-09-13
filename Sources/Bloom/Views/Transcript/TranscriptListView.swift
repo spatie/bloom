@@ -154,6 +154,11 @@ struct TranscriptListView: View {
     /// The question whose output is currently under the reader, only while its full bubble has
     /// passed above the viewport.
     @State private var pinnedQuestion: PinnedQuestion?
+    /// The prompt whose turn is at the top of the screen, for the minimap. Written only when the
+    /// reader crosses into another turn, from the same per-frame lookup the pinned question uses.
+    @State private var currentTurnSeq: Int?
+    /// Whether the pane is wide enough for the minimap beside the column. See `TurnMinimap.fits`.
+    @State private var minimapFits = false
     /// Whether the pane is at the live end EXACTLY, which is not `geometry.isNearBottom`.
     ///
     /// **Two different questions, and one number was answering both.** `ScrollEnd.threshold` is 96
@@ -867,7 +872,8 @@ struct TranscriptListView: View {
                 // is the worst thing in this file.
                 scroller.stop()
                 follower.seekLiveEnd(false)
-            }
+            },
+            quoteSelection: quoteSelection
         )
         .overlay(alignment: .top) {
             if let pinnedQuestion {
@@ -879,6 +885,10 @@ struct TranscriptListView: View {
             }
         }
         .animation(reduceMotion ? nil : Motion.hover, value: pinnedQuestion?.seq)
+        .overlay { minimap }
+        .onGeometryChange(for: Bool.self) {
+            TurnMinimap.fits(paneWidth: $0.size.width, measure: TranscriptLayout.conversationMeasure)
+        } action: { minimapFits = $0 }
         .overlay { TranscriptHoverOverlay(host: hoverHost) }
         .overlay {
             if showsPlaceholder {
@@ -963,6 +973,7 @@ struct TranscriptListView: View {
             isLiveScrolling.value = false
             opening = nil
             pinnedQuestion = nil
+            currentTurnSeq = nil
             // The folds of the session being arrived at, which are its own and are usually none.
             let remembered = memory?.remembered(session: transcript.session.id)
             liveEndRequest = TranscriptLiveEndRequest(handled: remembered?.liveEndRequest ?? 0)
@@ -1327,6 +1338,32 @@ struct TranscriptListView: View {
         }
     }
 
+    /// The strip of turns in the margin, clear of the pinned question above and the composer below.
+    @ViewBuilder
+    private var minimap: some View {
+        if minimapFits {
+            let turns = transcript.turns()
+            if turns.count >= TurnMinimap.minimumTurns {
+                TurnMinimapView(
+                    turns: turns,
+                    current: currentTurnSeq.flatMap { seq in turns.firstIndex { $0.seq == seq } },
+                    onOpen: showPinnedQuestion
+                )
+                .padding(.top, PinnedQuestionView.height + Metrics.spacingWide)
+                .padding(.bottom, composerRoom?.clearance ?? 0)
+            }
+        }
+    }
+
+    /// Where a passage selected in this conversation is quoted. Only where there is a composer to
+    /// reply in: the room is what a pane with one puts in the environment, and an archived
+    /// workspace's transcript has none.
+    private var quoteSelection: (@MainActor (String) -> Void)? {
+        guard composerRoom != nil else { return nil }
+        let transcript = transcript
+        return { transcript.appendQuote($0) }
+    }
+
     /// Returns to the full user bubble represented by the compact header.
     private func showPinnedQuestion(_ question: PinnedQuestion) {
         let rows = transcript.rows
@@ -1371,8 +1408,10 @@ struct TranscriptListView: View {
               let question = transcript.pinnedQuestion(atOrBefore: place.seq)
         else {
             if pinnedQuestion != nil { pinnedQuestion = nil }
+            if currentTurnSeq != nil { currentTurnSeq = nil }
             return
         }
+        if currentTurnSeq != question.seq { currentTurnSeq = question.seq }
 
         // A long user turn can fill most of the pane after its top has scrolled away. Pinning a
         // summary while that real bubble is still visible duplicates the loudest thing on screen.

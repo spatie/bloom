@@ -18,6 +18,9 @@ enum TerminalPaneCommand: Sendable, Hashable {
     case focus(SplitDirection)
     case close
     case toggleZoom
+    /// Whatever is selected in the shell, attached to the workspace's conversation. Cmd+L, the key
+    /// the menu bar's Add Selection to Chat carries everywhere else in the window.
+    case addSelectionToChat
 
     /// - Parameter key: `charactersIgnoringModifiers`, lowercased, so Shift is read from the flags
     ///   rather than from the character.
@@ -37,6 +40,8 @@ enum TerminalPaneCommand: Sendable, Hashable {
             self = .split(shift ? .vertical : .horizontal, .terminal)
         case "w" where !shift && !option:
             self = .close
+        case "l" where !shift && !option:
+            self = .addSelectionToChat
         // Both Returns, because the one on the numeric keypad sends a different character and a
         // user pressing it means the same thing.
         case "\r", "\u{3}":

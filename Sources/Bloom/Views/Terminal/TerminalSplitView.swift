@@ -26,6 +26,9 @@ struct TerminalSplitView: View {
     var onCloseTab: @MainActor () -> Void
     /// Called when a split asks for something a shell tree cannot hold. See `handle`.
     var splitColumn: @MainActor (SplitAxis, PaneKind) -> Void
+    /// Hands a pane's selection to the workspace's conversation. The tab holding this view knows
+    /// the workspace and what the tab is called, and this view knows neither.
+    var addToChat: @MainActor (String) -> Void = { _ in }
 
     /// The same switch the terminal itself reads, so turning the Ghostty theme off also turns off
     /// Ghostty's way of fading the panes that do not have the keyboard.
@@ -126,7 +129,8 @@ struct TerminalSplitView: View {
                 onContextMenu: {
                     TerminalPaneMenu.make(
                         canClose: layout.paneCount > 1,
-                        isZoomed: layout.zoomed == id
+                        isZoomed: layout.zoomed == id,
+                        hasSelection: TerminalSessionStore.shared.selection(paneID: id) != nil
                     ) { _ = handle($0, from: id) }
                 }
             )
@@ -227,6 +231,13 @@ struct TerminalSplitView: View {
 
         case .toggleZoom:
             return splits.toggleZoom(in: ownerID)
+
+        // Nothing selected hands the key back, so Cmd+L in a shell with no selection is the menu
+        // bar's, which answers it with a beep rather than with nothing.
+        case .addSelectionToChat:
+            guard let selection = TerminalSessionStore.shared.selection(paneID: pane) else { return false }
+            addToChat(selection)
+            return true
         }
     }
 }

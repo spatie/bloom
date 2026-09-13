@@ -196,14 +196,8 @@ public enum CheckFailureHandoff {
     /// the review pane does not try to draw it as a picture.
     public static func logFilename(for name: String, at date: Date = .now, timeZone: TimeZone = .current) -> String {
         // A check's name is whatever the workflow author typed, and on GitHub that includes
-        // slashes (`build / test (macos)`), colons and the occasional backtick. A slash would
-        // silently put the file in another folder, a colon is rewritten by the Finder, and a
-        // backtick would close the code span the path is written inside in the draft.
-        var safe = name
-        for bad in ["/", ":", "`"] { safe = safe.replacingOccurrences(of: bad, with: "-") }
-        safe = safe.trimmingCharacters(in: .whitespacesAndNewlines)
-        while safe.hasPrefix(".") { safe.removeFirst() }
-        let label = safe.isEmpty ? "check" : safe
+        // slashes (`build / test (macos)`), colons and the occasional backtick.
+        let label = PastedAttachment.label(name, fallback: "check")
         return "\(label) \(PastedAttachment.timestamp(date, in: timeZone)).log"
     }
 

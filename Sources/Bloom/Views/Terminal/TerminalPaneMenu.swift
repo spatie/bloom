@@ -19,12 +19,24 @@ enum TerminalPaneMenu {
     static func make(
         canClose: Bool,
         isZoomed: Bool,
+        hasSelection: Bool = false,
         perform: @escaping @MainActor (TerminalPaneCommand) -> Void
     ) -> NSMenu {
         let target = ActionTarget(perform: perform)
         // A menu that owns its target, because `NSMenuItem.target` is weak and nothing else here
         // would hold it: without this the closures are gone before the user picks anything.
         let menu = OwningMenu(target: target)
+
+        // First, and only when there is something selected: a right click over a selection is
+        // somebody asking what can be done with it, and an item that is always there and usually
+        // greyed out would be a row to read past on every other right click.
+        if hasSelection {
+            menu.addItem(item(
+                "Add Selection to Chat", symbol: "text.bubble", key: "l", modifiers: .command,
+                command: .addSelectionToChat, target: target
+            ))
+            menu.addItem(.separator())
+        }
 
         menu.addItem(splitItem(
             "Split Right", symbol: PaneSymbol.splitRight, axis: .horizontal,

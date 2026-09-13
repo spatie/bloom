@@ -128,6 +128,13 @@ final class TranscriptModel {
         })
     }
 
+    /// Every prompt in the session, for the turn minimap. The same incremental index the pinned
+    /// question reads, so a body asking for this on each pass pays only for rows that are new.
+    func turns() -> [PinnedQuestion] {
+        questionIndex.update(session: session.id, rows: rows)
+        return questionIndex.all
+    }
+
     func pinnedQuestion(atOrBefore seq: Int) -> PinnedQuestion? {
         questionIndex.update(session: session.id, rows: rows)
         return questionIndex.latest(atOrBefore: seq)
@@ -215,6 +222,11 @@ final class TranscriptModel {
 
     var draft = ""
 
+    /// How far Up and Down have walked back through this session's sent prompts. On the session
+    /// rather than in the composer's state, because one composer is handed from session to session
+    /// as a pane changes what it shows. See `PromptRecall`.
+    @ObservationIgnored var promptRecall = PromptRecall()
+
     /// What has been asked for on this session and has not gone yet, oldest first.
     ///
     /// Read by the transcript to draw the pending bubbles and by the drain to decide what goes
@@ -297,13 +309,27 @@ final class TranscriptModel {
     /// meant to carry on writing. A counter for `liveEndRequests`'s reason: two requests in a row
     /// are two requests, and the composer has nothing to clear afterwards.
     private(set) var composerFocusRequests = 0
+    /// Where the last of those requests wants the caret. See `focusComposer(caretAtEnd:)`.
+    @ObservationIgnored private(set) var composerFocusCaretAtEnd = false
+
+    /// A passage of an answer, quoted at the end of the draft with the caret left under it.
+    func appendQuote(_ selection: String) {
+        guard let quoted = ReplyQuote.appending(selection, to: draft) else { return }
+        draft = quoted
+        focusComposer(caretAtEnd: true)
+    }
 
     func appendSourceContext(_ context: String) {
         draft += (draft.isEmpty ? "" : "\n\n") + "Ask about this code:\n\n" + context + "\n\n"
         focusComposer()
     }
 
-    func focusComposer() { composerFocusRequests += 1 }
+    /// - Parameter caretAtEnd: whether the caret goes after what arrived rather than before it. A
+    ///   queued message brought back to edit wants the start, a quote wants the line under it.
+    func focusComposer(caretAtEnd: Bool = false) {
+        composerFocusCaretAtEnd = caretAtEnd
+        composerFocusRequests += 1
+    }
 
     private var runner: (any SessionRunner)?
 

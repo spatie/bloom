@@ -35,6 +35,7 @@ struct ToolPaneView: View {
 
     /// Read for the setup strip's slide. See the `.animation` in `body`.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(AppModel.self) private var app
 
     var body: some View {
         switch tab.kind {
@@ -54,7 +55,8 @@ struct ToolPaneView: View {
                             port: model.port,
                             directory: tab.directory,
                             onCloseTab: { Task { await CenterTabStore.shared.close(tab) } },
-                            splitColumn: splitColumn
+                            splitColumn: splitColumn,
+                            addToChat: { selection in Task { await addToChat(selection) } }
                         )
                         .id(tab.id)
                     } else {
@@ -113,5 +115,22 @@ struct ToolPaneView: View {
         TerminalSessionStore.shared.useStore(model.store)
         await model.ensurePort()
         readyTabID = tab.id
+    }
+
+    /// A shell's selection, attached to the conversation as a file named after this tab.
+    ///
+    /// The same door a failed check's log goes through, and for the same reason: it is usually a
+    /// screen of output rather than a sentence. See `TerminalSelection`.
+    private func addToChat(_ selection: String) async {
+        guard let text = TerminalSelection.text(selection) else { return }
+        let taken = Set(
+            PromptAttachmentStore.shared
+                .attachments(for: model.activeSession?.id.rawValue ?? "")
+                .map(\.filename)
+        )
+        let name = PastedAttachment.uniqued(TerminalSelection.filename(terminal: tab.title), avoiding: taken)
+        let outcome = await ComposerHandoff.attach([.text(text, named: name)], to: model)
+        guard let failure = outcome.failure else { return }
+        app.alert = BloomAlert(title: "That selection was not added to the chat", message: failure)
     }
 }

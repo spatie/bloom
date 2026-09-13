@@ -59,6 +59,7 @@ contribute for free.
 | Item | Key | Notes |
 | --- | --- | --- |
 | Undo, Redo, Cut, Copy, Paste, Select All | `⌘Z` `⇧⌘Z` `⌘X` `⌘C` `⌘V` `⌘A` | AppKit |
+| Add Selection to Chat | `⌘L` | a shell attaches its selection, an answer is quoted into the reply |
 | Find > Find… | `⌘F` | falls through to Search when nothing in front can find |
 | Find > Find Next | `⌘G` | |
 | Find > Find Previous | `⇧⌘G` | |

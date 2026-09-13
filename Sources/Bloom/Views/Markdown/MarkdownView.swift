@@ -267,25 +267,32 @@ private struct MarkdownBlockView: View {
     ) -> some View {
         let font = rung.resolved(scale: fontScale, face: chatFont)
         if !isStreaming, InlineNSAttributes.hasLink(inline) {
+            let text = InlineNSAttributes.make(
+                inline,
+                font: rung.resolvedNSFont(scale: fontScale, face: chatFont),
+                code: rung.monospacedCompanionNSFont(scale: fontScale, face: chatFont),
+                color: NSColor(color),
+                // The block's leading, not this rung's. A paragraph is led once, by the
+                // caller's `.proseLeading()`, and the `Text` branch below inherits that
+                // number through the environment; asking for a heading's own here would set
+                // a heading with a link in it differently from the heading beside it and
+                // change what the row measures at.
+                lineSpacing: spacing ?? lineSpacingOverride ?? TranscriptLayout.proseLeading(
+                    Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight
+                )
+            )
+            let baseline = TranscriptTextView.firstBaseline(of: text)
             TranscriptTextView(
-                text: InlineNSAttributes.make(
-                    inline,
-                    font: rung.resolvedNSFont(scale: fontScale, face: chatFont),
-                    code: rung.monospacedCompanionNSFont(scale: fontScale, face: chatFont),
-                    color: NSColor(color),
-                    // The block's leading, not this rung's. A paragraph is led once, by the
-                    // caller's `.proseLeading()`, and the `Text` branch below inherits that
-                    // number through the environment; asking for a heading's own here would set
-                    // a heading with a link in it differently from the heading beside it and
-                    // change what the row measures at.
-                    lineSpacing: spacing ?? lineSpacingOverride ?? TranscriptLayout.proseLeading(
-                        Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight
-                    )
-                ),
+                text: text,
                 linkColor: Palette.linkNSColor,
                 selectionColor: .selectedTextBackgroundColor,
                 actions: linkActions
             )
+            // A list item lines its marker up on this, and an `NSTextView` gives SwiftUI no text
+            // baseline of its own. Without it every list item holding a link, which since source
+            // references grew file icons is any item naming a file, set its marker a whole line
+            // above the text it marks.
+            .alignmentGuide(.firstTextBaseline) { _ in baseline }
         } else {
             Text(InlineAttributes.make(
                 inline,

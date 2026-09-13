@@ -149,6 +149,12 @@ final class TerminalSessionStore {
         terminals[paneID] != nil
     }
 
+    /// What is selected in a pane's shell, or nil when nothing is.
+    func selection(paneID: String) -> String? {
+        guard let view = terminals[paneID], view.selectionActive else { return nil }
+        return view.getSelection()
+    }
+
     /// Recent rendered output, with soft-wrapped screen rows joined back into logical lines.
     /// Reading never starts a restored shell. A terminal tool that wants one has to start one
     /// explicitly, rather than turning inspection into an action.
