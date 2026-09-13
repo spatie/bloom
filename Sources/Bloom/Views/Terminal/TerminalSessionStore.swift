@@ -44,6 +44,16 @@ final class TerminalSessionStore {
 
     // MARK: - Terminals
 
+    func excerpt(inPaneID paneID: String, workspaceID: WorkspaceID, label: String) -> TerminalExcerpt? {
+        guard paneOwner[paneID] == workspaceID,
+              let selection = terminals[paneID]?.selection, selection.active else { return nil }
+        return TerminalExcerpt(
+            terminalID: TerminalTabID(paneID), workspaceID: workspaceID, label: label,
+            firstLine: selection.start.row + 1, lastLine: selection.end.row + 1,
+            text: selection.getSelectedText()
+        )
+    }
+
     /// Queues a command for the pane that has not been drawn yet, so the shell runs it the moment
     /// it is forked. Nothing happens if the pane's shell already exists: a run script opens a tab
     /// of its own, and the tab is new every time.

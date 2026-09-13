@@ -93,6 +93,12 @@ public enum MenuBarCatalogue {
 
         // MARK: Edit
 
+        // Always live, because what it acts on is a selection and a selection is not something the
+        // menu bar is told about. See `SelectionToChat`, which asks at the moment it is pressed.
+        //
+        // **A terminal keeps Cmd+L as well, and it is the same action by a shorter road**: the
+        // shell hands its selection over itself, and hands the key back when it has none.
+        MenuBarItem(.addSelectionToChat, in: .edit, "Add to Chat", key: .command("l")),
         MenuBarItem(.find, in: .edit, "Find…", key: .command("f")),
         MenuBarItem(.findNext, in: .edit, "Find Next", key: .command("g")),
         MenuBarItem(.findPrevious, in: .edit, "Find Previous", key: .init("g", .command, .shift)),
@@ -218,6 +224,7 @@ public enum MenuBarAction: String, CaseIterable, Sendable {
     case startProject
     case save
 
+    case addSelectionToChat
     case find
     case findNext
     case findPrevious

@@ -87,6 +87,8 @@ struct ComposerView: View {
             )
             .help("Drag to resize. Double-click to fit the text.")
 
+            TurnHistoryNotice(transcript: transcript)
+            ComposerPlansView(transcript: transcript, model: model, controls: controls)
             composer
         }
         // The chrome is whatever is left once the editor's share is taken off, so this settles on
@@ -153,13 +155,18 @@ struct ComposerView: View {
             )
         }
         .task(id: transcript.session.id) { await prepare() }
+        .task(id: "planning:\(transcript.session.id):\(transcript.rows.last?.seq ?? -1)") {
+            if let store = app.store { await ComposerPlanningSupport.shared.refresh(from: store) }
+        }
         .onChange(of: transcript.draft) { _, _ in scheduleDraftSave() }
         // Something put words in the box for the owner to carry on writing, which today is Edit on
         // a queued message. The caret goes to the start rather than the end, because the words that
         // just arrived are at the front and are the ones the button was pressed to change.
         .onChange(of: transcript.composerFocusRequests) { _, _ in
             isFocused = true
-            caret = 0
+            caret = transcript.composerFocusCaretAtEnd
+                ? (SlashCommandDraft.parse(transcript.draft).body as NSString).length
+                : 0
         }
         .focusedValue(\.composerTranscript, isFocused ? transcript : nil)
         .onDisappear(perform: saveDraftNow)
@@ -238,9 +245,37 @@ struct ComposerView: View {
         case .escape:
             if let onDismiss { onDismiss() } else { isFocused = false }
             return true
-        case .up, .down, .tab:
+        case .up:
+            return recall(.older)
+        case .down:
+            return recall(.newer)
+        case .tab:
             return false
         }
+    }
+
+    /// Up or Down in an empty composer, or in one still holding a prompt they brought back.
+    ///
+    /// The guard in front is about cost rather than rules, which are `PromptRecall`'s: reading the
+    /// sent prompts decodes every user row in the session, and an arrow key pressed in a draft
+    /// somebody is writing has no business paying for that.
+    private func recall(_ direction: PromptRecall.Direction) -> Bool {
+        let draft = transcript.draft
+        guard draft.isEmpty || transcript.promptRecall.isBrowsing else { return false }
+
+        // The caret counts the body, the draft counts the `/command` in front of it too.
+        let body = SlashCommandDraft.parse(draft).body
+        let lead = (draft as NSString).length - (body as NSString).length
+        let sent = transcript.rows.lazy
+            .filter { $0.kind == .user }
+            .map { UserTurnPrompt.text(in: $0.payload) }
+        guard let text = transcript.promptRecall.step(
+            direction, prompts: PromptRecall.prompts(from: Array(sent)), draft: draft, caret: caret + lead
+        ) else { return false }
+
+        transcript.draft = text
+        caret = (SlashCommandDraft.parse(text).body as NSString).length
+        return true
     }
 
     // MARK: - Actions
@@ -308,6 +343,7 @@ struct ComposerView: View {
             || new.effort != session.effort
             || new.agentKind != session.agentKind
             || new.permissionMode != session.permissionMode
+            || new.interactionMode != session.interactionMode
         else { return }
 
         sessionEditor.apply {
@@ -315,6 +351,7 @@ struct ComposerView: View {
             $0.effort = new.effort
             $0.agentKind = new.agentKind
             $0.permissionMode = new.permissionMode
+            $0.interactionMode = new.interactionMode
         }
     }
 
@@ -771,7 +808,8 @@ struct ComposerView: View {
         if session.model != resolved.model
             || session.effort != resolved.effort
             || session.agentKind != resolved.backend
-            || session.permissionMode != resolved.permissionMode {
+            || session.permissionMode != resolved.permissionMode
+            || session.interactionMode != resolved.interactionMode {
             // The backend moves with the model, and it can only move here: this runs once, before
             // the chat has said anything, so there is no transcript in the old backend's
             // vocabulary and no thread on its server to strand. A chat that has spoken forks
@@ -781,6 +819,7 @@ struct ComposerView: View {
                 $0.effort = resolved.effort
                 $0.agentKind = resolved.backend
                 $0.permissionMode = resolved.permissionMode
+                $0.interactionMode = resolved.interactionMode
             }
         }
 

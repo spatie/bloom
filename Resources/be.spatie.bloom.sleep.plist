@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>be.spatie.bloom.sleep</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/bloom-sleep-helper</string>
+	<key>MachServices</key>
+	<dict>
+		<key>be.spatie.bloom.sleep</key>
+		<true/>
+	</dict>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>be.spatie.bloom</string>
+		<string>be.spatie.bloom.dev</string>
+	</array>
+</dict>
+</plist>

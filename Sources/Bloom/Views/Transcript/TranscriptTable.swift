@@ -202,6 +202,8 @@ struct TranscriptTable: NSViewRepresentable {
     let onLiveScrollChange: @MainActor (Bool) -> Void
     /// Give smooth following ownership before the table changes the document's height.
     var onContentWillChange: (@MainActor () -> Void)?
+    /// Where a passage selected in these rows is quoted. See `TranscriptTableView.quoteSelection`.
+    var quoteSelection: (@MainActor (String) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -271,6 +273,7 @@ struct TranscriptTable: NSViewRepresentable {
         coordinator.onSettled = onSettled
         coordinator.onLiveScrollChange = onLiveScrollChange
         coordinator.onContentWillChange = onContentWillChange
+        (coordinator.tableView as? TranscriptTableView)?.quoteSelection = quoteSelection
         // Before the entries, so that a pass carrying another conversation's rows is applied to a
         // pane that has already stopped drawing.
         coordinator.showing(session: session, in: nsView)

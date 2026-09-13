@@ -69,6 +69,16 @@ final class PromptAttachmentStore {
 
     // MARK: - Writing
 
+    func restoreDraftAttachments(_ draft: String, sessionID: String) {
+        load(sessionID: sessionID)
+        var restored = attachments(for: sessionID)
+        var paths = Set(restored.map(\.path))
+        for path in AttachmentDraft.parse(draft).paths where paths.insert(path).inserted {
+            restored.append(.sent(path: path))
+        }
+        apply(restored, to: sessionID)
+    }
+
     /// What one batch of attaching came to: the records it made, the paths to write into the
     /// sentence, and the sentences for the ones it could not.
     struct Added: Sendable {

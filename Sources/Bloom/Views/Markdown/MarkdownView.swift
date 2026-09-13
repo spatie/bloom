@@ -249,25 +249,28 @@ private struct MarkdownBlockView: View {
     }
 
     /// Every run joins the answer's native selection scope, including prose without links.
-    @ViewBuilder
     private func inlineText(
         _ inline: [MarkdownInline], rung: ScaledFont, color: Color, spacing: CGFloat? = nil
     ) -> some View {
-        TranscriptTextView(
-            text: InlineNSTextCache.make(
-                inline,
-                font: rung.resolvedNSFont(scale: fontScale, face: chatFont),
-                code: rung.monospacedCompanionNSFont(scale: fontScale, face: chatFont),
-                color: NSColor(color),
-                lineSpacing: spacing ?? lineSpacingOverride ?? TranscriptLayout.proseLeading(
-                    Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight
-                ),
-                isStreaming: isStreaming
+        let text = InlineNSTextCache.make(
+            inline,
+            font: rung.resolvedNSFont(scale: fontScale, face: chatFont),
+            code: rung.monospacedCompanionNSFont(scale: fontScale, face: chatFont),
+            color: NSColor(color),
+            lineSpacing: spacing ?? lineSpacingOverride ?? TranscriptLayout.proseLeading(
+                Typo.body, scale: fontScale, face: chatFont, lineHeight: chatLineHeight
             ),
+            isStreaming: isStreaming
+        )
+        let baseline = TranscriptTextView.firstBaseline(of: text)
+        return TranscriptTextView(
+            text: text,
             linkColor: Palette.linkNSColor,
             selectionColor: .selectedTextBackgroundColor,
             actions: linkActions
         )
+        // Native text views do not supply a SwiftUI baseline for the list marker beside them.
+        .alignmentGuide(.firstTextBaseline) { _ in baseline }
     }
 
     private func marker(_ text: String) -> some View {
