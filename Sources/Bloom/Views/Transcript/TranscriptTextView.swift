@@ -243,6 +243,19 @@ struct TranscriptTextView: NSViewRepresentable {
         return CGSize(width: size.width, height: size.height)
     }
 
+    /// How far below the top the first line's baseline sits, for a caller aligning something
+    /// beside this view on `.firstTextBaseline`. The first font's default offset, which is what
+    /// the layout manager above sets the first line at: `textContainerInset` is zero and paragraph
+    /// spacing is added below a line, never above the first.
+    @MainActor
+    static func firstBaseline(of text: NSAttributedString) -> CGFloat {
+        let font = text.length > 0 ? text.attribute(.font, at: 0, effectiveRange: nil) as? NSFont : nil
+        return baselineLayout.defaultBaselineOffset(for: font ?? .systemFont(ofSize: NSFont.systemFontSize))
+    }
+
+    /// Asked about fonts only, never handed text, so one serves every row.
+    @MainActor private static let baselineLayout = NSLayoutManager()
+
     /// One line of whatever this run is set in, which is the height a run that measured nothing
     /// falls back on. The first font in the string rather than the view's, which for a string
     /// carrying a span of code in a second face answers nil.
@@ -548,7 +561,20 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
     /// here. This draws them.
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
-        guard let url = link(at: point) else { return super.menu(for: event) }
+        guard let url = link(at: point) else {
+            // Over a selection, the reply is what somebody is most likely to want to do with it,
+            // so it leads, above Copy.
+            let menu = super.menu(for: event)
+            if let menu, SelectionToChat.canQuote(from: self) {
+                let quote = NSMenuItem(
+                    title: "Add to Chat", action: #selector(quoteSelection(_:)), keyEquivalent: ""
+                )
+                quote.target = self
+                menu.insertItem(.separator(), at: 0)
+                menu.insertItem(quote, at: 0)
+            }
+            return menu
+        }
 
         let menu = NSMenu()
         for offered in actions.items(url) {
@@ -578,6 +604,10 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
     private struct LinkChoice {
         let url: URL
         let target: TranscriptLinkTarget
+    }
+
+    @objc private func quoteSelection(_ sender: NSMenuItem) {
+        _ = SelectionToChat.quote(from: self)
     }
 
     @objc private func openLink(_ sender: NSMenuItem) {

@@ -198,6 +198,8 @@ struct TranscriptTable: NSViewRepresentable {
     /// `NSScrollView` posts `willStartLiveScroll` and `didEndLiveScroll` for user-initiated
     /// scrolling only, so this app's own movement is silent here.
     let onLiveScrollChange: @MainActor (Bool) -> Void
+    /// Where a passage selected in these rows is quoted. See `TranscriptTableView.quoteSelection`.
+    var quoteSelection: (@MainActor (String) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -266,6 +268,7 @@ struct TranscriptTable: NSViewRepresentable {
         coordinator.onGeometry = onGeometryChange
         coordinator.onSettled = onSettled
         coordinator.onLiveScrollChange = onLiveScrollChange
+        (coordinator.tableView as? TranscriptTableView)?.quoteSelection = quoteSelection
         // Before the entries, so that a pass carrying another conversation's rows is applied to a
         // pane that has already stopped drawing.
         coordinator.showing(session: session, in: nsView)

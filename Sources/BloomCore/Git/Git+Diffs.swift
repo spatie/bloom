@@ -242,9 +242,11 @@ extension Git {
         worktree: String, base: String, file: ChangedFile, scope: DiffScope = .all
     ) async throws -> String {
         if file.change == .untracked, !scope.isHistorical {
-            let arguments = ["diff", "--no-index", "--no-color", "--no-ext-diff", "--", "/dev/null", file.path]
+            let arguments = ["diff", "--no-index"] + patchOptions + ["--", "/dev/null", file.path]
             let result = try await run(arguments, in: worktree)
-            guard result.status == 0 || result.status == 1 else {
+            // Some Git versions use exit 1 for both a difference and an unreadable input.
+            guard result.status == 0 || result.status == 1,
+                  !(result.status == 1 && result.stdout.isEmpty && !result.stderr.isEmpty) else {
                 throw error(arguments, result.status, result.stderr, result.stdout)
             }
             return result.stdout
@@ -259,12 +261,18 @@ extension Git {
         }
         // Both paths preserve rename detection when opening only this file. Literal pathspecs
         // prevent a filename containing brackets or an asterisk from selecting its neighbours.
-        let paths = [file.oldPath, file.path].compactMap { $0 }.map { ":(literal)" + $0 }
+        let paths = [file.oldPath, file.path].compactMap { $0 }
         return try await check(
-            ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "-M"] + comparison + ["--"] + paths,
+            literalPaths(["diff"] + patchOptions + ["-M"] + comparison + ["--"] + paths),
             in: worktree
         ).stdout
     }
+
+    /// A patch is a data format here. Personal diff tools and text converters can replace it
+    /// with arbitrary output, while mnemonic prefixes change the paths the parser reads.
+    private static let patchOptions = [
+        "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/",
+    ]
 
     /// What a scope diffs against, resolved against this worktree.
     ///
