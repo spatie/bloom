@@ -19,6 +19,7 @@ struct ComposerSettingsPicker: View {
     var onPermissionMode: @MainActor (String) -> Void
     var onFastMode: @MainActor (Bool) -> Void
     var onContextWindow: @MainActor (Int) -> Void
+    var onInteractionMode: @MainActor (InteractionMode) -> Void = { _ in }
 
     @State private var isOpen = false
 
@@ -49,7 +50,8 @@ struct ComposerSettingsPicker: View {
                 onOutputStyle: onOutputStyle,
                 onPermissionMode: onPermissionMode,
                 onFastMode: onFastMode,
-                onContextWindow: onContextWindow
+                onContextWindow: onContextWindow,
+                onInteractionMode: onInteractionMode
             )
             .environment(\.fontScale, 1)
         }
@@ -79,6 +81,7 @@ private struct ComposerSettingsPanel: View {
     var onPermissionMode: @MainActor (String) -> Void
     var onFastMode: @MainActor (Bool) -> Void
     var onContextWindow: @MainActor (Int) -> Void
+    var onInteractionMode: @MainActor (InteractionMode) -> Void = { _ in }
 
     private static let width: CGFloat = 300
 
@@ -98,6 +101,29 @@ private struct ComposerSettingsPanel: View {
                             options: outputStyles,
                             onSelect: onOutputStyle
                         )
+                    }
+                }
+
+                if controls.offersInteractionMode {
+                    settingRow("Work mode") {
+                        if ComposerPlanningSupport.shared.isAvailable {
+                            optionPicker(
+                                "Work mode", selection: controls.interactionMode.rawValue,
+                                options: InteractionMode.allCases.map { ComposerOption(id: $0.rawValue, label: $0.label) },
+                                onSelect: { value in
+                                    if let mode = InteractionMode(rawValue: value) { onInteractionMode(mode) }
+                                }
+                            )
+                        } else if controls.interactionMode == .plan {
+                            Button("Use Build") { onInteractionMode(.build) }
+                        } else {
+                            Text("Build")
+                        }
+                    }
+                    if !ComposerPlanningSupport.shared.isAvailable {
+                        Text(CodexPlanningCapability.explanation).font(Typo.caption)
+                        Button("Check Again") { Task { await ComposerPlanningSupport.shared.checkAgain() } }
+                            .disabled(ComposerPlanningSupport.shared.isChecking)
                     }
                 }
 

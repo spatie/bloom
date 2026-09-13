@@ -167,6 +167,25 @@ struct ScratchDirectoryTrait: TestTrait, SuiteTrait, TestScoping {
             return
         }
 
+        // A trait inherited through nested suites must not consume the same budget twice.
+        guard !TestWorkloadLimit.isHeld else {
+            try await withDirectory(performing: function)
+            return
+        }
+        try await TestWorkloadLimit.shared.acquire()
+        do {
+            try Task.checkCancellation()
+            try await TestWorkloadLimit.$isHeld.withValue(true) {
+                try await withDirectory(performing: function)
+            }
+        } catch {
+            await TestWorkloadLimit.shared.release()
+            throw error
+        }
+        await TestWorkloadLimit.shared.release()
+    }
+
+    private func withDirectory(performing function: () async throws -> Void) async throws {
         let root = (TestProcessScratch.root as NSString)
             .appendingPathComponent("scratch-\(UUID().uuidString)")
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)

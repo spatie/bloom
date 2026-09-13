@@ -9,6 +9,17 @@ import BloomCore
 /// are all turns sent to the workspace's agent now, so the only `gh` this app runs is the reading
 /// half.
 enum GitHubBridge {
+    static func readPullRequest(for workspace: Workspace, maxAge: Duration = .zero) async -> PullRequestRead {
+        let availability = await GitHubAvailability.shared.check()
+        if availability == .notInstalled {
+            return .unavailable(GitHubReadFailure(reason: .unavailable, message: "Install the GitHub CLI to refresh pull requests."))
+        }
+        guard availability == .ready else {
+            return .unavailable(GitHubReadFailure(reason: .authentication, message: "Connect GitHub to refresh pull requests."))
+        }
+        return await GitHub.readPullRequest(for: workspace, maxAge: maxAge)
+    }
+
     /// - Parameter maxAge: how old an answer from the last `gh pr view` may be and still be used.
     ///   Zero always asks GitHub.
     ///
@@ -24,8 +35,8 @@ enum GitHubBridge {
     static func pullRequest(
         for workspace: Workspace, maxAge: Duration = .zero
     ) async -> PullRequest? {
-        guard await GitHubAvailability.shared.isReady() else { return nil }
-        return try? await GitHub.pullRequest(for: workspace, maxAge: maxAge)
+        guard case .current(let pullRequest) = await readPullRequest(for: workspace, maxAge: maxAge) else { return nil }
+        return pullRequest
     }
 
     static func checks(for workspace: Workspace) async -> [CheckRun] {

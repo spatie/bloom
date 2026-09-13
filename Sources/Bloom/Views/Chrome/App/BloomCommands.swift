@@ -809,7 +809,7 @@ struct BloomCommands: Commands {
         // Splitting and closing a shell pane are the tab's own, and the menu bar reaches neither
         // from here: Split Right opens in the CENTRE column and Close Pane closes a centre pane,
         // which are the two items directly above these in the same menu.
-        // Adding a selection is the shell's own too, and the menu bar's Add Selection to Chat finds
+        // Adding a selection is the shell's own too, and the menu bar's Add to Chat finds
         // the shell through the responder chain rather than coming through here.
         case .split, .close, .addSelectionToChat:
             return

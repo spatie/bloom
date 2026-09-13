@@ -1,6 +1,6 @@
 import AppKit
 
-/// Add Selection to Chat, resolved against whatever holds the keyboard when it is pressed.
+/// Add to Chat, resolved against whatever holds the keyboard when it is pressed.
 ///
 /// Two things in the window can answer it. A shell attaches what is selected in it to the
 /// workspace's conversation, and a conversation quotes what is selected in an answer into its own

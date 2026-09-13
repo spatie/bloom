@@ -56,7 +56,8 @@ struct ToolPaneView: View {
                             directory: tab.directory,
                             onCloseTab: { Task { await CenterTabStore.shared.close(tab) } },
                             splitColumn: splitColumn,
-                            addToChat: { selection in Task { await addToChat(selection) } }
+                            terminalLabel: tab.title,
+                            onAddToChat: terminalHandoff
                         )
                         .id(tab.id)
                     } else {
@@ -108,6 +109,18 @@ struct ToolPaneView: View {
         )
     }
 
+    private var terminalHandoff: (@MainActor (TerminalExcerpt) -> Void)? {
+        guard let sessionID = model.activeSession?.id else { return nil }
+        let destination = model
+        return { excerpt in
+            Task { @MainActor in
+                if let failure = await TerminalExcerptHandoff.attach(excerpt, to: destination, sessionID: sessionID) {
+                    app.notice = BloomNotice(message: failure)
+                }
+            }
+        }
+    }
+
     /// The store a shell's environment is built from, and the workspace's port, which is the one
     /// its setup and run scripts were told to bind. Allocation lives on the model, where
     /// concurrent callers get one block. See `WorkspaceModel.ensurePort`.
@@ -115,22 +128,5 @@ struct ToolPaneView: View {
         TerminalSessionStore.shared.useStore(model.store)
         await model.ensurePort()
         readyTabID = tab.id
-    }
-
-    /// A shell's selection, attached to the conversation as a file named after this tab.
-    ///
-    /// The same door a failed check's log goes through, and for the same reason: it is usually a
-    /// screen of output rather than a sentence. See `TerminalSelection`.
-    private func addToChat(_ selection: String) async {
-        guard let text = TerminalSelection.text(selection) else { return }
-        let taken = Set(
-            PromptAttachmentStore.shared
-                .attachments(for: model.activeSession?.id.rawValue ?? "")
-                .map(\.filename)
-        )
-        let name = PastedAttachment.uniqued(TerminalSelection.filename(terminal: tab.title), avoiding: taken)
-        let outcome = await ComposerHandoff.attach([.text(text, named: name)], to: model)
-        guard let failure = outcome.failure else { return }
-        app.alert = BloomAlert(title: "That selection was not added to the chat", message: failure)
     }
 }

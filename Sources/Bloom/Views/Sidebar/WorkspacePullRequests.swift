@@ -10,8 +10,8 @@ import BloomCore
 /// has produced no changes at all is never asked about, because a branch with nothing on it
 /// cannot have a pull request.
 ///
-/// Nothing here throws or reports. A sidebar mark is not the place to learn that gh is signed
-/// out: the row simply falls back to what git alone knows.
+/// Failed reads preserve the last good mark. The inspector reads the accompanying failure
+/// from this same state, so the explanation and the content cannot disagree.
 @MainActor
 @Observable
 final class WorkspacePullRequests {
@@ -25,7 +25,17 @@ final class WorkspacePullRequests {
     /// genuine poll a full interval later is never served from the cache.
     private static let maxAge = Duration.seconds(110)
 
-    private var pullRequests: [WorkspaceID: PullRequest] = [:]
+    private var states: [WorkspaceID: PullRequestRefreshState] = [:]
+    @ObservationIgnored private var generations: [WorkspaceID: UInt64] = [:]
+
+    func failure(for workspaceID: WorkspaceID) -> GitHubReadFailure? { states[workspaceID]?.failure }
+
+    func record(_ read: PullRequestRead, for workspaceID: WorkspaceID) {
+        generations[workspaceID, default: 0] &+= 1
+        var state = states[workspaceID] ?? PullRequestRefreshState()
+        state.record(read)
+        if states[workspaceID] != state { states[workspaceID] = state }
+    }
 
     /// The tail of the lookup queue. Each new lookup waits for the previous one, which is what
     /// turns twelve rows appearing at once into twelve sequential `gh` calls instead of twelve
@@ -33,7 +43,7 @@ final class WorkspacePullRequests {
     private var queue: Task<Void, Never> = Task {}
 
     func pullRequest(for workspaceID: WorkspaceID) -> PullRequest? {
-        pullRequests[workspaceID]
+        states[workspaceID]?.pullRequest
     }
 
     /// Records an answer somebody else went and got, including nil.
@@ -46,27 +56,19 @@ final class WorkspacePullRequests {
     /// This is the two-blues bug one layer down: not two places deciding a colour, but two places
     /// holding the fact the colour comes from.
     ///
-    /// Nil is written here where `refresh` below refuses to write it, and the difference is the
-    /// whole reason both exist. `refresh` is a poll behind a row nobody is looking at, where nil
-    /// means "gh did not answer" at least as often as it means "there is no pull request", and
-    /// making the mark flicker on a slow network is worse than showing a stale one. This is a
-    /// deliberate read for the workspace somebody is looking at, and there nil is an answer.
+    /// Only a successful read calls this. Failed reads go through record and retain content.
     func set(_ pullRequest: PullRequest?, for workspaceID: WorkspaceID) {
-        // Writing an equal value still invalidates every row reading this dictionary.
-        guard pullRequests[workspaceID] != pullRequest else { return }
-        pullRequests[workspaceID] = pullRequest
+        record(.current(pullRequest), for: workspaceID)
     }
 
     /// Drops what is remembered about one workspace, for a caller that knows the answer is now
     /// about a branch this workspace is no longer on.
     ///
-    /// Needed because `refresh` deliberately never clears: it treats nil as "gh could not answer"
-    /// rather than "there is no pull request", so a stale entry outlives every poll. That is the
-    /// right trade for a slow network and the wrong one after `AppModel.continueAfterMerge` moves
-    /// the worktree to a fresh branch, where the merged pull request in here would keep marking
-    /// the row for the rest of the session.
+    /// Also invalidates a queued read of the old branch, which must not repopulate this entry
+    /// after the workspace has continued onto a new branch.
     func forget(_ workspaceID: WorkspaceID) {
-        pullRequests[workspaceID] = nil
+        generations[workspaceID, default: 0] &+= 1
+        states[workspaceID] = nil
     }
 
     /// Keeps one workspace's answer fresh for as long as its row is on screen.
@@ -93,27 +95,24 @@ final class WorkspacePullRequests {
         // workspace and the band asked on its own.
         guard workspace.hasDiff
             || workspace.pullRequestNumber != nil
-            || pullRequests[workspace.id] != nil else { return }
-        guard await GitHubAvailability.shared.isReady() else { return }
+            || states[workspace.id]?.pullRequest != nil else { return }
 
         let id = workspace.id
         let asked = workspace
+        let generation = generations[id, default: 0]
 
         let previous = queue
         let lookup = Task { @MainActor in
             await previous.value
-            let fresh = await GitHubBridge.pullRequest(for: asked, maxAge: Self.maxAge)
-            // Nil is both "there is no pull request" and "gh could not answer", so the last known
-            // answer is kept rather than making the mark flicker back to a plain branch whenever
-            // the network is slow.
+            guard !Task.isCancelled, self.generations[id, default: 0] == generation else { return }
+            let read = await GitHubBridge.readPullRequest(for: asked, maxAge: Self.maxAge)
+            guard !Task.isCancelled, self.generations[id, default: 0] == generation else { return }
+            self.record(read, for: id)
+            guard case .current(let fresh) = read else { return }
             guard let fresh else { return }
             await PullRequestNumber.record(fresh, for: asked, in: store)
-            // Writing an equal value still invalidates every row reading this dictionary, and a
-            // poll that changed nothing is the common case.
-            guard self.pullRequests[id] != fresh else { return }
-            self.pullRequests[id] = fresh
         }
         queue = lookup
-        await lookup.value
+        await withTaskCancellationHandler { await lookup.value } onCancel: { lookup.cancel() }
     }
 }

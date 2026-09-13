@@ -18,8 +18,8 @@ enum TerminalPaneCommand: Sendable, Hashable {
     case focus(SplitDirection)
     case close
     case toggleZoom
-    /// Whatever is selected in the shell, attached to the workspace's conversation. Cmd+L, the key
-    /// the menu bar's Add Selection to Chat carries everywhere else in the window.
+    /// Whatever is selected in the shell, attached to the workspace's conversation: the context
+    /// menu's Add to Chat, on Cmd+L, the key the menu bar's Add to Chat carries everywhere else.
     case addSelectionToChat
 
     /// - Parameter key: `charactersIgnoringModifiers`, lowercased, so Shift is read from the flags

@@ -98,7 +98,7 @@ public enum MenuBarCatalogue {
         //
         // **A terminal keeps Cmd+L as well, and it is the same action by a shorter road**: the
         // shell hands its selection over itself, and hands the key back when it has none.
-        MenuBarItem(.addSelectionToChat, in: .edit, "Add Selection to Chat", key: .command("l")),
+        MenuBarItem(.addSelectionToChat, in: .edit, "Add to Chat", key: .command("l")),
         MenuBarItem(.find, in: .edit, "Find…", key: .command("f")),
         MenuBarItem(.findNext, in: .edit, "Find Next", key: .command("g")),
         MenuBarItem(.findPrevious, in: .edit, "Find Previous", key: .init("g", .command, .shift)),

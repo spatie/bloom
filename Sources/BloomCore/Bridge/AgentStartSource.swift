@@ -149,6 +149,7 @@ public enum AgentStartBranch: Sendable, Equatable {
         async let local = Git.branches(of: repo.path)
         async let remote = Git.remoteBranches(of: repo.path)
         async let worktrees = Git.worktrees(of: repo.path)
+        async let remoteNames = Git.remoteNames(of: repo.path)
 
         let holders = BranchHolder.byBranch(
             worktrees: (try? await worktrees) ?? [],
@@ -158,7 +159,8 @@ public enum AgentStartBranch: Sendable, Equatable {
             )
         )
         return WorkspaceCheckoutPlan.everyBranch(
-            local: (try? await local) ?? [], remote: (try? await remote) ?? [], inUse: holders
+            local: (try? await local) ?? [], remote: (try? await remote) ?? [], inUse: holders,
+            remoteNames: (try? await remoteNames) ?? []
         )
     }
 

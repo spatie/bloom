@@ -161,17 +161,6 @@ public enum PastedAttachment {
         return "\(base) \(UUID().uuidString.prefix(6))\(suffix)"
     }
 
-    /// A name somebody else chose, made safe to lead a filename with. A slash would silently put
-    /// the file in another folder, a colon is rewritten by the Finder, a backtick would close the
-    /// code span the path is written inside in the draft, and a leading dot hides the file.
-    public static func label(_ name: String, fallback: String) -> String {
-        var safe = name
-        for bad in ["/", ":", "`"] { safe = safe.replacingOccurrences(of: bad, with: "-") }
-        safe = safe.trimmingCharacters(in: .whitespacesAndNewlines)
-        while safe.hasPrefix(".") { safe.removeFirst() }
-        return safe.isEmpty ? fallback : safe
-    }
-
     /// The date part of an attachment's name. Public because `BrowserSnapshot` names a file the
     /// same way and the two must agree: a folder of screenshots is sorted by this string, so two
     /// formats would interleave into an order that reads as random.

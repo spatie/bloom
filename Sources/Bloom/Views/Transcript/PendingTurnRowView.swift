@@ -91,7 +91,7 @@ struct PendingTurnRowView: View {
             Spacer(minLength: Self.inset)
 
             VStack(alignment: .trailing, spacing: TranscriptLayout.tight) {
-                bubble
+                if delivery.deliveredSeq == nil { bubble }
                 caption
             }
         }
@@ -277,11 +277,13 @@ struct PendingTurnRowView: View {
             }
 
             if canRetry {
-                Button("Try Again", action: onRetry)
+                Button(delivery.state == .uncertain ? "Send Again" : "Try Again", action: onRetry)
                     .buttonStyle(.plain)
                     .foregroundStyle(Palette.link)
                     .pointerStyle(.link)
-                    .help("Try to send this message again.")
+                    .help(delivery.state == .uncertain
+                        ? "The agent may already have received this message. Send another attempt only after checking."
+                        : "Try to send this message again.")
             }
 
             moreMenu

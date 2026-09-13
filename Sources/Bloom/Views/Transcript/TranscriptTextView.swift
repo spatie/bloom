@@ -567,7 +567,7 @@ final class LinkTextView: NSTextView, HoverQuickLookSource {
             let menu = super.menu(for: event)
             if let menu, SelectionToChat.canQuote(from: self) {
                 let quote = NSMenuItem(
-                    title: "Add Selection to Chat", action: #selector(quoteSelection(_:)), keyEquivalent: ""
+                    title: "Add to Chat", action: #selector(quoteSelection(_:)), keyEquivalent: ""
                 )
                 quote.target = self
                 menu.insertItem(.separator(), at: 0)

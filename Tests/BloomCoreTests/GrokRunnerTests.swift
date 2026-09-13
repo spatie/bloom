@@ -45,14 +45,10 @@ private func scriptedGrokBox() -> ProcessBox {
 private func eventually(
     _ description: String,
     within seconds: Double = 2,
+    sourceLocation: SourceLocation = #_sourceLocation,
     _ condition: @Sendable () async -> Bool
 ) async {
-    let deadline = ContinuousClock.now.advanced(by: .seconds(seconds))
-    while ContinuousClock.now < deadline {
-        if await condition() { return }
-        try? await Task.sleep(for: .milliseconds(10))
-    }
-    Issue.record("timed out waiting for \(description)")
+    await waitUntil(Comment(rawValue: description), within: .seconds(seconds), sourceLocation: sourceLocation, condition)
 }
 
 @Suite(.scratchDirectory)

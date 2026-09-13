@@ -26,9 +26,8 @@ struct TerminalSplitView: View {
     var onCloseTab: @MainActor () -> Void
     /// Called when a split asks for something a shell tree cannot hold. See `handle`.
     var splitColumn: @MainActor (SplitAxis, PaneKind) -> Void
-    /// Hands a pane's selection to the workspace's conversation. The tab holding this view knows
-    /// the workspace and what the tab is called, and this view knows neither.
-    var addToChat: @MainActor (String) -> Void = { _ in }
+    var terminalLabel: String = "Terminal"
+    var onAddToChat: (@MainActor (TerminalExcerpt) -> Void)?
 
     /// The same switch the terminal itself reads, so turning the Ghostty theme off also turns off
     /// Ghostty's way of fading the panes that do not have the keyboard.
@@ -127,10 +126,16 @@ struct TerminalSplitView: View {
                 onCommand: { handle($0, from: id) },
                 onExit: { finished($0, in: id) },
                 onContextMenu: {
-                    TerminalPaneMenu.make(
+                    let excerpt = TerminalSessionStore.shared.excerpt(
+                        inPaneID: id, workspaceID: workspace.id, label: terminalLabel
+                    )
+                    let add: (@MainActor () -> Void)? = if let excerpt, let onAddToChat {
+                        { onAddToChat(excerpt) }
+                    } else { nil }
+                    return TerminalPaneMenu.make(
                         canClose: layout.paneCount > 1,
                         isZoomed: layout.zoomed == id,
-                        hasSelection: TerminalSessionStore.shared.selection(paneID: id) != nil
+                        onAddToChat: add
                     ) { _ = handle($0, from: id) }
                 }
             )
@@ -232,11 +237,13 @@ struct TerminalSplitView: View {
         case .toggleZoom:
             return splits.toggleZoom(in: ownerID)
 
-        // Nothing selected hands the key back, so Cmd+L in a shell with no selection is the menu
-        // bar's, which answers it with a beep rather than with nothing.
+        // The context menu's Add to Chat, from the keyboard. Nothing selected, or no conversation
+        // to add to, hands the key back, so the menu bar answers it with a beep rather than nothing.
         case .addSelectionToChat:
-            guard let selection = TerminalSessionStore.shared.selection(paneID: pane) else { return false }
-            addToChat(selection)
+            guard let onAddToChat, let excerpt = TerminalSessionStore.shared.excerpt(
+                inPaneID: pane, workspaceID: workspace.id, label: terminalLabel
+            ) else { return false }
+            onAddToChat(excerpt)
             return true
         }
     }

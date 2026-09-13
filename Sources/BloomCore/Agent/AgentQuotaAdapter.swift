@@ -107,9 +107,8 @@ public enum ClaudeCodeQuotaAdapter: AgentQuotaAdapter {
 /// duration. `secondary` is null on this account, which is why one window shows rather than two;
 /// a null slot is skipped rather than stored as an empty one.
 ///
-/// `credits`, `planType` and `spendControlReached` are read and deliberately dropped. Credits are
-/// a balance rather than a window, they have no reset time, and a panel about how close you are to
-/// a wall is the wrong place for a wallet.
+/// `credits` and `planType` are not windows, so they are not read here: they have no reset time
+/// and nothing to fill a meter against. `AgentAccountReader` reads them from the same bytes.
 public enum CodexQuotaAdapter: AgentQuotaAdapter {
     public static let provider = AgentKind.codex
 
@@ -118,8 +117,33 @@ public enum CodexQuotaAdapter: AgentQuotaAdapter {
         // the wire and under neither key once `CodexTranslation` has unwrapped it. Both spellings
         // are read because the fixtures carry the first and the runner produces the second.
         let codex = line["codex"] ?? line
-        guard let limits = codex["params"]?["rateLimits"] ?? codex["rateLimits"] else { return [] }
-        return ["primary", "secondary"].compactMap { slot in
+        let body = codex["params"] ?? codex["result"] ?? codex
+        guard let limits = body["rateLimits"] else { return [] }
+        return windows(in: limits, keyPrefix: "", nameSuffix: nil, at: now)
+            + extraLimits(in: body, besides: limits["limitId"]?.stringValue ?? "codex", at: now)
+    }
+
+    /// The limits Codex lists beside its own, which is where a model with an allowance of its own
+    /// sits: `rateLimitsByLimitId.codex_bengalfox`, named "GPT-5.3-Codex-Spark", with a five hour
+    /// and a weekly window of its own. They were read and dropped along with the rest of the
+    /// answer's extras; OpenUsage shows them as "Spark" and "Spark Weekly", behind the caret.
+    ///
+    /// Keyed `<limit id>.<slot>` so they cannot collide with the account's own `primary`, and so
+    /// `UsageCatalogue` can tell which limit a row belongs to. The limit's own entry in the map is
+    /// the snapshot already read above and is skipped.
+    static func extraLimits(in body: JSONValue, besides ownID: String, at now: Date) -> [AgentQuota] {
+        let extras = body["rateLimitsByLimitId"]?.objectValue ?? [:]
+        return extras.keys.sorted().filter { $0 != ownID }.flatMap { limitID -> [AgentQuota] in
+            guard let snapshot = extras[limitID], !snapshot.isNull else { return [] }
+            let name = snapshot["limitName"]?.stringValue
+                .flatMap { $0.split(separator: "-").last.map(String.init) }
+                ?? QuotaWindow.humanised(limitID)
+            return windows(in: snapshot, keyPrefix: "\(limitID).", nameSuffix: name, at: now)
+        }
+    }
+
+    static func windows(in limits: JSONValue, keyPrefix: String, nameSuffix: String?, at now: Date) -> [AgentQuota] {
+        ["primary", "secondary"].compactMap { slot in
             guard let window = limits[slot] else { return nil }
             // Only `usedPercent` is required on Codex's own `RateLimitWindow`. A rolling update
             // carrying a percentage and neither a length nor a reset time used to be declined
@@ -130,10 +154,12 @@ public enum CodexQuotaAdapter: AgentQuotaAdapter {
             let minutes = window["windowDurationMins"]?.doubleValue.flatMap { $0 > 0 ? $0 : nil }
             let measure: QuotaMeasure = window["usedPercent"]?.doubleValue
                 .map { .fraction($0 / 100) } ?? .unknown
+            var shape = minutes.map { QuotaWindow.lasting($0 * 60, key: keyPrefix + slot) }
+                ?? QuotaWindow(key: keyPrefix + slot, label: QuotaWindow.humanised(slot))
+            if let nameSuffix { shape.label += " (\(nameSuffix))" }
             return AgentQuota(
                 provider: provider,
-                window: minutes.map { QuotaWindow.lasting($0 * 60, key: slot) }
-                    ?? QuotaWindow(key: slot, label: QuotaWindow.humanised(slot)),
+                window: shape,
                 measure: measure,
                 resetsAt: window["resetsAt"]?.doubleValue.map { Date(timeIntervalSince1970: $0) },
                 observedAt: now

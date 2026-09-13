@@ -19,24 +19,24 @@ enum TerminalPaneMenu {
     static func make(
         canClose: Bool,
         isZoomed: Bool,
-        hasSelection: Bool = false,
+        onAddToChat: (@MainActor () -> Void)? = nil,
         perform: @escaping @MainActor (TerminalPaneCommand) -> Void
     ) -> NSMenu {
-        let target = ActionTarget(perform: perform)
+        let target = ActionTarget(perform: perform, onAddToChat: onAddToChat)
         // A menu that owns its target, because `NSMenuItem.target` is weak and nothing else here
         // would hold it: without this the closures are gone before the user picks anything.
         let menu = OwningMenu(target: target)
+        menu.autoenablesItems = false
 
-        // First, and only when there is something selected: a right click over a selection is
-        // somebody asking what can be done with it, and an item that is always there and usually
-        // greyed out would be a row to read past on every other right click.
-        if hasSelection {
-            menu.addItem(item(
-                "Add Selection to Chat", symbol: "text.bubble", key: "l", modifiers: .command,
-                command: .addSelectionToChat, target: target
-            ))
-            menu.addItem(.separator())
-        }
+        // Cmd+L is drawn here as a label, as the split keys are below: the keystroke is read in
+        // `BloomTerminalView.performKeyEquivalent`, and it is the key the menu bar's Add to Chat
+        // carries everywhere else in the window.
+        let addToChat = NSMenuItem(title: "Add to Chat", action: #selector(ActionTarget.addToChat), keyEquivalent: "l")
+        addToChat.keyEquivalentModifierMask = .command
+        addToChat.target = target
+        addToChat.isEnabled = onAddToChat != nil
+        menu.addItem(addToChat)
+        menu.addItem(.separator())
 
         menu.addItem(splitItem(
             "Split Right", symbol: PaneSymbol.splitRight, axis: .horizontal,
@@ -134,10 +134,14 @@ enum TerminalPaneMenu {
     @MainActor
     final class ActionTarget: NSObject {
         private let perform: @MainActor (TerminalPaneCommand) -> Void
+        private let onAddToChat: (@MainActor () -> Void)?
 
-        init(perform: @escaping @MainActor (TerminalPaneCommand) -> Void) {
+        init(perform: @escaping @MainActor (TerminalPaneCommand) -> Void, onAddToChat: (@MainActor () -> Void)?) {
             self.perform = perform
+            self.onAddToChat = onAddToChat
         }
+
+        @objc func addToChat() { onAddToChat?() }
 
         @objc func fire(_ sender: NSMenuItem) {
             guard let command = sender.represented(TerminalPaneCommand.self) else { return }

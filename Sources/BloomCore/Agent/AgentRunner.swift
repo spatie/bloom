@@ -54,7 +54,9 @@ public actor AgentRunner {
     /// See the initialiser. Long enough for SIGTERM, the grace period and the SIGKILL behind it.
     private let shutdownBudget: Duration
     private let makeProcess: @Sendable (AgentLaunch) -> any AgentProcessing
-    private let sink = EventFanout<AgentEvent>()
+    private let sink = AgentPresentationFeed()
+    private var sendsInFlight = 0
+    private var wasEvicted = false
     /// Held outside the actor so `cancelNow()` can signal a process from synchronous main-actor
     /// code without waiting for a turn on the actor, which is exactly when it is least available.
     private let handle = ProcessHandle()
@@ -344,6 +346,7 @@ public actor AgentRunner {
     /// that stream for good, so pressing Stop once left the UI staring at a runner that was still
     /// working and still writing rows nobody would ever see.
     public nonisolated var events: AsyncStream<AgentEvent> { sink.stream() }
+    public nonisolated var presentationFeed: AgentPresentationFeed? { sink }
 
     public func setPersistsStreamDeltas(_ value: Bool) {
         persistsStreamDeltas = value
@@ -357,6 +360,34 @@ public actor AgentRunner {
     /// asked for: see `SessionRunner.send(_:recording:)` for why what goes out and what is drawn
     /// are not the same string.
     public func send(_ text: String, recording: Data? = nil) async throws {
+        try await send(text, recording: recording, deliveryID: nil, interactionMode: nil)
+    }
+
+    public func evictIfIdle(for duration: Duration) async -> Bool {
+        guard !wasEvicted, sendsInFlight == 0, !session.state.isMidTurn,
+              session.agentSessionID != nil, pending.isEmpty, !sink.hasBackgroundWork else { return false }
+        let lastActivity = sink.lastActivity
+        guard lastActivity.duration(to: .now) >= duration,
+              let waiting = try? await store.pendingDeliveries(sessionID: session.id), waiting.isEmpty else { return false }
+        // Recheck after the store hop. A send or a native background event invalidates the lease.
+        guard sendsInFlight == 0, !session.state.isMidTurn, pending.isEmpty,
+              !sink.hasBackgroundWork, sink.lastActivity == lastActivity else { return false }
+        wasEvicted = true
+        terminateNow()
+        return true
+    }
+
+    public func sendDelivery(_ delivery: Delivery) async throws {
+        try await send(delivery.sent, recording: delivery.crewPayload,
+                       deliveryID: delivery.id, interactionMode: delivery.interactionMode)
+    }
+
+    private func send(_ text: String, recording: Data?, deliveryID: DeliveryID?,
+                      interactionMode: InteractionMode?) async throws {
+        guard !wasEvicted else { throw ProviderIdleError.retired }
+        sendsInFlight += 1
+        sink.noteActivity()
+        defer { sendsInFlight -= 1 }
         // The settings reads come first, and that ordering is the whole of the fix.
         //
         // They were between the wait and the start, and each is a store round trip, so there were
@@ -375,15 +406,19 @@ public actor AgentRunner {
         start()
 
         let line = try Self.encodeTurn(text)
-        handle.current?.writeLine(try Self.encodeTurn(prompt))
+        let outgoing = try Self.encodeTurn(prompt)
+        let generation = handle.generation
+        guard let process = handle.current else { throw DeliveryDispatchError.processUnavailable }
+        if let deliveryID { try await store.beginDeliveryDispatch(id: deliveryID) }
+        guard !handle.isCancelled(generation), handle.generation == generation else { throw CancellationError() }
+        process.writeLine(outgoing)
+        if let deliveryID { try await store.acceptDelivery(id: deliveryID) }
 
         // One row, whichever it is. The crew payload carries what a person reads and what the
         // model was handed, so writing the user row beside it would put the envelope back on
         // screen, which is the whole of what this argument exists to stop.
-        if let recording {
-            await persist(kind: .crew, payload: recording)
-        } else {
-            await persist(kind: .user, payload: Data(line.utf8))
+        if deliveryID == nil {
+            if let recording { await persist(kind: .crew, payload: recording) } else { await persist(kind: .user, payload: Data(line.utf8)) }
         }
 
         session.apply(.turnStarted)
@@ -507,6 +542,13 @@ public actor AgentRunner {
     func ingest(_ event: AgentEvent) async {
         var event = event
         if case .permissionAsk(let ask) = event, ask.isPlanApproval {
+            if let markdown = ask.input["plan"]?.stringValue {
+                do {
+                    _ = try await store.recordPlan(sessionID: session.id, sourceID: ask.requestID, markdown: markdown)
+                } catch {
+                    await report("could not save the proposed plan", error)
+                }
+            }
             let mode = (try? await store.planImplementationMode(
                 sessionID: session.id, hasWorktree: session.workspaceID != nil
             )) ?? .acceptEdits
@@ -534,10 +576,11 @@ public actor AgentRunner {
             await persist(kind: .system, payload: report.raw)
         }
 
+        var storedMessage: Message?
         if event.isTranscriptRow || persistsStreamDeltas {
             var durationMS: Int?
             if case .result(let result) = event { durationMS = result.durationMS }
-            await persist(kind: event.kind, payload: event.raw, durationMS: durationMS, refID: event.refID)
+            storedMessage = await persist(kind: event.kind, payload: event.raw, durationMS: durationMS, refID: event.refID)
         }
 
         switch event {
@@ -602,7 +645,7 @@ public actor AgentRunner {
             break
         }
 
-        sink.yield(event)
+        sink.yield(event, messageSeq: storedMessage?.seq)
 
         // After the yield, deliberately. A question a stored rule answers is decided in the same
         // breath it arrives, and `.permissionDecided` reaching a view before the `.permissionAsk`
@@ -619,9 +662,10 @@ public actor AgentRunner {
     /// The sequence number is allocated by the store, in the same call and the same transaction as
     /// the insert, so two writers can never both reserve it. That is also why a failed write
     /// advances nothing: the number was never handed out.
-    private func persist(kind: MessageKind, payload: Data, durationMS: Int? = nil, refID: String? = nil) async {
+    @discardableResult
+    private func persist(kind: MessageKind, payload: Data, durationMS: Int? = nil, refID: String? = nil) async -> Message? {
         do {
-            try await store.appendNext(
+            return try await store.appendNext(
                 sessionID: session.id,
                 kind: kind,
                 payload: payload,
@@ -630,6 +674,7 @@ public actor AgentRunner {
             )
         } catch {
             await report("could not store a \(kind.rawValue) row", error)
+            return nil
         }
     }
 
@@ -881,6 +926,7 @@ public actor AgentRunner {
     private func finish(status: Int32, sawResult: Bool, generation: Int) async {
         // A run that is no longer the current one has nothing left to say about the session.
         guard generation == handle.generation else { return }
+        sink.noteProcessEnded()
 
         alive = false
         handle.endRun(generation)
