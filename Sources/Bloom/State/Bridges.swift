@@ -5,9 +5,8 @@ import BloomCore
 /// The one place the app layer touches `GitHub`. Keeping it behind a single adapter means a
 /// change to the gh wrapper's signature is a one-file fix rather than a sweep through views.
 ///
-/// It asks GitHub questions and nothing else. Opening a pull request, pushing a branch and merging
-/// are all turns sent to the workspace's agent now, so the only `gh` this app runs is the reading
-/// half.
+/// Opening a pull request, pushing a branch and merging are turns sent to the workspace's agent.
+/// Marking a draft ready for review needs no interpretation, so it runs directly through gh.
 enum GitHubBridge {
     /// - Parameter maxAge: how old an answer from the last `gh pr view` may be and still be used.
     ///   Zero always asks GitHub.
@@ -26,6 +25,10 @@ enum GitHubBridge {
     ) async -> PullRequest? {
         guard await GitHubAvailability.shared.isReady() else { return nil }
         return try? await GitHub.pullRequest(for: workspace, maxAge: maxAge)
+    }
+
+    static func markReadyForReview(_ pullRequest: PullRequest, worktree: String) async throws {
+        try await GitHub.markReadyForReview(pullRequest, worktree: worktree)
     }
 
     static func checks(for workspace: Workspace) async -> [CheckRun] {

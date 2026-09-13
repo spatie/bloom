@@ -211,8 +211,8 @@ struct PullRequestSummary: View {
     /// the button now, on the trailing side where a split button carries it, and it is drawn
     /// nowhere else. See `mergeControl`.
     private var trailing: some View {
-        // Open pull requests submit messages. Finished ones offer immediate workspace actions,
-        // which remain disabled while any agent in the workspace is running.
+        // Finished pull requests offer workspace actions, which remain disabled while any
+        // agent in the workspace is running.
         trailingControls
             .disabled(!branchActions.isAllowed)
             .popover(isPresented: Binding(
@@ -439,7 +439,7 @@ struct PullRequestSummary: View {
             .fixedSize()
             .help(
                 branchActions.reason
-                    ?? "Ask this workspace's agent to mark #\(pullRequest.number) ready for review on GitHub."
+                    ?? "Mark #\(pullRequest.number) ready for review on GitHub."
             )
     }
 
